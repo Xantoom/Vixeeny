@@ -13,6 +13,8 @@ use serde::Deserialize;
 struct Lib {
     url: String,
     commit: String,
+    /// Informational upstream tag; re-created locally so `git describe` works (x265 needs it).
+    tag: String,
 }
 
 /// Build order matters: FFmpeg links against everything before it.
@@ -152,6 +154,9 @@ fn fetch(ctx: &Ctx, name: &str, lib: &Lib) -> Result<PathBuf> {
         &["checkout", "-q", "--force", &lib.commit],
         &[],
     )?;
+    if !lib.tag.contains(' ') {
+        run(&src, "git", &["tag", "-f", &lib.tag, &lib.commit], &[])?;
+    }
     run(
         &src,
         "git",
