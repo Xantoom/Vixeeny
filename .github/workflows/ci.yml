@@ -107,6 +107,9 @@ jobs:
         continue-on-error: true
         run: |
           choco install pkgconfiglite -y --no-progress
+          Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
+          refreshenv
+          pkg-config --version
           $env:PKG_CONFIG_PATH = "${{ github.workspace }}\native\build\work\prefix\lib\pkgconfig"
           cargo test -p vixeeny-image --features native-codecs
   native-macos:
