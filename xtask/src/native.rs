@@ -17,6 +17,9 @@ struct Lib {
     tag: String,
 }
 
+/// Bump to force a rebuild of every library when a recipe changes (stamps embed it).
+const RECIPE_REV: &str = "2";
+
 /// Build order matters: FFmpeg links against everything before it.
 const ORDER: &[&str] = &[
     "x264", "x265", "libvpx", "svt-av1", "dav1d", "opus", "ffmpeg", "libwebp", "libjxl", "jpegli",
@@ -54,7 +57,8 @@ pub fn build(only: &[String]) -> Result<()> {
             .get(*name)
             .with_context(|| format!("{name} missing from versions.toml"))?;
         let stamp = ctx.work.join(format!("{name}.stamp"));
-        if std::fs::read_to_string(&stamp).is_ok_and(|s| s == lib.commit) {
+        let stamp_value = format!("{}+{RECIPE_REV}", lib.commit);
+        if std::fs::read_to_string(&stamp).is_ok_and(|s| s == stamp_value) {
             println!("== {name}: up to date");
             continue;
         }
@@ -65,7 +69,7 @@ pub fn build(only: &[String]) -> Result<()> {
         if cfg!(windows) {
             normalize_msvc_libs(&ctx)?;
         }
-        std::fs::write(&stamp, &lib.commit)?;
+        std::fs::write(&stamp, &stamp_value)?;
     }
     Ok(())
 }
@@ -210,11 +214,16 @@ fn recipe(ctx: &Ctx, name: &str, src: &Path) -> Result<()> {
     let win = cfg!(windows);
     match name {
         "x264" => {
-            let cc = if win { "CC=cl " } else { "" };
+            // Windows: /MD like the Rust MSVC target (cl defaults to /MT).
+            let (cc, crt) = if win {
+                ("CC=cl ", "--extra-cflags=-MD ")
+            } else {
+                ("", "")
+            };
             sh(
                 src,
                 &format!(
-                    "{cc}./configure --prefix='{up}' --enable-static --enable-pic --disable-cli \
+                    "{cc}./configure {crt}--prefix='{up}' --enable-static --enable-pic --disable-cli \
                      --disable-opencl && make -j{j} && make install",
                     j = ctx.jobs
                 ),
@@ -267,6 +276,7 @@ fn recipe(ctx: &Ctx, name: &str, src: &Path) -> Result<()> {
                     "lib",
                     "--buildtype=release",
                     "-Ddefault_library=static",
+                    "-Db_vscrt=md",
                     "-Denable_tools=false",
                     "-Denable_tests=false",
                 ],
@@ -282,7 +292,7 @@ fn recipe(ctx: &Ctx, name: &str, src: &Path) -> Result<()> {
         ),
         "ffmpeg" => {
             let tc = if win {
-                "--toolchain=msvc --target-os=win64 --arch=x86_64 "
+                "--toolchain=msvc --target-os=win64 --arch=x86_64 --extra-cflags=-MD "
             } else {
                 "--enable-pic "
             };
