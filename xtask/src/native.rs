@@ -304,7 +304,7 @@ fn recipe(ctx: &Ctx, name: &str, src: &Path) -> Result<()> {
                      --disable-debug --pkg-config-flags=--static --enable-libx264 \
                      --enable-libx265 --enable-libvpx --enable-libsvtav1 --enable-libdav1d \
                      --enable-libopus || {{ \
-                     ls -la '{up}/lib' | head -60; grep -a -B1 -A3 'LNK[12]' ffbuild/config.log | tail -n 60; exit 1; }}; make -j{j} && make install",
+                     grep -a -A22 'check_func_headers EbSvtAv1Enc' ffbuild/config.log | tail -n 40; exit 1; }}; make -j{j} && make install",
                     j = ctx.jobs
                 ),
                 &pkg_env,
