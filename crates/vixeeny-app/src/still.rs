@@ -116,6 +116,7 @@ mod tests {
             rect: PhysicalRect::new(x, 0, w, 100),
             primary: id == 1,
             dpi: 96,
+            hdr: None,
         }
     }
 

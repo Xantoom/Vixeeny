@@ -28,3 +28,7 @@ pub fn window_info(_id: WindowId) -> Result<Option<WindowInfo>> {
 pub fn exclude_from_capture(_id: WindowId) -> Result<()> {
     Err(PlatformError::Unsupported)
 }
+
+pub fn hdr_info(_monitor: crate::MonitorId) -> Option<crate::HdrInfo> {
+    None
+}

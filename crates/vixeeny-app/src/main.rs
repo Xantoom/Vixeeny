@@ -51,7 +51,11 @@ fn direct_capture(action: ActionId, config: &Config) -> anyhow::Result<std::path
     let dir = vixeeny_common::paths::expand_user_dir(&config.paths.images)
         .context("cannot locate the images folder")?;
     let mut capturer = Capturer::new(WgcBackend::new()?, snapshot.monitors.clone());
-    let options = CaptureOptions { show_cursor: false };
+    let options = CaptureOptions {
+        show_cursor: false,
+        tonemap: (config.image.hdr == "tonemap_sdr")
+            .then_some(tonemap_hdr as vixeeny_capture::ToneMapFn),
+    };
     let (format, settings) = image_output(config);
     let path = still::run(
         action,
@@ -64,6 +68,18 @@ fn direct_capture(action: ActionId, config: &Config) -> anyhow::Result<std::path
     )?;
     tracing::info!("direct capture took {:?}", started.elapsed());
     Ok(path)
+}
+
+/// HDR monitors become SDR through the documented tone mapper (`vixeeny_image::tonemap`).
+#[cfg(windows)]
+fn tonemap_hdr(rgba: &[f32], info: &vixeeny_platform::HdrInfo) -> Vec<u8> {
+    vixeeny_image::tonemap::tonemap_frame(
+        rgba,
+        &vixeeny_image::tonemap::ToneMapParams {
+            sdr_white_nits: info.sdr_white_nits,
+            peak_nits: info.peak_nits,
+        },
+    )
 }
 
 /// Output format and settings from `[image]`. An unknown value falls back to the default (PNG,

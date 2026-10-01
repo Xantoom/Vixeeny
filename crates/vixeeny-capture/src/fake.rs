@@ -3,7 +3,7 @@
 
 use vixeeny_platform::{MonitorInfo, WindowId};
 
-use crate::{CaptureError, CpuFrame, StillBackend};
+use crate::{CaptureError, CpuFrame, HdrFrame, StillBackend};
 
 /// Pixel `(x, y)` of monitor `id` is `[x % 256, y % 256, id, 255]`.
 #[derive(Debug, Default)]
@@ -29,6 +29,22 @@ impl StillBackend for FakeBackend {
         Ok(frame)
     }
 
+    /// Every float is 2.0 (160 nits in scRGB).
+    fn grab_monitor_hdr(
+        &mut self,
+        monitor: &MonitorInfo,
+        cursor: bool,
+    ) -> Result<HdrFrame, CaptureError> {
+        self.grabs
+            .push(format!("hdr monitor {} cursor={cursor}", monitor.id.0));
+        let pixels = monitor.rect.width as usize * monitor.rect.height as usize;
+        Ok(HdrFrame {
+            width: monitor.rect.width,
+            height: monitor.rect.height,
+            rgba: vec![2.0; pixels * 4],
+        })
+    }
+
     fn grab_window(&mut self, window: WindowId, cursor: bool) -> Result<CpuFrame, CaptureError> {
         self.grabs
             .push(format!("window {} cursor={cursor}", window.0));
@@ -50,6 +66,7 @@ mod tests {
             rect: PhysicalRect::new(x, y, w, h),
             primary: id == 1,
             dpi,
+            hdr: None,
         }
     }
 
@@ -109,7 +126,10 @@ mod tests {
         let mut c = capturer();
         c.grab(
             &CaptureTarget::Monitor(MonitorId(1)),
-            CaptureOptions { show_cursor: true },
+            CaptureOptions {
+                show_cursor: true,
+                ..CaptureOptions::default()
+            },
         )
         .unwrap();
         assert_eq!(c.backend.grabs, vec!["monitor 1 cursor=true"]);
@@ -124,5 +144,48 @@ mod tests {
             ),
             Err(CaptureError::UnknownMonitor)
         ));
+    }
+
+    #[test]
+    fn hdr_monitors_go_through_the_tone_mapper() {
+        use vixeeny_platform::HdrInfo;
+        let hdr = HdrInfo {
+            sdr_white_nits: 80.0,
+            peak_nits: 1000.0,
+        };
+        let mut monitors = vec![mon(1, 0, 0, 4, 2, 96), mon(2, 4, 0, 4, 2, 96)];
+        monitors[1].hdr = Some(hdr);
+        let mut c = Capturer::new(FakeBackend::default(), monitors);
+        // A fake tone mapper that encodes the headroom it was given into the blue channel.
+        let options = CaptureOptions {
+            tonemap: Some(|rgba, info| {
+                assert!(rgba.iter().all(|v| *v == 2.0));
+                [(info.peak_nits / 10.0) as u8, 0, 0, 255].repeat(rgba.len() / 4)
+            }),
+            ..CaptureOptions::default()
+        };
+        let frame = c.grab(&CaptureTarget::AllMonitors, options).unwrap();
+        assert_eq!((frame.width, frame.height), (8, 2));
+        assert_eq!(frame.pixel(0, 0), [0, 0, 1, 255]); // SDR monitor: [x, y, id, 255]
+        assert_eq!(frame.pixel(4, 0), [100, 0, 0, 255]); // HDR monitor: tone-mapped
+        assert_eq!(
+            c.backend.grabs,
+            vec!["monitor 1 cursor=false", "hdr monitor 2 cursor=false"]
+        );
+        // Without a tone mapper the HDR monitor is captured as a plain SDR frame.
+        let mut c2 = Capturer::new(
+            FakeBackend::default(),
+            vec![{
+                let mut m = mon(2, 0, 0, 4, 2, 96);
+                m.hdr = Some(hdr);
+                m
+            }],
+        );
+        c2.grab(
+            &CaptureTarget::Monitor(MonitorId(2)),
+            CaptureOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(c2.backend.grabs, vec!["monitor 2 cursor=false"]);
     }
 }

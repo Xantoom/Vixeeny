@@ -20,7 +20,7 @@ mod unsupported;
 use unsupported as os;
 
 pub use os::{
-    cursor_position, ensure_dpi_aware, exclude_from_capture, foreground_window, monitors,
+    cursor_position, ensure_dpi_aware, exclude_from_capture, foreground_window, hdr_info, monitors,
     top_level_windows, window_info,
 };
 
@@ -42,12 +42,23 @@ pub struct MonitorInfo {
     pub primary: bool,
     /// Effective DPI (96 = 100 %).
     pub dpi: u32,
+    /// `Some` while the monitor shows HDR content.
+    pub hdr: Option<HdrInfo>,
 }
 
 impl MonitorInfo {
     pub fn scale_factor(&self) -> f64 {
         f64::from(self.dpi) / 96.0
     }
+}
+
+/// A monitor currently showing HDR content (Windows "Use HDR" on).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HdrInfo {
+    /// Brightness of SDR white in nits (the "SDR content brightness" slider; 80 at its minimum).
+    pub sdr_white_nits: f32,
+    /// Peak brightness reported by the display, in nits.
+    pub peak_nits: f32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -102,6 +113,7 @@ mod tests {
             rect: PhysicalRect::new(x, y, w, h),
             primary: id == 1,
             dpi,
+            hdr: None,
         }
     }
 

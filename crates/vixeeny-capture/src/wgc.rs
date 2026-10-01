@@ -30,7 +30,7 @@ use windows::Win32::System::WinRT::Direct3D11::{
 use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop;
 use windows::core::{Interface, factory};
 
-use crate::{CaptureError, CpuFrame, StillBackend};
+use crate::{CaptureError, CpuFrame, HdrFrame, StillBackend};
 
 const FRAME_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -86,11 +86,12 @@ impl WgcBackend {
         &self,
         item: &GraphicsCaptureItem,
         cursor: bool,
-    ) -> Result<CpuFrame, CaptureError> {
+        pixel_format: DirectXPixelFormat,
+    ) -> Result<RawFrame, CaptureError> {
         let size = item.Size().map_err(os("item size"))?;
         let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
             &self.winrt_device,
-            DirectXPixelFormat::B8G8R8A8UIntNormalized,
+            pixel_format,
             1,
             size,
         )
@@ -124,7 +125,7 @@ impl WgcBackend {
     }
 
     /// GPU → CPU through a staging texture.
-    fn read_back(&self, texture: &ID3D11Texture2D) -> Result<CpuFrame, CaptureError> {
+    fn read_back(&self, texture: &ID3D11Texture2D) -> Result<RawFrame, CaptureError> {
         let mut desc = D3D11_TEXTURE2D_DESC::default();
         // SAFETY: `desc` is a valid out-pointer.
         unsafe { texture.GetDesc(&mut desc) };
@@ -158,7 +159,33 @@ impl WgcBackend {
         let data = bytes.to_vec();
         // SAFETY: matches the successful Map above.
         unsafe { self.context.Unmap(&staging, 0) };
-        CpuFrame::from_raw(width, height, stride, data)
+        Ok(RawFrame {
+            width,
+            height,
+            stride,
+            data,
+        })
+    }
+}
+
+/// Bytes of a mapped texture, rows `stride` apart.
+struct RawFrame {
+    width: u32,
+    height: u32,
+    stride: usize,
+    data: Vec<u8>,
+}
+
+/// IEEE 754 half → single precision.
+fn f16_to_f32(h: u16) -> f32 {
+    let sign = if h & 0x8000 != 0 { -1.0 } else { 1.0 };
+    let exp = i32::from((h >> 10) & 0x1F);
+    let frac = f32::from(h & 0x3FF);
+    match exp {
+        0 => sign * frac * 2f32.powi(-24),
+        0x1F if frac == 0.0 => sign * f32::INFINITY,
+        0x1F => f32::NAN,
+        _ => sign * (1.0 + frac / 1024.0) * 2f32.powi(exp - 15),
     }
 }
 
@@ -183,7 +210,38 @@ impl StillBackend for WgcBackend {
         // SAFETY: `hmonitor` came from `EnumDisplayMonitors`; a stale one makes the call fail.
         let item: GraphicsCaptureItem =
             unsafe { interop.CreateForMonitor(hmonitor) }.map_err(os("CreateForMonitor"))?;
-        self.grab_item(&item, cursor)
+        let raw = self.grab_item(&item, cursor, DirectXPixelFormat::B8G8R8A8UIntNormalized)?;
+        CpuFrame::from_raw(raw.width, raw.height, raw.stride, raw.data)
+    }
+
+    fn grab_monitor_hdr(
+        &mut self,
+        monitor: &MonitorInfo,
+        cursor: bool,
+    ) -> Result<HdrFrame, CaptureError> {
+        let interop =
+            factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>().map_err(os("interop"))?;
+        let hmonitor = HMONITOR(monitor.id.0 as usize as *mut _);
+        // SAFETY: as in `grab_monitor`.
+        let item: GraphicsCaptureItem =
+            unsafe { interop.CreateForMonitor(hmonitor) }.map_err(os("CreateForMonitor"))?;
+        let raw = self.grab_item(&item, cursor, DirectXPixelFormat::R16G16B16A16Float)?;
+        let row_bytes = raw.width as usize * 8;
+        let mut rgba = Vec::with_capacity(raw.width as usize * raw.height as usize * 4);
+        for y in 0..raw.height as usize {
+            let row = &raw.data[y * raw.stride..y * raw.stride + row_bytes];
+            rgba.extend(
+                row.as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|h| f16_to_f32(u16::from_le_bytes(*h))),
+            );
+        }
+        Ok(HdrFrame {
+            width: raw.width,
+            height: raw.height,
+            rgba,
+        })
     }
 
     fn grab_window(&mut self, window: WindowId, cursor: bool) -> Result<CpuFrame, CaptureError> {
@@ -193,6 +251,24 @@ impl StillBackend for WgcBackend {
         // SAFETY: a stale or invalid window handle makes the call fail.
         let item: GraphicsCaptureItem =
             unsafe { interop.CreateForWindow(hwnd) }.map_err(os("CreateForWindow"))?;
-        self.grab_item(&item, cursor)
+        let raw = self.grab_item(&item, cursor, DirectXPixelFormat::B8G8R8A8UIntNormalized)?;
+        CpuFrame::from_raw(raw.width, raw.height, raw.stride, raw.data)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::f16_to_f32;
+
+    #[test]
+    fn half_floats() {
+        assert_eq!(f16_to_f32(0x3C00), 1.0);
+        assert_eq!(f16_to_f32(0xC000), -2.0);
+        assert_eq!(f16_to_f32(0x0000), 0.0);
+        assert_eq!(f16_to_f32(0x3555), 0.333_251_95);
+        assert_eq!(f16_to_f32(0x7BFF), 65504.0);
+        assert!(f16_to_f32(0x7C00).is_infinite());
+        assert!(f16_to_f32(0x7E00).is_nan());
+        assert!(f16_to_f32(0x0001) > 0.0); // smallest subnormal
     }
 }

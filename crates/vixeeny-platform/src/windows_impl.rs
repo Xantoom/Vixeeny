@@ -3,10 +3,18 @@
 
 use std::ffi::c_void;
 
+use windows::Win32::Devices::Display::{
+    DISPLAYCONFIG_DEVICE_INFO_GET_SDR_WHITE_LEVEL, DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
+    DISPLAYCONFIG_DEVICE_INFO_HEADER, DISPLAYCONFIG_MODE_INFO, DISPLAYCONFIG_PATH_INFO,
+    DISPLAYCONFIG_SDR_WHITE_LEVEL, DISPLAYCONFIG_SOURCE_DEVICE_NAME, DisplayConfigGetDeviceInfo,
+    GetDisplayConfigBufferSizes, QDC_ONLY_ACTIVE_PATHS, QueryDisplayConfig,
+};
 use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, POINT, RECT, TRUE};
 use windows::Win32::Graphics::Dwm::{
     DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute,
 };
+use windows::Win32::Graphics::Dxgi::Common::DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
+use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1, IDXGIOutput6};
 use windows::Win32::Graphics::Gdi::{
     EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO, MONITORINFOEXW,
 };
@@ -22,9 +30,11 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible, SetWindowDisplayAffinity,
     WDA_EXCLUDEFROMCAPTURE, WS_EX_TOOLWINDOW,
 };
-use windows::core::PWSTR;
+use windows::core::{Interface, PWSTR};
 
-use crate::{MonitorId, MonitorInfo, PhysicalRect, PlatformError, Result, WindowId, WindowInfo};
+use crate::{
+    HdrInfo, MonitorId, MonitorInfo, PhysicalRect, PlatformError, Result, WindowId, WindowInfo,
+};
 
 const MONITORINFOF_PRIMARY: u32 = 1;
 
@@ -99,6 +109,7 @@ pub fn monitors() -> Result<Vec<MonitorInfo>> {
             rect: rect_of(info.monitorInfo.rcMonitor),
             primary: info.monitorInfo.dwFlags & MONITORINFOF_PRIMARY != 0,
             dpi: dpi_x,
+            hdr: hdr_info(MonitorId(handle.0 as usize as u64)),
         });
     }
     Ok(out)
@@ -235,4 +246,98 @@ pub fn exclude_from_capture(id: WindowId) -> Result<()> {
     // SAFETY: plain call on a window handle owned by this process.
     unsafe { SetWindowDisplayAffinity(hwnd_of(id), WDA_EXCLUDEFROMCAPTURE) }
         .map_err(|e| os_err("SetWindowDisplayAffinity", e))
+}
+
+/// Looks up the DXGI output of `monitor`: `(is HDR, peak nits, GDI device name)`.
+fn dxgi_output(monitor: MonitorId) -> Option<(bool, f32, [u16; 32])> {
+    // SAFETY: plain DXGI enumeration; every interface is reference counted by the bindings.
+    unsafe {
+        let factory: IDXGIFactory1 = CreateDXGIFactory1().ok()?;
+        let mut adapter_index = 0;
+        while let Ok(adapter) = factory.EnumAdapters1(adapter_index) {
+            adapter_index += 1;
+            let mut output_index = 0;
+            while let Ok(output) = adapter.EnumOutputs(output_index) {
+                output_index += 1;
+                let Ok(output6) = output.cast::<IDXGIOutput6>() else {
+                    continue;
+                };
+                let Ok(desc) = output6.GetDesc1() else {
+                    continue;
+                };
+                if desc.Monitor.0 as usize as u64 == monitor.0 {
+                    let hdr = desc.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
+                    return Some((hdr, desc.MaxLuminance, desc.DeviceName));
+                }
+            }
+        }
+        None
+    }
+}
+
+/// SDR white level of the display whose GDI name is `gdi_name`, in nits.
+fn sdr_white_nits(gdi_name: &[u16; 32]) -> Option<f32> {
+    // SAFETY: the buffers are sized by `GetDisplayConfigBufferSizes`; the request structs have
+    // their header size and type set before each call.
+    unsafe {
+        let (mut paths_len, mut modes_len) = (0u32, 0u32);
+        GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &mut paths_len, &mut modes_len)
+            .ok()
+            .ok()?;
+        let mut paths = vec![DISPLAYCONFIG_PATH_INFO::default(); paths_len as usize];
+        let mut modes = vec![DISPLAYCONFIG_MODE_INFO::default(); modes_len as usize];
+        QueryDisplayConfig(
+            QDC_ONLY_ACTIVE_PATHS,
+            &mut paths_len,
+            paths.as_mut_ptr(),
+            &mut modes_len,
+            modes.as_mut_ptr(),
+            None,
+        )
+        .ok()
+        .ok()?;
+        for path in paths.iter().take(paths_len as usize) {
+            let mut source = DISPLAYCONFIG_SOURCE_DEVICE_NAME {
+                header: DISPLAYCONFIG_DEVICE_INFO_HEADER {
+                    r#type: DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
+                    size: size_of::<DISPLAYCONFIG_SOURCE_DEVICE_NAME>() as u32,
+                    adapterId: path.sourceInfo.adapterId,
+                    id: path.sourceInfo.id,
+                },
+                ..Default::default()
+            };
+            if DisplayConfigGetDeviceInfo(&raw mut source.header) != 0
+                || source.viewGdiDeviceName != *gdi_name
+            {
+                continue;
+            }
+            let mut white = DISPLAYCONFIG_SDR_WHITE_LEVEL {
+                header: DISPLAYCONFIG_DEVICE_INFO_HEADER {
+                    r#type: DISPLAYCONFIG_DEVICE_INFO_GET_SDR_WHITE_LEVEL,
+                    size: size_of::<DISPLAYCONFIG_SDR_WHITE_LEVEL>() as u32,
+                    adapterId: path.targetInfo.adapterId,
+                    id: path.targetInfo.id,
+                },
+                ..Default::default()
+            };
+            if DisplayConfigGetDeviceInfo(&raw mut white.header) == 0 {
+                // 1000 means 80 nits.
+                return Some(white.SDRWhiteLevel as f32 / 1000.0 * 80.0);
+            }
+        }
+        None
+    }
+}
+
+/// HDR parameters of `monitor`, or `None` when it shows SDR (or they cannot be read, in which
+/// case capturing as SDR is the safe choice).
+pub fn hdr_info(monitor: MonitorId) -> Option<HdrInfo> {
+    let (hdr, peak, name) = dxgi_output(monitor)?;
+    if !hdr {
+        return None;
+    }
+    Some(HdrInfo {
+        sdr_white_nits: sdr_white_nits(&name).unwrap_or(80.0),
+        peak_nits: if peak > 0.0 { peak } else { 1000.0 },
+    })
 }
