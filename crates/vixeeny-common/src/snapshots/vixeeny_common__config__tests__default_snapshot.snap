@@ -32,11 +32,14 @@ images = "{pictures}/Vixeeny"
 videos = "{videos}/Vixeeny"
 replays = "{videos}/Vixeeny/Replays"
 filename_template = "{app}_{date}_{time}"
+use_foreground_app = true
 
 [paths.per_app_subfolder]
 images = false
 videos = false
 replays = false
+
+[paths.app_names]
 
 [image]
 format = "png"

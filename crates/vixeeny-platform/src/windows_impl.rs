@@ -341,3 +341,71 @@ pub fn hdr_info(monitor: MonitorId) -> Option<HdrInfo> {
         peak_nits: if peak > 0.0 { peak } else { 1000.0 },
     })
 }
+
+/// `ProductName` and `FileDescription` from the executable's version resource. Missing or
+/// unreadable resources give empty fields, never an error.
+pub fn exe_metadata(path: &str) -> crate::ExeMetadata {
+    use windows::Win32::Storage::FileSystem::{
+        GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW,
+    };
+    use windows::core::PCWSTR;
+
+    let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+    let mut handle = 0u32;
+    // SAFETY: `wide` is NUL-terminated and outlives the call.
+    let size = unsafe { GetFileVersionInfoSizeW(PCWSTR(wide.as_ptr()), Some(&raw mut handle)) };
+    if size == 0 {
+        return crate::ExeMetadata::default();
+    }
+    let mut block = vec![0u8; size as usize];
+    // SAFETY: `block` is `size` bytes long, as `GetFileVersionInfoW` requires.
+    if unsafe { GetFileVersionInfoW(PCWSTR(wide.as_ptr()), None, size, block.as_mut_ptr().cast()) }
+        .is_err()
+    {
+        return crate::ExeMetadata::default();
+    }
+
+    let query = |sub: &str| -> Option<(*const c_void, u32)> {
+        let sub: Vec<u16> = sub.encode_utf16().chain(std::iter::once(0)).collect();
+        let mut ptr: *mut c_void = std::ptr::null_mut();
+        let mut len = 0u32;
+        // SAFETY: `block` holds a valid version resource; the out-pointers are valid and the
+        // returned pointer points into `block`, which outlives every use below.
+        let ok = unsafe {
+            VerQueryValueW(
+                block.as_ptr().cast(),
+                PCWSTR(sub.as_ptr()),
+                &raw mut ptr,
+                &raw mut len,
+            )
+        };
+        (ok.as_bool() && !ptr.is_null() && len > 0).then_some((ptr.cast_const(), len))
+    };
+    // Language/code page pairs; English (US) Unicode as a last resort.
+    let mut langs: Vec<String> = Vec::new();
+    if let Some((ptr, len)) = query("\\VarFileInfo\\Translation") {
+        // SAFETY: the translation table is `len` bytes of (u16 language, u16 code page) pairs.
+        let words = unsafe { std::slice::from_raw_parts(ptr.cast::<u16>(), len as usize / 2) };
+        langs.extend(
+            words
+                .chunks_exact(2)
+                .map(|w| format!("{:04x}{:04x}", w[0], w[1])),
+        );
+    }
+    langs.push("040904b0".to_owned());
+
+    let string = |name: &str| -> Option<String> {
+        langs.iter().find_map(|lang| {
+            let (ptr, len) = query(&format!("\\StringFileInfo\\{lang}\\{name}"))?;
+            // SAFETY: a string value is `len` UTF-16 units including the terminating NUL.
+            let units = unsafe { std::slice::from_raw_parts(ptr.cast::<u16>(), len as usize) };
+            let text = String::from_utf16_lossy(units);
+            let text = text.trim_end_matches('\0').trim();
+            (!text.is_empty()).then(|| text.to_owned())
+        })
+    };
+    crate::ExeMetadata {
+        product_name: string("ProductName"),
+        file_description: string("FileDescription"),
+    }
+}

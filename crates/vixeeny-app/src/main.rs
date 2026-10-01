@@ -50,6 +50,15 @@ fn direct_capture(action: ActionId, config: &Config) -> anyhow::Result<std::path
     };
     let dir = vixeeny_common::paths::expand_user_dir(&config.paths.images)
         .context("cannot locate the images folder")?;
+    let now = vixeeny_platform::local_time();
+    let destination = still::Destination {
+        dir: &dir,
+        template: &config.paths.filename_template,
+        per_app_subfolder: config.paths.per_app_subfolder.images,
+        use_foreground_app: config.paths.use_foreground_app,
+        app_names: &config.paths.app_names,
+        now: &now,
+    };
     let mut capturer = Capturer::new(WgcBackend::new()?, snapshot.monitors.clone());
     let options = CaptureOptions {
         show_cursor: false,
@@ -61,10 +70,10 @@ fn direct_capture(action: ActionId, config: &Config) -> anyhow::Result<std::path
         action,
         &snapshot,
         &mut capturer,
-        &dir,
+        &destination,
         options,
         (format, &settings),
-        &vixeeny_platform::local_time(),
+        &vixeeny_platform::exe_metadata,
     )?;
     tracing::info!("direct capture took {:?}", started.elapsed());
     Ok(path)

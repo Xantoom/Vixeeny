@@ -20,9 +20,16 @@ mod unsupported;
 use unsupported as os;
 
 pub use os::{
-    cursor_position, ensure_dpi_aware, exclude_from_capture, foreground_window, hdr_info, monitors,
-    top_level_windows, window_info,
+    cursor_position, ensure_dpi_aware, exclude_from_capture, exe_metadata, foreground_window,
+    hdr_info, monitors, top_level_windows, window_info,
 };
+
+/// Version-resource strings of an executable, used to name captures after the application.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ExeMetadata {
+    pub product_name: Option<String>,
+    pub file_description: Option<String>,
+}
 
 /// Opaque monitor handle (an `HMONITOR` on Windows).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

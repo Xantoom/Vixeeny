@@ -161,6 +161,11 @@ pub struct Paths {
     pub replays: String,
     pub filename_template: String,
     pub per_app_subfolder: PerAppSubfolder,
+    /// For captures that are not of a single window, `{app}` is the application that has the
+    /// focus (plan 5.8); otherwise it is `Vixeeny`.
+    pub use_foreground_app: bool,
+    /// User table "executable file name → displayed name", consulted first (plan 5.8).
+    pub app_names: BTreeMap<String, String>,
 }
 
 impl Default for Paths {
@@ -171,6 +176,8 @@ impl Default for Paths {
             replays: "{videos}/Vixeeny/Replays".into(),
             filename_template: "{app}_{date}_{time}".into(),
             per_app_subfolder: PerAppSubfolder::default(),
+            use_foreground_app: true,
+            app_names: BTreeMap::new(),
         }
     }
 }

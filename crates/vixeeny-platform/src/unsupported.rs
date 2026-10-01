@@ -32,3 +32,7 @@ pub fn exclude_from_capture(_id: WindowId) -> Result<()> {
 pub fn hdr_info(_monitor: crate::MonitorId) -> Option<crate::HdrInfo> {
     None
 }
+
+pub fn exe_metadata(_path: &str) -> crate::ExeMetadata {
+    crate::ExeMetadata::default()
+}

@@ -2,12 +2,14 @@
 //! Direct image captures (plan 5.2): full screen under the cursor, active window, all
 //! monitors. Written in the configured format in the images folder. The editor flow (`capture-region`) is M7.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use vixeeny_capture::{CaptureError, CaptureOptions, CaptureTarget, Capturer, StillBackend};
 use vixeeny_common::ipc::ActionId;
+use vixeeny_common::naming::{self, AppInfo, Vars};
 use vixeeny_image::{Bgra, ImageError, ImageFormat, Settings};
-use vixeeny_platform::{LocalTime, MonitorInfo, WindowInfo, monitor_at};
+use vixeeny_platform::{ExeMetadata, LocalTime, MonitorInfo, WindowInfo, monitor_at};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StillError {
@@ -52,20 +54,6 @@ pub fn target_for(action: ActionId, snap: &Snapshot) -> Result<CaptureTarget, St
     }
 }
 
-/// `Vixeeny_2026-10-01_17-12-00.png`, then `…_2.png`, `…_3.png` if it already exists. The
-/// configurable template and per-application folders arrive with M6.
-pub fn unique_path(dir: &Path, now: &LocalTime, ext: &str) -> PathBuf {
-    let stem = format!("Vixeeny_{}_{}", now.date(), now.time());
-    let first = dir.join(format!("{stem}.{ext}"));
-    if !first.exists() {
-        return first;
-    }
-    (2..)
-        .map(|n| dir.join(format!("{stem}_{n}.{ext}")))
-        .find(|p| !p.exists())
-        .unwrap_or(first)
-}
-
 /// Writes next to the destination then renames, so a crash never leaves a truncated file.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), StillError> {
     let io = |source| StillError::Io {
@@ -82,22 +70,100 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), StillError> {
     std::fs::rename(&tmp, path).map_err(io)
 }
 
-/// Grabs, encodes and saves. Returns the file written.
+/// Where and under which name captures are written (plan 5.8).
+pub struct Destination<'a> {
+    pub dir: &'a Path,
+    pub template: &'a str,
+    pub per_app_subfolder: bool,
+    /// `{app}` of a desktop capture is the application with the focus, not `Vixeeny`.
+    pub use_foreground_app: bool,
+    pub app_names: &'a BTreeMap<String, String>,
+    pub now: &'a LocalTime,
+}
+
+/// Display name of the application a capture is attributed to.
+fn app_name(
+    action: ActionId,
+    snap: &Snapshot,
+    dest: &Destination<'_>,
+    metadata: &dyn Fn(&str) -> ExeMetadata,
+) -> String {
+    let window = match action {
+        ActionId::CaptureWindow => snap.foreground.as_ref(),
+        _ => snap.foreground.as_ref().filter(|_| dest.use_foreground_app),
+    };
+    let resolved = window.and_then(|w| {
+        let meta = w.exe_path.as_deref().map(metadata).unwrap_or_default();
+        naming::resolve_app_name(
+            &AppInfo {
+                exe_path: w.exe_path.as_deref(),
+                product_name: meta.product_name.as_deref(),
+                file_description: meta.file_description.as_deref(),
+                window_title: Some(&w.title),
+            },
+            dest.app_names,
+        )
+    });
+    resolved.unwrap_or_else(|| naming::DEFAULT_APP_NAME.to_owned())
+}
+
+fn template_vars(
+    action: ActionId,
+    snap: &Snapshot,
+    dest: &Destination<'_>,
+    metadata: &dyn Fn(&str) -> ExeMetadata,
+    size: (u32, u32),
+) -> Vars {
+    let monitor = match target_for(action, snap) {
+        Ok(CaptureTarget::Monitor(id)) => snap
+            .monitors
+            .iter()
+            .position(|m| m.id == id)
+            .map_or_else(String::new, |i| (i + 1).to_string()),
+        _ => String::new(),
+    };
+    Vars {
+        app: app_name(action, snap, dest, metadata),
+        title: snap
+            .foreground
+            .as_ref()
+            .filter(|_| action == ActionId::CaptureWindow)
+            .map(|w| naming::sanitize(&w.title))
+            .unwrap_or_default(),
+        date: dest.now.date(),
+        time: dest.now.time(),
+        millis: dest.now.millisecond,
+        width: size.0,
+        height: size.1,
+        monitor,
+    }
+}
+
+/// Grabs, encodes and saves. Returns the file written. `metadata` reads the version resource
+/// of an executable (a parameter so tests need no real programs).
 pub fn run<B: StillBackend>(
     action: ActionId,
     snap: &Snapshot,
     capturer: &mut Capturer<B>,
-    images_dir: &Path,
+    dest: &Destination<'_>,
     options: CaptureOptions,
     output: (ImageFormat, &Settings),
-    now: &LocalTime,
+    metadata: &dyn Fn(&str) -> ExeMetadata,
 ) -> Result<PathBuf, StillError> {
     let target = target_for(action, snap)?;
     let frame = capturer.grab(&target, options)?;
     let (format, settings) = output;
     let image = Bgra::new(frame.width, frame.height, frame.stride, &frame.data);
     let bytes = vixeeny_image::encode(format, &image, settings)?;
-    let path = unique_path(images_dir, now, format.extension());
+    let vars = template_vars(action, snap, dest, metadata, (frame.width, frame.height));
+    let path = naming::output_path(
+        dest.dir,
+        dest.per_app_subfolder,
+        dest.template,
+        &vars,
+        format.extension(),
+        |p| p.exists(),
+    );
     write_atomic(&path, &bytes)?;
     Ok(path)
 }
@@ -168,26 +234,78 @@ mod tests {
         ));
     }
 
+    fn no_metadata(_: &str) -> ExeMetadata {
+        ExeMetadata::default()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn run_with(
+        action: ActionId,
+        snap: &Snapshot,
+        dir: &Path,
+        template: &str,
+        per_app: bool,
+        use_fg: bool,
+        names: &BTreeMap<String, String>,
+        metadata: &dyn Fn(&str) -> ExeMetadata,
+    ) -> PathBuf {
+        let mut capturer = Capturer::new(FakeBackend::default(), snap.monitors.clone());
+        let now = now();
+        let dest = Destination {
+            dir,
+            template,
+            per_app_subfolder: per_app,
+            use_foreground_app: use_fg,
+            app_names: names,
+            now: &now,
+        };
+        run(
+            action,
+            snap,
+            &mut capturer,
+            &dest,
+            CaptureOptions::default(),
+            (ImageFormat::Png, &Settings::default()),
+            metadata,
+        )
+        .unwrap()
+    }
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("vixeeny-still-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
     #[test]
     fn writes_a_decodable_png_without_clobbering() {
-        let dir = std::env::temp_dir().join(format!("vixeeny-still-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let snap = snapshot();
-        let mut capturer = Capturer::new(FakeBackend::default(), snap.monitors.clone());
-        let run_once = |capturer: &mut Capturer<FakeBackend>| {
-            run(
-                ActionId::CaptureFullscreen,
-                &snap,
-                capturer,
-                &dir,
-                CaptureOptions::default(),
-                (ImageFormat::Png, &Settings::default()),
-                &now(),
-            )
-            .unwrap()
+        let dir = temp_dir("png");
+        let snap = Snapshot {
+            foreground: None,
+            ..snapshot()
         };
-        let first = run_once(&mut capturer);
-        let second = run_once(&mut capturer);
+        let names = BTreeMap::new();
+        let tpl = "{app}_{date}_{time}";
+        let first = run_with(
+            ActionId::CaptureFullscreen,
+            &snap,
+            &dir,
+            tpl,
+            false,
+            true,
+            &names,
+            &no_metadata,
+        );
+        let second = run_with(
+            ActionId::CaptureFullscreen,
+            &snap,
+            &dir,
+            tpl,
+            false,
+            true,
+            &names,
+            &no_metadata,
+        );
         assert_eq!(
             first.file_name().unwrap(),
             "Vixeeny_2026-10-01_17-12-00.png"
@@ -202,6 +320,84 @@ mod tests {
         let reader = decoder.read_info().unwrap();
         assert_eq!((reader.info().width, reader.info().height), (160, 100));
         assert!(!dir.join("Vixeeny_2026-10-01_17-12-00.png.part").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn per_app_folder_uses_the_resolved_name() {
+        let dir = temp_dir("app");
+        let mut snap = snapshot();
+        snap.foreground.as_mut().unwrap().exe_path = Some(r"C:\G\Client-Win64-Shipping.exe".into());
+        let names: BTreeMap<_, _> = [(
+            "client-win64-shipping.exe".to_owned(),
+            "Wuthering Waves".to_owned(),
+        )]
+        .into();
+        let path = run_with(
+            ActionId::CaptureWindow,
+            &snap,
+            &dir,
+            "{app}_{date}_{time}",
+            true,
+            true,
+            &names,
+            &no_metadata,
+        );
+        assert_eq!(
+            path,
+            dir.join("Wuthering Waves")
+                .join("Wuthering Waves_2026-10-01_17-12-00.png")
+        );
+        // Product name from the version resource wins when the table has no entry.
+        let meta = |_: &str| ExeMetadata {
+            product_name: Some("Wuthering: Waves?".into()),
+            file_description: None,
+        };
+        let path = run_with(
+            ActionId::CaptureWindow,
+            &snap,
+            &dir,
+            "{app}-{width}x{height}",
+            true,
+            true,
+            &BTreeMap::new(),
+            &meta,
+        );
+        assert_eq!(
+            path,
+            dir.join("Wuthering Waves")
+                .join("Wuthering Waves-64x48.png")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn desktop_captures_follow_the_foreground_app_setting() {
+        let dir = temp_dir("fg");
+        let snap = snapshot(); // foreground window titled "Game", unknown exe
+        let names = BTreeMap::new();
+        let on = run_with(
+            ActionId::CaptureFullscreen,
+            &snap,
+            &dir,
+            "{app}",
+            false,
+            true,
+            &names,
+            &no_metadata,
+        );
+        assert_eq!(on.file_name().unwrap(), "Game.png");
+        let off = run_with(
+            ActionId::CaptureFullscreen,
+            &snap,
+            &dir,
+            "{app}",
+            false,
+            false,
+            &names,
+            &no_metadata,
+        );
+        assert_eq!(off.file_name().unwrap(), "Vixeeny.png");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
