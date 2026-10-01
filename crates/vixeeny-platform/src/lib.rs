@@ -18,7 +18,8 @@ mod unsupported;
 use unsupported as os;
 
 pub use os::{
-    cursor_position, ensure_dpi_aware, foreground_window, monitors, top_level_windows, window_info,
+    cursor_position, ensure_dpi_aware, exclude_from_capture, foreground_window, monitors,
+    top_level_windows, window_info,
 };
 
 /// Opaque monitor handle (an `HMONITOR` on Windows).

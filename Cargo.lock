@@ -1348,6 +1348,11 @@ version = "0.0.1"
 [[package]]
 name = "vixeeny-capture"
 version = "0.0.1"
+dependencies = [
+ "thiserror",
+ "vixeeny-platform",
+ "windows",
+]
 
 [[package]]
 name = "vixeeny-common"

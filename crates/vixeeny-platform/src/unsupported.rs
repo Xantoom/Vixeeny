@@ -24,3 +24,7 @@ pub fn top_level_windows() -> Result<Vec<WindowInfo>> {
 pub fn window_info(_id: WindowId) -> Result<Option<WindowInfo>> {
     Err(PlatformError::Unsupported)
 }
+
+pub fn exclude_from_capture(_id: WindowId) -> Result<()> {
+    Err(PlatformError::Unsupported)
+}

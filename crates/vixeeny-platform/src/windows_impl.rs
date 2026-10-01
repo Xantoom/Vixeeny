@@ -19,7 +19,8 @@ use windows::Win32::UI::HiDpi::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GWL_EXSTYLE, GetCursorPos, GetForegroundWindow, GetWindowLongW, GetWindowRect,
-    GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible, WS_EX_TOOLWINDOW,
+    GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible, SetWindowDisplayAffinity,
+    WDA_EXCLUDEFROMCAPTURE, WS_EX_TOOLWINDOW,
 };
 use windows::core::PWSTR;
 
@@ -226,4 +227,12 @@ pub fn top_level_windows() -> Result<Vec<WindowInfo>> {
         }
     }
     Ok(out)
+}
+
+/// Hides one of our own windows from every screen capture (plan 5.2 CA-IMG-2). Needs
+/// Windows 10 2004 or later; the window shows normally on screen.
+pub fn exclude_from_capture(id: WindowId) -> Result<()> {
+    // SAFETY: plain call on a window handle owned by this process.
+    unsafe { SetWindowDisplayAffinity(hwnd_of(id), WDA_EXCLUDEFROMCAPTURE) }
+        .map_err(|e| os_err("SetWindowDisplayAffinity", e))
 }
