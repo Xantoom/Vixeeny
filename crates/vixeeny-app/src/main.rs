@@ -76,13 +76,20 @@ fn image_output(config: &Config) -> (vixeeny_image::ImageFormat, vixeeny_image::
     if let Some(chroma) = Chroma::from_name(&config.image.jpeg.chroma) {
         settings.jpeg.chroma = chroma;
     }
-    let format = ImageFormat::from_name(&config.image.format).unwrap_or_else(|| {
-        tracing::warn!(
-            "image format `{}` is not available yet, using PNG",
-            config.image.format
-        );
-        ImageFormat::Png
-    });
+    settings.avif.quality = config.image.avif.quality.min(100);
+    settings.avif.depth = if config.image.avif.depth >= 10 { 10 } else { 8 };
+    if let Some(chroma) = Chroma::from_name(&config.image.avif.chroma) {
+        settings.avif.chroma = chroma;
+    }
+    let format = ImageFormat::from_name(&config.image.format)
+        .filter(|f| f.available())
+        .unwrap_or_else(|| {
+            tracing::warn!(
+                "image format `{}` is not available, using PNG",
+                config.image.format
+            );
+            ImageFormat::Png
+        });
     (format, settings)
 }
 
