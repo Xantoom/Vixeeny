@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Direct image captures (plan 5.2): full screen under the cursor, active window, all
-//! monitors. Written as PNG in the images folder. The editor flow (`capture-region`) is M7.
+//! monitors. Written in the configured format in the images folder. The editor flow (`capture-region`) is M7.
 
 use std::path::{Path, PathBuf};
 
 use vixeeny_capture::{CaptureError, CaptureOptions, CaptureTarget, Capturer, StillBackend};
 use vixeeny_common::ipc::ActionId;
-use vixeeny_image::ImageError;
+use vixeeny_image::{Bgra, ImageError, ImageFormat, Settings};
 use vixeeny_platform::{LocalTime, MonitorInfo, WindowInfo, monitor_at};
 
 #[derive(Debug, thiserror::Error)]
@@ -54,14 +54,14 @@ pub fn target_for(action: ActionId, snap: &Snapshot) -> Result<CaptureTarget, St
 
 /// `Vixeeny_2026-10-01_17-12-00.png`, then `…_2.png`, `…_3.png` if it already exists. The
 /// configurable template and per-application folders arrive with M6.
-pub fn unique_path(dir: &Path, now: &LocalTime) -> PathBuf {
+pub fn unique_path(dir: &Path, now: &LocalTime, ext: &str) -> PathBuf {
     let stem = format!("Vixeeny_{}_{}", now.date(), now.time());
-    let first = dir.join(format!("{stem}.png"));
+    let first = dir.join(format!("{stem}.{ext}"));
     if !first.exists() {
         return first;
     }
     (2..)
-        .map(|n| dir.join(format!("{stem}_{n}.png")))
+        .map(|n| dir.join(format!("{stem}_{n}.{ext}")))
         .find(|p| !p.exists())
         .unwrap_or(first)
 }
@@ -75,7 +75,9 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), StillError> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(io)?;
     }
-    let tmp = path.with_extension("png.part");
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".part");
+    let tmp = PathBuf::from(tmp);
     std::fs::write(&tmp, bytes).map_err(io)?;
     std::fs::rename(&tmp, path).map_err(io)
 }
@@ -87,14 +89,16 @@ pub fn run<B: StillBackend>(
     capturer: &mut Capturer<B>,
     images_dir: &Path,
     options: CaptureOptions,
+    output: (ImageFormat, &Settings),
     now: &LocalTime,
 ) -> Result<PathBuf, StillError> {
     let target = target_for(action, snap)?;
     let frame = capturer.grab(&target, options)?;
-    let png =
-        vixeeny_image::png_fast::encode_bgra(frame.width, frame.height, frame.stride, &frame.data)?;
-    let path = unique_path(images_dir, now);
-    write_atomic(&path, &png)?;
+    let (format, settings) = output;
+    let image = Bgra::new(frame.width, frame.height, frame.stride, &frame.data);
+    let bytes = vixeeny_image::encode(format, &image, settings)?;
+    let path = unique_path(images_dir, now, format.extension());
+    write_atomic(&path, &bytes)?;
     Ok(path)
 }
 
@@ -176,6 +180,7 @@ mod tests {
                 capturer,
                 &dir,
                 CaptureOptions::default(),
+                (ImageFormat::Png, &Settings::default()),
                 &now(),
             )
             .unwrap()

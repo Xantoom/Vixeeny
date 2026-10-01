@@ -52,16 +52,38 @@ fn direct_capture(action: ActionId, config: &Config) -> anyhow::Result<std::path
         .context("cannot locate the images folder")?;
     let mut capturer = Capturer::new(WgcBackend::new()?, snapshot.monitors.clone());
     let options = CaptureOptions { show_cursor: false };
+    let (format, settings) = image_output(config);
     let path = still::run(
         action,
         &snapshot,
         &mut capturer,
         &dir,
         options,
+        (format, &settings),
         &vixeeny_platform::local_time(),
     )?;
     tracing::info!("direct capture took {:?}", started.elapsed());
     Ok(path)
+}
+
+/// Output format and settings from `[image]`. An unknown value falls back to the default (PNG,
+/// 4:4:4), never to a failed capture.
+#[cfg(any(windows, test))]
+fn image_output(config: &Config) -> (vixeeny_image::ImageFormat, vixeeny_image::Settings) {
+    use vixeeny_image::{Chroma, ImageFormat, Settings};
+    let mut settings = Settings::default();
+    settings.jpeg.quality = config.image.jpeg.quality.clamp(1, 100);
+    if let Some(chroma) = Chroma::from_name(&config.image.jpeg.chroma) {
+        settings.jpeg.chroma = chroma;
+    }
+    let format = ImageFormat::from_name(&config.image.format).unwrap_or_else(|| {
+        tracing::warn!(
+            "image format `{}` is not available yet, using PNG",
+            config.image.format
+        );
+        ImageFormat::Png
+    });
+    (format, settings)
 }
 
 #[cfg(not(windows))]
@@ -134,5 +156,28 @@ fn run() -> anyhow::Result<()> {
                 return Ok(());
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vixeeny_image::{Chroma, ImageFormat};
+
+    #[test]
+    fn config_maps_to_encoder_settings() {
+        let mut config = Config::default();
+        assert_eq!(image_output(&config).0, ImageFormat::Png);
+        config.image.format = "jpeg".into();
+        config.image.jpeg.quality = 70;
+        config.image.jpeg.chroma = "420".into();
+        let (format, settings) = image_output(&config);
+        assert_eq!(format, ImageFormat::Jpeg);
+        assert_eq!(
+            (settings.jpeg.quality, settings.jpeg.chroma),
+            (70, Chroma::Yuv420)
+        );
+        config.image.format = "avif".into(); // not available yet
+        assert_eq!(image_output(&config).0, ImageFormat::Png);
     }
 }
