@@ -20,7 +20,7 @@ struct Lib {
 /// Bump a library's revision to force its rebuild when its recipe changes (stamps embed it).
 fn recipe_rev(name: &str) -> &'static str {
     match name {
-        "libvpx" => "4",
+        "libvpx" => "5",
         _ => "2",
     }
 }
@@ -263,6 +263,14 @@ fn recipe(ctx: &Ctx, name: &str, src: &Path) -> Result<()> {
             // On Windows: clang targeting the MSVC ABI (so libvpx uses Win32 threads, not
             // winpthreads, and links with the /MD CRT). libvpx's own MSVC target needs yasm
             // Visual Studio integration; MinGW gcc objects need winpthreads.
+            // clang defines _MSC_VER, so vpx_encoder.c calls these x87 helpers, which libvpx only
+            // assembles for its Visual Studio projects.
+            let fcw = if win {
+                "&& make vpx_ports/float_control_word.asm.o \\
+                 && llvm-ar rs libvpx.a vpx_ports/float_control_word.asm.o "
+            } else {
+                ""
+            };
             let (env, target, cflags) = if win {
                 (
                     "CC='clang --target=x86_64-pc-windows-msvc' \
@@ -280,7 +288,7 @@ fn recipe(ctx: &Ctx, name: &str, src: &Path) -> Result<()> {
                     "{env}./configure {target}{cflags}--prefix='{up}' --enable-static \
                      --disable-shared --enable-pic --enable-vp9-highbitdepth \
                      --disable-examples --disable-tools --disable-docs --disable-unit-tests \
-                     && {env}make -j{j} && {env}make install",
+                     && {env}make -j{j} {fcw}&& {env}make install",
                     j = ctx.jobs
                 ),
                 &[],
@@ -340,7 +348,7 @@ fn recipe(ctx: &Ctx, name: &str, src: &Path) -> Result<()> {
                      --disable-debug --pkg-config-flags=--static --enable-libx264 \
                      --enable-libx265 --enable-libvpx --enable-libsvtav1 --enable-libdav1d \
                      --enable-libopus || {{ \
-                     grep -a -A32 'check_func_headers vpx/vpx_decoder.h vpx/vp8dx.h' ffbuild/config.log | tail -n 40; exit 1; }}; make -j{j} && make install",
+                     grep -a -A32 'check_func_headers x265.h' ffbuild/config.log | tail -n 40; exit 1; }}; make -j{j} && make install",
                     j = ctx.jobs
                 ),
                 &pkg_env,
