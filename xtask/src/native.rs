@@ -119,6 +119,23 @@ fn sh(dir: &Path, script: &str, env: &[(&str, String)]) -> Result<()> {
 /// under that name too.
 fn normalize_msvc_libs(ctx: &Ctx) -> Result<()> {
     let dir = ctx.prefix.join("lib");
+    // `.pc` files written for Unix name libraries MSVC does not have (`m.lib`, `pthread.lib`).
+    if let Ok(pcs) = std::fs::read_dir(dir.join("pkgconfig")) {
+        for pc in pcs {
+            let path = pc?.path();
+            let text = std::fs::read_to_string(&path)?;
+            let cleaned: Vec<String> = text
+                .lines()
+                .map(|line| {
+                    line.split(' ')
+                        .filter(|t| !matches!(*t, "-lm" | "-lpthread" | "-ldl" | "-UEB_DLL"))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+                .collect();
+            std::fs::write(&path, cleaned.join("\n") + "\n")?;
+        }
+    }
     for entry in std::fs::read_dir(&dir)? {
         let path = entry?.path();
         let Some(file) = path.file_name().and_then(|f| f.to_str()) else {
