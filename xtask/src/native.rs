@@ -123,10 +123,13 @@ fn sh(dir: &Path, script: &str, env: &[(&str, String)]) -> Result<()> {
 fn normalize_msvc_libs(ctx: &Ctx) -> Result<()> {
     let dir = ctx.prefix.join("lib");
     // `.pc` files written for Unix name libraries MSVC does not have (`m.lib`, `pthread.lib`).
+    // Autotools libraries record the MSYS form of the prefix (`/d/a/…`); `cl` needs `D:/a/…`.
+    let msys_prefix = unix(&ctx.prefix);
+    let win_prefix = ctx.prefix.display().to_string().replace('\\', "/");
     if let Ok(pcs) = std::fs::read_dir(dir.join("pkgconfig")) {
         for pc in pcs {
             let path = pc?.path();
-            let text = std::fs::read_to_string(&path)?;
+            let text = std::fs::read_to_string(&path)?.replace(&msys_prefix, &win_prefix);
             let cleaned: Vec<String> = text
                 .lines()
                 .map(|line| {
