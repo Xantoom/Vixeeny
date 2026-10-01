@@ -195,7 +195,15 @@ mod tests {
         config.image.jpeg.quality = 70;
         config.image.jpeg.chroma = "420".into();
         let (format, settings) = image_output(&config);
-        assert_eq!(format, ImageFormat::Jpeg);
+        let native = cfg!(feature = "native-codecs");
+        assert_eq!(
+            format,
+            if native {
+                ImageFormat::Jpeg
+            } else {
+                ImageFormat::Png
+            }
+        );
         assert_eq!(
             (settings.jpeg.quality, settings.jpeg.chroma),
             (70, Chroma::Yuv420)

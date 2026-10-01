@@ -33,7 +33,8 @@ fn recipe_rev(name: &str) -> &'static str {
     match name {
         "libvpx" => "6",
         "x265" => "3",
-        "libjxl" | "jpegli" => "3",
+        "libjxl" => "3",
+        "jpegli" => "4",
         _ => "2",
     }
 }
@@ -429,28 +430,31 @@ fn recipe(ctx: &Ctx, name: &str, src: &Path) -> Result<()> {
                 "-DBUILD_TESTING=OFF",
             ],
         ),
-        "jpegli" => cmake(
-            ctx,
-            src,
-            ".",
-            &[
-                "-DJPEGXL_ENABLE_TOOLS=OFF",
-                "-DJPEGXL_ENABLE_BENCHMARK=OFF",
-                "-DJPEGXL_ENABLE_EXAMPLES=OFF",
-                "-DJPEGXL_ENABLE_MANPAGES=OFF",
-                "-DJPEGXL_ENABLE_DOXYGEN=OFF",
-                "-DJPEGXL_ENABLE_JNI=OFF",
-                "-DJPEGXL_ENABLE_SJPEG=OFF",
-                "-DJPEGXL_ENABLE_OPENEXR=OFF",
-                "-DJPEGXL_ENABLE_PLUGINS=OFF",
-                "-DJPEGXL_ENABLE_VIEWERS=OFF",
-                "-DJPEGXL_STATIC=ON",
-                // JPEGXL_STATIC would default to the static CRT (/MT); everything else here and
-                // the Rust side use /MD.
-                "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL",
-                "-DBUILD_TESTING=OFF",
-            ],
-        ),
+        "jpegli" => {
+            cmake(
+                ctx,
+                src,
+                ".",
+                &[
+                    "-DJPEGXL_ENABLE_TOOLS=OFF",
+                    "-DJPEGXL_ENABLE_BENCHMARK=OFF",
+                    "-DJPEGXL_ENABLE_EXAMPLES=OFF",
+                    "-DJPEGXL_ENABLE_MANPAGES=OFF",
+                    "-DJPEGXL_ENABLE_DOXYGEN=OFF",
+                    "-DJPEGXL_ENABLE_JNI=OFF",
+                    "-DJPEGXL_ENABLE_SJPEG=OFF",
+                    "-DJPEGXL_ENABLE_OPENEXR=OFF",
+                    "-DJPEGXL_ENABLE_PLUGINS=OFF",
+                    "-DJPEGXL_ENABLE_VIEWERS=OFF",
+                    "-DJPEGXL_STATIC=ON",
+                    // JPEGXL_STATIC would default to the static CRT (/MT); everything else here and
+                    // the Rust side use /MD.
+                    "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL",
+                    "-DBUILD_TESTING=OFF",
+                ],
+            )?;
+            install_jpegli(ctx, src)
+        }
         "libavif" => {
             let _ = pkg_env;
             cmake(
@@ -469,6 +473,30 @@ fn recipe(ctx: &Ctx, name: &str, src: &Path) -> Result<()> {
         }
         other => bail!("no recipe for {other}"),
     }
+}
+
+/// jpegli's own install step leaves out the core library (only its helpers are installed), so
+/// copy `jpegli-static` to `libjpegli.a` / `jpegli.lib` and describe it for pkg-config. Its C API
+/// (`jpegli_*`) is declared by `vixeeny-image`.
+fn install_jpegli(ctx: &Ctx, src: &Path) -> Result<()> {
+    let built = src.join("vx-build/lib");
+    let (from, to) = if cfg!(windows) {
+        ("jpegli-static.lib", "jpegli.lib")
+    } else {
+        ("libjpegli-static.a", "libjpegli.a")
+    };
+    std::fs::copy(built.join(from), ctx.prefix.join("lib").join(to))
+        .with_context(|| format!("copying {from}"))?;
+    let pc = format!(
+        "prefix={p}\nlibdir=${{prefix}}/lib\nincludedir=${{prefix}}/include\n\n\
+         Name: libjpegli\nDescription: jpegli, libjpeg-compatible JPEG codec\nVersion: 0.12.0\n\
+         Requires: libhwy\nLibs: -L${{libdir}} -ljpegli -lm -lstdc++\nCflags: -I${{includedir}}/jpegli\n",
+        p = ctx.prefix.display()
+    );
+    let pc_dir = ctx.prefix.join("lib/pkgconfig");
+    std::fs::create_dir_all(&pc_dir)?;
+    std::fs::write(pc_dir.join("libjpegli.pc"), pc)?;
+    Ok(())
 }
 
 /// x265 multilib (8/10-bit in one static library; 12-bit deliberately not built).

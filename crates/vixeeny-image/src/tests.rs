@@ -84,37 +84,6 @@ fn oxipng_never_grows_the_file() {
 }
 
 #[test]
-fn jpeg_has_right_size_icc_and_reasonable_error() {
-    let (data, stride) = sample(64, 48);
-    let img = Bgra::new(64, 48, stride, &data);
-    let want = rgb_of(&data, stride, 64, 48);
-    for chroma in [Chroma::Yuv444, Chroma::Yuv420] {
-        let settings = Settings {
-            jpeg: JpegSettings {
-                quality: 95,
-                chroma,
-                progressive: chroma == Chroma::Yuv420,
-            },
-            ..Settings::default()
-        };
-        let bytes = encode(ImageFormat::Jpeg, &img, &settings).unwrap();
-        assert_eq!(&bytes[..2], &[0xFF, 0xD8]);
-        assert!(bytes.windows(11).any(|w| w == b"ICC_PROFILE"));
-        let got = decode(&bytes, image::ImageFormat::Jpeg);
-        assert_eq!((got.width(), got.height()), (64, 48));
-        let err: u64 = got
-            .as_raw()
-            .iter()
-            .zip(&want)
-            .map(|(a, b)| u64::from(a.abs_diff(*b)))
-            .sum();
-        let mean = err as f64 / want.len() as f64;
-        let limit = if chroma == Chroma::Yuv444 { 6.0 } else { 14.0 }; // noisy test image
-        assert!(mean < limit, "{chroma:?}: mean error {mean}");
-    }
-}
-
-#[test]
 fn webp_lossless_is_bit_exact_and_tagged() {
     let (data, stride) = sample(53, 41);
     let img = Bgra::new(53, 41, stride, &data);
@@ -178,6 +147,37 @@ fn format_names() {
 #[cfg(feature = "native-codecs")]
 mod native {
     use super::*;
+
+    #[test]
+    fn jpeg_has_right_size_icc_and_reasonable_error() {
+        let (data, stride) = sample(64, 48);
+        let img = Bgra::new(64, 48, stride, &data);
+        let want = rgb_of(&data, stride, 64, 48);
+        for chroma in [Chroma::Yuv444, Chroma::Yuv420] {
+            let settings = Settings {
+                jpeg: JpegSettings {
+                    quality: 95,
+                    chroma,
+                    progressive: chroma == Chroma::Yuv420,
+                },
+                ..Settings::default()
+            };
+            let bytes = encode(ImageFormat::Jpeg, &img, &settings).unwrap();
+            assert_eq!(&bytes[..2], &[0xFF, 0xD8]);
+            assert!(bytes.windows(11).any(|w| w == b"ICC_PROFILE"));
+            let got = decode(&bytes, image::ImageFormat::Jpeg);
+            assert_eq!((got.width(), got.height()), (64, 48));
+            let err: u64 = got
+                .as_raw()
+                .iter()
+                .zip(&want)
+                .map(|(a, b)| u64::from(a.abs_diff(*b)))
+                .sum();
+            let mean = err as f64 / want.len() as f64;
+            let limit = if chroma == Chroma::Yuv444 { 6.0 } else { 14.0 }; // noisy test image
+            assert!(mean < limit, "{chroma:?}: mean error {mean}");
+        }
+    }
 
     fn smooth(width: u32, height: u32) -> (Vec<u8>, usize) {
         let stride = width as usize * 4;

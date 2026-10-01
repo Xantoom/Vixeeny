@@ -8,7 +8,6 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-jpeg-encoder = "0.7.1"
 libwebp-sys = "0.14.4"
 moxcms = "0.9.1"
 oxipng = { version = "10.2.1", default-features = false, features = ["parallel"] }
@@ -16,7 +15,7 @@ png.workspace = true
 thiserror.workspace = true
 
 [features]
-# AVIF (libavif + SVT-AV1) and JPEG XL (libjxl) through the natively built libraries
+# JPEG (jpegli), AVIF (libavif + SVT-AV1) and JPEG XL (libjxl) through the natively built libraries
 # (`cargo xtask build-native`; PKG_CONFIG_PATH must point at its prefix).
 native-codecs = ["dep:pkg-config", "dep:bindgen"]
 

@@ -7,7 +7,8 @@
 #[cfg(feature = "native-codecs")]
 mod avif;
 mod icc;
-mod jpeg;
+#[cfg(feature = "native-codecs")]
+mod jpegli;
 #[cfg(feature = "native-codecs")]
 mod jxl;
 mod pixels;
@@ -37,11 +38,11 @@ impl ImageFormat {
         }
     }
 
-    /// Whether this build can encode the format (AVIF and JPEG XL need `native-codecs`).
+    /// Whether this build can encode the format (JPEG, AVIF and JPEG XL need `native-codecs`).
     pub const fn available(self) -> bool {
         match self {
-            Self::Png | Self::Jpeg | Self::WebP => true,
-            Self::Avif | Self::Jxl => cfg!(feature = "native-codecs"),
+            Self::Png | Self::WebP => true,
+            Self::Jpeg | Self::Avif | Self::Jxl => cfg!(feature = "native-codecs"),
         }
     }
 
@@ -220,14 +221,17 @@ pub fn encode(
     image.validate()?;
     match format {
         ImageFormat::Png => png_enc::encode(image, &settings.png),
-        ImageFormat::Jpeg => jpeg::encode(image, &settings.jpeg),
         ImageFormat::WebP => webp::encode(image, &settings.webp),
+        #[cfg(feature = "native-codecs")]
+        ImageFormat::Jpeg => jpegli::encode(image, &settings.jpeg),
         #[cfg(feature = "native-codecs")]
         ImageFormat::Avif => avif::encode(image, &settings.avif),
         #[cfg(feature = "native-codecs")]
         ImageFormat::Jxl => jxl::encode(image, &settings.jxl),
         #[cfg(not(feature = "native-codecs"))]
-        ImageFormat::Avif | ImageFormat::Jxl => Err(ImageError::Unavailable(format)),
+        ImageFormat::Jpeg | ImageFormat::Avif | ImageFormat::Jxl => {
+            Err(ImageError::Unavailable(format))
+        }
     }
 }
 

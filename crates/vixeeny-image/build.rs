@@ -14,7 +14,7 @@ fn native() {
 
     println!("cargo:rerun-if-env-changed=PKG_CONFIG_PATH");
     let mut includes = Vec::new();
-    for lib in ["libavif", "libjxl", "libjxl_threads"] {
+    for lib in ["libavif", "libjxl", "libjxl_threads", "libjpegli"] {
         let found = pkg_config::Config::new()
             .statik(true)
             .probe(lib)
@@ -26,7 +26,7 @@ fn native() {
     let mut builder = bindgen::Builder::default()
         .header_contents(
             "wrapper.h",
-            "#include <avif/avif.h>\n#include <jxl/encode.h>\n#include <jxl/decode.h>\n#include <jxl/thread_parallel_runner.h>\n",
+            "#include <avif/avif.h>\n#include <jxl/encode.h>\n#include <jxl/decode.h>\n#include <jxl/thread_parallel_runner.h>\n#include <stdio.h>\n#include <jpeglib.h>\n",
         )
         .allowlist_function("avif.*")
         .allowlist_type("avif.*")
@@ -34,6 +34,8 @@ fn native() {
         .allowlist_function("Jxl.*")
         .allowlist_type("Jxl.*")
         .allowlist_var("JXL_.*")
+        .allowlist_type("j_compress_ptr|jpeg_.*|J[A-Z_]+|JSAMPARRAY|boolean")
+        .allowlist_var("JPEG_LIB_VERSION|JCS_.*|TRUE|FALSE")
         .derive_default(true)
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()));
     for dir in includes {

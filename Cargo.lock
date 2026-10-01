@@ -596,12 +596,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "jpeg-encoder"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0370574b86f7eca156b9f298392b5e69a23f8c86f3f865add60bbc2e79467a6"
-
-[[package]]
 name = "jxl-bitstream"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1832,7 +1826,6 @@ version = "0.0.1"
 dependencies = [
  "bindgen 0.73.2",
  "image",
- "jpeg-encoder",
  "jxl-oxide",
  "libwebp-sys",
  "moxcms 0.9.1",
