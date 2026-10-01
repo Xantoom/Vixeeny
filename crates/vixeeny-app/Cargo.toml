@@ -9,8 +9,15 @@ repository.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+thiserror.workspace = true
 tracing.workspace = true
+vixeeny-capture = { path = "../vixeeny-capture" }
 vixeeny-common = { path = "../vixeeny-common" }
+vixeeny-image = { path = "../vixeeny-image" }
+vixeeny-platform = { path = "../vixeeny-platform" }
+
+[dev-dependencies]
+png.workspace = true
 
 [lints]
 workspace = true

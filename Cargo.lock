@@ -1337,8 +1337,13 @@ name = "vixeeny-app"
 version = "0.0.1"
 dependencies = [
  "anyhow",
+ "png",
+ "thiserror",
  "tracing",
+ "vixeeny-capture",
  "vixeeny-common",
+ "vixeeny-image",
+ "vixeeny-platform",
 ]
 
 [[package]]
@@ -1365,6 +1370,8 @@ dependencies = [
  "serde",
  "thiserror",
  "toml",
+ "tracing-appender",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -1376,8 +1383,6 @@ dependencies = [
  "global-hotkey",
  "thiserror",
  "tracing",
- "tracing-appender",
- "tracing-subscriber",
  "tray-icon",
  "vixeeny-common",
  "windows",
@@ -1397,6 +1402,10 @@ dependencies = [
 [[package]]
 name = "vixeeny-image"
 version = "0.0.1"
+dependencies = [
+ "png",
+ "thiserror",
+]
 
 [[package]]
 name = "vixeeny-ocr"

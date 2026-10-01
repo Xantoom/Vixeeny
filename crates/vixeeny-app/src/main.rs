@@ -7,15 +7,66 @@
 use std::sync::mpsc::{RecvTimeoutError, channel};
 use std::time::Duration;
 
+#[cfg(any(windows, test))]
+mod still;
+
 use anyhow::Context;
 use vixeeny_common::config::Config;
 use vixeeny_common::ipc::{self, ActionId, AppToDaemon, DaemonToApp, Endpoint, Hello};
 
 fn main() {
+    vixeeny_common::logging::init("vixeeny-app");
     if let Err(e) = run() {
+        tracing::error!("fatal: {e:#}");
         eprintln!("vixeeny-app: {e:#}");
         std::process::exit(1);
     }
+}
+
+/// Runs one action. Failures are logged, not fatal: the app stays available for the next one.
+fn perform(action: ActionId, config: &Config) {
+    use ActionId::{CaptureAllMonitors, CaptureFullscreen, CaptureWindow};
+    match action {
+        CaptureFullscreen | CaptureWindow | CaptureAllMonitors => {
+            match direct_capture(action, config) {
+                Ok(path) => tracing::info!("saved {}", path.display()),
+                Err(e) => tracing::error!("capture failed: {e:#}"),
+            }
+        }
+        other => tracing::info!("action {other:?} is not implemented yet"),
+    }
+}
+
+#[cfg(windows)]
+fn direct_capture(action: ActionId, config: &Config) -> anyhow::Result<std::path::PathBuf> {
+    use vixeeny_capture::{CaptureOptions, Capturer, WgcBackend};
+
+    let started = std::time::Instant::now();
+    vixeeny_platform::ensure_dpi_aware();
+    let snapshot = still::Snapshot {
+        monitors: vixeeny_platform::monitors()?,
+        cursor: vixeeny_platform::cursor_position()?,
+        foreground: vixeeny_platform::foreground_window()?,
+    };
+    let dir = vixeeny_common::paths::expand_user_dir(&config.paths.images)
+        .context("cannot locate the images folder")?;
+    let mut capturer = Capturer::new(WgcBackend::new()?, snapshot.monitors.clone());
+    let options = CaptureOptions { show_cursor: false };
+    let path = still::run(
+        action,
+        &snapshot,
+        &mut capturer,
+        &dir,
+        options,
+        &vixeeny_platform::local_time(),
+    )?;
+    tracing::info!("direct capture took {:?}", started.elapsed());
+    Ok(path)
+}
+
+#[cfg(not(windows))]
+fn direct_capture(_: ActionId, _: &Config) -> anyhow::Result<std::path::PathBuf> {
+    anyhow::bail!("screen capture is not supported on this platform yet")
 }
 
 /// `--action <name>` (default: open the settings).
@@ -34,11 +85,10 @@ fn parse_action() -> anyhow::Result<ActionId> {
 
 fn run() -> anyhow::Result<()> {
     let first_action = parse_action()?;
-    let idle = vixeeny_common::paths::config_file()
+    let config = vixeeny_common::paths::config_file()
         .and_then(|path| Config::load(&path).ok())
-        .unwrap_or_default()
-        .general
-        .app_idle_exit_seconds;
+        .unwrap_or_default();
+    let idle = config.general.app_idle_exit_seconds;
     let idle = Duration::from_secs(u64::from(idle));
 
     let stream = Endpoint::current_user()
@@ -74,7 +124,7 @@ fn run() -> anyhow::Result<()> {
     loop {
         match rx.recv_timeout(idle) {
             Ok(DaemonToApp::RunAction { action, .. }) => {
-                tracing::info!("action {action:?} (no UI before M3)");
+                perform(action, &config);
             }
             Ok(DaemonToApp::ConfigChanged) => {}
             // The daemon asked us to stop, or went away.

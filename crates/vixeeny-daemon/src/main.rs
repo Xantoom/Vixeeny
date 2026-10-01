@@ -4,12 +4,11 @@
 
 use vixeeny_common::config::Config;
 use vixeeny_common::ipc::{BindError, ControlRequest, Endpoint};
-use vixeeny_daemon::logging;
 use vixeeny_daemon::platform::{self, Startup};
 use vixeeny_daemon::server::{AppLink, ask_running_daemon};
 
 fn main() {
-    logging::init("vixeeny-daemon");
+    vixeeny_common::logging::init("vixeeny-daemon");
     if let Err(e) = real_main() {
         tracing::error!("fatal: {e:#}");
         std::process::exit(1);

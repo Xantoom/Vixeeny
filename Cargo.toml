@@ -14,6 +14,7 @@ repository = "https://github.com/Xantoom/Vixeeny"
 thiserror = "2.0.21"
 anyhow = "1.0.104"
 tracing = "0.1.44"
+png = "0.18.1"
 serde = { version = "1.0.229", features = ["derive"] }
 toml = "1.1.6"
 postcard = { version = "1.1.3", default-features = false, features = ["use-std"] }

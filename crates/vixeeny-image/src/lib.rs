@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! vixeeny-image — see README.md.
+//! vixeeny-image — image encoding (plan 5.4). M4 ships the fast PNG path used by direct
+//! captures; JPEG, WebP, AVIF, JPEG XL, ICC and HDR arrive with M5.
 
-/// Crate name, used by the M0 smoke test.
-pub const CRATE_NAME: &str = "vixeeny-image";
+pub mod png_fast;
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn crate_name() {
-        assert_eq!(super::CRATE_NAME, "vixeeny-image");
-    }
+#[derive(Debug, thiserror::Error)]
+pub enum ImageError {
+    #[error("invalid pixel buffer: {0}")]
+    BadBuffer(&'static str),
+    #[error("png: {0}")]
+    Png(#[from] png::EncodingError),
 }

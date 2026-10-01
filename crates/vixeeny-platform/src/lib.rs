@@ -5,7 +5,9 @@
 //! [`ensure_dpi_aware`] first, otherwise Windows hands out scaled (virtualised) values.
 
 mod geometry;
+mod time;
 pub use geometry::{PhysicalRect, virtual_bounds};
+pub use time::{LocalTime, local_time};
 
 #[cfg(windows)]
 mod windows_impl;

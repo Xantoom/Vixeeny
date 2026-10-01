@@ -5,6 +5,7 @@ pub mod config;
 pub mod hotkey;
 pub mod i18n;
 pub mod ipc;
+pub mod logging;
 pub mod paths;
 
 /// Crate name, used by the M0 smoke test.
