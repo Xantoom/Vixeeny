@@ -21,6 +21,7 @@ struct Lib {
 fn recipe_rev(name: &str) -> &'static str {
     match name {
         "libvpx" => "6",
+        "x265" => "3",
         _ => "2",
     }
 }
@@ -508,8 +509,9 @@ fn x265(ctx: &Ctx, src: &Path) -> Result<()> {
 
     // x265 only generates its .pc file for shared builds; FFmpeg's configure needs one.
     let p = unix(&ctx.prefix);
+    // Windows: threadpool.cpp reads the registry (RegOpenKeyEx…).
     let private = if win {
-        ""
+        " -ladvapi32"
     } else {
         " -lstdc++ -lm -ldl -lpthread"
     };
