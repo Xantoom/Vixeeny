@@ -33,6 +33,7 @@ fn recipe_rev(name: &str) -> &'static str {
     match name {
         "libvpx" => "6",
         "x265" => "3",
+        "libjxl" | "jpegli" => "3",
         _ => "2",
     }
 }
@@ -422,6 +423,9 @@ fn recipe(ctx: &Ctx, name: &str, src: &Path) -> Result<()> {
                 "-DJPEGXL_ENABLE_PLUGINS=OFF",
                 "-DJPEGXL_ENABLE_VIEWERS=OFF",
                 "-DJPEGXL_STATIC=ON",
+                // JPEGXL_STATIC would default to the static CRT (/MT); everything else here and
+                // the Rust side use /MD.
+                "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL",
                 "-DBUILD_TESTING=OFF",
             ],
         ),
@@ -441,6 +445,9 @@ fn recipe(ctx: &Ctx, name: &str, src: &Path) -> Result<()> {
                 "-DJPEGXL_ENABLE_PLUGINS=OFF",
                 "-DJPEGXL_ENABLE_VIEWERS=OFF",
                 "-DJPEGXL_STATIC=ON",
+                // JPEGXL_STATIC would default to the static CRT (/MT); everything else here and
+                // the Rust side use /MD.
+                "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL",
                 "-DBUILD_TESTING=OFF",
             ],
         ),
