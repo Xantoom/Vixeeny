@@ -1400,6 +1400,10 @@ version = "0.0.1"
 [[package]]
 name = "vixeeny-platform"
 version = "0.0.1"
+dependencies = [
+ "thiserror",
+ "windows",
+]
 
 [[package]]
 name = "vixeeny-stitch"
