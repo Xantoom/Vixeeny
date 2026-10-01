@@ -102,6 +102,13 @@ jobs:
         run: |
           $env:PATH = "$env:FFMPEG_DIR\bin;$env:PATH"
           cargo test -p vixeeny-encode --features ffmpeg-next --test software_encode
+      - name: Image codecs (AVIF, JPEG XL)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          choco install pkgconfiglite -y --no-progress
+          $env:PKG_CONFIG_PATH = "${{ github.workspace }}\native\build\work\prefix\lib\pkgconfig"
+          cargo test -p vixeeny-image --features native-codecs
   native-macos:
     # Native arch of the runner (arm64); the universal binary is a later milestone.
     runs-on: macos-latest
