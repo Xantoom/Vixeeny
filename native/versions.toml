@@ -10,6 +10,14 @@ tag = "n9.0.2"
 commit = "ce8f11b9fac4cd7ccfb41ca7c01bc17f5cda8cc3"
 license = "GPL-3.0-or-later (built with --enable-gpl --enable-version3, never --enable-nonfree)"
 
+[ffmpeg-windows-prebuilt]
+# Windows only: prebuilt shared GPL build (FFmpeg n9.0.2 + 22 commits) with x264, x265,
+# SVT-AV1, libvpx, dav1d, opus, NVENC, AMF and QSV. Replaces building FFmpeg and its encoders
+# on Windows (maintainer decision 2026-10-01; plan section 3 said static, see section 14).
+url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-01-13-06/ffmpeg-n9.0.2-22-g46d8f462ee-win64-gpl-shared-9.0.zip"
+sha256 = "64f7d1460ce986804386582eeec3bd95117a4e84f7567ad416dd33f434fe8286"
+license = "GPL-3.0-or-later (BtbN build, --enable-gpl --enable-version3, no nonfree)"
+
 [x264]
 url = "https://code.videolan.org/videolan/x264.git"
 tag = "stable"

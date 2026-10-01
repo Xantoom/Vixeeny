@@ -11,7 +11,14 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+
+# Unix: FFmpeg built by `cargo xtask build-native`, linked statically (found via pkg-config).
+[target.'cfg(not(windows))'.dependencies]
 ffmpeg-next = { version = "9.0.0", default-features = false, features = ["codec", "format", "software-scaling", "static"], optional = true }
+
+# Windows: prebuilt shared FFmpeg (FFMPEG_DIR); its DLLs must be next to the executable.
+[target.'cfg(windows)'.dependencies]
+ffmpeg-next = { version = "9.0.0", default-features = false, features = ["codec", "format", "software-scaling"], optional = true }
 
 [features]
 ffmpeg-next = ["dep:ffmpeg-next"]

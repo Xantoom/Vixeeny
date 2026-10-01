@@ -9,7 +9,9 @@ publish = false
 [dependencies]
 anyhow.workspace = true
 serde.workspace = true
+sha2 = { version = "0.11.0", default-features = false }
 toml.workspace = true
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 
 [lints]
 workspace = true

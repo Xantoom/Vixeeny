@@ -42,13 +42,12 @@ jobs:
         env:
           PKG_CONFIG_PATH: ${{ github.workspace }}/native/build/work/prefix/lib/pkgconfig
   native-windows:
-    # MSVC toolchain; MSYS2 only provides bash/make/pkgconf for the autotools-style libraries.
+    # Prebuilt shared FFmpeg (checked by SHA-256); dav1d, SVT-AV1 and the image libraries are
+    # built with MSVC for libavif and the image crates.
     runs-on: windows-latest
-    defaults:
-      run:
-        shell: msys2 {0}
     env:
-      MSYS2_PATH_TYPE: inherit
+      FFMPEG_DIR: ${{ github.workspace }}\native\build\work\ffmpeg-prebuilt
+      LIBCLANG_PATH: C:\Program Files\LLVM\bin
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -56,23 +55,13 @@ jobs:
           toolchain: 1.98.1
       - uses: Swatinem/rust-cache@v2
       - uses: ilammy/msvc-dev-cmd@v1
-      - uses: msys2/setup-msys2@v2
-        with:
-          msystem: MSYS
-          path-type: inherit
-          install: >-
-            make diffutils patch perl pkgconf
-            mingw-w64-x86_64-gcc mingw-w64-x86_64-make
       - name: Tools (nasm, meson)
         shell: pwsh
         run: |
           choco install nasm -y --no-progress
           "C:\Program Files\NASM" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
           pip install meson
-      - name: Keep MSVC's link.exe ahead of MSYS2's
-        run: rm -f /usr/bin/link.exe
       - uses: actions/cache/restore@v4
-        id: native-cache
         with:
           path: native/build/work
           key: native-windows-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}
@@ -83,7 +72,8 @@ jobs:
         with:
           path: native/build/work
           key: native-windows-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}-${{ github.run_id }}
-      - run: cargo test -p vixeeny-encode --features ffmpeg-next --test software_encode
-        env:
-          PKG_CONFIG_PATH: ${{ github.workspace }}/native/build/work/prefix/lib/pkgconfig
-          PKG_CONFIG_ALLOW_CROSS: "1"
+      - name: Software encode matrix
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:FFMPEG_DIR\bin;$env:PATH"
+          cargo test -p vixeeny-encode --features ffmpeg-next --test software_encode
