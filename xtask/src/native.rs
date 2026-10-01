@@ -17,8 +17,13 @@ struct Lib {
     tag: String,
 }
 
-/// Bump to force a rebuild of every library when a recipe changes (stamps embed it).
-const RECIPE_REV: &str = "2";
+/// Bump a library's revision to force its rebuild when its recipe changes (stamps embed it).
+fn recipe_rev(name: &str) -> &'static str {
+    match name {
+        "libvpx" => "3",
+        _ => "2",
+    }
+}
 
 /// Build order matters: FFmpeg links against everything before it.
 const ORDER: &[&str] = &[
@@ -57,7 +62,7 @@ pub fn build(only: &[String]) -> Result<()> {
             .get(*name)
             .with_context(|| format!("{name} missing from versions.toml"))?;
         let stamp = ctx.work.join(format!("{name}.stamp"));
-        let stamp_value = format!("{}+{RECIPE_REV}", lib.commit);
+        let stamp_value = format!("{}+{}", lib.commit, recipe_rev(name));
         if std::fs::read_to_string(&stamp).is_ok_and(|s| s == stamp_value) {
             println!("== {name}: up to date");
             continue;
@@ -153,9 +158,9 @@ fn normalize_msvc_libs(ctx: &Ctx) -> Result<()> {
         else {
             continue;
         };
-        let target = dir.join(format!("{stem}.lib"));
-        if !target.exists() {
-            std::fs::copy(&path, target)?;
+        // Always overwrite: a rebuilt library must replace its stale `<name>.lib` copy.
+        if file != format!("{stem}.lib") {
+            std::fs::copy(&path, dir.join(format!("{stem}.lib")))?;
         }
     }
     Ok(())
@@ -255,19 +260,26 @@ fn recipe(ctx: &Ctx, name: &str, src: &Path) -> Result<()> {
         }
         "x265" => x265(ctx, src),
         "libvpx" => {
-            // On Windows: MinGW gcc (plain C + nasm, no C++ runtime) so the archive links with
-            // MSVC; libvpx's own MSVC target needs yasm VS integration.
-            let (path, target) = if win {
-                ("PATH=/mingw64/bin:$PATH ", "--target=x86_64-win64-gcc ")
+            // On Windows: clang targeting the MSVC ABI (so libvpx uses Win32 threads, not
+            // winpthreads, and links with the /MD CRT). libvpx's own MSVC target needs yasm
+            // Visual Studio integration; MinGW gcc objects need winpthreads.
+            let (env, target, cflags) = if win {
+                (
+                    "CC='clang --target=x86_64-pc-windows-msvc' \
+                     LD='clang --target=x86_64-pc-windows-msvc' AR=llvm-ar AS=nasm ",
+                    "--target=x86_64-win64-gcc ",
+                    "--extra-cflags=-fms-runtime-lib=dll ",
+                )
             } else {
-                ("", "")
+                ("", "", "")
             };
             sh(
                 src,
                 &format!(
-                    "{path}./configure {target}--prefix='{up}' --enable-static --disable-shared \
-                     --enable-pic --enable-vp9-highbitdepth --disable-examples --disable-tools \
-                     --disable-docs --disable-unit-tests && {path}make -j{j} && {path}make install",
+                    "{env}./configure {target}{cflags}--prefix='{up}' --enable-static \
+                     --disable-shared --enable-pic --enable-vp9-highbitdepth \
+                     --disable-examples --disable-tools --disable-docs --disable-unit-tests \
+                     && {env}make -j{j} && {env}make install",
                     j = ctx.jobs
                 ),
                 &[],
