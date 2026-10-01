@@ -13,6 +13,9 @@ pub fn init(name: &str) {
     let Some(dir) = vixeeny_common::paths::log_dir() else {
         return;
     };
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
     let appender = RollingFileAppender::builder()
         .rotation(Rotation::DAILY)
         .filename_prefix(name)
