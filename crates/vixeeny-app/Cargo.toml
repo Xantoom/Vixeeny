@@ -16,6 +16,10 @@ vixeeny-common = { path = "../vixeeny-common" }
 vixeeny-image = { path = "../vixeeny-image" }
 vixeeny-platform = { path = "../vixeeny-platform" }
 
+[features]
+# AVIF and JPEG XL output; needs the natively built libraries (see vixeeny-image).
+native-codecs = ["vixeeny-image/native-codecs"]
+
 [dev-dependencies]
 png.workspace = true
 

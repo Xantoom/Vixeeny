@@ -174,3 +174,92 @@ fn format_names() {
     assert_eq!(ImageFormat::WebP.extension(), "webp");
     assert_eq!(Chroma::from_name("420"), Some(Chroma::Yuv420));
 }
+
+#[cfg(feature = "native-codecs")]
+mod native {
+    use super::*;
+
+    fn smooth(width: u32, height: u32) -> (Vec<u8>, usize) {
+        let stride = width as usize * 4;
+        let mut data = vec![255u8; stride * height as usize];
+        for y in 0..height as usize {
+            for x in 0..width as usize {
+                let i = y * stride + x * 4;
+                data[i] = (x * 255 / width as usize) as u8;
+                data[i + 1] = (y * 255 / height as usize) as u8;
+                data[i + 2] = ((x + y) * 255 / (width + height) as usize) as u8;
+            }
+        }
+        (data, stride)
+    }
+
+    #[test]
+    fn avif_round_trip_in_both_depths_and_chromas() {
+        let (data, stride) = smooth(96, 64);
+        let img = Bgra::new(96, 64, stride, &data);
+        let want = rgb_of(&data, stride, 96, 64);
+        for (depth, chroma) in [
+            (10, Chroma::Yuv444),
+            (8, Chroma::Yuv444),
+            (10, Chroma::Yuv420),
+        ] {
+            let settings = Settings {
+                avif: AvifSettings {
+                    quality: 90,
+                    speed: 10,
+                    depth,
+                    chroma,
+                },
+                ..Settings::default()
+            };
+            let bytes = encode(ImageFormat::Avif, &img, &settings).unwrap();
+            assert_eq!(&bytes[4..12], b"ftypavif");
+            let (w, h, got) = crate::avif::decode_rgb(&bytes).unwrap();
+            assert_eq!((w, h), (96, 64));
+            let err: u64 = got
+                .iter()
+                .zip(&want)
+                .map(|(a, b)| u64::from(a.abs_diff(*b)))
+                .sum();
+            let mean = err as f64 / want.len() as f64;
+            assert!(mean < 4.0, "{depth}-bit {chroma:?}: mean error {mean}");
+        }
+    }
+
+    #[test]
+    fn jxl_lossless_is_bit_exact() {
+        let (data, stride) = sample(57, 43);
+        let img = Bgra::new(57, 43, stride, &data);
+        let bytes = encode(ImageFormat::Jxl, &img, &Settings::default()).unwrap();
+        assert!(bytes.starts_with(&[0xFF, 0x0A]) || bytes.starts_with(b"\0\0\0\x0cJXL "));
+        let image = jxl_oxide::JxlImage::builder()
+            .read(std::io::Cursor::new(&bytes))
+            .unwrap();
+        let render = image.render_frame(0).unwrap();
+        let fb = render.image_all_channels();
+        assert_eq!((fb.width(), fb.height()), (57, 43));
+        let got: Vec<u8> = fb.buf().iter().map(|v| (v * 255.0).round() as u8).collect();
+        assert_eq!(got, rgb_of(&data, stride, 57, 43));
+    }
+
+    #[test]
+    fn jxl_lossy_is_smaller() {
+        let (data, stride) = sample(128, 128);
+        let img = Bgra::new(128, 128, stride, &data);
+        let lossless = encode(ImageFormat::Jxl, &img, &Settings::default()).unwrap();
+        let lossy = encode(
+            ImageFormat::Jxl,
+            &img,
+            &Settings {
+                jxl: JxlSettings {
+                    lossless: false,
+                    distance: 2.0,
+                    effort: 3,
+                },
+                ..Settings::default()
+            },
+        )
+        .unwrap();
+        assert!(lossy.len() < lossless.len());
+    }
+}

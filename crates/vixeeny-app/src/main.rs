@@ -177,7 +177,14 @@ mod tests {
             (settings.jpeg.quality, settings.jpeg.chroma),
             (70, Chroma::Yuv420)
         );
-        config.image.format = "avif".into(); // not available yet
+        config.image.format = "bmp".into(); // unknown
         assert_eq!(image_output(&config).0, ImageFormat::Png);
+        config.image.format = "avif".into();
+        let expected = if cfg!(feature = "native-codecs") {
+            ImageFormat::Avif
+        } else {
+            ImageFormat::Png
+        };
+        assert_eq!(image_output(&config).0, expected);
     }
 }

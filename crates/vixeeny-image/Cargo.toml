@@ -15,8 +15,18 @@ oxipng = { version = "10.2.1", default-features = false, features = ["parallel"]
 png.workspace = true
 thiserror.workspace = true
 
+[features]
+# AVIF (libavif + SVT-AV1) and JPEG XL (libjxl) through the natively built libraries
+# (`cargo xtask build-native`; PKG_CONFIG_PATH must point at its prefix).
+native-codecs = ["dep:pkg-config", "dep:bindgen"]
+
 [lints]
 workspace = true
 
 [dev-dependencies]
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp"] }
+jxl-oxide = "0.12.6"
+
+[build-dependencies]
+bindgen = { version = "0.73.2", optional = true }
+pkg-config = { version = "0.3.34", optional = true }
