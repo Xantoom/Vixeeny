@@ -109,6 +109,9 @@ jobs:
           choco install pkgconfiglite -y --no-progress
           $env:PATH = "$env:PATH;C:\ProgramData\chocolatey\bin"
           pkg-config --version
+          Get-ChildItem "${{ github.workspace }}\native\build\work\prefix\lib" -Filter *.lib | Select-Object -ExpandProperty Name
+          Get-Content "${{ github.workspace }}\native\build\work\prefix\lib\pkgconfig\libjxl.pc"
+          Get-Content "${{ github.workspace }}\native\build\work\prefix\lib\pkgconfig\libavif.pc"
           $env:PKG_CONFIG_PATH = "${{ github.workspace }}\native\build\work\prefix\lib\pkgconfig"
           cargo test -p vixeeny-image --features native-codecs
   native-macos:
