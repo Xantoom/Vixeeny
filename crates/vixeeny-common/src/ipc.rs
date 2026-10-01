@@ -24,8 +24,12 @@ pub enum ActionId {
     CaptureRegion,
     CaptureWindow,
     CaptureFullscreen,
+    CaptureAllMonitors,
+    CaptureScrolling,
+    OcrRegion,
     RecordToggle,
     RecordPause,
+    ReplayToggle,
     ReplaySave,
     OverlayToggle,
     OpenSettings,
@@ -33,12 +37,16 @@ pub enum ActionId {
 
 impl ActionId {
     /// All actions, in a stable order.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 12] = [
         Self::CaptureRegion,
         Self::CaptureWindow,
         Self::CaptureFullscreen,
+        Self::CaptureAllMonitors,
+        Self::CaptureScrolling,
+        Self::OcrRegion,
         Self::RecordToggle,
         Self::RecordPause,
+        Self::ReplayToggle,
         Self::ReplaySave,
         Self::OverlayToggle,
         Self::OpenSettings,
@@ -50,8 +58,12 @@ impl ActionId {
             Self::CaptureRegion => "capture-region",
             Self::CaptureWindow => "capture-window",
             Self::CaptureFullscreen => "capture-fullscreen",
+            Self::CaptureAllMonitors => "capture-all-monitors",
+            Self::CaptureScrolling => "capture-scrolling",
+            Self::OcrRegion => "ocr-region",
             Self::RecordToggle => "record-toggle",
             Self::RecordPause => "record-pause",
+            Self::ReplayToggle => "replay-toggle",
             Self::ReplaySave => "replay-save",
             Self::OverlayToggle => "overlay-toggle",
             Self::OpenSettings => "open-settings",

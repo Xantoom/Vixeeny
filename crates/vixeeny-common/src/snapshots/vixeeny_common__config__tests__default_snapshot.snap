@@ -17,10 +17,15 @@ check_updates = true
 capture_region = ["PrintScreen"]
 capture_window = ["Alt+PrintScreen"]
 capture_fullscreen = ["Shift+PrintScreen"]
+capture_all_monitors = []
+capture_scrolling = []
+ocr_region = []
 record_toggle = ["Ctrl+Shift+R"]
 record_pause = ["Ctrl+Shift+P"]
+replay_toggle = []
 replay_save = ["Ctrl+Shift+S"]
 overlay_toggle = ["Ctrl+Shift+O"]
+open_settings = []
 
 [paths]
 images = "{pictures}/Vixeeny"

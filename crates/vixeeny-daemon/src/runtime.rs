@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 
 use vixeeny_common::config::Config;
+use vixeeny_common::hotkey::{self, Hotkey, ProblemKind};
 use vixeeny_common::i18n::{Key, Lang, tr};
 use vixeeny_common::ipc::{ActionId, RecState};
 
@@ -21,6 +22,14 @@ pub trait Tray {
     fn notify(&mut self, message: &str);
 }
 
+/// Registers the global shortcuts with the OS. A shortcut press becomes an
+/// [`Event::Action`] sent by the backend itself.
+pub trait HotkeyBackend {
+    /// Replaces the registered shortcuts by `bindings`. Returns one message per shortcut the
+    /// OS refused (typically because another application owns it).
+    fn apply(&mut self, bindings: &[(ActionId, Hotkey)]) -> Vec<String>;
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Flow {
     Continue,
@@ -30,6 +39,7 @@ pub enum Flow {
 pub struct Runtime<T: Tray, S: Spawner> {
     core: Core,
     tray: T,
+    hotkeys: Box<dyn HotkeyBackend>,
     spawner: S,
     link: AppLink,
     tx: EventTx,
@@ -47,6 +57,7 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
         config_path: Option<PathBuf>,
         os_locale: Option<String>,
         tray: T,
+        hotkeys: Box<dyn HotkeyBackend>,
         spawner: S,
         link: AppLink,
         tx: EventTx,
@@ -56,6 +67,7 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
         Self {
             core: Core::new(),
             tray,
+            hotkeys,
             spawner,
             link,
             tx,
@@ -72,9 +84,39 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
     }
 
     /// Applies settings that live outside the process (OS autostart).
-    pub fn apply_config(&self) {
+    pub fn apply_config(&mut self) {
         if let Err(e) = autostart::apply(self.config.general.autostart) {
             tracing::warn!("cannot update autostart: {e}");
+        }
+        self.apply_hotkeys();
+    }
+
+    fn apply_hotkeys(&mut self) {
+        let resolution = hotkey::resolve(&self.config.hotkeys);
+        let mut trouble = !resolution.problems.is_empty();
+        for problem in &resolution.problems {
+            let (action, text) = (problem.action, &problem.text);
+            match &problem.kind {
+                ProblemKind::Invalid(e) => tracing::warn!("shortcut `{text}` for {action:?}: {e}"),
+                ProblemKind::TooMany => {
+                    tracing::warn!(
+                        "shortcut `{text}` for {action:?} ignored: at most 3 per action"
+                    );
+                }
+                ProblemKind::Duplicate => {
+                    tracing::warn!("shortcut `{text}` listed twice for {action:?}");
+                }
+                ProblemKind::Conflict(other) => {
+                    tracing::warn!("shortcut `{text}` for {action:?} conflicts with {other:?}");
+                }
+            }
+        }
+        for failure in self.hotkeys.apply(&resolution.bindings) {
+            tracing::warn!("shortcut not registered: {failure}");
+            trouble = true;
+        }
+        if trouble {
+            self.execute(Effect::Notify(Key::HotkeysUnavailable));
         }
     }
 
@@ -157,6 +199,7 @@ pub fn menu_label(key: Key, lang: Lang) -> &'static str {
 }
 
 #[cfg(test)]
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
     use std::io;
@@ -184,6 +227,23 @@ mod tests {
         }
         fn notify(&mut self, message: &str) {
             self.log.lock().unwrap().push(format!("notify {message}"));
+        }
+    }
+
+    #[derive(Default)]
+    struct FakeHotkeys {
+        applied: Arc<Mutex<Vec<(ActionId, String)>>>,
+        refuse: bool,
+    }
+    impl HotkeyBackend for FakeHotkeys {
+        fn apply(&mut self, bindings: &[(ActionId, Hotkey)]) -> Vec<String> {
+            *self.applied.lock().unwrap() =
+                bindings.iter().map(|(a, h)| (*a, h.to_string())).collect();
+            if self.refuse {
+                vec!["taken".into()]
+            } else {
+                Vec::new()
+            }
         }
     }
 
@@ -218,6 +278,7 @@ mod tests {
             None,
             Some("fr-FR".into()),
             tray,
+            Box::new(FakeHotkeys::default()),
             FakeSpawner {
                 fail,
                 spawned: spawned.clone(),
@@ -274,5 +335,66 @@ mod tests {
         )));
         rt.pump();
         assert_eq!(*log.lock().unwrap(), vec!["rec Recording".to_owned()]);
+    }
+
+    #[test]
+    fn hotkeys_are_registered_from_the_config() {
+        let (tx, rx) = channel();
+        let events = EventTx::new(tx, Arc::new(NoWake));
+        let tray = FakeTray::default();
+        let log = tray.log.clone();
+        let hk = FakeHotkeys::default();
+        let applied = hk.applied.clone();
+        let mut config = Config::default();
+        config.hotkeys.open_settings = vec!["Ctrl+Shift+R".into()]; // conflicts with record
+        let spawner = FakeSpawner {
+            fail: false,
+            spawned: Arc::default(),
+        };
+        let mut rt = Runtime::new(
+            config,
+            None,
+            None,
+            tray,
+            Box::new(hk),
+            spawner,
+            AppLink::default(),
+            events,
+            rx,
+        );
+        rt.apply_config();
+        let applied = applied.lock().unwrap();
+        assert!(applied.contains(&(ActionId::RecordToggle, "Ctrl+Shift+R".into())));
+        assert!(!applied.iter().any(|(a, _)| *a == ActionId::OpenSettings));
+        assert!(log.lock().unwrap().iter().any(|l| l.starts_with("notify")));
+    }
+
+    #[test]
+    fn os_refusal_is_notified() {
+        let (tx, rx) = channel();
+        let events = EventTx::new(tx, Arc::new(NoWake));
+        let tray = FakeTray::default();
+        let log = tray.log.clone();
+        let hk = FakeHotkeys {
+            refuse: true,
+            ..Default::default()
+        };
+        let spawner = FakeSpawner {
+            fail: false,
+            spawned: Arc::default(),
+        };
+        let mut rt = Runtime::new(
+            Config::default(),
+            None,
+            None,
+            tray,
+            Box::new(hk),
+            spawner,
+            AppLink::default(),
+            events,
+            rx,
+        );
+        rt.apply_config();
+        assert!(log.lock().unwrap().iter().any(|l| l.starts_with("notify")));
     }
 }

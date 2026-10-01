@@ -16,6 +16,7 @@ pub enum Key {
     MenuSettings,
     MenuQuit,
     AppCrashed,
+    HotkeysUnavailable,
 }
 
 impl Lang {
@@ -60,6 +61,12 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::MenuQuit, Lang::Fr) => "Quitter",
         (Key::AppCrashed, Lang::En) => "Vixeeny stopped unexpectedly",
         (Key::AppCrashed, Lang::Fr) => "Vixeeny s'est arrêté de façon inattendue",
+        (Key::HotkeysUnavailable, Lang::En) => {
+            "Some shortcuts could not be registered (already used elsewhere?)"
+        }
+        (Key::HotkeysUnavailable, Lang::Fr) => {
+            "Certains raccourcis n'ont pas pu être enregistrés (déjà utilisés ailleurs ?)"
+        }
     }
 }
 

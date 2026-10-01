@@ -17,6 +17,7 @@ tracing-subscriber.workspace = true
 vixeeny-common = { path = "../vixeeny-common" }
 
 [target.'cfg(windows)'.dependencies]
+global-hotkey.workspace = true
 tray-icon.workspace = true
 windows = { workspace = true, features = [
     "Win32_Foundation",

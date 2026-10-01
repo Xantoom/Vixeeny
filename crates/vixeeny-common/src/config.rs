@@ -6,6 +6,8 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::ipc::ActionId;
+
 /// Schema version written by this build. Bump it and add a migration to [`MIGRATIONS`].
 pub const SCHEMA_VERSION: u32 = 1;
 
@@ -100,10 +102,35 @@ pub struct Hotkeys {
     pub capture_region: Vec<String>,
     pub capture_window: Vec<String>,
     pub capture_fullscreen: Vec<String>,
+    pub capture_all_monitors: Vec<String>,
+    pub capture_scrolling: Vec<String>,
+    pub ocr_region: Vec<String>,
     pub record_toggle: Vec<String>,
     pub record_pause: Vec<String>,
+    pub replay_toggle: Vec<String>,
     pub replay_save: Vec<String>,
     pub overlay_toggle: Vec<String>,
+    pub open_settings: Vec<String>,
+}
+
+impl Hotkeys {
+    /// Every action with the shortcuts configured for it, in [`ActionId::ALL`] order.
+    pub fn bindings(&self) -> [(ActionId, &[String]); 12] {
+        [
+            (ActionId::CaptureRegion, &self.capture_region),
+            (ActionId::CaptureWindow, &self.capture_window),
+            (ActionId::CaptureFullscreen, &self.capture_fullscreen),
+            (ActionId::CaptureAllMonitors, &self.capture_all_monitors),
+            (ActionId::CaptureScrolling, &self.capture_scrolling),
+            (ActionId::OcrRegion, &self.ocr_region),
+            (ActionId::RecordToggle, &self.record_toggle),
+            (ActionId::RecordPause, &self.record_pause),
+            (ActionId::ReplayToggle, &self.replay_toggle),
+            (ActionId::ReplaySave, &self.replay_save),
+            (ActionId::OverlayToggle, &self.overlay_toggle),
+            (ActionId::OpenSettings, &self.open_settings),
+        ]
+    }
 }
 
 impl Default for Hotkeys {
@@ -113,10 +140,15 @@ impl Default for Hotkeys {
             capture_region: one("PrintScreen"),
             capture_window: one("Alt+PrintScreen"),
             capture_fullscreen: one("Shift+PrintScreen"),
+            capture_all_monitors: Vec::new(),
+            capture_scrolling: Vec::new(),
+            ocr_region: Vec::new(),
             record_toggle: one("Ctrl+Shift+R"),
             record_pause: one("Ctrl+Shift+P"),
+            replay_toggle: Vec::new(),
             replay_save: one("Ctrl+Shift+S"),
             overlay_toggle: one("Ctrl+Shift+O"),
+            open_settings: Vec::new(),
         }
     }
 }

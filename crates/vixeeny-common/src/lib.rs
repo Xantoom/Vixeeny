@@ -2,6 +2,7 @@
 //! vixeeny-common — see README.md.
 
 pub mod config;
+pub mod hotkey;
 pub mod i18n;
 pub mod ipc;
 pub mod paths;

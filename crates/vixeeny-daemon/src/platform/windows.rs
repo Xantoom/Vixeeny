@@ -8,9 +8,16 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::mpsc::channel;
 
+use std::collections::HashMap;
+use std::str::FromStr;
+use std::sync::Mutex;
+
 use anyhow::{Context, bail};
+use global_hotkey::hotkey::{Code, HotKey, Modifiers};
+use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 use tray_icon::menu::{Menu, MenuEvent, MenuId, MenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
+use vixeeny_common::hotkey::Hotkey;
 use vixeeny_common::i18n::{Key, Lang, tr};
 use vixeeny_common::ipc::{ActionId, RecState};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
@@ -26,7 +33,7 @@ use windows::core::w;
 use super::Startup;
 use crate::core::Event;
 use crate::icon;
-use crate::runtime::{Flow, Runtime, Tray};
+use crate::runtime::{Flow, HotkeyBackend, Runtime, Tray};
 use crate::server::{self, EventTx, Waker};
 use crate::supervisor::ProcessSpawner;
 
@@ -142,6 +149,80 @@ impl Tray for WinTray {
     }
 }
 
+/// RegisterHotKey-based shortcuts: they fire while a game has the focus (CA-HK-2), except for
+/// games that grab the keyboard exclusively. No hook, no polling: the shortcut arrives as a
+/// message on the daemon's own loop.
+pub struct WinHotkeys {
+    manager: GlobalHotKeyManager,
+    registered: Vec<HotKey>,
+    actions: Arc<Mutex<HashMap<u32, ActionId>>>,
+}
+
+impl WinHotkeys {
+    fn new(tx: &EventTx) -> anyhow::Result<Self> {
+        let manager = GlobalHotKeyManager::new().context("creating the hotkey manager")?;
+        let actions: Arc<Mutex<HashMap<u32, ActionId>>> = Arc::default();
+        let (handler_actions, handler_tx) = (actions.clone(), tx.clone());
+        GlobalHotKeyEvent::set_event_handler(Some(move |event: GlobalHotKeyEvent| {
+            if event.state() != HotKeyState::Pressed {
+                return;
+            }
+            let action = handler_actions
+                .lock()
+                .ok()
+                .and_then(|map| map.get(&event.id()).copied());
+            if let Some(action) = action {
+                handler_tx.send(Event::Action(action));
+            }
+        }));
+        Ok(Self {
+            manager,
+            registered: Vec::new(),
+            actions,
+        })
+    }
+}
+
+fn to_global(hotkey: &Hotkey) -> Result<HotKey, String> {
+    let code = Code::from_str(&hotkey.code).map_err(|_| format!("unknown key {}", hotkey.code))?;
+    let m = hotkey.mods;
+    let mut mods = Modifiers::empty();
+    mods.set(Modifiers::CONTROL, m.ctrl);
+    mods.set(Modifiers::ALT, m.alt);
+    mods.set(Modifiers::SHIFT, m.shift);
+    mods.set(Modifiers::SUPER, m.meta);
+    Ok(HotKey::new(Some(mods), code))
+}
+
+impl HotkeyBackend for WinHotkeys {
+    fn apply(&mut self, bindings: &[(ActionId, Hotkey)]) -> Vec<String> {
+        // Forget the previous set first; a failure here only means it was not registered.
+        let _ = self.manager.unregister_all(&self.registered);
+        self.registered.clear();
+        let Ok(mut actions) = self.actions.lock() else {
+            return vec!["hotkey table poisoned".into()];
+        };
+        actions.clear();
+        let mut failures = Vec::new();
+        for (action, hotkey) in bindings {
+            let result = to_global(hotkey).and_then(|global| {
+                self.manager
+                    .register(global)
+                    .map(|()| global)
+                    .map_err(|e| e.to_string())
+            });
+            match result {
+                Ok(global) => {
+                    actions.insert(global.id(), *action);
+                    self.registered.push(global);
+                }
+                Err(e) => failures.push(format!("{hotkey} ({action:?}): {e}")),
+            }
+        }
+        failures
+    }
+}
+
 fn os_locale() -> Option<String> {
     let mut buf = [0u16; LOCALE_NAME_MAX_LENGTH];
     // SAFETY: the buffer is valid for writes and its length is passed to the call.
@@ -221,6 +302,7 @@ pub fn run(startup: Startup) -> anyhow::Result<()> {
     let os_locale = os_locale();
     let lang = vixeeny_common::i18n::Lang::resolve(&config.general.language, os_locale.as_deref());
     let tray = WinTray::new(lang, &tx)?;
+    let hotkeys = WinHotkeys::new(&tx)?;
     let spawner = ProcessSpawner::next_to_current_exe().context("locating vixeeny-app")?;
 
     let serve_tx = tx.clone();
@@ -231,11 +313,12 @@ pub fn run(startup: Startup) -> anyhow::Result<()> {
         .spawn(move || server::serve(&listener, &serve_tx, &serve_link))
         .context("starting the IPC thread")?;
 
-    let runtime = Runtime::new(
+    let mut runtime = Runtime::new(
         config,
         config_path,
         os_locale,
         tray,
+        Box::new(hotkeys),
         spawner,
         link,
         tx,
