@@ -503,18 +503,40 @@ fn x265(ctx: &Ctx, src: &Path) -> Result<()> {
 
     // Merge the 8-bit and 10-bit archives into the installed libx265.a.
     let libdir = ctx.prefix.join("lib");
-    let script = "create libx265.a\naddlib libx265_main.a\naddlib libx265_main10.a\nsave\nend\n";
     std::fs::rename(d8.join("libx265.a"), d8.join("libx265_main.a"))?;
-    std::fs::write(d8.join("merge.mri"), script)?;
-    run(&d8, "sh", &["-c", "ar -M < merge.mri"], &[])?;
+    if cfg!(target_os = "macos") {
+        // Apple's `ar` has no MRI scripts.
+        run(
+            &d8,
+            "libtool",
+            &[
+                "-static",
+                "-o",
+                "libx265.a",
+                "libx265_main.a",
+                "libx265_main10.a",
+            ],
+            &[],
+        )?;
+    } else {
+        let script =
+            "create libx265.a\naddlib libx265_main.a\naddlib libx265_main10.a\nsave\nend\n";
+        std::fs::write(d8.join("merge.mri"), script)?;
+        run(&d8, "sh", &["-c", "ar -M < merge.mri"], &[])?;
+    }
     std::fs::copy(d8.join("libx265.a"), libdir.join("libx265.a"))?;
 
     // x265 only generates its .pc file for shared builds; FFmpeg's configure needs one.
     let p = ctx.prefix.display();
+    let cxx = if cfg!(target_os = "macos") {
+        "-lc++"
+    } else {
+        "-lstdc++"
+    };
     let pc = format!(
         "prefix={p}\nlibdir={p}/lib\nincludedir={p}/include\n\nName: x265\n\
          Description: H.265/HEVC video encoder (8/10-bit)\nVersion: 4.2\n\
-         Libs: -L${{libdir}} -lx265\nLibs.private: -lhdr10plus -lstdc++ -lm -ldl -lpthread\n\
+         Libs: -L${{libdir}} -lx265\nLibs.private: -lhdr10plus {cxx} -lm -ldl -lpthread\n\
          Cflags: -I${{includedir}}\n"
     );
     std::fs::create_dir_all(libdir.join("pkgconfig"))?;

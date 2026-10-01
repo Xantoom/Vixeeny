@@ -24,7 +24,6 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v2
   native-linux:
     # M1: build the pinned native libraries and run the software-encode matrix.
-    # The macOS job is still to be added.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -77,3 +76,27 @@ jobs:
         run: |
           $env:PATH = "$env:FFMPEG_DIR\bin;$env:PATH"
           cargo test -p vixeeny-encode --features ffmpeg-next --test software_encode
+  native-macos:
+    # Native arch of the runner (arm64); the universal binary is a later milestone.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+      - uses: Swatinem/rust-cache@v2
+      - run: brew install cmake nasm meson ninja pkgconf
+      - uses: actions/cache/restore@v4
+        with:
+          path: native/build/work
+          key: native-macos-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}
+          restore-keys: native-macos-
+      - run: cargo xtask build-native
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: native/build/work
+          key: native-macos-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}-${{ github.run_id }}
+      - run: cargo test -p vixeeny-encode --features ffmpeg-next --test software_encode
+        env:
+          PKG_CONFIG_PATH: ${{ github.workspace }}/native/build/work/prefix/lib/pkgconfig
