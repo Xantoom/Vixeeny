@@ -65,6 +65,9 @@ pub fn build(only: &[String]) -> Result<()> {
         println!("== {name}: fetching {}", lib.commit);
         let src = fetch(&ctx, name, lib)?;
         println!("== {name}: building");
+        if cfg!(windows) {
+            normalize_msvc_libs(&ctx)?;
+        }
         recipe(&ctx, name, &src)?;
         if cfg!(windows) {
             normalize_msvc_libs(&ctx)?;
