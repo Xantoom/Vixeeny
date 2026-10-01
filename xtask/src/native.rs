@@ -102,6 +102,10 @@ pub fn build(only: &[String]) -> Result<()> {
         }
         std::fs::write(&stamp, &stamp_value)?;
     }
+    if cfg!(windows) {
+        // Also for cached prefixes built before a normalisation rule existed.
+        normalize_msvc_libs(&ctx)?;
+    }
     Ok(())
 }
 
@@ -210,7 +214,11 @@ fn normalize_msvc_libs(ctx: &Ctx) -> Result<()> {
                 .lines()
                 .map(|line| {
                     line.split(' ')
-                        .filter(|t| !matches!(*t, "-lm" | "-lpthread" | "-ldl" | "-UEB_DLL"))
+                        .filter(|t| {
+                            !matches!(*t, "-lm" | "-lpthread" | "-ldl" | "-lstdc++" | "-UEB_DLL")
+                        })
+                        // libjxl.pc names `jxl-static`; the library is installed as `jxl.lib`.
+                        .map(|t| if t == "-ljxl-static" { "-ljxl" } else { t })
                         .collect::<Vec<_>>()
                         .join(" ")
                 })
