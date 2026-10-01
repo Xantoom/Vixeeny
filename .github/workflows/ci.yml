@@ -17,6 +17,26 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test --workspace
+  daemon-windows:
+    # M2: release binaries for the manual NF-1/NF-2 measurement, plus a short idle smoke test.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p vixeeny-daemon -p vixeeny-app -p xtask
+      - name: Idle smoke test (20 s, informational)
+        continue-on-error: true
+        run: target\release\xtask.exe bench-idle --seconds 20
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vixeeny-m2-windows
+          path: |
+            target/release/vixeeny-daemon.exe
+            target/release/vixeeny-app.exe
+            target/release/xtask.exe
   deny:
     runs-on: ubuntu-latest
     steps:

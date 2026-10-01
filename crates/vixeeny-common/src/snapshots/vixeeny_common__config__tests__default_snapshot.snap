@@ -1,0 +1,90 @@
+---
+source: crates/vixeeny-common/src/config.rs
+expression: "Config::default().to_toml().unwrap()"
+---
+schema_version = 1
+
+[general]
+language = "auto"
+theme = "system"
+autostart = true
+app_idle_exit_seconds = 30
+sounds = true
+notifications = true
+check_updates = true
+
+[hotkeys]
+capture_region = ["PrintScreen"]
+capture_window = ["Alt+PrintScreen"]
+capture_fullscreen = ["Shift+PrintScreen"]
+record_toggle = ["Ctrl+Shift+R"]
+record_pause = ["Ctrl+Shift+P"]
+replay_save = ["Ctrl+Shift+S"]
+overlay_toggle = ["Ctrl+Shift+O"]
+
+[paths]
+images = "{pictures}/Vixeeny"
+videos = "{videos}/Vixeeny"
+replays = "{videos}/Vixeeny/Replays"
+filename_template = "{app}_{date}_{time}"
+
+[paths.per_app_subfolder]
+images = false
+videos = false
+replays = false
+
+[image]
+format = "png"
+show_cursor = false
+hdr = "tonemap_sdr"
+copy_to_clipboard = false
+
+[image.jpeg]
+quality = 90
+chroma = "444"
+
+[image.avif]
+quality = 80
+depth = 10
+chroma = "444"
+
+[video]
+profile = "default"
+
+[profiles.default]
+encoder = "auto"
+container = "mp4_hybrid"
+resolution = "source"
+fps = 60
+depth = 8
+chroma = "420"
+hdr = "tonemap_sdr"
+mode = "simple"
+preset = "balanced"
+show_cursor = true
+
+[profiles.default.split]
+mode = "off"
+
+[profiles.default.audio]
+routing = "one_track_per_source"
+sources = ["system"]
+codec = "auto"
+bitrate_kbps = 160
+vbr = true
+
+[recording_widget]
+enabled = true
+corner = "top_left"
+auto_hide = false
+
+[replay]
+enabled_on_start = false
+duration_seconds = 30
+storage = "ram"
+
+[overlay]
+edge = "right"
+
+[ocr]
+languages = ["auto"]

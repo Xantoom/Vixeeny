@@ -7,5 +7,10 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[dependencies]
+anyhow.workspace = true
+tracing.workspace = true
+vixeeny-common = { path = "../vixeeny-common" }
+
 [lints]
 workspace = true
