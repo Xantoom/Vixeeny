@@ -27,6 +27,8 @@ jobs:
           toolchain: 1.98.1
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release -p vixeeny-daemon -p vixeeny-app -p xtask
+      - name: Real capture smoke test (output only)
+        run: cargo test -p vixeeny-capture --test wgc_smoke -- --nocapture
       - name: Idle smoke test (20 s, informational)
         continue-on-error: true
         run: target\release\xtask.exe bench-idle --seconds 20
