@@ -293,7 +293,8 @@ fn recipe(ctx: &Ctx, name: &str, src: &Path) -> Result<()> {
                      --enable-static --disable-shared --disable-programs --disable-doc \
                      --disable-debug --pkg-config-flags=--static --enable-libx264 \
                      --enable-libx265 --enable-libvpx --enable-libsvtav1 --enable-libdav1d \
-                     --enable-libopus && make -j{j} && make install",
+                     --enable-libopus || {{ pkg-config --debug --static --libs dav1d 2>&1 | tail -20; \
+                     tail -n 80 ffbuild/config.log; exit 1; }}; make -j{j} && make install",
                     j = ctx.jobs
                 ),
                 &pkg_env,
