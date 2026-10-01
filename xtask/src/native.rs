@@ -20,7 +20,7 @@ struct Lib {
 /// Bump a library's revision to force its rebuild when its recipe changes (stamps embed it).
 fn recipe_rev(name: &str) -> &'static str {
     match name {
-        "libvpx" => "3",
+        "libvpx" => "4",
         _ => "2",
     }
 }
@@ -266,6 +266,7 @@ fn recipe(ctx: &Ctx, name: &str, src: &Path) -> Result<()> {
             let (env, target, cflags) = if win {
                 (
                     "CC='clang --target=x86_64-pc-windows-msvc' \
+                     CXX='clang++ --target=x86_64-pc-windows-msvc' \
                      LD='clang --target=x86_64-pc-windows-msvc' AR=llvm-ar AS=nasm ",
                     "--target=x86_64-win64-gcc ",
                     "--extra-cflags=-fms-runtime-lib=dll ",
