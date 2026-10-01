@@ -24,7 +24,7 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v2
   native-linux:
     # M1: build the pinned native libraries and run the software-encode matrix.
-    # Windows (MSYS2) and macOS jobs are still to be added.
+    # The macOS job is still to be added.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -41,3 +41,49 @@ jobs:
       - run: cargo test -p vixeeny-encode --features ffmpeg-next --test software_encode
         env:
           PKG_CONFIG_PATH: ${{ github.workspace }}/native/build/work/prefix/lib/pkgconfig
+  native-windows:
+    # MSVC toolchain; MSYS2 only provides bash/make/pkgconf for the autotools-style libraries.
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    env:
+      MSYS2_PATH_TYPE: inherit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+      - uses: Swatinem/rust-cache@v2
+      - uses: ilammy/msvc-dev-cmd@v1
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MSYS
+          path-type: inherit
+          install: >-
+            make diffutils patch perl pkgconf
+            mingw-w64-x86_64-gcc mingw-w64-x86_64-make
+      - name: Tools (nasm, meson)
+        shell: pwsh
+        run: |
+          choco install nasm -y --no-progress
+          "C:\Program Files\NASM" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          pip install meson
+      - name: Keep MSVC's link.exe ahead of MSYS2's
+        run: rm -f /usr/bin/link.exe
+      - uses: actions/cache/restore@v4
+        id: native-cache
+        with:
+          path: native/build/work
+          key: native-windows-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}
+          restore-keys: native-windows-
+      - run: cargo xtask build-native
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: native/build/work
+          key: native-windows-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}-${{ github.run_id }}
+      - run: cargo test -p vixeeny-encode --features ffmpeg-next --test software_encode
+        env:
+          PKG_CONFIG_PATH: ${{ github.workspace }}/native/build/work/prefix/lib/pkgconfig
+          PKG_CONFIG_ALLOW_CROSS: "1"
