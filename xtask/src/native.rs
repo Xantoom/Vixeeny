@@ -31,6 +31,8 @@ pub fn build(only: &[String]) -> Result<()> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .canonicalize()?;
+    // Drop the `\\?\` verbatim prefix: cygpath and the build tools do not understand it.
+    let root = PathBuf::from(root.to_string_lossy().trim_start_matches(r"\\?\"));
     let libs: BTreeMap<String, Lib> =
         toml::from_str(&std::fs::read_to_string(root.join("native/versions.toml"))?)
             .context("parsing native/versions.toml")?;
@@ -100,7 +102,8 @@ fn unix(p: &Path) -> String {
 fn sh(dir: &Path, script: &str, env: &[(&str, String)]) -> Result<()> {
     run(
         Path::new("."),
-        "bash",
+        // `bash` on Windows PATH can be WSL's launcher; MSYS2's `sh` is bash.
+        if cfg!(windows) { "sh" } else { "bash" },
         &["-c", &format!("cd '{}' && {script}", unix(dir))],
         env,
     )
