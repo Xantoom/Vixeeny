@@ -20,7 +20,7 @@ struct Lib {
 /// Bump a library's revision to force its rebuild when its recipe changes (stamps embed it).
 fn recipe_rev(name: &str) -> &'static str {
     match name {
-        "libvpx" => "5",
+        "libvpx" => "6",
         _ => "2",
     }
 }
@@ -266,7 +266,7 @@ fn recipe(ctx: &Ctx, name: &str, src: &Path) -> Result<()> {
             // clang defines _MSC_VER, so vpx_encoder.c calls these x87 helpers, which libvpx only
             // assembles for its Visual Studio projects.
             let fcw = if win {
-                "&& make vpx_ports/float_control_word.asm.o \\
+                "&& AS=nasm make vpx_ports/float_control_word.asm.o \\
                  && llvm-ar rs libvpx.a vpx_ports/float_control_word.asm.o "
             } else {
                 ""
