@@ -112,13 +112,13 @@ Ces choix sont **définitifs**. Ne pas proposer d'alternative.
 | Licence | GPL-3.0-or-later | Obligatoire avec x264/x265 ; impose aux forks de rester libres. |
 | Interface | **Slint** (rendu Skia ou FemtoVG, au choix du M0 selon la consommation mesurée) | Natif, léger, animations GPU, s'endort sans animation, traductions intégrées. |
 | Vidéo, audio, muxing | **FFmpeg** (branche stable la plus récente au M0, 9.0.x à la date de rédaction) via `ffmpeg-sys-next` / `ffmpeg-next`, lié statiquement | Fournit tous les encodeurs logiciels et matériels et les conteneurs. |
-| AV1 logiciel | **SVT-AV1-Tritium** (dépôt `Uranite/svt-av1-tritium`, commit épinglé), compilé à la place de SVT-AV1 | Même bibliothèque `libSvtAv1Enc`, meilleure qualité psychovisuelle, 4:4:4. Repli possible sur SVT-AV1 officiel sans changer le code. |
+| AV1 logiciel | **SVT-AV1** officiel (`AOMediaCodec/SVT-AV1`, commit épinglé) | Décision du mainteneur (2026-10-01) : version officielle plutôt que le fork Tritium. |
 | H.264 / HEVC logiciel | x264, x265 (versions épinglées) | |
 | VP9 | libvpx | |
 | JPEG | **jpegli** (`google/jpegli`, API compatible libjpeg62), via FFI | Meilleure compression perceptuelle à compatibilité totale. |
 | PNG | crate `png` + `oxipng` (optimisation optionnelle) | |
 | WebP | libwebp (via `libwebp-sys`) | |
-| AVIF | libavif, avec SVT-AV1-Tritium comme encodeur et dav1d comme décodeur | |
+| AVIF | libavif, avec SVT-AV1 comme encodeur et dav1d comme décodeur | |
 | JPEG XL | libjxl | |
 | Lecture d'images (conversion) | crate `image` + libavif/libjxl/jpegli pour leurs formats | |
 | Config | TOML (`serde`, `toml`), schéma versionné avec migrations | Lisible et modifiable à la main. |
@@ -265,7 +265,7 @@ Capture (texture GPU)
   → conversion couleur sur GPU (shader de calcul) : BGRA/RGBA16F → NV12 / P010 / formats 4:2:2 / 4:4:4
   → mise à l'échelle GPU (si résolution de sortie ≠ source)
   → encodeur matériel (zero-copy via hwframes FFmpeg : d3d11 → NVENC/AMF/QSV ; IOSurface → VideoToolbox ; DMA-BUF → VAAPI/Vulkan)
-     OU téléchargement vers la RAM → encodeur logiciel (x264, x265, libvpx, Tritium)
+     OU téléchargement vers la RAM → encodeur logiciel (x264, x265, libvpx, SVT-AV1)
   → paquets encodés
   → [replay buffer en anneau] et/ou [muxer fichier]
 Audio (N sources) → rééchantillonnage 48 kHz → mixage selon le routage des pistes → encodeur audio → muxer
@@ -405,7 +405,7 @@ CA :
 | PNG | `png` + `oxipng` | Niveau de compression, optimisation oxipng (oui/non, niveau) | Compression rapide, oxipng désactivé |
 | JPEG | jpegli | Qualité ou distance (butteraugli), sous-échantillonnage (4:4:4 / 4:2:0), progressif | Qualité 90, 4:4:4 |
 | WebP | libwebp | Avec perte (qualité) / sans perte, effort | Sans perte |
-| AVIF | libavif + Tritium | Qualité, vitesse, profondeur 8/10/12 bits, chroma 4:4:4 / 4:2:0, HDR (PQ) | Qualité 80, 10 bits, 4:4:4 |
+| AVIF | libavif + SVT-AV1 | Qualité, vitesse, profondeur 8/10/12 bits, chroma 4:4:4 / 4:2:0, HDR (PQ) | Qualité 80, 10 bits, 4:4:4 |
 | JPEG XL | libjxl | Distance / sans perte, effort, HDR | Sans perte, effort 7 |
 
 Métadonnées : profil de couleur ICC incorporé (sRGB, ou BT.2100 PQ pour le HDR), aucune donnée personnelle.
@@ -664,7 +664,7 @@ Les valeurs ci-dessus sont des exemples : **l'agent doit vérifier chaque option
 |---|---|---|---|---|---|---|
 | H.264 | `libx264` | `h264_nvenc` | `h264_amf` (Win) | `h264_qsv` | `h264_videotoolbox` | `h264_vaapi`, `h264_vulkan` |
 | HEVC | `libx265` | `hevc_nvenc` | `hevc_amf` (Win) | `hevc_qsv` | `hevc_videotoolbox` | `hevc_vaapi`, `hevc_vulkan` |
-| AV1 | `libsvtav1` (Tritium) | `av1_nvenc` | `av1_amf` (Win) | `av1_qsv` | — (aucun encodeur AV1 matériel Apple à la date de rédaction ; le sondage le détectera si cela change) | `av1_vaapi`, `av1_vulkan` |
+| AV1 | `libsvtav1` | `av1_nvenc` | `av1_amf` (Win) | `av1_qsv` | — (aucun encodeur AV1 matériel Apple à la date de rédaction ; le sondage le détectera si cela change) | `av1_vaapi`, `av1_vulkan` |
 | VP9 | `libvpx-vp9` | — | — | `vp9_qsv` | — | `vp9_vaapi` |
 
 Vérifier au M0 la présence de chaque encodeur dans la version de FFmpeg épinglée (notamment les encodeurs Vulkan Video, plus récents). Sous Linux, AMF n'est pas utilisé : les GPU AMD passent par VAAPI/Vulkan.
@@ -1058,7 +1058,7 @@ HDR (PQ, HDR10) : HEVC et AV1 en 10 bits, conteneurs MKV et MP4. (VP9 HDR possib
 | 2026-10-01 | Architecture démon + app séparés | RAM minimale au repos |
 | 2026-10-01 | Slint pour l'UI, pas de webview | RAM, fluidité |
 | 2026-10-01 | FFmpeg pour toute la vidéo et l'audio | couverture des encodeurs et conteneurs |
-| 2026-10-01 | SVT-AV1-Tritium comme AV1 logiciel et pour AVIF | qualité psychovisuelle, 4:4:4, même API que SVT-AV1 |
+| 2026-10-01 | ~~SVT-AV1-Tritium~~ remplacé par SVT-AV1 officiel (voir plus bas) | |
 | 2026-10-01 | OCR de l'OS (Tesseract sous Linux) | légèreté, toutes langues |
 | 2026-10-01 | Capture défilante pilotée par l'utilisateur | fiabilité multiplateforme |
 | 2026-10-01 | Pas de mise en ligne, pas de télémétrie | vie privée, simplicité |
@@ -1067,4 +1067,9 @@ HDR (PQ, HDR10) : HEVC et AV1 en 10 bits, conteneurs MKV et MP4. (VP9 HDR possib
 | 2026-10-01 | Registre de codecs piloté par données | ajout futur d'AV2 / x266 sans changement de logique |
 | 2026-10-01 | M0 : toolchain Rust 1.98.1 épinglée ; versions relevées sur crates.io : slint 1.18.1, ffmpeg-next / ffmpeg-sys-next 9.0.0, serde 1.0.229, toml 1.1.6, postcard 1.1.3, directories 6.0.0, interprocess 2.4.4, global-hotkey 0.8.0, ashpd 0.13.13, tray-icon 0.26.0, auto-launch 0.6.0, arboard 3.6.1, notify-rust 4.18.1, windows 0.62.2, png 0.18.1, oxipng 10.2.1, libwebp-sys 0.14.4, image 0.25.10, thiserror 2.0.21, anyhow 1.0.104, tracing 0.1.44, insta 1.48.0, pipewire 0.10.1, x11rb 0.14.0, objc2 0.6.4 (seules les versions du workspace sont figées dans Cargo.toml ; le reste sera épinglé à l'usage) | règle 0.1.5 |
 | 2026-10-01 | M0 : `panic = "abort"` en release, lints workspace (`unwrap_used`/`expect_used` en warning, `undocumented_unsafe_blocks` en deny) | règles 0.2 |
+| 2026-10-01 | M0 : rendu Slint provisoire = FemtoVG (feature `renderer-femtovg`) ; à confirmer par mesure RAM/CPU au M2/M7 (bascule vers Skia possible sans changer les `.slint`) | plus léger à compiler et à lier que Skia ; aucune mesure possible avant qu'une fenêtre existe |
+| 2026-10-01 | M0 : installeur Windows = Inno Setup (portable en zip en plus) | gratuit, script texte versionnable, pas de dépendance .NET/WiX, mise à jour silencieuse simple |
+| 2026-10-01 | M1 : bibliothèques natives épinglées par commit dans `native/versions.toml` (FFmpeg n9.0.2, x264 stable, x265 4.2, libvpx 1.17.0, SVT-AV1 4.2.0 officiel, dav1d 1.5.4, opus 1.6.1, libwebp 1.6.0, libavif 1.4.2, libjxl 0.12.0, jpegli HEAD) ; FLAC/AAC via les encodeurs natifs de FFmpeg, pas de bibliothèque externe | règle 0.1.5 ; évite fdk-aac (0.2) |
+| 2026-10-01 | Le mainteneur demande SVT-AV1 officiel (v4.2.0) au lieu de Tritium, pour l'AV1 logiciel et AVIF. Recette : LTO désactivé (`-DSVT_AV1_LTO=OFF`), les objets LTO « slim » GCC étant illisibles par lld | décision utilisateur ; édition de liens Rust |
+| 2026-10-01 | x265 compilé en 8 et 10 bits seulement (pas de 12 bits) | décision utilisateur ; HDR10 = 10 bits |
 | | *(à compléter par l'agent)* | |

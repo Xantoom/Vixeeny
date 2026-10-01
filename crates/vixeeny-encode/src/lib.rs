@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! vixeeny-encode — see README.md.
 
+/// FFmpeg bindings, built against the pinned static libraries of `native/versions.toml`.
+#[cfg(feature = "ffmpeg-next")]
+pub use ffmpeg_next as ffmpeg;
+
 /// Crate name, used by the M0 smoke test.
 pub const CRATE_NAME: &str = "vixeeny-encode";
 

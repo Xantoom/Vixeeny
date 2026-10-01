@@ -22,3 +22,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
+  native-linux:
+    # M1: build the pinned native libraries and run the software-encode matrix.
+    # Windows (MSYS2) and macOS jobs are still to be added.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y cmake nasm meson ninja-build pkg-config
+      - uses: actions/cache@v4
+        with:
+          path: native/build/work
+          key: native-linux-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}
+      - run: cargo xtask build-native
+      - run: cargo test -p vixeeny-encode --features ffmpeg-next --test software_encode
+        env:
+          PKG_CONFIG_PATH: ${{ github.workspace }}/native/build/work/prefix/lib/pkgconfig

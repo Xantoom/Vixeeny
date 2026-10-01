@@ -1,2 +1,72 @@
-# Pinned native libraries. Filled in at M1 (version/commit, SHA-256, licence for each).
-# Tritium repo: https://github.com/Uranite/svt-av1-tritium
+# Pinned native libraries (VIXEENY_PLAN.md sections 3 and 9.1).
+# Every library is fetched by exact commit; `tag` is informational. Versions resolved 2026-10-01.
+#
+# `cargo xtask build-native` reads this file, so keep the keys stable.
+# `fallback` documents a drop-in replacement (plan section 3).
+
+[ffmpeg]
+url = "https://github.com/FFmpeg/FFmpeg"
+tag = "n9.0.2"
+commit = "ce8f11b9fac4cd7ccfb41ca7c01bc17f5cda8cc3"
+license = "GPL-3.0-or-later (built with --enable-gpl --enable-version3, never --enable-nonfree)"
+
+[x264]
+url = "https://code.videolan.org/videolan/x264.git"
+tag = "stable"
+commit = "b35605ace3ddf7c1a5d67a2eb553f034aef41d55"
+license = "GPL-2.0-or-later"
+
+[x265]
+url = "https://bitbucket.org/multicoreware/x265_git"
+tag = "4.2"
+commit = "e7a37608685a1ea61c59342cb19208d688928287"
+license = "GPL-2.0-or-later"
+
+[libvpx]
+url = "https://github.com/webmproject/libvpx"
+tag = "v1.17.0"
+commit = "82615ff0733cd4063838c352bc2e2ab225f37ade"
+license = "BSD-3-Clause"
+
+[svt-av1]
+# Official SVT-AV1 (maintainer decision 2026-10-01: Tritium not used).
+url = "https://gitlab.com/AOMediaCodec/SVT-AV1"
+tag = "v4.2.0"
+commit = "9292ec8e32bce26f781f277ec8739b53426c4300"
+license = "BSD-3-Clause-Clear / AOM patent licence"
+
+[dav1d]
+url = "https://github.com/videolan/dav1d"
+tag = "1.5.4"
+commit = "191bdda98ec3c68137754dc97da1db34043d7cd4"
+license = "BSD-2-Clause"
+
+[opus]
+url = "https://github.com/xiph/opus"
+tag = "v1.6.1"
+commit = "a5d6c1b6f4e582df97390f9ac5c6e7c51cbffffe"
+license = "BSD-3-Clause"
+
+[libwebp]
+url = "https://github.com/webmproject/libwebp"
+tag = "v1.6.0"
+commit = "b7e29b9d75bd31422b00c2a446d49d7af06c328d"
+license = "BSD-3-Clause"
+
+[libavif]
+url = "https://github.com/AOMediaCodec/libavif"
+tag = "v1.4.2"
+commit = "bd32fb40a3b2028eb555b67f769c57a32ed8a1b4"
+license = "BSD-2-Clause"
+
+[libjxl]
+url = "https://github.com/libjxl/libjxl"
+tag = "v0.12.0"
+commit = "a7a9c787341cf703dede03c2009fa460cae5e5df"
+license = "BSD-3-Clause"
+
+[jpegli]
+url = "https://github.com/google/jpegli"
+tag = "HEAD as of 2026-10-01 (no release tags)"
+commit = "031a0077f5799a6041004267fc12b956c1f52a20"
+license = "BSD-3-Clause"
