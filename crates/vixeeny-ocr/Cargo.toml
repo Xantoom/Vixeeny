@@ -1,0 +1,11 @@
+[package]
+name = "vixeeny-ocr"
+description = "Vixeeny: ocr"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true

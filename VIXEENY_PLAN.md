@@ -1,0 +1,1070 @@
+# VIXEENY — Cahier des charges et plan de développement complet (v1.0)
+
+> Ce document est la **source de vérité unique** du projet. Il est destiné à une IA de développement (agent de code) qui doit construire Vixeeny 1.0 de A à Z, et aux personnes qui reprendront le projet (forks).
+> Toute décision qui n'est pas écrite ici doit être documentée dans la section 14 (« Journal des décisions ») avant d'être appliquée.
+
+---
+
+## Sommaire
+
+0. Règles pour l'agent IA
+1. Vision et contraintes non négociables
+2. Plateformes, matériel de référence et priorités
+3. Décisions techniques figées
+4. Architecture
+5. Spécifications fonctionnelles
+6. Registre des codecs (conçu pour l'ajout futur d'AV2, x266, etc.)
+7. Exigences non fonctionnelles chiffrées
+8. Limitations connues par OS
+9. Build, dépendances natives, licences
+10. Packaging, distribution et mises à jour
+11. Feuille de route par jalons
+12. Plan de tests
+13. Annexes (config par défaut, matrices de compatibilité)
+14. Journal des décisions
+
+---
+
+## 0. Règles pour l'agent IA
+
+### 0.1 Méthode de travail
+
+1. Travailler **jalon par jalon** (section 11), dans l'ordre. Ne jamais commencer un jalon tant que la « Définition de terminé » du précédent n'est pas remplie.
+2. Chaque jalon se termine par : le code compile sans avertissement (`cargo clippy --all-targets -- -D warnings`), `cargo fmt --check` passe, tous les tests passent, la CI est verte sur les OS concernés.
+3. Quand un jalon contient un point **🧪 TEST MANUEL**, s'arrêter et demander au mainteneur de faire le test, avec une procédure pas à pas. Ne pas déclarer le jalon terminé sans son retour.
+4. Avant d'ajouter une dépendance (crate ou bibliothèque native), **vérifier qu'elle existe**, qu'elle est maintenue (commit ou release depuis moins de 12 mois), et que sa licence est compatible GPL-3.0. Ne jamais inventer le nom ou l'API d'une crate. En cas de doute, lire la documentation sur docs.rs ou le dépôt.
+5. Au jalon M0, relever la **dernière version stable** de chaque dépendance listée en section 3 et l'épingler. Les versions citées dans ce document sont indicatives à la date de rédaction (octobre 2026).
+6. Toute déviation par rapport à ce document est notée dans la section 14 avec la raison.
+7. En cas de blocage technique réel (API OS qui ne permet pas une fonctionnalité), ne pas contourner par une méthode interdite (0.2) : documenter la limitation dans la section 8, implémenter le meilleur comportement dégradé possible, et le signaler.
+
+### 0.2 Interdits absolus
+
+- Aucune injection de DLL, hook graphique ou lecture de la mémoire d'un autre processus (risque de bannissement par les anti-cheats).
+- Aucune boucle de polling dans le démon (`loop { sleep() }`, timers répétitifs à haute fréquence). Le démon dort sur des événements OS.
+- Aucune webview (Tauri, Electron, WebView2, WKWebView) pour l'interface.
+- Aucune télémétrie, aucune connexion réseau à part la vérification de mise à jour (désactivable).
+- Aucun envoi en ligne des captures.
+- Aucune dépendance incompatible GPL-3.0 (ex. : fdk-aac, `--enable-nonfree` de FFmpeg).
+- Pas de `unsafe` sans un commentaire `// SAFETY:` qui justifie l'invariant.
+- Pas de `unwrap()` / `expect()` hors tests et hors invariants prouvés (commentés).
+
+### 0.3 Conventions
+
+- Rust stable, édition 2024, `rust-toolchain.toml` épinglé.
+- Code et commentaires en anglais ; interface traduite (FR + EN au minimum).
+- Erreurs : `thiserror` dans les bibliothèques, `anyhow` uniquement dans les binaires.
+- Logs : `tracing`, fichiers tournants dans le dossier de logs de l'OS, niveau `info` par défaut.
+- Chaque crate a un `README.md` court qui explique son rôle et ses points d'entrée.
+- Commits au format Conventional Commits (`feat:`, `fix:`, `docs:`…).
+
+---
+
+## 1. Vision et contraintes non négociables
+
+Vixeeny est une application de capture d'écran (images et vidéos) **open-source, 100 % gratuite, sous licence GPL-3.0-or-later**, pour Windows, macOS et Linux.
+
+Objectif de cycle de vie : publier une 1.0 quasi définitive. Après la 1.0, les seules évolutions prévues sont l'ajout de nouveaux codecs (AV2, H.266/x266, nouveaux encodeurs matériels de nouvelles générations de GPU). La maintenance au-delà est laissée aux forks. Le code doit donc être **simple à reprendre** : architecture documentée, build reproductible en une commande, tests.
+
+Contraintes non négociables :
+
+1. Écrite en Rust.
+2. Installée une fois, tourne en arrière-plan, démarre automatiquement avec l'OS (désactivable).
+3. **0,0 % de CPU au repos** et empreinte RAM minimale (chiffres en section 7).
+4. Capture plein écran, zone, fenêtre/application, compatible avec toutes les API graphiques (DirectX 9 à 12, Vulkan, OpenGL, Metal), sans injection.
+5. Choix complet des formats, codecs, conteneurs et réglages par l'utilisateur.
+6. Interface moderne, épurée, animations fluides.
+
+---
+
+## 2. Plateformes, matériel de référence et priorités
+
+### 2.1 Priorités
+
+1. **Windows : priorité absolue.** C'est la plateforme du mainteneur. La 1.0 ne sort pas si une fonctionnalité Windows est cassée.
+2. macOS et Linux : livrés dans la 1.0, testés par des volontaires. Une 0.9 publique sert de bêta pour recueillir leurs retours avant la 1.0.
+
+### 2.2 Versions minimales
+
+| OS | Minimum | Notes |
+|---|---|---|
+| Windows | Windows 10 22H2 (x64) et Windows 11 | Certaines options exigent Windows 11 (voir section 8). ARM64 non visé en 1.0. |
+| macOS | macOS 13 Ventura | Apple Silicon et Intel (binaire universel). |
+| Linux | Noyau et PipeWire récents (PipeWire ≥ 0.3.x épinglé au M0) | Wayland : GNOME, KDE Plasma, compositeurs wlroots (Hyprland, Sway). X11 aussi. |
+
+### 2.3 Machine de référence (tests du mainteneur)
+
+- Windows 11 Pro 26H2
+- AMD Ryzen 7 9800X3D (iGPU désactivé, ne sera pas activé)
+- NVIDIA RTX 5080 (Blackwell)
+- Écran 4K QD-OLED 240 Hz (HDR)
+- 64 Go DDR5
+
+Conséquences : NVENC (H.264, HEVC, AV1, 8 et 10 bits, 4:2:0 et 4:2:2 selon le codec) est testé en conditions réelles. AMF (AMD) et QSV (Intel), le multi-GPU et Linux/macOS sont testés par des volontaires. Le code multi-GPU doit être testable sans matériel grâce à des « faux adaptateurs » (section 12).
+
+---
+
+## 3. Décisions techniques figées
+
+Ces choix sont **définitifs**. Ne pas proposer d'alternative.
+
+| Domaine | Choix | Raison |
+|---|---|---|
+| Licence | GPL-3.0-or-later | Obligatoire avec x264/x265 ; impose aux forks de rester libres. |
+| Interface | **Slint** (rendu Skia ou FemtoVG, au choix du M0 selon la consommation mesurée) | Natif, léger, animations GPU, s'endort sans animation, traductions intégrées. |
+| Vidéo, audio, muxing | **FFmpeg** (branche stable la plus récente au M0, 9.0.x à la date de rédaction) via `ffmpeg-sys-next` / `ffmpeg-next`, lié statiquement | Fournit tous les encodeurs logiciels et matériels et les conteneurs. |
+| AV1 logiciel | **SVT-AV1-Tritium** (dépôt `Uranite/svt-av1-tritium`, commit épinglé), compilé à la place de SVT-AV1 | Même bibliothèque `libSvtAv1Enc`, meilleure qualité psychovisuelle, 4:4:4. Repli possible sur SVT-AV1 officiel sans changer le code. |
+| H.264 / HEVC logiciel | x264, x265 (versions épinglées) | |
+| VP9 | libvpx | |
+| JPEG | **jpegli** (`google/jpegli`, API compatible libjpeg62), via FFI | Meilleure compression perceptuelle à compatibilité totale. |
+| PNG | crate `png` + `oxipng` (optimisation optionnelle) | |
+| WebP | libwebp (via `libwebp-sys`) | |
+| AVIF | libavif, avec SVT-AV1-Tritium comme encodeur et dav1d comme décodeur | |
+| JPEG XL | libjxl | |
+| Lecture d'images (conversion) | crate `image` + libavif/libjxl/jpegli pour leurs formats | |
+| Config | TOML (`serde`, `toml`), schéma versionné avec migrations | Lisible et modifiable à la main. |
+| Chemins OS | crate `directories` | |
+| IPC démon ↔ UI | `interprocess` (named pipe sous Windows, socket Unix ailleurs), messages `serde` + `postcard` | |
+| Raccourcis globaux | crate `global-hotkey` (Windows, macOS, X11) + portail `GlobalShortcuts` via `ashpd` (Wayland) | |
+| Icône système | crate `tray-icon` | |
+| Démarrage auto | crate `auto-launch` (vérifier au M0 ; sinon implémentation native : clé Run, LaunchAgent, fichier `.desktop` autostart) | |
+| Presse-papier | crate `arboard` | |
+| Notifications | `notify-rust` (Linux/macOS) et toasts natifs Windows via le crate `windows` | |
+| API Windows | crate `windows` (officiel Microsoft) | |
+| API macOS | crates `objc2` et associés (`objc2-screen-capture-kit`, `objc2-vision`, `objc2-av-foundation`…) — vérifier les noms exacts au M0 | |
+| Linux capture/audio | `ashpd` (portails), `pipewire` (bindings Rust), `x11rb` (X11) | |
+| Traductions | système `@tr()` de Slint (gettext) | |
+| Tests | `cargo test`, `insta` (snapshots), tests d'intégration avec sources de capture factices | |
+
+---
+
+## 4. Architecture
+
+### 4.1 Deux processus
+
+```
+┌──────────────────────────────┐        IPC (pipe / socket)      ┌──────────────────────────────────┐
+│ vixeeny-daemon               │ ◀────────────────────────────▶ │ vixeeny-app                       │
+│ toujours actif, < 15 Mo      │                                 │ lancé à la demande                │
+│ • icône système              │                                 │ • overlay latéral                 │
+│ • raccourcis globaux         │                                 │ • éditeur Print Screen            │
+│ • démarrage auto             │                                 │ • enregistrement vidéo + replay   │
+│ • instance unique            │                                 │ • OCR, capture défilante          │
+│ • lit la config              │                                 │ • paramètres + galerie            │
+│ • lance / réveille l'app     │                                 │ • conversion d'images             │
+│ • vérif. mise à jour (1/24h) │                                 │ • FFmpeg, encodeurs, Slint        │
+└──────────────────────────────┘                                 └──────────────────────────────────┘
+```
+
+Règles :
+
+- Le démon **ne lie ni Slint ni FFmpeg ni les bibliothèques d'images**. Il ne contient que : boucle d'événements OS, raccourcis, icône système, IPC, config, lancement de processus, vérification de mise à jour.
+- Le démon dort dans la boucle de messages de l'OS (`GetMessageW` sous Windows, `CFRunLoop` sous macOS, boucle `poll`/`epoll` bloquante sous Linux). La vérification de mise à jour utilise un unique timer OS toutes les 24 h (réveil négligeable).
+- `vixeeny-app` est lancé quand un raccourci est pressé. Après une action terminée et **N secondes d'inactivité** (défaut 30 s, réglable, 0 = quitter immédiatement), il se ferme et libère toute sa mémoire. Pendant un enregistrement ou un replay buffer actif, il reste ouvert.
+- Pour le Print Screen, le démon prend lui-même la capture d'écran brute (API OS, sans dépendance lourde) **avant** de lancer l'app, et la transmet par mémoire partagée. Ainsi l'image figée correspond exactement à l'instant de l'appui, même si l'app met du temps à démarrer.
+- Si l'app plante, le démon reste vivant et notifie l'utilisateur.
+
+### 4.2 Workspace Cargo
+
+```
+vixeeny/
+├── Cargo.toml                  # workspace
+├── rust-toolchain.toml
+├── deny.toml                   # cargo-deny : licences et vulnérabilités
+├── xtask/                      # tâches de build (cargo xtask …)
+├── native/                     # scripts de build des bibliothèques C/C++ épinglées
+│   ├── versions.toml           # versions et commits de toutes les libs natives
+│   └── build/                  # scripts par OS
+├── crates/
+│   ├── vixeeny-common/         # types partagés, config, IPC, erreurs, i18n des clés
+│   ├── vixeeny-daemon/         # binaire démon
+│   ├── vixeeny-platform/       # abstractions OS : fenêtres, processus, écrans, DPI, notifications
+│   ├── vixeeny-capture/        # capture d'images et de vidéo (trait CaptureSource)
+│   ├── vixeeny-audio/          # capture audio système / par application / micro
+│   ├── vixeeny-encode/         # pipeline vidéo/audio, registre de codecs, sondage GPU, muxing, replay
+│   ├── vixeeny-image/          # encodage, décodage, conversion d'images, tone-mapping HDR→SDR
+│   ├── vixeeny-ocr/            # OCR via l'OS
+│   ├── vixeeny-stitch/         # assemblage de la capture défilante
+│   ├── vixeeny-editor/         # modèle de l'éditeur d'annotations (logique pure, testable)
+│   ├── vixeeny-ui/             # fichiers .slint et liaison Rust
+│   ├── vixeeny-app/            # binaire app
+│   └── vixeeny-updater/        # vérification, téléchargement, vérification de signature, remplacement
+├── assets/                     # icônes, polices, sons
+├── i18n/                       # traductions (gettext .po)
+├── packaging/                  # Inno Setup / WiX, dmg, Flatpak, AppImage, deb, PKGBUILD
+├── docs/
+│   ├── ARCHITECTURE.md         # résumé de la section 4 pour les contributeurs
+│   ├── ADDING_A_CODEC.md       # procédure de la section 6.5
+│   └── LIMITATIONS.md          # copie de la section 8
+├── THIRD_PARTY_LICENSES.md     # généré automatiquement
+└── VIXEENY_PLAN.md             # ce document
+```
+
+### 4.3 Abstractions principales (traits)
+
+Les signatures ci-dessous fixent l'intention ; l'agent peut ajuster les détails en le notant dans la section 14.
+
+```rust
+// vixeeny-capture
+pub enum CaptureTarget {
+    Monitor(MonitorId),
+    Region { monitor: MonitorId, rect: PhysicalRect },
+    Window(WindowId),
+}
+
+pub struct CaptureOptions {
+    pub target: CaptureTarget,
+    pub show_cursor: bool,
+    pub target_fps: Option<u32>,      // None = au rythme de l'écran
+    pub hdr: HdrMode,                 // Native10Bit | ToneMapToSdr | Sdr
+    pub exclude_own_windows: bool,    // toujours true en pratique
+}
+
+pub enum FramePayload {
+    GpuTexture(GpuFrame),             // D3D11 / Metal (IOSurface) / DMA-BUF
+    Cpu(CpuFrame),                    // repli
+}
+
+pub trait CaptureSource: Send {
+    fn start(&mut self, sink: Box<dyn FrameSink>) -> Result<(), CaptureError>;
+    fn stop(&mut self) -> Result<(), CaptureError>;
+    fn grab_still(&mut self) -> Result<CpuFrame, CaptureError>;  // une seule image
+}
+
+pub trait FrameSink: Send {
+    fn on_frame(&mut self, frame: FramePayload, pts: Timestamp);
+}
+
+// vixeeny-audio
+pub enum AudioSourceKind {
+    SystemMix,                         // tout le son système
+    Application { pid: u32, name: String },
+    Microphone(DeviceId),
+}
+
+pub trait AudioSource: Send {
+    fn start(&mut self, sink: Box<dyn AudioSink>) -> Result<(), AudioError>;
+    fn stop(&mut self) -> Result<(), AudioError>;
+}
+
+// vixeeny-encode
+pub trait VideoEncoderBackend { /* ouvert depuis une entrée du registre (section 6) */ }
+
+// vixeeny-ocr
+pub trait OcrEngine {
+    fn available_languages(&self) -> Vec<LanguageTag>;
+    fn recognize(&self, image: &CpuFrame, langs: &[LanguageTag]) -> Result<OcrResult, OcrError>;
+}
+```
+
+Chaque trait a une implémentation par OS (`#[cfg(target_os = ...)]`) **et** une implémentation factice (`Fake…`) pour les tests.
+
+### 4.4 Pipeline vidéo
+
+```
+Capture (texture GPU)
+  → conversion couleur sur GPU (shader de calcul) : BGRA/RGBA16F → NV12 / P010 / formats 4:2:2 / 4:4:4
+  → mise à l'échelle GPU (si résolution de sortie ≠ source)
+  → encodeur matériel (zero-copy via hwframes FFmpeg : d3d11 → NVENC/AMF/QSV ; IOSurface → VideoToolbox ; DMA-BUF → VAAPI/Vulkan)
+     OU téléchargement vers la RAM → encodeur logiciel (x264, x265, libvpx, Tritium)
+  → paquets encodés
+  → [replay buffer en anneau] et/ou [muxer fichier]
+Audio (N sources) → rééchantillonnage 48 kHz → mixage selon le routage des pistes → encodeur audio → muxer
+```
+
+- Une **horloge maîtresse** unique (horloge monotone de l'OS) date toutes les images et tous les échantillons audio. La synchro A/V doit rester inférieure à 20 ms sur 1 h.
+- Les images capturées en retard sont dupliquées, celles en avance sont abandonnées, pour respecter un framerate constant (CFR) par défaut. Option VFR pour MKV.
+- La pause arrête l'envoi au muxer et décale les horodatages à la reprise (pas de trou dans le fichier).
+
+### 4.5 Config
+
+- Fichier `config.toml` dans le dossier de config de l'OS (`directories::ProjectDirs`).
+- Champ `schema_version`. Migrations automatiques de chaque version vers la suivante, testées.
+- Le démon et l'app relisent la config sur notification IPC (`ConfigChanged`) quand l'UI l'enregistre.
+- Exemple complet en annexe 13.1.
+
+### 4.6 Protocole IPC (extrait)
+
+```rust
+enum DaemonToApp {
+    RunAction { action: ActionId, frozen_frame: Option<SharedMemHandle> },
+    ConfigChanged,
+    Shutdown,
+}
+enum AppToDaemon {
+    Ready,
+    RecordingStateChanged(RecState),     // pour l'icône système (point rouge)
+    RequestRestartForUpdate,
+    Idle,                                  // l'app va se fermer
+}
+```
+
+---
+
+## 5. Spécifications fonctionnelles
+
+Chaque fonctionnalité a des **critères d'acceptation** (CA). Une fonctionnalité n'est terminée que si tous ses CA sont vérifiés.
+
+### 5.1 Actions et raccourcis
+
+Liste des actions assignables :
+
+| ID | Action | Raccourci par défaut |
+|---|---|---|
+| `capture_region` | Éditeur Print Screen (zone + annotations) | `Print Screen` |
+| `capture_window` | Capture de la fenêtre active (directement en fichier) | `Alt+Print Screen` |
+| `capture_fullscreen` | Capture de l'écran sous la souris (directement en fichier) | `Shift+Print Screen` |
+| `capture_all_monitors` | Capture de tous les écrans assemblés | aucun |
+| `capture_scrolling` | Capture défilante | aucun |
+| `ocr_region` | Sélection d'une zone → OCR | aucun |
+| `record_toggle` | Démarrer / arrêter l'enregistrement vidéo | `Ctrl+Shift+R` |
+| `record_pause` | Pause / reprise | `Ctrl+Shift+P` |
+| `replay_toggle` | Activer / désactiver le replay buffer | aucun |
+| `replay_save` | Sauvegarder le replay | `Ctrl+Shift+S` |
+| `overlay_toggle` | Afficher / masquer l'overlay latéral | `Ctrl+Shift+O` |
+| `open_settings` | Ouvrir les paramètres | aucun |
+
+Règles :
+
+- **3 raccourcis maximum par action.**
+- Saisie d'un raccourci : clic sur le champ, appui sur la combinaison, enregistrement. `Échap` annule, `Retour arrière` efface.
+- Détection de conflit : avec une autre action de Vixeeny (bloquant) et, quand l'OS le permet, avec un raccourci déjà réservé (avertissement).
+- Sous Wayland, les raccourcis passent par le portail `GlobalShortcuts` : l'utilisateur confirme dans la boîte de dialogue du système (voir section 8).
+
+CA :
+- CA-HK-1 : chaque action accepte 0 à 3 raccourcis et refuse le 4e.
+- CA-HK-2 : un raccourci fonctionne quand une application plein écran (jeu) a le focus, sous Windows.
+- CA-HK-3 : appuyer sur un raccourci au repos ne crée aucune activité CPU mesurable en dehors du traitement de l'action.
+
+### 5.2 Capture d'images
+
+Modes : écran entier (écran sous la souris), tous les écrans, zone, fenêtre/application.
+
+Options (dans les paramètres) :
+- Afficher le curseur : oui/non (défaut : non pour les images).
+- Format de sortie par défaut et réglages par format (5.4).
+- HDR : si l'écran est en HDR, `Convertir en SDR` (défaut) ou `Conserver le HDR` (seulement pour AVIF et JPEG XL ; les autres formats sont toujours convertis).
+- Son de capture : oui/non.
+- Après la capture : copier dans le presse-papier (oui/non), notification avec aperçu (oui/non), ouvrir l'éditeur (pour les captures directes).
+
+CA :
+- CA-IMG-1 : une capture plein écran en 4K est écrite sur le disque en moins de 300 ms (PNG optimisé exclu).
+- CA-IMG-2 : la capture ne contient aucune fenêtre de Vixeeny.
+- CA-IMG-3 : multi-écrans avec DPI différents : les coordonnées et dimensions sont correctes (pixels physiques).
+- CA-IMG-4 : la conversion HDR→SDR ne produit ni image délavée ni écrêtage visible sur l'écran de référence (🧪 TEST MANUEL).
+
+### 5.3 Éditeur Print Screen (type Lightshot)
+
+Déroulement :
+
+1. Appui sur `Print Screen` → le démon capture tous les écrans instantanément.
+2. Une fenêtre plein écran sans bordure, au-dessus de tout, affiche l'image figée sur chaque écran avec un voile sombre (opacité 40 %, réglable).
+3. L'utilisateur trace une zone à la souris. Pendant le tracé : dimensions en pixels affichées, loupe avec réticule et couleur du pixel sous le curseur (hex). La zone sélectionnée est affichée sans voile.
+4. Après la sélection : poignées pour redimensionner ou déplacer la zone. Une barre d'outils apparaît collée à la zone (à l'extérieur, du côté où il y a de la place).
+5. Détection de fenêtres : au survol avant le tracé, la fenêtre sous le curseur est mise en surbrillance ; un clic simple la sélectionne entièrement.
+
+Outils :
+
+| Outil | Détails |
+|---|---|
+| Crayon | Trait libre lissé |
+| Ligne | Maj = angles de 15° |
+| Flèche | Pointe propre, épaisseur liée au trait |
+| Rectangle | Contour ou plein ; Maj = carré |
+| Ellipse | Contour ou plein ; Maj = cercle |
+| Texte | Police, taille, couleur ; fond optionnel |
+| Surligneur | Semi-transparent, mode multiplication |
+| Flou | Flou gaussien sur une zone (irréversible à l'export) |
+| Pixellisation | Mosaïque sur une zone (irréversible à l'export) |
+| Marqueurs numérotés | Pastilles 1, 2, 3… numérotation automatique |
+| Recadrage | Ajuste la zone finale |
+| Pipette | Prend une couleur de l'image |
+
+Commun : palette de couleurs (8 couleurs prédéfinies + sélecteur complet + dernières couleurs), épaisseur, annuler/rétablir illimités, sélection et déplacement d'une annotation existante, suppression.
+
+Actions et raccourcis dans l'éditeur :
+
+| Action | Raccourci |
+|---|---|
+| Copier dans le presse-papier et fermer | `Ctrl+C` (`Cmd+C` sur macOS) |
+| Enregistrer dans le dossier par défaut avec le format par défaut | `Ctrl+S` |
+| Enregistrer sous (choix du dossier et du format) | `Ctrl+Shift+S` |
+| OCR de la zone | `Ctrl+T` |
+| Annuler / Rétablir | `Ctrl+Z` / `Ctrl+Y` et `Ctrl+Shift+Z` |
+| Fermer sans enregistrer | `Échap` |
+
+CA :
+- CA-ED-1 : entre l'appui sur Print Screen et l'affichage de l'image figée : moins de 150 ms sur la machine de référence, app déjà fermée (🧪 TEST MANUEL).
+- CA-ED-2 : `Ctrl+C` place une image PNG (sans perte) dans le presse-papier, collable dans un navigateur, Discord, un éditeur d'images.
+- CA-ED-3 : le modèle de l'éditeur (`vixeeny-editor`) est testé unitairement : chaque outil, annuler/rétablir, rendu de référence par snapshot.
+- CA-ED-4 : fonctionne correctement sur plusieurs écrans avec des DPI différents, et sur un écran 240 Hz sans saccade (rendu à la fréquence de l'écran pendant les interactions, 0 image par seconde au repos).
+
+### 5.4 Formats d'image
+
+| Format | Bibliothèque | Réglages | Défaut |
+|---|---|---|---|
+| PNG | `png` + `oxipng` | Niveau de compression, optimisation oxipng (oui/non, niveau) | Compression rapide, oxipng désactivé |
+| JPEG | jpegli | Qualité ou distance (butteraugli), sous-échantillonnage (4:4:4 / 4:2:0), progressif | Qualité 90, 4:4:4 |
+| WebP | libwebp | Avec perte (qualité) / sans perte, effort | Sans perte |
+| AVIF | libavif + Tritium | Qualité, vitesse, profondeur 8/10/12 bits, chroma 4:4:4 / 4:2:0, HDR (PQ) | Qualité 80, 10 bits, 4:4:4 |
+| JPEG XL | libjxl | Distance / sans perte, effort, HDR | Sans perte, effort 7 |
+
+Métadonnées : profil de couleur ICC incorporé (sRGB, ou BT.2100 PQ pour le HDR), aucune donnée personnelle.
+
+CA :
+- CA-FMT-1 : chaque format produit un fichier qui s'ouvre dans au moins deux visionneuses courantes de chaque OS (navigateurs Chrome et Firefox pour WebP/AVIF/JXL lorsqu'ils les supportent).
+- CA-FMT-2 : tests d'aller-retour : encodage puis décodage, vérification des dimensions et, pour les formats sans perte, identité bit à bit.
+
+### 5.5 Conversion rapide d'images
+
+- Dans l'app : fenêtre « Convertir » où l'on glisse-dépose un ou plusieurs fichiers ou dossiers. Choix du format et des réglages, dossier de sortie (même dossier par défaut), comportement si le fichier existe (renommer / écraser / ignorer). Barre de progression. Traitement parallèle sur tous les cœurs.
+- Intégration système : entrée « Convertir avec Vixeeny » dans le menu contextuel de l'explorateur (Windows : menu contextuel ; macOS : action rapide / service ; Linux : fichier `.desktop` avec `MimeType` et action pour Nautilus/Dolphin). Installable et désinstallable depuis les paramètres.
+- Formats lus : PNG, JPEG, WebP, AVIF, JPEG XL, BMP, TIFF, GIF (première image).
+
+CA :
+- CA-CONV-1 : conversion de 100 PNG 4K en AVIF sans erreur, avec progression affichée et annulation possible.
+- CA-CONV-2 : les profils ICC et l'orientation EXIF sont respectés.
+
+### 5.6 OCR
+
+- Moteur : **celui de l'OS**.
+  - Windows : `Windows.Media.Ocr`. Les langues disponibles dépendent des modules de langue installés dans Windows. Si une langue manque (ex. : japonais, coréen), l'app affiche comment l'installer (Paramètres Windows → Langue → ajouter la langue avec la fonctionnalité de reconnaissance optique), avec un bouton qui ouvre la page des paramètres.
+  - macOS : framework Vision (`VNRecognizeTextRequest`, niveau « accurate », correction linguistique activée).
+  - Linux : Tesseract (dépendance de paquet `tesseract` + packs de langues). Si absent, message expliquant la commande d'installation selon la distribution détectée.
+- Toutes les langues proposées par le moteur sont utilisables. Réglage : langues prioritaires (multi-sélection) ; défaut : langue de l'interface + anglais. Option « détection automatique » lorsque le moteur la propose (Vision).
+- Résultat : le texte est copié dans le presse-papier et affiché dans un petit panneau où il est modifiable, avec un bouton « Copier ». Respect des sauts de ligne et de l'ordre de lecture (y compris vertical pour le japonais quand le moteur le gère).
+
+CA :
+- CA-OCR-1 : une image de test en anglais, japonais, coréen et allemand (fournie dans `tests/fixtures/ocr/`) est reconnue avec moins de 5 % d'erreur de caractères sur Windows avec les langues installées (🧪 TEST MANUEL).
+- CA-OCR-2 : si aucune langue demandée n'est installée, aucun plantage, message clair.
+
+### 5.7 Capture défilante
+
+Mode retenu : **l'utilisateur fait défiler lui-même**, Vixeeny capture et assemble.
+
+1. L'utilisateur sélectionne une zone (comme l'éditeur) puis clique « Démarrer ».
+2. Il fait défiler le contenu (molette, barre de défilement, clavier). Vixeeny capture la zone à intervalle régulier (≈ 15 images/s) uniquement pendant cette phase.
+3. Un aperçu vertical réduit se construit en direct à côté de la zone.
+4. « Terminer » (ou `Entrée`) → l'image assemblée s'ouvre dans l'éditeur d'annotations.
+
+Algorithme d'assemblage (`vixeeny-stitch`) :
+- Comparaison de chaque nouvelle image avec la précédente pour trouver le décalage vertical (corrélation sur des empreintes de lignes, puis vérification fine).
+- Détection et exclusion des zones fixes (en-têtes et barres collantes) en haut et en bas.
+- Défilement vers le haut ou vers le bas géré ; décalage horizontal ignoré en 1.0.
+- Image finale limitée à 30 000 px de hauteur (réglable), avec avertissement.
+
+CA :
+- CA-SCR-1 : tests automatisés sur des séquences synthétiques (page générée + défilement simulé, avec en-tête fixe) : l'image assemblée est identique pixel par pixel à la page de référence.
+- CA-SCR-2 : 🧪 TEST MANUEL sur une page web longue dans un navigateur et sur une conversation Discord.
+
+### 5.8 Dossiers, noms de fichiers et dossiers par application
+
+- Dossiers séparés pour images, vidéos et replays (défaut : `Images/Vixeeny`, `Vidéos/Vixeeny`, `Vidéos/Vixeeny/Replays`).
+- Modèle de nom de fichier paramétrable. Variables : `{app}`, `{title}`, `{date}` (AAAA-MM-JJ), `{time}` (HH-MM-SS), `{ms}`, `{counter}`, `{width}`, `{height}`, `{monitor}`. Défaut : `{app}_{date}_{time}` (si l'app est inconnue ou c'est le bureau : `Vixeeny`). Exemple : `Wuthering Waves_2026-10-01_17-12-00.png`.
+- Option **« Créer un sous-dossier par application »**, réglable séparément pour images, vidéos et replays.
+- Résolution du nom de l'application (dans cet ordre) :
+  1. Table de correspondance utilisateur (modifiable dans les paramètres : exécutable → nom affiché).
+  2. Métadonnées de l'exécutable : `ProductName`, puis `FileDescription` (Windows) ; `CFBundleName` (macOS) ; champ `Name` du `.desktop` correspondant (Linux).
+  3. Titre de la fenêtre, nettoyé.
+  4. Nom de l'exécutable sans extension.
+  - Les noms génériques (ex. : `Client-Win64-Shipping`, utilisé par de nombreux jeux Unreal Engine) sont exclus de l'étape 4 : on passe au titre de la fenêtre.
+- Nettoyage : suppression des caractères interdits par le système de fichiers, espaces en bout, noms réservés Windows (`CON`, `NUL`…), longueur limitée à 100 caractères.
+- Capture du bureau ou d'une zone multi-fenêtres : `{app}` = application au premier plan au moment de la capture (option) ou `Bureau`.
+
+CA :
+- CA-DIR-1 : capturer Wuthering Waves avec l'option active crée `…/Wuthering Waves/` et y place le fichier (🧪 TEST MANUEL).
+- CA-DIR-2 : tests unitaires du nettoyage de noms et de l'ordre de résolution.
+
+### 5.9 Enregistrement vidéo
+
+Cibles : écran entier, zone, fenêtre/application (la capture de fenêtre suit la fenêtre si elle bouge ; si elle est réduite, l'image est figée sur la dernière image).
+
+Réglages vidéo :
+- Encodeur : liste issue du registre (section 6), filtrée par ce que le sondage a validé. Groupée par « Logiciel (CPU) » puis par GPU (nom du GPU).
+- Conteneur : MKV, MP4 (hybride), MP4 fragmenté, WebM. Les combinaisons interdites sont grisées (annexe 13.2).
+- Résolution de sortie : identique à la source, ou préréglages (2160p, 1440p, 1080p, 720p) ou personnalisée ; conservation du ratio.
+- Framerate : 24, 30, 48, 60, 90, 120, 144, 165, 240 ou personnalisé ; limité à la fréquence de l'écran source.
+- Profondeur : 8 ou 10 bits (selon l'encodeur).
+- Sous-échantillonnage : 4:2:0, 4:2:2, 4:4:4 (selon l'encodeur).
+- HDR : `Enregistrer en HDR` (10 bits, BT.2020 PQ, métadonnées HDR10 ; HEVC et AV1 seulement) ou `Convertir en SDR`. Visible seulement si l'écran est en HDR.
+- Mode de réglage : **Simple** (préréglages Qualité / Équilibré / Performance / Taille réduite, définis par encodeur dans le registre) ou **Avancé** (contrôle de débit CRF/CQP/VBR/CBR selon l'encodeur, débit, preset, tune, intervalle d'images clés, B-frames, lookahead, etc., générés depuis le registre) + champ libre d'options FFmpeg supplémentaires (`clé=valeur`), validé à l'ouverture de l'encodeur.
+- Curseur : visible oui/non (défaut : oui).
+- Découpage automatique : désactivé / par taille (Go) / par durée (minutes). Découpe sur image clé, sans perte d'images entre deux fichiers.
+- Raccourci de pause/reprise.
+
+Conteneurs :
+- **MP4 hybride** (défaut) : écrit en fragmenté pendant l'enregistrement (lisible même après un plantage), puis converti à l'arrêt en MP4 classique avec `moov` en tête (faststart), sans réencodage.
+- **MP4 fragmenté** : reste fragmenté.
+- **MKV** : supporte toutes les pistes audio, très robuste.
+- **WebM** : VP9 ou AV1 + Opus uniquement.
+
+Widget d'enregistrement :
+- Petite pilule horizontale en haut à gauche (position réglable : 4 coins), affichable ou non (option).
+- Contenu : point rouge pulsant, chronomètre `HH:MM:SS`, bouton pause/reprise, bouton stop. En pause : point orange fixe et chronomètre figé.
+- Option « Masquer automatiquement après 3 s, réapparaître au survol ».
+- **Toujours exclu de la capture** (Windows : `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` ; macOS : fenêtres exclues du filtre ScreenCaptureKit ; Linux : selon le compositeur, voir section 8).
+- L'icône système passe en état « enregistrement » (point rouge).
+
+CA :
+- CA-REC-1 : 🧪 TEST MANUEL — 10 minutes en 4K 240 i/s, HEVC NVENC 10 bits, sur un jeu DirectX 12 et un jeu Vulkan : 0 image perdue côté encodeur (compteur affiché dans les logs), impact sur les i/s du jeu < 5 %.
+- CA-REC-2 : un plantage forcé (kill du processus) pendant un enregistrement MP4 hybride laisse un fichier lisible jusqu'aux dernières secondes.
+- CA-REC-3 : pause/reprise : le fichier final est continu, la durée correspond au temps hors pause (± 1 image).
+- CA-REC-4 : synchro A/V < 20 ms après 1 h d'enregistrement (test automatisé avec source factice + 🧪 TEST MANUEL).
+- CA-REC-5 : le widget n'apparaît jamais dans la vidéo.
+- CA-REC-6 : chaque encodeur sondé avec succès produit un fichier lisible par FFmpeg et par VLC (test automatisé pour les encodeurs logiciels ; manuel pour le matériel).
+
+### 5.10 Audio
+
+- Sources disponibles :
+  - Son système complet.
+  - **Applications individuelles** (liste des applications qui émettent du son, rafraîchie à l'ouverture du menu).
+  - Microphones (tous les périphériques d'entrée).
+- Routage :
+  - Mode **« Une source = une piste »** (défaut) : chaque source choisie a sa propre piste.
+  - Mode **« Tout mixer »** : une seule piste.
+  - Mode **Avancé** : l'utilisateur crée des pistes et y assigne les sources (ex. : piste 1 = micro + jeu + Spotify mixés ; piste 2 = micro seul).
+  - Volume par source, et réduction de bruit simple pour le micro (option, filtre FFmpeg `afftdn`, désactivée par défaut).
+- Si le conteneur ne supporte qu'une piste… ils en supportent tous plusieurs, mais **WebM** est limité par certains lecteurs : avertissement non bloquant.
+- Codecs audio :
+
+| Codec | Implémentation | Réglages | Défaut |
+|---|---|---|---|
+| AAC-LC | Windows : Media Foundation (`aac_mf`) ; macOS : AudioToolbox (`aac_at`) ; Linux : encodeur `aac` natif de FFmpeg | Débit ; VBR quand l'encodeur le permet, sinon CBR | **VBR ≈ 160 kb/s** (CBR 160 kb/s sur Linux) |
+| Opus | libopus | Débit, VBR/CVBR/CBR | **VBR 160 kb/s** |
+| FLAC | natif FFmpeg | Niveau de compression | 5 |
+| PCM 16/24 bits | natif FFmpeg | Profondeur | MKV seulement |
+
+- Codec par défaut : AAC pour MP4, Opus pour MKV et WebM.
+- Fréquence : 48 kHz ; canaux : ceux de la source (stéréo par défaut, 5.1/7.1 conservés si présents en MKV).
+- Métadonnées de piste : chaque piste porte le nom de ses sources (ex. : « Micro », « Wuthering Waves », « Spotify »).
+
+CA :
+- CA-AUD-1 : enregistrer micro + jeu + Spotify en 3 pistes MKV : chaque piste ne contient que sa source (🧪 TEST MANUEL).
+- CA-AUD-2 : une application qui démarre ou s'arrête pendant l'enregistrement ne casse pas l'enregistrement (piste silencieuse).
+- CA-AUD-3 : débranchement du micro pendant l'enregistrement : silence sur sa piste, notification, aucun plantage.
+
+### 5.11 Replay buffer
+
+- Activable par raccourci, depuis l'overlay ou automatiquement au démarrage (option).
+- Durée réglable de 5 s à 20 min (défaut 30 s), par pas de 5 s. L'interface affiche une **estimation de la RAM nécessaire** selon le débit choisi.
+- Stockage : anneau de paquets encodés en RAM, découpé sur les images clés (intervalle d'images clés forcé à 1 s maximum en mode replay). Option « stocker sur disque » pour les longues durées (fichier temporaire tournant).
+- `replay_save` : écrit les N dernières secondes dans un fichier (même conteneur et mêmes pistes que l'enregistrement), sans réencodage, puis notification. Le buffer continue de tourner.
+- Compatible avec un enregistrement normal simultané (une seule session d'encodage partagée).
+- Réglages vidéo/audio propres au replay (par défaut : identiques à l'enregistrement).
+
+CA :
+- CA-RPL-1 : sauvegarde en moins de 2 s pour 2 min de 4K 60 i/s ; le fichier fait la durée demandée (± 1 s, alignement image clé).
+- CA-RPL-2 : la RAM consommée ne dépasse pas l'estimation de plus de 10 %.
+- CA-RPL-3 : deux sauvegardes consécutives rapprochées produisent deux fichiers valides.
+
+### 5.12 Overlay latéral
+
+- Raccourci `overlay_toggle`. Apparaît par défaut **à la verticale sur le bord droit** de l'écran sous la souris (bord réglable : gauche/droite/haut/bas).
+- Animation d'entrée : glissement + fondu, courbe « spring » ou ease-out, 180–250 ms. Sortie : 150 ms. Respecte le réglage « réduire les animations » de l'OS.
+- Style : fond translucide flouté quand l'OS le permet (Mica/Acrylic sous Windows 11, vibrancy sous macOS ; sinon fond opaque semi-transparent), coins arrondis, icônes nettes, thème clair/sombre suivant l'OS (ou forcé).
+- Contenu :
+  - Capture image : Zone / Fenêtre / Écran / Défilante / OCR.
+  - Vidéo : Enregistrer (avec choix rapide de la cible) / Replay (état + sauvegarder).
+  - Sélecteur rapide de profil (profils de réglages nommés, ex. « Jeu 4K HDR », « Tuto 1080p »).
+  - Accès aux paramètres.
+- Se ferme sur `Échap`, clic à l'extérieur, ou après le choix d'une action.
+- Navigation complète au clavier (flèches, Entrée).
+
+CA :
+- CA-OVL-1 : animation fluide à 240 Hz sur la machine de référence, sans image sautée visible (🧪 TEST MANUEL).
+- CA-OVL-2 : aucune consommation CPU/GPU une fois l'animation terminée et l'overlay immobile.
+
+### 5.13 Application de paramètres et galerie
+
+Ouverte par un clic sur l'icône système ou par `open_settings`.
+
+Sections :
+1. **Galerie** : grille des dernières captures (images et vidéos, miniatures générées à la demande et mises en cache), filtres (type, application, date), actions : ouvrir, ouvrir le dossier, copier, convertir, supprimer (vers la corbeille de l'OS).
+2. **Général** : langue, thème, démarrage avec l'OS, délai de fermeture de l'app, sons, notifications.
+3. **Raccourcis** : tableau des actions (5.1) avec 3 emplacements chacune.
+4. **Images** : formats et réglages, HDR, curseur, comportement après capture.
+5. **Vidéo** : encodeur, conteneur, résolution, framerate, profondeur, chroma, HDR, mode simple/avancé, découpage, widget.
+6. **Audio** : sources, routage des pistes, codecs.
+7. **Replay** : activation, durée, stockage, réglages propres.
+8. **Dossiers et noms** : dossiers, modèle de nom, sous-dossiers par application, table de correspondance des applications.
+9. **OCR** : langues, état des langues installées.
+10. **Profils** : créer / dupliquer / renommer / supprimer des profils de réglages vidéo+audio.
+11. **Matériel** : liste des GPU détectés, encodeurs disponibles par GPU, bouton « Relancer la détection ».
+12. **Mises à jour** : vérification automatique (oui/non), « Vérifier maintenant », version actuelle.
+13. **Intégration système** : menu contextuel de conversion (installer/retirer).
+14. **À propos** : licence, licences tierces, lien GitHub, dossier des logs.
+
+Chaque réglage modifié s'applique immédiatement (pas de bouton « Appliquer »), avec un bouton « Réinitialiser » par section.
+
+### 5.14 Notifications et retour après capture
+
+- Notification native avec miniature : clic = ouvrir le fichier ; bouton « Ouvrir le dossier ».
+- Erreurs (disque plein, encodeur indisponible, permission refusée) : notification claire avec action proposée.
+
+### 5.15 Instance unique et démarrage
+
+- Un seul démon par session utilisateur. Lancer Vixeeny une deuxième fois ouvre les paramètres de l'instance existante.
+- Premier lancement : assistant court (langue, dossiers, démarrage auto, permissions nécessaires selon l'OS, détection matérielle).
+
+### 5.16 Internationalisation
+
+- Langues livrées : français et anglais. Toutes les chaînes passent par `@tr()` ; aucune chaîne en dur.
+- Fichiers `.po` dans `i18n/`, guide de contribution pour ajouter une langue.
+- Dates et nombres au format de la langue.
+
+---
+
+## 6. Registre des codecs
+
+**Objectif : ajouter un codec futur (AV2, H.266/VVC via VVenC, nouveaux encodeurs matériels) sans modifier la logique de l'application.** Toute la connaissance spécifique aux codecs est dans des données.
+
+### 6.1 Fichier `crates/vixeeny-encode/codecs/registry.toml`
+
+Embarqué dans le binaire (`include_str!`), une entrée par encodeur. Exemple :
+
+```toml
+[[encoder]]
+id = "nvenc_hevc"
+display_name = "NVIDIA NVENC HEVC"
+family = "hevc"                  # h264 | hevc | av1 | vp9 | (futur) vvc | av2
+kind = "hardware"                # software | hardware
+vendor = "nvidia"                # none | nvidia | amd | intel | apple | vaapi | vulkan
+ffmpeg_encoder = "hevc_nvenc"
+platforms = ["windows", "linux"]
+hw_frames = ["d3d11", "cuda"]    # chemins zero-copy acceptés
+pixel_formats = [
+  { depth = 8,  chroma = "420", ffmpeg = "nv12" },
+  { depth = 10, chroma = "420", ffmpeg = "p010le" },
+  { depth = 8,  chroma = "444", ffmpeg = "yuv444p" },
+  { depth = 10, chroma = "444", ffmpeg = "yuv444p16le" },
+]
+hdr = true
+containers = ["mkv", "mp4", "fmp4"]
+rate_control = ["cqp", "vbr", "cbr", "constqp_lossless"]
+
+[encoder.presets]                # mode Simple
+quality     = { rc = "vbr", cq = 19, preset = "p6", tune = "hq",  multipass = "qres" }
+balanced    = { rc = "vbr", cq = 23, preset = "p4", tune = "hq" }
+performance = { rc = "vbr", cq = 25, preset = "p2", tune = "ll" }
+small       = { rc = "vbr", cq = 30, preset = "p5", tune = "hq" }
+
+[[encoder.params]]               # mode Avancé (généré automatiquement dans l'UI)
+key = "preset"
+ffmpeg_option = "preset"
+type = "enum"
+values = ["p1","p2","p3","p4","p5","p6","p7"]
+default = "p4"
+label = "encoder.nvenc.preset"   # clé de traduction
+```
+
+Les valeurs ci-dessus sont des exemples : **l'agent doit vérifier chaque option et valeur dans la documentation FFmpeg de la version épinglée** (`ffmpeg -h encoder=<nom>`) et générer des tests qui comparent le registre aux options réellement exposées par l'encodeur (via l'API `AVOption` de FFmpeg).
+
+### 6.2 Encodeurs à inclure en 1.0
+
+| Famille | Logiciel | NVIDIA | AMD | Intel | Apple | Linux générique |
+|---|---|---|---|---|---|---|
+| H.264 | `libx264` | `h264_nvenc` | `h264_amf` (Win) | `h264_qsv` | `h264_videotoolbox` | `h264_vaapi`, `h264_vulkan` |
+| HEVC | `libx265` | `hevc_nvenc` | `hevc_amf` (Win) | `hevc_qsv` | `hevc_videotoolbox` | `hevc_vaapi`, `hevc_vulkan` |
+| AV1 | `libsvtav1` (Tritium) | `av1_nvenc` | `av1_amf` (Win) | `av1_qsv` | — (aucun encodeur AV1 matériel Apple à la date de rédaction ; le sondage le détectera si cela change) | `av1_vaapi`, `av1_vulkan` |
+| VP9 | `libvpx-vp9` | — | — | `vp9_qsv` | — | `vp9_vaapi` |
+
+Vérifier au M0 la présence de chaque encodeur dans la version de FFmpeg épinglée (notamment les encodeurs Vulkan Video, plus récents). Sous Linux, AMF n'est pas utilisé : les GPU AMD passent par VAAPI/Vulkan.
+
+### 6.3 Sondage matériel
+
+- Énumération des adaptateurs : DXGI (Windows), Metal (macOS), Vulkan + DRM (Linux). Pour chaque GPU : nom, fabricant, ID, version du pilote.
+- Pour chaque encodeur matériel compatible avec le fabricant : ouverture d'une **session d'essai** pour chaque format de pixel déclaré (1 image 256×256 puis 3840×2160), avec et sans HDR. Seules les combinaisons qui réussissent sont proposées dans l'UI.
+- Multi-GPU : chaque encodeur est associé à son GPU ; l'UI affiche toutes les combinaisons valides. Si la capture se fait sur un GPU différent de l'encodeur, une copie inter-GPU est faite (avertissement « performance réduite »).
+- Résultat mis en cache (`hw_cache.toml`) avec comme clé l'ensemble {GPU, version du pilote, version de Vixeeny}. Nouveau sondage automatique si la clé change, ou sur demande.
+- Le sondage s'exécute dans un processus enfant séparé (`vixeeny-app --probe`) pour qu'un plantage du pilote ne fasse pas tomber l'app.
+- Durée cible : < 5 s.
+
+### 6.4 Validation des combinaisons
+
+Une fonction pure `validate(profile) -> Vec<Issue>` vérifie : encodeur ↔ conteneur, format de pixel ↔ encodeur, HDR ↔ codec/profondeur, codec audio ↔ conteneur, framerate ↔ niveau du codec. Testée exhaustivement (tests de propriétés).
+
+### 6.5 Procédure « Ajouter un codec » (copiée dans `docs/ADDING_A_CODEC.md`)
+
+Exemple : ajouter H.266 via VVenC, ou AV2 quand il sera disponible.
+
+1. Ajouter la bibliothèque dans `native/versions.toml` (dépôt, commit/version, licence) et son script de build. Vérifier la compatibilité de licence avec GPL-3.0.
+2. Activer l'encodeur dans la configuration de build de FFmpeg (`--enable-lib…`). Mettre à jour FFmpeg si l'encodeur n'existe que dans une version plus récente.
+3. Ajouter la famille (`vvc`, `av2`) dans l'énumération `CodecFamily` et dans la matrice conteneurs (annexe 13.2).
+4. Ajouter l'entrée `[[encoder]]` dans `registry.toml` (formats, préréglages, paramètres).
+5. Ajouter les clés de traduction.
+6. Lancer `cargo xtask verify-registry` (compare le registre aux `AVOption` réelles) et `cargo test`.
+7. Pour un nouvel encodeur matériel d'une nouvelle génération de GPU : souvent, seule l'étape 2 (mise à jour FFmpeg et des en-têtes du SDK) et l'ajout des formats de pixel dans le registre sont nécessaires ; le sondage les détectera automatiquement.
+
+---
+
+## 7. Exigences non fonctionnelles chiffrées
+
+| ID | Exigence | Mesure |
+|---|---|---|
+| NF-1 | CPU du démon au repos | 0,0 % en moyenne sur 10 min (Gestionnaire des tâches / `ps`), moins de 10 réveils par minute (Windows : Process Explorer « Context Switch Delta » ≈ 0) |
+| NF-2 | RAM du démon au repos | < 15 Mo d'ensemble de travail privé sous Windows (cible 8 Mo) |
+| NF-3 | RAM de l'app au repos (avant fermeture) | < 120 Mo hors buffer replay |
+| NF-4 | Démarrage à froid de l'app (overlay visible) | < 300 ms sur la machine de référence |
+| NF-5 | Print Screen → image figée affichée | < 150 ms |
+| NF-6 | Enregistrement 4K 240 i/s NVENC | 0 image perdue sur 10 min, impact jeu < 5 % |
+| NF-7 | Synchro A/V | < 20 ms sur 1 h |
+| NF-8 | Robustesse | aucun plantage sur 8 h d'enregistrement continu (test d'endurance) |
+| NF-9 | Taille | installeur Windows < 120 Mo |
+| NF-10 | Accessibilité | navigation clavier complète, contrastes WCAG AA, lecteur d'écran sur les fenêtres de paramètres (accessibilité Slint) |
+| NF-11 | Fichiers | aucune perte de données si le disque se remplit : arrêt propre, fichier finalisé, notification |
+
+Des commandes de mesure reproductibles sont fournies dans `xtask` (`cargo xtask bench-idle`, `bench-latency`).
+
+---
+
+## 8. Limitations connues par OS
+
+À documenter aussi dans `docs/LIMITATIONS.md` et dans l'aide de l'app.
+
+### Windows
+- La capture par Windows Graphics Capture couvre DirectX 9 à 12, Vulkan et OpenGL en fenêtré et en plein écran sans bordure, et la plupart des jeux en plein écran grâce aux « optimisations plein écran » de Windows. Un jeu en **plein écran exclusif strict** peut ne pas être capturable par fenêtre : proposer alors la capture d'écran entier, et l'indiquer dans l'aide.
+- Bordure jaune de capture : désactivable sous Windows 11 (`IsBorderRequired = false`) ; présente sous Windows 10.
+- Contrôle du rythme de capture (`MinUpdateInterval`) : versions récentes de Windows 11 ; sinon, régulation côté Vixeeny.
+- Capture audio par application : disponible sous Windows 11 ; à vérifier sur Windows 10 22H2 (repli : son système complet).
+- OCR : dépend des langues installées dans Windows.
+- Sans signature de code : avertissement SmartScreen au premier lancement.
+
+### macOS
+- Permissions obligatoires au premier usage : Enregistrement de l'écran, Microphone, Accessibilité (raccourcis globaux selon la méthode), Notifications. L'assistant guide l'utilisateur.
+- L'audio système/par application passe par ScreenCaptureKit (macOS 13+). Micro via AVFoundation (ou ScreenCaptureKit selon la version).
+- Sans notarisation : l'app est bloquée au premier lancement ; le README explique comment l'autoriser (clic droit → Ouvrir, ou Réglages → Confidentialité et sécurité).
+- Pas d'encodeur AV1 matériel Apple à la date de rédaction.
+
+### Linux
+- **Wayland** :
+  - La capture passe par le portail ScreenCast : boîte de dialogue de l'OS pour choisir l'écran ou la fenêtre (mémorisation via le jeton de restauration du portail quand c'est supporté). L'éditeur Print Screen sous Wayland utilise le portail Screenshot ou ScreenCast, ce qui peut ajouter de la latence.
+  - Les raccourcis globaux passent par le portail GlobalShortcuts (KDE, GNOME récent, Hyprland). Sur un compositeur sans ce portail : instructions pour lier une commande `vixeeny ctl <action>` dans les raccourcis du compositeur.
+  - Overlay et widget au-dessus de tout : via `wlr-layer-shell` (wlroots, KDE). Sous GNOME, pas de layer-shell : fenêtre normale « toujours au-dessus » quand c'est possible, comportement dégradé documenté.
+  - Exclusion du widget de la capture : pas garantie selon le compositeur ; option de masquer le widget pendant l'enregistrement.
+  - Détection de l'application capturée : limitée par le portail (on reçoit le flux, pas forcément l'application) ; repli sur le titre ou « Écran ».
+- **X11** : capture via XComposite/XShm, raccourcis via XGrabKey, pas de restriction de permission.
+- Audio par application : via les nœuds PipeWire de chaque application.
+- OCR : nécessite Tesseract et ses packs de langues installés.
+- Encodage matériel : VAAPI (Intel, AMD) et NVENC (NVIDIA, pilote propriétaire), Vulkan Video selon les pilotes.
+
+---
+
+## 9. Build, dépendances natives, licences
+
+### 9.1 Build reproductible
+
+- `native/versions.toml` liste chaque bibliothèque native avec version ou commit exact et somme SHA-256 de l'archive source : FFmpeg, x264, x265, libvpx, SVT-AV1-Tritium, dav1d, libopus, libwebp, libavif, libjxl, jpegli, nv-codec-headers, AMF headers, oneVPL/libvpl (QSV), libva (Linux).
+- `cargo xtask build-native` télécharge, vérifie et compile tout en statique dans `target/native/<triple>/`. Le build Rust lie ces artefacts.
+- La CI met en cache les artefacts natifs par hash de `versions.toml`.
+- Une seule commande pour un fork : `cargo xtask dist` produit les paquets de l'OS courant.
+- FFmpeg configuré avec `--enable-gpl --enable-version3`, **sans** `--enable-nonfree`, uniquement avec les composants nécessaires (encodeurs listés, décodeurs nécessaires aux miniatures et à la conversion, muxers MKV/MP4/WebM, filtres utilisés).
+
+### 9.2 Licences
+
+- Vixeeny : GPL-3.0-or-later (fichier `LICENSE`, en-tête SPDX dans chaque fichier source).
+- `cargo-deny` en CI : refus de toute licence incompatible.
+- `THIRD_PARTY_LICENSES.md` généré (crates via `cargo-about`, bibliothèques natives depuis `versions.toml`), affiché dans « À propos ».
+- Les codes sources correspondants des bibliothèques natives sont accessibles (liens et archives dans les releases GitHub), conformément à la GPL.
+
+### 9.3 CI (GitHub Actions)
+
+- À chaque push : fmt, clippy, tests, `cargo deny`, build sur Windows x64, macOS (arm64 + x64 → universel), Linux x64.
+- Tests nécessitant un GPU ou un écran : marqués `#[ignore]` en CI, exécutables localement avec `cargo xtask test-hw`.
+- Sur tag `v*` : build des paquets, signature des artefacts de mise à jour (9.4), publication d'une release GitHub en brouillon.
+
+### 9.4 Signature des mises à jour (gratuite)
+
+Pas de signature de code payante (Authenticode, notarisation Apple). En revanche, chaque artefact de release est signé avec une clé **minisign/ed25519** gratuite gérée par le mainteneur (clé privée dans les secrets GitHub). La clé publique est intégrée au binaire. Le système de mise à jour refuse tout fichier dont la signature est invalide.
+
+---
+
+## 10. Packaging, distribution et mises à jour
+
+### 10.1 Formats
+
+| OS | Formats |
+|---|---|
+| Windows | Installeur `.exe` (Inno Setup ou WiX, choix au M0) par utilisateur sans droits admin + version portable `.zip` (config à côté de l'exécutable si un fichier `portable.flag` est présent) |
+| macOS | `.dmg` (binaire universel) |
+| Linux | Flatpak, AppImage, `.deb`, PKGBUILD pour l'AUR |
+
+L'installeur Windows : installation par utilisateur, entrée « Programmes et fonctionnalités », désinstallation propre (option : conserver la config), démarrage auto activé par défaut, menu contextuel optionnel.
+
+### 10.2 Mises à jour
+
+- Le démon vérifie l'API GitHub Releases au démarrage puis toutes les 24 h (désactivable ; aucun autre trafic réseau).
+- Si une nouvelle version existe : notification + bandeau dans les paramètres avec les notes de version. L'utilisateur clique « Mettre à jour ».
+- Selon le format :
+  - **Installeur Windows, portable Windows, `.dmg`, AppImage** : téléchargement, vérification SHA-256 + signature minisign, remplacement, **redémarrage automatique** du démon et de l'app. Si un enregistrement est en cours, la mise à jour attend la fin.
+    - Windows : l'exécutable en cours est verrouillé → un petit programme de mise à jour (`vixeeny-updater.exe`) attend la fermeture des processus, remplace les fichiers, relance le démon.
+    - macOS : remplacement du bundle `.app` puis relance ; retrait de l'attribut de quarantaine sur le fichier téléchargé par Vixeeny lui-même.
+    - AppImage : remplacement du fichier AppImage.
+  - **Flatpak, `.deb`, AUR** : simple notification « une mise à jour est disponible via votre gestionnaire de paquets ».
+- Retour arrière : la version précédente est conservée jusqu'au redémarrage réussi de la nouvelle ; en cas d'échec de démarrage, restauration automatique.
+
+---
+
+## 11. Feuille de route par jalons
+
+Légende : 🪟 Windows, 🍎 macOS, 🐧 Linux, 🧪 test manuel requis.
+
+### Phase A — Fondations (toutes plateformes)
+
+**M0 — Squelette et décisions**
+- Workspace, toolchain, CI 3 OS, `cargo-deny`, licence, structure de dossiers (4.2).
+- Relevé et épinglage des versions de toutes les dépendances (règle 0.1.5) ; mise à jour de la section 3 et du journal 14.
+- Choix et justification : moteur de rendu Slint, installeur Windows.
+- *Terminé quand* : CI verte sur 3 OS avec un binaire « hello » par crate.
+
+**M1 — Build natif**
+- `native/versions.toml`, `cargo xtask build-native` pour FFmpeg et toutes les bibliothèques, sur les 3 OS.
+- Test : un programme de démonstration encode 100 images synthétiques avec chaque encodeur logiciel et chaque conteneur.
+- *Terminé quand* : artefacts natifs en cache CI, tests d'encodage logiciel verts sur 3 OS.
+
+**M2 — Démon minimal** 🪟
+- Boucle d'événements, icône système (menu : Paramètres, Quitter), instance unique, démarrage auto, lecture de config, IPC, lancement de l'app.
+- `cargo xtask bench-idle`.
+- 🧪 Mesure NF-1 et NF-2 sur la machine de référence.
+- *Terminé quand* : NF-1 et NF-2 respectées.
+
+**M3 — Raccourcis globaux** 🪟
+- 3 raccourcis par action, détection de conflits, déclenchement dans un jeu plein écran.
+- 🧪 CA-HK-2.
+
+### Phase B — Images sous Windows
+
+**M4 — Capture d'images** 🪟
+- `vixeeny-platform` (écrans, DPI, fenêtres, processus), `vixeeny-capture` Windows (WGC) pour image unique, exclusion des fenêtres de Vixeeny.
+- Captures directes plein écran / fenêtre / tous écrans en PNG.
+- *Terminé quand* : CA-IMG-1, CA-IMG-2, CA-IMG-3.
+
+**M5 — Formats d'image et HDR** 
+- `vixeeny-image` : PNG, JPEG (jpegli), WebP, AVIF, JPEG XL ; profils ICC ; tone-mapping HDR→SDR (algorithme documenté, ex. BT.2390 ou équivalent) ; conservation HDR pour AVIF/JXL.
+- Tests d'aller-retour sur 3 OS.
+- 🧪 CA-IMG-4 sur l'écran QD-OLED HDR.
+
+**M6 — Dossiers, noms, sous-dossiers par application** 🪟
+- Modèle de nom, résolution du nom d'application (5.8), table de correspondance.
+- 🧪 CA-DIR-1 avec Wuthering Waves.
+
+**M7 — Éditeur Print Screen** 🪟
+- Capture par le démon + mémoire partagée, fenêtre figée multi-écrans, sélection, loupe, détection de fenêtres, `vixeeny-editor` (modèle) + UI Slint, tous les outils, presse-papier, enregistrement.
+- *Terminé quand* : CA-ED-1 à CA-ED-4. 🧪
+
+**M8 — OCR** 🪟
+- `vixeeny-ocr` Windows, panneau de résultat, gestion des langues manquantes.
+- 🧪 CA-OCR-1.
+
+**M9 — Capture défilante**
+- `vixeeny-stitch` (multiplateforme, testé sur séquences synthétiques), UI Windows.
+- *Terminé quand* : CA-SCR-1 vert en CI ; 🧪 CA-SCR-2.
+
+**M10 — Conversion d'images** 🪟
+- Fenêtre de conversion, menu contextuel Windows.
+- CA-CONV-1, CA-CONV-2.
+
+### Phase C — Vidéo sous Windows
+
+**M11 — Registre et sondage**
+- `registry.toml` complet (6.2), `cargo xtask verify-registry`, `validate()`, sondage GPU en processus enfant, cache.
+- Faux adaptateurs pour tester le multi-GPU.
+- 🧪 Sondage sur la RTX 5080 : liste des encodeurs NVENC et formats détectés, à comparer à la documentation NVIDIA.
+
+**M12 — Pipeline vidéo** 🪟
+- Capture vidéo WGC, horloge maîtresse, conversion couleur et mise à l'échelle GPU, zero-copy D3D11 → NVENC/AMF/QSV, repli CPU pour les encodeurs logiciels, muxers MKV / MP4 hybride / fMP4 / WebM, pause, découpage, HDR.
+- *Terminé quand* : CA-REC-2, CA-REC-3, CA-REC-6 ; 🧪 CA-REC-1.
+
+**M13 — Audio** 🪟
+- Son système, par application, micro ; routage des pistes ; encodeurs AAC (MF), Opus, FLAC, PCM.
+- CA-AUD-2, CA-AUD-3 ; 🧪 CA-AUD-1 ; CA-REC-4.
+
+**M14 — Widget d'enregistrement** 🪟
+- CA-REC-5. 🧪
+
+**M15 — Replay buffer** 🪟
+- CA-RPL-1 à CA-RPL-3. 🧪
+
+### Phase D — Interface complète
+
+**M16 — Overlay latéral** 🪟
+- CA-OVL-1, CA-OVL-2. 🧪
+
+**M17 — Paramètres, galerie, profils, assistant de premier lancement, notifications, traductions FR/EN**
+- Toutes les sections de 5.13.
+- 🧪 Revue complète par le mainteneur.
+
+**M18 — Mises à jour et packaging Windows**
+- Installeur, portable, `vixeeny-updater`, signature minisign, retour arrière.
+- 🧪 Mise à jour d'une version de test vers une autre avec redémarrage automatique.
+
+**➡ Release 0.5 (Windows uniquement)** : usage quotidien par le mainteneur pendant au moins 2 semaines, correction des bugs.
+
+### Phase E — macOS
+
+**M19 — Plateforme et capture macOS** 🍎 : ScreenCaptureKit (image, vidéo, audio système et par application), permissions, IOSurface → VideoToolbox, exclusion des fenêtres.
+**M20 — Intégration macOS** 🍎 : raccourcis, icône de barre de menus, LaunchAgent, OCR Vision, notifications, action rapide de conversion, vibrancy, `.dmg`, mise à jour.
+- 🧪 Testeurs volontaires : checklist de la section 12.3.
+
+### Phase F — Linux
+
+**M21 — Capture et audio Linux** 🐧 : portails ScreenCast/Screenshot (Wayland), X11, PipeWire (vidéo DMA-BUF et audio par application), VAAPI / NVENC / Vulkan.
+**M22 — Intégration Linux** 🐧 : raccourcis (portail + X11 + commande `vixeeny ctl`), layer-shell, autostart, Tesseract, notifications, menus contextuels, Flatpak/AppImage/deb/AUR, mise à jour.
+- 🧪 Testeurs volontaires sur GNOME, KDE, Hyprland, X11.
+
+### Phase G — Release
+
+**M23 — Version 0.9 bêta publique** : 3 OS, appel à testeurs, collecte des retours (modèles d'issues GitHub avec infos système générées par l'app : `Aide → Copier les infos système`).
+**M24 — Version 1.0** : tous les CA Windows validés ; aucun bug bloquant ouvert sur macOS/Linux ; documentation finale (README, ARCHITECTURE, ADDING_A_CODEC, LIMITATIONS, CONTRIBUTING) ; tag `v1.0.0`.
+
+---
+
+## 12. Plan de tests
+
+### 12.1 Automatisés (CI, 3 OS)
+
+- Unitaires : config et migrations, nettoyage des noms, résolution des noms d'applications (avec données factices), modèle de l'éditeur, `validate()`, assemblage défilant, tone-mapping (images de référence), raccourcis (analyse et conflits).
+- Intégration : pipeline vidéo complet avec `FakeCaptureSource` (mire animée avec horodatage incrusté) et `FakeAudioSource` (bips synchronisés) → vérification par décodage FFmpeg : nombre d'images, durée, synchro A/V, pistes, métadonnées HDR.
+- Encodeurs logiciels × conteneurs × profondeurs : matrice complète.
+- Registre : `verify-registry`.
+- Snapshots UI (rendu Slint hors écran) des écrans principaux.
+
+### 12.2 Matériel (local, `cargo xtask test-hw`)
+
+- Sondage réel, encodage avec chaque encodeur matériel détecté, zero-copy, capture réelle d'une fenêtre de test (DirectX 11, DirectX 12, Vulkan, OpenGL — petits programmes de test fournis dans `tests/hw-apps/`).
+
+### 12.3 Checklist manuelle (à fournir aux testeurs, par OS)
+
+Installation → assistant → raccourcis → Print Screen + annotations + Ctrl+C → capture fenêtre d'un jeu → sous-dossier par application → OCR multilingue → capture défilante → enregistrement 10 min avec 3 pistes audio → pause/reprise → replay → widget absent de la vidéo → overlay → conversion → mise à jour → désinstallation. Chaque étape : OK / KO + capture + logs.
+
+### 12.4 Endurance
+
+8 h d'enregistrement continu (NF-8) et 7 jours de démon au repos sans fuite mémoire (RAM stable à ± 1 Mo).
+
+---
+
+## 13. Annexes
+
+### 13.1 Config par défaut (extrait)
+
+```toml
+schema_version = 1
+
+[general]
+language = "auto"
+theme = "system"
+autostart = true
+app_idle_exit_seconds = 30
+sounds = true
+notifications = true
+check_updates = true
+
+[hotkeys]
+capture_region      = ["PrintScreen"]
+capture_window      = ["Alt+PrintScreen"]
+capture_fullscreen  = ["Shift+PrintScreen"]
+record_toggle       = ["Ctrl+Shift+R"]
+record_pause        = ["Ctrl+Shift+P"]
+replay_save         = ["Ctrl+Shift+S"]
+overlay_toggle      = ["Ctrl+Shift+O"]
+
+[paths]
+images  = "{pictures}/Vixeeny"
+videos  = "{videos}/Vixeeny"
+replays = "{videos}/Vixeeny/Replays"
+filename_template = "{app}_{date}_{time}"
+per_app_subfolder = { images = false, videos = false, replays = false }
+
+[image]
+format = "png"
+show_cursor = false
+hdr = "tonemap_sdr"
+copy_to_clipboard = false
+
+[image.jpeg]
+quality = 90
+chroma = "444"
+
+[image.avif]
+quality = 80
+depth = 10
+chroma = "444"
+
+[video]
+profile = "default"
+
+[profiles.default]
+encoder = "auto"            # meilleur encodeur matériel détecté, sinon libx264
+container = "mp4_hybrid"
+resolution = "source"
+fps = 60
+depth = 8
+chroma = "420"
+hdr = "tonemap_sdr"
+mode = "simple"
+preset = "balanced"
+show_cursor = true
+split = { mode = "off" }
+
+[profiles.default.audio]
+routing = "one_track_per_source"
+sources = ["system"]
+codec = "auto"              # AAC en MP4, Opus en MKV/WebM
+bitrate_kbps = 160
+vbr = true
+
+[recording_widget]
+enabled = true
+corner = "top_left"
+auto_hide = false
+
+[replay]
+enabled_on_start = false
+duration_seconds = 30
+storage = "ram"
+
+[overlay]
+edge = "right"
+
+[ocr]
+languages = ["auto"]
+```
+
+### 13.2 Matrice conteneur × codec
+
+| | H.264 | HEVC | AV1 | VP9 | AAC | Opus | FLAC | PCM |
+|---|---|---|---|---|---|---|---|---|
+| MKV | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| MP4 hybride / fMP4 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
+| WebM | ❌ | ❌ | ✅ | ✅ | ❌ | ✅ | ❌ | ❌ |
+
+HDR (PQ, HDR10) : HEVC et AV1 en 10 bits, conteneurs MKV et MP4. (VP9 HDR possible mais non proposé en 1.0.)
+
+### 13.3 Glossaire
+
+- **WGC** : Windows Graphics Capture, API officielle de capture d'écran et de fenêtres.
+- **SCK** : ScreenCaptureKit, API de capture de macOS.
+- **Zero-copy** : l'image reste en mémoire GPU de la capture jusqu'à l'encodeur.
+- **fMP4** : MP4 fragmenté, lisible même s'il n'est pas finalisé.
+- **MP4 hybride** : fragmenté pendant l'enregistrement, converti en MP4 classique à la fin.
+- **Replay buffer** : enregistrement permanent en mémoire des dernières secondes, sauvegardées à la demande.
+- **Tone-mapping** : conversion d'une image HDR en SDR en préservant l'aspect.
+
+---
+
+## 14. Journal des décisions
+
+| Date | Décision | Raison |
+|---|---|---|
+| 2026-10-01 | Licence GPL-3.0-or-later | x264/x265 sont GPL ; forks libres |
+| 2026-10-01 | Architecture démon + app séparés | RAM minimale au repos |
+| 2026-10-01 | Slint pour l'UI, pas de webview | RAM, fluidité |
+| 2026-10-01 | FFmpeg pour toute la vidéo et l'audio | couverture des encodeurs et conteneurs |
+| 2026-10-01 | SVT-AV1-Tritium comme AV1 logiciel et pour AVIF | qualité psychovisuelle, 4:4:4, même API que SVT-AV1 |
+| 2026-10-01 | OCR de l'OS (Tesseract sous Linux) | légèreté, toutes langues |
+| 2026-10-01 | Capture défilante pilotée par l'utilisateur | fiabilité multiplateforme |
+| 2026-10-01 | Pas de mise en ligne, pas de télémétrie | vie privée, simplicité |
+| 2026-10-01 | Pas de signature de code payante ; signature minisign des mises à jour | coût |
+| 2026-10-01 | Windows prioritaire ; 0.5 Windows, 0.9 bêta 3 OS, puis 1.0 | seul le mainteneur teste Windows |
+| 2026-10-01 | Registre de codecs piloté par données | ajout futur d'AV2 / x266 sans changement de logique |
+| 2026-10-01 | M0 : toolchain Rust 1.98.1 épinglée ; versions relevées sur crates.io : slint 1.18.1, ffmpeg-next / ffmpeg-sys-next 9.0.0, serde 1.0.229, toml 1.1.6, postcard 1.1.3, directories 6.0.0, interprocess 2.4.4, global-hotkey 0.8.0, ashpd 0.13.13, tray-icon 0.26.0, auto-launch 0.6.0, arboard 3.6.1, notify-rust 4.18.1, windows 0.62.2, png 0.18.1, oxipng 10.2.1, libwebp-sys 0.14.4, image 0.25.10, thiserror 2.0.21, anyhow 1.0.104, tracing 0.1.44, insta 1.48.0, pipewire 0.10.1, x11rb 0.14.0, objc2 0.6.4 (seules les versions du workspace sont figées dans Cargo.toml ; le reste sera épinglé à l'usage) | règle 0.1.5 |
+| 2026-10-01 | M0 : `panic = "abort"` en release, lints workspace (`unwrap_used`/`expect_used` en warning, `undocumented_unsafe_blocks` en deny) | règles 0.2 |
+| | *(à compléter par l'agent)* | |
