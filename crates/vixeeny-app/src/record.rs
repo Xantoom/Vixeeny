@@ -14,7 +14,9 @@ use vixeeny_common::config::{Config, Profile};
 use vixeeny_common::ipc::RecState;
 use vixeeny_encode::clock::Fps;
 use vixeeny_encode::probe::ProbeResult;
-use vixeeny_encode::recorder::{OutputContainer, RecordConfig, Recorder, Split, VideoFrame};
+use vixeeny_encode::recorder::{
+    FrameFormat, OutputContainer, RecordConfig, Recorder, Split, VideoFrame,
+};
 use vixeeny_encode::registry::{Chroma, Encoder, Platform, PresetName, Registry};
 use vixeeny_encode::validate::{self, Context as ValidateContext, Severity};
 
@@ -107,6 +109,8 @@ struct Plan {
     config: RecordConfig,
     monitor: vixeeny_platform::MonitorInfo,
     cursor: bool,
+    /// The monitor shows HDR and the profile keeps it: frames are scRGB half floats.
+    hdr: bool,
     namer: Box<dyn FnMut(u32) -> std::path::PathBuf + Send>,
 }
 
@@ -155,6 +159,8 @@ fn plan(config: &Config) -> anyhow::Result<Plan> {
         .iter()
         .map(|(k, v)| (k.clone(), v.to_ffmpeg()))
         .collect();
+    // An SDR monitor has nothing to preserve: such a recording stays SDR.
+    let hdr = monitor.hdr.is_some() && matches!(profile.hdr.as_str(), "keep_hdr" | "hdr");
     let record = RecordConfig {
         options,
         container,
@@ -162,7 +168,7 @@ fn plan(config: &Config) -> anyhow::Result<Plan> {
         fps: Fps::whole(profile.fps.clamp(1, 240)),
         depth: profile.depth,
         chroma,
-        hdr: matches!(profile.hdr.as_str(), "keep_hdr" | "hdr"),
+        hdr,
         split: parse_split(&profile.split.mode),
         vfr: profile.vfr,
         keyframe_seconds: 2.0,
@@ -228,6 +234,7 @@ fn plan(config: &Config) -> anyhow::Result<Plan> {
         config: record,
         monitor,
         cursor: profile.show_cursor,
+        hdr,
         namer,
     })
 }
@@ -239,6 +246,7 @@ pub fn start(config: &Config) -> anyhow::Result<Handle> {
     let stream = vixeeny_capture::VideoStream::start(
         &vixeeny_capture::StreamTarget::Monitor(plan.monitor),
         plan.cursor,
+        plan.hdr,
     )?;
     let recorder = Recorder::start(plan.config, plan.namer)?;
     let state = Arc::new(AtomicU8::new(RECORDING));
@@ -298,7 +306,12 @@ fn record_loop(
                             width: f.width,
                             height: f.height,
                             stride: f.stride,
-                            bgra: f.data,
+                            format: if captured.hdr {
+                                FrameFormat::ScRgbHalf
+                            } else {
+                                FrameFormat::Bgra8
+                            },
+                            data: f.data,
                         },
                     );
                 }

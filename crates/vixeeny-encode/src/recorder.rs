@@ -118,13 +118,23 @@ pub struct RecordConfig {
     pub vfr: bool,
 }
 
-/// A captured frame: 8-bit BGRA in RAM.
+/// How the pixels of a [`VideoFrame`] are laid out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrameFormat {
+    /// 8-bit BGRA, sRGB (an SDR monitor).
+    Bgra8,
+    /// RGBA half floats, scRGB (an HDR monitor): converted to BT.2020 / PQ by the recorder.
+    ScRgbHalf,
+}
+
+/// A captured frame in RAM.
 #[derive(Debug, Clone)]
 pub struct VideoFrame {
     pub width: u32,
     pub height: u32,
     pub stride: usize,
-    pub bgra: Vec<u8>,
+    pub format: FrameFormat,
+    pub data: Vec<u8>,
 }
 
 /// Live counters, readable while recording (the "frames lost" figure of CA-REC-1).
@@ -322,7 +332,7 @@ struct Worker {
     codec: ffmpeg_next::Codec,
     pix: Pixel,
     enc_tb: Rational,
-    scaler: Option<(scaling::Context, (u32, u32))>,
+    scaler: Option<(scaling::Context, (u32, u32, FrameFormat))>,
     last: Option<frame::Video>,
     out: Option<Output>,
     part: u32,
@@ -492,10 +502,20 @@ impl Worker {
 
     fn convert(&mut self, src: &VideoFrame) -> Result<frame::Video, RecordError> {
         let (ow, oh) = self.cfg.output_size;
-        let dims = (src.width, src.height);
-        if self.scaler.as_ref().is_none_or(|(_, d)| *d != dims) {
+        let key = (src.width, src.height, src.format);
+        // Half-float HDR frames become 16-bit PQ RGB first; swscale does the rest.
+        let hdr16;
+        let (input_pix, bytes, stride, bpp) = match src.format {
+            FrameFormat::Bgra8 => (Pixel::BGRA, &src.data[..], src.stride, 4),
+            FrameFormat::ScRgbHalf => {
+                hdr16 = crate::hdr::scrgb_half_to_pq(&src.data, src.width, src.height, src.stride)
+                    .ok_or_else(|| RecordError::Config("frame buffer too small".into()))?;
+                (Pixel::RGB48LE, &hdr16[..], src.width as usize * 6, 6)
+            }
+        };
+        if self.scaler.as_ref().is_none_or(|(_, k)| *k != key) {
             let mut ctx = scaling::Context::get(
-                Pixel::BGRA,
+                input_pix,
                 src.width,
                 src.height,
                 self.pix,
@@ -524,18 +544,17 @@ impl Worker {
                     1 << 16,
                 );
             }
-            self.scaler = Some((ctx, dims));
+            self.scaler = Some((ctx, key));
         }
-        let mut input = frame::Video::new(Pixel::BGRA, src.width, src.height);
-        let stride = input.stride(0);
-        let row = src.width as usize * 4;
+        let mut input = frame::Video::new(input_pix, src.width, src.height);
+        let dst_stride = input.stride(0);
+        let row = src.width as usize * bpp;
         for y in 0..src.height as usize {
-            let from = y * src.stride;
-            let line = src
-                .bgra
+            let from = y * stride;
+            let line = bytes
                 .get(from..from + row)
                 .ok_or_else(|| RecordError::Config("frame buffer too small".into()))?;
-            input.data_mut(0)[y * stride..y * stride + row].copy_from_slice(line);
+            input.data_mut(0)[y * dst_stride..y * dst_stride + row].copy_from_slice(line);
         }
         let mut output = frame::Video::new(self.pix, ow, oh);
         if let Some((ctx, _)) = &mut self.scaler {

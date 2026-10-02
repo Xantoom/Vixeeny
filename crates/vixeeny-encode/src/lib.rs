@@ -3,6 +3,7 @@
 //! later milestones, the video pipeline. See README.md.
 
 pub mod clock;
+pub mod hdr;
 pub mod probe;
 pub mod registry;
 pub mod validate;

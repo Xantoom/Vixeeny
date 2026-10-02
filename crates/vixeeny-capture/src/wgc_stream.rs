@@ -43,6 +43,14 @@ fn os<E: std::fmt::Display>(what: &str) -> impl FnOnce(E) -> CaptureError + '_ {
     move |e| CaptureError::Os(format!("{what}: {e}"))
 }
 
+fn pixel_format(hdr: bool) -> DirectXPixelFormat {
+    if hdr {
+        DirectXPixelFormat::R16G16B16A16Float
+    } else {
+        DirectXPixelFormat::B8G8R8A8UIntNormalized
+    }
+}
+
 /// What to follow.
 #[derive(Debug, Clone)]
 pub enum StreamTarget {
@@ -59,6 +67,8 @@ pub enum StreamTarget {
 /// A frame and when it was produced.
 #[derive(Debug)]
 pub struct CapturedFrame {
+    /// `true`: `frame.data` holds RGBA half floats (scRGB, 8 bytes per pixel) instead of BGRA8.
+    pub hdr: bool,
     /// Nanoseconds on the OS monotonic clock (the same clock as
     /// `vixeeny_platform::monotonic_ns`).
     pub time_ns: i64,
@@ -72,6 +82,7 @@ struct Shared {
     context: Mutex<ID3D11DeviceContext>,
     staging: Mutex<Option<(ID3D11Texture2D, (u32, u32))>>,
     region: Option<PhysicalRect>,
+    hdr: bool,
     last_size: Mutex<SizeInt32>,
 }
 
@@ -175,7 +186,8 @@ pub struct VideoStream {
 }
 
 impl VideoStream {
-    pub fn start(target: &StreamTarget, cursor: bool) -> Result<Self, CaptureError> {
+    /// `hdr`: ask for scRGB half floats (an HDR monitor); the frames then have `hdr` set.
+    pub fn start(target: &StreamTarget, cursor: bool, hdr: bool) -> Result<Self, CaptureError> {
         if !GraphicsCaptureSession::IsSupported().map_err(os("IsSupported"))? {
             return Err(CaptureError::Os(
                 "Windows Graphics Capture is not available".into(),
@@ -236,11 +248,12 @@ impl VideoStream {
             context: Mutex::new(context),
             staging: Mutex::new(None),
             region,
+            hdr,
             last_size: Mutex::new(size),
         });
         let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
             &winrt_device,
-            DirectXPixelFormat::B8G8R8A8UIntNormalized,
+            pixel_format(hdr),
             2,
             size,
         )
@@ -324,21 +337,18 @@ fn frame_handler(
                 && (last.Width, last.Height) != (content.Width, content.Height)
             {
                 *last = content;
-                let _ = pool.Recreate(
-                    &shared.winrt_device,
-                    DirectXPixelFormat::B8G8R8A8UIntNormalized,
-                    2,
-                    content,
-                );
+                let _ = pool.Recreate(&shared.winrt_device, pixel_format(shared.hdr), 2, content);
             }
             let time_ns = frame.SystemRelativeTime()?.Duration.saturating_mul(100);
             let surface = frame.Surface()?;
             let access: IDirect3DDxgiInterfaceAccess = surface.cast()?;
             // SAFETY: the surface is backed by a D3D11 texture on our device.
             let texture: ID3D11Texture2D = unsafe { access.GetInterface() }?;
-            let result = shared
-                .read(&texture, content)
-                .map(|frame| CapturedFrame { time_ns, frame });
+            let result = shared.read(&texture, content).map(|frame| CapturedFrame {
+                hdr: shared.hdr,
+                time_ns,
+                frame,
+            });
             // A full queue drops the frame: the consumer is behind.
             let _ = tx.try_send(result);
             Ok(())

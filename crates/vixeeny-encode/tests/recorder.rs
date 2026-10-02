@@ -12,7 +12,9 @@ use std::time::Duration;
 
 use vixeeny_encode::clock::Fps;
 use vixeeny_encode::ffmpeg::{codec, format, media};
-use vixeeny_encode::recorder::{OutputContainer, RecordConfig, Recorder, Split, VideoFrame};
+use vixeeny_encode::recorder::{
+    FrameFormat, OutputContainer, RecordConfig, Recorder, Split, VideoFrame,
+};
 use vixeeny_encode::registry::{Chroma, PresetName, Registry};
 
 const MS: i64 = 1_000_000;
@@ -41,7 +43,8 @@ fn frame(w: u32, h: u32, i: usize) -> VideoFrame {
         width: w,
         height: h,
         stride: (w * 4) as usize,
-        bgra,
+        format: FrameFormat::Bgra8,
+        data: bgra,
     }
 }
 
@@ -528,5 +531,72 @@ fn variable_frame_rate_is_refused_in_mp4() {
     let mut cfg = config(&registry, "libx264", OutputContainer::Mp4Hybrid, 30);
     cfg.vfr = true;
     assert!(Recorder::start(cfg, namer(&dir, "mp4")).is_err());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A uniform scRGB frame (all channels `half`, as raw half-float bits).
+fn hdr_frame(w: u32, h: u32, half: u16) -> VideoFrame {
+    let px: Vec<u8> = [half, half, half, 0x3C00]
+        .iter()
+        .flat_map(|v| v.to_le_bytes())
+        .collect();
+    VideoFrame {
+        width: w,
+        height: h,
+        stride: (w * 8) as usize,
+        format: FrameFormat::ScRgbHalf,
+        data: px.repeat((w * h) as usize),
+    }
+}
+
+#[test]
+fn scrgb_frames_come_out_as_bt2020_pq_10_bit() {
+    use vixeeny_encode::ffmpeg::frame;
+    let registry = Registry::builtin().unwrap();
+    let dir = scratch("scrgb");
+    let mut cfg = config(&registry, "libx265", OutputContainer::Mkv, 30);
+    cfg.depth = 10;
+    cfg.hdr = true;
+    let fps = 30;
+    let rec = Recorder::start(cfg, namer(&dir, "mkv")).unwrap();
+    // 1.25 in scRGB = 100 nits = PQ 0.508.
+    for i in 0..10 {
+        rec.push_frame(i * 1_000 * MS / fps, hdr_frame(320, 180, 0x3D00));
+    }
+    let summary = rec.stop(10 * 1_000 * MS / fps).unwrap();
+
+    let mut input = format::input(&summary.files[0]).unwrap();
+    let index = input.streams().best(media::Type::Video).unwrap().index();
+    let params = input.stream(index).unwrap().parameters();
+    let mut decoder = codec::context::Context::from_parameters(params)
+        .unwrap()
+        .decoder()
+        .video()
+        .unwrap();
+    let mut decoded = frame::Video::empty();
+    'outer: for (s, packet) in input.packets() {
+        if s.index() != index {
+            continue;
+        }
+        decoder.send_packet(&packet).unwrap();
+        if decoder.receive_frame(&mut decoded).is_ok() {
+            break 'outer;
+        }
+    }
+    assert_eq!(
+        decoded.format(),
+        vixeeny_encode::ffmpeg::format::Pixel::YUV420P10LE
+    );
+    // Luma of the centre pixel, 10-bit limited range: 64 + 876 × 0.508 ≈ 509.
+    let stride = decoded.stride(0);
+    let at = 90 * stride + 160 * 2;
+    let y = i32::from(u16::from_le_bytes([
+        decoded.data(0)[at],
+        decoded.data(0)[at + 1],
+    ]));
+    assert!((y - 509).abs() <= 6, "luma {y}");
+    // Neutral grey: chroma at mid-scale (512).
+    let cb = i32::from(u16::from_le_bytes([decoded.data(1)[0], decoded.data(1)[1]]));
+    assert!((cb - 512).abs() <= 4, "cb {cb}");
     let _ = std::fs::remove_dir_all(dir);
 }
