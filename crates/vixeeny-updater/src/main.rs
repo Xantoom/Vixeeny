@@ -9,7 +9,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, bail};
 use vixeeny_common::ipc::{self, ControlReply, ControlRequest, Endpoint, Hello};
-use vixeeny_updater::state::{self, State};
+use vixeeny_updater::state::{self, State, log};
 use vixeeny_updater::{Release, check_url, is_newer, swap, verify};
 
 const REPOSITORY: &str = "https://github.com/Xantoom/Vixeeny";
@@ -110,9 +110,34 @@ fn stop_daemon() -> anyhow::Result<()> {
             bail!("the daemon did not stop");
         }
     }
+    close_apps();
     // Let the processes release their files.
     std::thread::sleep(Duration::from_millis(800));
     Ok(())
+}
+
+/// The settings window, a toast or a leftover app are processes of their own: they would go on
+/// running the old version. The daemon only quits when no recording runs, so this is safe.
+fn close_apps() {
+    if !cfg!(windows) {
+        return;
+    }
+    let taskkill = |force: bool| {
+        let mut command = std::process::Command::new("taskkill");
+        command.args(["/IM", "vixeeny-app.exe"]);
+        if force {
+            command.arg("/F");
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x0800_0000);
+        }
+        let _ = command.output();
+    };
+    taskkill(false);
+    std::thread::sleep(Duration::from_secs(2));
+    taskkill(true);
 }
 
 fn start_daemon(dir: &Path) -> std::io::Result<()> {
@@ -121,7 +146,30 @@ fn start_daemon(dir: &Path) -> std::io::Result<()> {
         .map(|_| ())
 }
 
+/// `apply`, with its progress in `update.log` and its failure kept in the state for the settings.
 fn apply() -> anyhow::Result<()> {
+    let path = state_path()?;
+    log(&format!(
+        "-- update to start (updater {})",
+        env!("CARGO_PKG_VERSION")
+    ));
+    let result = apply_inner();
+    let mut state = State::load(&path);
+    match &result {
+        Ok(()) => {
+            log("update done");
+            state.error = None;
+        }
+        Err(e) => {
+            log(&format!("update failed: {e:#}"));
+            state.error = Some(format!("{e:#}"));
+        }
+    }
+    let _ = state.save(&path);
+    result
+}
+
+fn apply_inner() -> anyhow::Result<()> {
     let path = state_path()?;
     let state = State::load(&path);
     let release = state.available.context("no update is available")?;
@@ -129,9 +177,11 @@ fn apply() -> anyhow::Result<()> {
         .files(PLATFORM)
         .context("the release has no file for this system")?;
     let agent = agent();
+    log("downloading");
     let archive = get(&agent, &files.archive.url, 400 << 20)?;
     let signature = String::from_utf8(get(&agent, &files.signature.url, 1 << 16)?)?;
     let sums = String::from_utf8(get(&agent, &files.sums.url, 1 << 20)?)?;
+    log("verifying");
     // Nothing is touched before both checks pass.
     verify::check_sum(&archive, &sums, &files.archive.name)?;
     verify::check_signature(&archive, &signature, verify::PUBLIC_KEY)?;
@@ -143,9 +193,12 @@ fn apply() -> anyhow::Result<()> {
     let _ = std::fs::remove_dir_all(&work);
     swap::extract(&archive, &work)?;
 
+    log("stopping the daemon");
     stop_daemon()?;
+    log("replacing the files");
     swap::install(&work, &install, &backup).context("cannot replace the files")?;
     let _ = std::fs::remove_dir_all(&work);
+    log("starting the new version");
     start_daemon(&install)?;
 
     let deadline = Instant::now() + START_TIMEOUT;

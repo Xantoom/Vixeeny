@@ -273,6 +273,7 @@ pub enum Key {
     UpdateInstalling,
     UpdateNoKey,
     ToastAudioLost,
+    UpdateFailed,
 }
 
 impl Key {
@@ -530,6 +531,7 @@ impl Key {
         Self::UpdateInstalling,
         Self::UpdateNoKey,
         Self::ToastAudioLost,
+        Self::UpdateFailed,
     ];
 }
 
@@ -1137,6 +1139,8 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::ToastAudioLost, Lang::Fr) => {
             "Une source audio a été perdue (la piste reste muette jusqu'à son retour)"
         }
+        (Key::UpdateFailed, Lang::En) => "The last update failed: {error}",
+        (Key::UpdateFailed, Lang::Fr) => "La dernière mise à jour a échoué : {error}",
     }
 }
 

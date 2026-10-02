@@ -8,6 +8,22 @@ use serde::{Deserialize, Serialize};
 
 use crate::release::Release;
 
+/// Appends a line to `update.log` next to the settings (the updater has no console).
+pub fn log(message: &str) {
+    use std::io::Write;
+    let Some(dir) = vixeeny_common::paths::config_dir() else {
+        return;
+    };
+    let _ = std::fs::create_dir_all(&dir);
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("update.log"))
+    {
+        let _ = writeln!(file, "{message}");
+    }
+}
+
 pub fn file() -> Option<PathBuf> {
     vixeeny_common::paths::config_dir().map(|d| d.join("update.json"))
 }
@@ -20,6 +36,8 @@ pub struct State {
     pub available: Option<Release>,
     /// The version the user was already told about.
     pub notified: Option<String>,
+    /// Why the last attempt to install failed (cleared by a new attempt or a success).
+    pub error: Option<String>,
 }
 
 impl State {
@@ -68,6 +86,7 @@ mod tests {
                 assets: Vec::new(),
             }),
             notified: Some("1.0.0".into()),
+            error: Some("boom".into()),
         };
         state.save(&path).unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(State::load(&path), state);

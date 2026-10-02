@@ -307,6 +307,9 @@ fn update_text(lang: Lang) -> String {
     let state = vixeeny_updater::state::file()
         .map(|p| vixeeny_updater::state::State::load(&p))
         .unwrap_or_default();
+    if let Some(error) = &state.error {
+        return tr(Key::UpdateFailed, lang).replace("{error}", error);
+    }
     match state.newer_than(current) {
         Some(release) => format!(
             "{}\n\n{}",
