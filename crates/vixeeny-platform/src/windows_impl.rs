@@ -388,7 +388,9 @@ pub fn exe_metadata(path: &str) -> crate::ExeMetadata {
         let words = unsafe { std::slice::from_raw_parts(ptr.cast::<u16>(), len as usize / 2) };
         langs.extend(
             words
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .map(|w| format!("{:04x}{:04x}", w[0], w[1])),
         );
     }

@@ -34,7 +34,7 @@ fn recipe_rev(name: &str) -> &'static str {
         "libvpx" => "6",
         "x265" => "3",
         "libjxl" => "3",
-        "jpegli" => "4",
+        "jpegli" => "5",
         _ => "2",
     }
 }
@@ -487,10 +487,15 @@ fn install_jpegli(ctx: &Ctx, src: &Path) -> Result<()> {
     };
     std::fs::copy(built.join(from), ctx.prefix.join("lib").join(to))
         .with_context(|| format!("copying {from}"))?;
+    let cxx = if cfg!(target_os = "macos") {
+        "-lc++"
+    } else {
+        "-lstdc++"
+    };
     let pc = format!(
         "prefix={p}\nlibdir=${{prefix}}/lib\nincludedir=${{prefix}}/include\n\n\
          Name: libjpegli\nDescription: jpegli, libjpeg-compatible JPEG codec\nVersion: 0.12.0\n\
-         Requires: libhwy\nLibs: -L${{libdir}} -ljpegli -lm -lstdc++\nCflags: -I${{includedir}}/jpegli\n",
+         Requires: libhwy\nLibs: -L${{libdir}} -ljpegli -lm {cxx}\nCflags: -I${{includedir}}/jpegli\n",
         p = ctx.prefix.display()
     );
     let pc_dir = ctx.prefix.join("lib/pkgconfig");
