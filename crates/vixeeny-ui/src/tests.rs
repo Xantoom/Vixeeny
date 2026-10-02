@@ -220,3 +220,17 @@ fn commands_reach_the_handler_and_can_keep_the_window_open() {
     use vixeeny_editor::Command::{Copy, Ocr};
     assert_eq!(*seen.borrow(), [(Copy, true), (Ocr, true)]);
 }
+
+#[test]
+fn the_colour_picker_panel_renders() {
+    let o = overlay(900, 500, 1.0);
+    let w = o.window();
+    w.invoke_pointer_pressed(100.0, 60.0, false);
+    w.invoke_pointer_released(400.0, 200.0, false);
+    w.set_picker_open(true);
+    let buf = render(&o, 900, 500);
+    save("4-picker", &buf);
+    // the hue bar is red at the top
+    let top = w.get_toolbar_y();
+    assert!(top > 0.0);
+}

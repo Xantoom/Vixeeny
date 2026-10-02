@@ -88,6 +88,8 @@ pub struct View {
     pub can_redo: bool,
     /// Where the text field is open, if the Text tool was just clicked.
     pub text_input: Option<Point>,
+    /// Font size of the text tool, in pixels.
+    pub text_size: f32,
     pub dim: f32,
 }
 
@@ -164,7 +166,15 @@ impl Session {
     }
 
     pub fn set_width(&mut self, width: f32) {
-        self.editor.settings.style.width = width.clamp(1.0, 40.0);
+        let width = width.clamp(1.0, 40.0);
+        let settings = &mut self.editor.settings;
+        settings.style.width = width;
+        // One thickness control sizes every tool (defaults at width 4: 24 px text, 14 px markers,
+        // blur radius 6, 10 px mosaic cells).
+        settings.text_size = 8.0 + 4.0 * width;
+        settings.marker_radius = 10.0 + width;
+        settings.blur_radius = 1.5 * width;
+        settings.pixelate_block = (2.5 * width).round().max(2.0) as u32;
     }
 
     pub fn set_filled(&mut self, filled: bool) {
@@ -418,6 +428,7 @@ impl Session {
             can_undo: self.editor.can_undo(),
             can_redo: self.editor.can_redo(),
             text_input: self.text_input,
+            text_size: settings.text_size,
             dim: self.dim,
         }
     }

@@ -279,3 +279,35 @@ fn the_toolbar_stays_on_screen() {
     assert_eq!(t.x, 0.0);
     assert!(t.y >= 0.0);
 }
+
+#[test]
+fn thickness_scales_every_tool() {
+    let mut s = session();
+    s.set_width(4.0);
+    let d = s.editor().settings.clone();
+    assert_eq!(
+        (
+            d.text_size,
+            d.marker_radius,
+            d.blur_radius,
+            d.pixelate_block
+        ),
+        (24.0, 14.0, 6.0, 10)
+    );
+    s.set_width(10.0);
+    let t = &s.editor().settings;
+    assert_eq!(
+        (
+            t.text_size,
+            t.marker_radius,
+            t.blur_radius,
+            t.pixelate_block
+        ),
+        (48.0, 20.0, 15.0, 25)
+    );
+    s.set_width(0.0);
+    assert_eq!(s.editor().settings.style.width, 1.0);
+    assert_eq!(s.editor().settings.pixelate_block, 3);
+    s.set_width(1000.0);
+    assert_eq!(s.editor().settings.style.width, 40.0);
+}

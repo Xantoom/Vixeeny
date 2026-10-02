@@ -112,6 +112,10 @@ export component EditorWindow inherits Window {
     in property <float> text-size: 24;
 
     in-out property <string> text-value;
+    in-out property <bool> picker-open: false;
+    property <float> hue: 0;
+    property <float> sat: 1;
+    property <float> val: 1;
     in property <int> cursor-kind: 0;
     // Off while a system dialog (Save as) must appear above the overlay.
     in property <bool> on-top: true;
@@ -371,11 +375,106 @@ export component EditorWindow inherits Window {
             }
             for c[i] in root.recent : Swatch {
                 u: root.u;
-                x: 8 * root.u + 8 * 28 * root.u + 14 * root.u + i * 28 * root.u;
+                x: 8 * root.u + 9 * 28 * root.u + 10 * root.u + i * 28 * root.u;
                 y: 50 * root.u;
                 swatch: c;
                 chosen: c == root.current-color;
                 clicked => { root.color-chosen(c); }
+            }
+            // Full colour picker: opens the panel below/above the bar.
+            Swatch {
+                u: root.u;
+                x: 8 * root.u + 8 * 28 * root.u;
+                y: 50 * root.u;
+                swatch: #00000000;
+                chosen: root.picker-open;
+                Path {
+                    x: 4 * root.u;
+                    y: 4 * root.u;
+                    width: 16 * root.u;
+                    height: 16 * root.u;
+                    viewbox-width: 24;
+                    viewbox-height: 24;
+                    commands: "M12 4 L12 20 M4 12 L20 12";
+                    stroke: white;
+                    stroke-width: 2 * root.u;
+                    stroke-line-cap: round;
+                }
+                clicked => { root.picker-open = !root.picker-open; }
+            }
+            if root.picker-open : Rectangle {
+                x: 8 * root.u;
+                y: root.toolbar-y > 190 ? -176 * root.u : 96 * root.u;
+                width: 280 * root.u;
+                height: 168 * root.u;
+                background: #1f2937f2;
+                border-radius: 8 * root.u;
+                border-width: 1phx;
+                border-color: #ffffff22;
+                TouchArea { }
+                // saturation (x) / value (y) square for the current hue
+                sv := Rectangle {
+                    x: 10 * root.u;
+                    y: 10 * root.u;
+                    width: 200 * root.u;
+                    height: 120 * root.u;
+                    background: Colors.hsv(root.hue, 1, 1, 1);
+                    Rectangle { background: @linear-gradient(90deg, white, #ffffff00); }
+                    Rectangle { background: @linear-gradient(180deg, #00000000, black); }
+                    Rectangle {
+                        x: root.sat * parent.width - 5 * root.u;
+                        y: (1 - root.val) * parent.height - 5 * root.u;
+                        width: 10 * root.u;
+                        height: 10 * root.u;
+                        border-radius: 5 * root.u;
+                        border-width: 2 * root.u;
+                        border-color: white;
+                    }
+                    TouchArea {
+                        function pick() {
+                            root.sat = max(0, min(1, self.mouse-x / self.width));
+                            root.val = 1 - max(0, min(1, self.mouse-y / self.height));
+                            root.color-chosen(Colors.hsv(root.hue, root.sat, root.val, 1));
+                        }
+                        pointer-event(e) => { if e.kind == PointerEventKind.down { self.pick(); } }
+                        moved => { if self.pressed { self.pick(); } }
+                    }
+                }
+                // hue bar
+                Rectangle {
+                    x: 222 * root.u;
+                    y: 10 * root.u;
+                    width: 24 * root.u;
+                    height: 120 * root.u;
+                    background: @linear-gradient(180deg, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000);
+                    border-radius: 3 * root.u;
+                    Rectangle {
+                        y: root.hue / 360 * parent.height - 2 * root.u;
+                        height: 4 * root.u;
+                        background: white;
+                        border-width: 1phx;
+                        border-color: black;
+                    }
+                    TouchArea {
+                        function pick() {
+                            root.hue = 360 * max(0, min(0.999, self.mouse-y / self.height));
+                            root.color-chosen(Colors.hsv(root.hue, root.sat, root.val, 1));
+                        }
+                        pointer-event(e) => { if e.kind == PointerEventKind.down { self.pick(); } }
+                        moved => { if self.pressed { self.pick(); } }
+                    }
+                }
+                // preview of the current colour
+                Rectangle {
+                    x: 10 * root.u;
+                    y: 138 * root.u;
+                    width: 24 * root.u;
+                    height: 22 * root.u;
+                    background: root.current-color;
+                    border-radius: 4 * root.u;
+                    border-width: 1phx;
+                    border-color: #ffffff66;
+                }
             }
             IconButton {
                 u: root.u;

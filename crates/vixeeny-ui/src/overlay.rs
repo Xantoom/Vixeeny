@@ -340,6 +340,7 @@ fn refresh_from(weak: &slint::Weak<EditorWindow>, session: &Rc<RefCell<Session>>
     w.set_can_undo(v.can_undo);
     w.set_can_redo(v.can_redo);
     w.set_has_text_input(v.text_input.is_some());
+    w.set_text_size(v.text_size);
     if let Some(at) = v.text_input {
         w.set_text_x(at.x);
         w.set_text_y(at.y);
