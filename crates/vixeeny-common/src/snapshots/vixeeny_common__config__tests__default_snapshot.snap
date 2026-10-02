@@ -12,6 +12,7 @@ app_idle_exit_seconds = 30
 sounds = true
 notifications = true
 check_updates = true
+first_run_done = false
 
 [hotkeys]
 capture_region = ["PrintScreen"]

@@ -246,6 +246,24 @@ pub enum Key {
     ToastReplayFailed,
     ToastDiskFull,
     ToastAccessDenied,
+    WizWelcomeTitle,
+    WizWelcomeBody,
+    WizLanguageLabel,
+    WizLanguageAuto,
+    WizFoldersTitle,
+    WizImagesLabel,
+    WizVideosLabel,
+    WizBrowse,
+    WizStartupTitle,
+    WizStartupBody,
+    WizAutostart,
+    WizNotifications,
+    WizHardwareTitle,
+    WizBack,
+    WizNext,
+    WizFinish,
+    WizSkip,
+    WizStepOf,
 }
 
 impl Lang {
@@ -770,6 +788,50 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::ToastAccessDenied, Lang::Fr) => {
             "Accès refusé : choisissez un dossier où vous pouvez écrire."
         }
+        (Key::WizWelcomeTitle, Lang::En) => "Welcome to Vixeeny",
+        (Key::WizWelcomeTitle, Lang::Fr) => "Bienvenue dans Vixeeny",
+        (Key::WizWelcomeBody, Lang::En) => {
+            "A few questions to get you started. You can change everything later in the settings."
+        }
+        (Key::WizWelcomeBody, Lang::Fr) => {
+            "Quelques questions pour bien démarrer. Tout se change ensuite dans les paramètres."
+        }
+        (Key::WizLanguageLabel, Lang::En) => "Language",
+        (Key::WizLanguageLabel, Lang::Fr) => "Langue",
+        (Key::WizLanguageAuto, Lang::En) => "Automatic",
+        (Key::WizLanguageAuto, Lang::Fr) => "Automatique",
+        (Key::WizFoldersTitle, Lang::En) => "Where should captures go?",
+        (Key::WizFoldersTitle, Lang::Fr) => "Où ranger les captures ?",
+        (Key::WizImagesLabel, Lang::En) => "Images",
+        (Key::WizImagesLabel, Lang::Fr) => "Images",
+        (Key::WizVideosLabel, Lang::En) => "Videos",
+        (Key::WizVideosLabel, Lang::Fr) => "Vidéos",
+        (Key::WizBrowse, Lang::En) => "Browse…",
+        (Key::WizBrowse, Lang::Fr) => "Parcourir…",
+        (Key::WizStartupTitle, Lang::En) => "Start with Windows",
+        (Key::WizStartupTitle, Lang::Fr) => "Démarrage avec Windows",
+        (Key::WizStartupBody, Lang::En) => {
+            "Vixeeny waits quietly in the notification area, ready for your shortcuts."
+        }
+        (Key::WizStartupBody, Lang::Fr) => {
+            "Vixeeny attend discrètement dans la zone de notification, prêt pour vos raccourcis."
+        }
+        (Key::WizAutostart, Lang::En) => "Start Vixeeny when I sign in",
+        (Key::WizAutostart, Lang::Fr) => "Lancer Vixeeny à l'ouverture de session",
+        (Key::WizNotifications, Lang::En) => "Show a notification after each capture",
+        (Key::WizNotifications, Lang::Fr) => "Afficher une notification après chaque capture",
+        (Key::WizHardwareTitle, Lang::En) => "Your hardware",
+        (Key::WizHardwareTitle, Lang::Fr) => "Votre matériel",
+        (Key::WizBack, Lang::En) => "Back",
+        (Key::WizBack, Lang::Fr) => "Retour",
+        (Key::WizNext, Lang::En) => "Next",
+        (Key::WizNext, Lang::Fr) => "Suivant",
+        (Key::WizFinish, Lang::En) => "Finish",
+        (Key::WizFinish, Lang::Fr) => "Terminer",
+        (Key::WizSkip, Lang::En) => "Skip",
+        (Key::WizSkip, Lang::Fr) => "Passer",
+        (Key::WizStepOf, Lang::En) => "Step {n} of {total}",
+        (Key::WizStepOf, Lang::Fr) => "Étape {n} sur {total}",
     }
 }
 

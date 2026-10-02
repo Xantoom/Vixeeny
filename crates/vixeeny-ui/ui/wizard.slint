@@ -1,0 +1,226 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+// The first-run assistant (plan 5.15): language, folders, start-up, hardware. The host owns the
+// state and the texts; this window shows one step and reports what was touched.
+component WizButton inherits Rectangle {
+    in property <bool> dark;
+    property <color> ink: root.dark ? #f9fafb : #111827;
+    property <color> dim: root.dark ? #9ca3af : #4b5563;
+    property <color> panel: root.dark ? #1f2937 : #ffffff;
+    property <color> line: root.dark ? #374151 : #d1d5db;
+    property <color> accent: #3b82f6;
+    in property <string> text;
+    in property <bool> primary: false;
+    callback clicked();
+    height: 34px;
+    width: max(86px, label.preferred-width + 28px);
+    border-radius: 6px;
+    background: root.primary ? (area.has-hover ? #2563eb : #3b82f6) : (area.has-hover ? root.line : transparent);
+    border-width: self.primary ? 0px : 1px;
+    border-color: root.line;
+    label := Text {
+        text: root.text;
+        color: root.primary ? #ffffff : root.ink;
+        font-size: 13px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    area := TouchArea {
+        accessible-role: button;
+        accessible-label: root.text;
+        clicked => { root.clicked(); }
+    }
+}
+component PathRow inherits HorizontalLayout {
+    in property <bool> dark;
+    property <color> ink: root.dark ? #f9fafb : #111827;
+    property <color> dim: root.dark ? #9ca3af : #4b5563;
+    property <color> panel: root.dark ? #1f2937 : #ffffff;
+    property <color> line: root.dark ? #374151 : #d1d5db;
+    property <color> accent: #3b82f6;
+    in property <string> caption;
+    in property <string> path;
+    in property <string> browse-text;
+    callback browse();
+    spacing: 10px;
+    VerticalLayout {
+        spacing: 4px;
+        Text { text: root.caption; color: dim; font-size: 12px; }
+        Rectangle {
+            height: 34px;
+            border-radius: 6px;
+            background: panel;
+            border-width: 1px;
+            border-color: line;
+            Text {
+                x: 10px;
+                width: parent.width - 20px;
+                text: root.path;
+                color: ink;
+                font-size: 13px;
+                overflow: elide;
+                vertical-alignment: center;
+            }
+        }
+    }
+    VerticalLayout {
+        alignment: end;
+        WizButton { dark: root.dark; text: root.browse-text; clicked => { root.browse(); } }
+    }
+}
+
+component Check inherits Rectangle {
+    in property <bool> dark;
+    property <color> ink: root.dark ? #f9fafb : #111827;
+    property <color> dim: root.dark ? #9ca3af : #4b5563;
+    property <color> panel: root.dark ? #1f2937 : #ffffff;
+    property <color> line: root.dark ? #374151 : #d1d5db;
+    property <color> accent: #3b82f6;
+    in property <string> text;
+    in-out property <bool> on;
+    callback toggled(bool);
+    height: 34px;
+    HorizontalLayout {
+        spacing: 10px;
+        Rectangle {
+            width: 20px;
+            height: 20px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 4px;
+            background: root.on ? accent : panel;
+            border-width: 1px;
+            border-color: root.on ? accent : line;
+            Text { text: root.on ? "✓" : ""; color: #ffffff; font-size: 14px; horizontal-alignment: center; vertical-alignment: center; }
+        }
+        Text { text: root.text; color: ink; font-size: 13px; vertical-alignment: center; }
+    }
+    TouchArea {
+        accessible-role: checkbox;
+        accessible-label: root.text;
+        accessible-checked: root.on;
+        clicked => { root.on = !root.on; root.toggled(root.on); }
+    }
+}
+
+
+export component WizardWindow inherits Window {
+    in property <int> step: 0;
+    in property <bool> dark: true;
+    in property <string> heading;
+    in property <string> body;
+    in property <string> step-text;
+    in property <string> language-label;
+    in property <[string]> languages;
+    in property <int> language: 0;
+    in property <string> images-label;
+    in property <string> videos-label;
+    in property <string> images-path;
+    in property <string> videos-path;
+    in property <string> browse-label;
+    in property <string> autostart-label;
+    in property <bool> autostart: true;
+    in property <string> notifications-label;
+    in property <bool> notifications: true;
+    in property <string> hardware-text;
+    in property <string> back-label;
+    in property <string> next-label;
+    in property <string> finish-label;
+    in property <string> skip-label;
+    in property <bool> last: false;
+
+    callback language-chosen(int);
+    callback browse(int);
+    callback autostart-toggled(bool);
+    callback notifications-toggled(bool);
+    callback back();
+    callback next();
+    callback skip();
+
+    title: root.heading;
+    default-font-family: "Inter";
+    preferred-width: 520px;
+    preferred-height: 380px;
+    min-width: 520px;
+    min-height: 380px;
+    background: root.dark ? #111827 : #f3f4f6;
+
+    property <color> ink: root.dark ? #f9fafb : #111827;
+    property <color> dim: root.dark ? #9ca3af : #4b5563;
+    property <color> panel: root.dark ? #1f2937 : #ffffff;
+    property <color> line: root.dark ? #374151 : #d1d5db;
+    property <color> accent: #3b82f6;
+
+    VerticalLayout {
+        padding: 28px;
+        spacing: 14px;
+
+        Text { text: root.step-text; color: dim; font-size: 12px; }
+        Text { text: root.heading; color: ink; font-size: 22px; font-weight: 700; wrap: word-wrap; }
+        if root.body != "": Text { text: root.body; color: dim; font-size: 13px; wrap: word-wrap; }
+
+        VerticalLayout {
+            vertical-stretch: 1;
+            spacing: 12px;
+            alignment: start;
+
+            if root.step == 0: VerticalLayout {
+                spacing: 6px;
+                Text { text: root.language-label; color: dim; font-size: 12px; }
+                for name[i] in root.languages: Rectangle {
+                    height: 36px;
+                    border-radius: 6px;
+                    background: i == root.language ? accent.with-alpha(0.2) : (lang-area.has-hover ? panel : transparent);
+                    border-width: 1px;
+                    border-color: i == root.language ? accent : line;
+                    Text { x: 12px; text: name; color: ink; font-size: 13px; vertical-alignment: center; }
+                    lang-area := TouchArea {
+                        accessible-role: radio-button;
+                        accessible-label: name;
+                        clicked => { root.language-chosen(i); }
+                    }
+                }
+            }
+            if root.step == 1: VerticalLayout {
+                spacing: 12px;
+                PathRow {
+                    dark: root.dark;
+                    caption: root.images-label;
+                    path: root.images-path;
+                    browse-text: root.browse-label;
+                    browse => { root.browse(0); }
+                }
+                PathRow {
+                    dark: root.dark;
+                    caption: root.videos-label;
+                    path: root.videos-path;
+                    browse-text: root.browse-label;
+                    browse => { root.browse(1); }
+                }
+            }
+            if root.step == 2: VerticalLayout {
+                spacing: 4px;
+                Check { dark: root.dark; text: root.autostart-label; on: root.autostart; toggled(v) => { root.autostart-toggled(v); } }
+                Check { dark: root.dark; text: root.notifications-label; on: root.notifications; toggled(v) => { root.notifications-toggled(v); } }
+            }
+            if root.step == 3: Text {
+                text: root.hardware-text;
+                color: ink;
+                font-size: 13px;
+                wrap: word-wrap;
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 10px;
+            WizButton { dark: root.dark; text: root.skip-label; clicked => { root.skip(); } }
+            Rectangle { }
+            if root.step > 0: WizButton { dark: root.dark; text: root.back-label; clicked => { root.back(); } }
+            WizButton {
+                dark: root.dark;
+                text: root.last ? root.finish-label : root.next-label;
+                primary: true;
+                clicked => { root.next(); }
+            }
+        }
+    }
+}

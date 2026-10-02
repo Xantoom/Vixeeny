@@ -84,6 +84,8 @@ pub struct General {
     pub sounds: bool,
     pub notifications: bool,
     pub check_updates: bool,
+    /// The welcome assistant has been through (or skipped).
+    pub first_run_done: bool,
 }
 
 impl Default for General {
@@ -96,6 +98,7 @@ impl Default for General {
             sounds: true,
             notifications: true,
             check_updates: true,
+            first_run_done: false,
         }
     }
 }

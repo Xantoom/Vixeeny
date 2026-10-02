@@ -98,6 +98,13 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
         }
     }
 
+    /// The very first start opens the welcome assistant (the settings process shows it).
+    pub fn open_wizard_if_first_run(&mut self) {
+        if !self.config.general.first_run_done {
+            self.tx.send(Event::Action(ActionId::OpenSettings));
+        }
+    }
+
     fn apply_hotkeys(&mut self) {
         let resolution = hotkey::resolve(&self.config.hotkeys);
         let mut trouble = !resolution.problems.is_empty();
@@ -310,6 +317,21 @@ mod tests {
         rt.start_replay_if_configured();
         rt.pump();
         assert_eq!(*spawned.lock().unwrap(), vec![(1, ActionId::ReplayToggle)]);
+    }
+
+    #[test]
+    fn the_assistant_opens_once_on_the_first_start() {
+        let (mut rt, _, _, spawned) = runtime(false, Config::default());
+        rt.open_wizard_if_first_run();
+        rt.pump();
+        assert_eq!(*spawned.lock().unwrap(), vec![(1, ActionId::OpenSettings)]);
+
+        let mut config = Config::default();
+        config.general.first_run_done = true;
+        let (mut rt, _, _, spawned) = runtime(false, config);
+        rt.open_wizard_if_first_run();
+        rt.pump();
+        assert!(spawned.lock().unwrap().is_empty());
     }
 
     #[test]

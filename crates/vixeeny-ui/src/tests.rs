@@ -786,3 +786,54 @@ fn the_toast_renders_with_a_thumbnail_and_an_error_variant() {
     save("8-toast-error", &bad);
     assert_ne!(ok.as_slice(), bad.as_slice());
 }
+
+#[test]
+fn the_wizard_walks_its_steps_and_relabels_in_the_chosen_language() {
+    use crate::wizard_panel::{STEPS, WizardPanel};
+    WINDOW.with(|_| ());
+    let window = WINDOW.with(Rc::clone);
+    window.set_size(PhysicalSize::new(520, 380));
+    let browse = |_: &str| Some(String::from(r"D:\Captures"));
+    let panel = WizardPanel::new(
+        vixeeny_common::config::Config::default(),
+        Some("en-US".into()),
+        true,
+        Box::new(browse),
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    let w = panel.window();
+    w.show().unwrap_or_else(|e| panic!("{e}"));
+    let draw = |name: &str| {
+        let mut buffer = SharedPixelBuffer::<Rgb8Pixel>::new(520, 380);
+        window.draw_if_needed(|r| {
+            r.render(buffer.make_mut_slice(), 520);
+        });
+        save(name, &buffer);
+    };
+    assert_eq!(w.get_heading(), "Welcome to Vixeeny");
+    assert_eq!(w.get_step_text(), "Step 1 of 4");
+    draw("9-wizard-language");
+    w.invoke_language_chosen(1);
+    assert_eq!(w.get_heading(), "Bienvenue dans Vixeeny");
+    assert_eq!(panel.choices().general.language, "fr");
+    w.invoke_next();
+    assert_eq!(w.get_step(), 1);
+    w.invoke_browse(0);
+    assert_eq!(panel.choices().paths.images, r"D:\Captures");
+    assert_eq!(w.get_images_path(), r"D:\Captures");
+    draw("9-wizard-folders");
+    w.invoke_next();
+    w.invoke_autostart_toggled(false);
+    draw("9-wizard-startup");
+    w.invoke_next();
+    assert!(w.get_last());
+    assert_eq!(w.get_finish_label(), "Terminer");
+    draw("9-wizard-hardware");
+    assert!(!panel.is_finished());
+    w.invoke_back();
+    assert_eq!(w.get_step() as usize, STEPS - 2);
+    w.invoke_next();
+    w.invoke_next();
+    assert!(panel.is_finished());
+    assert!(!panel.choices().general.autostart);
+}

@@ -326,6 +326,7 @@ pub fn run(startup: Startup) -> anyhow::Result<()> {
     );
     runtime.apply_config();
     runtime.start_replay_if_configured();
+    runtime.open_wizard_if_first_run();
     RUNTIME.with(|cell| *cell.borrow_mut() = Some(runtime));
 
     let mut msg = MSG::default();

@@ -42,7 +42,7 @@ fn load_config() -> Config {
 }
 
 /// Writes the settings, then tells the daemon to reload them (off the UI thread).
-fn save(config: &Config) {
+pub fn save(config: &Config) {
     let Some(path) = vixeeny_common::paths::config_file() else {
         tracing::error!("no settings folder: the change is not saved");
         return;
@@ -220,7 +220,7 @@ fn gallery_request(
     }
 }
 
-fn hardware_lines(lang: Lang, result: &ProbeResult) -> Vec<Line> {
+pub fn hardware_lines(lang: Lang, result: &ProbeResult) -> Vec<Line> {
     let registry = Registry::builtin().ok();
     let name_of = |id: &str| {
         registry
@@ -343,6 +343,9 @@ pub fn run_child() -> anyhow::Result<()> {
         &config.general.theme,
         vixeeny_platform::system_prefers_dark(),
     );
+    if !config.general.first_run_done {
+        return first_run(&config, lang);
+    }
     let panel = SettingsPanel::new(
         config.clone(),
         vixeeny_platform::user_locale(),
@@ -447,4 +450,55 @@ pub fn run_child() -> anyhow::Result<()> {
 
     panel.select_section(Section::General);
     panel.window().run().map_err(|e| anyhow::anyhow!("{e}"))
+}
+
+/// The welcome assistant, before the very first use of the settings. Closing it counts as
+/// skipping it: it is shown once.
+fn first_run(config: &Config, lang: Lang) -> anyhow::Result<()> {
+    use vixeeny_ui::wizard_panel::WizardPanel;
+
+    let dark = vixeeny_ui::side_panel::dark_theme(
+        &config.general.theme,
+        vixeeny_platform::system_prefers_dark(),
+    );
+    let browse = |current: &str| {
+        let mut dialog = rfd::FileDialog::new();
+        if let Some(dir) = vixeeny_common::paths::expand_user_dir(current) {
+            dialog = dialog.set_directory(dir);
+        }
+        dialog.pick_folder().map(|p| p.display().to_string())
+    };
+    let panel = WizardPanel::new(
+        config.clone(),
+        vixeeny_platform::user_locale(),
+        dark,
+        Box::new(browse),
+    )
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let handle = panel.handle();
+    std::thread::spawn(move || {
+        let text = match crate::probe::current(false) {
+            Ok(result) => hardware_lines(lang, &result)
+                .iter()
+                .map(|l| {
+                    if l.detail.is_empty() {
+                        l.text.clone()
+                    } else {
+                        format!("{}\n{}", l.text, l.detail)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n\n"),
+            Err(e) => {
+                tracing::warn!("hardware detection: {e:#}");
+                tr(Key::HwUnavailable, lang).to_owned()
+            }
+        };
+        handle.set_hardware(text);
+    });
+    let chosen = panel.run().map_err(|e| anyhow::anyhow!("{e}"))?;
+    save(&chosen);
+    // `save` tells the daemon from a thread: give it the moment it needs before the process ends.
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    Ok(())
 }
