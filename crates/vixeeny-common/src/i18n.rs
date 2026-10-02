@@ -266,6 +266,255 @@ pub enum Key {
     WizStepOf,
 }
 
+impl Key {
+    /// Every key, for the completeness test; adding a key without listing it here fails it.
+    pub const ALL: &'static [Self] = &[
+        Self::TrayTooltip,
+        Self::TrayTooltipRecording,
+        Self::MenuSettings,
+        Self::MenuQuit,
+        Self::AppCrashed,
+        Self::HotkeysUnavailable,
+        Self::OcrTitle,
+        Self::OcrCopy,
+        Self::OcrOpenSettings,
+        Self::OcrNoText,
+        Self::OcrLanguageUsed,
+        Self::OcrMissingLanguages,
+        Self::OcrNoLanguage,
+        Self::OcrFailed,
+        Self::ScrollTitle,
+        Self::ScrollIntro,
+        Self::ScrollStart,
+        Self::ScrollFinish,
+        Self::ScrollCancel,
+        Self::RecWidgetPause,
+        Self::RecWidgetResume,
+        Self::RecWidgetStop,
+        Self::OvlImage,
+        Self::OvlRegion,
+        Self::OvlWindow,
+        Self::OvlScreen,
+        Self::OvlAllMonitors,
+        Self::OvlScrolling,
+        Self::OvlOcr,
+        Self::OvlVideo,
+        Self::OvlRecord,
+        Self::OvlStopRecording,
+        Self::OvlReplayStart,
+        Self::OvlReplayStop,
+        Self::OvlReplaySave,
+        Self::OvlProfile,
+        Self::OvlSettings,
+        Self::ScrollCapturing,
+        Self::ScrollLost,
+        Self::ScrollTruncated,
+        Self::ConvMenuLabel,
+        Self::ConvTitle,
+        Self::ConvDropHint,
+        Self::ConvAddFiles,
+        Self::ConvAddFolder,
+        Self::ConvClear,
+        Self::ConvFormat,
+        Self::ConvQuality,
+        Self::ConvLossless,
+        Self::ConvExisting,
+        Self::ConvRename,
+        Self::ConvOverwrite,
+        Self::ConvSkip,
+        Self::ConvOutput,
+        Self::ConvSameFolder,
+        Self::ConvChoose,
+        Self::ConvReset,
+        Self::ConvConvert,
+        Self::ConvCancel,
+        Self::ConvSummary,
+        Self::ConvProgress,
+        Self::ConvDone,
+        Self::ConvCancelled,
+        Self::ConvNothing,
+        Self::SecGallery,
+        Self::SecGeneral,
+        Self::SecShortcuts,
+        Self::SecImages,
+        Self::SecVideo,
+        Self::SecAudio,
+        Self::SecReplay,
+        Self::SecFolders,
+        Self::SecOcr,
+        Self::SecProfiles,
+        Self::SecHardware,
+        Self::SecUpdates,
+        Self::SecIntegration,
+        Self::SecAbout,
+        Self::SetReset,
+        Self::SetInvalid,
+        Self::SetLanguage,
+        Self::SetLangAuto,
+        Self::SetTheme,
+        Self::SetThemeSystem,
+        Self::SetThemeLight,
+        Self::SetThemeDark,
+        Self::SetAutostart,
+        Self::SetIdleExit,
+        Self::SetSounds,
+        Self::SetNotifications,
+        Self::SetOverlayEdge,
+        Self::SetEdgeLeft,
+        Self::SetEdgeRight,
+        Self::SetEdgeTop,
+        Self::SetEdgeBottom,
+        Self::SetImageFormat,
+        Self::SetShowCursor,
+        Self::SetHdr,
+        Self::SetHdrTonemap,
+        Self::SetHdrKeep,
+        Self::SetCopyClipboard,
+        Self::SetJpegQuality,
+        Self::SetJpegChroma,
+        Self::SetAvifQuality,
+        Self::SetAvifDepth,
+        Self::SetDim,
+        Self::SetScrollMax,
+        Self::SetEncoder,
+        Self::SetEncoderAuto,
+        Self::SetContainer,
+        Self::SetResolution,
+        Self::SetResSource,
+        Self::SetFps,
+        Self::SetDepth,
+        Self::SetChroma,
+        Self::SetPreset,
+        Self::SetPresetQuality,
+        Self::SetPresetBalanced,
+        Self::SetPresetPerformance,
+        Self::SetPresetSmall,
+        Self::SetVfr,
+        Self::SetSplit,
+        Self::SetSplitOff,
+        Self::SetSplitSize,
+        Self::SetSplitDuration,
+        Self::SetSplitSizeMb,
+        Self::SetSplitMinutes,
+        Self::SetWidget,
+        Self::SetWidgetCorner,
+        Self::SetCornerTl,
+        Self::SetCornerTr,
+        Self::SetCornerBl,
+        Self::SetCornerBr,
+        Self::SetWidgetHide,
+        Self::SetAudioRouting,
+        Self::SetRouteEach,
+        Self::SetRouteMix,
+        Self::SetRouteAdvanced,
+        Self::SetAudioSources,
+        Self::SetAudioCodec,
+        Self::SetAudioBitrate,
+        Self::SetAudioVbr,
+        Self::SetReplayStart,
+        Self::SetReplayDuration,
+        Self::SetReplayProfile,
+        Self::SetSameAsRecording,
+        Self::SetReplayRam,
+        Self::SetDirImages,
+        Self::SetDirVideos,
+        Self::SetDirReplays,
+        Self::SetTemplate,
+        Self::SetSubImages,
+        Self::SetSubVideos,
+        Self::SetSubReplays,
+        Self::SetForegroundApp,
+        Self::SetAppNames,
+        Self::SetOcrLanguages,
+        Self::SetCheckUpdates,
+        Self::SetVersion,
+        Self::SetCheckNow,
+        Self::SetUpdatesLater,
+        Self::SetProblems,
+        Self::SetEditing,
+        Self::SettingsTitle,
+        Self::UiNew,
+        Self::UiDuplicate,
+        Self::UiRename,
+        Self::UiDelete,
+        Self::UiUse,
+        Self::UiOpen,
+        Self::UiOpenFolder,
+        Self::UiCopy,
+        Self::UiConvert,
+        Self::UiAll,
+        Self::UiImages,
+        Self::UiVideos,
+        Self::UiAppFilter,
+        Self::UiRedetect,
+        Self::UiInstall,
+        Self::UiRemove,
+        Self::UiGithub,
+        Self::UiLogs,
+        Self::UiGalleryEmpty,
+        Self::UiNameHint,
+        Self::UiShortcutHint,
+        Self::ActCaptureRegion,
+        Self::ActCaptureWindow,
+        Self::ActCaptureFullscreen,
+        Self::ActCaptureAll,
+        Self::ActCaptureScrolling,
+        Self::ActOcr,
+        Self::ActRecordToggle,
+        Self::ActRecordPause,
+        Self::ActReplayToggle,
+        Self::ActReplaySave,
+        Self::ActOverlay,
+        Self::ActSettings,
+        Self::ShortcutConflict,
+        Self::ShortcutDuplicate,
+        Self::ProfileEmpty,
+        Self::ProfileTaken,
+        Self::ProfileLast,
+        Self::ProfileCurrent,
+        Self::ProfileReplay,
+        Self::HwUnavailable,
+        Self::HwSoftware,
+        Self::HwNoGpu,
+        Self::HwDriver,
+        Self::HwDetecting,
+        Self::IntegInstalled,
+        Self::IntegNotInstalled,
+        Self::AboutLicense,
+        Self::AboutThirdParty,
+        Self::AboutLogs,
+        Self::GalleryDeleted,
+        Self::ToastImageSaved,
+        Self::ToastRecordingSaved,
+        Self::ToastReplaySaved,
+        Self::ToastOpenFolder,
+        Self::ToastOpenSettings,
+        Self::ToastCaptureFailed,
+        Self::ToastRecordingFailed,
+        Self::ToastReplayFailed,
+        Self::ToastDiskFull,
+        Self::ToastAccessDenied,
+        Self::WizWelcomeTitle,
+        Self::WizWelcomeBody,
+        Self::WizLanguageLabel,
+        Self::WizLanguageAuto,
+        Self::WizFoldersTitle,
+        Self::WizImagesLabel,
+        Self::WizVideosLabel,
+        Self::WizBrowse,
+        Self::WizStartupTitle,
+        Self::WizStartupBody,
+        Self::WizAutostart,
+        Self::WizNotifications,
+        Self::WizHardwareTitle,
+        Self::WizBack,
+        Self::WizNext,
+        Self::WizFinish,
+        Self::WizSkip,
+        Self::WizStepOf,
+    ];
+}
+
 impl Lang {
     /// Parses a BCP-47-ish tag (`fr`, `fr-FR`, `fr_FR.UTF-8`); unknown languages fall back to
     /// English.
@@ -838,6 +1087,52 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The keys declared in the source of this file (so a key missing from `Key::ALL` is caught).
+    fn declared_keys() -> usize {
+        let source = include_str!("i18n.rs");
+        let start = source.find("pub enum Key {").unwrap_or_default();
+        let body = &source[start..];
+        let end = body.find("\n}\n").unwrap_or(body.len());
+        body[..end]
+            .lines()
+            .filter(|l| {
+                l.starts_with("    ")
+                    && !l.starts_with("     ")
+                    && !l.trim_start().starts_with("//")
+                    && l.trim_end().ends_with(',')
+            })
+            .count()
+    }
+
+    fn placeholders(text: &str) -> Vec<&str> {
+        let mut found: Vec<&str> = text
+            .split('{')
+            .skip(1)
+            .filter_map(|rest| rest.split('}').next())
+            .collect();
+        found.sort_unstable();
+        found
+    }
+
+    #[test]
+    fn every_key_is_listed_and_translated_the_same_way_in_every_language() {
+        assert_eq!(
+            Key::ALL.len(),
+            declared_keys(),
+            "a key is missing from Key::ALL"
+        );
+        for key in Key::ALL {
+            let (en, fr) = (tr(*key, Lang::En), tr(*key, Lang::Fr));
+            assert!(!en.trim().is_empty(), "{key:?} has no English text");
+            assert!(!fr.trim().is_empty(), "{key:?} has no French text");
+            assert_eq!(
+                placeholders(en),
+                placeholders(fr),
+                "{key:?}: the placeholders differ between languages"
+            );
+        }
+    }
 
     #[test]
     fn tags() {
