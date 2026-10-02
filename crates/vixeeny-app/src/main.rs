@@ -12,6 +12,8 @@ mod convert;
 #[cfg(windows)]
 mod ocr;
 mod probe;
+#[cfg(all(windows, feature = "ffmpeg"))]
+mod record;
 #[cfg(windows)]
 mod region;
 #[cfg(windows)]
@@ -174,6 +176,72 @@ fn parse_action() -> anyhow::Result<ActionId> {
     Ok(action)
 }
 
+/// The recording started by `RecordToggle`, if any (Windows with FFmpeg only).
+#[derive(Default)]
+struct Recording {
+    #[cfg(all(windows, feature = "ffmpeg"))]
+    handle: Option<record::Handle>,
+}
+
+impl Recording {
+    #[cfg(all(windows, feature = "ffmpeg"))]
+    fn active(&self) -> bool {
+        self.handle.is_some()
+    }
+
+    #[cfg(not(all(windows, feature = "ffmpeg")))]
+    #[allow(clippy::unused_self)]
+    fn active(&self) -> bool {
+        false
+    }
+
+    #[cfg(all(windows, feature = "ffmpeg"))]
+    fn handle(&mut self, action: ActionId, config: &Config) {
+        match (action, &self.handle) {
+            (ActionId::RecordToggle, Some(handle)) => handle.stop(),
+            (ActionId::RecordToggle, None) => match record::start(config) {
+                Ok(handle) => self.handle = Some(handle),
+                Err(e) => tracing::error!("cannot start the recording: {e:#}"),
+            },
+            (_, Some(handle)) => handle.pause_toggle(),
+            (_, None) => {}
+        }
+    }
+
+    #[cfg(not(all(windows, feature = "ffmpeg")))]
+    #[allow(clippy::unused_self)]
+    fn handle(&mut self, action: ActionId, _: &Config) {
+        tracing::info!("action {action:?}: recording needs Windows and the `ffmpeg` feature");
+    }
+
+    /// Tells the daemon (tray icon) when the state changed, and forgets a finished recording.
+    #[cfg(all(windows, feature = "ffmpeg"))]
+    fn report(&mut self, send: &mut impl std::io::Write) -> anyhow::Result<()> {
+        let Some(handle) = self.handle.as_mut() else {
+            return Ok(());
+        };
+        let finished = handle.finished();
+        let state = if finished {
+            Some(ipc::RecState::Idle)
+        } else {
+            handle.changed()
+        };
+        if let Some(state) = state {
+            ipc::write_msg(send, &AppToDaemon::RecordingStateChanged(state))?;
+        }
+        if finished {
+            self.handle = None;
+        }
+        Ok(())
+    }
+
+    #[cfg(not(all(windows, feature = "ffmpeg")))]
+    #[allow(clippy::unused_self)]
+    fn report(&mut self, _: &mut impl std::io::Write) -> anyhow::Result<()> {
+        Ok(())
+    }
+}
+
 fn run() -> anyhow::Result<()> {
     // `--convert <paths…>`: the conversion window on its own, no daemon needed (it is what the
     // Explorer context-menu entry starts).
@@ -254,10 +322,25 @@ fn run() -> anyhow::Result<()> {
         "vixeeny-app {} started for {first_action:?}",
         env!("CARGO_PKG_VERSION")
     );
+    let mut recording = Recording::default();
     loop {
-        match rx.recv_timeout(idle) {
+        // While recording the app must not exit as idle; it polls the recording state instead.
+        let wait = if recording.active() {
+            Duration::from_millis(200)
+        } else {
+            idle
+        };
+        match rx.recv_timeout(wait) {
             Ok(DaemonToApp::RunAction { action, .. }) => {
-                perform(action, &config);
+                if matches!(action, ActionId::RecordToggle | ActionId::RecordPause) {
+                    recording.handle(action, &config);
+                } else {
+                    perform(action, &config);
+                }
+                recording.report(&mut send)?;
+            }
+            Err(RecvTimeoutError::Timeout) if recording.active() => {
+                recording.report(&mut send)?;
             }
             Ok(DaemonToApp::ConfigChanged) => {}
             // The daemon asked us to stop, or went away.

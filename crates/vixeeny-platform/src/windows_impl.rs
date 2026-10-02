@@ -480,3 +480,16 @@ pub fn attach_console() {
         }
     }
 }
+
+/// Nanoseconds on the performance counter: the clock of WGC's `SystemRelativeTime`.
+pub fn monotonic_ns() -> i64 {
+    use windows::Win32::System::Performance::{QueryPerformanceCounter, QueryPerformanceFrequency};
+    let (mut counter, mut frequency) = (0i64, 0i64);
+    // SAFETY: both out-pointers are valid; these calls cannot fail on Windows XP and later.
+    unsafe {
+        let _ = QueryPerformanceCounter(&mut counter);
+        let _ = QueryPerformanceFrequency(&mut frequency);
+    }
+    let frequency = i128::from(frequency.max(1));
+    (i128::from(counter) * 1_000_000_000 / frequency) as i64
+}

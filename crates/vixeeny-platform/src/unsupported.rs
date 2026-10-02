@@ -12,6 +12,15 @@ pub fn monitors() -> Result<Vec<MonitorInfo>> {
 /// Nothing to do: the process already has a terminal.
 pub fn attach_console() {}
 
+/// Nanoseconds on a monotonic clock.
+pub fn monotonic_ns() -> i64 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    START
+        .get_or_init(std::time::Instant::now)
+        .elapsed()
+        .as_nanos() as i64
+}
+
 pub fn gpu_adapters() -> Result<Vec<crate::GpuInfo>> {
     Err(PlatformError::Unsupported)
 }

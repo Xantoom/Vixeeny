@@ -105,6 +105,11 @@ jobs:
         run: |
           $env:PATH = "$env:FFMPEG_DIR\bin;$env:PATH"
           cargo test -p vixeeny-encode --features ffmpeg-next --test software_encode --test recorder
+      - name: Recording app (Windows capture + recorder) compiles
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:FFMPEG_DIR\bin;$env:PATH"
+          cargo clippy -p vixeeny-app -p vixeeny-capture --features vixeeny-app/ffmpeg --all-targets -- -D warnings
       - name: Registry against FFmpeg (every Windows encoder must exist and expose the declared options)
         shell: pwsh
         run: |

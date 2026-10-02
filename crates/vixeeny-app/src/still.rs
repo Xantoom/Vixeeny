@@ -84,7 +84,7 @@ pub struct Destination<'a> {
 }
 
 /// Display name of the application a capture is attributed to.
-fn app_name(
+pub(crate) fn app_name(
     action: ActionId,
     snap: &Snapshot,
     dest: &Destination<'_>,
