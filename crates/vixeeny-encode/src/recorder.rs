@@ -23,6 +23,7 @@ use crate::audio::{AudioEncoder, AudioTrackConfig, SAMPLE_RATE};
 use crate::clock::{Cfr, Emit, Fps};
 use crate::gpu::{GpuPipeline, HwFrame};
 use crate::registry::{Chroma, Encoder};
+use crate::replay::{Ring, Snapshot, share};
 
 #[derive(Debug, thiserror::Error)]
 pub enum RecordError {
@@ -122,6 +123,10 @@ pub struct RecordConfig {
     pub audio: Vec<AudioTrackConfig>,
     /// Hardware encoders that read D3D11 frames (Windows): frames come from `push_hw`.
     pub gpu: Option<Arc<GpuPipeline>>,
+    /// Keep the last seconds of encoded packets in RAM for [`Recorder::save_replay`] (plan 5.11).
+    pub replay_seconds: Option<u32>,
+    /// Write files. A replay-only session has none: the namer is never called.
+    pub files: bool,
 }
 
 /// How the pixels of a [`VideoFrame`] are laid out.
@@ -183,6 +188,23 @@ enum Cmd {
     Pause(i64),
     Resume(i64),
     Stop(i64),
+    Save(PathBuf, SyncSender<Result<ReplaySave, RecordError>>),
+}
+
+/// A replay being written (on a thread of its own, so the recording is not held up).
+pub struct ReplaySave {
+    pub path: PathBuf,
+    /// Seconds of media in the file.
+    pub seconds: f64,
+    join: JoinHandle<Result<(), RecordError>>,
+}
+
+impl ReplaySave {
+    /// Waits for the file to be complete.
+    pub fn wait(self) -> Result<PathBuf, RecordError> {
+        self.join.join().map_err(|_| RecordError::Worker)??;
+        Ok(self.path)
+    }
 }
 
 pub struct Recorder {
@@ -275,6 +297,17 @@ impl Recorder {
 
     pub fn resume(&self, t: i64) {
         let _ = self.tx.send(Cmd::Resume(t));
+    }
+
+    /// Writes the replay buffer's last seconds to `path` without re-encoding. Returns once the
+    /// packets are picked (the buffer keeps running); the file is complete after
+    /// [`ReplaySave::wait`].
+    pub fn save_replay(&self, path: PathBuf) -> Result<ReplaySave, RecordError> {
+        let (reply, answer) = sync_channel(1);
+        self.tx
+            .send(Cmd::Save(path, reply))
+            .map_err(|_| RecordError::Worker)?;
+        answer.recv().map_err(|_| RecordError::Worker)?
     }
 
     /// Finishes the files and returns what was written.
@@ -401,6 +434,7 @@ struct Worker {
     horizon: i64,
     part: u32,
     files: Vec<PathBuf>,
+    ring: Option<Ring>,
 }
 
 impl Worker {
@@ -415,11 +449,19 @@ impl Worker {
                 "bad output size {w}×{h} (must be even)"
             )));
         }
-        let path0 = namer(0);
-        if let Some(dir) = path0.parent() {
-            std::fs::create_dir_all(dir).map_err(|e| RecordError::Io(e.to_string()))?;
-        }
-        let octx = format::output_as(&path0, cfg.container.muxer())?;
+        let first = if cfg.files {
+            let path0 = namer(0);
+            if let Some(dir) = path0.parent() {
+                std::fs::create_dir_all(dir).map_err(|e| RecordError::Io(e.to_string()))?;
+            }
+            Some((format::output_as(&path0, cfg.container.muxer())?, path0))
+        } else {
+            None
+        };
+        // Every container we write (Matroska, MP4, WebM) wants the codec headers out of band.
+        let global = first
+            .as_ref()
+            .is_none_or(|(octx, _)| octx.format().flags().contains(format::Flags::GLOBAL_HEADER));
 
         let mut ctx = codec::context::Context::new_with_codec(codec)
             .encoder()
@@ -457,7 +499,7 @@ impl Worker {
             ctx.set_color_primaries(color::Primaries::BT709);
             ctx.set_color_transfer_characteristic(color::TransferCharacteristic::BT709);
         }
-        if octx.format().flags().contains(format::Flags::GLOBAL_HEADER) {
+        if global {
             flags |= codec::Flags::GLOBAL_HEADER;
         }
         ctx.set_flags(flags);
@@ -481,8 +523,12 @@ impl Worker {
             horizon: i64::MIN,
             part: 0,
             files: Vec::new(),
+            ring: None,
         };
-        let global = octx.format().flags().contains(format::Flags::GLOBAL_HEADER);
+        worker.ring = worker
+            .cfg
+            .replay_seconds
+            .map(|seconds| Ring::new(seconds, worker.cfg.audio.len()));
         for track in &worker.cfg.audio {
             let enc = AudioEncoder::open(track, global)?;
             let codec = enc.codec;
@@ -495,7 +541,9 @@ impl Worker {
                 held: std::collections::VecDeque::new(),
             });
         }
-        worker.begin_part(octx, path0)?;
+        if let Some((octx, path0)) = first {
+            worker.begin_part(octx, path0)?;
+        }
         Ok(worker)
     }
 
@@ -561,6 +609,9 @@ impl Worker {
     }
 
     fn write_audio(&mut self, track: usize, packet: &mut Packet) -> Result<(), RecordError> {
+        if let (Some(ring), Some(pts)) = (&mut self.ring, packet.pts()) {
+            ring.push_audio(track, pts, packet);
+        }
         let Some(out) = &mut self.out else {
             return Ok(());
         };
@@ -593,9 +644,20 @@ impl Worker {
 
     fn begin_part(
         &mut self,
-        mut octx: format::context::Output,
+        octx: format::context::Output,
         path: PathBuf,
     ) -> Result<(), RecordError> {
+        self.files.push(path.clone());
+        self.out = Some(self.new_output(octx, path)?);
+        Ok(())
+    }
+
+    /// The streams of a file (video, then the audio tracks) and its header.
+    fn new_output(
+        &self,
+        mut octx: format::context::Output,
+        path: PathBuf,
+    ) -> Result<Output, RecordError> {
         let mut stream = octx.add_stream(self.codec)?;
         stream.set_parameters(&self.encoder);
         for track in &self.audio {
@@ -615,8 +677,7 @@ impl Worker {
                     .map_or(Rational(1, SAMPLE_RATE as i32), |s| s.time_base())
             })
             .collect();
-        self.files.push(path.clone());
-        self.out = Some(Output {
+        Ok(Output {
             octx,
             path,
             stream_tb,
@@ -626,8 +687,47 @@ impl Worker {
             bytes: 0,
             audio_tb,
             audio_cut: 0,
-        });
-        Ok(())
+        })
+    }
+
+    /// Picks the packets of a save and hands them to a thread that writes the file.
+    fn save_replay(&mut self, path: PathBuf) -> Result<ReplaySave, RecordError> {
+        let seconds = self
+            .cfg
+            .replay_seconds
+            .ok_or_else(|| RecordError::Config("this recording has no replay buffer".into()))?;
+        let snapshot = self
+            .ring
+            .as_ref()
+            .and_then(|r| r.snapshot(seconds))
+            .ok_or_else(|| RecordError::Config("the replay buffer is still empty".into()))?;
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| RecordError::Io(e.to_string()))?;
+        }
+        let octx = format::output_as(&path, self.cfg.container.muxer())?;
+        let mut out = self.new_output(octx, path.clone())?;
+        let enc_tb = self.enc_tb;
+        let container = self.cfg.container;
+        let last = snapshot.video.last().map_or(snapshot.start, |(t, _)| *t);
+        let span = (last - snapshot.start) as f64 / f64::from(SAMPLE_RATE);
+        let join = std::thread::Builder::new()
+            .name("vixeeny-replay-save".into())
+            .spawn(move || {
+                write_snapshot(&mut out, &snapshot, enc_tb)?;
+                let path = out.path.clone();
+                out.octx.write_trailer()?;
+                drop(out);
+                if container == OutputContainer::Mp4Hybrid {
+                    faststart(&path)?;
+                }
+                Ok(())
+            })
+            .map_err(|e| RecordError::Io(e.to_string()))?;
+        Ok(ReplaySave {
+            path,
+            seconds: span,
+            join,
+        })
     }
 
     fn run(mut self, rx: &Receiver<Cmd>) -> Result<Summary, RecordError> {
@@ -665,6 +765,10 @@ impl Worker {
                 Cmd::Pause(t) => self.cfr.pause(t),
                 Cmd::Resume(t) => {
                     self.cfr.resume(t);
+                    continue;
+                }
+                Cmd::Save(path, reply) => {
+                    let _ = reply.send(self.save_replay(path));
                     continue;
                 }
                 Cmd::Stop(t) => {
@@ -815,6 +919,11 @@ impl Worker {
     }
 
     fn write(&mut self, packet: &mut Packet) -> Result<(), RecordError> {
+        let video_pts = packet.pts().unwrap_or(0);
+        let reached = self.pts_to_samples(video_pts);
+        if let Some(ring) = &mut self.ring {
+            ring.push_video(reached, packet);
+        }
         let due = self.out.as_ref().is_some_and(|o| self.split_due(o, packet));
         if due {
             // The audio before the cut belongs to the part that ends.
@@ -827,27 +936,24 @@ impl Worker {
             self.begin_part(octx, path)?;
         }
         let enc_tb = self.enc_tb;
-        let Some(out) = &mut self.out else {
-            return Ok(());
-        };
-        let offset = *out.offset.get_or_insert_with(|| {
-            out.first_pts = packet.pts().unwrap_or(0);
-            out.first_pts
-        });
-        let first_pts = out.first_pts;
-        let size = packet.size();
-        let video_pts = packet.pts().unwrap_or(0);
-        packet.set_pts(packet.pts().map(|p| p - offset));
-        packet.set_dts(packet.dts().map(|d| d - offset));
-        packet.rescale_ts(self.enc_tb, out.stream_tb);
-        packet.set_stream(0);
-        packet.write_interleaved(&mut out.octx)?;
-        out.packets += 1;
-        out.bytes += size as u64;
-        if out.packets == 1 {
-            out.audio_cut = samples_of(enc_tb, first_pts);
+        if let Some(out) = &mut self.out {
+            let offset = *out.offset.get_or_insert_with(|| {
+                out.first_pts = packet.pts().unwrap_or(0);
+                out.first_pts
+            });
+            let first_pts = out.first_pts;
+            let size = packet.size();
+            packet.set_pts(packet.pts().map(|p| p - offset));
+            packet.set_dts(packet.dts().map(|d| d - offset));
+            packet.rescale_ts(self.enc_tb, out.stream_tb);
+            packet.set_stream(0);
+            packet.write_interleaved(&mut out.octx)?;
+            out.packets += 1;
+            out.bytes += size as u64;
+            if out.packets == 1 {
+                out.audio_cut = samples_of(enc_tb, first_pts);
+            }
         }
-        let reached = samples_of(enc_tb, video_pts);
         self.horizon = self.horizon.max(reached);
         self.write_ready_audio()
     }
@@ -884,6 +990,68 @@ impl Worker {
             dropped_by_queue: self.stats.queue_dropped.load(Ordering::Relaxed),
         })
     }
+}
+
+/// Writes a replay: the packets of `snapshot`, video and audio merged by time, each stream
+/// starting at zero.
+fn write_snapshot(
+    out: &mut Output,
+    snapshot: &Snapshot,
+    enc_tb: Rational,
+) -> Result<(), RecordError> {
+    // The first packet is a key frame; its dts may be before its pts (encoder delay), as in a
+    // normal recording.
+    let offset = snapshot
+        .video
+        .first()
+        .and_then(|(_, p)| p.pts())
+        .unwrap_or(0);
+    let cut = samples_of(enc_tb, offset);
+    let mut next = vec![0_usize; snapshot.audio.len()];
+    let mut video = snapshot.video.iter().peekable();
+    loop {
+        // The earliest of the next video packet and the next packet of every audio track.
+        let video_t = video.peek().map(|(t, _)| *t);
+        let audio_pick = snapshot
+            .audio
+            .iter()
+            .enumerate()
+            .filter_map(|(i, q)| q.get(next[i]).map(|(t, _)| (*t, i)))
+            .min();
+        match (video_t, audio_pick) {
+            (None, None) => break,
+            (Some(vt), audio) if audio.is_none_or(|(at, _)| vt <= at) => {
+                let Some((_, original)) = video.next() else {
+                    break;
+                };
+                let mut packet = share(original);
+                packet.set_pts(packet.pts().map(|p| p - offset));
+                packet.set_dts(packet.dts().map(|d| d - offset));
+                packet.rescale_ts(enc_tb, out.stream_tb);
+                packet.set_stream(0);
+                packet.write_interleaved(&mut out.octx)?;
+            }
+            (_, Some((_, track))) => {
+                let (_, original) = &snapshot.audio[track][next[track]];
+                next[track] += 1;
+                let mut packet = share(original);
+                let Some(pts) = packet.pts().map(|p| p - cut) else {
+                    continue;
+                };
+                if pts < 0 {
+                    continue; // starts before the key frame
+                }
+                packet.set_pts(Some(pts));
+                packet.set_dts(packet.dts().map(|d| d - cut));
+                let tb = out.audio_tb.get(track).copied().unwrap_or(enc_tb);
+                packet.rescale_ts(Rational(1, SAMPLE_RATE as i32), tb);
+                packet.set_stream(1 + track);
+                packet.write_interleaved(&mut out.octx)?;
+            }
+            (Some(_), None) => unreachable!("handled by the first arm"),
+        }
+    }
+    Ok(())
 }
 
 /// Rewrites a fragmented MP4 as a classic one with the `moov` box first (packet copy).

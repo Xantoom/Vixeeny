@@ -187,12 +187,15 @@ fn parse_action() -> anyhow::Result<ActionId> {
 struct Recording {
     #[cfg(all(windows, feature = "ffmpeg"))]
     handle: Option<record::Handle>,
+    /// The replay buffer (`ReplayToggle`), which runs alongside a recording.
+    #[cfg(all(windows, feature = "ffmpeg"))]
+    replay: Option<record::Handle>,
 }
 
 impl Recording {
     #[cfg(all(windows, feature = "ffmpeg"))]
     fn active(&self) -> bool {
-        self.handle.is_some()
+        self.handle.is_some() || self.replay.is_some()
     }
 
     #[cfg(not(all(windows, feature = "ffmpeg")))]
@@ -203,6 +206,27 @@ impl Recording {
 
     #[cfg(all(windows, feature = "ffmpeg"))]
     fn handle(&mut self, action: ActionId, config: &Config) {
+        match action {
+            ActionId::ReplayToggle => {
+                match self.replay.take() {
+                    // Dropping the handle stops the buffer.
+                    Some(replay) => drop(replay),
+                    None => match record::start_replay(config) {
+                        Ok(handle) => self.replay = Some(handle),
+                        Err(e) => tracing::error!("cannot start the replay buffer: {e:#}"),
+                    },
+                }
+                return;
+            }
+            ActionId::ReplaySave => {
+                match &self.replay {
+                    Some(replay) => replay.save(),
+                    None => tracing::info!("replay save ignored: the buffer is not running"),
+                }
+                return;
+            }
+            _ => {}
+        }
         match (action, &self.handle) {
             (ActionId::RecordToggle, Some(handle)) => handle.stop(),
             (ActionId::RecordToggle, None) => match record::start(config) {

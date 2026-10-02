@@ -80,6 +80,8 @@ fn config(registry: &Registry, id: &str, container: OutputContainer, fps: u32) -
         vfr: false,
         audio: Vec::new(),
         gpu: None,
+        replay_seconds: None,
+        files: true,
     }
 }
 
@@ -856,5 +858,123 @@ fn a_drifting_source_through_the_mixer_stays_in_sync_with_the_video() {
         (last - v_end).abs() <= 60,
         "audio {last} ms vs video {v_end} ms"
     );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+// ---- replay buffer ----
+
+/// A replay-only session fed `seconds` of 30 fps video and a stereo tone track.
+fn replay_session(
+    container: OutputContainer,
+    audio: bool,
+    keep: u32,
+    seconds: usize,
+) -> (Recorder, PathBuf) {
+    let registry = Registry::builtin().unwrap();
+    let dir = scratch(&format!("replay-{}", container.extension()));
+    let mut cfg = config(&registry, "libx264", container, 30);
+    cfg.files = false;
+    cfg.replay_seconds = Some(keep);
+    if audio {
+        cfg.audio = vec![audio_track("Jeu", AudioCodec::Opus)];
+    }
+    let ext = cfg.container.extension();
+    let rec = Recorder::start(cfg, namer(&dir, ext)).unwrap();
+    for (k, block) in tone_blocks(seconds, 0).into_iter().enumerate() {
+        if audio {
+            rec.push_audio(0, block);
+        }
+        if k % 2 == 0 {
+            rec.push_frame(k as i64 * 20 * MS, frame(320, 180, k / 2));
+        }
+    }
+    (rec, dir)
+}
+
+#[test]
+fn a_replay_save_holds_the_requested_duration_without_writing_while_buffering() {
+    let (rec, dir) = replay_session(OutputContainer::Mkv, true, 5, 12);
+    let save = rec.save_replay(dir.join("replay.mkv")).unwrap();
+    // 5 s asked, key frames every second: 4 to 5 s of media.
+    assert!((4.0..=5.1).contains(&save.seconds), "{}", save.seconds);
+    let path = save.wait().unwrap();
+    let video = demux(&path);
+    assert_eq!(video.pts_ms[0], 0, "starts at zero");
+    assert!(video.keyframes >= 4);
+    let span = video.pts_ms.last().unwrap() - video.pts_ms[0];
+    assert!((3_800..=5_000).contains(&span), "{span} ms");
+    let audio = demux_audio(&path);
+    assert_eq!(audio.streams.len(), 1);
+    assert_eq!(audio.streams[0].3.as_deref(), Some("Jeu"));
+    // Audio and video cover the same stretch (to within a packet or two).
+    assert!(audio.streams[0].1.abs() < 60, "{}", audio.streams[0].1);
+    assert!(
+        (audio.streams[0].2 - span).abs() < 200,
+        "{:?}",
+        audio.streams
+    );
+    // The buffer keeps running: the session ends with no file of its own.
+    let summary = rec.stop(12_000 * MS).unwrap();
+    assert!(summary.files.is_empty());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn two_saves_in_a_row_make_two_valid_files_and_a_short_buffer_gives_what_it_has() {
+    let (rec, dir) = replay_session(OutputContainer::Mkv, false, 30, 4);
+    let a = rec.save_replay(dir.join("a.mkv")).unwrap();
+    let b = rec.save_replay(dir.join("b.mkv")).unwrap();
+    let (a, b) = (a.wait().unwrap(), b.wait().unwrap());
+    for path in [&a, &b] {
+        let seen = demux(path);
+        assert_eq!(seen.pts_ms[0], 0);
+        // Only ~4 s were buffered: that is what the file has.
+        assert!(seen.pts_ms.len() >= 100, "{}", seen.pts_ms.len());
+    }
+    drop(rec);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_save_before_any_key_frame_is_refused_and_a_plain_recording_has_no_replay() {
+    let registry = Registry::builtin().unwrap();
+    let dir = scratch("replay-empty");
+    let mut cfg = config(&registry, "libx264", OutputContainer::Mkv, 30);
+    cfg.files = false;
+    cfg.replay_seconds = Some(5);
+    let rec = Recorder::start(cfg, namer(&dir, "mkv")).unwrap();
+    assert!(rec.save_replay(dir.join("x.mkv")).is_err());
+    drop(rec);
+    let cfg = config(&registry, "libx264", OutputContainer::Mkv, 30);
+    let rec = Recorder::start(cfg, namer(&dir, "mkv")).unwrap();
+    assert!(rec.save_replay(dir.join("y.mkv")).is_err());
+    rec.stop(0).unwrap();
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_replay_and_a_recording_share_one_encoder_session() {
+    let registry = Registry::builtin().unwrap();
+    let dir = scratch("replay-shared");
+    let mut cfg = config(&registry, "libx264", OutputContainer::Mp4Hybrid, 30);
+    cfg.replay_seconds = Some(5);
+    let rec = Recorder::start(cfg, namer(&dir, "mp4")).unwrap();
+    for i in 0..240 {
+        rec.push_frame(i * 1_000 * MS / 30, frame(320, 180, i as usize));
+    }
+    let path = rec
+        .save_replay(dir.join("replay.mp4"))
+        .unwrap()
+        .wait()
+        .unwrap();
+    let summary = rec.stop(8_000 * MS).unwrap();
+    // The recording is whole, and the replay is a classic MP4 cut from the same packets.
+    assert_eq!(demux(&summary.files[0]).pts_ms.len(), 240);
+    assert!(
+        boxes(&path).iter().position(|b| b == "moov")
+            < boxes(&path).iter().position(|b| b == "mdat")
+    );
+    // Starts where a recording starts (MP4 keeps the encoder delay as an offset).
+    assert_eq!(demux(&path).pts_ms[0], demux(&summary.files[0]).pts_ms[0]);
     let _ = std::fs::remove_dir_all(dir);
 }

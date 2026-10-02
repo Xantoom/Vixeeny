@@ -3,6 +3,7 @@
 //! the action loop keeps answering the daemon. This is the CPU path; the target is the monitor
 //! under the cursor.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -23,12 +24,14 @@ use vixeeny_encode::recorder::{
     FrameFormat, OutputContainer, RecordConfig, Recorder, Split, VideoFrame,
 };
 use vixeeny_encode::registry::{Chroma, Encoder, Platform, PresetName, Registry, Vendor};
+use vixeeny_encode::replay;
 use vixeeny_encode::validate::{self, Context as ValidateContext, Severity};
 
 /// How often a still screen gets its frame repeated.
 const TICK: Duration = Duration::from_millis(100);
 
 enum Ctl {
+    Save,
     TogglePause,
     Stop,
 }
@@ -52,6 +55,11 @@ impl Handle {
 
     pub fn stop(&self) {
         let _ = self.ctl.send(Ctl::Stop);
+    }
+
+    /// Replay only: writes the buffer's last seconds to a new file.
+    pub fn save(&self) {
+        let _ = self.ctl.send(Ctl::Save);
     }
 
     pub fn finished(&self) -> bool {
@@ -109,6 +117,9 @@ fn parse_split(mode: &str) -> Split {
     }
 }
 
+type Namer = Box<dyn FnMut(u32) -> PathBuf + Send>;
+type SaveNamer = Box<dyn FnMut() -> anyhow::Result<PathBuf> + Send>;
+
 /// Everything decided before the capture starts.
 struct Plan {
     config: RecordConfig,
@@ -116,7 +127,9 @@ struct Plan {
     cursor: bool,
     /// The monitor shows HDR and the profile keeps it: frames are scRGB half floats.
     hdr: bool,
-    namer: Box<dyn FnMut(u32) -> std::path::PathBuf + Send>,
+    namer: Namer,
+    /// Replay only: the path of the next save.
+    save_as: Option<SaveNamer>,
     /// Frames are converted on the GPU on this device (see `try_gpu`).
     gpu: Option<GpuParts>,
     audio: Vec<vixeeny_audio::TrackPlan>,
@@ -186,7 +199,7 @@ fn try_gpu(
     }
 }
 
-fn plan(config: &Config, allow_gpu: bool) -> anyhow::Result<Plan> {
+fn plan(config: &Config, allow_gpu: bool, replay: bool) -> anyhow::Result<Plan> {
     vixeeny_platform::ensure_dpi_aware();
     let monitors = vixeeny_platform::monitors()?;
     let cursor = vixeeny_platform::cursor_position()?;
@@ -196,9 +209,15 @@ fn plan(config: &Config, allow_gpu: bool) -> anyhow::Result<Plan> {
         .clone();
     let source = (monitor.rect.width, monitor.rect.height);
 
+    // The replay has its own profile, by default the recording's.
+    let profile_name = if replay && !config.replay.profile.is_empty() {
+        &config.replay.profile
+    } else {
+        &config.video.profile
+    };
     let profile = config
         .profiles
-        .get(&config.video.profile)
+        .get(profile_name)
         .cloned()
         .unwrap_or_default();
     let registry = Registry::builtin().context("codec registry")?;
@@ -256,13 +275,20 @@ fn plan(config: &Config, allow_gpu: bool) -> anyhow::Result<Plan> {
         depth: profile.depth,
         chroma,
         hdr,
-        split: parse_split(&profile.split.mode),
+        split: if replay {
+            Split::Off
+        } else {
+            parse_split(&profile.split.mode)
+        },
         vfr: profile.vfr,
-        keyframe_seconds: 2.0,
+        // A replay starts on a key frame: one every second keeps the cut within a second.
+        keyframe_seconds: if replay { 1.0 } else { 2.0 },
         queue: 8,
         audio: audio_configs,
         gpu: None,
         encoder,
+        replay_seconds: replay.then(|| replay::clamp_seconds(config.replay.duration_seconds)),
+        files: !replay,
     };
     let gpu = if allow_gpu {
         try_gpu(&record.encoder, &record, source, hdr)
@@ -271,69 +297,37 @@ fn plan(config: &Config, allow_gpu: bool) -> anyhow::Result<Plan> {
     };
     record.gpu = gpu.as_ref().map(|g| Arc::clone(&g.pipeline));
 
-    let dir = vixeeny_common::paths::expand_user_dir(&config.paths.videos)
-        .context("cannot locate the videos folder")?;
-    let now = vixeeny_platform::local_time();
-    let snapshot = crate::still::Snapshot {
-        monitors: monitors.clone(),
-        cursor,
-        foreground: vixeeny_platform::foreground_window()?,
-    };
-    let destination = crate::still::Destination {
-        dir: &dir,
-        template: &config.paths.filename_template,
-        per_app_subfolder: config.paths.per_app_subfolder.videos,
-        use_foreground_app: config.paths.use_foreground_app,
-        app_names: &config.paths.app_names,
-        now: &now,
-        after_save: None,
-    };
-    let vars = vixeeny_common::naming::Vars {
-        app: crate::still::app_name(
-            vixeeny_common::ipc::ActionId::RecordToggle,
-            &snapshot,
-            &destination,
-            &vixeeny_platform::exe_metadata,
-        ),
-        title: String::new(),
-        date: now.date(),
-        time: now.time(),
-        millis: now.millisecond,
-        width: output_size.0,
-        height: output_size.1,
-        monitor: monitors
-            .iter()
-            .position(|m| m.id == monitor.id)
-            .map_or_else(String::new, |i| (i + 1).to_string()),
-    };
     let extension = container.extension();
-    let first = vixeeny_common::naming::output_path(
-        destination.dir,
-        destination.per_app_subfolder,
-        destination.template,
-        &vars,
-        extension,
-        |p| p.exists(),
-    );
-    let namer = Box::new(move |part: u32| {
-        if part == 0 {
-            return first.clone();
-        }
-        let stem = first
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("video");
-        first.with_file_name(format!("{stem}_part{}.{extension}", part + 1))
-    });
+    let (namer, save_as): (Namer, Option<SaveNamer>) = if replay {
+        let config = config.clone();
+        let monitor = monitor.clone();
+        let save: SaveNamer =
+            Box::new(move || output_file(&config, true, &monitor, output_size, extension));
+        (Box::new(|_| PathBuf::new()), Some(save))
+    } else {
+        let first = output_file(config, false, &monitor, output_size, extension)?;
+        let namer = Box::new(move |part: u32| {
+            if part == 0 {
+                return first.clone();
+            }
+            let stem = first
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("video");
+            first.with_file_name(format!("{stem}_part{}.{extension}", part + 1))
+        });
+        (namer, None)
+    };
     Ok(Plan {
         config: record,
         monitor,
         cursor: profile.show_cursor,
         hdr,
         namer,
+        save_as,
         gpu,
         audio,
-        widget: config.recording_widget.enabled.then(|| {
+        widget: (config.recording_widget.enabled && !replay).then(|| {
             (
                 config.recording_widget.clone(),
                 config.general.language.clone(),
@@ -342,11 +336,87 @@ fn plan(config: &Config, allow_gpu: bool) -> anyhow::Result<Plan> {
     })
 }
 
+/// A new file in the videos (or replays) folder, named by the user's template.
+fn output_file(
+    config: &Config,
+    replay: bool,
+    monitor: &vixeeny_platform::MonitorInfo,
+    size: (u32, u32),
+    extension: &str,
+) -> anyhow::Result<PathBuf> {
+    let (folder, per_app, action) = if replay {
+        (
+            &config.paths.replays,
+            config.paths.per_app_subfolder.replays,
+            vixeeny_common::ipc::ActionId::ReplaySave,
+        )
+    } else {
+        (
+            &config.paths.videos,
+            config.paths.per_app_subfolder.videos,
+            vixeeny_common::ipc::ActionId::RecordToggle,
+        )
+    };
+    let dir = vixeeny_common::paths::expand_user_dir(folder)
+        .context("cannot locate the videos folder")?;
+    let monitors = vixeeny_platform::monitors()?;
+    let now = vixeeny_platform::local_time();
+    let snapshot = crate::still::Snapshot {
+        monitors: monitors.clone(),
+        cursor: vixeeny_platform::cursor_position()?,
+        foreground: vixeeny_platform::foreground_window()?,
+    };
+    let destination = crate::still::Destination {
+        dir: &dir,
+        template: &config.paths.filename_template,
+        per_app_subfolder: per_app,
+        use_foreground_app: config.paths.use_foreground_app,
+        app_names: &config.paths.app_names,
+        now: &now,
+        after_save: None,
+    };
+    let vars = vixeeny_common::naming::Vars {
+        app: crate::still::app_name(
+            action,
+            &snapshot,
+            &destination,
+            &vixeeny_platform::exe_metadata,
+        ),
+        title: String::new(),
+        date: now.date(),
+        time: now.time(),
+        millis: now.millisecond,
+        width: size.0,
+        height: size.1,
+        monitor: monitors
+            .iter()
+            .position(|m| m.id == monitor.id)
+            .map_or_else(String::new, |i| (i + 1).to_string()),
+    };
+    Ok(vixeeny_common::naming::output_path(
+        destination.dir,
+        destination.per_app_subfolder,
+        destination.template,
+        &vars,
+        extension,
+        |p| p.exists(),
+    ))
+}
+
 /// Starts a recording on its own thread; fails early (bad profile, no encoder, no capture) so
 /// the caller can tell the user. The GPU path is tried first; if it cannot start, the same
 /// recording starts on the CPU path.
 pub fn start(config: &Config) -> anyhow::Result<Handle> {
-    let first = plan(config, true)?;
+    start_session(config, false)
+}
+
+/// Starts the replay buffer: the same capture and encoder, nothing written until a save.
+pub fn start_replay(config: &Config) -> anyhow::Result<Handle> {
+    start_session(config, true)
+}
+
+fn start_session(config: &Config, replay: bool) -> anyhow::Result<Handle> {
+    let first = plan(config, true, replay)?;
     if first.gpu.is_none() {
         return launch(first);
     }
@@ -354,7 +424,7 @@ pub fn start(config: &Config) -> anyhow::Result<Handle> {
         Ok(handle) => Ok(handle),
         Err(e) => {
             tracing::warn!("GPU recording failed to start ({e:#}); using the CPU path");
-            launch(plan(config, false)?)
+            launch(plan(config, false, replay)?)
         }
     }
 }
@@ -420,6 +490,7 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
     let state = Arc::new(AtomicU8::new(RECORDING));
     let thread_state = Arc::clone(&state);
     // The GPU parts must outlive the recording (the device the textures live on).
+    let save_as = plan.save_as;
     let keep_alive = KeepAlive(plan.gpu);
     let thread = std::thread::Builder::new()
         .name("recording".into())
@@ -430,6 +501,7 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
                 recorder,
                 rig,
                 widget,
+                save_as,
                 origin,
                 &rx,
                 &thread_state,
@@ -450,6 +522,27 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
     })
 }
 
+/// Starts writing the replay; the file is finished (and reported) by a thread of its own, so the
+/// recording goes on, and a second save right after does not wait for the first.
+fn save_replay(recorder: &Recorder, next_path: &mut SaveNamer) {
+    let started = std::time::Instant::now();
+    let save = next_path().and_then(|path| Ok(recorder.save_replay(path)?));
+    match save {
+        Ok(save) => {
+            let seconds = save.seconds;
+            std::thread::spawn(move || match save.wait() {
+                Ok(path) => tracing::info!(
+                    "replay saved: {} ({seconds:.1} s, {:.2} s to write)",
+                    path.display(),
+                    started.elapsed().as_secs_f64()
+                ),
+                Err(e) => tracing::error!("cannot save the replay: {e}"),
+            });
+        }
+        Err(e) => tracing::error!("cannot save the replay: {e:#}"),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn record_loop(
     stream: &vixeeny_capture::VideoStream,
@@ -457,6 +550,7 @@ fn record_loop(
     recorder: Recorder,
     mut rig: Option<Rig>,
     mut widget: Option<crate::widget::Widget>,
+    mut save_as: Option<SaveNamer>,
     origin: i64,
     ctl: &Receiver<Ctl>,
     state: &AtomicU8,
@@ -478,6 +572,13 @@ fn record_loop(
     }
     loop {
         match ctl.try_recv() {
+            Ok(Ctl::Save) => {
+                if let Some(next_path) = &mut save_as {
+                    save_replay(&recorder, next_path);
+                }
+            }
+            // A replay has no pause: it always keeps the last seconds.
+            Ok(Ctl::TogglePause) if save_as.is_some() => {}
             Ok(Ctl::TogglePause) => {
                 paused = !paused;
                 if paused {

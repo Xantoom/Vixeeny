@@ -393,6 +393,8 @@ pub struct Replay {
     pub enabled_on_start: bool,
     pub duration_seconds: u32,
     pub storage: String,
+    /// The video profile of the replay; empty = the recording's.
+    pub profile: String,
 }
 
 impl Default for Replay {
@@ -401,6 +403,7 @@ impl Default for Replay {
             enabled_on_start: false,
             duration_seconds: 30,
             storage: "ram".into(),
+            profile: String::new(),
         }
     }
 }

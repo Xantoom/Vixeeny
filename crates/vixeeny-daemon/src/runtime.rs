@@ -91,6 +91,13 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
         self.apply_hotkeys();
     }
 
+    /// Starts the replay buffer if the settings say so (once, when the daemon starts).
+    pub fn start_replay_if_configured(&mut self) {
+        if self.config.replay.enabled_on_start {
+            self.tx.send(Event::Action(ActionId::ReplayToggle));
+        }
+    }
+
     fn apply_hotkeys(&mut self) {
         let resolution = hotkey::resolve(&self.config.hotkeys);
         let mut trouble = !resolution.problems.is_empty();
@@ -288,6 +295,21 @@ mod tests {
             rx,
         );
         (rt, events, log, spawned)
+    }
+
+    #[test]
+    fn the_replay_buffer_starts_with_the_daemon_only_when_asked() {
+        let (mut rt, _, _, spawned) = runtime(false, Config::default());
+        rt.start_replay_if_configured();
+        rt.pump();
+        assert!(spawned.lock().unwrap().is_empty());
+
+        let mut config = Config::default();
+        config.replay.enabled_on_start = true;
+        let (mut rt, _, _, spawned) = runtime(false, config);
+        rt.start_replay_if_configured();
+        rt.pump();
+        assert_eq!(*spawned.lock().unwrap(), vec![(1, ActionId::ReplayToggle)]);
     }
 
     #[test]
