@@ -78,6 +78,7 @@ fn config(registry: &Registry, id: &str, container: OutputContainer, fps: u32) -
         keyframe_seconds: 1.0,
         queue: 1_000,
         vfr: false,
+        gpu: None,
     }
 }
 

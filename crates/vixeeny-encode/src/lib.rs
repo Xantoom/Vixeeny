@@ -3,6 +3,8 @@
 //! later milestones, the video pipeline. See README.md.
 
 pub mod clock;
+#[cfg(windows)]
+pub mod d3d_convert;
 pub mod hdr;
 pub mod probe;
 pub mod registry;
@@ -10,6 +12,8 @@ pub mod validate;
 
 #[cfg(feature = "ffmpeg-next")]
 pub mod ffmpeg_probe;
+#[cfg(feature = "ffmpeg-next")]
+pub mod gpu;
 #[cfg(feature = "ffmpeg-next")]
 pub mod recorder;
 

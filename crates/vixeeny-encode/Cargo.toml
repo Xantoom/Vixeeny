@@ -23,6 +23,14 @@ ffmpeg-next = { version = "9.0.0", default-features = false, features = ["codec"
 # Windows: prebuilt shared FFmpeg (FFMPEG_DIR); its DLLs must be next to the executable.
 [target.'cfg(windows)'.dependencies]
 ffmpeg-next = { version = "9.0.0", default-features = false, features = ["codec", "format", "software-scaling"], optional = true }
+# The D3D11 video processor that converts captured frames on the GPU.
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+] }
 
 [features]
 ffmpeg-next = ["dep:ffmpeg-next"]

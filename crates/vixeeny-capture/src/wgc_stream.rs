@@ -75,6 +75,18 @@ pub struct CapturedFrame {
     pub frame: CpuFrame,
 }
 
+/// Receives each frame as a GPU texture: `(texture, content size, time in ns)`. The texture is
+/// only valid during the call (it goes back to the capture pool afterwards): convert or copy it
+/// there.
+pub type TextureSink = Box<dyn FnMut(&ID3D11Texture2D, (u32, u32), i64) + Send>;
+
+/// An existing D3D11 device to capture on, and where the textures go (GPU recording).
+pub struct GpuCapture {
+    pub device: ID3D11Device,
+    pub context: ID3D11DeviceContext,
+    pub sink: TextureSink,
+}
+
 /// State shared with the frame callback. The immediate context is not thread safe: one lock.
 struct Shared {
     device: ID3D11Device,
@@ -83,6 +95,7 @@ struct Shared {
     staging: Mutex<Option<(ID3D11Texture2D, (u32, u32))>>,
     region: Option<PhysicalRect>,
     hdr: bool,
+    sink: Option<Mutex<TextureSink>>,
     last_size: Mutex<SizeInt32>,
 }
 
@@ -188,6 +201,17 @@ pub struct VideoStream {
 impl VideoStream {
     /// `hdr`: ask for scRGB half floats (an HDR monitor); the frames then have `hdr` set.
     pub fn start(target: &StreamTarget, cursor: bool, hdr: bool) -> Result<Self, CaptureError> {
+        Self::start_with(target, cursor, hdr, None)
+    }
+
+    /// Like [`start`](Self::start); with `gpu`, frames go to its sink as textures and `recv`
+    /// only reports errors (the stream ending).
+    pub fn start_with(
+        target: &StreamTarget,
+        cursor: bool,
+        hdr: bool,
+        gpu: Option<GpuCapture>,
+    ) -> Result<Self, CaptureError> {
         if !GraphicsCaptureSession::IsSupported().map_err(os("IsSupported"))? {
             return Err(CaptureError::Os(
                 "Windows Graphics Capture is not available".into(),
@@ -217,25 +241,33 @@ impl VideoStream {
         };
         let size = item.Size().map_err(os("item size"))?;
 
-        let mut device = None;
-        let mut context = None;
-        // SAFETY: out-pointers are valid; default adapter, no feature-level list.
-        unsafe {
-            D3D11CreateDevice(
-                None,
-                D3D_DRIVER_TYPE_HARDWARE,
-                HMODULE::default(),
-                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-                None,
-                D3D11_SDK_VERSION,
-                Some(&raw mut device),
-                None,
-                Some(&raw mut context),
-            )
-        }
-        .map_err(os("D3D11CreateDevice"))?;
-        let device = device.ok_or_else(|| CaptureError::Os("no D3D11 device".into()))?;
-        let context = context.ok_or_else(|| CaptureError::Os("no D3D11 context".into()))?;
+        let (device, context, sink) = match gpu {
+            Some(g) => (g.device, g.context, Some(Mutex::new(g.sink))),
+            None => {
+                let mut device = None;
+                let mut context = None;
+                // SAFETY: out-pointers are valid; default adapter, no feature-level list.
+                unsafe {
+                    D3D11CreateDevice(
+                        None,
+                        D3D_DRIVER_TYPE_HARDWARE,
+                        HMODULE::default(),
+                        D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                        None,
+                        D3D11_SDK_VERSION,
+                        Some(&raw mut device),
+                        None,
+                        Some(&raw mut context),
+                    )
+                }
+                .map_err(os("D3D11CreateDevice"))?;
+                (
+                    device.ok_or_else(|| CaptureError::Os("no D3D11 device".into()))?,
+                    context.ok_or_else(|| CaptureError::Os("no D3D11 context".into()))?,
+                    None,
+                )
+            }
+        };
         let dxgi: IDXGIDevice = device.cast().map_err(os("IDXGIDevice"))?;
         // SAFETY: `dxgi` is a live DXGI device.
         let winrt_device: IDirect3DDevice = unsafe { CreateDirect3D11DeviceFromDXGIDevice(&dxgi) }
@@ -249,6 +281,7 @@ impl VideoStream {
             staging: Mutex::new(None),
             region,
             hdr,
+            sink,
             last_size: Mutex::new(size),
         });
         let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
@@ -344,6 +377,16 @@ fn frame_handler(
             let access: IDirect3DDxgiInterfaceAccess = surface.cast()?;
             // SAFETY: the surface is backed by a D3D11 texture on our device.
             let texture: ID3D11Texture2D = unsafe { access.GetInterface() }?;
+            if let Some(sink) = &shared.sink {
+                if let Ok(mut sink) = sink.lock() {
+                    sink(
+                        &texture,
+                        (content.Width.max(1) as u32, content.Height.max(1) as u32),
+                        time_ns,
+                    );
+                }
+                return Ok(());
+            }
             let result = shared.read(&texture, content).map(|frame| CapturedFrame {
                 hdr: shared.hdr,
                 time_ns,

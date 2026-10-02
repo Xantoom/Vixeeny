@@ -20,6 +20,7 @@ use ffmpeg_next::software::scaling;
 use ffmpeg_next::{Dictionary, Packet, Rational, codec, color, encoder, ffi, format, frame};
 
 use crate::clock::{Cfr, Emit, Fps};
+use crate::gpu::{GpuPipeline, HwFrame};
 use crate::registry::{Chroma, Encoder};
 
 #[derive(Debug, thiserror::Error)]
@@ -116,6 +117,8 @@ pub struct RecordConfig {
     /// Variable frame rate: every captured frame is kept at its own time, nothing is repeated
     /// or dropped (the file is smaller when the screen is mostly still). Matroska and WebM only.
     pub vfr: bool,
+    /// Hardware encoders that read D3D11 frames (Windows): frames come from `push_hw`.
+    pub gpu: Option<Arc<GpuPipeline>>,
 }
 
 /// How the pixels of a [`VideoFrame`] are laid out.
@@ -158,8 +161,20 @@ pub struct Summary {
     pub dropped_by_queue: u64,
 }
 
+/// What a frame command carries.
+enum Input {
+    Cpu(VideoFrame),
+    Hw(HwFrame),
+}
+
+/// The last converted frame, repeated when the source is late.
+enum Last {
+    Sw(frame::Video),
+    Hw(HwFrame),
+}
+
 enum Cmd {
-    Frame(i64, Box<VideoFrame>),
+    Frame(i64, Box<Input>),
     Tick(i64),
     Pause(i64),
     Resume(i64),
@@ -218,7 +233,17 @@ impl Recorder {
     /// is behind.
     pub fn push_frame(&self, t: i64, frame: VideoFrame) -> bool {
         self.stats.pushed.fetch_add(1, Ordering::Relaxed);
-        match self.tx.try_send(Cmd::Frame(t, Box::new(frame))) {
+        self.queue(t, Input::Cpu(frame))
+    }
+
+    /// Queues a frame already converted on the GPU (see [`GpuPipeline::convert`]).
+    pub fn push_hw(&self, t: i64, frame: HwFrame) -> bool {
+        self.stats.pushed.fetch_add(1, Ordering::Relaxed);
+        self.queue(t, Input::Hw(frame))
+    }
+
+    fn queue(&self, t: i64, input: Input) -> bool {
+        match self.tx.try_send(Cmd::Frame(t, Box::new(input))) {
             Ok(()) => true,
             Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => {
                 self.stats.queue_dropped.fetch_add(1, Ordering::Relaxed);
@@ -333,7 +358,7 @@ struct Worker {
     pix: Pixel,
     enc_tb: Rational,
     scaler: Option<(scaling::Context, (u32, u32, FrameFormat))>,
-    last: Option<frame::Video>,
+    last: Option<Last>,
     out: Option<Output>,
     part: u32,
     files: Vec<PathBuf>,
@@ -363,6 +388,9 @@ impl Worker {
         ctx.set_width(w);
         ctx.set_height(h);
         ctx.set_format(pix);
+        if let Some(gpu) = &cfg.gpu {
+            crate::gpu::attach(&mut ctx, gpu)?;
+        }
         if cfg.vfr && !matches!(cfg.container, OutputContainer::Mkv | OutputContainer::WebM) {
             return Err(RecordError::Config(
                 "variable frame rate needs Matroska or WebM".into(),
@@ -444,8 +472,7 @@ impl Worker {
             let emits = match cmd {
                 Cmd::Frame(t, frame) if self.cfg.vfr => {
                     if let Some(pts) = self.vfr.stamp(t) {
-                        let converted = self.convert(&frame)?;
-                        self.last = Some(converted);
+                        self.last = Some(self.prepare(*frame)?);
                         self.send(pts)?;
                     }
                     continue;
@@ -461,7 +488,7 @@ impl Worker {
                 }
                 Cmd::Frame(t, frame) => {
                     let emits = self.cfr.on_frame(t);
-                    self.emit(&emits, Some(&frame))?;
+                    self.emit(&emits, Some(*frame))?;
                     continue;
                 }
                 Cmd::Tick(t) => self.cfr.on_tick(t),
@@ -485,19 +512,27 @@ impl Worker {
     }
 
     /// Sends the planned frames to the encoder. `new` is the frame for the `Emit::New` slot.
-    fn emit(&mut self, emits: &[Emit], new: Option<&VideoFrame>) -> Result<(), RecordError> {
+    fn emit(&mut self, emits: &[Emit], mut new: Option<Input>) -> Result<(), RecordError> {
         for e in emits {
-            match (*e, new) {
-                (Emit::New(i), Some(frame)) => {
-                    let converted = self.convert(frame)?;
-                    self.last = Some(converted);
-                    self.send(i)?;
+            match *e {
+                Emit::New(i) => {
+                    if let Some(input) = new.take() {
+                        self.last = Some(self.prepare(input)?);
+                        self.send(i)?;
+                    }
                 }
-                (Emit::Repeat(i), _) => self.send(i)?,
-                (Emit::New(_), None) => {}
+                Emit::Repeat(i) => self.send(i)?,
             }
         }
         Ok(())
+    }
+
+    /// Software frames are converted and scaled here; GPU frames already are.
+    fn prepare(&mut self, input: Input) -> Result<Last, RecordError> {
+        Ok(match input {
+            Input::Cpu(frame) => Last::Sw(self.convert(&frame)?),
+            Input::Hw(frame) => Last::Hw(frame),
+        })
     }
 
     fn convert(&mut self, src: &VideoFrame) -> Result<frame::Video, RecordError> {
@@ -564,11 +599,24 @@ impl Worker {
     }
 
     fn send(&mut self, index: u64) -> Result<(), RecordError> {
-        let Some(frame) = &mut self.last else {
-            return Ok(());
-        };
-        frame.set_pts(Some(index as i64));
-        self.encoder.send_frame(frame)?;
+        match &mut self.last {
+            None => return Ok(()),
+            Some(Last::Sw(frame)) => {
+                frame.set_pts(Some(index as i64));
+                self.encoder.send_frame(frame)?;
+            }
+            Some(Last::Hw(frame)) => {
+                // SAFETY: the frame is a live D3D11 `AVFrame`; the encoder takes its own
+                // reference to the pixels, so the same frame can be sent again for a repeat.
+                let code = unsafe {
+                    (*frame.as_ptr()).pts = index as i64;
+                    ffi::avcodec_send_frame(self.encoder.as_mut_ptr(), frame.as_ptr())
+                };
+                if code < 0 {
+                    return Err(RecordError::Ffmpeg(format!("avcodec_send_frame: {code}")));
+                }
+            }
+        }
         self.stats.encoded.fetch_add(1, Ordering::Relaxed);
         self.drain()
     }

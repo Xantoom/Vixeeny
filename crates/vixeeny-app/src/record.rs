@@ -13,11 +13,13 @@ use anyhow::Context;
 use vixeeny_common::config::{Config, Profile};
 use vixeeny_common::ipc::RecState;
 use vixeeny_encode::clock::Fps;
+use vixeeny_encode::d3d_convert as d3d;
+use vixeeny_encode::gpu::{GpuPipeline, HwFrame, Source as GpuSource};
 use vixeeny_encode::probe::ProbeResult;
 use vixeeny_encode::recorder::{
     FrameFormat, OutputContainer, RecordConfig, Recorder, Split, VideoFrame,
 };
-use vixeeny_encode::registry::{Chroma, Encoder, Platform, PresetName, Registry};
+use vixeeny_encode::registry::{Chroma, Encoder, Platform, PresetName, Registry, Vendor};
 use vixeeny_encode::validate::{self, Context as ValidateContext, Severity};
 
 /// How often a still screen gets its frame repeated.
@@ -112,9 +114,73 @@ struct Plan {
     /// The monitor shows HDR and the profile keeps it: frames are scRGB half floats.
     hdr: bool,
     namer: Box<dyn FnMut(u32) -> std::path::PathBuf + Send>,
+    /// Frames are converted on the GPU on this device (see `try_gpu`).
+    gpu: Option<GpuParts>,
 }
 
-fn plan(config: &Config) -> anyhow::Result<Plan> {
+struct GpuParts {
+    pipeline: Arc<GpuPipeline>,
+    device: d3d::Device,
+    context: d3d::DeviceContext,
+}
+
+/// Keeps the D3D11 device alive for the length of the recording.
+struct KeepAlive(#[allow(dead_code)] Option<GpuParts>);
+
+// SAFETY: the device is free-threaded and multithread protected; the value is only held, never
+// used, by the recording thread.
+unsafe impl Send for KeepAlive {}
+
+/// The GPU path: NVENC / AMF read D3D11 textures converted by the video processor. `None` (with
+/// the reason logged) when the encoder or the machine cannot do it: the CPU path then records.
+fn try_gpu(
+    encoder: &Encoder,
+    config: &RecordConfig,
+    source: (u32, u32),
+    source_hdr: bool,
+) -> Option<GpuParts> {
+    if std::env::var_os("VIXEENY_NO_GPU").is_some()
+        || !vixeeny_encode::gpu::supports(encoder)
+        || config.chroma != Chroma::C420
+        || !matches!(config.depth, 8 | 10)
+    {
+        return None;
+    }
+    let vendor = match encoder.vendor {
+        Vendor::Nvidia => Some(0x10DE),
+        Vendor::Amd => Some(0x1002),
+        _ => None,
+    };
+    let built = d3d::create_device(vendor).and_then(|(device, context)| {
+        GpuPipeline::new(
+            &device,
+            &context,
+            GpuSource {
+                size: source,
+                hdr: source_hdr,
+            },
+            config.output_size,
+            config.fps,
+            config.hdr,
+            config.depth == 10 || config.hdr,
+        )
+        .map(|pipeline| GpuParts {
+            pipeline: Arc::new(pipeline),
+            device,
+            context,
+        })
+        .map_err(|e| e.to_string())
+    });
+    match built {
+        Ok(parts) => Some(parts),
+        Err(e) => {
+            tracing::warn!("GPU recording path unavailable, using the CPU path: {e}");
+            None
+        }
+    }
+}
+
+fn plan(config: &Config, allow_gpu: bool) -> anyhow::Result<Plan> {
     vixeeny_platform::ensure_dpi_aware();
     let monitors = vixeeny_platform::monitors()?;
     let cursor = vixeeny_platform::cursor_position()?;
@@ -161,7 +227,7 @@ fn plan(config: &Config) -> anyhow::Result<Plan> {
         .collect();
     // An SDR monitor has nothing to preserve: such a recording stays SDR.
     let hdr = monitor.hdr.is_some() && matches!(profile.hdr.as_str(), "keep_hdr" | "hdr");
-    let record = RecordConfig {
+    let mut record = RecordConfig {
         options,
         container,
         output_size,
@@ -173,8 +239,15 @@ fn plan(config: &Config) -> anyhow::Result<Plan> {
         vfr: profile.vfr,
         keyframe_seconds: 2.0,
         queue: 8,
+        gpu: None,
         encoder,
     };
+    let gpu = if allow_gpu {
+        try_gpu(&record.encoder, &record, source, hdr)
+    } else {
+        None
+    };
+    record.gpu = gpu.as_ref().map(|g| Arc::clone(&g.pipeline));
 
     let dir = vixeeny_common::paths::expand_user_dir(&config.paths.videos)
         .context("cannot locate the videos folder")?;
@@ -236,26 +309,80 @@ fn plan(config: &Config) -> anyhow::Result<Plan> {
         cursor: profile.show_cursor,
         hdr,
         namer,
+        gpu,
     })
 }
 
 /// Starts a recording on its own thread; fails early (bad profile, no encoder, no capture) so
-/// the caller can tell the user.
+/// the caller can tell the user. The GPU path is tried first; if it cannot start, the same
+/// recording starts on the CPU path.
 pub fn start(config: &Config) -> anyhow::Result<Handle> {
-    let plan = plan(config)?;
-    let stream = vixeeny_capture::VideoStream::start(
-        &vixeeny_capture::StreamTarget::Monitor(plan.monitor),
-        plan.cursor,
-        plan.hdr,
-    )?;
+    let first = plan(config, true)?;
+    if first.gpu.is_none() {
+        return launch(first);
+    }
+    match launch(first) {
+        Ok(handle) => Ok(handle),
+        Err(e) => {
+            tracing::warn!("GPU recording failed to start ({e:#}); using the CPU path");
+            launch(plan(config, false)?)
+        }
+    }
+}
+
+/// Frames the GPU sink may queue for the recording thread.
+const GPU_BACKLOG: usize = 4;
+
+fn launch(plan: Plan) -> anyhow::Result<Handle> {
+    let target = vixeeny_capture::StreamTarget::Monitor(plan.monitor);
+    let (stream, gpu_frames) = match &plan.gpu {
+        None => (
+            vixeeny_capture::VideoStream::start(&target, plan.cursor, plan.hdr)?,
+            None,
+        ),
+        Some(gpu) => {
+            let (tx, rx) = std::sync::mpsc::sync_channel::<(i64, HwFrame)>(GPU_BACKLOG);
+            let pipeline = Arc::clone(&gpu.pipeline);
+            let sink: vixeeny_capture::TextureSink = Box::new(move |texture, content, time_ns| {
+                let rect = d3d::Rect {
+                    left: 0,
+                    top: 0,
+                    right: content.0 as i32,
+                    bottom: content.1 as i32,
+                };
+                // A refused conversion (pool exhausted, GPU busy) is a dropped frame.
+                if let Ok(frame) = pipeline.convert(texture, rect) {
+                    let _ = tx.try_send((time_ns, frame));
+                }
+            });
+            let capture = vixeeny_capture::GpuCapture {
+                device: gpu.device.clone(),
+                context: gpu.context.clone(),
+                sink,
+            };
+            (
+                vixeeny_capture::VideoStream::start_with(
+                    &target,
+                    plan.cursor,
+                    plan.hdr,
+                    Some(capture),
+                )?,
+                Some(rx),
+            )
+        }
+    };
     let recorder = Recorder::start(plan.config, plan.namer)?;
     let state = Arc::new(AtomicU8::new(RECORDING));
     let (ctl, rx) = channel();
     let thread_state = Arc::clone(&state);
+    // The GPU parts must outlive the recording (the device the textures live on).
+    let keep_alive = KeepAlive(plan.gpu);
     let thread = std::thread::Builder::new()
         .name("recording".into())
         .spawn(move || {
-            let result = record_loop(&stream, recorder, &rx, &thread_state);
+            let result = record_loop(&stream, gpu_frames.as_ref(), recorder, &rx, &thread_state);
+            drop(stream);
+            drop(keep_alive);
             thread_state.store(IDLE, Ordering::Release);
             match result {
                 Ok(summary) => tracing::info!("recording finished: {summary:?}"),
@@ -272,6 +399,7 @@ pub fn start(config: &Config) -> anyhow::Result<Handle> {
 
 fn record_loop(
     stream: &vixeeny_capture::VideoStream,
+    gpu_frames: Option<&std::sync::mpsc::Receiver<(i64, HwFrame)>>,
     recorder: Recorder,
     ctl: &Receiver<Ctl>,
     state: &AtomicU8,
@@ -294,6 +422,27 @@ fn record_loop(
             }
             Ok(Ctl::Stop) | Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
             Err(std::sync::mpsc::TryRecvError::Empty) => {}
+        }
+        if let Some(frames) = gpu_frames {
+            // The stream only reports its end; the frames arrive through the sink's channel.
+            if let Err(e) = stream.recv(Duration::ZERO) {
+                failure = Some(e);
+                break;
+            }
+            match frames.recv_timeout(TICK) {
+                Ok((time_ns, frame)) => {
+                    if !paused {
+                        recorder.push_hw((time_ns - origin).max(0), frame);
+                    }
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    if !paused {
+                        recorder.tick(now());
+                    }
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+            continue;
         }
         match stream.recv(TICK) {
             Ok(Some(captured)) => {

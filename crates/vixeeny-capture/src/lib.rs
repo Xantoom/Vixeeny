@@ -16,7 +16,7 @@ pub use wgc::WgcBackend;
 #[cfg(windows)]
 mod wgc_stream;
 #[cfg(windows)]
-pub use wgc_stream::{CapturedFrame, StreamTarget, VideoStream};
+pub use wgc_stream::{CapturedFrame, GpuCapture, StreamTarget, TextureSink, VideoStream};
 
 pub use fake::FakeBackend;
 pub use frame::{BYTES_PER_PIXEL, CpuFrame};
