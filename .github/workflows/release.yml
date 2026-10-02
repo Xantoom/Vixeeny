@@ -61,7 +61,11 @@ jobs:
           cargo install rsign2 --locked
           Set-Content -Path "$env:RUNNER_TEMP\minisign.key" -Value $env:MINISIGN_KEY
           Get-ChildItem dist -File | Where-Object { $_.Extension -in ".zip", ".exe" } | ForEach-Object {
-            $env:MINISIGN_PASSWORD | rsign sign -s "$env:RUNNER_TEMP\minisign.key" -x "$($_.FullName).minisig" $_.FullName
+            if ($env:MINISIGN_PASSWORD) {
+              $env:MINISIGN_PASSWORD | rsign sign -s "$env:RUNNER_TEMP\minisign.key" -x "$($_.FullName).minisig" $_.FullName
+            } else {
+              rsign sign -W -s "$env:RUNNER_TEMP\minisign.key" -x "$($_.FullName).minisig" $_.FullName
+            }
           }
           Remove-Item "$env:RUNNER_TEMP\minisign.key"
       - uses: actions/upload-artifact@v4
