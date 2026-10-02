@@ -14,8 +14,10 @@ mod generated {
 }
 pub use generated::*;
 
+pub mod ocr_panel;
 pub mod overlay;
 pub use overlay::Overlay;
+pub use vixeeny_ocr::OcrPanel;
 
 #[cfg(test)]
 mod tests;

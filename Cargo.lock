@@ -5553,6 +5553,7 @@ dependencies = [
  "vixeeny-common",
  "vixeeny-editor",
  "vixeeny-image",
+ "vixeeny-ocr",
  "vixeeny-platform",
  "vixeeny-ui",
 ]
@@ -5633,6 +5634,11 @@ dependencies = [
 [[package]]
 name = "vixeeny-ocr"
 version = "0.0.1"
+dependencies = [
+ "thiserror 2.0.21",
+ "tracing",
+ "windows",
+]
 
 [[package]]
 name = "vixeeny-platform"
@@ -5654,6 +5660,7 @@ dependencies = [
  "slint",
  "slint-build",
  "vixeeny-editor",
+ "vixeeny-ocr",
 ]
 
 [[package]]

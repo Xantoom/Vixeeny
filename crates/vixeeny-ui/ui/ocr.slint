@@ -1,0 +1,106 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Plain Slint elements only: std-widgets would pull the SVG decoder in for its icons.
+component PushButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> primary: false;
+    callback clicked();
+    height: 32px;
+    preferred-width: lbl.preferred-width + 28px;
+    border-radius: 6px;
+    background: root.primary ? (touch.has-hover ? #2563eb : #3b82f6) : (touch.has-hover ? #4b5563 : #374151);
+    lbl := Text {
+        text: root.label;
+        color: white;
+        font-size: 13px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+// The result of a text recognition: editable text, a status line and, when a language is
+// missing, how to install it (plan 5.6).
+export component OcrWindow inherits Window {
+    in property <string> window-title: "Vixeeny";
+    in-out property <string> text;
+    in property <string> status;
+    in property <string> hint;
+    in property <string> copy-label: "Copy";
+    in property <string> settings-label: "Open language settings";
+    in property <bool> show-settings: false;
+
+    callback copy(string);
+    callback open-settings();
+
+    title: root.window-title;
+    min-width: 420px;
+    min-height: 260px;
+    preferred-width: 560px;
+    preferred-height: 380px;
+    default-font-family: "Inter";
+    background: #1f2937;
+
+    VerticalLayout {
+        padding: 12px;
+        spacing: 10px;
+
+        Rectangle {
+            vertical-stretch: 1;
+            background: #111827;
+            border-radius: 6px;
+            border-width: 1px;
+            border-color: #374151;
+            clip: true;
+            Flickable {
+                content-height: max(self.height, input.preferred-height + 16px);
+                input := TextInput {
+                    x: 8px;
+                    y: 8px;
+                    width: parent.width - 16px;
+                    text <=> root.text;
+                    wrap: word-wrap;
+                    single-line: false;
+                    color: white;
+                    font-size: 14px;
+                }
+            }
+        }
+
+        if root.hint != "" : Rectangle {
+            background: #f59e0b22;
+            border-radius: 6px;
+            border-width: 1px;
+            border-color: #f59e0b;
+            HorizontalLayout {
+                padding: 8px;
+                Text {
+                    text: root.hint;
+                    wrap: word-wrap;
+                    color: #fcd34d;
+                    font-size: 12px;
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            Text {
+                text: root.status;
+                color: #d1d5db;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                overflow: elide;
+                font-size: 12px;
+            }
+            if root.show-settings : PushButton {
+                label: root.settings-label;
+                clicked => { root.open-settings(); }
+            }
+            PushButton {
+                label: root.copy-label;
+                primary: true;
+                clicked => { root.copy(root.text); }
+            }
+        }
+    }
+}

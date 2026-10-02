@@ -234,3 +234,29 @@ fn the_colour_picker_panel_renders() {
     let top = w.get_toolbar_y();
     assert!(top > 0.0);
 }
+
+#[test]
+fn the_ocr_window_renders_text_hint_and_buttons() {
+    WINDOW.with(|_| ());
+    let panel = OcrPanel {
+        title: "Text recognition".into(),
+        text: "Hello world\nSecond line — 日本語".into(),
+        status: "Language: English (United States)".into(),
+        hint: "No OCR language is installed for: ja, ko. Open Windows Settings → Language & region and add the language with “Optical character recognition”.".into(),
+        copy_label: "Copy".into(),
+        settings_label: "Open language settings".into(),
+        show_settings: true,
+    };
+    let w = ocr_panel::build(&panel).unwrap_or_else(|e| panic!("{e}"));
+    let window = WINDOW.with(Rc::clone);
+    window.set_size(PhysicalSize::new(560, 380));
+    w.show().unwrap_or_else(|e| panic!("{e}"));
+    let mut buffer = SharedPixelBuffer::<Rgb8Pixel>::new(560, 380);
+    window.draw_if_needed(|r| {
+        r.render(buffer.make_mut_slice(), 560);
+    });
+    save("5-ocr", &buffer);
+    assert_eq!(w.get_text(), "Hello world\nSecond line — 日本語");
+    // not an all-black frame
+    assert!(buffer.as_slice().iter().any(|p| p.r > 100));
+}

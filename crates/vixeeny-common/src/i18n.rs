@@ -17,6 +17,18 @@ pub enum Key {
     MenuQuit,
     AppCrashed,
     HotkeysUnavailable,
+    OcrTitle,
+    OcrCopy,
+    OcrOpenSettings,
+    OcrNoText,
+    /// `{language}`
+    OcrLanguageUsed,
+    /// `{languages}`, `{command}`
+    OcrMissingLanguages,
+    /// `{languages}`
+    OcrNoLanguage,
+    /// `{error}`
+    OcrFailed,
 }
 
 impl Lang {
@@ -67,6 +79,28 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::HotkeysUnavailable, Lang::Fr) => {
             "Certains raccourcis n'ont pas pu être enregistrés (déjà utilisés ailleurs ?)"
         }
+        (Key::OcrTitle, Lang::En) => "Text recognition",
+        (Key::OcrTitle, Lang::Fr) => "Reconnaissance de texte",
+        (Key::OcrCopy, Lang::En) => "Copy",
+        (Key::OcrCopy, Lang::Fr) => "Copier",
+        (Key::OcrOpenSettings, Lang::En) => "Open language settings",
+        (Key::OcrOpenSettings, Lang::Fr) => "Ouvrir les paramètres de langue",
+        (Key::OcrNoText, Lang::En) => "No text found",
+        (Key::OcrNoText, Lang::Fr) => "Aucun texte trouvé",
+        (Key::OcrLanguageUsed, Lang::En) => "Language: {language} — copied to the clipboard",
+        (Key::OcrLanguageUsed, Lang::Fr) => "Langue : {language} — copié dans le presse-papier",
+        (Key::OcrMissingLanguages, Lang::En) => {
+            "Missing recognition language: {languages}. In Windows Settings → Time & language → Language & region, add the language with “Optical character recognition”, or run in an administrator PowerShell: Add-WindowsCapability -Online -Name {command}"
+        }
+        (Key::OcrMissingLanguages, Lang::Fr) => {
+            "Langue de reconnaissance manquante : {languages}. Dans Paramètres Windows → Heure et langue → Langue et région, ajoutez la langue avec « Reconnaissance optique des caractères », ou exécutez dans PowerShell administrateur : Add-WindowsCapability -Online -Name {command}"
+        }
+        (Key::OcrNoLanguage, Lang::En) => "No recognition language is installed for: {languages}",
+        (Key::OcrNoLanguage, Lang::Fr) => {
+            "Aucune langue de reconnaissance n'est installée pour : {languages}"
+        }
+        (Key::OcrFailed, Lang::En) => "Text recognition failed: {error}",
+        (Key::OcrFailed, Lang::Fr) => "Échec de la reconnaissance de texte : {error}",
     }
 }
 

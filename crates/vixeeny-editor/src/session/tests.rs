@@ -311,3 +311,27 @@ fn thickness_scales_every_tool() {
     s.set_width(1000.0);
     assert_eq!(s.editor().settings.style.width, 40.0);
 }
+
+#[test]
+fn the_auto_command_fires_once_when_the_first_zone_settles() {
+    let mut s = session().with_auto_command(Command::Ocr);
+    s.pointer_down(p(20.0, 20.0), NO);
+    s.pointer_move(p(60.0, 60.0), NO);
+    assert_eq!(s.pointer_up(p(60.0, 60.0), NO), Some(Command::Ocr));
+    // a second gesture does not repeat it
+    s.pointer_down(p(30.0, 30.0), NO);
+    assert_eq!(s.pointer_up(p(35.0, 35.0), NO), None);
+}
+
+#[test]
+fn a_click_on_a_window_also_settles_the_zone() {
+    let mut s = session().with_auto_command(Command::Ocr);
+    s.pointer_down(p(30.0, 30.0), NO);
+    assert_eq!(s.pointer_up(p(30.0, 30.0), NO), Some(Command::Ocr));
+    // a click on nothing selects nothing and keeps waiting
+    let mut s = session().with_auto_command(Command::Ocr);
+    s.pointer_down(p(150.0, 90.0), NO);
+    assert_eq!(s.pointer_up(p(150.0, 90.0), NO), None);
+    s.pointer_down(p(110.0, 10.0), NO);
+    assert_eq!(s.pointer_up(p(180.0, 80.0), NO), Some(Command::Ocr));
+}

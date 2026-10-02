@@ -124,7 +124,16 @@ fn save_as_dialog(config: &Config, window: &vixeeny_ui::EditorWindow) -> Option<
     chosen
 }
 
-pub fn run(config: &Config) -> anyhow::Result<()> {
+/// What the zone is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    /// Annotate, then copy or save (Print Screen).
+    Editor,
+    /// Recognise the text of the zone as soon as it is drawn.
+    Ocr,
+}
+
+pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
     let started = Instant::now();
     vixeeny_platform::ensure_dpi_aware();
     let monitors = vixeeny_platform::monitors()?;
@@ -164,8 +173,14 @@ pub fn run(config: &Config) -> anyhow::Result<()> {
         foreground,
     };
     let config = config.clone();
+    let ocr_image: std::rc::Rc<std::cell::RefCell<Option<RgbaImage>>> = std::rc::Rc::default();
+    let ocr_slot = ocr_image.clone();
+    let ocr_config = config.clone();
 
     let mut session = Session::new(base, zones);
+    if mode == Mode::Ocr {
+        session = session.with_auto_command(Command::Ocr);
+    }
     session.dim = f32::from(config.editor.dim_percent.min(90)) / 100.0;
     let overlay = vixeeny_ui::Overlay::new(session, scale, move |command, session, window| {
         let export = || session.export();
@@ -207,15 +222,24 @@ pub fn run(config: &Config) -> anyhow::Result<()> {
                     }
                 }
             }
-            Command::Ocr => {
-                tracing::info!("OCR is not implemented yet (M8)");
-                false
-            }
+            Command::Ocr => match export() {
+                // The overlay closes first; the result window opens afterwards.
+                Some(img) => {
+                    *ocr_slot.borrow_mut() = Some(img);
+                    true
+                }
+                None => false,
+            },
         }
     })
     .map_err(|e| anyhow::anyhow!("cannot create the editor window: {e}"))?;
     tracing::info!("editor ready after {:?}", started.elapsed());
     overlay
         .run((bounds.x, bounds.y), (bounds.width, bounds.height))
-        .map_err(|e| anyhow::anyhow!("editor window: {e}"))
+        .map_err(|e| anyhow::anyhow!("editor window: {e}"))?;
+    let recognised = ocr_image.borrow_mut().take();
+    if let Some(img) = recognised {
+        crate::ocr::run(&img, &ocr_config)?;
+    }
+    Ok(())
 }

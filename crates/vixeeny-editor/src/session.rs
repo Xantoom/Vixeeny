@@ -109,6 +109,8 @@ pub struct Session {
     text_input: Option<Point>,
     /// Veil opacity over the image outside the zone (0.0–1.0).
     pub dim: f32,
+    /// Command issued once, as soon as the first zone is settled (OCR mode: no toolbar step).
+    auto_command: Option<Command>,
     /// Scale of the interface (the window's scale factor); the toolbar and magnifier grow with it.
     ui_scale: f32,
 }
@@ -126,8 +128,15 @@ impl Session {
             cursor: Point::default(),
             text_input: None,
             dim: 0.4,
+            auto_command: None,
             ui_scale: 1.0,
         }
+    }
+
+    /// Issues `command` as soon as the first zone is validated (the OCR shortcut).
+    pub fn with_auto_command(mut self, command: Command) -> Self {
+        self.auto_command = Some(command);
+        self
     }
 
     pub fn set_ui_scale(&mut self, scale: f32) {
@@ -230,13 +239,21 @@ impl Session {
         }
     }
 
-    pub fn pointer_up(&mut self, p: Point, mods: Modifiers) {
+    /// Ends the gesture. Returns a command when the zone just became final and an automatic
+    /// command was requested (see [`Session::with_auto_command`]).
+    pub fn pointer_up(&mut self, p: Point, mods: Modifiers) -> Option<Command> {
         self.cursor = p;
         match self.target.take() {
-            Some(Target::Selection) => self.selection.pointer_up(p),
+            Some(Target::Selection) => {
+                self.selection.pointer_up(p);
+                if self.selection.is_settled() {
+                    return self.auto_command.take();
+                }
+            }
             Some(Target::Editor) => self.editor.pointer_up(p, mods),
             None => {}
         }
+        None
     }
 
     /// Validates the text typed in the field opened by the Text tool.

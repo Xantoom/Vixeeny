@@ -8,6 +8,8 @@ use std::sync::mpsc::{RecvTimeoutError, channel};
 use std::time::Duration;
 
 #[cfg(windows)]
+mod ocr;
+#[cfg(windows)]
 mod region;
 #[cfg(any(windows, test))]
 mod still;
@@ -31,8 +33,14 @@ fn perform(action: ActionId, config: &Config) {
     match action {
         #[cfg(windows)]
         ActionId::CaptureRegion => {
-            if let Err(e) = region::run(config) {
+            if let Err(e) = region::run(config, region::Mode::Editor) {
                 tracing::error!("editor failed: {e:#}");
+            }
+        }
+        #[cfg(windows)]
+        ActionId::OcrRegion => {
+            if let Err(e) = region::run(config, region::Mode::Ocr) {
+                tracing::error!("OCR failed: {e:#}");
             }
         }
         CaptureFullscreen | CaptureWindow | CaptureAllMonitors => {

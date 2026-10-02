@@ -2,6 +2,15 @@
 //! Putting an image on the clipboard (plan 5.3, CA-ED-2): a `PNG` entry for browsers, Discord and
 //! most editors, and a `CF_DIBV5` bitmap for everything else (Paint, Office). Both are lossless.
 
+/// UTF-16, NUL-terminated, as little-endian bytes (`CF_UNICODETEXT`). Line breaks become CRLF.
+pub fn utf16_z(text: &str) -> Vec<u8> {
+    let crlf = text.replace("\r\n", "\n").replace('\n', "\r\n");
+    crlf.encode_utf16()
+        .chain(std::iter::once(0))
+        .flat_map(u16::to_le_bytes)
+        .collect()
+}
+
 /// A `BITMAPV5HEADER` followed by bottom-up BGRA pixels, from top-down BGRA input.
 pub fn dibv5(width: u32, height: u32, bgra: &[u8]) -> Vec<u8> {
     const HEADER: usize = 124;
@@ -31,24 +40,19 @@ pub fn dibv5(width: u32, height: u32, bgra: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Opens the clipboard, empties it, lets `fill` add formats, closes it.
 #[cfg(windows)]
-pub fn copy_image(width: u32, height: u32, bgra: &[u8], png: &[u8]) -> crate::Result<()> {
+fn with_clipboard(
+    fill: impl FnOnce(&dyn Fn(u32, &[u8]) -> crate::Result<()>) -> crate::Result<()>,
+) -> crate::Result<()> {
     use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL};
     use windows::Win32::System::DataExchange::{
-        CloseClipboard, EmptyClipboard, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
+        CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData,
     };
     use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
-    use windows::core::w;
 
     use crate::PlatformError;
 
-    const CF_DIBV5: u32 = 17;
-
-    if bgra.len() < width as usize * height as usize * 4 {
-        return Err(PlatformError::Os(
-            "clipboard: pixel buffer too small".into(),
-        ));
-    }
     let os =
         |what: &str, e: windows::core::Error| PlatformError::Os(format!("clipboard {what}: {e}"));
 
@@ -89,16 +93,45 @@ pub fn copy_image(width: u32, height: u32, bgra: &[u8], png: &[u8]) -> crate::Re
             }
             Ok(())
         };
+        fill(&put)
+    })();
+    // SAFETY: the clipboard was opened above.
+    let _ = unsafe { CloseClipboard() };
+    result
+}
+
+#[cfg(windows)]
+pub fn copy_image(width: u32, height: u32, bgra: &[u8], png: &[u8]) -> crate::Result<()> {
+    use windows::Win32::System::DataExchange::RegisterClipboardFormatW;
+    use windows::core::w;
+
+    const CF_DIBV5: u32 = 17;
+
+    if bgra.len() < width as usize * height as usize * 4 {
+        return Err(crate::PlatformError::Os(
+            "clipboard: pixel buffer too small".into(),
+        ));
+    }
+    with_clipboard(|put| {
         // SAFETY: registering a named format has no preconditions.
         let png_format = unsafe { RegisterClipboardFormatW(w!("PNG")) };
         if png_format != 0 {
             put(png_format, png)?;
         }
         put(CF_DIBV5, &dibv5(width, height, bgra))
-    })();
-    // SAFETY: the clipboard was opened above.
-    let _ = unsafe { CloseClipboard() };
-    result
+    })
+}
+
+/// Plain text, as `CF_UNICODETEXT`.
+#[cfg(windows)]
+pub fn copy_text(text: &str) -> crate::Result<()> {
+    const CF_UNICODETEXT: u32 = 13;
+    with_clipboard(|put| put(CF_UNICODETEXT, &utf16_z(text)))
+}
+
+#[cfg(not(windows))]
+pub fn copy_text(_text: &str) -> crate::Result<()> {
+    Err(crate::PlatformError::Unsupported)
 }
 
 #[cfg(not(windows))]
@@ -108,7 +141,20 @@ pub fn copy_image(_width: u32, _height: u32, _bgra: &[u8], _png: &[u8]) -> crate
 
 #[cfg(test)]
 mod tests {
-    use super::dibv5;
+    use super::{dibv5, utf16_z};
+
+    #[test]
+    fn text_is_utf16_with_crlf_and_a_terminator() {
+        assert_eq!(
+            utf16_z("a\nb"),
+            [b'a', 0, b'\r', 0, b'\n', 0, b'b', 0, 0, 0]
+        );
+        assert_eq!(utf16_z(""), [0, 0]);
+        assert_eq!(utf16_z("a\r\nb"), utf16_z("a\nb"));
+        // outside the BMP: a surrogate pair
+        assert_eq!(utf16_z("😀").len(), 6);
+        assert_eq!(utf16_z("日"), [0xE5, 0x65, 0, 0]);
+    }
 
     #[test]
     fn header_and_bottom_up_rows() {

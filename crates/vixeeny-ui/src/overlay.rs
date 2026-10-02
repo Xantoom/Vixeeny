@@ -175,11 +175,18 @@ impl Overlay {
         });
         let (session, weak) = (self.session.clone(), w.as_weak());
         let sh = shift.clone();
+        let handler = on_command.clone();
         w.on_pointer_released(move |x, y, s| {
             sh.set(s);
-            session
+            let command = session
                 .borrow_mut()
                 .pointer_up(Point::new(x, y), Modifiers { shift: s });
+            if let (Some(command), Some(window)) = (command, weak.upgrade())
+                && handler(command, &session.borrow(), &window)
+            {
+                let _ = window.hide();
+                return;
+            }
             refresh_from(&weak, &session);
         });
 
