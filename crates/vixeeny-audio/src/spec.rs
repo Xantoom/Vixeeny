@@ -76,7 +76,10 @@ mod tests {
 
     #[test]
     fn parses_the_documented_forms() {
-        assert_eq!(SourceSpec::parse("system").unwrap().kind, SourceKind::System);
+        assert_eq!(
+            SourceSpec::parse("system").unwrap().kind,
+            SourceKind::System
+        );
         assert_eq!(
             SourceSpec::parse("mic").unwrap().kind,
             SourceKind::Microphone(None)
@@ -98,12 +101,17 @@ mod tests {
     fn titles_name_the_source() {
         assert_eq!(SourceSpec::parse("system").unwrap().title(), "System");
         assert_eq!(SourceSpec::parse("mic:X").unwrap().title(), "Micro");
-        assert_eq!(SourceSpec::parse("app:Spotify.exe").unwrap().title(), "Spotify");
+        assert_eq!(
+            SourceSpec::parse("app:Spotify.exe").unwrap().title(),
+            "Spotify"
+        );
     }
 
     #[test]
     fn duplicates_and_garbage_are_reported() {
-        let list: Vec<String> = ["system", "mic", "system", "nope"].map(String::from).to_vec();
+        let list: Vec<String> = ["system", "mic", "system", "nope"]
+            .map(String::from)
+            .to_vec();
         let (good, bad) = parse_sources(&list);
         assert_eq!(good.len(), 2);
         assert_eq!(bad, ["nope"]);

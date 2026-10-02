@@ -41,7 +41,10 @@ struct Source {
 enum State {
     Running,
     /// Paused at `at_ns`; blocks up to track index `end` are still to be emitted.
-    Pausing { end: u64, at_ns: i64 },
+    Pausing {
+        end: u64,
+        at_ns: i64,
+    },
     Paused,
 }
 
@@ -101,7 +104,10 @@ impl Mixer {
         }
         let mut at = self.raw_idx(chunk.time_ns);
         let next = self.next;
-        let first_of_stretch = self.sources.get(source).is_some_and(|s| s.expected.is_none());
+        let first_of_stretch = self
+            .sources
+            .get(source)
+            .is_some_and(|s| s.expected.is_none());
         if first_of_stretch {
             // A stream that starts a few ms before the stretch keeps its first samples.
             at = at.max(self.epoch_idx as i64);
@@ -242,7 +248,10 @@ mod tests {
     }
 
     fn collect(blocks: &[Block]) -> Vec<f32> {
-        blocks.iter().flat_map(|b| b.samples.iter().copied()).collect()
+        blocks
+            .iter()
+            .flat_map(|b| b.samples.iter().copied())
+            .collect()
     }
 
     #[test]

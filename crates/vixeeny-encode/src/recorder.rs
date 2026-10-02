@@ -19,6 +19,7 @@ use ffmpeg_next::format::Pixel;
 use ffmpeg_next::software::scaling;
 use ffmpeg_next::{Dictionary, Packet, Rational, codec, color, encoder, ffi, format, frame};
 
+use crate::audio::{AudioEncoder, AudioTrackConfig, SAMPLE_RATE};
 use crate::clock::{Cfr, Emit, Fps};
 use crate::gpu::{GpuPipeline, HwFrame};
 use crate::registry::{Chroma, Encoder};
@@ -117,6 +118,8 @@ pub struct RecordConfig {
     /// Variable frame rate: every captured frame is kept at its own time, nothing is repeated
     /// or dropped (the file is smaller when the screen is mostly still). Matroska and WebM only.
     pub vfr: bool,
+    /// Audio tracks, in file order; fed with `push_audio` (empty = no audio).
+    pub audio: Vec<AudioTrackConfig>,
     /// Hardware encoders that read D3D11 frames (Windows): frames come from `push_hw`.
     pub gpu: Option<Arc<GpuPipeline>>,
 }
@@ -175,6 +178,7 @@ enum Last {
 
 enum Cmd {
     Frame(i64, Box<Input>),
+    Audio(usize, Vec<f32>),
     Tick(i64),
     Pause(i64),
     Resume(i64),
@@ -250,6 +254,14 @@ impl Recorder {
                 false
             }
         }
+    }
+
+    /// Appends samples (48 kHz, stereo, interleaved f32) to audio track `track`. The track is one
+    /// gapless stream starting at the recording's time zero (the origin of the video timestamps):
+    /// `vixeeny_audio::Mixer` produces exactly that. Blocks when the encoder is behind, so no
+    /// audio is ever dropped (a dropped block would shift the track).
+    pub fn push_audio(&self, track: usize, samples: Vec<f32>) {
+        let _ = self.tx.send(Cmd::Audio(track, samples));
     }
 
     /// Call regularly (a few times per second) so a static screen keeps its frame rate.
@@ -345,6 +357,28 @@ struct Output {
     packets: u64,
     /// Compressed bytes of the part, for the size limit.
     bytes: u64,
+    /// Time bases of the audio streams (stream `1 + i`).
+    audio_tb: Vec<Rational>,
+    /// Samples subtracted from the audio pts so the part starts at zero, like the video.
+    audio_cut: i64,
+}
+
+fn samples_of(tb: Rational, pts: i64) -> i64 {
+    let num = i128::from(tb.0) * i128::from(SAMPLE_RATE);
+    (i128::from(pts) * num / i128::from(tb.1.max(1))) as i64
+}
+
+/// An audio track on its way to the file.
+struct AudioTrack {
+    enc: AudioEncoder,
+    codec: ffmpeg_next::Codec,
+    title: String,
+    /// Samples that arrived before the first video frame fixed the time zero.
+    pending: Vec<f32>,
+    /// Frames still to drop from the start (the video starts a little after the clock origin).
+    to_skip: usize,
+    /// Encoded packets waiting for the video to catch up (a split must cut both by time).
+    held: std::collections::VecDeque<Packet>,
 }
 
 struct Worker {
@@ -360,6 +394,11 @@ struct Worker {
     scaler: Option<(scaling::Context, (u32, u32, FrameFormat))>,
     last: Option<Last>,
     out: Option<Output>,
+    audio: Vec<AudioTrack>,
+    /// Time zero of the media: the first video frame; `None` until it arrives.
+    anchored: bool,
+    /// Latest video pts written, in audio samples.
+    horizon: i64,
     part: u32,
     files: Vec<PathBuf>,
 }
@@ -437,11 +476,119 @@ impl Worker {
             scaler: None,
             last: None,
             out: None,
+            audio: Vec::new(),
+            anchored: false,
+            horizon: i64::MIN,
             part: 0,
             files: Vec::new(),
         };
+        let global = octx.format().flags().contains(format::Flags::GLOBAL_HEADER);
+        for track in &worker.cfg.audio {
+            let enc = AudioEncoder::open(track, global)?;
+            let codec = enc.codec;
+            worker.audio.push(AudioTrack {
+                enc,
+                codec,
+                title: track.title.clone(),
+                pending: Vec::new(),
+                to_skip: 0,
+                held: std::collections::VecDeque::new(),
+            });
+        }
         worker.begin_part(octx, path0)?;
         Ok(worker)
+    }
+
+    /// The first video frame fixes the media's time zero. Audio starts at the clock origin, so
+    /// the audio that came before the frame is cut: both streams then agree on what "0" is.
+    fn anchor(&mut self, t: i64) -> Result<(), RecordError> {
+        if self.anchored {
+            return Ok(());
+        }
+        self.anchored = true;
+        let skip = (i128::from(t.max(0)) * i128::from(SAMPLE_RATE) + 500_000_000) / 1_000_000_000;
+        for i in 0..self.audio.len() {
+            self.audio[i].to_skip = skip as usize;
+            let pending = std::mem::take(&mut self.audio[i].pending);
+            self.audio_in(i, pending)?;
+        }
+        Ok(())
+    }
+
+    fn audio_in(&mut self, track: usize, mut samples: Vec<f32>) -> Result<(), RecordError> {
+        let Some(t) = self.audio.get_mut(track) else {
+            return Ok(());
+        };
+        if !self.anchored {
+            t.pending.extend_from_slice(&samples);
+            return Ok(());
+        }
+        let skip = t.to_skip.min(samples.len() / 2);
+        t.to_skip -= skip;
+        samples.drain(..skip * 2);
+        if samples.is_empty() {
+            return Ok(());
+        }
+        let packets = t.enc.push(&samples)?;
+        t.held.extend(packets);
+        self.write_ready_audio()
+    }
+
+    /// Video pts (encoder time base) as audio samples.
+    fn pts_to_samples(&self, pts: i64) -> i64 {
+        samples_of(self.enc_tb, pts)
+    }
+
+    /// Writes the held audio packets that the video has caught up with.
+    fn write_ready_audio(&mut self) -> Result<(), RecordError> {
+        self.write_audio_before(self.horizon)
+    }
+
+    /// Writes the held audio packets that start at or before `limit` samples (media time).
+    fn write_audio_before(&mut self, limit: i64) -> Result<(), RecordError> {
+        for i in 0..self.audio.len() {
+            while self.audio[i]
+                .held
+                .front()
+                .is_some_and(|p| p.pts().unwrap_or(0) <= limit)
+            {
+                if let Some(mut packet) = self.audio[i].held.pop_front() {
+                    self.write_audio(i, &mut packet)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn write_audio(&mut self, track: usize, packet: &mut Packet) -> Result<(), RecordError> {
+        let Some(out) = &mut self.out else {
+            return Ok(());
+        };
+        let Some(pts) = packet.pts().map(|p| p - out.audio_cut) else {
+            return Ok(());
+        };
+        if pts < 0 {
+            return Ok(()); // belongs to the previous part
+        }
+        packet.set_pts(Some(pts));
+        packet.set_dts(packet.dts().map(|d| d - out.audio_cut));
+        let tb = out.audio_tb.get(track).copied().unwrap_or(self.enc_tb);
+        packet.rescale_ts(Rational(1, SAMPLE_RATE as i32), tb);
+        packet.set_stream(1 + track);
+        packet.write_interleaved(&mut out.octx)?;
+        Ok(())
+    }
+
+    /// Encodes the tail of every track and writes everything still held.
+    fn finish_audio(&mut self) -> Result<(), RecordError> {
+        if !self.anchored {
+            self.anchor(0)?;
+        }
+        for i in 0..self.audio.len() {
+            let tail = self.audio[i].enc.finish()?;
+            self.audio[i].held.extend(tail);
+        }
+        self.write_audio_before(i64::MAX)
     }
 
     fn begin_part(
@@ -451,8 +598,23 @@ impl Worker {
     ) -> Result<(), RecordError> {
         let mut stream = octx.add_stream(self.codec)?;
         stream.set_parameters(&self.encoder);
+        for track in &self.audio {
+            let mut stream = octx.add_stream(track.codec)?;
+            stream.set_parameters(&track.enc.encoder);
+            let mut meta = Dictionary::new();
+            meta.set("title", &track.title);
+            // MP4 keeps a stream's name in the handler, not in a title tag.
+            meta.set("handler_name", &track.title);
+            stream.set_metadata(meta);
+        }
         octx.write_header_with(self.cfg.container.header_options())?;
         let stream_tb = octx.stream(0).map_or(self.enc_tb, |s| s.time_base());
+        let audio_tb = (0..self.audio.len())
+            .map(|i| {
+                octx.stream(1 + i)
+                    .map_or(Rational(1, SAMPLE_RATE as i32), |s| s.time_base())
+            })
+            .collect();
         self.files.push(path.clone());
         self.out = Some(Output {
             octx,
@@ -462,6 +624,8 @@ impl Worker {
             first_pts: 0,
             packets: 0,
             bytes: 0,
+            audio_tb,
+            audio_cut: 0,
         });
         Ok(())
     }
@@ -470,7 +634,12 @@ impl Worker {
         let mut stop_at = None;
         while let Ok(cmd) = rx.recv() {
             let emits = match cmd {
+                Cmd::Audio(track, samples) => {
+                    self.audio_in(track, samples)?;
+                    continue;
+                }
                 Cmd::Frame(t, frame) if self.cfg.vfr => {
+                    self.anchor(t)?;
                     if let Some(pts) = self.vfr.stamp(t) {
                         self.last = Some(self.prepare(*frame)?);
                         self.send(pts)?;
@@ -487,6 +656,7 @@ impl Worker {
                     continue;
                 }
                 Cmd::Frame(t, frame) => {
+                    self.anchor(t)?;
                     let emits = self.cfr.on_frame(t);
                     self.emit(&emits, Some(*frame))?;
                     continue;
@@ -647,12 +817,16 @@ impl Worker {
     fn write(&mut self, packet: &mut Packet) -> Result<(), RecordError> {
         let due = self.out.as_ref().is_some_and(|o| self.split_due(o, packet));
         if due {
+            // The audio before the cut belongs to the part that ends.
+            let cut = self.pts_to_samples(packet.pts().unwrap_or(0));
+            self.write_audio_before(cut - 1)?;
             self.close_part()?;
             self.part += 1;
             let path = (self.namer)(self.part);
             let octx = format::output_as(&path, self.cfg.container.muxer())?;
             self.begin_part(octx, path)?;
         }
+        let enc_tb = self.enc_tb;
         let Some(out) = &mut self.out else {
             return Ok(());
         };
@@ -660,7 +834,9 @@ impl Worker {
             out.first_pts = packet.pts().unwrap_or(0);
             out.first_pts
         });
+        let first_pts = out.first_pts;
         let size = packet.size();
+        let video_pts = packet.pts().unwrap_or(0);
         packet.set_pts(packet.pts().map(|p| p - offset));
         packet.set_dts(packet.dts().map(|d| d - offset));
         packet.rescale_ts(self.enc_tb, out.stream_tb);
@@ -668,7 +844,12 @@ impl Worker {
         packet.write_interleaved(&mut out.octx)?;
         out.packets += 1;
         out.bytes += size as u64;
-        Ok(())
+        if out.packets == 1 {
+            out.audio_cut = samples_of(enc_tb, first_pts);
+        }
+        let reached = samples_of(enc_tb, video_pts);
+        self.horizon = self.horizon.max(reached);
+        self.write_ready_audio()
     }
 
     /// Writes the trailer; a hybrid MP4 is then rewritten with `moov` in front, without
@@ -689,6 +870,7 @@ impl Worker {
     fn finish(mut self) -> Result<Summary, RecordError> {
         self.encoder.send_eof()?;
         self.drain()?;
+        self.finish_audio()?;
         self.close_part()?;
         Ok(Summary {
             files: self.files,

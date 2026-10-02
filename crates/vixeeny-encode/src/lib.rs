@@ -11,6 +11,8 @@ pub mod registry;
 pub mod validate;
 
 #[cfg(feature = "ffmpeg-next")]
+pub mod audio;
+#[cfg(feature = "ffmpeg-next")]
 pub mod ffmpeg_probe;
 #[cfg(feature = "ffmpeg-next")]
 pub mod gpu;

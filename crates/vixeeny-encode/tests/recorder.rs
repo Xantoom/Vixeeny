@@ -78,6 +78,7 @@ fn config(registry: &Registry, id: &str, container: OutputContainer, fps: u32) -
         keyframe_seconds: 1.0,
         queue: 1_000,
         vfr: false,
+        audio: Vec::new(),
         gpu: None,
     }
 }
@@ -599,5 +600,261 @@ fn scrgb_frames_come_out_as_bt2020_pq_10_bit() {
     // Neutral grey: chroma at mid-scale (512).
     let cb = i32::from(u16::from_le_bytes([decoded.data(1)[0], decoded.data(1)[1]]));
     assert!((cb - 512).abs() <= 4, "cb {cb}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+// ---- audio ----
+
+use vixeeny_encode::audio::{AudioCodec, AudioTrackConfig};
+
+fn audio_track(title: &str, codec: AudioCodec) -> AudioTrackConfig {
+    AudioTrackConfig {
+        title: title.into(),
+        codec,
+        bitrate_kbps: 128,
+        vbr: true,
+    }
+}
+
+/// `seconds` of a 440 Hz tone for the recorder: blocks of 20 ms, like the mixer produces.
+fn tone_blocks(seconds: usize, mut first_frame: usize) -> Vec<Vec<f32>> {
+    (0..seconds * 50)
+        .map(|_| {
+            let block: Vec<f32> = (0..960)
+                .flat_map(|i| {
+                    let n = (first_frame + i) as f32;
+                    let v = (n / 48_000.0 * 440.0 * std::f32::consts::TAU).sin() * 0.5;
+                    [v, v]
+                })
+                .collect();
+            first_frame += 960;
+            block
+        })
+        .collect()
+}
+
+struct AudioSeen {
+    /// (codec, first pts ms, last end ms, title) per audio stream.
+    streams: Vec<(codec::Id, i64, i64, Option<String>)>,
+}
+
+fn demux_audio(path: &Path) -> AudioSeen {
+    let mut input = format::input(path).unwrap();
+    let audio: Vec<usize> = input
+        .streams()
+        .filter(|s| s.parameters().medium() == media::Type::Audio)
+        .map(|s| s.index())
+        .collect();
+    let mut firsts = vec![i64::MAX; audio.len()];
+    let mut lasts = vec![i64::MIN; audio.len()];
+    let tbs: Vec<_> = audio
+        .iter()
+        .map(|i| input.stream(*i).unwrap().time_base())
+        .collect();
+    for (s, packet) in input.packets() {
+        if let Some(k) = audio.iter().position(|i| *i == s.index()) {
+            let Some(pts) = packet.pts() else { continue };
+            let ms = |v: i64| v * 1000 * i64::from(tbs[k].0) / i64::from(tbs[k].1);
+            firsts[k] = firsts[k].min(ms(pts));
+            lasts[k] = lasts[k].max(ms(pts + packet.duration()));
+        }
+    }
+    AudioSeen {
+        streams: audio
+            .iter()
+            .enumerate()
+            .map(|(k, i)| {
+                let st = input.stream(*i).unwrap();
+                let meta = st.metadata();
+                (
+                    st.parameters().id(),
+                    firsts[k],
+                    lasts[k],
+                    meta.get("title")
+                        .or_else(|| meta.get("handler_name"))
+                        .map(str::to_owned),
+                )
+            })
+            .collect(),
+    }
+}
+
+/// Records `seconds` of video at 30 fps plus the given audio tracks (the same tone in each).
+fn record_av(
+    cfg: RecordConfig,
+    dir: &Path,
+    seconds: usize,
+    video_start_ms: i64,
+) -> vixeeny_encode::recorder::Summary {
+    let ext = cfg.container.extension();
+    let tracks = cfg.audio.len();
+    let rec = Recorder::start(cfg, namer(dir, ext)).unwrap();
+    let blocks = tone_blocks(seconds, 0);
+    for (k, block) in blocks.into_iter().enumerate() {
+        let t = k as i64 * 20 * MS;
+        // 0.6 video frames per audio block: push the frames whose time has come.
+        for i in 0..tracks {
+            rec.push_audio(i, block.clone());
+        }
+        let video_t = t - video_start_ms * MS;
+        if video_t >= 0 && k % 2 == 0 {
+            let n = (video_t / (1_000 * MS / 30)) as usize;
+            rec.push_frame(t, frame(320, 180, n));
+        }
+    }
+    rec.stop(seconds as i64 * 1_000 * MS).unwrap()
+}
+
+#[test]
+fn every_audio_codec_muxes_in_the_containers_that_allow_it() {
+    let registry = Registry::builtin().unwrap();
+    let dir = scratch("audio-matrix");
+    let cases = [
+        (AudioCodec::Aac, OutputContainer::Mp4Hybrid),
+        (AudioCodec::Aac, OutputContainer::Mkv),
+        (AudioCodec::Opus, OutputContainer::Mkv),
+        (AudioCodec::Opus, OutputContainer::WebM),
+        (AudioCodec::Opus, OutputContainer::Mp4Fragmented),
+        (AudioCodec::Flac, OutputContainer::Mkv),
+        (AudioCodec::Pcm16, OutputContainer::Mkv),
+        (AudioCodec::Pcm24, OutputContainer::Mkv),
+    ];
+    for (n, (codec_, container)) in cases.into_iter().enumerate() {
+        let mut cfg = config(&registry, "libx264", container, 30);
+        if container == OutputContainer::WebM {
+            cfg = config(&registry, "libvpx_vp9", container, 30);
+        }
+        cfg.audio = vec![audio_track("Micro", codec_)];
+        let summary = record_av(cfg, &dir.join(n.to_string()), 3, 0);
+        let seen = demux_audio(&summary.files[0]);
+        assert_eq!(seen.streams.len(), 1, "{codec_:?} {container:?}");
+        let (_, first, last, title) = &seen.streams[0];
+        assert!(
+            *first <= 30,
+            "{codec_:?} {container:?}: starts at {first} ms"
+        );
+        assert!(
+            (2_900..=3_100).contains(last),
+            "{codec_:?} {container:?}: ends at {last} ms"
+        );
+        // MP4 muxers keep their own handler name; Matroska and WebM carry the title.
+        if matches!(container, OutputContainer::Mkv | OutputContainer::WebM) {
+            assert_eq!(title.as_deref(), Some("Micro"), "{codec_:?} {container:?}");
+        }
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn several_tracks_each_get_their_own_named_stream() {
+    let registry = Registry::builtin().unwrap();
+    let dir = scratch("audio-tracks");
+    let mut cfg = config(&registry, "libx264", OutputContainer::Mkv, 30);
+    cfg.audio = vec![
+        audio_track("Micro", AudioCodec::Opus),
+        audio_track("Wuthering Waves", AudioCodec::Opus),
+        audio_track("Spotify", AudioCodec::Opus),
+    ];
+    let summary = record_av(cfg, &dir, 2, 0);
+    let seen = demux_audio(&summary.files[0]);
+    let titles: Vec<_> = seen.streams.iter().map(|s| s.3.clone().unwrap()).collect();
+    assert_eq!(titles, ["Micro", "Wuthering Waves", "Spotify"]);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn audio_and_video_agree_on_time_zero_when_the_first_frame_is_late() {
+    // CA-REC-4 (offset part): the first video frame arrives 200 ms after the clock origin; the
+    // audio of those 200 ms is cut so that both streams start together.
+    let registry = Registry::builtin().unwrap();
+    let dir = scratch("audio-sync");
+    let mut cfg = config(&registry, "libx264", OutputContainer::Mkv, 30);
+    cfg.audio = vec![audio_track("Micro", AudioCodec::Flac)];
+    let summary = record_av(cfg, &dir, 4, 200);
+    let video = demux(&summary.files[0]);
+    let audio = demux_audio(&summary.files[0]);
+    let (_, a_first, a_last, _) = audio.streams[0];
+    let v_last = *video.pts_ms.last().unwrap() + 33;
+    assert!(a_first.abs() <= 25, "audio starts at {a_first}");
+    assert!(video.pts_ms[0].abs() <= 1);
+    // 4 s of audio minus the 200 ms cut = 3.8 s; the video was fed up to the same instant.
+    assert!((3_700..=3_900).contains(&a_last), "audio ends at {a_last}");
+    assert!(
+        (a_last - v_last).abs() <= 80,
+        "audio {a_last} vs video {v_last}"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn splitting_keeps_audio_in_every_part() {
+    let registry = Registry::builtin().unwrap();
+    let dir = scratch("audio-split");
+    let mut cfg = config(&registry, "libx264", OutputContainer::Mkv, 30);
+    cfg.split = Split::Duration(Duration::from_secs(2));
+    cfg.audio = vec![audio_track("Micro", AudioCodec::Opus)];
+    let summary = record_av(cfg, &dir, 7, 0);
+    assert!(summary.files.len() >= 3, "{:?}", summary.files);
+    let mut audio_total = 0;
+    for file in &summary.files {
+        let seen = demux_audio(file);
+        let (_, first, last, _) = seen.streams[0];
+        assert!(first <= 60, "{file:?}: audio starts at {first}");
+        assert!(last > first, "{file:?}");
+        audio_total += last - first;
+    }
+    // Nothing lost beyond the encoder's frame at each cut.
+    assert!(
+        (6_700..=7_100).contains(&audio_total),
+        "{audio_total} ms of audio"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_drifting_source_through_the_mixer_stays_in_sync_with_the_video() {
+    // CA-REC-4 (automated part): a fake source whose clock runs 100 ppm fast, mixed by the track
+    // mixer, recorded with the video; the audio ends where the recording ends.
+    use vixeeny_audio::{FakeAudioSource, Mixer};
+    let registry = Registry::builtin().unwrap();
+    let dir = scratch("audio-drift");
+    let mut cfg = config(&registry, "libx264", OutputContainer::Mkv, 30);
+    cfg.audio = vec![audio_track("Micro", AudioCodec::Opus)];
+    let rec = Recorder::start(cfg, namer(&dir, "mkv")).unwrap();
+    let seconds = 120i64;
+    let mut source = FakeAudioSource::new(440.0);
+    source.drift = 1.0001;
+    let mut mixer = Mixer::new(&[1.0], 0);
+    let mut t = 0i64;
+    let mut n = 0usize;
+    while t < seconds * 1_000 * MS {
+        let chunk = source.next_chunk(480);
+        mixer.push(0, &chunk);
+        t += 10 * MS;
+        for block in mixer.drain(t) {
+            rec.push_audio(0, block.samples);
+        }
+        if (t / (10 * MS)) % 3 == 0 {
+            rec.push_frame(t, frame(320, 180, n));
+            n += 1;
+        }
+    }
+    for block in mixer.finish(t) {
+        rec.push_audio(0, block.samples);
+    }
+    let summary = rec.stop(t).unwrap();
+    let audio = demux_audio(&summary.files[0]);
+    let video = demux(&summary.files[0]);
+    let (_, first, last, _) = audio.streams[0];
+    let v_end = *video.pts_ms.last().unwrap() + 33;
+    assert!(first.abs() <= 30, "audio starts at {first} ms");
+    assert!(
+        (last - seconds * 1000).abs() <= 40,
+        "audio ends at {last} ms"
+    );
+    assert!(
+        (last - v_end).abs() <= 60,
+        "audio {last} ms vs video {v_end} ms"
+    );
     let _ = std::fs::remove_dir_all(dir);
 }

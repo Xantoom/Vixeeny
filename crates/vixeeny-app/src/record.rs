@@ -239,6 +239,7 @@ fn plan(config: &Config, allow_gpu: bool) -> anyhow::Result<Plan> {
         vfr: profile.vfr,
         keyframe_seconds: 2.0,
         queue: 8,
+        audio: Vec::new(),
         gpu: None,
         encoder,
     };
