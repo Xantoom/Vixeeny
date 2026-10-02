@@ -136,18 +136,23 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<Decoded, ImageError> {
                 let icc = (img.icc.size > 0 && !img.icc.data.is_null())
                     .then(|| std::slice::from_raw_parts(img.icc.data, img.icc.size).to_vec());
                 let flags = img.transformFlags;
+                // The bindgen constants are `i32` on Windows and `u32` elsewhere.
+                #[allow(clippy::unnecessary_cast)]
+                let (irot, imir) = (
+                    avifTransformFlag_AVIF_TRANSFORM_IROT as u32,
+                    avifTransformFlag_AVIF_TRANSFORM_IMIR as u32,
+                );
                 Decoded {
                     width: rgb.width,
                     height: rgb.height,
                     rgba: v,
                     icc,
-                    rotation: if flags & avifTransformFlag_AVIF_TRANSFORM_IROT != 0 {
+                    rotation: if flags & irot != 0 {
                         img.irot.angle & 3
                     } else {
                         0
                     },
-                    mirror: (flags & avifTransformFlag_AVIF_TRANSFORM_IMIR != 0)
-                        .then_some(img.imir.axis),
+                    mirror: (flags & imir != 0).then_some(img.imir.axis),
                 }
             });
             avifRGBImageFreePixels(&raw mut rgb);
