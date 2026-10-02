@@ -490,7 +490,8 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
         .inspect_err(|e| tracing::warn!("recording widget: {e:#}"))
         .ok()
     });
-    let rig = (!plan.audio.is_empty()).then(|| Rig::start(&plan.audio, origin));
+    let rig =
+        (!plan.audio.is_empty()).then(|| Rig::start(&plan.audio, origin, plan.notice.clone()));
     let state = Arc::new(AtomicU8::new(RECORDING));
     let thread_state = Arc::clone(&state);
     // The GPU parts must outlive the recording (the device the textures live on).

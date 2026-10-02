@@ -8,7 +8,10 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use vixeeny_audio::{
     AudioChunk, AudioSink, AudioSource, Mixer, SourceEvent, SourceSpec, TrackPlan, WasapiSource,
 };
+use vixeeny_common::config::Config;
 use vixeeny_encode::recorder::Recorder;
+
+use crate::toast::{Failed, Toast};
 
 enum Msg {
     Chunk(usize, AudioChunk),
@@ -42,11 +45,13 @@ pub struct Rig {
     tracks: Vec<TrackRt>,
     /// Master-clock time of the recording's zero.
     origin: i64,
+    /// The settings, for the notification when a source is lost.
+    notice: Config,
 }
 
 impl Rig {
     /// Starts every source of `plan`. A source that cannot start now is retried by itself.
-    pub fn start(plan: &[TrackPlan], origin: i64) -> Self {
+    pub fn start(plan: &[TrackPlan], origin: i64, notice: Config) -> Self {
         let (tx, rx) = channel();
         let mut sources: Vec<(SourceSpec, WasapiSource)> = Vec::new();
         let mut tracks = Vec::new();
@@ -85,6 +90,7 @@ impl Rig {
             rx,
             tracks,
             origin,
+            notice,
         }
     }
 
@@ -109,6 +115,8 @@ impl Rig {
                         .get(source)
                         .map_or("?", |(s, _)| s.name.as_str());
                     tracing::warn!("audio source `{name}` lost: {reason}");
+                    let text = format!("{name}: {reason}");
+                    crate::toast::notify(&self.notice, &Toast::Failed(Failed::Audio, text));
                 }
                 Msg::Event(source, SourceEvent::Back) => {
                     let name = self

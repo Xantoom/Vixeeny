@@ -17,6 +17,9 @@ toml.workspace = true
 tracing-appender.workspace = true
 tracing-subscriber.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+widestring = "1.2.1"
+
 [dev-dependencies]
 insta.workspace = true
 

@@ -5758,6 +5758,7 @@ dependencies = [
  "toml",
  "tracing-appender",
  "tracing-subscriber",
+ "widestring",
 ]
 
 [[package]]

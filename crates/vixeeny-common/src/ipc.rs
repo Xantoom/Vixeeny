@@ -186,6 +186,10 @@ pub fn read_msg<R: Read, T: DeserializeOwned>(r: &mut R) -> Result<Option<T>, Ip
     Ok(Some(postcard::from_bytes(&payload)?))
 }
 
+/// Who may open the daemon's named pipe (SDDL): not network logons, the system and the owner.
+#[cfg(windows)]
+const PIPE_SDDL: &str = "D:P(D;;GA;;;NU)(A;;GA;;;SY)(A;;GA;;;OW)";
+
 /// A named local-socket endpoint.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Endpoint {
@@ -235,9 +239,26 @@ impl Endpoint {
         Stream::connect(self.name()?)
     }
 
+    /// Listener options. On Windows the pipe is closed to everyone but the current user and the
+    /// system: the default access control would let any local account connect and, for instance,
+    /// make the daemon quit or run actions.
+    fn options(&self) -> io::Result<ListenerOptions<'static>> {
+        let options = ListenerOptions::new().name(self.name()?);
+        #[cfg(windows)]
+        let options = {
+            use interprocess::os::windows::local_socket::ListenerOptionsExt;
+            use interprocess::os::windows::security_descriptor::SecurityDescriptor;
+            // Protected DACL: deny network logons, allow the system and the owner (the user
+            // who started the daemon); nobody else.
+            let sddl = widestring::U16CString::from_str(PIPE_SDDL).map_err(io::Error::other)?;
+            options.security_descriptor(SecurityDescriptor::deserialize(&sddl)?)
+        };
+        Ok(options)
+    }
+
     /// Creates the daemon's listener, doubling as the single-instance lock.
     pub fn bind(&self) -> Result<Listener, BindError> {
-        match ListenerOptions::new().name(self.name()?).create_sync() {
+        match self.options()?.create_sync() {
             Ok(listener) => Ok(listener),
             Err(first) => {
                 // Something owns the name: a live daemon, or a corpse socket file left behind
@@ -249,10 +270,7 @@ impl Endpoint {
                     // A named pipe cannot be stale; failing to connect means it is busy.
                     return Err(BindError::Io(first));
                 }
-                Ok(ListenerOptions::new()
-                    .name(self.name()?)
-                    .try_overwrite(true)
-                    .create_sync()?)
+                Ok(self.options()?.try_overwrite(true).create_sync()?)
             }
         }
     }

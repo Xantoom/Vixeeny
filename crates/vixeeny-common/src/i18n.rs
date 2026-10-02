@@ -272,6 +272,7 @@ pub enum Key {
     UpdateCheckFailed,
     UpdateInstalling,
     UpdateNoKey,
+    ToastAudioLost,
 }
 
 impl Key {
@@ -528,6 +529,7 @@ impl Key {
         Self::UpdateCheckFailed,
         Self::UpdateInstalling,
         Self::UpdateNoKey,
+        Self::ToastAudioLost,
     ];
 }
 
@@ -1128,6 +1130,12 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         }
         (Key::UpdateNoKey, Lang::Fr) => {
             "Cette version ne peut pas vérifier les mises à jour (pas de clé de signature) : mettez à jour à la main."
+        }
+        (Key::ToastAudioLost, Lang::En) => {
+            "An audio source was lost (the track stays silent until it returns)"
+        }
+        (Key::ToastAudioLost, Lang::Fr) => {
+            "Une source audio a été perdue (la piste reste muette jusqu'à son retour)"
         }
     }
 }

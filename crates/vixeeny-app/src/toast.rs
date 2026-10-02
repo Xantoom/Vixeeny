@@ -31,6 +31,8 @@ pub enum Failed {
     Capture,
     Recording,
     Replay,
+    /// An audio source went away during a recording.
+    Audio,
 }
 
 impl Saved {
@@ -57,6 +59,7 @@ impl Failed {
             Self::Capture => "capture",
             Self::Recording => "recording",
             Self::Replay => "replay",
+            Self::Audio => "audio",
         }
     }
 
@@ -65,6 +68,7 @@ impl Failed {
             Self::Capture => Key::ToastCaptureFailed,
             Self::Recording => Key::ToastRecordingFailed,
             Self::Replay => Key::ToastReplayFailed,
+            Self::Audio => Key::ToastAudioLost,
         }
     }
 }
@@ -90,6 +94,7 @@ impl Toast {
             "failed-capture" => failed(Failed::Capture),
             "failed-recording" => failed(Failed::Recording),
             "failed-replay" => failed(Failed::Replay),
+            "failed-audio" => failed(Failed::Audio),
             _ => None,
         }
     }
@@ -229,6 +234,7 @@ mod tests {
             Toast::Saved(Saved::Image, PathBuf::from(r"C:\Users\x\a b.png")),
             Toast::Saved(Saved::Replay, PathBuf::from("r.mp4")),
             Toast::Failed(Failed::Recording, "no encoder: \"x\"".into()),
+            Toast::Failed(Failed::Audio, "mic: device removed".into()),
         ] {
             let [kind, text] = toast.to_args();
             assert_eq!(Toast::from_args(&kind, &text), Some(toast));
