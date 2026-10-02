@@ -120,6 +120,8 @@ pub enum ControlRequest {
     ReloadConfig,
     Quit,
     Ping,
+    /// Like `Quit`, but ignored while a recording runs; the updater asks again until it works.
+    QuitForUpdate,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -10,10 +10,27 @@ fn dirs() -> Option<ProjectDirs> {
     ProjectDirs::from("", "", "Vixeeny")
 }
 
+/// `<folder of the executable>/data` when a `portable.flag` file sits next to the executable
+/// (the portable zip, plan 10.1): settings and logs then travel with the folder.
+pub fn portable_dir() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    portable_dir_of(exe.parent()?)
+}
+
+fn portable_dir_of(exe_dir: &std::path::Path) -> Option<PathBuf> {
+    exe_dir
+        .join("portable.flag")
+        .exists()
+        .then(|| exe_dir.join("data"))
+}
+
 /// Directory holding `config.toml`.
 pub fn config_dir() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os("VIXEENY_CONFIG_DIR") {
         return Some(PathBuf::from(dir));
+    }
+    if let Some(dir) = portable_dir() {
+        return Some(dir);
     }
     dirs().map(|d| d.config_dir().to_path_buf())
 }
@@ -32,6 +49,9 @@ pub fn hw_cache_file() -> Option<PathBuf> {
 pub fn log_dir() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os("VIXEENY_LOG_DIR") {
         return Some(PathBuf::from(dir));
+    }
+    if let Some(dir) = portable_dir() {
+        return Some(dir.join("logs"));
     }
     // Windows: %LOCALAPPDATA%\Vixeeny\data\logs ; Linux: ~/.local/state or share ; macOS: Logs.
     dirs().map(|d| {
@@ -71,5 +91,20 @@ mod tests {
             expand_user_dir("/abs/{other}").unwrap_or_default(),
             PathBuf::from("/abs/{other}")
         );
+    }
+}
+
+#[cfg(test)]
+mod portable_tests {
+    use super::*;
+
+    #[test]
+    fn the_flag_next_to_the_executable_makes_the_install_portable() {
+        let dir = std::env::temp_dir().join(format!("vixeeny-portable-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        assert_eq!(portable_dir_of(&dir), None);
+        let _ = std::fs::write(dir.join("portable.flag"), "");
+        assert_eq!(portable_dir_of(&dir), Some(dir.join("data")));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

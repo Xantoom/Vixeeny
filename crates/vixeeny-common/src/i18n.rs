@@ -264,6 +264,14 @@ pub enum Key {
     WizFinish,
     WizSkip,
     WizStepOf,
+    UpdateAvailable,
+    UpdateNow,
+    UpdateUpToDate,
+    UpdateFound,
+    UpdateChecking,
+    UpdateCheckFailed,
+    UpdateInstalling,
+    UpdateNoKey,
 }
 
 impl Key {
@@ -512,6 +520,14 @@ impl Key {
         Self::WizFinish,
         Self::WizSkip,
         Self::WizStepOf,
+        Self::UpdateAvailable,
+        Self::UpdateNow,
+        Self::UpdateUpToDate,
+        Self::UpdateFound,
+        Self::UpdateChecking,
+        Self::UpdateCheckFailed,
+        Self::UpdateInstalling,
+        Self::UpdateNoKey,
     ];
 }
 
@@ -1081,6 +1097,38 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::WizSkip, Lang::Fr) => "Passer",
         (Key::WizStepOf, Lang::En) => "Step {n} of {total}",
         (Key::WizStepOf, Lang::Fr) => "Étape {n} sur {total}",
+        (Key::UpdateAvailable, Lang::En) => {
+            "Vixeeny {version} is available. Open the settings to update."
+        }
+        (Key::UpdateAvailable, Lang::Fr) => {
+            "Vixeeny {version} est disponible. Ouvrez les paramètres pour mettre à jour."
+        }
+        (Key::UpdateNow, Lang::En) => "Update now",
+        (Key::UpdateNow, Lang::Fr) => "Mettre à jour",
+        (Key::UpdateUpToDate, Lang::En) => "Vixeeny is up to date ({version}).",
+        (Key::UpdateUpToDate, Lang::Fr) => "Vixeeny est à jour ({version}).",
+        (Key::UpdateFound, Lang::En) => "Version {version} is available.",
+        (Key::UpdateFound, Lang::Fr) => "La version {version} est disponible.",
+        (Key::UpdateChecking, Lang::En) => "Checking…",
+        (Key::UpdateChecking, Lang::Fr) => "Vérification…",
+        (Key::UpdateCheckFailed, Lang::En) => {
+            "The check failed: no network, or GitHub is unreachable."
+        }
+        (Key::UpdateCheckFailed, Lang::Fr) => {
+            "La vérification a échoué : pas de réseau, ou GitHub est injoignable."
+        }
+        (Key::UpdateInstalling, Lang::En) => {
+            "Updating: Vixeeny restarts when it is done. A recording in progress is finished first."
+        }
+        (Key::UpdateInstalling, Lang::Fr) => {
+            "Mise à jour en cours : Vixeeny redémarre à la fin. Un enregistrement en cours est d'abord terminé."
+        }
+        (Key::UpdateNoKey, Lang::En) => {
+            "This build cannot verify updates (no signing key): update manually."
+        }
+        (Key::UpdateNoKey, Lang::Fr) => {
+            "Cette version ne peut pas vérifier les mises à jour (pas de clé de signature) : mettez à jour à la main."
+        }
     }
 }
 

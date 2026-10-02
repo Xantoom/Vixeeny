@@ -1,0 +1,82 @@
+name: Release
+# A tag `v*` builds the Windows packages, signs them and prepares a draft GitHub release.
+# A tag `v*-test` builds the same files without drafting a release (to check the packaging).
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      FFMPEG_DIR: ${{ github.workspace }}\native\build\work\ffmpeg-prebuilt
+      LIBCLANG_PATH: C:\Program Files\LLVM\bin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+      - uses: Swatinem/rust-cache@v2
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Tools (nasm, meson, Inno Setup)
+        shell: pwsh
+        run: |
+          choco install nasm innosetup pkgconfiglite -y --no-progress
+          "C:\Program Files\NASM" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          "C:\Program Files (x86)\Inno Setup 6" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          pip install meson
+      - uses: actions/cache/restore@v4
+        with:
+          path: native/build/work
+          key: native-windows-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}
+          restore-keys: native-windows-
+      - run: cargo xtask build-native
+      - name: Build the programs
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:FFMPEG_DIR\bin;$env:PATH;C:\ProgramData\chocolatey\bin"
+          $env:PKG_CONFIG_PATH = "${{ github.workspace }}\native\build\work\prefix\lib\pkgconfig"
+          cargo build --release -p vixeeny-daemon -p vixeeny-updater -p xtask
+          cargo build --release -p vixeeny-app --features "ffmpeg native-codecs"
+      - name: Package (stage, update archive, portable archive)
+        shell: pwsh
+        run: cargo xtask dist --out dist
+      - name: Installer
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"').Matches[0].Groups[1].Value
+          iscc "/DAppVersion=$version" "/DStageDir=$PWD\dist\stage" "/DOutDir=$PWD\dist" packaging\windows\vixeeny.iss
+      - name: Checksums
+        shell: pwsh
+        run: cargo xtask sums dist
+      - name: Sign (minisign)
+        shell: pwsh
+        env:
+          MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: |
+          if (-not $env:MINISIGN_KEY) { Write-Warning "No MINISIGN_KEY secret: the files are not signed."; exit 0 }
+          cargo install rsign2 --locked
+          Set-Content -Path "$env:RUNNER_TEMP\minisign.key" -Value $env:MINISIGN_KEY
+          Get-ChildItem dist -File | Where-Object { $_.Extension -in ".zip", ".exe" } | ForEach-Object {
+            $env:MINISIGN_PASSWORD | rsign sign -s "$env:RUNNER_TEMP\minisign.key" -x "$($_.FullName).minisig" $_.FullName
+          }
+          Remove-Item "$env:RUNNER_TEMP\minisign.key"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vixeeny-windows
+          path: |
+            dist/*.zip
+            dist/*.exe
+            dist/*.minisig
+            dist/SHA256SUMS
+      - name: Draft release
+        if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-test')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $files = Get-ChildItem dist -File | Where-Object { $_.Extension -in ".zip", ".exe", ".minisig" -or $_.Name -eq "SHA256SUMS" } | ForEach-Object { $_.FullName }
+          gh release create "${{ github.ref_name }}" --draft --generate-notes @files

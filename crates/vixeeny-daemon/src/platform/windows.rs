@@ -313,6 +313,7 @@ pub fn run(startup: Startup) -> anyhow::Result<()> {
         .spawn(move || server::serve(&listener, &serve_tx, &serve_link))
         .context("starting the IPC thread")?;
 
+    crate::update_check::spawn(config_path.clone(), tx.clone());
     let mut runtime = Runtime::new(
         config,
         config_path,

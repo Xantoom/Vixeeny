@@ -176,6 +176,11 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
                 tracing::warn!("notification: {text}");
                 self.tray.notify(text);
             }
+            Effect::NotifyUpdate(version) => {
+                let text = tr(Key::UpdateAvailable, self.lang).replace("{version}", &version);
+                tracing::info!("{text}");
+                self.tray.notify(&text);
+            }
             Effect::ReloadConfig => self.reload_config(),
             Effect::Quit => return Flow::Quit,
         }

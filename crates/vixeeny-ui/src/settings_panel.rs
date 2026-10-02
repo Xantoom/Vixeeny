@@ -161,6 +161,7 @@ fn ui_texts(lang: Lang) -> UiTexts {
         install: t(Key::UiInstall),
         remove: t(Key::UiRemove),
         check_now: t(Key::SetCheckNow),
+        update_now: t(Key::UpdateNow),
         github: t(Key::UiGithub),
         logs: t(Key::UiLogs),
         empty: t(Key::UiGalleryEmpty),
@@ -402,10 +403,7 @@ impl SettingsPanel {
                 drop(env);
                 self.refresh_profiles();
             }
-            Section::Updates => {
-                self.window
-                    .set_extra(tr(Key::SetUpdatesLater, env.lang).into());
-            }
+            Section::Updates => self.window.set_extra("".into()),
             _ => {}
         }
     }

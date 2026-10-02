@@ -27,6 +27,8 @@ pub enum Event {
         success: bool,
     },
     TrayQuit,
+    /// The update check found a version the user has not been told about.
+    UpdateAvailable(String),
 }
 
 /// Something to do.
@@ -40,6 +42,8 @@ pub enum Effect {
     SendToApp(DaemonToApp),
     SetRecording(RecState),
     Notify(Key),
+    /// Tell the user that this version can be installed.
+    NotifyUpdate(String),
     /// Re-read `config.toml` and apply it (language, autostart…).
     ReloadConfig,
     /// Leave the message loop.
@@ -77,7 +81,13 @@ impl Core {
             }
             Event::Control(ControlRequest::Quit) | Event::TrayQuit => self.quit(&mut fx),
             Event::Control(ControlRequest::ReloadConfig) => fx.push(Effect::ReloadConfig),
+            Event::Control(ControlRequest::QuitForUpdate) => {
+                if self.recording_state() == RecState::Idle {
+                    self.quit(&mut fx);
+                }
+            }
             Event::Control(ControlRequest::Ping) => {}
+            Event::UpdateAvailable(version) => fx.push(Effect::NotifyUpdate(version)),
             Event::Action(action) => self.run(action, &mut fx),
             Event::AppConnected => self.connected = true,
             Event::App(msg) => self.on_app_message(msg, &mut fx),
@@ -304,6 +314,34 @@ mod tests {
         assert_eq!(
             core.handle(Event::Action(ActionId::OpenSettings)),
             vec![spawn(2, ActionId::OpenSettings)]
+        );
+    }
+
+    #[test]
+    fn a_new_version_is_announced() {
+        let mut core = Core::default();
+        assert_eq!(
+            core.handle(Event::UpdateAvailable("1.2.0".into())),
+            vec![Effect::NotifyUpdate("1.2.0".into())]
+        );
+    }
+
+    #[test]
+    fn an_update_waits_for_the_end_of_a_recording() {
+        let mut core = Core::default();
+        core.handle(Event::App(AppToDaemon::RecordingStateChanged(
+            RecState::Recording,
+        )));
+        assert!(
+            core.handle(Event::Control(ControlRequest::QuitForUpdate))
+                .is_empty()
+        );
+        core.handle(Event::App(AppToDaemon::RecordingStateChanged(
+            RecState::Idle,
+        )));
+        assert_eq!(
+            core.handle(Event::Control(ControlRequest::QuitForUpdate)),
+            vec![Effect::Quit]
         );
     }
 

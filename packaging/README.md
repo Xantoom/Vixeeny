@@ -1,0 +1,31 @@
+# Packaging
+
+- `windows/vixeeny.iss` — Inno Setup script (per-user installer, no administrator rights).
+- `minisign.pub` — the public key updates are verified with, embedded in `vixeeny-updater`.
+  While it contains the word `unconfigured`, the updater refuses every update.
+- `.github/workflows/release.yml` — builds, packages, signs and drafts a release on a `v*` tag
+  (or builds without publishing on a manual run).
+
+## One-time setup by the maintainer (signing key)
+
+```
+cargo install rsign2
+rsign generate -p packaging/minisign.pub -s vixeeny.key
+```
+
+Commit `packaging/minisign.pub`; keep `vixeeny.key` secret. In the repository settings add the
+secrets `MINISIGN_KEY` (the content of `vixeeny.key`) and `MINISIGN_PASSWORD`.
+
+## Files of a release
+
+| File | Use |
+|---|---|
+| `Vixeeny-<v>-setup.exe` | Installer |
+| `Vixeeny-<v>-windows-x64.zip` | Update archive (what the updater downloads) |
+| `Vixeeny-<v>-windows-x64-portable.zip` | Portable: same files plus `portable.flag` (settings in `data\`) |
+| `*.minisig` | minisign signature of each archive and of the installer |
+| `SHA256SUMS` | SHA-256 of every file above |
+
+Updates replace the files of the install folder with those of the update archive, for the
+installed and the portable layout alike; the previous files are kept in `.update-backup` until
+the new daemon answers, and put back if it does not.

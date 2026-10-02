@@ -396,6 +396,11 @@ fn run() -> anyhow::Result<()> {
         // The settings window and gallery, a process of its own (see `settings`).
         #[cfg(windows)]
         Some("--settings") => return settings::run_child(),
+        // The installer adds or removes the Explorer entry.
+        #[cfg(windows)]
+        Some(flag @ ("--install-menu" | "--uninstall-menu")) => {
+            return settings::context_menu(flag == "--install-menu");
+        }
         // A notification card (see `toast`).
         #[cfg(windows)]
         Some("--toast") => return toast::run_child(&args[1..]),

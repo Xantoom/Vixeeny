@@ -2,6 +2,7 @@
 //! Build and maintenance tasks: `cargo xtask <task>`.
 
 mod bench;
+mod dist;
 mod native;
 
 use anyhow::{Result, bail};
@@ -12,11 +13,13 @@ fn main() -> Result<()> {
         Some("build-native") => native::build(&args.collect::<Vec<_>>()),
         Some("bench-idle") => bench::run(&args.collect::<Vec<_>>()),
         Some("verify-registry") => verify_registry(),
-        Some("dist" | "bench-latency" | "test-hw") => {
+        Some("dist") => dist::dist(&args.collect::<Vec<_>>()),
+        Some("sums") => dist::sums(&args.collect::<Vec<_>>()),
+        Some("bench-latency" | "test-hw") => {
             bail!("task not implemented yet (see VIXEENY_PLAN.md section 11)")
         }
         _ => bail!(
-            "usage: cargo xtask <build-native [lib…]|dist|verify-registry|bench-idle|bench-latency|test-hw>"
+            "usage: cargo xtask <build-native [lib…]|dist [--out dir]|sums <dir>|verify-registry|bench-idle|bench-latency|test-hw>"
         ),
     }
 }

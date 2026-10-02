@@ -288,6 +288,78 @@ fn detect_hardware(handle: PanelHandle, lang: Lang, force: bool) {
     });
 }
 
+fn updater_exe() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let path = exe.parent()?.join("vixeeny-updater.exe");
+    path.exists().then_some(path)
+}
+
+/// What the Updates page says: the running version and what the last check found.
+fn update_text(lang: Lang) -> String {
+    let current = env!("CARGO_PKG_VERSION");
+    let state = vixeeny_updater::state::file()
+        .map(|p| vixeeny_updater::state::State::load(&p))
+        .unwrap_or_default();
+    match state.newer_than(current) {
+        Some(release) => format!(
+            "{}\n\n{}",
+            tr(Key::UpdateFound, lang).replace("{version}", &release.version),
+            release.notes.trim()
+        ),
+        None => tr(Key::UpdateUpToDate, lang).replace("{version}", current),
+    }
+}
+
+fn check_for_update(handle: PanelHandle, lang: Lang) {
+    let Some(updater) = updater_exe() else {
+        handle.set_extra(tr(Key::UpdateCheckFailed, lang).into());
+        return;
+    };
+    handle.set_extra(tr(Key::UpdateChecking, lang).into());
+    std::thread::spawn(move || {
+        let done = std::process::Command::new(updater)
+            .arg("check")
+            .output()
+            .is_ok_and(|o| o.status.success());
+        handle.set_extra(if done {
+            update_text(lang)
+        } else {
+            tr(Key::UpdateCheckFailed, lang).into()
+        });
+    });
+}
+
+fn start_update(handle: &PanelHandle, lang: Lang) {
+    let current = env!("CARGO_PKG_VERSION");
+    let available = vixeeny_updater::state::file()
+        .map(|p| vixeeny_updater::state::State::load(&p))
+        .is_some_and(|s| s.newer_than(current).is_some());
+    if !available {
+        handle.set_extra(update_text(lang));
+        return;
+    }
+    if !vixeeny_updater::verify::has_key() {
+        handle.set_extra(tr(Key::UpdateNoKey, lang).into());
+        return;
+    }
+    match updater_exe().map(|u| std::process::Command::new(u).arg("apply").spawn()) {
+        Some(Ok(_)) => handle.set_extra(tr(Key::UpdateInstalling, lang).into()),
+        _ => handle.set_extra(tr(Key::UpdateCheckFailed, lang).into()),
+    }
+}
+
+/// `--install-menu` / `--uninstall-menu`, run by the installer.
+pub fn context_menu(install: bool) -> anyhow::Result<()> {
+    let lang = crate::lang(&load_config().general.language);
+    if install {
+        let exe = std::env::current_exe()?;
+        vixeeny_platform::context_menu::install(&exe, tr(Key::ConvMenuLabel, lang))
+            .map_err(|e| anyhow::anyhow!("{e}"))
+    } else {
+        vixeeny_platform::context_menu::uninstall().map_err(|e| anyhow::anyhow!("{e}"))
+    }
+}
+
 fn integration_lines(lang: Lang) -> Vec<Line> {
     let installed = vixeeny_platform::context_menu::is_installed();
     vec![Line {
@@ -403,6 +475,7 @@ pub fn run_child() -> anyhow::Result<()> {
                     handle.set_lines(integration_lines(lang));
                     handle.set_extra(String::new());
                 }
+                Section::Updates => handle.set_extra(update_text(lang)),
                 Section::About => {
                     handle.set_lines(about_lines(lang));
                     handle.set_extra(String::new());
@@ -435,6 +508,8 @@ pub fn run_child() -> anyhow::Result<()> {
                     }
                     handle.set_lines(integration_lines(lang));
                 }
+                (Section::Updates, "check") => check_for_update(handle.clone(), lang),
+                (Section::Updates, "update") => start_update(&handle, lang),
                 (Section::About, "github") => {
                     let _ = vixeeny_platform::open_path(REPO);
                 }

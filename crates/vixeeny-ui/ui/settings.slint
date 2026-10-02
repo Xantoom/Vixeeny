@@ -64,6 +64,7 @@ export struct UiTexts {
     install: string,
     remove: string,
     check-now: string,
+    update-now: string,
     github: string,
     logs: string,
     empty: string,
@@ -621,11 +622,22 @@ export component SettingsWindow inherits Window {
                     if root.extra != "" : Text { text: root.extra; color: tk.muted; font-size: 13px; wrap: word-wrap; }
                 }
 
-                if root.section == 11 : Text {
-                    text: root.extra;
-                    color: tk.muted;
-                    font-size: 13px;
-                    wrap: word-wrap;
+                if root.section == 11 : VerticalLayout {
+                    spacing: 10px;
+                    alignment: start;
+                    Text {
+                        text: root.extra;
+                        color: tk.muted;
+                        font-size: 13px;
+                        wrap: word-wrap;
+                    }
+                    HorizontalLayout {
+                        height: 30px;
+                        spacing: 8px;
+                        Button { label: root.t.check-now; dark: root.dark; clicked => { root.page-action("check", ""); } }
+                        Button { label: root.t.update-now; dark: root.dark; primary: true; clicked => { root.page-action("update", ""); } }
+                        Rectangle { horizontal-stretch: 1; }
+                    }
                 }
             }
         }
