@@ -643,3 +643,23 @@ fn software_encoders_are_software() {
         );
     }
 }
+
+#[test]
+fn variable_frame_rate_needs_matroska_or_webm() {
+    let registry = Registry::builtin().unwrap();
+    let ctx = Context {
+        registry: &registry,
+        platform: Platform::Windows,
+        source: (1920, 1080),
+        probe: None,
+    };
+    for (container, ok) in [("mkv", true), ("webm", true), ("mp4_hybrid", false)] {
+        let mut p = profile("libx264", container);
+        p.vfr = true;
+        let has = validate(&p, &ctx)
+            .iter()
+            .any(|i| matches!(i.kind, IssueKind::VfrContainer(_)));
+        // WebM carries no H.264 (another issue), but the VFR rule itself must not fire.
+        assert_eq!(!has, ok, "{container}");
+    }
+}

@@ -294,6 +294,8 @@ pub struct Profile {
     pub mode: String,
     pub preset: String,
     pub show_cursor: bool,
+    /// Variable frame rate (Matroska and WebM only).
+    pub vfr: bool,
     pub split: Split,
     pub audio: Audio,
 }
@@ -311,6 +313,7 @@ impl Default for Profile {
             mode: "simple".into(),
             preset: "balanced".into(),
             show_cursor: true,
+            vfr: false,
             split: Split::default(),
             audio: Audio::default(),
         }

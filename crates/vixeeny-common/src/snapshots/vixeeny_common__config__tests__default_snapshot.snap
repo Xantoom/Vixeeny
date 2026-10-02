@@ -73,6 +73,7 @@ hdr = "tonemap_sdr"
 mode = "simple"
 preset = "balanced"
 show_cursor = true
+vfr = false
 
 [profiles.default.split]
 mode = "off"

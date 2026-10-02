@@ -113,6 +113,9 @@ pub struct RecordConfig {
     pub keyframe_seconds: f64,
     /// Frames the queue holds before input frames are dropped.
     pub queue: usize,
+    /// Variable frame rate: every captured frame is kept at its own time, nothing is repeated
+    /// or dropped (the file is smaller when the screen is mostly still). Matroska and WebM only.
+    pub vfr: bool,
 }
 
 /// A captured frame: 8-bit BGRA in RAM.
@@ -235,6 +238,42 @@ impl Recorder {
     }
 }
 
+/// Time stamping of a variable-rate recording: microseconds from the first frame, pauses cut
+/// out, strictly increasing.
+#[derive(Debug, Default)]
+struct Vfr {
+    origin: Option<i64>,
+    paused_at: Option<i64>,
+    paused_total: i64,
+    last: Option<i64>,
+}
+
+impl Vfr {
+    /// The stamp of a frame captured at `t` (ns); `None` while paused.
+    fn stamp(&mut self, t: i64) -> Option<u64> {
+        if self.paused_at.is_some() {
+            return None;
+        }
+        let origin = *self.origin.get_or_insert(t);
+        let mut pts = (t - origin - self.paused_total) / 1000;
+        if let Some(last) = self.last {
+            pts = pts.max(last + 1);
+        }
+        self.last = Some(pts);
+        Some(pts.max(0) as u64)
+    }
+
+    fn pause(&mut self, t: i64) {
+        self.paused_at.get_or_insert(t);
+    }
+
+    fn resume(&mut self, t: i64) {
+        if let Some(at) = self.paused_at.take() {
+            self.paused_total += (t - at).max(0);
+        }
+    }
+}
+
 /// The encoder's pixel format for a depth and a chroma, from the registry entry.
 fn pixel_format(encoder: &Encoder, depth: u8, chroma: Chroma) -> Result<Pixel, RecordError> {
     let spec = encoder
@@ -278,6 +317,7 @@ struct Worker {
     namer: Namer,
     stats: Arc<Stats>,
     cfr: Cfr,
+    vfr: Vfr,
     encoder: encoder::Video,
     codec: ffmpeg_next::Codec,
     pix: Pixel,
@@ -313,7 +353,17 @@ impl Worker {
         ctx.set_width(w);
         ctx.set_height(h);
         ctx.set_format(pix);
-        let enc_tb = Rational(cfg.fps.den as i32, cfg.fps.num as i32);
+        if cfg.vfr && !matches!(cfg.container, OutputContainer::Mkv | OutputContainer::WebM) {
+            return Err(RecordError::Config(
+                "variable frame rate needs Matroska or WebM".into(),
+            ));
+        }
+        // VFR stamps frames in microseconds; CFR counts frames.
+        let enc_tb = if cfg.vfr {
+            Rational(1, 1_000_000)
+        } else {
+            Rational(cfg.fps.den as i32, cfg.fps.num as i32)
+        };
         ctx.set_time_base(enc_tb);
         ctx.set_frame_rate(Some(Rational(cfg.fps.num as i32, cfg.fps.den as i32)));
         let gop = (f64::from(cfg.fps.num) / f64::from(cfg.fps.den) * cfg.keyframe_seconds).round();
@@ -338,6 +388,7 @@ impl Worker {
 
         let mut worker = Self {
             cfr: Cfr::new(cfg.fps),
+            vfr: Vfr::default(),
             cfg,
             namer,
             stats,
@@ -381,6 +432,23 @@ impl Worker {
         let mut stop_at = None;
         while let Ok(cmd) = rx.recv() {
             let emits = match cmd {
+                Cmd::Frame(t, frame) if self.cfg.vfr => {
+                    if let Some(pts) = self.vfr.stamp(t) {
+                        let converted = self.convert(&frame)?;
+                        self.last = Some(converted);
+                        self.send(pts)?;
+                    }
+                    continue;
+                }
+                Cmd::Tick(_) if self.cfg.vfr => continue,
+                Cmd::Pause(t) if self.cfg.vfr => {
+                    self.vfr.pause(t);
+                    continue;
+                }
+                Cmd::Resume(t) if self.cfg.vfr => {
+                    self.vfr.resume(t);
+                    continue;
+                }
                 Cmd::Frame(t, frame) => {
                     let emits = self.cfr.on_frame(t);
                     self.emit(&emits, Some(&frame))?;
@@ -399,7 +467,7 @@ impl Worker {
             };
             self.emit(&emits, None)?;
         }
-        if let Some(t) = stop_at {
+        if let Some(t) = stop_at.filter(|_| !self.cfg.vfr) {
             let emits = self.cfr.finish(t);
             self.emit(&emits, None)?;
         }
@@ -557,7 +625,11 @@ impl Worker {
         self.close_part()?;
         Ok(Summary {
             files: self.files,
-            frames: self.cfr.emitted(),
+            frames: if self.cfg.vfr {
+                self.stats.encoded.load(Ordering::Relaxed)
+            } else {
+                self.cfr.emitted()
+            },
             repeated: self.cfr.repeated,
             dropped_by_clock: self.cfr.dropped,
             dropped_by_queue: self.stats.queue_dropped.load(Ordering::Relaxed),

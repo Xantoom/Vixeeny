@@ -164,6 +164,7 @@ fn plan(config: &Config) -> anyhow::Result<Plan> {
         chroma,
         hdr: matches!(profile.hdr.as_str(), "keep_hdr" | "hdr"),
         split: parse_split(&profile.split.mode),
+        vfr: profile.vfr,
         keyframe_seconds: 2.0,
         queue: 8,
         encoder,

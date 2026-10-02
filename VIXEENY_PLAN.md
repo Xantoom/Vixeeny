@@ -1002,6 +1002,7 @@ hdr = "tonemap_sdr"
 mode = "simple"
 preset = "balanced"
 show_cursor = true
+vfr = false                 # fréquence variable (MKV / WebM seulement)
 split = { mode = "off" }
 
 [profiles.default.audio]

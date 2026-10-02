@@ -39,6 +39,8 @@ pub enum IssueKind {
     HdrNeeds10Bit,
     HdrContainer(Container),
     HdrNotSupported,
+    /// Variable frame rate needs Matroska or WebM.
+    VfrContainer(Container),
     AudioCodec {
         codec: String,
         container: Container,
@@ -171,6 +173,12 @@ pub fn validate(profile: &Profile, ctx: &Context<'_>) -> Vec<Issue> {
     }
 
     // HDR ↔ container (the encoder part is below).
+    if profile.vfr
+        && let Some(c) = container
+        && !matches!(c, Container::Mkv | Container::Webm)
+    {
+        issues.push(error(IssueKind::VfrContainer(c)));
+    }
     if wants_hdr {
         if let Some(c) = container
             && c == Container::Webm

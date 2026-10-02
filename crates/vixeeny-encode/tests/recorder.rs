@@ -74,6 +74,7 @@ fn config(registry: &Registry, id: &str, container: OutputContainer, fps: u32) -
         split: Split::Off,
         keyframe_seconds: 1.0,
         queue: 1_000,
+        vfr: false,
     }
 }
 
@@ -487,5 +488,45 @@ fn a_slow_encoder_drops_input_frames_instead_of_blocking() {
     let summary = rec.stop(200 * 33 * MS).unwrap();
     assert_eq!(summary.dropped_by_queue, refused);
     let _ = started;
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn variable_frame_rate_keeps_every_frame_at_its_own_time() {
+    let registry = Registry::builtin().unwrap();
+    let dir = scratch("vfr");
+    let mut cfg = config(&registry, "libx264", OutputContainer::Mkv, 30);
+    cfg.vfr = true;
+    let rec = Recorder::start(cfg, namer(&dir, "mkv")).unwrap();
+    // Irregular times, a long still period, then a pause that must be cut out.
+    let times_ms = [0i64, 10, 40, 41, 500, 2_000, 2_033];
+    for (i, t) in times_ms.iter().enumerate() {
+        assert!(rec.push_frame(t * MS, frame(320, 180, i)));
+    }
+    rec.tick(2_500 * MS); // ignored in VFR
+    rec.pause(2_100 * MS);
+    rec.push_frame(3_000 * MS, frame(320, 180, 0)); // paused: ignored
+    rec.resume(5_100 * MS); // 3 s pause
+    rec.push_frame(5_200 * MS, frame(320, 180, 7));
+    let summary = rec.stop(5_300 * MS).unwrap();
+    assert_eq!(summary.frames, 8, "no frame repeated or dropped");
+    assert_eq!(summary.repeated, 0);
+    let seen = demux(&summary.files[0]);
+    // Same offsets, the 3 s pause removed (5 200 − 3 000 = 2 200).
+    let expected = [0, 10, 40, 41, 500, 2_000, 2_033, 2_200];
+    assert_eq!(seen.pts_ms.len(), expected.len(), "{:?}", seen.pts_ms);
+    for (got, want) in seen.pts_ms.iter().zip(expected) {
+        assert!((got - want).abs() <= 1, "{:?}", seen.pts_ms);
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn variable_frame_rate_is_refused_in_mp4() {
+    let registry = Registry::builtin().unwrap();
+    let dir = scratch("vfr-mp4");
+    let mut cfg = config(&registry, "libx264", OutputContainer::Mp4Hybrid, 30);
+    cfg.vfr = true;
+    assert!(Recorder::start(cfg, namer(&dir, "mp4")).is_err());
     let _ = std::fs::remove_dir_all(dir);
 }
