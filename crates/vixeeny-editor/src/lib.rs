@@ -15,3 +15,5 @@ pub mod render;
 pub use render::{RgbaImage, render};
 pub mod editor;
 pub use editor::{Editor, Modifiers, Outcome, Tool, ToolSettings};
+pub mod selection;
+pub use selection::{CursorHint, Handle, Selection};
