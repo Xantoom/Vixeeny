@@ -9,3 +9,10 @@ repository.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+tiny-skia.workspace = true
+fontdue.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

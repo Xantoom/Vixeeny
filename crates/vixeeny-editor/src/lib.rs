@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! vixeeny-editor — see README.md.
+//! vixeeny-editor — the annotation editor's model (plan 5.3): annotations, undo/redo, tool
+//! interaction and rendering to pixels. No UI, no OS: everything is testable.
 
-/// Crate name, used by the M0 smoke test.
-pub const CRATE_NAME: &str = "vixeeny-editor";
+pub mod geometry;
+pub mod history;
+pub mod model;
+pub mod text;
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn crate_name() {
-        assert_eq!(super::CRATE_NAME, "vixeeny-editor");
-    }
-}
+pub use geometry::{Point, Rect};
+pub use history::{Edit, History};
+pub use model::{Annotation, AnnotationId, Color, Document, Item, Style};
+pub mod effects;
+pub mod render;
+pub use render::{RgbaImage, render};
+pub mod editor;
+pub use editor::{Editor, Modifiers, Outcome, Tool, ToolSettings};

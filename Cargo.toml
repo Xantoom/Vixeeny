@@ -27,6 +27,8 @@ tray-icon = { version = "0.26.0", default-features = false }
 global-hotkey = { version = "0.8.0", default-features = false }
 auto-launch = "0.6.0"
 windows = "0.62.2"
+tiny-skia = "0.12.0"
+fontdue = "0.9.4"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
