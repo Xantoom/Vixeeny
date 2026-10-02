@@ -20,6 +20,8 @@ mod record;
 mod region;
 #[cfg(windows)]
 mod scroll;
+#[cfg(windows)]
+mod side;
 #[cfg(any(windows, test))]
 mod still;
 #[cfg(windows)]
@@ -182,6 +184,67 @@ fn parse_action() -> anyhow::Result<ActionId> {
     Ok(action)
 }
 
+/// Runs one action. Returns a follow-up action when the action was the overlay and the user
+/// picked something in it.
+fn run_action(
+    action: ActionId,
+    config: &mut Config,
+    recording: &mut Recording,
+    send: &mut impl std::io::Write,
+) -> anyhow::Result<Option<ActionId>> {
+    match action {
+        ActionId::RecordToggle
+        | ActionId::RecordPause
+        | ActionId::ReplayToggle
+        | ActionId::ReplaySave => recording.handle(action, config),
+        ActionId::OverlayToggle => return overlay(config, recording, send),
+        _ => perform(action, config),
+    }
+    Ok(None)
+}
+
+#[cfg(windows)]
+fn overlay(
+    config: &mut Config,
+    recording: &Recording,
+    send: &mut impl std::io::Write,
+) -> anyhow::Result<Option<ActionId>> {
+    let (recording, replay) = recording.flags();
+    let outcome = match side::run(config, recording, replay) {
+        Ok(outcome) => outcome,
+        Err(e) => {
+            tracing::error!("overlay failed: {e:#}");
+            return Ok(None);
+        }
+    };
+    if let Some(profile) = outcome.profile {
+        config.video.profile = profile;
+        match vixeeny_common::paths::config_file() {
+            Some(path) => match config.save(&path) {
+                Ok(()) => ipc::write_msg(send, &AppToDaemon::ConfigChanged)?,
+                Err(e) => tracing::error!("cannot save the profile choice: {e}"),
+            },
+            None => tracing::error!("no settings folder: the profile choice is not saved"),
+        }
+    }
+    // The strip is gone once the loop ends, but give the compositor a moment to repaint before
+    // a capture freezes the screen: the strip must not be in it.
+    if outcome.action.is_some() {
+        std::thread::sleep(Duration::from_millis(120));
+    }
+    Ok(outcome.action)
+}
+
+#[cfg(not(windows))]
+fn overlay(
+    _: &mut Config,
+    _: &Recording,
+    _: &mut impl std::io::Write,
+) -> anyhow::Result<Option<ActionId>> {
+    tracing::info!("the overlay needs Windows");
+    Ok(None)
+}
+
 /// The recording started by `RecordToggle`, if any (Windows with FFmpeg only).
 #[derive(Default)]
 struct Recording {
@@ -193,6 +256,18 @@ struct Recording {
 }
 
 impl Recording {
+    /// `(recording, replay buffer)` is running.
+    #[cfg(all(windows, feature = "ffmpeg"))]
+    fn flags(&self) -> (bool, bool) {
+        (self.handle.is_some(), self.replay.is_some())
+    }
+
+    #[cfg(not(all(windows, feature = "ffmpeg")))]
+    #[allow(clippy::unused_self, dead_code)]
+    fn flags(&self) -> (bool, bool) {
+        (false, false)
+    }
+
     #[cfg(all(windows, feature = "ffmpeg"))]
     fn active(&self) -> bool {
         self.handle.is_some() || self.replay.is_some()
@@ -319,7 +394,7 @@ fn run() -> anyhow::Result<()> {
         }
     }
     let first_action = parse_action()?;
-    let config = vixeeny_common::paths::config_file()
+    let mut config = vixeeny_common::paths::config_file()
         .and_then(|path| Config::load(&path).ok())
         .unwrap_or_default();
     let idle = config.general.app_idle_exit_seconds;
@@ -365,10 +440,10 @@ fn run() -> anyhow::Result<()> {
         };
         match rx.recv_timeout(wait) {
             Ok(DaemonToApp::RunAction { action, .. }) => {
-                if matches!(action, ActionId::RecordToggle | ActionId::RecordPause) {
-                    recording.handle(action, &config);
-                } else {
-                    perform(action, &config);
+                // The overlay hands back the action the user picked in it.
+                let mut next = Some(action);
+                while let Some(action) = next.take() {
+                    next = run_action(action, &mut config, &mut recording, &mut send)?;
                 }
                 recording.report(&mut send)?;
             }

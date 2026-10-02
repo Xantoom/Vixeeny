@@ -377,3 +377,161 @@ fn the_recording_widget_renders_both_states_and_reports_clicks() {
         [WidgetEvent::TogglePause, WidgetEvent::Stop]
     );
 }
+
+fn side_texts() -> side_panel::SideTexts {
+    side_panel::SideTexts {
+        image: "Screenshot".into(),
+        region: "Region".into(),
+        window: "Window".into(),
+        screen: "Screen".into(),
+        all_monitors: "All screens".into(),
+        scrolling: "Scrolling capture".into(),
+        ocr: "Copy text (OCR)".into(),
+        video: "Video".into(),
+        record: "Record".into(),
+        stop_recording: "Stop recording".into(),
+        replay_start: "Start replay buffer".into(),
+        replay_stop: "Stop replay buffer".into(),
+        replay_save: "Save replay".into(),
+        profile: "Profile: {name}".into(),
+        settings: "Settings".into(),
+    }
+}
+
+fn side_state(edge: side_panel::Edge, dark: bool) -> side_panel::SideState {
+    side_panel::SideState {
+        recording: false,
+        replay: true,
+        profiles: vec!["Jeu 4K HDR".into(), "Tuto 1080p".into()],
+        profile: 0,
+        dark,
+        edge,
+        animate: false,
+        backdrop: false,
+    }
+}
+
+/// Opens the strip on a 2560×1440 monitor at 100 % and renders it.
+fn side_render(
+    panel: &side_panel::SidePanel,
+    edge: side_panel::Edge,
+) -> (SharedPixelBuffer<Rgb8Pixel>, Rc<MinimalSoftwareWindow>) {
+    let (_, _, w, h) = side_panel::panel_geometry(edge, (0, 0, 2560, 1440), 96, panel.entries());
+    let window = WINDOW.with(Rc::clone);
+    window.set_size(PhysicalSize::new(w, h));
+    panel.window().show().unwrap_or_else(|e| panic!("{e}"));
+    panel.window().set_shown(true);
+    let mut buffer = SharedPixelBuffer::<Rgb8Pixel>::new(w, h);
+    window.draw_if_needed(|r| {
+        r.render(buffer.make_mut_slice(), w as usize);
+    });
+    (buffer, window)
+}
+
+#[test]
+fn the_side_strip_renders_in_both_themes_and_orientations() {
+    use side_panel::{Edge, SidePanel};
+    WINDOW.with(|_| ());
+    let dark = SidePanel::new(&side_texts(), &side_state(Edge::Right, true))
+        .unwrap_or_else(|e| panic!("{e}"));
+    let (dark_img, _) = side_render(&dark, Edge::Right);
+    save("8-side-dark-right", &dark_img);
+    let light = SidePanel::new(&side_texts(), &side_state(Edge::Bottom, false))
+        .unwrap_or_else(|e| panic!("{e}"));
+    let (light_img, _) = side_render(&light, Edge::Bottom);
+    save("8-side-light-bottom", &light_img);
+    // Drawn (not blank), dark strip dark, light strip light.
+    let mean = |b: &SharedPixelBuffer<Rgb8Pixel>| {
+        let s = b.as_slice();
+        s.iter().map(|p| u64::from(p.r)).sum::<u64>() / s.len() as u64
+    };
+    assert!(mean(&dark_img) < 120, "{}", mean(&dark_img));
+    assert!(mean(&light_img) > 120, "{}", mean(&light_img));
+}
+
+#[test]
+fn the_side_strip_answers_to_the_keyboard_and_the_mouse() {
+    use side_panel::{Choice, Edge, SidePanel};
+    use slint::platform::{Key, PointerEventButton, WindowEvent};
+    WINDOW.with(|_| ());
+
+    // Down, Down, Enter: the third entry (Screen), not the titles.
+    let panel = SidePanel::new(&side_texts(), &side_state(Edge::Right, true))
+        .unwrap_or_else(|e| panic!("{e}"));
+    let (_, window) = side_render(&panel, Edge::Right);
+    let press = |key: Key| {
+        let text: slint::SharedString = key.into();
+        window.dispatch_event(WindowEvent::KeyPressed { text: text.clone() });
+        window.dispatch_event(WindowEvent::KeyReleased { text });
+    };
+    assert_eq!(
+        panel.entries()[panel.window().get_selected() as usize].id,
+        Choice::Region as i32
+    );
+    press(Key::DownArrow);
+    press(Key::DownArrow);
+    press(Key::Return);
+    assert_eq!(panel.chosen(), Some(Choice::Screen));
+
+    // Escape picks nothing.
+    let panel = SidePanel::new(&side_texts(), &side_state(Edge::Right, true))
+        .unwrap_or_else(|e| panic!("{e}"));
+    let (_, window) = side_render(&panel, Edge::Right);
+    let text: slint::SharedString = Key::Escape.into();
+    window.dispatch_event(WindowEvent::KeyPressed { text });
+    assert_eq!(panel.chosen(), None);
+    assert!(!panel.window().get_shown(), "Escape starts the exit");
+
+    // A click on the "Record" row (a window-sized strip: 12 px margin, 8 px padding, rows of 44
+    // and titles of 30, 2 px apart) picks it; a click on a title does nothing.
+    let panel = SidePanel::new(&side_texts(), &side_state(Edge::Right, true))
+        .unwrap_or_else(|e| panic!("{e}"));
+    let (_, window) = side_render(&panel, Edge::Right);
+    let click = |y: f32| {
+        let position = slint::LogicalPosition::new(150.0, y);
+        window.dispatch_event(WindowEvent::PointerMoved { position });
+        window.dispatch_event(WindowEvent::PointerPressed {
+            position,
+            button: PointerEventButton::Left,
+        });
+        window.dispatch_event(WindowEvent::PointerReleased {
+            position,
+            button: PointerEventButton::Left,
+        });
+    };
+    click(12.0 + 8.0 + 15.0); // the "Screenshot" title
+    assert_eq!(panel.chosen(), None);
+    // title 30 + 6 rows × 44 + title 30 + 7 gaps × 2 → the first video row starts here
+    let record_y = 12.0 + 8.0 + 30.0 + 6.0 * 44.0 + 30.0 + 8.0 * 2.0 + 22.0;
+    click(record_y);
+    assert_eq!(panel.chosen(), Some(Choice::RecordToggle));
+}
+
+#[test]
+fn cycling_the_profile_keeps_the_strip_open_and_reports_it() {
+    use side_panel::{Edge, SidePanel};
+    use slint::Model;
+    use std::cell::RefCell;
+    WINDOW.with(|_| ());
+    let panel = SidePanel::new(&side_texts(), &side_state(Edge::Right, true))
+        .unwrap_or_else(|e| panic!("{e}"));
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let sink = seen.clone();
+    panel.on_profile(move |i| sink.borrow_mut().push(i));
+    side_render(&panel, Edge::Right);
+    panel.window().invoke_activate(100);
+    panel.window().invoke_activate(100);
+    assert_eq!(*seen.borrow(), [1, 0]);
+    assert_eq!(panel.chosen(), None);
+    assert!(panel.window().get_shown());
+    let labels: Vec<_> = panel
+        .window()
+        .get_items()
+        .iter()
+        .map(|i| i.label.to_string())
+        .collect();
+    assert!(
+        labels.contains(&"Profile: Jeu 4K HDR".to_owned()),
+        "{labels:?}"
+    );
+}

@@ -1,0 +1,304 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+// The side overlay (plan 5.12): the actions of Vixeeny in a translucent strip on one edge of the
+// screen. It slides and fades in, takes the arrow keys, Enter and Escape, and does nothing while
+// it is still (no timer runs once the animation is over).
+
+export struct SideItem {
+    // Which action this is (the Rust side maps it back).
+    id: int,
+    // Which little drawing goes with it, see `Glyph`.
+    glyph: int,
+    label: string,
+    enabled: bool,
+    // A section title rather than an action.
+    header: bool,
+    // On/off actions that are on (recording, replay): drawn highlighted.
+    active: bool,
+}
+
+// A 20 px icon drawn with shapes, so it is sharp at any scale and needs no icon font.
+component Glyph inherits Rectangle {
+    in property <int> kind;
+    in property <color> tint;
+    in property <color> accent;
+    width: 20px;
+    height: 20px;
+
+    // 0 region: a frame with a corner mark
+    if root.kind == 0 : Rectangle {
+        x: 2px; y: 3px; width: 16px; height: 14px;
+        border-width: 1.5px; border-color: root.tint; border-radius: 2px;
+    }
+    if root.kind == 0 : Rectangle { x: 6px; y: 7px; width: 8px; height: 6px; background: root.tint.with-alpha(0.35); border-radius: 1px; }
+    // 1 window: a frame with a title bar
+    if root.kind == 1 : Rectangle {
+        x: 2px; y: 3px; width: 16px; height: 14px;
+        border-width: 1.5px; border-color: root.tint; border-radius: 2px;
+    }
+    if root.kind == 1 : Rectangle { x: 2px; y: 3px; width: 16px; height: 4px; background: root.tint; border-radius: 2px; }
+    // 2 screen: a frame on a stand
+    if root.kind == 2 : Rectangle {
+        x: 2px; y: 3px; width: 16px; height: 11px;
+        border-width: 1.5px; border-color: root.tint; border-radius: 2px;
+    }
+    if root.kind == 2 : Rectangle { x: 6px; y: 16px; width: 8px; height: 1.5px; background: root.tint; }
+    // 3 all screens: two frames
+    if root.kind == 3 : Rectangle {
+        x: 1px; y: 5px; width: 12px; height: 9px;
+        border-width: 1.5px; border-color: root.tint; border-radius: 2px;
+    }
+    if root.kind == 3 : Rectangle {
+        x: 7px; y: 8px; width: 12px; height: 9px;
+        border-width: 1.5px; border-color: root.tint; border-radius: 2px;
+        background: root.tint.with-alpha(0.2);
+    }
+    // 4 scrolling: a tall frame and a down arrow
+    if root.kind == 4 : Rectangle {
+        x: 4px; y: 1px; width: 12px; height: 18px;
+        border-width: 1.5px; border-color: root.tint; border-radius: 2px;
+    }
+    if root.kind == 4 : Path {
+        x: 7px; y: 5px; width: 6px; height: 10px;
+        commands: "M 3 0 L 3 9 M 0 6 L 3 9 L 6 6";
+        stroke: root.tint; stroke-width: 1.5px;
+    }
+    // 5 text capture: a T in a frame
+    if root.kind == 5 : Rectangle {
+        x: 2px; y: 2px; width: 16px; height: 16px;
+        border-width: 1.5px; border-color: root.tint; border-radius: 3px;
+    }
+    if root.kind == 5 : Path {
+        x: 6px; y: 6px; width: 8px; height: 9px;
+        commands: "M 0 1 L 8 1 M 4 1 L 4 9";
+        stroke: root.tint; stroke-width: 1.8px;
+    }
+    // 6 record: a dot
+    if root.kind == 6 : Rectangle {
+        x: 3px; y: 3px; width: 14px; height: 14px; border-radius: 7px;
+        background: root.accent;
+    }
+    // 7 stop recording: a square
+    if root.kind == 7 : Rectangle {
+        x: 4px; y: 4px; width: 12px; height: 12px; border-radius: 2px;
+        background: root.accent;
+    }
+    // 8 replay: a ring with a play mark
+    if root.kind == 8 : Rectangle {
+        x: 2px; y: 2px; width: 16px; height: 16px; border-radius: 8px;
+        border-width: 1.5px; border-color: root.tint;
+    }
+    if root.kind == 8 : Path {
+        x: 8px; y: 6px; width: 6px; height: 8px;
+        commands: "M 0 0 L 6 4 L 0 8 Z";
+        fill: root.tint;
+    }
+    // 9 save replay: an arrow into a tray
+    if root.kind == 9 : Path {
+        x: 3px; y: 2px; width: 14px; height: 16px;
+        commands: "M 7 0 L 7 10 M 3 6 L 7 10 L 11 6 M 0 13 L 0 15 L 14 15 L 14 13";
+        stroke: root.tint; stroke-width: 1.6px;
+    }
+    // 10 profile: three sliders
+    if root.kind == 10 : Path {
+        x: 2px; y: 3px; width: 16px; height: 14px;
+        commands: "M 0 1 L 16 1 M 0 7 L 16 7 M 0 13 L 16 13";
+        stroke: root.tint; stroke-width: 1.5px;
+    }
+    if root.kind == 10 : Rectangle { x: 5px; y: 2px; width: 4px; height: 4px; border-radius: 2px; background: root.tint; }
+    if root.kind == 10 : Rectangle { x: 12px; y: 8px; width: 4px; height: 4px; border-radius: 2px; background: root.tint; }
+    if root.kind == 10 : Rectangle { x: 7px; y: 14px; width: 4px; height: 4px; border-radius: 2px; background: root.tint; }
+    // 11 settings: a ring with a hub
+    if root.kind == 11 : Rectangle {
+        x: 2px; y: 2px; width: 16px; height: 16px; border-radius: 8px;
+        border-width: 3px; border-color: root.tint;
+    }
+    if root.kind == 11 : Rectangle { x: 8px; y: 8px; width: 4px; height: 4px; border-radius: 2px; background: root.tint; }
+}
+
+component ItemView inherits Rectangle {
+    in property <SideItem> item;
+    in property <bool> vertical;
+    in property <bool> selected;
+    in property <bool> dark;
+    in property <color> fg;
+    in property <color> muted;
+    in property <color> hover-bg;
+    in property <color> accent;
+    callback clicked();
+    callback hovered();
+
+    // Vertical: a row (icon and label); horizontal: a tile (icon over label).
+    width: root.item.header ? (root.vertical ? 0px : 10px) : (root.vertical ? 264px : 92px);
+    height: root.item.header ? (root.vertical ? 30px : 84px) : (root.vertical ? 44px : 84px);
+    border-radius: 10px;
+    background: (root.selected && !root.item.header) ? root.hover-bg : transparent;
+    opacity: root.item.enabled || root.item.header ? 1.0 : 0.38;
+    accessible-role: button;
+    accessible-label: root.item.label;
+
+    if root.item.header && root.vertical : Text {
+        x: 14px;
+        y: 10px;
+        text: root.item.label;
+        color: root.muted;
+        font-size: 11px;
+        font-weight: 700;
+    }
+    if root.item.header && !root.vertical : Rectangle {
+        x: 4px; y: 14px; width: 1px; height: 56px; background: root.muted.with-alpha(0.4);
+    }
+    if !root.item.header && root.vertical : HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 14px;
+        alignment: start;
+        Glyph {
+            y: (parent.height - self.height) / 2;
+            kind: root.item.glyph;
+            tint: root.item.active ? root.accent : root.fg;
+            accent: root.accent;
+        }
+        Text {
+            text: root.item.label;
+            color: root.item.active ? root.accent : root.fg;
+            font-size: 14px;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+    if !root.item.header && !root.vertical : Rectangle {
+        Glyph {
+            x: (parent.width - self.width) / 2;
+            y: 14px;
+            kind: root.item.glyph;
+            tint: root.item.active ? root.accent : root.fg;
+            accent: root.accent;
+        }
+        Text {
+            x: 4px;
+            y: 42px;
+            width: parent.width - 8px;
+            height: 36px;
+            text: root.item.label;
+            color: root.item.active ? root.accent : root.fg;
+            font-size: 11px;
+            horizontal-alignment: center;
+            vertical-alignment: top;
+            wrap: word-wrap;
+        }
+    }
+    if !root.item.header : TouchArea {
+        enabled: root.item.enabled;
+        mouse-cursor: pointer;
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.move) { root.hovered(); }
+        }
+        clicked => { root.clicked(); }
+    }
+}
+
+export component SidePanelWindow inherits Window {
+    in property <[SideItem]> items;
+    // On the left or right edge (a column) rather than the top or bottom (a row).
+    in property <bool> vertical: true;
+    // 0 left, 1 right, 2 top, 3 bottom: where it slides in from.
+    in property <int> edge: 1;
+    in property <bool> dark: true;
+    // The OS blurs what is behind the window: a lighter fill lets it show.
+    in property <bool> backdrop: false;
+    in property <duration> enter: 220ms;
+    in property <duration> exit: 150ms;
+    in-out property <bool> shown: false;
+    in-out property <int> selected: -1;
+
+    callback activate(int);
+    // The index to select after moving by this many selectable entries.
+    callback navigate(int) -> int;
+    callback dismiss();
+
+    no-frame: true;
+    always-on-top: true;
+    background: transparent;
+    default-font-family: "Inter";
+    forward-focus: keys;
+
+    property <float> progress: root.shown ? 1.0 : 0.0;
+    animate progress {
+        duration: root.shown ? root.enter : root.exit;
+        easing: root.shown ? cubic-bezier(0.16, 1, 0.3, 1) : ease-in;
+    }
+
+    property <color> fg: root.dark ? #f3f4f6 : #111827;
+    property <color> muted: root.dark ? #9ca3af : #6b7280;
+    property <color> hover-bg: root.dark ? #ffffff1f : #00000014;
+    property <color> accent: root.dark ? #f87171 : #dc2626;
+    property <color> fill: root.dark
+        ? (root.backdrop ? #1c1f2ab8 : #1c1f2af2)
+        : (root.backdrop ? #f5f6f8b8 : #f5f6f8f2);
+
+    keys := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.dismiss();
+                return accept;
+            }
+            if (event.text == Key.Return) {
+                if (root.selected >= 0 && root.selected < root.items.length) {
+                    root.activate(root.items[root.selected].id);
+                }
+                return accept;
+            }
+            if (event.text == Key.UpArrow || event.text == Key.LeftArrow || (event.text == Key.Tab && event.modifiers.shift)) {
+                root.selected = root.navigate(-1);
+                return accept;
+            }
+            if (event.text == Key.DownArrow || event.text == Key.RightArrow || event.text == Key.Tab) {
+                root.selected = root.navigate(1);
+                return accept;
+            }
+            reject
+        }
+    }
+
+    // The strip sits 12 px inside the window; the window touches the screen edge, so the strip
+    // slides in from beyond it.
+    strip := Rectangle {
+        x: 12px + (root.edge == 0 ? -1 : (root.edge == 1 ? 1 : 0)) * (1.0 - root.progress) * root.width;
+        y: 12px + (root.edge == 2 ? -1 : (root.edge == 3 ? 1 : 0)) * (1.0 - root.progress) * root.height;
+        width: root.width - 24px;
+        height: root.height - 24px;
+        opacity: root.progress;
+        border-radius: 16px;
+        background: root.fill;
+        border-width: 1px;
+        border-color: root.dark ? #ffffff26 : #00000020;
+
+        if root.vertical : VerticalLayout {
+            padding: 8px;
+            spacing: 2px;
+            alignment: start;
+            for item[i] in root.items : ItemView {
+                item: item;
+                vertical: true;
+                selected: i == root.selected;
+                fg: root.fg; muted: root.muted; hover-bg: root.hover-bg; accent: root.accent;
+                hovered => { root.selected = i; }
+                clicked => { root.activate(item.id); }
+            }
+        }
+        if !root.vertical : HorizontalLayout {
+            padding: 8px;
+            spacing: 2px;
+            alignment: start;
+            for item[i] in root.items : ItemView {
+                item: item;
+                vertical: false;
+                selected: i == root.selected;
+                fg: root.fg; muted: root.muted; hover-bg: root.hover-bg; accent: root.accent;
+                hovered => { root.selected = i; }
+                clicked => { root.activate(item.id); }
+            }
+        }
+    }
+}

@@ -11,7 +11,8 @@ use windows::Win32::Devices::Display::{
 };
 use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, POINT, RECT, TRUE};
 use windows::Win32::Graphics::Dwm::{
-    DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute,
+    DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DWMWINDOWATTRIBUTE, DwmGetWindowAttribute,
+    DwmSetWindowAttribute,
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
 use windows::Win32::Graphics::Dxgi::{
@@ -262,6 +263,66 @@ pub fn set_noactivate_tool_window(id: WindowId) -> Result<()> {
         let _ = SetWindowLongW(hwnd, GWL_EXSTYLE, wanted as i32);
     }
     Ok(())
+}
+
+/// `true` when the user chose the dark theme for apps (`AppsUseLightTheme` = 0).
+pub fn system_prefers_dark() -> bool {
+    use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
+    use windows::core::w;
+    let mut data = 1_u32;
+    let mut size = std::mem::size_of::<u32>() as u32;
+    // SAFETY: `data` and `size` are valid for the call; a missing value leaves `data` at 1.
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            w!(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"),
+            w!("AppsUseLightTheme"),
+            RRF_RT_REG_DWORD,
+            None,
+            Some((&raw mut data).cast()),
+            Some(&raw mut size),
+        )
+    };
+    status.is_ok() && data == 0
+}
+
+/// `false` when the user turned off animations in Windows ("Show animations in Windows").
+pub fn animations_enabled() -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SPI_GETCLIENTAREAANIMATION, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
+    };
+    let mut on = TRUE;
+    // SAFETY: `on` is a valid BOOL for the call.
+    let ok = unsafe {
+        SystemParametersInfoW(
+            SPI_GETCLIENTAREAANIMATION,
+            0,
+            Some((&raw mut on).cast()),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+    };
+    ok.is_err() || on.as_bool()
+}
+
+/// Gives one of our windows the blurred "acrylic" backdrop and rounded corners of Windows 11.
+/// Errors on Windows 10, where the caller keeps its own (more opaque) background.
+pub fn apply_acrylic(id: WindowId) -> Result<()> {
+    // `DWMWA_WINDOW_CORNER_PREFERENCE` = 33 (`DWMWCP_ROUND` = 2) and
+    // `DWMWA_SYSTEMBACKDROP_TYPE` = 38 (`DWMSBT_TRANSIENTWINDOW` = 3): Windows 11 22H2.
+    let hwnd = hwnd_of(id);
+    let set = |attribute: i32, value: i32| {
+        // SAFETY: `value` is a live i32 of the size the attribute wants.
+        unsafe {
+            DwmSetWindowAttribute(
+                hwnd,
+                DWMWINDOWATTRIBUTE(attribute),
+                (&raw const value).cast(),
+                std::mem::size_of::<i32>() as u32,
+            )
+        }
+    };
+    let _ = set(33, 2);
+    set(38, 3).map_err(|e| PlatformError::Os(e.to_string()))
 }
 
 /// Looks up the DXGI output of `monitor`: `(is HDR, peak nits, GDI device name)`.

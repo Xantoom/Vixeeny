@@ -45,6 +45,18 @@ pub fn set_noactivate_tool_window(_id: WindowId) -> Result<()> {
     Err(PlatformError::Unsupported)
 }
 
+pub fn system_prefers_dark() -> bool {
+    false
+}
+
+pub fn animations_enabled() -> bool {
+    true
+}
+
+pub fn apply_acrylic(_id: WindowId) -> Result<()> {
+    Err(PlatformError::Unsupported)
+}
+
 pub fn exclude_from_capture(_id: WindowId) -> Result<()> {
     Err(PlatformError::Unsupported)
 }
