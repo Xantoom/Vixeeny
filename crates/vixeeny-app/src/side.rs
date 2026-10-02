@@ -69,7 +69,7 @@ pub fn run(config: &Config, recording: bool, replay: bool) -> anyhow::Result<Out
         .context("no monitor")?
         .clone();
 
-    let lang = Lang::resolve(&config.general.language, None);
+    let lang = crate::lang(&config.general.language);
     let profiles: Vec<String> = config.profiles.keys().cloned().collect();
     let current = profiles
         .iter()

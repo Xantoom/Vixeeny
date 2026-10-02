@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use vixeeny_common::config::RecordingWidget;
-use vixeeny_common::i18n::{Key, Lang, tr};
+use vixeeny_common::i18n::{Key, tr};
 use vixeeny_platform::MonitorInfo;
 
 use crate::widget_math::{FromWidget, ToWidget, corner_geometry};
@@ -114,7 +114,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
         num(3)? as u32,
     );
     let auto_hide = args.get(4).is_some_and(|a| a == "1");
-    let lang = Lang::resolve(args.get(5).map_or("auto", String::as_str), None);
+    let lang = crate::lang(args.get(5).map_or("auto", String::as_str));
 
     let panel = WidgetPanel::new(
         &WidgetTexts {

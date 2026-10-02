@@ -225,6 +225,17 @@ pub enum Key {
     ProfileLast,
     ProfileCurrent,
     ProfileReplay,
+    HwUnavailable,
+    HwSoftware,
+    HwNoGpu,
+    HwDriver,
+    HwDetecting,
+    IntegInstalled,
+    IntegNotInstalled,
+    AboutLicense,
+    AboutThirdParty,
+    AboutLogs,
+    GalleryDeleted,
 }
 
 impl Lang {
@@ -687,6 +698,42 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::ProfileCurrent, Lang::Fr) => "utilisé",
         (Key::ProfileReplay, Lang::En) => "replay",
         (Key::ProfileReplay, Lang::Fr) => "replay",
+        (Key::HwUnavailable, Lang::En) => "Hardware detection is not available in this build.",
+        (Key::HwUnavailable, Lang::Fr) => {
+            "La détection du matériel n'est pas disponible dans cette version."
+        }
+        (Key::HwSoftware, Lang::En) => "Software encoders",
+        (Key::HwSoftware, Lang::Fr) => "Encodeurs logiciels",
+        (Key::HwNoGpu, Lang::En) => "No graphics card found.",
+        (Key::HwNoGpu, Lang::Fr) => "Aucune carte graphique trouvée.",
+        (Key::HwDriver, Lang::En) => "Driver {version}",
+        (Key::HwDriver, Lang::Fr) => "Pilote {version}",
+        (Key::HwDetecting, Lang::En) => "Detecting…",
+        (Key::HwDetecting, Lang::Fr) => "Détection en cours…",
+        (Key::IntegInstalled, Lang::En) => {
+            "The “Convert with Vixeeny” entry is in the context menu."
+        }
+        (Key::IntegInstalled, Lang::Fr) => {
+            "L'entrée « Convertir avec Vixeeny » est dans le menu contextuel."
+        }
+        (Key::IntegNotInstalled, Lang::En) => {
+            "The “Convert with Vixeeny” entry is not in the context menu."
+        }
+        (Key::IntegNotInstalled, Lang::Fr) => {
+            "L'entrée « Convertir avec Vixeeny » n'est pas dans le menu contextuel."
+        }
+        (Key::AboutLicense, Lang::En) => "Licence: GNU GPL v3 or later",
+        (Key::AboutLicense, Lang::Fr) => "Licence : GNU GPL v3 ou ultérieure",
+        (Key::AboutThirdParty, Lang::En) => {
+            "Third-party licences: THIRD-PARTY-LICENSES.txt, next to the application"
+        }
+        (Key::AboutThirdParty, Lang::Fr) => {
+            "Licences tierces : THIRD-PARTY-LICENSES.txt, à côté de l'application"
+        }
+        (Key::AboutLogs, Lang::En) => "Logs: {path}",
+        (Key::AboutLogs, Lang::Fr) => "Journaux : {path}",
+        (Key::GalleryDeleted, Lang::En) => "Moved to the Recycle Bin.",
+        (Key::GalleryDeleted, Lang::Fr) => "Déplacé dans la corbeille.",
     }
 }
 

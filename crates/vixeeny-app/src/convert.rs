@@ -177,7 +177,7 @@ fn start(w: &ConvertWindow, state: &Rc<RefCell<State>>) {
 }
 
 pub fn run(config: &Config, paths: &[PathBuf]) -> anyhow::Result<()> {
-    let lang = Lang::resolve(&config.general.language, None);
+    let lang = crate::lang(&config.general.language);
     let (default_format, base) = crate::image_output(config);
     let formats: Vec<ImageFormat> = [
         ImageFormat::Png,

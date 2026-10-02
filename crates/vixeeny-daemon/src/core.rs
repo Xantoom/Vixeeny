@@ -76,6 +76,7 @@ impl Core {
                 self.run(ActionId::OpenSettings, &mut fx);
             }
             Event::Control(ControlRequest::Quit) | Event::TrayQuit => self.quit(&mut fx),
+            Event::Control(ControlRequest::ReloadConfig) => fx.push(Effect::ReloadConfig),
             Event::Control(ControlRequest::Ping) => {}
             Event::Action(action) => self.run(action, &mut fx),
             Event::AppConnected => self.connected = true,
@@ -326,6 +327,15 @@ mod tests {
                 success: false
             }),
             vec![Effect::Notify(Key::AppCrashed)]
+        );
+    }
+
+    #[test]
+    fn a_reload_request_from_the_settings_window_reloads_the_config() {
+        let mut core = Core::new();
+        assert_eq!(
+            core.handle(Event::Control(ControlRequest::ReloadConfig)),
+            vec![Effect::ReloadConfig]
         );
     }
 

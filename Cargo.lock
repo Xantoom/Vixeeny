@@ -5583,6 +5583,7 @@ dependencies = [
  "vixeeny-image",
  "vixeeny-ocr",
  "vixeeny-platform",
+ "vixeeny-settings",
  "vixeeny-stitch",
  "vixeeny-ui",
 ]

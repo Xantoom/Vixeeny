@@ -62,6 +62,70 @@ struct State {
     on_section: RefCell<Box<dyn Fn(Section)>>,
 }
 
+/// A way to update the window from another thread (a detection that takes a while, thumbnails
+/// that arrive one by one).
+#[derive(Clone)]
+pub struct PanelHandle(slint::Weak<SettingsWindow>);
+
+impl PanelHandle {
+    pub fn set_lines(&self, lines: Vec<Line>) {
+        let _ = self
+            .0
+            .upgrade_in_event_loop(move |w| w.set_lines(line_model(lines, None)));
+    }
+
+    pub fn set_extra(&self, text: String) {
+        let _ = self
+            .0
+            .upgrade_in_event_loop(move |w| w.set_extra(text.into()));
+    }
+
+    pub fn set_gallery(&self, entries: Vec<GalleryEntry>, selected: Option<usize>) {
+        let _ = self
+            .0
+            .upgrade_in_event_loop(move |w| w.set_gallery(gallery_model(entries, selected)));
+    }
+}
+
+fn line_model(lines: Vec<Line>, selected: Option<usize>) -> ModelRc<LineItem> {
+    let items: Vec<LineItem> = lines
+        .into_iter()
+        .enumerate()
+        .map(|(i, l)| LineItem {
+            text: l.text.into(),
+            detail: l.detail.into(),
+            selected: selected == Some(i),
+            strong: l.strong,
+        })
+        .collect();
+    ModelRc::from(Rc::new(VecModel::from(items)))
+}
+
+fn gallery_model(entries: Vec<GalleryEntry>, selected: Option<usize>) -> ModelRc<GalleryItem> {
+    let items: Vec<GalleryItem> = entries
+        .into_iter()
+        .enumerate()
+        .map(|(i, e)| {
+            let thumb = e.thumb.and_then(|(w, h, rgba)| {
+                (rgba.len() == w as usize * h as usize * 4).then(|| {
+                    let mut buffer = SharedPixelBuffer::<slint::Rgba8Pixel>::new(w, h);
+                    buffer.make_mut_bytes().copy_from_slice(&rgba);
+                    slint::Image::from_rgba8(buffer)
+                })
+            });
+            GalleryItem {
+                name: e.name.into(),
+                detail: e.detail.into(),
+                has_thumb: thumb.is_some(),
+                thumb: thumb.unwrap_or_default(),
+                video: e.video,
+                selected: selected == Some(i),
+            }
+        })
+        .collect();
+    ModelRc::from(Rc::new(VecModel::from(items)))
+}
+
 pub struct SettingsPanel {
     window: SettingsWindow,
     state: Rc<State>,
@@ -268,44 +332,16 @@ impl SettingsPanel {
     }
 
     pub fn set_gallery(&self, entries: Vec<GalleryEntry>, selected: Option<usize>) {
-        let items: Vec<GalleryItem> = entries
-            .into_iter()
-            .enumerate()
-            .map(|(i, e)| {
-                let thumb = e.thumb.and_then(|(w, h, rgba)| {
-                    (rgba.len() == w as usize * h as usize * 4).then(|| {
-                        let mut buffer = SharedPixelBuffer::<slint::Rgba8Pixel>::new(w, h);
-                        buffer.make_mut_bytes().copy_from_slice(&rgba);
-                        slint::Image::from_rgba8(buffer)
-                    })
-                });
-                GalleryItem {
-                    name: e.name.into(),
-                    detail: e.detail.into(),
-                    has_thumb: thumb.is_some(),
-                    thumb: thumb.unwrap_or_default(),
-                    video: e.video,
-                    selected: selected == Some(i),
-                }
-            })
-            .collect();
-        self.window
-            .set_gallery(ModelRc::from(Rc::new(VecModel::from(items))));
+        self.window.set_gallery(gallery_model(entries, selected));
     }
 
     pub fn set_lines(&self, lines: Vec<Line>, selected: Option<usize>) {
-        let items: Vec<LineItem> = lines
-            .into_iter()
-            .enumerate()
-            .map(|(i, l)| LineItem {
-                text: l.text.into(),
-                detail: l.detail.into(),
-                selected: selected == Some(i),
-                strong: l.strong,
-            })
-            .collect();
-        self.window
-            .set_lines(ModelRc::from(Rc::new(VecModel::from(items))));
+        self.window.set_lines(line_model(lines, selected));
+    }
+
+    /// A handle for other threads.
+    pub fn handle(&self) -> PanelHandle {
+        PanelHandle(self.window.as_weak())
     }
 
     /// A message under the page (an error, a hint).

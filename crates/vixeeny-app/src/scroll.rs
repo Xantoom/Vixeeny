@@ -154,7 +154,7 @@ pub fn run(
     zone: PhysicalRect,
     scale: f32,
 ) -> anyhow::Result<()> {
-    let lang = Lang::resolve(&config.general.language, None);
+    let lang = crate::lang(&config.general.language);
     let monitor = vixeeny_platform::monitor_for_rect(&snapshot.monitors, &zone)
         .context("no monitor for the zone")?
         .clone();

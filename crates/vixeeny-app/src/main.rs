@@ -11,6 +11,8 @@ use std::time::Duration;
 mod audio_rig;
 #[cfg(windows)]
 mod convert;
+#[cfg(any(windows, test))]
+mod gallery;
 #[cfg(windows)]
 mod ocr;
 mod probe;
@@ -20,6 +22,8 @@ mod record;
 mod region;
 #[cfg(windows)]
 mod scroll;
+#[cfg(windows)]
+mod settings;
 #[cfg(windows)]
 mod side;
 #[cfg(any(windows, test))]
@@ -43,6 +47,12 @@ fn main() {
 }
 
 /// Runs one action. Failures are logged, not fatal: the app stays available for the next one.
+/// The display language: the setting, or the OS's own for `auto`.
+#[cfg(windows)]
+fn lang(setting: &str) -> vixeeny_common::i18n::Lang {
+    vixeeny_common::i18n::Lang::resolve(setting, vixeeny_platform::user_locale().as_deref())
+}
+
 fn perform(action: ActionId, config: &Config) {
     use ActionId::{CaptureAllMonitors, CaptureFullscreen, CaptureWindow};
     match action {
@@ -198,9 +208,20 @@ fn run_action(
         | ActionId::ReplayToggle
         | ActionId::ReplaySave => recording.handle(action, config),
         ActionId::OverlayToggle => return overlay(config, recording, send),
+        ActionId::OpenSettings => open_settings(),
         _ => perform(action, config),
     }
     Ok(None)
+}
+
+/// The settings window is a process of its own: the hotkeys keep working while it is open.
+fn open_settings() {
+    #[cfg(windows)]
+    if let Err(e) = settings::spawn() {
+        tracing::error!("{e:#}");
+    }
+    #[cfg(not(windows))]
+    tracing::info!("the settings window needs Windows");
 }
 
 #[cfg(windows)]
@@ -357,6 +378,9 @@ fn run() -> anyhow::Result<()> {
         // The recording widget, a process of its own (see `widget`).
         #[cfg(windows)]
         Some("--widget") => return widget::run_child(&args[1..]),
+        // The settings window and gallery, a process of its own (see `settings`).
+        #[cfg(windows)]
+        Some("--settings") => return settings::run_child(),
         Some("--probe-report") => return probe::report(args.iter().any(|a| a == "--force")),
         _ => {}
     }
@@ -369,7 +393,7 @@ fn run() -> anyhow::Result<()> {
         let config = vixeeny_common::paths::config_file()
             .and_then(|path| Config::load(&path).ok())
             .unwrap_or_default();
-        let lang = vixeeny_common::i18n::Lang::resolve(&config.general.language, None);
+        let lang = lang(&config.general.language);
         let result = if flag == "--install-context-menu" {
             let label = vixeeny_common::i18n::tr(vixeeny_common::i18n::Key::ConvMenuLabel, lang);
             vixeeny_platform::context_menu::install(&std::env::current_exe()?, label)

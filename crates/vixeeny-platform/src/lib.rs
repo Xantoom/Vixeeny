@@ -22,9 +22,10 @@ mod unsupported;
 use unsupported as os;
 
 pub use os::{
-    animations_enabled, apply_acrylic, attach_console, cursor_position, ensure_dpi_aware,
-    exclude_from_capture, exe_metadata, foreground_window, gpu_adapters, hdr_info, monitors,
-    monotonic_ns, set_noactivate_tool_window, system_prefers_dark, top_level_windows, window_info,
+    InstanceGuard, animations_enabled, apply_acrylic, attach_console, cursor_position,
+    ensure_dpi_aware, exclude_from_capture, exe_metadata, focus_window_titled, foreground_window,
+    gpu_adapters, hdr_info, monitors, monotonic_ns, open_path, recycle, set_noactivate_tool_window,
+    single_instance, system_prefers_dark, top_level_windows, user_locale, window_info,
 };
 
 /// A graphics adapter as the OS reports it (the encoder probe derives its own view from it).

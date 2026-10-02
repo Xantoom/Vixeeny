@@ -116,6 +116,8 @@ pub enum AppToDaemon {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ControlRequest {
     OpenSettings,
+    /// The settings changed on disk (the settings window is a process of its own).
+    ReloadConfig,
     Quit,
     Ping,
 }

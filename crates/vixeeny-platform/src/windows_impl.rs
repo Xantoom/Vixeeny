@@ -9,7 +9,7 @@ use windows::Win32::Devices::Display::{
     DISPLAYCONFIG_SDR_WHITE_LEVEL, DISPLAYCONFIG_SOURCE_DEVICE_NAME, DisplayConfigGetDeviceInfo,
     GetDisplayConfigBufferSizes, QDC_ONLY_ACTIVE_PATHS, QueryDisplayConfig,
 };
-use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, POINT, RECT, TRUE};
+use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, POINT, RECT, TRUE};
 use windows::Win32::Graphics::Dwm::{
     DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DWMWINDOWATTRIBUTE, DwmGetWindowAttribute,
     DwmSetWindowAttribute,
@@ -323,6 +323,112 @@ pub fn apply_acrylic(id: WindowId) -> Result<()> {
     };
     let _ = set(33, 2);
     set(38, 3).map_err(|e| PlatformError::Os(e.to_string()))
+}
+
+/// The user's locale tag (`fr-FR`), for the `auto` language.
+pub fn user_locale() -> Option<String> {
+    use windows::Win32::Globalization::GetUserDefaultLocaleName;
+    // LOCALE_NAME_MAX_LENGTH
+    let mut buf = [0u16; 85];
+    // SAFETY: the buffer is valid for writes and its length is passed to the call.
+    let len = unsafe { GetUserDefaultLocaleName(&mut buf) };
+    let len = usize::try_from(len).ok()?.checked_sub(1)?; // drop the NUL
+    String::from_utf16(buf.get(..len)?).ok()
+}
+
+/// Holds the name for as long as it lives; a second holder of the same name gets `None`.
+pub struct InstanceGuard(HANDLE);
+
+// SAFETY: a mutex handle can be closed from any thread.
+unsafe impl Send for InstanceGuard {}
+
+impl Drop for InstanceGuard {
+    fn drop(&mut self) {
+        // SAFETY: the handle was created by `single_instance` and is closed once.
+        let _ = unsafe { CloseHandle(self.0) };
+    }
+}
+
+/// Takes the per-session instance lock called `name`: `Some` for the first caller.
+pub fn single_instance(name: &str) -> Option<InstanceGuard> {
+    use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError};
+    use windows::Win32::System::Threading::CreateMutexW;
+    let wide: Vec<u16> = format!("Local\\{name}\0").encode_utf16().collect();
+    // SAFETY: `wide` is NUL-terminated and outlives the call.
+    let handle = unsafe { CreateMutexW(None, false, windows::core::PCWSTR(wide.as_ptr())) }.ok()?;
+    // SAFETY: reads the thread's last error, set by the call above.
+    if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+        // SAFETY: closing the handle we just got.
+        let _ = unsafe { CloseHandle(handle) };
+        return None;
+    }
+    Some(InstanceGuard(handle))
+}
+
+/// Brings the top-level window titled `title` to the front. `true` when there was one.
+pub fn focus_window_titled(title: &str) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        FindWindowW, SW_RESTORE, SetForegroundWindow, ShowWindow,
+    };
+    let wide: Vec<u16> = title.encode_utf16().chain(std::iter::once(0)).collect();
+    // SAFETY: `wide` is NUL-terminated and outlives the calls; the window is another process's,
+    // which these calls are allowed to address.
+    unsafe {
+        let Ok(hwnd) = FindWindowW(None, windows::core::PCWSTR(wide.as_ptr())) else {
+            return false;
+        };
+        let _ = ShowWindow(hwnd, SW_RESTORE);
+        SetForegroundWindow(hwnd).as_bool()
+    }
+}
+
+/// Opens a file, folder or address with the program Windows associates with it.
+pub fn open_path(path: &str) -> Result<()> {
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    use windows::core::{PCWSTR, w};
+    let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+    // SAFETY: both strings are NUL-terminated and outlive the call.
+    let result = unsafe {
+        ShellExecuteW(
+            None,
+            w!("open"),
+            PCWSTR(wide.as_ptr()),
+            None,
+            None,
+            SW_SHOWNORMAL,
+        )
+    };
+    // Values above 32 mean success.
+    if result.0 as usize > 32 {
+        Ok(())
+    } else {
+        Err(PlatformError::Os(format!("cannot open {path}")))
+    }
+}
+
+/// Moves a file to the Recycle Bin (never deletes it for good).
+pub fn recycle(path: &str) -> Result<()> {
+    use windows::Win32::UI::Shell::{
+        FO_DELETE, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, SHFILEOPSTRUCTW,
+        SHFileOperationW,
+    };
+    // The list of names ends with two NULs.
+    let mut wide: Vec<u16> = path.encode_utf16().collect();
+    wide.extend([0, 0]);
+    let mut op = SHFILEOPSTRUCTW {
+        wFunc: FO_DELETE,
+        pFrom: windows::core::PCWSTR(wide.as_ptr()),
+        fFlags: (FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT).0 as u16,
+        ..Default::default()
+    };
+    // SAFETY: `op` points at `wide`, which outlives the call.
+    let code = unsafe { SHFileOperationW(&mut op) };
+    if code == 0 && !op.fAnyOperationsAborted.as_bool() {
+        Ok(())
+    } else {
+        Err(PlatformError::Os(format!("cannot recycle {path} ({code})")))
+    }
 }
 
 /// Looks up the DXGI output of `monitor`: `(is HDR, peak nits, GDI device name)`.

@@ -24,6 +24,7 @@ vixeeny-editor = { path = "../vixeeny-editor" }
 vixeeny-stitch = { path = "../vixeeny-stitch" }
 vixeeny-convert = { path = "../vixeeny-convert" }
 vixeeny-ocr = { path = "../vixeeny-ocr" }
+vixeeny-settings = { path = "../vixeeny-settings" }
 vixeeny-ui = { path = "../vixeeny-ui", features = ["desktop"] }
 rfd = { version = "0.17.2", default-features = false }
 

@@ -32,7 +32,7 @@ fn to_bgra(img: &RgbaImage) -> Vec<u8> {
 }
 
 pub fn run(image: &RgbaImage, config: &Config) -> anyhow::Result<()> {
-    let lang = Lang::resolve(&config.general.language, None);
+    let lang = crate::lang(&config.general.language);
     let ui_language = if lang == Lang::Fr { "fr" } else { "en" };
     let ocr_image = OcrImage::new(image.width, image.height, to_bgra(image))
         .context("unexpected image buffer")?;

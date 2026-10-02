@@ -68,3 +68,25 @@ pub fn hdr_info(_monitor: crate::MonitorId) -> Option<crate::HdrInfo> {
 pub fn exe_metadata(_path: &str) -> crate::ExeMetadata {
     crate::ExeMetadata::default()
 }
+
+pub struct InstanceGuard;
+
+pub fn single_instance(_name: &str) -> Option<InstanceGuard> {
+    Some(InstanceGuard)
+}
+
+pub fn focus_window_titled(_title: &str) -> bool {
+    false
+}
+
+pub fn open_path(_path: &str) -> Result<()> {
+    Err(PlatformError::Unsupported)
+}
+
+pub fn recycle(_path: &str) -> Result<()> {
+    Err(PlatformError::Unsupported)
+}
+
+pub fn user_locale() -> Option<String> {
+    None
+}
