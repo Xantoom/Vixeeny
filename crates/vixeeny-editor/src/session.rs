@@ -10,7 +10,7 @@ use crate::render::{RgbaImage, render_region};
 use crate::selection::{CursorHint, Selection, magnifier_position, magnifier_source, place_beside};
 
 /// Size of the toolbar, in image pixels (the UI lays out its content to fit).
-pub const TOOLBAR_SIZE: (f32, f32) = (640.0, 88.0);
+pub const TOOLBAR_SIZE: (f32, f32) = (700.0, 88.0);
 /// Source pixels shown by the magnifier, per side, and the on-screen zoom factor.
 pub const MAGNIFIER_SIDE: u32 = 11;
 pub const MAGNIFIER_ZOOM: f32 = 10.0;
@@ -58,6 +58,8 @@ pub struct MagnifierView {
     /// smoothing.
     pub pixels: RgbaImage,
     pub position: Point,
+    /// Side of the magnified square on screen, in pixels.
+    pub size: f32,
     /// Colour under the cursor, `#rrggbb`.
     pub hex: String,
     pub color: Color,
@@ -105,6 +107,8 @@ pub struct Session {
     text_input: Option<Point>,
     /// Veil opacity over the image outside the zone (0.0–1.0).
     pub dim: f32,
+    /// Scale of the interface (the window's scale factor); the toolbar and magnifier grow with it.
+    ui_scale: f32,
 }
 
 impl Session {
@@ -120,7 +124,16 @@ impl Session {
             cursor: Point::default(),
             text_input: None,
             dim: 0.4,
+            ui_scale: 1.0,
         }
+    }
+
+    pub fn set_ui_scale(&mut self, scale: f32) {
+        self.ui_scale = scale.clamp(0.5, 4.0);
+    }
+
+    pub fn ui_scale(&self) -> f32 {
+        self.ui_scale
     }
 
     pub fn base(&self) -> &RgbaImage {
@@ -348,14 +361,16 @@ impl Session {
             (self.cursor.y.max(0.0) as u32).min(self.base.height - 1),
         );
         let color = self.base.pixel(px, py).with_alpha(255);
-        let size = MAGNIFIER_SIDE as f32 * MAGNIFIER_ZOOM;
+        let scale = self.ui_scale;
+        let size = MAGNIFIER_SIDE as f32 * MAGNIFIER_ZOOM * scale;
         Some(MagnifierView {
             pixels,
+            size,
             position: magnifier_position(
                 self.cursor,
-                (size, size + 28.0),
+                (size, size + 28.0 * scale),
                 &bounds,
-                MAGNIFIER_OFFSET,
+                MAGNIFIER_OFFSET * scale,
             ),
             hex: color.hex(),
             color,
@@ -373,7 +388,8 @@ impl Session {
             hover_window: self.selection.hover_window,
             size_label: zone.map(|z| {
                 let text = format!("{} × {}", z.w.round() as u32, z.h.round() as u32);
-                let y = if z.y >= 26.0 { z.y - 26.0 } else { z.y + 4.0 };
+                let label = 26.0 * self.ui_scale;
+                let y = if z.y >= label { z.y - label } else { z.y + 4.0 };
                 (text, Point::new(z.x, y))
             }),
             magnifier: if zone.is_none() || !settled {
@@ -381,9 +397,17 @@ impl Session {
             } else {
                 None
             },
-            toolbar: zone
-                .filter(|_| settled)
-                .map(|z| place_beside(&z, TOOLBAR_SIZE, &bounds, GAP)),
+            toolbar: zone.filter(|_| settled).map(|z| {
+                place_beside(
+                    &z,
+                    (
+                        TOOLBAR_SIZE.0 * self.ui_scale,
+                        TOOLBAR_SIZE.1 * self.ui_scale,
+                    ),
+                    &bounds,
+                    GAP * self.ui_scale,
+                )
+            }),
             annotated: zone.and_then(|z| self.annotated(&z)),
             cursor: self.cursor_hint(),
             tool: self.tool,
