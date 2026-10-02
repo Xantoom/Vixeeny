@@ -3,6 +3,7 @@
 //! the action loop keeps answering the daemon. This is the CPU path; the target is the monitor
 //! under the cursor.
 
+use crate::toast::{Failed, Saved, Toast, failure_text};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -135,6 +136,8 @@ struct Plan {
     audio: Vec<vixeeny_audio::TrackPlan>,
     /// The widget to show, and the language of its labels.
     widget: Option<(vixeeny_common::config::RecordingWidget, String)>,
+    /// The settings, for the notifications that end a session.
+    notice: Config,
 }
 
 struct GpuParts {
@@ -333,6 +336,7 @@ fn plan(config: &Config, allow_gpu: bool, replay: bool) -> anyhow::Result<Plan> 
                 config.general.language.clone(),
             )
         }),
+        notice: config.clone(),
     })
 }
 
@@ -491,6 +495,7 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
     let thread_state = Arc::clone(&state);
     // The GPU parts must outlive the recording (the device the textures live on).
     let save_as = plan.save_as;
+    let notice = plan.notice;
     let keep_alive = KeepAlive(plan.gpu);
     let thread = std::thread::Builder::new()
         .name("recording".into())
@@ -505,13 +510,24 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
                 origin,
                 &rx,
                 &thread_state,
+                &notice,
             );
             drop(stream);
             drop(keep_alive);
             thread_state.store(IDLE, Ordering::Release);
             match result {
-                Ok(summary) => tracing::info!("recording finished: {summary:?}"),
-                Err(e) => tracing::error!("recording failed: {e:#}"),
+                Ok(summary) => {
+                    tracing::info!("recording finished: {summary:?}");
+                    if let Some(file) = summary.files.first() {
+                        let saved = Toast::Saved(Saved::Recording, file.clone());
+                        crate::toast::notify(&notice, &saved);
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("recording failed: {e:#}");
+                    let text = failure_text(&e, crate::lang(&notice.general.language));
+                    crate::toast::notify(&notice, &Toast::Failed(Failed::Recording, text));
+                }
             }
         })?;
     Ok(Handle {
@@ -524,22 +540,37 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
 
 /// Starts writing the replay; the file is finished (and reported) by a thread of its own, so the
 /// recording goes on, and a second save right after does not wait for the first.
-fn save_replay(recorder: &Recorder, next_path: &mut SaveNamer) {
+fn save_replay(recorder: &Recorder, next_path: &mut SaveNamer, notice: &Config) {
     let started = std::time::Instant::now();
     let save = next_path().and_then(|path| Ok(recorder.save_replay(path)?));
     match save {
         Ok(save) => {
             let seconds = save.seconds;
+            let notice = notice.clone();
             std::thread::spawn(move || match save.wait() {
-                Ok(path) => tracing::info!(
-                    "replay saved: {} ({seconds:.1} s, {:.2} s to write)",
-                    path.display(),
-                    started.elapsed().as_secs_f64()
-                ),
-                Err(e) => tracing::error!("cannot save the replay: {e}"),
+                Ok(path) => {
+                    tracing::info!(
+                        "replay saved: {} ({seconds:.1} s, {:.2} s to write)",
+                        path.display(),
+                        started.elapsed().as_secs_f64()
+                    );
+                    crate::toast::notify(&notice, &Toast::Saved(Saved::Replay, path));
+                }
+                Err(e) => {
+                    tracing::error!("cannot save the replay: {e}");
+                    let text = failure_text(
+                        &anyhow::anyhow!("{e}"),
+                        crate::lang(&notice.general.language),
+                    );
+                    crate::toast::notify(&notice, &Toast::Failed(Failed::Replay, text));
+                }
             });
         }
-        Err(e) => tracing::error!("cannot save the replay: {e:#}"),
+        Err(e) => {
+            tracing::error!("cannot save the replay: {e:#}");
+            let text = failure_text(&e, crate::lang(&notice.general.language));
+            crate::toast::notify(notice, &Toast::Failed(Failed::Replay, text));
+        }
     }
 }
 
@@ -554,6 +585,7 @@ fn record_loop(
     origin: i64,
     ctl: &Receiver<Ctl>,
     state: &AtomicU8,
+    notice: &Config,
 ) -> anyhow::Result<vixeeny_encode::recorder::Summary> {
     let now = || vixeeny_platform::monotonic_ns() - origin;
     let mut paused = false;
@@ -574,7 +606,7 @@ fn record_loop(
         match ctl.try_recv() {
             Ok(Ctl::Save) => {
                 if let Some(next_path) = &mut save_as {
-                    save_replay(&recorder, next_path);
+                    save_replay(&recorder, next_path, notice);
                 }
             }
             // A replay has no pause: it always keeps the last seconds.

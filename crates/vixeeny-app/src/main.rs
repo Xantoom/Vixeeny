@@ -28,6 +28,7 @@ mod settings;
 mod side;
 #[cfg(any(windows, test))]
 mod still;
+mod toast;
 #[cfg(windows)]
 mod widget;
 #[cfg(any(windows, test))]
@@ -46,13 +47,12 @@ fn main() {
     }
 }
 
-/// Runs one action. Failures are logged, not fatal: the app stays available for the next one.
 /// The display language: the setting, or the OS's own for `auto`.
-#[cfg(windows)]
 fn lang(setting: &str) -> vixeeny_common::i18n::Lang {
     vixeeny_common::i18n::Lang::resolve(setting, vixeeny_platform::user_locale().as_deref())
 }
 
+/// Runs one action. Failures are logged, not fatal: the app stays available for the next one.
 fn perform(action: ActionId, config: &Config) {
     use ActionId::{CaptureAllMonitors, CaptureFullscreen, CaptureWindow};
     match action {
@@ -76,8 +76,16 @@ fn perform(action: ActionId, config: &Config) {
         }
         CaptureFullscreen | CaptureWindow | CaptureAllMonitors => {
             match direct_capture(action, config) {
-                Ok(path) => tracing::info!("saved {}", path.display()),
-                Err(e) => tracing::error!("capture failed: {e:#}"),
+                Ok(path) => {
+                    tracing::info!("saved {}", path.display());
+                    toast::notify(config, &toast::Toast::Saved(toast::Saved::Image, path));
+                }
+                Err(e) => {
+                    tracing::error!("capture failed: {e:#}");
+                    let lang = lang(&config.general.language);
+                    let text = toast::failure_text(&e, lang);
+                    toast::notify(config, &toast::Toast::Failed(toast::Failed::Capture, text));
+                }
             }
         }
         other => tracing::info!("action {other:?} is not implemented yet"),
@@ -327,7 +335,14 @@ impl Recording {
             (ActionId::RecordToggle, Some(handle)) => handle.stop(),
             (ActionId::RecordToggle, None) => match record::start(config) {
                 Ok(handle) => self.handle = Some(handle),
-                Err(e) => tracing::error!("cannot start the recording: {e:#}"),
+                Err(e) => {
+                    tracing::error!("cannot start the recording: {e:#}");
+                    let text = toast::failure_text(&e, lang(&config.general.language));
+                    toast::notify(
+                        config,
+                        &toast::Toast::Failed(toast::Failed::Recording, text),
+                    );
+                }
             },
             (_, Some(handle)) => handle.pause_toggle(),
             (_, None) => {}
@@ -381,6 +396,9 @@ fn run() -> anyhow::Result<()> {
         // The settings window and gallery, a process of its own (see `settings`).
         #[cfg(windows)]
         Some("--settings") => return settings::run_child(),
+        // A notification card (see `toast`).
+        #[cfg(windows)]
+        Some("--toast") => return toast::run_child(&args[1..]),
         Some("--probe-report") => return probe::report(args.iter().any(|a| a == "--force")),
         _ => {}
     }

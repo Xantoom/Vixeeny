@@ -745,3 +745,44 @@ fn the_gallery_and_the_other_pages_show_what_the_host_gives_them() {
     );
     settings_render(&panel, "9-settings-hardware");
 }
+
+#[test]
+fn the_toast_renders_with_a_thumbnail_and_an_error_variant() {
+    use crate::toast_panel::{ToastContent, ToastPanel};
+    WINDOW.with(|_| ());
+    let window = WINDOW.with(Rc::clone);
+    window.set_size(PhysicalSize::new(360, 96));
+    let draw = |content: &ToastContent| {
+        let panel = ToastPanel::new(content).unwrap_or_else(|e| panic!("{e}"));
+        panel.window().show().unwrap_or_else(|e| panic!("{e}"));
+        let mut buffer = SharedPixelBuffer::<Rgb8Pixel>::new(360, 96);
+        window.draw_if_needed(|r| {
+            r.render(buffer.make_mut_slice(), 360);
+        });
+        (panel, buffer)
+    };
+    let green = vec![[40u8, 200, 90, 255]; 64 * 48].concat();
+    let saved = ToastContent {
+        heading: "Image saved".into(),
+        body: "capture-001.png".into(),
+        thumb: Some((64, 48, green)),
+        dark: true,
+        action_label: "Open folder".into(),
+        ..ToastContent::default()
+    };
+    let (panel, ok) = draw(&saved);
+    save("8-toast-saved", &ok);
+    assert!(panel.window().get_has_thumb());
+    assert!(ok.as_slice().iter().any(|p| p.g > 180 && p.r < 80));
+    let failed = ToastContent {
+        heading: "The capture failed".into(),
+        body: "The disk is full".into(),
+        error: true,
+        dark: false,
+        action_label: "Open settings".into(),
+        ..ToastContent::default()
+    };
+    let (_, bad) = draw(&failed);
+    save("8-toast-error", &bad);
+    assert_ne!(ok.as_slice(), bad.as_slice());
+}

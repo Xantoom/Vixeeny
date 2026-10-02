@@ -20,6 +20,7 @@ pub mod overlay;
 pub mod scroll_panel;
 pub mod settings_panel;
 pub mod side_panel;
+pub mod toast_panel;
 pub mod widget_panel;
 pub use overlay::Overlay;
 pub use slint::ComponentHandle;

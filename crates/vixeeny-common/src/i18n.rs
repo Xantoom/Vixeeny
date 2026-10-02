@@ -236,6 +236,16 @@ pub enum Key {
     AboutThirdParty,
     AboutLogs,
     GalleryDeleted,
+    ToastImageSaved,
+    ToastRecordingSaved,
+    ToastReplaySaved,
+    ToastOpenFolder,
+    ToastOpenSettings,
+    ToastCaptureFailed,
+    ToastRecordingFailed,
+    ToastReplayFailed,
+    ToastDiskFull,
+    ToastAccessDenied,
 }
 
 impl Lang {
@@ -734,6 +744,32 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::AboutLogs, Lang::Fr) => "Journaux : {path}",
         (Key::GalleryDeleted, Lang::En) => "Moved to the Recycle Bin.",
         (Key::GalleryDeleted, Lang::Fr) => "Déplacé dans la corbeille.",
+        (Key::ToastImageSaved, Lang::En) => "Image saved",
+        (Key::ToastImageSaved, Lang::Fr) => "Image enregistrée",
+        (Key::ToastRecordingSaved, Lang::En) => "Recording saved",
+        (Key::ToastRecordingSaved, Lang::Fr) => "Enregistrement terminé",
+        (Key::ToastReplaySaved, Lang::En) => "Replay saved",
+        (Key::ToastReplaySaved, Lang::Fr) => "Replay enregistré",
+        (Key::ToastOpenFolder, Lang::En) => "Open folder",
+        (Key::ToastOpenFolder, Lang::Fr) => "Ouvrir le dossier",
+        (Key::ToastOpenSettings, Lang::En) => "Open settings",
+        (Key::ToastOpenSettings, Lang::Fr) => "Ouvrir les paramètres",
+        (Key::ToastCaptureFailed, Lang::En) => "The capture failed",
+        (Key::ToastCaptureFailed, Lang::Fr) => "La capture a échoué",
+        (Key::ToastRecordingFailed, Lang::En) => "The recording failed",
+        (Key::ToastRecordingFailed, Lang::Fr) => "L'enregistrement a échoué",
+        (Key::ToastReplayFailed, Lang::En) => "The replay could not be saved",
+        (Key::ToastReplayFailed, Lang::Fr) => "Le replay n'a pas pu être enregistré",
+        (Key::ToastDiskFull, Lang::En) => {
+            "The disk is full: free some space or pick another folder."
+        }
+        (Key::ToastDiskFull, Lang::Fr) => {
+            "Le disque est plein : libérez de la place ou choisissez un autre dossier."
+        }
+        (Key::ToastAccessDenied, Lang::En) => "Access denied: pick a folder you can write to.",
+        (Key::ToastAccessDenied, Lang::Fr) => {
+            "Accès refusé : choisissez un dossier où vous pouvez écrire."
+        }
     }
 }
 
