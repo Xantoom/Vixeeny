@@ -195,8 +195,19 @@ fn webp_jxl_bmp_gif_tiff_read() {
 #[cfg(feature = "native-codecs")]
 #[test]
 fn native_formats_read() {
-    let src = tagged();
-    let img = Bgra::new(4, 2, 16, &src);
+    // SVT-AV1 misbehaves on tiny frames: use a size the encoder tests also use.
+    let (w, h) = (96u32, 64u32);
+    let src: Vec<u8> = (0..w * h)
+        .flat_map(|i| {
+            [
+                (i % 251) as u8,
+                ((i / w) * 3) as u8,
+                (i % 97) as u8 * 2,
+                255,
+            ]
+        })
+        .collect();
+    let img = Bgra::new(w, h, w as usize * 4, &src);
     let jxl = encode(ImageFormat::Jxl, &img, &Settings::default()).unwrap();
     let d = decode(&jxl).unwrap();
     for (a, b) in d.bgra.iter().zip(&src) {
@@ -205,7 +216,7 @@ fn native_formats_read() {
     let avif = encode(ImageFormat::Avif, &img, &Settings::default()).unwrap();
     assert_eq!(SourceFormat::sniff(&avif), Some(SourceFormat::Avif));
     let d = decode(&avif).unwrap();
-    assert_eq!((d.width, d.height), (4, 2));
+    assert_eq!((d.width, d.height), (w, h));
     let jpeg = encode(ImageFormat::Jpeg, &img, &Settings::default()).unwrap();
-    assert_eq!(decode(&jpeg).unwrap().width, 4);
+    assert_eq!(decode(&jpeg).unwrap().width, w);
 }
