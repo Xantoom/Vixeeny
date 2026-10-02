@@ -27,13 +27,33 @@ fn to_bgra(img: &RgbaImage) -> Vec<u8> {
 
 fn copy_to_clipboard(img: &RgbaImage) -> anyhow::Result<()> {
     let bgra = to_bgra(img);
-    let bitmap = Bgra::new(img.width, img.height, img.width as usize * 4, &bgra);
-    let png = vixeeny_image::encode(
-        ImageFormat::Png,
-        &bitmap,
-        &vixeeny_image::Settings::default(),
-    )?;
-    vixeeny_platform::clipboard::copy_image(img.width, img.height, &bgra, &png)
+    copy_bgra(&Bgra::new(
+        img.width,
+        img.height,
+        img.width as usize * 4,
+        &bgra,
+    ))
+}
+
+/// Lossless copy: a `PNG` entry and a bitmap (see `vixeeny_platform::clipboard`).
+pub fn copy_bgra(image: &Bgra<'_>) -> anyhow::Result<()> {
+    let png = vixeeny_image::encode(ImageFormat::Png, image, &vixeeny_image::Settings::default())?;
+    // The clipboard wants tightly packed rows.
+    let row = image.width as usize * 4;
+    let packed: Vec<u8>;
+    let pixels = if image.stride == row {
+        image.data
+    } else {
+        packed = (0..image.height as usize)
+            .flat_map(|y| {
+                image.data[y * image.stride..y * image.stride + row]
+                    .iter()
+                    .copied()
+            })
+            .collect();
+        &packed
+    };
+    vixeeny_platform::clipboard::copy_image(image.width, image.height, pixels, &png)
         .map_err(|e: PlatformError| anyhow::anyhow!("{e}"))
 }
 
@@ -68,6 +88,7 @@ fn save(
         use_foreground_app: config.paths.use_foreground_app,
         app_names: &config.paths.app_names,
         now: &now,
+        after_save: None,
     };
     Ok(still::save_image(
         ActionId::CaptureRegion,

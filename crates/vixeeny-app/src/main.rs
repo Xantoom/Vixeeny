@@ -66,6 +66,7 @@ fn direct_capture(action: ActionId, config: &Config) -> anyhow::Result<std::path
         use_foreground_app: config.paths.use_foreground_app,
         app_names: &config.paths.app_names,
         now: &now,
+        after_save: None,
     };
     let mut capturer = Capturer::new(WgcBackend::new()?, snapshot.monitors.clone());
     let options = CaptureOptions {
@@ -74,6 +75,15 @@ fn direct_capture(action: ActionId, config: &Config) -> anyhow::Result<std::path
             .then_some(tonemap_hdr as vixeeny_capture::ToneMapFn),
     };
     let (format, settings) = image_output(config);
+    let copy = |image: &vixeeny_image::Bgra<'_>| {
+        if let Err(e) = region::copy_bgra(image) {
+            tracing::warn!("clipboard: {e:#}");
+        }
+    };
+    let destination = still::Destination {
+        after_save: config.image.copy_to_clipboard.then_some(&copy),
+        ..destination
+    };
     let path = still::run(
         action,
         &snapshot,

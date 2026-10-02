@@ -79,6 +79,8 @@ pub struct Destination<'a> {
     pub use_foreground_app: bool,
     pub app_names: &'a BTreeMap<String, String>,
     pub now: &'a LocalTime,
+    /// Called with the image once it is written (e.g. to copy it to the clipboard).
+    pub after_save: Option<&'a dyn Fn(&Bgra<'_>)>,
 }
 
 /// Display name of the application a capture is attributed to.
@@ -178,6 +180,9 @@ pub fn save_image(
         |p| p.exists(),
     );
     write_atomic(&path, &bytes)?;
+    if let Some(after) = dest.after_save {
+        after(image);
+    }
     Ok(path)
 }
 
@@ -271,6 +276,7 @@ mod tests {
             use_foreground_app: use_fg,
             app_names: names,
             now: &now,
+            after_save: None,
         };
         run(
             action,
