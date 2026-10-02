@@ -460,8 +460,8 @@ fn a_slow_encoder_drops_input_frames_instead_of_blocking() {
     let registry = Registry::builtin().unwrap();
     let dir = scratch("queue");
     let mut cfg = config(&registry, "libx264", OutputContainer::Mkv, 30);
-    cfg.queue = 2;
-    cfg.output_size = (1280, 720);
+    cfg.queue = 1;
+    cfg.output_size = (1920, 1080);
     // A slow preset on a big frame, fed as fast as possible.
     cfg.options = vec![
         ("preset".into(), "veryslow".into()),
@@ -470,8 +470,10 @@ fn a_slow_encoder_drops_input_frames_instead_of_blocking() {
     let rec = Recorder::start(cfg, namer(&dir, "mkv")).unwrap();
     let started = std::time::Instant::now();
     let mut refused = 0;
+    // Built once: a fast producer is what overflows the queue, even on a quick machine.
+    let big = frame(1920, 1080, 0);
     for i in 0..200 {
-        if !rec.push_frame(i * 33 * MS, frame(1280, 720, i as usize)) {
+        if !rec.push_frame(i * 33 * MS, big.clone()) {
             refused += 1;
         }
     }

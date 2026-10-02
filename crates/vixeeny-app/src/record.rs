@@ -125,10 +125,10 @@ fn plan(config: &Config) -> anyhow::Result<Plan> {
         .get(&config.video.profile)
         .cloned()
         .unwrap_or_default();
-    let registry = Registry::builtin();
+    let registry = Registry::builtin().context("codec registry")?;
     let probe = crate::probe::current(false).ok();
     let ctx = ValidateContext {
-        registry,
+        registry: &registry,
         platform: Platform::current(),
         source,
         probe: probe.as_ref(),
@@ -137,7 +137,7 @@ fn plan(config: &Config) -> anyhow::Result<Plan> {
     if let Some(issue) = issues.iter().find(|i| i.severity == Severity::Error) {
         anyhow::bail!("the video profile is not valid: {issue:?}");
     }
-    let encoder = choose_encoder(registry, &profile, probe.as_ref())?.clone();
+    let encoder = choose_encoder(&registry, &profile, probe.as_ref())?.clone();
 
     let container = OutputContainer::from_setting(&profile.container)
         .with_context(|| format!("unknown container `{}`", profile.container))?;
