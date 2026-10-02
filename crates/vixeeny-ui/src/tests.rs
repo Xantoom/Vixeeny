@@ -83,7 +83,7 @@ fn overlay(w: u32, h: u32, scale: f32) -> Overlay {
         screen(w, h),
         vec![vixeeny_editor::Rect::new(60.0, 50.0, 240.0, 170.0)],
     );
-    Overlay::new(session, scale, |_, _| {}).unwrap_or_else(|e| panic!("{e}"))
+    Overlay::new(session, scale, |_, _, _| true).unwrap_or_else(|e| panic!("{e}"))
 }
 
 const NO: Modifiers = Modifiers { shift: false };

@@ -152,10 +152,23 @@ pub fn run<B: StillBackend>(
 ) -> Result<PathBuf, StillError> {
     let target = target_for(action, snap)?;
     let frame = capturer.grab(&target, options)?;
-    let (format, settings) = output;
     let image = Bgra::new(frame.width, frame.height, frame.stride, &frame.data);
-    let bytes = vixeeny_image::encode(format, &image, settings)?;
-    let vars = template_vars(action, snap, dest, metadata, (frame.width, frame.height));
+    save_image(action, snap, dest, output, metadata, &image)
+}
+
+/// Encodes `image` and writes it under the configured name. Shared by the direct captures and
+/// the editor's "save".
+pub fn save_image(
+    action: ActionId,
+    snap: &Snapshot,
+    dest: &Destination<'_>,
+    output: (ImageFormat, &Settings),
+    metadata: &dyn Fn(&str) -> ExeMetadata,
+    image: &Bgra<'_>,
+) -> Result<PathBuf, StillError> {
+    let (format, settings) = output;
+    let bytes = vixeeny_image::encode(format, image, settings)?;
+    let vars = template_vars(action, snap, dest, metadata, (image.width, image.height));
     let path = naming::output_path(
         dest.dir,
         dest.per_app_subfolder,

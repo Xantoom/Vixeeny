@@ -112,6 +112,8 @@ export component EditorWindow inherits Window {
     in property <float> text-size: 24;
 
     in property <int> cursor-kind: 0;
+    // Off while a system dialog (Save as) must appear above the overlay.
+    in property <bool> on-top: true;
 
     callback pointer-pressed(float, float, bool);
     callback pointer-moved(float, float, bool);
@@ -128,7 +130,7 @@ export component EditorWindow inherits Window {
     property <length> u: 1phx * root.ui-scale;
 
     no-frame: true;
-    always-on-top: true;
+    always-on-top: root.on-top;
     background: black;
     default-font-family: "Inter";
     width: image-width * 1phx;

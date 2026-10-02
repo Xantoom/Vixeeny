@@ -4,6 +4,7 @@
 //! All coordinates are **physical pixels** in the virtual desktop. Callers must have called
 //! [`ensure_dpi_aware`] first, otherwise Windows hands out scaled (virtualised) values.
 
+pub mod clipboard;
 mod geometry;
 mod time;
 pub use geometry::{PhysicalRect, virtual_bounds};

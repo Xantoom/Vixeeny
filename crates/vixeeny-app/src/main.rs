@@ -7,6 +7,8 @@
 use std::sync::mpsc::{RecvTimeoutError, channel};
 use std::time::Duration;
 
+#[cfg(windows)]
+mod region;
 #[cfg(any(windows, test))]
 mod still;
 
@@ -27,6 +29,12 @@ fn main() {
 fn perform(action: ActionId, config: &Config) {
     use ActionId::{CaptureAllMonitors, CaptureFullscreen, CaptureWindow};
     match action {
+        #[cfg(windows)]
+        ActionId::CaptureRegion => {
+            if let Err(e) = region::run(config) {
+                tracing::error!("editor failed: {e:#}");
+            }
+        }
         CaptureFullscreen | CaptureWindow | CaptureAllMonitors => {
             match direct_capture(action, config) {
                 Ok(path) => tracing::info!("saved {}", path.display()),

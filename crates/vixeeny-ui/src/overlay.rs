@@ -95,7 +95,8 @@ pub fn map_key(text: &str, ctrl: bool, shift: bool) -> Option<KeyInput> {
     Some(KeyInput { key, ctrl, shift })
 }
 
-type CommandHandler = dyn Fn(Command, &Session);
+/// Returns `true` when the overlay should close afterwards.
+type CommandHandler = dyn Fn(Command, &Session, &EditorWindow) -> bool;
 
 pub struct Overlay {
     window: EditorWindow,
@@ -108,7 +109,7 @@ impl Overlay {
     pub fn new(
         mut session: Session,
         ui_scale: f32,
-        on_command: impl Fn(Command, &Session) + 'static,
+        on_command: impl Fn(Command, &Session, &EditorWindow) -> bool + 'static,
     ) -> Result<Self, slint::PlatformError> {
         session.set_ui_scale(ui_scale);
         let window = EditorWindow::new()?;
@@ -130,6 +131,14 @@ impl Overlay {
 
     pub fn window(&self) -> &EditorWindow {
         &self.window
+    }
+
+    /// Shows the overlay at `position` with `size` (physical pixels) and runs until it closes.
+    pub fn run(self, position: (i32, i32), size: (u32, u32)) -> Result<(), slint::PlatformError> {
+        let window = self.window.window();
+        window.set_position(slint::PhysicalPosition::new(position.0, position.1));
+        window.set_size(slint::PhysicalSize::new(size.0, size.1));
+        self.window.run()
     }
 
     pub fn session(&self) -> Rc<RefCell<Session>> {
@@ -187,8 +196,11 @@ impl Overlay {
                 return;
             }
             let command = session.borrow_mut().key(input);
-            if let Some(command) = command {
-                handler(command, &session.borrow());
+            if let (Some(command), Some(window)) = (command, weak.upgrade())
+                && handler(command, &session.borrow(), &window)
+            {
+                let _ = window.hide();
+                return;
             }
             refresh_from(&weak, &session);
         });
@@ -236,7 +248,12 @@ impl Overlay {
                         "ocr" => Command::Ocr,
                         _ => Command::Close,
                     };
-                    handler(command, &session.borrow());
+                    if let Some(window) = weak.upgrade()
+                        && handler(command, &session.borrow(), &window)
+                    {
+                        let _ = window.hide();
+                        return;
+                    }
                 }
             }
             refresh_from(&weak, &session);
