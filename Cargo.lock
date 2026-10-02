@@ -5589,6 +5589,10 @@ dependencies = [
 [[package]]
 name = "vixeeny-audio"
 version = "0.0.1"
+dependencies = [
+ "thiserror 2.0.21",
+ "tracing",
+]
 
 [[package]]
 name = "vixeeny-capture"
