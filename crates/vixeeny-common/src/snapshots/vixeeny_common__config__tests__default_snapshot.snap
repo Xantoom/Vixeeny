@@ -56,6 +56,9 @@ quality = 80
 depth = 10
 chroma = "444"
 
+[editor]
+dim_percent = 40
+
 [video]
 profile = "default"
 

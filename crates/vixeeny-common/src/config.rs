@@ -42,6 +42,7 @@ pub struct Config {
     pub hotkeys: Hotkeys,
     pub paths: Paths,
     pub image: Image,
+    pub editor: Editor,
     pub video: Video,
     pub profiles: BTreeMap<String, Profile>,
     pub recording_widget: RecordingWidget,
@@ -58,6 +59,7 @@ impl Default for Config {
             hotkeys: Hotkeys::default(),
             paths: Paths::default(),
             image: Image::default(),
+            editor: Editor::default(),
             video: Video::default(),
             profiles: BTreeMap::from([("default".to_owned(), Profile::default())]),
             recording_widget: RecordingWidget::default(),
@@ -211,6 +213,20 @@ impl Default for Image {
             jpeg: Jpeg::default(),
             avif: Avif::default(),
         }
+    }
+}
+
+/// The Print Screen editor (plan 5.3).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Editor {
+    /// Opacity of the dark veil over the frozen screen outside the zone, in percent.
+    pub dim_percent: u8,
+}
+
+impl Default for Editor {
+    fn default() -> Self {
+        Self { dim_percent: 40 }
     }
 }
 

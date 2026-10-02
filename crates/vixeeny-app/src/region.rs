@@ -144,56 +144,54 @@ pub fn run(config: &Config) -> anyhow::Result<()> {
     };
     let config = config.clone();
 
-    let overlay = vixeeny_ui::Overlay::new(
-        Session::new(base, zones),
-        scale,
-        move |command, session, window| {
-            let export = || session.export();
-            match command {
-                Command::Close => true,
-                Command::Copy => match export() {
-                    Some(img) => {
-                        if let Err(e) = copy_to_clipboard(&img) {
-                            tracing::error!("clipboard: {e:#}");
-                            return false;
+    let mut session = Session::new(base, zones);
+    session.dim = f32::from(config.editor.dim_percent.min(90)) / 100.0;
+    let overlay = vixeeny_ui::Overlay::new(session, scale, move |command, session, window| {
+        let export = || session.export();
+        match command {
+            Command::Close => true,
+            Command::Copy => match export() {
+                Some(img) => {
+                    if let Err(e) = copy_to_clipboard(&img) {
+                        tracing::error!("clipboard: {e:#}");
+                        return false;
+                    }
+                    true
+                }
+                None => false,
+            },
+            Command::Save | Command::SaveAs => {
+                let Some(img) = export() else { return false };
+                let chosen = if command == Command::SaveAs {
+                    match save_as_dialog(&config, window) {
+                        Some(path) => Some(path),
+                        None => return false, // cancelled: stay in the editor
+                    }
+                } else {
+                    None
+                };
+                match save(&config, &snapshot, &img, chosen) {
+                    Ok(path) => {
+                        tracing::info!("saved {}", path.display());
+                        if config.image.copy_to_clipboard
+                            && let Err(e) = copy_to_clipboard(&img)
+                        {
+                            tracing::warn!("clipboard: {e:#}");
                         }
                         true
                     }
-                    None => false,
-                },
-                Command::Save | Command::SaveAs => {
-                    let Some(img) = export() else { return false };
-                    let chosen = if command == Command::SaveAs {
-                        match save_as_dialog(&config, window) {
-                            Some(path) => Some(path),
-                            None => return false, // cancelled: stay in the editor
-                        }
-                    } else {
-                        None
-                    };
-                    match save(&config, &snapshot, &img, chosen) {
-                        Ok(path) => {
-                            tracing::info!("saved {}", path.display());
-                            if config.image.copy_to_clipboard
-                                && let Err(e) = copy_to_clipboard(&img)
-                            {
-                                tracing::warn!("clipboard: {e:#}");
-                            }
-                            true
-                        }
-                        Err(e) => {
-                            tracing::error!("save failed: {e:#}");
-                            false
-                        }
+                    Err(e) => {
+                        tracing::error!("save failed: {e:#}");
+                        false
                     }
                 }
-                Command::Ocr => {
-                    tracing::info!("OCR is not implemented yet (M8)");
-                    false
-                }
             }
-        },
-    )
+            Command::Ocr => {
+                tracing::info!("OCR is not implemented yet (M8)");
+                false
+            }
+        }
+    })
     .map_err(|e| anyhow::anyhow!("cannot create the editor window: {e}"))?;
     tracing::info!("editor ready after {:?}", started.elapsed());
     overlay
