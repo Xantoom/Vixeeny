@@ -14,7 +14,9 @@ use windows::Win32::Graphics::Dwm::{
     DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute,
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
-use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1, IDXGIOutput6};
+use windows::Win32::Graphics::Dxgi::{
+    CreateDXGIFactory1, DXGI_ADAPTER_FLAG_SOFTWARE, IDXGIDevice, IDXGIFactory1, IDXGIOutput6,
+};
 use windows::Win32::Graphics::Gdi::{
     EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO, MONITORINFOEXW,
 };
@@ -409,5 +411,72 @@ pub fn exe_metadata(path: &str) -> crate::ExeMetadata {
     crate::ExeMetadata {
         product_name: string("ProductName"),
         file_description: string("FileDescription"),
+    }
+}
+
+/// The graphics adapters, in DXGI order.
+pub fn gpu_adapters() -> Result<Vec<crate::GpuInfo>> {
+    use windows::core::Interface;
+    // SAFETY: plain DXGI enumeration; every interface is released when dropped.
+    unsafe {
+        let factory: IDXGIFactory1 =
+            CreateDXGIFactory1().map_err(|e| PlatformError::Os(format!("DXGI factory: {e}")))?;
+        let mut out = Vec::new();
+        let mut index = 0;
+        while let Ok(adapter) = factory.EnumAdapters1(index) {
+            index += 1;
+            let Ok(desc) = adapter.GetDesc1() else {
+                continue;
+            };
+            let len = desc
+                .Description
+                .iter()
+                .position(|c| *c == 0)
+                .unwrap_or(desc.Description.len());
+            let driver = adapter
+                .CheckInterfaceSupport(&IDXGIDevice::IID)
+                .map(crate::format_driver_version)
+                .unwrap_or_default();
+            out.push(crate::GpuInfo {
+                name: String::from_utf16_lossy(&desc.Description[..len]),
+                vendor_id: desc.VendorId,
+                device_id: desc.DeviceId,
+                driver_version: driver,
+                software: desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 != 0,
+            });
+        }
+        Ok(out)
+    }
+}
+
+/// Lets a GUI-subsystem process print to the terminal that started it (command-line modes such
+/// as `--probe-report`). A no-op when it was not started from a console.
+pub fn attach_console() {
+    use windows::Win32::Foundation::GENERIC_WRITE;
+    use windows::Win32::Storage::FileSystem::{
+        CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_WRITE, OPEN_EXISTING,
+    };
+    use windows::Win32::System::Console::{
+        ATTACH_PARENT_PROCESS, AttachConsole, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE, SetStdHandle,
+    };
+    use windows::core::w;
+    // SAFETY: console attachment and handle replacement have no memory-safety preconditions;
+    // the handle opened here is intentionally kept for the life of the process.
+    unsafe {
+        if AttachConsole(ATTACH_PARENT_PROCESS).is_err() {
+            return;
+        }
+        if let Ok(out) = CreateFileW(
+            w!("CONOUT$"),
+            GENERIC_WRITE.0,
+            FILE_SHARE_WRITE,
+            None,
+            OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL,
+            None,
+        ) {
+            let _ = SetStdHandle(STD_OUTPUT_HANDLE, out);
+            let _ = SetStdHandle(STD_ERROR_HANDLE, out);
+        }
     }
 }

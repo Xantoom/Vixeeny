@@ -11,6 +11,10 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+serde.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+vixeeny-common = { path = "../vixeeny-common" }
 
 # Unix: FFmpeg built by `cargo xtask build-native`, linked statically (found via pkg-config).
 [target.'cfg(not(windows))'.dependencies]

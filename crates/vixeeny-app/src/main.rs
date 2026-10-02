@@ -11,6 +11,7 @@ use std::time::Duration;
 mod convert;
 #[cfg(windows)]
 mod ocr;
+mod probe;
 #[cfg(windows)]
 mod region;
 #[cfg(windows)]
@@ -177,6 +178,12 @@ fn run() -> anyhow::Result<()> {
     // `--convert <paths…>`: the conversion window on its own, no daemon needed (it is what the
     // Explorer context-menu entry starts).
     let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.first().map(String::as_str) {
+        // The probe child: prints TOML on stdout (see `vixeeny_encode::probe::run_child`).
+        Some("--probe") => return probe::child(),
+        Some("--probe-report") => return probe::report(args.iter().any(|a| a == "--force")),
+        _ => {}
+    }
     // The Explorer context-menu entry (until the settings app offers the switch).
     #[cfg(windows)]
     if let Some(flag) = args

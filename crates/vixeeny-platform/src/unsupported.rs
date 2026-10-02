@@ -9,6 +9,13 @@ pub fn monitors() -> Result<Vec<MonitorInfo>> {
     Err(PlatformError::Unsupported)
 }
 
+/// Nothing to do: the process already has a terminal.
+pub fn attach_console() {}
+
+pub fn gpu_adapters() -> Result<Vec<crate::GpuInfo>> {
+    Err(PlatformError::Unsupported)
+}
+
 pub fn cursor_position() -> Result<(i32, i32)> {
     Err(PlatformError::Unsupported)
 }

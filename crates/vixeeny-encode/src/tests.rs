@@ -1,0 +1,621 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+use std::cell::RefCell;
+use std::path::PathBuf;
+
+use vixeeny_common::config::Profile;
+
+use crate::probe::{
+    Adapter, EncoderProbe, FormatProbe, ProbeResult, Prober, cache_key, cached_or_probe, from_toml,
+    probe, to_toml, vendor_from_pci,
+};
+use crate::registry::{
+    Chroma, Container, Encoder, Family, Kind, PixelFormatSpec, Platform, Registry, Vendor,
+};
+use crate::validate::{Context, IssueKind, Severity, is_valid, output_size, pick_auto, validate};
+
+fn registry() -> Registry {
+    Registry::builtin().unwrap_or_else(|e| panic!("{e}"))
+}
+
+#[test]
+fn the_builtin_registry_covers_plan_6_2() {
+    let r = registry();
+    // Every encoder of the table of section 6.2 is there.
+    for id in [
+        "libx264",
+        "libx265",
+        "libsvtav1",
+        "libvpx_vp9",
+        "nvenc_h264",
+        "nvenc_hevc",
+        "nvenc_av1",
+        "amf_h264",
+        "amf_hevc",
+        "amf_av1",
+        "qsv_h264",
+        "qsv_hevc",
+        "qsv_av1",
+        "qsv_vp9",
+        "videotoolbox_h264",
+        "videotoolbox_hevc",
+        "vaapi_h264",
+        "vaapi_hevc",
+        "vaapi_av1",
+        "vaapi_vp9",
+        "vulkan_h264",
+        "vulkan_hevc",
+        "vulkan_av1",
+    ] {
+        assert!(r.get(id).is_some(), "{id} missing");
+    }
+    assert_eq!(r.encoders.len(), 23);
+    // AMF is Windows only, VAAPI/Vulkan Linux only, VideoToolbox macOS only.
+    for e in &r.encoders {
+        match e.vendor {
+            Vendor::Amd => assert_eq!(e.platforms, [Platform::Windows], "{}", e.id),
+            Vendor::Vaapi | Vendor::Vulkan => {
+                assert_eq!(e.platforms, [Platform::Linux], "{}", e.id)
+            }
+            Vendor::Apple => assert_eq!(e.platforms, [Platform::Macos], "{}", e.id),
+            _ => {}
+        }
+    }
+}
+
+#[test]
+fn containers_follow_the_matrix_13_2() {
+    for e in &registry().encoders {
+        let webm = e.containers.contains(&Container::Webm);
+        assert_eq!(
+            webm,
+            matches!(e.family, Family::Av1 | Family::Vp9),
+            "{}",
+            e.id
+        );
+        assert!(e.containers.contains(&Container::Mkv), "{}", e.id);
+        assert!(e.containers.contains(&Container::Mp4), "{}", e.id);
+    }
+}
+
+#[test]
+fn hdr_is_hevc_and_av1_only_with_10_bits() {
+    for e in &registry().encoders {
+        if e.hdr {
+            assert!(matches!(e.family, Family::Hevc | Family::Av1), "{}", e.id);
+            assert!(e.pixel_formats.iter().any(|p| p.depth == 10), "{}", e.id);
+        }
+    }
+}
+
+#[test]
+fn every_encoder_has_four_presets_and_sane_params() {
+    for e in &registry().encoders {
+        for name in [
+            crate::registry::PresetName::Quality,
+            crate::registry::PresetName::Balanced,
+            crate::registry::PresetName::Performance,
+            crate::registry::PresetName::Small,
+        ] {
+            assert!(!e.presets.get(name).is_empty(), "{} {name:?}", e.id);
+        }
+        let mut keys: Vec<_> = e.params.iter().map(|p| &p.key).collect();
+        keys.sort();
+        keys.dedup();
+        assert_eq!(keys.len(), e.params.len(), "{}: duplicate param keys", e.id);
+        for p in &e.params {
+            assert!(p.label.starts_with("encoder.param."), "{}", e.id);
+        }
+    }
+}
+
+#[test]
+fn a_broken_registry_is_rejected() {
+    let text = include_str!("../codecs/registry.toml");
+    assert!(
+        Registry::parse(&format!("{text}\n{text}")).is_err(),
+        "duplicate ids"
+    );
+    assert!(Registry::parse(&text.replace("kind = \"hardware\"", "kind = \"software\"")).is_err());
+    assert!(Registry::parse("[[encoder]]\nid = \"x\"").is_err());
+}
+
+// ---- validation ---------------------------------------------------------------------------
+
+fn profile(encoder: &str, container: &str) -> Profile {
+    Profile {
+        encoder: encoder.into(),
+        container: container.into(),
+        ..Profile::default()
+    }
+}
+
+fn check(profile: &Profile, probe: Option<&ProbeResult>) -> Vec<IssueKind> {
+    let r = registry();
+    validate(
+        profile,
+        &Context {
+            registry: &r,
+            platform: Platform::Windows,
+            source: (3840, 2160),
+            probe,
+        },
+    )
+    .into_iter()
+    .map(|i| i.kind)
+    .collect()
+}
+
+#[test]
+fn the_default_profile_is_valid() {
+    let r = registry();
+    let issues = validate(
+        &Profile::default(),
+        &Context {
+            registry: &r,
+            platform: Platform::Windows,
+            source: (1920, 1080),
+            probe: None,
+        },
+    );
+    assert!(issues.is_empty(), "{issues:?}");
+}
+
+#[test]
+fn encoder_and_container_must_agree() {
+    assert!(check(&profile("libx264", "mkv"), None).is_empty());
+    let issues = check(&profile("libx264", "webm"), None);
+    assert!(issues.contains(&IssueKind::ContainerNotSupported {
+        family: Family::H264,
+        container: Container::Webm
+    }));
+    assert!(check(&profile("libsvtav1", "webm"), None).is_empty());
+    assert!(
+        check(&profile("nope", "mkv"), None).contains(&IssueKind::UnknownEncoder("nope".into()))
+    );
+    assert!(
+        check(&profile("libx264", "avi"), None)
+            .contains(&IssueKind::UnknownContainer("avi".into()))
+    );
+    assert!(check(&profile("vaapi_h264", "mkv"), None).contains(&IssueKind::NotOnThisPlatform));
+}
+
+#[test]
+fn pixel_format_and_hdr_rules() {
+    let mut p = profile("nvenc_h264", "mp4_hybrid");
+    p.chroma = "444".into();
+    p.depth = 10;
+    assert!(check(&p, None).contains(&IssueKind::FormatNotSupported {
+        depth: 10,
+        chroma: Chroma::C444
+    }));
+
+    let mut hdr = profile("nvenc_hevc", "mp4_hybrid");
+    hdr.hdr = "keep_hdr".into();
+    assert!(check(&hdr, None).contains(&IssueKind::HdrNeeds10Bit));
+    hdr.depth = 10;
+    assert!(check(&hdr, None).is_empty());
+    hdr.container = "webm".into();
+    assert!(check(&hdr, None).contains(&IssueKind::HdrContainer(Container::Webm)));
+    let mut h264 = profile("libx264", "mkv");
+    h264.hdr = "keep_hdr".into();
+    h264.depth = 10;
+    assert!(check(&h264, None).contains(&IssueKind::HdrNeedsHevcOrAv1));
+}
+
+#[test]
+fn audio_and_container() {
+    let mut p = profile("libx264", "mp4_hybrid");
+    p.audio.codec = "pcm".into();
+    assert!(check(&p, None).contains(&IssueKind::AudioCodec {
+        codec: "pcm".into(),
+        container: Container::Mp4
+    }));
+    p.container = "mkv".into();
+    assert!(check(&p, None).is_empty());
+    p.audio.codec = "opus".into();
+    p.container = "webm".into();
+    p.encoder = "libsvtav1".into();
+    assert!(check(&p, None).is_empty());
+    p.audio.codec = "aac".into();
+    assert!(!check(&p, None).is_empty());
+    p.audio.codec = "wma".into();
+    assert!(check(&p, None).contains(&IssueKind::UnknownAudioCodec("wma".into())));
+}
+
+#[test]
+fn frame_rate_is_checked_against_the_codec_level() {
+    let mut p = profile("libx264", "mkv");
+    p.fps = 240;
+    let r = registry();
+    let issues = validate(
+        &p,
+        &Context {
+            registry: &r,
+            platform: Platform::Windows,
+            source: (3840, 2160),
+            probe: None,
+        },
+    );
+    let warning = issues
+        .iter()
+        .find(|i| matches!(i.kind, IssueKind::FramerateTooHigh { .. }));
+    assert_eq!(warning.map(|i| i.severity), Some(Severity::Warning));
+    assert!(is_valid(&issues), "a warning does not block");
+    assert!(check(&profile("libx265", "mkv"), None).is_empty());
+    p.encoder = "libx265".into();
+    assert!(check(&p, None).is_empty(), "HEVC level 6.2 handles 4K 240");
+}
+
+#[test]
+fn bad_numbers_are_reported() {
+    let p = Profile {
+        fps: 0,
+        depth: 12,
+        chroma: "411".into(),
+        resolution: "huge".into(),
+        preset: "ludicrous".into(),
+        hdr: "maybe".into(),
+        ..Profile::default()
+    };
+    let issues = check(&p, None);
+    for expected in [
+        IssueKind::ZeroFps,
+        IssueKind::BadDepth(12),
+        IssueKind::UnknownChroma("411".into()),
+        IssueKind::BadResolution("huge".into()),
+        IssueKind::UnknownPreset("ludicrous".into()),
+        IssueKind::UnknownHdrSetting("maybe".into()),
+    ] {
+        assert!(issues.contains(&expected), "{expected:?} in {issues:?}");
+    }
+}
+
+#[test]
+fn resolution_settings() {
+    assert_eq!(output_size("source", (2560, 1440)), Some((2560, 1440)));
+    assert_eq!(output_size("1080p", (2560, 1440)), Some((1920, 1080)));
+    assert_eq!(output_size("720p", (3440, 1440)), Some((1720, 720)));
+    assert_eq!(output_size("1280x720", (1, 1)), Some((1280, 720)));
+    assert_eq!(output_size("0x720", (1, 1)), None);
+    assert_eq!(output_size("p", (1, 1)), None);
+}
+
+/// The property of 6.4, over every encoder × container × depth × chroma × HDR: the verdict
+/// agrees with the registry data written out by hand.
+#[test]
+fn validation_agrees_with_the_data_exhaustively() {
+    let r = registry();
+    let containers = ["mkv", "mp4_hybrid", "mp4_fragmented", "webm"];
+    for e in r.for_platform(Platform::Windows) {
+        for container in containers {
+            for depth in [8u8, 10] {
+                for chroma in ["420", "422", "444"] {
+                    for hdr in ["tonemap_sdr", "keep_hdr"] {
+                        let p = Profile {
+                            encoder: e.id.clone(),
+                            container: container.into(),
+                            depth,
+                            chroma: chroma.into(),
+                            hdr: hdr.into(),
+                            ..Profile::default()
+                        };
+                        let c = Container::from_setting(container).unwrap_or_else(|| panic!());
+                        let ch = Chroma::from_setting(chroma).unwrap_or_else(|| panic!());
+                        let want = e.containers.contains(&c)
+                            && e.supports_format(depth, ch)
+                            && (hdr == "tonemap_sdr"
+                                || (e.hdr && depth == 10 && c != Container::Webm));
+                        let issues = check(&p, None);
+                        let got = !issues
+                            .iter()
+                            .any(|k| !matches!(k, IssueKind::FramerateTooHigh { .. }));
+                        assert_eq!(
+                            got, want,
+                            "{} {container} {depth}-bit {chroma} {hdr}: {issues:?}",
+                            e.id
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ---- probing ------------------------------------------------------------------------------
+
+fn gpu(index: u32, name: &str, vendor_id: u32, driver: &str) -> Adapter {
+    Adapter {
+        index,
+        name: name.into(),
+        vendor: vendor_from_pci(vendor_id),
+        vendor_id,
+        device_id: 0x2684,
+        driver_version: driver.into(),
+        software: vendor_id == 0x1414,
+    }
+}
+
+/// (encoder id, adapter index, size, hdr)
+type Call = (String, Option<u32>, (u32, u32), bool);
+
+/// Which (encoder, adapter) pairs open, and what they accept.
+struct Fake {
+    adapters: Vec<Adapter>,
+    calls: RefCell<Vec<Call>>,
+}
+
+impl Prober for Fake {
+    fn adapters(&self) -> Vec<Adapter> {
+        self.adapters.clone()
+    }
+
+    fn try_open(
+        &self,
+        encoder: &Encoder,
+        adapter: Option<&Adapter>,
+        format: &PixelFormatSpec,
+        size: (u32, u32),
+        hdr: bool,
+    ) -> Result<(), String> {
+        self.calls
+            .borrow_mut()
+            .push((encoder.id.clone(), adapter.map(|a| a.index), size, hdr));
+        // The second NVIDIA card is an old one: no HEVC 10-bit, nothing at 4K.
+        if encoder.vendor == Vendor::Nvidia
+            && adapter.is_some_and(|a| a.index == 1)
+            && (encoder.family != Family::H264 || format.depth > 8 || size.0 > 256)
+        {
+            return Err("old card".into());
+        }
+        // The Intel iGPU has no HDR.
+        if encoder.vendor == Vendor::Intel && hdr {
+            return Err("no hdr".into());
+        }
+        // AV1 encoding needs a recent NVIDIA card (index 0 here).
+        if encoder.id == "nvenc_av1" && adapter.is_some_and(|a| a.index != 0) {
+            return Err("no av1".into());
+        }
+        // The software encoders accept everything except 4:4:4 AV1 (not declared anyway).
+        Ok(())
+    }
+}
+
+fn multi_gpu() -> Fake {
+    Fake {
+        adapters: vec![
+            gpu(0, "NVIDIA GeForce RTX 5080", 0x10DE, "32.0.15.7000"),
+            gpu(1, "NVIDIA GeForce GTX 960", 0x10DE, "32.0.15.7000"),
+            gpu(0, "Intel(R) UHD Graphics", 0x8086, "31.0.101.5000"),
+            gpu(0, "Microsoft Basic Render Driver", 0x1414, "10.0"),
+        ],
+        calls: RefCell::default(),
+    }
+}
+
+fn find<'a>(r: &'a ProbeResult, id: &str, adapter: Option<u32>) -> Option<&'a EncoderProbe> {
+    r.encoders
+        .iter()
+        .find(|e| e.id == id && e.adapter == adapter)
+}
+
+#[test]
+fn probing_associates_each_encoder_with_its_gpu() {
+    let fake = multi_gpu();
+    let result = probe(&registry(), Platform::Windows, &fake, "0.1");
+
+    // NVIDIA: both cards listed, with their own capabilities.
+    let new = find(&result, "nvenc_hevc", Some(0)).unwrap_or_else(|| panic!("RTX missing"));
+    assert!(
+        new.formats
+            .iter()
+            .any(|f| f.depth == 10 && f.chroma == Chroma::C420 && f.uhd && f.hdr)
+    );
+    assert!(
+        find(&result, "nvenc_hevc", Some(1)).is_none(),
+        "old card cannot do HEVC"
+    );
+    let old = find(&result, "nvenc_h264", Some(1)).unwrap_or_else(|| panic!("GTX missing"));
+    assert!(old.formats.iter().all(|f| !f.uhd));
+    assert!(find(&result, "nvenc_av1", Some(1)).is_none());
+    assert!(find(&result, "nvenc_av1", Some(0)).is_some());
+
+    // Intel: only the iGPU, no HDR.
+    let qsv = find(&result, "qsv_hevc", Some(0)).unwrap_or_else(|| panic!("iGPU missing"));
+    assert!(qsv.formats.iter().all(|f| !f.hdr));
+    // AMD: no AMD adapter, so no AMF entry at all.
+    assert!(result.encoders.iter().all(|e| !e.id.starts_with("amf_")));
+    // The software renderer is never used, and software encoders run once.
+    assert!(
+        fake.calls
+            .borrow()
+            .iter()
+            .all(|(id, a, ..)| !(id.starts_with("nvenc") && *a == Some(2)))
+    );
+    assert_eq!(
+        result.encoders.iter().filter(|e| e.id == "libx264").count(),
+        1
+    );
+    assert!(find(&result, "libx264", None).is_some());
+    // Hardware encoders are tried at 256×256 first; 4K only after that worked.
+    let calls = fake.calls.borrow();
+    let first = calls
+        .iter()
+        .position(|c| c.0 == "nvenc_h264" && c.1 == Some(1))
+        .unwrap_or(0);
+    assert_eq!(calls[first].2, (256, 256));
+    // HDR is only attempted for encoders and formats declared for it.
+    assert!(
+        calls
+            .iter()
+            .filter(|c| c.3)
+            .all(|c| c.0 != "nvenc_h264" && c.0 != "libx264")
+    );
+    // Vulkan and VAAPI do not exist on Windows.
+    assert!(
+        result
+            .encoders
+            .iter()
+            .all(|e| !e.id.starts_with("vaapi") && !e.id.starts_with("vulkan"))
+    );
+}
+
+#[test]
+fn a_system_without_a_gpu_only_offers_software() {
+    let fake = Fake {
+        adapters: vec![],
+        calls: RefCell::default(),
+    };
+    let result = probe(&registry(), Platform::Windows, &fake, "0.1");
+    assert!(result.encoders.iter().all(|e| e.id.starts_with("lib")));
+    assert!(result.supports("libx264", 8, Chroma::C420, false));
+    let r = registry();
+    assert_eq!(
+        pick_auto(&r, Platform::Windows, Some(&result)).map(|e| e.id.as_str()),
+        Some("libx264")
+    );
+    assert_eq!(
+        pick_auto(&r, Platform::Windows, None).map(|e| e.id.as_str()),
+        Some("libx264")
+    );
+}
+
+#[test]
+fn auto_prefers_h264_on_the_best_vendor_then_other_codecs() {
+    let r = registry();
+    let result = probe(&r, Platform::Windows, &multi_gpu(), "0.1");
+    assert_eq!(
+        pick_auto(&r, Platform::Windows, Some(&result)).map(|e| e.id.as_str()),
+        Some("nvenc_h264")
+    );
+    // Without NVIDIA H.264, Intel H.264 would come next; with only HEVC, HEVC wins.
+    let mut only_hevc = result.clone();
+    only_hevc
+        .encoders
+        .retain(|e| e.id == "nvenc_hevc" || e.id.starts_with("lib"));
+    assert_eq!(
+        pick_auto(&r, Platform::Windows, Some(&only_hevc)).map(|e| e.id.as_str()),
+        Some("nvenc_hevc")
+    );
+    let intel = ProbeResult {
+        encoders: vec![EncoderProbe {
+            id: "qsv_h264".into(),
+            adapter: Some(0),
+            formats: vec![FormatProbe {
+                depth: 8,
+                chroma: Chroma::C420,
+                uhd: true,
+                hdr: false,
+            }],
+        }],
+        ..ProbeResult::default()
+    };
+    assert_eq!(
+        pick_auto(&r, Platform::Windows, Some(&intel)).map(|e| e.id.as_str()),
+        Some("qsv_h264")
+    );
+}
+
+#[test]
+fn availability_drives_validation() {
+    let r = registry();
+    let result = probe(&r, Platform::Windows, &multi_gpu(), "0.1");
+    // AMF was not found: choosing it is reported.
+    assert!(check(&profile("amf_h264", "mkv"), Some(&result)).contains(&IssueKind::NotAvailable));
+    assert!(check(&profile("nvenc_h264", "mkv"), Some(&result)).is_empty());
+    // The iGPU cannot do HDR: asking for it is "not available".
+    let mut p = profile("qsv_hevc", "mkv");
+    p.depth = 10;
+    p.hdr = "keep_hdr".into();
+    assert!(check(&p, Some(&result)).contains(&IssueKind::NotAvailable));
+}
+
+#[test]
+fn results_round_trip_through_toml_and_the_cache_key_tracks_drivers() {
+    let result = probe(&registry(), Platform::Windows, &multi_gpu(), "0.1");
+    let text = to_toml(&result).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(from_toml(&text).unwrap_or_else(|e| panic!("{e}")), result);
+
+    let a = multi_gpu().adapters;
+    let key = cache_key(&a, "0.1");
+    assert_eq!(
+        key,
+        cache_key(&a.iter().rev().cloned().collect::<Vec<_>>(), "0.1"),
+        "order does not matter"
+    );
+    assert_ne!(key, cache_key(&a, "0.2"), "new Vixeeny version");
+    let mut newer = a.clone();
+    newer[0].driver_version = "32.0.15.8000".into();
+    assert_ne!(key, cache_key(&newer, "0.1"), "new driver");
+    newer.pop();
+    assert_ne!(key, cache_key(&newer, "0.1"), "GPU removed");
+}
+
+fn scratch(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("vixeeny-probe-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    dir
+}
+
+#[test]
+fn the_cache_is_reused_until_the_key_changes() {
+    let dir = scratch("cache");
+    let path = dir.join("hw_cache.toml");
+    let adapters = multi_gpu().adapters;
+    let runs = RefCell::new(0);
+    let run = || {
+        *runs.borrow_mut() += 1;
+        Ok(probe(&registry(), Platform::Windows, &multi_gpu(), "0.1"))
+    };
+    let first = cached_or_probe(&path, &adapters, "0.1", run).unwrap_or_else(|e| panic!("{e}"));
+    let second = cached_or_probe(&path, &adapters, "0.1", run).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(*runs.borrow(), 1, "second call is served by the cache");
+    assert_eq!(first, second);
+    // A driver update invalidates it.
+    let mut updated = adapters.clone();
+    updated[0].driver_version = "99".into();
+    cached_or_probe(&path, &updated, "0.1", run).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(*runs.borrow(), 2);
+    // A corrupt file is ignored.
+    std::fs::write(&path, "garbage {{{").unwrap_or_else(|e| panic!("{e}"));
+    cached_or_probe(&path, &updated, "0.1", run).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(*runs.borrow(), 3);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_probe_that_hangs_or_crashes_is_contained() {
+    // `sleep` ignores `--probe` and outlives the timeout; `false` exits with an error.
+    #[cfg(unix)]
+    {
+        let slow = crate::probe::run_child(
+            std::path::Path::new("/bin/sleep"),
+            std::time::Duration::from_millis(100),
+        );
+        assert!(matches!(
+            slow,
+            Err(crate::probe::ProbeError::Failed(_) | crate::probe::ProbeError::Timeout)
+        ));
+        let failing = crate::probe::run_child(
+            std::path::Path::new("/bin/false"),
+            std::time::Duration::from_secs(5),
+        );
+        assert!(matches!(failing, Err(crate::probe::ProbeError::Failed(_))));
+        let missing = crate::probe::run_child(
+            std::path::Path::new("/nonexistent/vixeeny"),
+            std::time::Duration::from_secs(1),
+        );
+        assert!(matches!(missing, Err(crate::probe::ProbeError::Spawn(_))));
+    }
+}
+
+#[test]
+fn software_encoders_are_software() {
+    for e in &registry().encoders {
+        assert_eq!(
+            e.kind == Kind::Software,
+            e.id.starts_with("lib"),
+            "{}",
+            e.id
+        );
+    }
+}

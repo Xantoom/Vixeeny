@@ -62,7 +62,7 @@ jobs:
           path: native/build/work
           key: native-linux-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}
       - run: cargo xtask build-native
-      - run: cargo test -p vixeeny-encode --features ffmpeg-next --test software_encode
+      - run: cargo test -p vixeeny-encode --features ffmpeg-next --test software_encode --test verify_registry
         env:
           PKG_CONFIG_PATH: ${{ github.workspace }}/native/build/work/prefix/lib/pkgconfig
       - name: Image codecs (AVIF, JPEG XL)
@@ -105,6 +105,11 @@ jobs:
         run: |
           $env:PATH = "$env:FFMPEG_DIR\bin;$env:PATH"
           cargo test -p vixeeny-encode --features ffmpeg-next --test software_encode
+      - name: Registry against FFmpeg (every Windows encoder must exist and expose the declared options)
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:FFMPEG_DIR\bin;$env:PATH"
+          cargo test -p vixeeny-encode --features ffmpeg-next --test verify_registry -- --nocapture
       - name: Image codecs (AVIF, JPEG XL)
         shell: pwsh
         continue-on-error: true
@@ -138,7 +143,7 @@ jobs:
         with:
           path: native/build/work
           key: native-macos-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}-${{ github.run_id }}
-      - run: cargo test -p vixeeny-encode --features ffmpeg-next --test software_encode
+      - run: cargo test -p vixeeny-encode --features ffmpeg-next --test software_encode --test verify_registry
         env:
           PKG_CONFIG_PATH: ${{ github.workspace }}/native/build/work/prefix/lib/pkgconfig
       - name: Image codecs (AVIF, JPEG XL)

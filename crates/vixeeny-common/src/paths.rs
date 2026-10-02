@@ -23,6 +23,11 @@ pub fn config_file() -> Option<PathBuf> {
     config_dir().map(|d| d.join("config.toml"))
 }
 
+/// Cached result of the hardware encoder probe (plan 6.3).
+pub fn hw_cache_file() -> Option<PathBuf> {
+    config_dir().map(|d| d.join("hw_cache.toml"))
+}
+
 /// Directory for rotating log files.
 pub fn log_dir() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os("VIXEENY_LOG_DIR") {

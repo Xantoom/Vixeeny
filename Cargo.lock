@@ -5578,6 +5578,7 @@ dependencies = [
  "vixeeny-common",
  "vixeeny-convert",
  "vixeeny-editor",
+ "vixeeny-encode",
  "vixeeny-image",
  "vixeeny-ocr",
  "vixeeny-platform",
@@ -5649,6 +5650,10 @@ name = "vixeeny-encode"
 version = "0.0.1"
 dependencies = [
  "ffmpeg-next",
+ "serde",
+ "thiserror 2.0.21",
+ "toml",
+ "vixeeny-common",
 ]
 
 [[package]]

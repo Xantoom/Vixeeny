@@ -22,9 +22,33 @@ mod unsupported;
 use unsupported as os;
 
 pub use os::{
-    cursor_position, ensure_dpi_aware, exclude_from_capture, exe_metadata, foreground_window,
-    hdr_info, monitors, top_level_windows, window_info,
+    attach_console, cursor_position, ensure_dpi_aware, exclude_from_capture, exe_metadata,
+    foreground_window, gpu_adapters, hdr_info, monitors, top_level_windows, window_info,
 };
+
+/// A graphics adapter as the OS reports it (the encoder probe derives its own view from it).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GpuInfo {
+    pub name: String,
+    pub vendor_id: u32,
+    pub device_id: u32,
+    /// `a.b.c.d`, as shown in the driver properties.
+    pub driver_version: String,
+    /// A software renderer (Microsoft Basic Render Driver / WARP).
+    pub software: bool,
+}
+
+/// Decodes the 64-bit user-mode driver version DXGI reports (`a.b.c.d`, 16 bits each).
+pub fn format_driver_version(raw: i64) -> String {
+    let v = raw as u64;
+    format!(
+        "{}.{}.{}.{}",
+        v >> 48,
+        (v >> 32) & 0xFFFF,
+        (v >> 16) & 0xFFFF,
+        v & 0xFFFF
+    )
+}
 
 /// Version-resource strings of an executable, used to name captures after the application.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -113,6 +137,11 @@ pub fn monitor_for_rect<'a>(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn driver_versions() {
+        // 32.0.15.7283\n        assert_eq!(super::format_driver_version(((32i64) << 48) | (15 << 16) | 7283), "32.0.15.7283");
+    }
+
     use super::*;
 
     fn mon(id: u64, x: i32, y: i32, w: u32, h: u32, dpi: u32) -> MonitorInfo {
