@@ -695,7 +695,11 @@ pub fn rows(section: Section, env: &Env, config: &Config) -> Vec<Row> {
                 when(
                     number(
                         "split_amount",
-                        t(Key::SetSplitSizeMb),
+                        t(if split_parts(&config.cur().split.mode).0 == "duration" {
+                            Key::SetSplitMinutes
+                        } else {
+                            Key::SetSplitSizeMb
+                        }),
                         (1, 1_000_000, 1),
                         |c| split_parts(&c.cur().split.mode).1,
                         |c, v| {

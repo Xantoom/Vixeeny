@@ -5720,8 +5720,10 @@ dependencies = [
  "png",
  "slint",
  "slint-build",
+ "vixeeny-common",
  "vixeeny-editor",
  "vixeeny-ocr",
+ "vixeeny-settings",
 ]
 
 [[package]]

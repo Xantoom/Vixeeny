@@ -535,3 +535,213 @@ fn cycling_the_profile_keeps_the_strip_open_and_reports_it() {
         "{labels:?}"
     );
 }
+
+fn settings_panel() -> (
+    settings_panel::SettingsPanel,
+    Rc<std::cell::RefCell<Vec<vixeeny_common::config::Config>>>,
+) {
+    use std::cell::RefCell;
+    WINDOW.with(|_| ());
+    let panel = settings_panel::SettingsPanel::new(
+        vixeeny_common::config::Config::default(),
+        Some("en-US".into()),
+        "1.2.3",
+        true,
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let sink = seen.clone();
+    panel.on_change(move |c| sink.borrow_mut().push(c.clone()));
+    (panel, seen)
+}
+
+fn settings_render(
+    panel: &settings_panel::SettingsPanel,
+    name: &str,
+) -> SharedPixelBuffer<Rgb8Pixel> {
+    let window = WINDOW.with(Rc::clone);
+    window.set_size(PhysicalSize::new(980, 680));
+    panel.window().show().unwrap_or_else(|e| panic!("{e}"));
+    let mut buffer = SharedPixelBuffer::<Rgb8Pixel>::new(980, 680);
+    window.draw_if_needed(|r| {
+        r.render(buffer.make_mut_slice(), 980);
+    });
+    save(name, &buffer);
+    buffer
+}
+
+#[test]
+fn settings_apply_immediately_and_each_section_resets() {
+    use vixeeny_settings::Section;
+    let (panel, seen) = settings_panel();
+    panel.select_section(Section::General);
+    settings_render(&panel, "9-settings-general");
+    let w = panel.window();
+    w.invoke_row_toggled("sounds".into(), false);
+    w.invoke_row_chosen("theme".into(), 2); // system, light, dark
+    w.invoke_row_number("idle_exit".into(), 62);
+    assert_eq!(seen.borrow().len(), 3, "one notification per change");
+    let c = panel.config();
+    assert!(!c.general.sounds);
+    assert_eq!(c.general.theme, "dark");
+    assert_eq!(c.general.app_idle_exit_seconds, 60);
+    // The same value again is not a change.
+    w.invoke_row_toggled("sounds".into(), false);
+    assert_eq!(seen.borrow().len(), 3);
+
+    // Another section's change survives this section's reset.
+    panel.select_section(Section::Images);
+    w.invoke_row_chosen("image_format".into(), 1);
+    panel.select_section(Section::General);
+    w.invoke_reset();
+    let c = panel.config();
+    assert!(c.general.sounds && c.general.theme == "system");
+    assert_eq!(c.image.format, "jpeg");
+    // Unknown ids and out-of-range choices are ignored.
+    let before = seen.borrow().len();
+    w.invoke_row_chosen("theme".into(), 99);
+    w.invoke_row_toggled("nope".into(), true);
+    assert_eq!(seen.borrow().len(), before);
+}
+
+#[test]
+fn changing_the_language_relabels_the_window_at_once() {
+    use vixeeny_settings::Section;
+    let (panel, _) = settings_panel();
+    panel.select_section(Section::General);
+    use slint::Model;
+    let titles = |p: &settings_panel::SettingsPanel| {
+        p.window()
+            .get_section_titles()
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(titles(&panel)[1], "General");
+    panel.window().invoke_row_chosen("language".into(), 1); // auto, fr, en
+    assert_eq!(panel.config().general.language, "fr");
+    assert_eq!(titles(&panel)[1], "Général");
+    assert_eq!(
+        panel.window().get_rows().row_data(0).unwrap().label,
+        "Langue"
+    );
+}
+
+#[test]
+fn the_video_page_edits_the_current_profile_and_reports_problems() {
+    use vixeeny_settings::Section;
+    let (panel, _) = settings_panel();
+    panel.select_section(Section::Video);
+    settings_render(&panel, "9-settings-video");
+    let w = panel.window();
+    w.invoke_row_chosen("fps".into(), 1); // 24, 30, …
+    assert_eq!(panel.config().profiles["default"].fps, 30);
+    w.invoke_row_chosen("split".into(), 1);
+    assert_eq!(panel.config().profiles["default"].split.mode, "size:2048");
+    assert_eq!(w.get_notice(), "");
+    // MKV is not an MP4: a variable frame rate in MP4 is a problem the page says out loud.
+    w.invoke_row_toggled("vfr".into(), true);
+    assert!(!w.get_notice().is_empty(), "{}", w.get_notice());
+}
+
+#[test]
+fn shortcuts_are_edited_in_place_and_conflicts_are_explained() {
+    use slint::Model;
+    use vixeeny_settings::Section;
+    let (panel, seen) = settings_panel();
+    panel.select_section(Section::Shortcuts);
+    settings_render(&panel, "9-settings-shortcuts");
+    let w = panel.window();
+    // Row 8 is the replay toggle, row 9 the replay save (Ctrl+Shift+S).
+    w.invoke_shortcut_edited(8, 0, "shift+ctrl+f9".into());
+    assert_eq!(panel.config().hotkeys.replay_toggle, ["Ctrl+Shift+F9"]);
+    assert_eq!(seen.borrow().len(), 1);
+    w.invoke_shortcut_edited(8, 1, "Ctrl+Shift+S".into());
+    assert_eq!(panel.config().hotkeys.replay_toggle.len(), 1, "refused");
+    let row = w.get_shortcuts().row_data(8).unwrap();
+    assert!(row.error.contains("Save the replay"), "{}", row.error);
+    assert_eq!(seen.borrow().len(), 1, "a refusal is not a change");
+    w.invoke_shortcut_edited(8, 1, "nonsense+".into());
+    assert!(!w.get_shortcuts().row_data(8).unwrap().error.is_empty());
+}
+
+#[test]
+fn profiles_are_created_renamed_used_and_deleted_from_the_page() {
+    use slint::Model;
+    use vixeeny_settings::Section;
+    let (panel, _) = settings_panel();
+    panel.select_section(Section::Profiles);
+    let w = panel.window();
+    w.invoke_page_action("new".into(), "Jeu 4K".into());
+    assert_eq!(panel.config().video.profile, "Jeu 4K");
+    w.invoke_page_action("duplicate".into(), "Tuto".into());
+    assert_eq!(panel.config().profiles.len(), 3);
+    settings_render(&panel, "9-settings-profiles");
+    // Select "Jeu 4K" (profiles are listed by name: Jeu 4K, Tuto, default) and use it.
+    w.invoke_line_select(0);
+    w.invoke_page_action("use".into(), "".into());
+    assert_eq!(panel.config().video.profile, "Jeu 4K");
+    w.invoke_page_action("rename".into(), "Jeu".into());
+    assert!(panel.config().profiles.contains_key("Jeu") && panel.config().video.profile == "Jeu");
+    w.invoke_page_action("new".into(), "Jeu".into());
+    assert!(!w.get_extra().is_empty(), "name taken");
+    w.invoke_page_action("delete".into(), "".into());
+    assert_eq!(panel.config().profiles.len(), 2);
+    assert_eq!(w.get_lines().row_count(), 2);
+}
+
+#[test]
+fn the_gallery_and_the_other_pages_show_what_the_host_gives_them() {
+    use settings_panel::{GalleryEntry, GalleryRequest, Line};
+    use std::cell::RefCell;
+    use vixeeny_settings::Section;
+    let (panel, _) = settings_panel();
+    let requests = Rc::new(RefCell::new(Vec::new()));
+    let sink = requests.clone();
+    panel.on_gallery(move |r| sink.borrow_mut().push(r));
+    panel.select_section(Section::Gallery);
+    let tile = |name: &str, video: bool| GalleryEntry {
+        name: name.into(),
+        detail: "2026-10-02 14:03 · 2.4 MB".into(),
+        video,
+        thumb: (!video).then(|| (4, 4, [200, 80, 40, 255].repeat(16))),
+    };
+    panel.set_gallery(
+        vec![
+            tile("Minecraft_2026-10-02.png", false),
+            tile("Replay.mp4", true),
+            tile("a.png", false),
+        ],
+        Some(1),
+    );
+    settings_render(&panel, "9-settings-gallery");
+    let w = panel.window();
+    w.invoke_gallery_select(2);
+    w.invoke_gallery_action("open".into());
+    w.invoke_gallery_filter(1, "mine".into());
+    assert_eq!(
+        *requests.borrow(),
+        [
+            GalleryRequest::Select(2),
+            GalleryRequest::Action("open".into()),
+            GalleryRequest::Filter(1, "mine".into()),
+        ]
+    );
+    panel.select_section(Section::Hardware);
+    panel.set_lines(
+        vec![
+            Line {
+                text: "NVIDIA GeForce RTX 5080".into(),
+                detail: "NVENC H.264 · HEVC · AV1".into(),
+                strong: true,
+            },
+            Line {
+                text: "Software".into(),
+                detail: "x264 · x265 · SVT-AV1".into(),
+                strong: false,
+            },
+        ],
+        None,
+    );
+    settings_render(&panel, "9-settings-hardware");
+}

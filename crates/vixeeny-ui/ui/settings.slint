@@ -1,0 +1,633 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+// The settings window (plan 5.13): a sidebar of sections and the page of the chosen one. Rows
+// of settings are generic (toggle, choice, number, text, folder, info); the gallery, shortcuts,
+// profiles, hardware, integration and about pages have their own layouts. Plain Slint elements
+// only (std-widgets would pull the SVG decoder in for its icons).
+
+export struct SettingRow {
+    id: string,
+    label: string,
+    // 0 toggle, 1 choice, 2 number, 3 text, 4 folder, 5 info
+    kind: int,
+    enabled: bool,
+    on: bool,
+    text: string,
+    num: int,
+    min: int,
+    max: int,
+    step: int,
+    options: [string],
+    selected: int,
+}
+
+export struct GalleryItem {
+    name: string,
+    detail: string,
+    thumb: image,
+    has-thumb: bool,
+    video: bool,
+    selected: bool,
+}
+
+export struct ShortcutRow {
+    label: string,
+    s0: string,
+    s1: string,
+    s2: string,
+    error: string,
+}
+
+export struct LineItem {
+    text: string,
+    detail: string,
+    selected: bool,
+    strong: bool,
+}
+
+export struct UiTexts {
+    reset: string,
+    new-label: string,
+    duplicate: string,
+    rename: string,
+    delete: string,
+    use-label: string,
+    open: string,
+    open-folder: string,
+    copy: string,
+    convert: string,
+    all: string,
+    images: string,
+    videos: string,
+    app-filter: string,
+    redetect: string,
+    install: string,
+    remove: string,
+    check-now: string,
+    github: string,
+    logs: string,
+    empty: string,
+    name-hint: string,
+    shortcut-hint: string,
+    choose: string,
+}
+
+component Tokens {
+    in property <bool> dark;
+    out property <color> bg: dark ? #14161c : #f4f5f7;
+    out property <color> side: dark ? #1b1e26 : #e9ebef;
+    out property <color> card: dark ? #1f232c : #ffffff;
+    out property <color> fg: dark ? #f3f4f6 : #111827;
+    out property <color> muted: dark ? #9ca3af : #6b7280;
+    out property <color> line: dark ? #ffffff1a : #0000001a;
+    out property <color> hover: dark ? #ffffff14 : #0000000d;
+    out property <color> accent: #3b82f6;
+    out property <color> danger: #ef4444;
+}
+
+component Button inherits Rectangle {
+    in property <string> label;
+    in property <bool> enabled: true;
+    in property <bool> primary: false;
+    in property <bool> dark: true;
+    callback clicked();
+    height: 30px;
+    preferred-width: t.preferred-width + 28px;
+    border-radius: 6px;
+    opacity: root.enabled ? 1 : 0.4;
+    background: root.primary ? #3b82f6 : (touch.has-hover && root.enabled ? (root.dark ? #ffffff26 : #00000018) : (root.dark ? #ffffff14 : #0000000d));
+    t := Text {
+        text: root.label;
+        color: root.primary ? white : (root.dark ? #f3f4f6 : #111827);
+        font-size: 13px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    touch := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
+    accessible-role: button;
+    accessible-label: root.label;
+}
+
+component Switch inherits Rectangle {
+    in property <bool> on;
+    in property <bool> enabled: true;
+    callback toggled(bool);
+    width: 40px;
+    height: 22px;
+    border-radius: 11px;
+    opacity: root.enabled ? 1 : 0.4;
+    background: root.on ? #3b82f6 : #6b728080;
+    animate background { duration: 120ms; }
+    Rectangle {
+        x: root.on ? parent.width - self.width - 3px : 3px;
+        y: 3px;
+        width: 16px;
+        height: 16px;
+        border-radius: 8px;
+        background: white;
+        animate x { duration: 120ms; }
+    }
+    touch := TouchArea { enabled: root.enabled; clicked => { root.toggled(!root.on); } }
+    accessible-role: checkbox;
+    accessible-checked: root.on;
+}
+
+component Field inherits Rectangle {
+    in property <bool> dark: true;
+    in property <bool> enabled: true;
+    in property <string> text;
+    in property <string> hint;
+    callback edited(string);
+    height: 30px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: input.has-focus ? #3b82f6 : (root.dark ? #ffffff26 : #00000026);
+    background: root.dark ? #0f1116 : #ffffff;
+    opacity: root.enabled ? 1 : 0.4;
+    Text {
+        x: 8px;
+        text: root.hint;
+        visible: input.text == "" && !input.has-focus;
+        color: #6b7280;
+        font-size: 13px;
+        vertical-alignment: center;
+    }
+    input := TextInput {
+        x: 8px;
+        width: parent.width - 16px;
+        height: parent.height;
+        text: root.text;
+        enabled: root.enabled;
+        color: root.dark ? #f3f4f6 : #111827;
+        font-size: 13px;
+        vertical-alignment: center;
+        single-line: true;
+        edited => { }
+        accepted => { root.edited(self.text); }
+        changed has-focus => { if (!self.has-focus) { root.edited(self.text); } }
+    }
+}
+
+component Dropdown inherits Rectangle {
+    in property <bool> dark: true;
+    in property <bool> enabled: true;
+    in property <[string]> options;
+    in property <int> selected;
+    callback chosen(int);
+    height: 30px;
+    border-radius: 6px;
+    background: root.dark ? #ffffff14 : #0000000d;
+    opacity: root.enabled ? 1 : 0.4;
+    Text {
+        x: 10px;
+        width: parent.width - 30px;
+        text: root.selected >= 0 && root.selected < root.options.length ? root.options[root.selected] : "";
+        color: root.dark ? #f3f4f6 : #111827;
+        font-size: 13px;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    Path {
+        x: parent.width - 20px; y: 12px; width: 10px; height: 6px;
+        commands: "M 0 0 L 5 5 L 10 0";
+        stroke: #9ca3af; stroke-width: 1.6px;
+    }
+    touch := TouchArea { enabled: root.enabled; clicked => { menu.show(); } }
+    menu := PopupWindow {
+        x: 0;
+        y: root.height + 2px;
+        width: root.width;
+        height: min(root.options.length * 30px + 8px, 280px);
+        Rectangle {
+            background: root.dark ? #262a35 : #ffffff;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: root.dark ? #ffffff26 : #00000026;
+            Flickable {
+                content-height: root.options.length * 30px + 8px;
+                VerticalLayout {
+                    padding: 4px;
+                    for option[i] in root.options : Rectangle {
+                        height: 30px;
+                        border-radius: 5px;
+                        background: item.has-hover ? (root.dark ? #ffffff1f : #00000012) : transparent;
+                        Text {
+                            x: 8px;
+                            width: parent.width - 16px;
+                            text: option;
+                            color: i == root.selected ? #3b82f6 : (root.dark ? #f3f4f6 : #111827);
+                            font-size: 13px;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                        item := TouchArea { clicked => { root.chosen(i); } }
+                    }
+                }
+            }
+        }
+    }
+    accessible-role: combobox;
+}
+
+component Stepper inherits Rectangle {
+    in property <bool> dark: true;
+    in property <bool> enabled: true;
+    in property <int> value;
+    in property <int> lo;
+    in property <int> hi;
+    in property <int> step;
+    callback value-changed(int);
+    height: 30px;
+    width: 150px;
+    opacity: root.enabled ? 1 : 0.4;
+    HorizontalLayout {
+        spacing: 6px;
+        Button { width: 30px; label: "−"; dark: root.dark; enabled: root.enabled && root.value > root.lo; clicked => { root.value-changed(max(root.lo, root.value - root.step)); } }
+        Rectangle {
+            border-radius: 6px;
+            background: root.dark ? #0f1116 : #ffffff;
+            Text { text: root.value; color: root.dark ? #f3f4f6 : #111827; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; }
+        }
+        Button { width: 30px; label: "+"; dark: root.dark; enabled: root.enabled && root.value < root.hi; clicked => { root.value-changed(min(root.hi, root.value + root.step)); } }
+    }
+}
+
+component SettingLine inherits Rectangle {
+    in property <SettingRow> entry;
+    in property <bool> dark: true;
+    in property <UiTexts> t;
+    callback toggled(bool);
+    callback chosen(int);
+    callback number(int);
+    callback text-edited(string);
+    callback browse();
+    height: 46px;
+    Rectangle { y: parent.height - 1px; height: 1px; background: root.dark ? #ffffff12 : #0000000f; }
+    Text {
+        x: 4px;
+        width: parent.width * 0.5;
+        height: parent.height;
+        text: root.entry.label;
+        color: root.dark ? #f3f4f6 : #111827;
+        font-size: 14px;
+        vertical-alignment: center;
+        overflow: elide;
+        opacity: root.entry.enabled || root.entry.kind == 5 ? 1 : 0.45;
+    }
+    Rectangle {
+        x: parent.width * 0.5 + 8px;
+        width: parent.width * 0.5 - 12px;
+        height: parent.height;
+        if root.entry.kind == 0 : Switch {
+            x: parent.width - self.width;
+            y: (parent.height - self.height) / 2;
+            on: root.entry.on;
+            enabled: root.entry.enabled;
+            toggled(v) => { root.toggled(v); }
+        }
+        if root.entry.kind == 1 : Dropdown {
+            y: (parent.height - self.height) / 2;
+            dark: root.dark;
+            options: root.entry.options;
+            selected: root.entry.selected;
+            enabled: root.entry.enabled;
+            chosen(i) => { root.chosen(i); }
+        }
+        if root.entry.kind == 2 : Stepper {
+            x: parent.width - self.width;
+            y: (parent.height - self.height) / 2;
+            dark: root.dark;
+            value: root.entry.num;
+            lo: root.entry.min;
+            hi: root.entry.max;
+            step: root.entry.step;
+            enabled: root.entry.enabled;
+            value-changed(v) => { root.number(v); }
+        }
+        if root.entry.kind == 3 : Field {
+            y: (parent.height - self.height) / 2;
+            dark: root.dark;
+            text: root.entry.text;
+            enabled: root.entry.enabled;
+            edited(s) => { root.text-edited(s); }
+        }
+        if root.entry.kind == 4 : HorizontalLayout {
+            y: (parent.height - 30px) / 2;
+            height: 30px;
+            spacing: 6px;
+            Field {
+                dark: root.dark;
+                text: root.entry.text;
+                enabled: root.entry.enabled;
+                edited(s) => { root.text-edited(s); }
+            }
+            Button { label: root.t.choose; dark: root.dark; clicked => { root.browse(); } }
+        }
+        if root.entry.kind == 5 : Text {
+            text: root.entry.text;
+            color: root.dark ? #9ca3af : #6b7280;
+            font-size: 13px;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+        }
+    }
+}
+
+component SideEntry inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected;
+    in property <bool> dark: true;
+    callback clicked();
+    height: 34px;
+    border-radius: 8px;
+    background: root.selected ? (root.dark ? #3b82f640 : #3b82f633) : (touch.has-hover ? (root.dark ? #ffffff12 : #0000000d) : transparent);
+    Text {
+        x: 12px;
+        width: parent.width - 24px;
+        text: root.label;
+        color: root.selected ? #60a5fa : (root.dark ? #e5e7eb : #1f2937);
+        font-size: 14px;
+        font-weight: root.selected ? 600 : 400;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    touch := TouchArea { clicked => { root.clicked(); } }
+    accessible-role: tab;
+    accessible-label: root.label;
+}
+
+component PageTitle inherits Text {
+    font-size: 22px;
+    font-weight: 700;
+}
+
+export component SettingsWindow inherits Window {
+    in property <string> window-title: "Vixeeny";
+    in property <bool> dark: true;
+    in property <UiTexts> t;
+    in property <[string]> section-titles;
+    // 0 gallery, 1 general, 2 shortcuts, 3 images, 4 video, 5 audio, 6 replay, 7 folders, 8 ocr,
+    // 9 profiles, 10 hardware, 11 updates, 12 integration, 13 about
+    in-out property <int> section: 1;
+    in property <[SettingRow]> rows;
+    // A message under the rows (problems with the video settings).
+    in property <string> notice;
+    in property <[GalleryItem]> gallery;
+    in property <[ShortcutRow]> shortcuts;
+    in property <[LineItem]> lines;
+    in property <string> extra;
+    in property <string> rename-text;
+    in-out property <int> gallery-kind: 0;
+
+    callback section-changed(int);
+    callback reset();
+    callback row-toggled(string, bool);
+    callback row-chosen(string, int);
+    callback row-number(string, int);
+    callback row-text(string, string);
+    callback row-browse(string);
+    callback gallery-select(int);
+    callback gallery-action(string);
+    callback gallery-filter(int, string);
+    callback shortcut-edited(int, int, string);
+    callback line-select(int);
+    callback page-action(string, string);
+
+    title: root.window-title;
+    background: tk.bg;
+    min-width: 760px;
+    min-height: 520px;
+    preferred-width: 980px;
+    preferred-height: 680px;
+    default-font-family: "Inter";
+
+    tk := Tokens { dark: root.dark; }
+
+    property <bool> is-rows: root.section == 1 || root.section == 3 || root.section == 4 || root.section == 5 || root.section == 6 || root.section == 7 || root.section == 8 || root.section == 11;
+
+    HorizontalLayout {
+        Rectangle {
+            width: 220px;
+            background: tk.side;
+            VerticalLayout {
+                padding: 12px;
+                spacing: 2px;
+                alignment: start;
+                Text { text: "Vixeeny"; color: tk.fg; font-size: 18px; font-weight: 800; height: 40px; vertical-alignment: center; x: 8px; }
+                for title[i] in root.section-titles : SideEntry {
+                    label: title;
+                    selected: i == root.section;
+                    dark: root.dark;
+                    clicked => { root.section = i; root.section-changed(i); }
+                }
+            }
+        }
+
+        Rectangle {
+            VerticalLayout {
+                padding: 24px;
+                spacing: 12px;
+                HorizontalLayout {
+                    height: 36px;
+                    PageTitle {
+                        text: root.section >= 0 && root.section < root.section-titles.length ? root.section-titles[root.section] : "";
+                        color: tk.fg;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    if root.is-rows || root.section == 2 : Button {
+                        label: root.t.reset;
+                        dark: root.dark;
+                        clicked => { root.reset(); }
+                    }
+                }
+
+                // ---- rows pages
+                if root.is-rows : Flickable {
+                    content-height: rows-box.preferred-height;
+                    rows-box := VerticalLayout {
+                        alignment: start;
+                        for r in root.rows : SettingLine {
+                            entry: r;
+                            dark: root.dark;
+                            t: root.t;
+                            toggled(v) => { root.row-toggled(r.id, v); }
+                            chosen(k) => { root.row-chosen(r.id, k); }
+                            number(v) => { root.row-number(r.id, v); }
+                            text-edited(s) => { root.row-text(r.id, s); }
+                            browse => { root.row-browse(r.id); }
+                        }
+                        if root.notice != "" : Text {
+                            text: root.notice;
+                            color: tk.danger;
+                            font-size: 13px;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+
+                // ---- gallery
+                if root.section == 0 : VerticalLayout {
+                    spacing: 10px;
+                    HorizontalLayout {
+                        spacing: 8px;
+                        height: 30px;
+                        Button { label: root.t.all; dark: root.dark; primary: root.gallery-kind == 0; clicked => { root.gallery-kind = 0; root.gallery-filter(0, app-filter.text); } }
+                        Button { label: root.t.images; dark: root.dark; primary: root.gallery-kind == 1; clicked => { root.gallery-kind = 1; root.gallery-filter(1, app-filter.text); } }
+                        Button { label: root.t.videos; dark: root.dark; primary: root.gallery-kind == 2; clicked => { root.gallery-kind = 2; root.gallery-filter(2, app-filter.text); } }
+                        app-filter := Field {
+                            dark: root.dark;
+                            hint: root.t.app-filter;
+                            width: 200px;
+                            edited(s) => { root.gallery-filter(root.gallery-kind, s); }
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        height: 30px;
+                        Button { label: root.t.open; dark: root.dark; clicked => { root.gallery-action("open"); } }
+                        Button { label: root.t.open-folder; dark: root.dark; clicked => { root.gallery-action("folder"); } }
+                        Button { label: root.t.copy; dark: root.dark; clicked => { root.gallery-action("copy"); } }
+                        Button { label: root.t.convert; dark: root.dark; clicked => { root.gallery-action("convert"); } }
+                        Button { label: root.t.delete; dark: root.dark; clicked => { root.gallery-action("delete"); } }
+                        Rectangle { horizontal-stretch: 1; }
+                    }
+                    if root.gallery.length == 0 : Text {
+                        text: root.t.empty;
+                        color: tk.muted;
+                        font-size: 14px;
+                    }
+                    Flickable {
+                        content-height: ceil(root.gallery.length / 4.0) * 176px;
+                        for item[i] in root.gallery : Rectangle {
+                            x: mod(i, 4) * (parent.width / 4);
+                            y: floor(i / 4) * 176px;
+                            width: parent.width / 4;
+                            height: 176px;
+                            Rectangle {
+                                x: 4px; y: 4px;
+                                width: parent.width - 8px;
+                                height: parent.height - 8px;
+                                border-radius: 8px;
+                                background: item.selected ? #3b82f640 : tk.card;
+                                border-width: item.selected ? 2px : 1px;
+                                border-color: item.selected ? #3b82f6 : tk.line;
+                                clip: true;
+                                Rectangle {
+                                    height: parent.height - 44px;
+                                    background: tk.hover;
+                                    clip: true;
+                                    if item.has-thumb : Image {
+                                        source: item.thumb;
+                                        image-fit: cover;
+                                        width: parent.width;
+                                        height: parent.height;
+                                    }
+                                    if !item.has-thumb : Text {
+                                        text: item.video ? "▶" : "▢";
+                                        color: tk.muted;
+                                        font-size: 28px;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                Text {
+                                    x: 8px; y: parent.height - 40px; width: parent.width - 16px; height: 18px;
+                                    text: item.name; color: tk.fg; font-size: 12px; overflow: elide;
+                                }
+                                Text {
+                                    x: 8px; y: parent.height - 22px; width: parent.width - 16px; height: 16px;
+                                    text: item.detail; color: tk.muted; font-size: 11px; overflow: elide;
+                                }
+                                TouchArea { clicked => { root.gallery-select(i); } double-clicked => { root.gallery-select(i); root.gallery-action("open"); } }
+                            }
+                        }
+                    }
+                }
+
+                // ---- shortcuts
+                if root.section == 2 : Flickable {
+                    content-height: sc-box.preferred-height;
+                    sc-box := VerticalLayout {
+                        alignment: start;
+                        for sc[i] in root.shortcuts : Rectangle {
+                            height: sc.error != "" ? 66px : 46px;
+                            Text { x: 4px; width: parent.width * 0.28; height: 46px; text: sc.label; color: tk.fg; font-size: 14px; vertical-alignment: center; overflow: elide; }
+                            HorizontalLayout {
+                                x: parent.width * 0.3;
+                                width: parent.width * 0.7;
+                                y: 8px;
+                                height: 30px;
+                                spacing: 8px;
+                                Field { dark: root.dark; text: sc.s0; hint: root.t.shortcut-hint; edited(s) => { root.shortcut-edited(i, 0, s); } }
+                                Field { dark: root.dark; text: sc.s1; hint: root.t.shortcut-hint; edited(s) => { root.shortcut-edited(i, 1, s); } }
+                                Field { dark: root.dark; text: sc.s2; hint: root.t.shortcut-hint; edited(s) => { root.shortcut-edited(i, 2, s); } }
+                            }
+                            Text { x: parent.width * 0.3; y: 44px; text: sc.error; color: tk.danger; font-size: 12px; }
+                            Rectangle { y: parent.height - 1px; height: 1px; background: tk.line; }
+                        }
+                    }
+                }
+
+                // ---- profiles
+                if root.section == 9 : VerticalLayout {
+                    spacing: 10px;
+                    Flickable {
+                        content-height: root.lines.length * 38px;
+                        for line[i] in root.lines : Rectangle {
+                            y: i * 38px;
+                            height: 36px;
+                            border-radius: 8px;
+                            background: line.selected ? #3b82f640 : (lt.has-hover ? tk.hover : transparent);
+                            Text { x: 12px; text: line.text; color: tk.fg; font-size: 14px; font-weight: line.strong ? 700 : 400; vertical-alignment: center; }
+                            Text { x: parent.width - 160px; width: 148px; text: line.detail; color: tk.muted; font-size: 12px; horizontal-alignment: right; vertical-alignment: center; }
+                            lt := TouchArea { clicked => { root.line-select(i); } }
+                        }
+                    }
+                    HorizontalLayout {
+                        height: 30px;
+                        spacing: 8px;
+                        name-field := Field { dark: root.dark; hint: root.t.name-hint; text: root.rename-text; width: 220px; }
+                        Button { label: root.t.new-label; dark: root.dark; clicked => { root.page-action("new", name-field.text); } }
+                        Button { label: root.t.duplicate; dark: root.dark; clicked => { root.page-action("duplicate", name-field.text); } }
+                        Button { label: root.t.rename; dark: root.dark; clicked => { root.page-action("rename", name-field.text); } }
+                        Button { label: root.t.use-label; dark: root.dark; primary: true; clicked => { root.page-action("use", ""); } }
+                        Button { label: root.t.delete; dark: root.dark; clicked => { root.page-action("delete", ""); } }
+                        Rectangle { horizontal-stretch: 1; }
+                    }
+                    if root.extra != "" : Text { text: root.extra; color: tk.danger; font-size: 13px; }
+                }
+
+                // ---- hardware, integration, about: lines and buttons
+                if root.section == 10 || root.section == 12 || root.section == 13 : VerticalLayout {
+                    spacing: 10px;
+                    alignment: start;
+                    for line in root.lines : Rectangle {
+                        height: line.detail != "" ? 44px : 28px;
+                        Text { y: 0px; text: line.text; color: tk.fg; font-size: 14px; font-weight: line.strong ? 700 : 400; overflow: elide; width: parent.width; }
+                        Text { y: 22px; text: line.detail; color: tk.muted; font-size: 12px; overflow: elide; width: parent.width; }
+                    }
+                    HorizontalLayout {
+                        height: 30px;
+                        spacing: 8px;
+                        if root.section == 10 : Button { label: root.t.redetect; dark: root.dark; primary: true; clicked => { root.page-action("redetect", ""); } }
+                        if root.section == 12 : Button { label: root.t.install; dark: root.dark; primary: true; clicked => { root.page-action("install", ""); } }
+                        if root.section == 12 : Button { label: root.t.remove; dark: root.dark; clicked => { root.page-action("remove", ""); } }
+                        if root.section == 13 : Button { label: root.t.github; dark: root.dark; clicked => { root.page-action("github", ""); } }
+                        if root.section == 13 : Button { label: root.t.logs; dark: root.dark; clicked => { root.page-action("logs", ""); } }
+                        Rectangle { horizontal-stretch: 1; }
+                    }
+                    if root.extra != "" : Text { text: root.extra; color: tk.muted; font-size: 13px; wrap: word-wrap; }
+                }
+
+                if root.section == 11 : Text {
+                    text: root.extra;
+                    color: tk.muted;
+                    font-size: 13px;
+                    wrap: word-wrap;
+                }
+            }
+        }
+    }
+}
