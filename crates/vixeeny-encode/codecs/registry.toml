@@ -954,13 +954,6 @@ max = 16
 default = 2
 label = "encoder.param.bframes"
 
-[[encoder.params]]
-key = "lookahead"
-ffmpeg_option = "look_ahead"
-type = "bool"
-default = false
-label = "encoder.param.lookahead"
-
 
 [[encoder]]
 id = "qsv_av1"
@@ -1020,13 +1013,6 @@ max = 16
 default = 2
 label = "encoder.param.bframes"
 
-[[encoder.params]]
-key = "lookahead"
-ffmpeg_option = "look_ahead"
-type = "bool"
-default = false
-label = "encoder.param.lookahead"
-
 
 [[encoder]]
 id = "qsv_vp9"
@@ -1085,13 +1071,6 @@ min = 0
 max = 16
 default = 2
 label = "encoder.param.bframes"
-
-[[encoder.params]]
-key = "lookahead"
-ffmpeg_option = "look_ahead"
-type = "bool"
-default = false
-label = "encoder.param.lookahead"
 
 
 [[encoder]]
