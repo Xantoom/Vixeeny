@@ -1,13 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! vixeeny-ui — see README.md.
+//! vixeeny-ui — the Slint user interface (plan 4.1): `.slint` files and their Rust binding.
 
-/// Crate name, used by the M0 smoke test.
-pub const CRATE_NAME: &str = "vixeeny-ui";
+slint::include_modules!();
 
 #[cfg(test)]
-mod tests {
-    #[test]
-    fn crate_name() {
-        assert_eq!(super::CRATE_NAME, "vixeeny-ui");
-    }
-}
+mod tests;

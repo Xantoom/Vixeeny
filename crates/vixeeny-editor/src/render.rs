@@ -67,7 +67,7 @@ impl RgbaImage {
         }
     }
 
-    fn crop(&self, region: Region) -> Self {
+    pub(crate) fn crop(&self, region: Region) -> Self {
         let mut data = Vec::with_capacity(region.w * region.h * 4);
         for y in region.y..region.y + region.h {
             let o = (y * self.width as usize + region.x) * 4;
@@ -315,18 +315,19 @@ fn draw_arrow(pix: &mut Pixmap, from: Point, to: Point, color: Color, width: f32
     }
 }
 
-/// Renders the document over `base`: annotations bottom to top, then the crop.
-pub fn render(base: &RgbaImage, doc: &Document) -> RgbaImage {
-    let Some(size) = IntSize::from_wh(base.width, base.height) else {
-        return base.clone();
+/// Draws `annotations` (in the coordinates of `image`) over `image`, bottom to top.
+fn flatten<'a>(image: RgbaImage, annotations: impl Iterator<Item = &'a Annotation>) -> RgbaImage {
+    let Some(size) = IntSize::from_wh(image.width, image.height) else {
+        return image;
     };
+    let (width, height) = (image.width, image.height);
     // The base is opaque, so straight and premultiplied RGBA are the same bytes.
-    let Some(mut pix) = Pixmap::from_vec(base.data.clone(), size) else {
-        return base.clone();
+    let Some(mut pix) = Pixmap::from_vec(image.data.clone(), size) else {
+        return image;
     };
-    let (w, h) = (base.width as usize, base.height as usize);
-    for item in &doc.items {
-        match &item.annotation {
+    let (w, h) = (width as usize, height as usize);
+    for annotation in annotations {
+        match annotation {
             Annotation::Blur { rect, radius } => {
                 if let Some(region) = Region::clamp(rect, w, h) {
                     effects::blur(pix.data_mut(), w, region, *radius);
@@ -340,15 +341,35 @@ pub fn render(base: &RgbaImage, doc: &Document) -> RgbaImage {
             other => draw_annotation(&mut pix, other),
         }
     }
-    let flat = RgbaImage {
-        width: base.width,
-        height: base.height,
+    RgbaImage {
+        width,
+        height,
         data: pix.take(),
-    };
-    match Region::clamp(&doc.output_rect(), w, h) {
-        Some(region) if region != (Region { x: 0, y: 0, w, h }) => flat.crop(region),
-        _ => flat,
     }
+}
+
+/// The part of `base` inside `region` (rounded outwards, clamped) with `annotations` drawn on
+/// it. `None` when the region is empty. Only the region is rasterised, so a live preview of a
+/// small selection stays cheap on a large screen.
+pub fn render_region<'a>(
+    base: &RgbaImage,
+    annotations: impl Iterator<Item = &'a Annotation>,
+    region: &Rect,
+) -> Option<RgbaImage> {
+    let r = Region::clamp(region, base.width as usize, base.height as usize)?;
+    let (dx, dy) = (-(r.x as f32), -(r.y as f32));
+    let moved: Vec<Annotation> = annotations.map(|a| a.translated(dx, dy)).collect();
+    Some(flatten(base.crop(r), moved.iter()))
+}
+
+/// Renders the document over `base`: annotations bottom to top, then the crop.
+pub fn render(base: &RgbaImage, doc: &Document) -> RgbaImage {
+    render_region(
+        base,
+        doc.items.iter().map(|i| &i.annotation),
+        &doc.output_rect(),
+    )
+    .unwrap_or_else(|| base.clone())
 }
 
 #[cfg(test)]

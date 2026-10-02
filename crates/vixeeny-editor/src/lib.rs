@@ -17,3 +17,5 @@ pub mod editor;
 pub use editor::{Editor, Modifiers, Outcome, Tool, ToolSettings};
 pub mod selection;
 pub use selection::{CursorHint, Handle, Selection};
+pub mod session;
+pub use session::{Command, Key, KeyInput, MagnifierView, Session, View};

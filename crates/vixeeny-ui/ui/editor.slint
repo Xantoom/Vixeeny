@@ -1,0 +1,46 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+import "../../../assets/fonts/Inter-Regular.ttf";
+
+export component EditorWindow inherits Window {
+    // Geometry is in physical pixels (`phx`): the frozen image is shown 1:1 whatever the DPI.
+    in property <image> frozen;
+    in property <int> image-width: 1;
+    in property <int> image-height: 1;
+    in property <float> dim: 0.4;
+    in property <bool> has-selection: false;
+    in property <float> sel-x;
+    in property <float> sel-y;
+    in property <float> sel-w;
+    in property <float> sel-h;
+
+    no-frame: true;
+    always-on-top: true;
+    background: black;
+    default-font-family: "Inter";
+    width: image-width * 1phx;
+    height: image-height * 1phx;
+
+    Image {
+        x: 0phx;
+        y: 0phx;
+        width: root.image-width * 1phx;
+        height: root.image-height * 1phx;
+        source: root.frozen;
+    }
+
+    // Veil around the selection (or everywhere when there is none).
+    Rectangle { x: 0phx; y: 0phx; width: parent.width; height: root.has-selection ? root.sel-y * 1phx : parent.height; background: #000000 .with-alpha(root.dim); }
+    Rectangle { visible: root.has-selection; x: 0phx; y: (root.sel-y + root.sel-h) * 1phx; width: parent.width; height: parent.height - (root.sel-y + root.sel-h) * 1phx; background: #000000 .with-alpha(root.dim); }
+    Rectangle { visible: root.has-selection; x: 0phx; y: root.sel-y * 1phx; width: root.sel-x * 1phx; height: root.sel-h * 1phx; background: #000000 .with-alpha(root.dim); }
+    Rectangle { visible: root.has-selection; x: (root.sel-x + root.sel-w) * 1phx; y: root.sel-y * 1phx; width: parent.width - (root.sel-x + root.sel-w) * 1phx; height: root.sel-h * 1phx; background: #000000 .with-alpha(root.dim); }
+
+    Rectangle {
+        visible: root.has-selection;
+        x: root.sel-x * 1phx;
+        y: root.sel-y * 1phx;
+        width: root.sel-w * 1phx;
+        height: root.sel-h * 1phx;
+        border-width: 1phx;
+        border-color: #4fc3f7;
+    }
+}
