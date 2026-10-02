@@ -5699,6 +5699,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "vixeeny-settings"
+version = "0.0.1"
+dependencies = [
+ "vixeeny-common",
+ "vixeeny-encode",
+]
+
+[[package]]
 name = "vixeeny-stitch"
 version = "0.0.1"
 dependencies = [
