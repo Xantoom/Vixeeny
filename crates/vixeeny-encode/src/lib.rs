@@ -2,12 +2,15 @@
 //! vixeeny-encode — the codec registry (plan 6), profile validation, hardware probing and, in
 //! later milestones, the video pipeline. See README.md.
 
+pub mod clock;
 pub mod probe;
 pub mod registry;
 pub mod validate;
 
 #[cfg(feature = "ffmpeg-next")]
 pub mod ffmpeg_probe;
+#[cfg(feature = "ffmpeg-next")]
+pub mod recorder;
 
 /// FFmpeg bindings, built against the pinned static libraries of `native/versions.toml`.
 #[cfg(feature = "ffmpeg-next")]
