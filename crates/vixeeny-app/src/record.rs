@@ -9,9 +9,11 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
+use crate::audio_rig::Rig;
 use anyhow::Context;
 use vixeeny_common::config::{Config, Profile};
 use vixeeny_common::ipc::RecState;
+use vixeeny_encode::audio::{AudioCodec, AudioTrackConfig};
 use vixeeny_encode::clock::Fps;
 use vixeeny_encode::d3d_convert as d3d;
 use vixeeny_encode::gpu::{GpuPipeline, HwFrame, Source as GpuSource};
@@ -116,6 +118,7 @@ struct Plan {
     namer: Box<dyn FnMut(u32) -> std::path::PathBuf + Send>,
     /// Frames are converted on the GPU on this device (see `try_gpu`).
     gpu: Option<GpuParts>,
+    audio: Vec<vixeeny_audio::TrackPlan>,
 }
 
 struct GpuParts {
@@ -225,6 +228,21 @@ fn plan(config: &Config, allow_gpu: bool) -> anyhow::Result<Plan> {
         .iter()
         .map(|(k, v)| (k.clone(), v.to_ffmpeg()))
         .collect();
+    let (audio, unknown) = vixeeny_audio::plan_tracks(&profile.audio);
+    for name in unknown {
+        tracing::warn!("unknown audio source `{name}` ignored");
+    }
+    let audio_codec = AudioCodec::from_setting(&profile.audio.codec, container)
+        .with_context(|| format!("unknown audio codec `{}`", profile.audio.codec))?;
+    let audio_configs = audio
+        .iter()
+        .map(|t| AudioTrackConfig {
+            title: t.title.clone(),
+            codec: audio_codec,
+            bitrate_kbps: profile.audio.bitrate_kbps,
+            vbr: profile.audio.vbr,
+        })
+        .collect();
     // An SDR monitor has nothing to preserve: such a recording stays SDR.
     let hdr = monitor.hdr.is_some() && matches!(profile.hdr.as_str(), "keep_hdr" | "hdr");
     let mut record = RecordConfig {
@@ -239,7 +257,7 @@ fn plan(config: &Config, allow_gpu: bool) -> anyhow::Result<Plan> {
         vfr: profile.vfr,
         keyframe_seconds: 2.0,
         queue: 8,
-        audio: Vec::new(),
+        audio: audio_configs,
         gpu: None,
         encoder,
     };
@@ -311,6 +329,7 @@ fn plan(config: &Config, allow_gpu: bool) -> anyhow::Result<Plan> {
         hdr,
         namer,
         gpu,
+        audio,
     })
 }
 
@@ -335,6 +354,8 @@ pub fn start(config: &Config) -> anyhow::Result<Handle> {
 const GPU_BACKLOG: usize = 4;
 
 fn launch(plan: Plan) -> anyhow::Result<Handle> {
+    // The recording's time zero: video and audio timestamps are relative to it.
+    let origin = vixeeny_platform::monotonic_ns();
     let target = vixeeny_capture::StreamTarget::Monitor(plan.monitor);
     let (stream, gpu_frames) = match &plan.gpu {
         None => (
@@ -373,6 +394,7 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
         }
     };
     let recorder = Recorder::start(plan.config, plan.namer)?;
+    let rig = (!plan.audio.is_empty()).then(|| Rig::start(&plan.audio, origin));
     let state = Arc::new(AtomicU8::new(RECORDING));
     let (ctl, rx) = channel();
     let thread_state = Arc::clone(&state);
@@ -381,7 +403,15 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
     let thread = std::thread::Builder::new()
         .name("recording".into())
         .spawn(move || {
-            let result = record_loop(&stream, gpu_frames.as_ref(), recorder, &rx, &thread_state);
+            let result = record_loop(
+                &stream,
+                gpu_frames.as_ref(),
+                recorder,
+                rig,
+                origin,
+                &rx,
+                &thread_state,
+            );
             drop(stream);
             drop(keep_alive);
             thread_state.store(IDLE, Ordering::Release);
@@ -402,10 +432,11 @@ fn record_loop(
     stream: &vixeeny_capture::VideoStream,
     gpu_frames: Option<&std::sync::mpsc::Receiver<(i64, HwFrame)>>,
     recorder: Recorder,
+    mut rig: Option<Rig>,
+    origin: i64,
     ctl: &Receiver<Ctl>,
     state: &AtomicU8,
 ) -> anyhow::Result<vixeeny_encode::recorder::Summary> {
-    let origin = vixeeny_platform::monotonic_ns();
     let now = || vixeeny_platform::monotonic_ns() - origin;
     let mut paused = false;
     let mut failure = None;
@@ -415,14 +446,23 @@ fn record_loop(
                 paused = !paused;
                 if paused {
                     recorder.pause(now());
+                    if let Some(rig) = &mut rig {
+                        rig.pause(now());
+                    }
                     state.store(PAUSED, Ordering::Release);
                 } else {
                     recorder.resume(now());
+                    if let Some(rig) = &mut rig {
+                        rig.resume(now(), &recorder);
+                    }
                     state.store(RECORDING, Ordering::Release);
                 }
             }
             Ok(Ctl::Stop) | Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
             Err(std::sync::mpsc::TryRecvError::Empty) => {}
+        }
+        if let Some(rig) = &mut rig {
+            rig.pump(now(), &recorder);
         }
         if let Some(frames) = gpu_frames {
             // The stream only reports its end; the frames arrive through the sink's channel.
@@ -476,6 +516,9 @@ fn record_loop(
                 break;
             }
         }
+    }
+    if let Some(rig) = &mut rig {
+        rig.finish(now(), &recorder);
     }
     let summary = recorder.stop(now())?;
     match failure {

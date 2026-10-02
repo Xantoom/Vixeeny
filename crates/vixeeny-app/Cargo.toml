@@ -19,6 +19,7 @@ vixeeny-platform = { path = "../vixeeny-platform" }
 
 # The Print Screen editor (plan 5.3) is Windows-only until M21/M22.
 [target.'cfg(windows)'.dependencies]
+vixeeny-audio = { path = "../vixeeny-audio" }
 vixeeny-editor = { path = "../vixeeny-editor" }
 vixeeny-stitch = { path = "../vixeeny-stitch" }
 vixeeny-convert = { path = "../vixeeny-convert" }

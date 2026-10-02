@@ -7,6 +7,8 @@
 use std::sync::mpsc::{RecvTimeoutError, channel};
 use std::time::Duration;
 
+#[cfg(all(windows, feature = "ffmpeg"))]
+mod audio_rig;
 #[cfg(windows)]
 mod convert;
 #[cfg(windows)]

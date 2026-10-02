@@ -5574,6 +5574,7 @@ dependencies = [
  "rfd",
  "thiserror 2.0.21",
  "tracing",
+ "vixeeny-audio",
  "vixeeny-capture",
  "vixeeny-common",
  "vixeeny-convert",
@@ -5592,6 +5593,9 @@ version = "0.0.1"
 dependencies = [
  "thiserror 2.0.21",
  "tracing",
+ "vixeeny-common",
+ "windows",
+ "windows-core",
 ]
 
 [[package]]

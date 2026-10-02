@@ -8,11 +8,17 @@
 
 mod fake;
 mod mixer;
+mod routing;
 mod spec;
+#[cfg(windows)]
+mod wasapi;
 
 pub use fake::FakeAudioSource;
 pub use mixer::{Block, Mixer};
+pub use routing::{TrackMember, TrackPlan, plan_tracks};
 pub use spec::{SourceKind, SourceSpec, parse_sources};
+#[cfg(windows)]
+pub use wasapi::{AppInfo, DeviceInfo, WasapiSource, list_applications, list_microphones};
 
 /// Samples per second, per channel.
 pub const SAMPLE_RATE: u32 = 48_000;

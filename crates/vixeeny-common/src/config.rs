@@ -341,6 +341,18 @@ pub struct Audio {
     pub codec: String,
     pub bitrate_kbps: u32,
     pub vbr: bool,
+    /// Volume per source (`"mic" = 0.8`); missing = 1.0.
+    pub volumes: BTreeMap<String, f32>,
+    /// The tracks of `routing = "advanced"`.
+    pub tracks: Vec<AudioTrack>,
+}
+
+/// A track of the advanced routing: a name and the sources mixed into it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct AudioTrack {
+    pub name: String,
+    pub sources: Vec<String>,
 }
 
 impl Default for Audio {
@@ -351,6 +363,8 @@ impl Default for Audio {
             codec: "auto".into(),
             bitrate_kbps: 160,
             vbr: true,
+            volumes: BTreeMap::new(),
+            tracks: Vec::new(),
         }
     }
 }

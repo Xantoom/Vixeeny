@@ -84,6 +84,9 @@ sources = ["system"]
 codec = "auto"
 bitrate_kbps = 160
 vbr = true
+tracks = []
+
+[profiles.default.audio.volumes]
 
 [recording_widget]
 enabled = true
