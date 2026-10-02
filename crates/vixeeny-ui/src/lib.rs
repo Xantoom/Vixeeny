@@ -18,6 +18,7 @@ pub mod convert_panel;
 pub mod ocr_panel;
 pub mod overlay;
 pub mod scroll_panel;
+pub mod widget_panel;
 pub use overlay::Overlay;
 pub use slint::ComponentHandle;
 pub use vixeeny_ocr::OcrPanel;

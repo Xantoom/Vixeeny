@@ -320,3 +320,60 @@ fn the_convert_window_renders_and_reports_clicks() {
     w.invoke_quality_step(-5);
     assert_eq!(clicked.get(), -5);
 }
+
+#[test]
+fn the_recording_widget_renders_both_states_and_reports_clicks() {
+    use crate::widget_panel::{WidgetEvent, WidgetPanel, WidgetTexts};
+    use std::cell::RefCell;
+    WINDOW.with(|_| ());
+    let texts = WidgetTexts {
+        pause: "Pause".into(),
+        resume: "Resume".into(),
+        stop: "Stop".into(),
+    };
+    let panel = WidgetPanel::new(&texts, false).unwrap_or_else(|e| panic!("{e}"));
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let sink = events.clone();
+    panel.on_event(move |e| sink.borrow_mut().push(e));
+    let window = WINDOW.with(Rc::clone);
+    window.set_size(PhysicalSize::new(200, 40));
+    panel.window().show().unwrap_or_else(|e| panic!("{e}"));
+    let draw = || {
+        let mut buffer = SharedPixelBuffer::<Rgb8Pixel>::new(200, 40);
+        window.draw_if_needed(|r| {
+            r.render(buffer.make_mut_slice(), 200);
+        });
+        buffer
+    };
+    panel.set_state(false, std::time::Duration::from_secs(3_725));
+    let recording = draw();
+    save("7-widget-recording", &recording);
+    panel.set_state(true, std::time::Duration::from_secs(3_725));
+    let paused = draw();
+    save("7-widget-paused", &paused);
+    // Not blank, and the two states differ (red pulsing dot vs. orange still dot, other button).
+    assert!(recording.as_slice().iter().any(|p| p.r > 200));
+    assert_ne!(recording.as_slice(), paused.as_slice());
+    assert_eq!(panel.window().get_time(), "01:02:05");
+
+    // Clicks: pause button at the right, stop at the far right.
+    use slint::platform::{PointerEventButton, WindowEvent};
+    let click = |x: f32| {
+        let pos = slint::LogicalPosition::new(x, 20.0);
+        window.dispatch_event(WindowEvent::PointerMoved { position: pos });
+        window.dispatch_event(WindowEvent::PointerPressed {
+            position: pos,
+            button: PointerEventButton::Left,
+        });
+        window.dispatch_event(WindowEvent::PointerReleased {
+            position: pos,
+            button: PointerEventButton::Left,
+        });
+    };
+    click(140.0);
+    click(178.0);
+    assert_eq!(
+        *events.borrow(),
+        [WidgetEvent::TogglePause, WidgetEvent::Stop]
+    );
+}

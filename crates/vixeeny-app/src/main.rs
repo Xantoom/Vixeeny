@@ -22,6 +22,10 @@ mod region;
 mod scroll;
 #[cfg(any(windows, test))]
 mod still;
+#[cfg(windows)]
+mod widget;
+#[cfg(any(windows, test))]
+mod widget_math;
 
 use anyhow::Context;
 use vixeeny_common::config::Config;
@@ -251,6 +255,9 @@ fn run() -> anyhow::Result<()> {
     match args.first().map(String::as_str) {
         // The probe child: prints TOML on stdout (see `vixeeny_encode::probe::run_child`).
         Some("--probe") => return probe::child(),
+        // The recording widget, a process of its own (see `widget`).
+        #[cfg(windows)]
+        Some("--widget") => return widget::run_child(&args[1..]),
         Some("--probe-report") => return probe::report(args.iter().any(|a| a == "--force")),
         _ => {}
     }

@@ -10,6 +10,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crate::audio_rig::Rig;
+use crate::widget_math::FromWidget;
 use anyhow::Context;
 use vixeeny_common::config::{Config, Profile};
 use vixeeny_common::ipc::RecState;
@@ -119,6 +120,8 @@ struct Plan {
     /// Frames are converted on the GPU on this device (see `try_gpu`).
     gpu: Option<GpuParts>,
     audio: Vec<vixeeny_audio::TrackPlan>,
+    /// The widget to show, and the language of its labels.
+    widget: Option<(vixeeny_common::config::RecordingWidget, String)>,
 }
 
 struct GpuParts {
@@ -330,6 +333,12 @@ fn plan(config: &Config, allow_gpu: bool) -> anyhow::Result<Plan> {
         namer,
         gpu,
         audio,
+        widget: config.recording_widget.enabled.then(|| {
+            (
+                config.recording_widget.clone(),
+                config.general.language.clone(),
+            )
+        }),
     })
 }
 
@@ -356,7 +365,7 @@ const GPU_BACKLOG: usize = 4;
 fn launch(plan: Plan) -> anyhow::Result<Handle> {
     // The recording's time zero: video and audio timestamps are relative to it.
     let origin = vixeeny_platform::monotonic_ns();
-    let target = vixeeny_capture::StreamTarget::Monitor(plan.monitor);
+    let target = vixeeny_capture::StreamTarget::Monitor(plan.monitor.clone());
     let (stream, gpu_frames) = match &plan.gpu {
         None => (
             vixeeny_capture::VideoStream::start(&target, plan.cursor, plan.hdr)?,
@@ -394,9 +403,21 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
         }
     };
     let recorder = Recorder::start(plan.config, plan.namer)?;
+    let (ctl, rx) = channel();
+    // The widget is a nicety: without it the recording goes on (hotkeys still work).
+    let widget = plan.widget.as_ref().and_then(|(settings, language)| {
+        let presses = ctl.clone();
+        crate::widget::Widget::spawn(settings, language, &plan.monitor, move |press| {
+            let _ = presses.send(match press {
+                FromWidget::TogglePause => Ctl::TogglePause,
+                FromWidget::Stop => Ctl::Stop,
+            });
+        })
+        .inspect_err(|e| tracing::warn!("recording widget: {e:#}"))
+        .ok()
+    });
     let rig = (!plan.audio.is_empty()).then(|| Rig::start(&plan.audio, origin));
     let state = Arc::new(AtomicU8::new(RECORDING));
-    let (ctl, rx) = channel();
     let thread_state = Arc::clone(&state);
     // The GPU parts must outlive the recording (the device the textures live on).
     let keep_alive = KeepAlive(plan.gpu);
@@ -408,6 +429,7 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
                 gpu_frames.as_ref(),
                 recorder,
                 rig,
+                widget,
                 origin,
                 &rx,
                 &thread_state,
@@ -433,6 +455,7 @@ fn record_loop(
     gpu_frames: Option<&std::sync::mpsc::Receiver<(i64, HwFrame)>>,
     recorder: Recorder,
     mut rig: Option<Rig>,
+    mut widget: Option<crate::widget::Widget>,
     origin: i64,
     ctl: &Receiver<Ctl>,
     state: &AtomicU8,
@@ -440,10 +463,30 @@ fn record_loop(
     let now = || vixeeny_platform::monotonic_ns() - origin;
     let mut paused = false;
     let mut failure = None;
+    // The widget shows the recorded time: pauses do not count.
+    let mut paused_ns = 0_i64;
+    let mut paused_since = 0_i64;
+    let mut elapsed = |paused: bool, at: i64, paused_ns: i64, paused_since: i64| {
+        Duration::from_nanos(
+            (at - paused_ns - if paused { at - paused_since } else { 0 }).max(0) as u64,
+        )
+    };
+    let mut last_shown = Duration::ZERO;
+    if let Some(w) = &mut widget {
+        w.state(false, Duration::ZERO);
+    }
     loop {
         match ctl.try_recv() {
             Ok(Ctl::TogglePause) => {
                 paused = !paused;
+                if paused {
+                    paused_since = now();
+                } else {
+                    paused_ns += now() - paused_since;
+                }
+                if let Some(w) = &mut widget {
+                    w.state(paused, elapsed(paused, now(), paused_ns, paused_since));
+                }
                 if paused {
                     recorder.pause(now());
                     if let Some(rig) = &mut rig {
@@ -463,6 +506,14 @@ fn record_loop(
         }
         if let Some(rig) = &mut rig {
             rig.pump(now(), &recorder);
+        }
+        // The widget counts by itself; a resync every few seconds keeps it honest.
+        if !paused && let Some(w) = &mut widget {
+            let shown = elapsed(false, now(), paused_ns, paused_since);
+            if shown.saturating_sub(last_shown) >= Duration::from_secs(5) {
+                w.state(false, shown);
+                last_shown = shown;
+            }
         }
         if let Some(frames) = gpu_frames {
             // The stream only reports its end; the frames arrive through the sink's channel.

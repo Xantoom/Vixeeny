@@ -30,7 +30,7 @@ use windows::Win32::UI::HiDpi::{
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GWL_EXSTYLE, GetCursorPos, GetForegroundWindow, GetWindowLongW, GetWindowRect,
     GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible, SetWindowDisplayAffinity,
-    WDA_EXCLUDEFROMCAPTURE, WS_EX_TOOLWINDOW,
+    SetWindowLongW, WDA_EXCLUDEFROMCAPTURE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
 use windows::core::{Interface, PWSTR};
 
@@ -248,6 +248,20 @@ pub fn exclude_from_capture(id: WindowId) -> Result<()> {
     // SAFETY: plain call on a window handle owned by this process.
     unsafe { SetWindowDisplayAffinity(hwnd_of(id), WDA_EXCLUDEFROMCAPTURE) }
         .map_err(|e| os_err("SetWindowDisplayAffinity", e))
+}
+
+/// Makes one of our windows a tool window that never takes the focus when clicked (a recording
+/// widget must not pull the keyboard away from the game) and stays out of Alt+Tab.
+pub fn set_noactivate_tool_window(id: WindowId) -> Result<()> {
+    let hwnd = hwnd_of(id);
+    // SAFETY: reads and writes the extended style of a window owned by this process.
+    unsafe {
+        let style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+        let wanted = style | WS_EX_TOOLWINDOW.0 | WS_EX_NOACTIVATE.0;
+        // 0 is both "failed" and "the previous style was 0"; the style is cosmetic either way.
+        let _ = SetWindowLongW(hwnd, GWL_EXSTYLE, wanted as i32);
+    }
+    Ok(())
 }
 
 /// Looks up the DXGI output of `monitor`: `(is HDR, peak nits, GDI device name)`.
