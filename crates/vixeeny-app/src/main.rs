@@ -11,6 +11,8 @@ use std::time::Duration;
 mod ocr;
 #[cfg(windows)]
 mod region;
+#[cfg(windows)]
+mod scroll;
 #[cfg(any(windows, test))]
 mod still;
 
@@ -35,6 +37,12 @@ fn perform(action: ActionId, config: &Config) {
         ActionId::CaptureRegion => {
             if let Err(e) = region::run(config, region::Mode::Editor) {
                 tracing::error!("editor failed: {e:#}");
+            }
+        }
+        #[cfg(windows)]
+        ActionId::CaptureScrolling => {
+            if let Err(e) = region::run(config, region::Mode::Scroll) {
+                tracing::error!("scrolling capture failed: {e:#}");
             }
         }
         #[cfg(windows)]

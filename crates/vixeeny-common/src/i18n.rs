@@ -29,6 +29,16 @@ pub enum Key {
     OcrNoLanguage,
     /// `{error}`
     OcrFailed,
+    ScrollTitle,
+    ScrollIntro,
+    ScrollStart,
+    ScrollFinish,
+    ScrollCancel,
+    /// `{height}`
+    ScrollCapturing,
+    ScrollLost,
+    /// `{height}`
+    ScrollTruncated,
 }
 
 impl Lang {
@@ -101,6 +111,22 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         }
         (Key::OcrFailed, Lang::En) => "Text recognition failed: {error}",
         (Key::OcrFailed, Lang::Fr) => "Échec de la reconnaissance de texte : {error}",
+        (Key::ScrollTitle, Lang::En) => "Scrolling capture",
+        (Key::ScrollTitle, Lang::Fr) => "Capture défilante",
+        (Key::ScrollIntro, Lang::En) => "Click Start, then scroll the content yourself.",
+        (Key::ScrollIntro, Lang::Fr) => "Cliquez sur Démarrer, puis faites défiler le contenu.",
+        (Key::ScrollStart, Lang::En) => "Start",
+        (Key::ScrollStart, Lang::Fr) => "Démarrer",
+        (Key::ScrollFinish, Lang::En) => "Finish",
+        (Key::ScrollFinish, Lang::Fr) => "Terminer",
+        (Key::ScrollCancel, Lang::En) => "Cancel",
+        (Key::ScrollCancel, Lang::Fr) => "Annuler",
+        (Key::ScrollCapturing, Lang::En) => "Capturing… {height} px (Enter to finish)",
+        (Key::ScrollCapturing, Lang::Fr) => "Capture… {height} px (Entrée pour terminer)",
+        (Key::ScrollLost, Lang::En) => "Scrolled too fast: scroll back a little",
+        (Key::ScrollLost, Lang::Fr) => "Défilement trop rapide : remontez un peu",
+        (Key::ScrollTruncated, Lang::En) => "Height limit reached ({height} px)",
+        (Key::ScrollTruncated, Lang::Fr) => "Hauteur maximale atteinte ({height} px)",
     }
 }
 

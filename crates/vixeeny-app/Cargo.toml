@@ -19,6 +19,7 @@ vixeeny-platform = { path = "../vixeeny-platform" }
 # The Print Screen editor (plan 5.3) is Windows-only until M21/M22.
 [target.'cfg(windows)'.dependencies]
 vixeeny-editor = { path = "../vixeeny-editor" }
+vixeeny-stitch = { path = "../vixeeny-stitch" }
 vixeeny-ocr = { path = "../vixeeny-ocr" }
 vixeeny-ui = { path = "../vixeeny-ui", features = ["desktop"] }
 rfd = { version = "0.17.2", default-features = false }

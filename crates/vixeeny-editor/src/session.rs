@@ -29,6 +29,8 @@ pub enum Command {
     SaveAs,
     /// Run OCR on the zone.
     Ocr,
+    /// Capture the zone while the user scrolls it.
+    Scroll,
     /// Close without saving.
     Close,
 }
@@ -332,6 +334,11 @@ impl Session {
     }
 
     /// The final image: the zone with its annotations. `None` while there is no zone.
+    /// The selected zone, in image pixels.
+    pub fn zone(&self) -> Option<Rect> {
+        self.selection.rect()
+    }
+
     pub fn export(&self) -> Option<RgbaImage> {
         let zone = self.selection.rect()?;
         render_region(

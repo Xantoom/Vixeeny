@@ -65,6 +65,17 @@ fn save(
 ) -> anyhow::Result<PathBuf> {
     let bgra = to_bgra(img);
     let bitmap = Bgra::new(img.width, img.height, img.width as usize * 4, &bgra);
+    save_bgra(config, snap, ActionId::CaptureRegion, &bitmap, chosen)
+}
+
+/// Writes `bitmap` to the images folder (or to `chosen`, whose extension picks the format).
+pub fn save_bgra(
+    config: &Config,
+    snap: &Snapshot,
+    action: ActionId,
+    bitmap: &Bgra<'_>,
+    chosen: Option<PathBuf>,
+) -> anyhow::Result<PathBuf> {
     let (default_format, settings) = crate::image_output(config);
     if let Some(path) = chosen {
         // "Save as": the extension picks the format.
@@ -74,7 +85,7 @@ fn save(
             .and_then(ImageFormat::from_name)
             .filter(|f| f.available())
             .unwrap_or(default_format);
-        let bytes = vixeeny_image::encode(format, &bitmap, &settings)?;
+        let bytes = vixeeny_image::encode(format, bitmap, &settings)?;
         still::write_atomic(&path, &bytes)?;
         return Ok(path);
     }
@@ -91,12 +102,12 @@ fn save(
         after_save: None,
     };
     Ok(still::save_image(
-        ActionId::CaptureRegion,
+        action,
         snap,
         &dest,
         (default_format, &settings),
         &vixeeny_platform::exe_metadata,
-        &bitmap,
+        bitmap,
     )?)
 }
 
@@ -131,6 +142,8 @@ pub enum Mode {
     Editor,
     /// Recognise the text of the zone as soon as it is drawn.
     Ocr,
+    /// Pick the zone of a scrolling capture.
+    Scroll,
 }
 
 pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
@@ -167,6 +180,11 @@ pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
         .collect();
     let scale = vixeeny_platform::monitor_at(&monitors, cursor.0, cursor.1)
         .map_or(1.0, |m| m.scale_factor() as f32);
+    let scroll_snapshot = Snapshot {
+        monitors: monitors.clone(),
+        cursor,
+        foreground: foreground.clone(),
+    };
     let snapshot = Snapshot {
         monitors,
         cursor,
@@ -176,10 +194,16 @@ pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
     let ocr_image: std::rc::Rc<std::cell::RefCell<Option<RgbaImage>>> = std::rc::Rc::default();
     let ocr_slot = ocr_image.clone();
     let ocr_config = config.clone();
+    let config_for_scroll = config.clone();
+
+    let scroll_zone: std::rc::Rc<std::cell::Cell<Option<Rect>>> = std::rc::Rc::default();
+    let scroll_slot = scroll_zone.clone();
 
     let mut session = Session::new(base, zones);
-    if mode == Mode::Ocr {
-        session = session.with_auto_command(Command::Ocr);
+    match mode {
+        Mode::Editor => {}
+        Mode::Ocr => session = session.with_auto_command(Command::Ocr),
+        Mode::Scroll => session = session.with_auto_command(Command::Scroll),
     }
     session.dim = f32::from(config.editor.dim_percent.min(90)) / 100.0;
     let overlay = vixeeny_ui::Overlay::new(session, scale, move |command, session, window| {
@@ -222,6 +246,13 @@ pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
                     }
                 }
             }
+            Command::Scroll => match session.zone() {
+                Some(zone) => {
+                    scroll_slot.set(Some(zone));
+                    true
+                }
+                None => false,
+            },
             Command::Ocr => match export() {
                 // The overlay closes first; the result window opens afterwards.
                 Some(img) => {
@@ -237,6 +268,15 @@ pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
     overlay
         .run((bounds.x, bounds.y), (bounds.width, bounds.height))
         .map_err(|e| anyhow::anyhow!("editor window: {e}"))?;
+    if let Some(zone) = scroll_zone.take() {
+        let zone = vixeeny_platform::PhysicalRect::new(
+            bounds.x + zone.x.round() as i32,
+            bounds.y + zone.y.round() as i32,
+            zone.w.round() as u32,
+            zone.h.round() as u32,
+        );
+        return crate::scroll::run(&config_for_scroll, scroll_snapshot, zone, scale);
+    }
     let recognised = ocr_image.borrow_mut().take();
     if let Some(img) = recognised {
         crate::ocr::run(&img, &ocr_config)?;

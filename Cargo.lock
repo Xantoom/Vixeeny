@@ -5555,6 +5555,7 @@ dependencies = [
  "vixeeny-image",
  "vixeeny-ocr",
  "vixeeny-platform",
+ "vixeeny-stitch",
  "vixeeny-ui",
 ]
 
@@ -5651,6 +5652,9 @@ dependencies = [
 [[package]]
 name = "vixeeny-stitch"
 version = "0.0.1"
+dependencies = [
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "vixeeny-ui"

@@ -16,6 +16,7 @@ pub use generated::*;
 
 pub mod ocr_panel;
 pub mod overlay;
+pub mod scroll_panel;
 pub use overlay::Overlay;
 pub use vixeeny_ocr::OcrPanel;
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Plain Slint elements only: std-widgets would pull the SVG decoder in for its icons.
-component PushButton inherits Rectangle {
+export component PushButton inherits Rectangle {
     in property <string> label;
     in property <bool> primary: false;
     callback clicked();

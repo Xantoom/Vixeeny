@@ -49,6 +49,7 @@ pub struct Config {
     pub replay: Replay,
     pub overlay: Overlay,
     pub ocr: Ocr,
+    pub scrolling: Scrolling,
 }
 
 impl Default for Config {
@@ -66,6 +67,7 @@ impl Default for Config {
             replay: Replay::default(),
             overlay: Overlay::default(),
             ocr: Ocr::default(),
+            scrolling: Scrolling::default(),
         }
     }
 }
@@ -411,6 +413,19 @@ impl Default for Ocr {
         Self {
             languages: vec!["auto".into()],
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Scrolling {
+    /// The assembled image is cut at this height (plan 5.7).
+    pub max_height: u32,
+}
+
+impl Default for Scrolling {
+    fn default() -> Self {
+        Self { max_height: 30_000 }
     }
 }
 

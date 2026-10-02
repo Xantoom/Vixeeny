@@ -263,6 +263,7 @@ impl Overlay {
                         "save" => Command::Save,
                         "save-as" => Command::SaveAs,
                         "ocr" => Command::Ocr,
+                        "scroll" => Command::Scroll,
                         _ => Command::Close,
                     };
                     if let Some(window) = weak.upgrade()
