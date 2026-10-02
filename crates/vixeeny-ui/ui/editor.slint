@@ -111,6 +111,7 @@ export component EditorWindow inherits Window {
     in property <float> text-y;
     in property <float> text-size: 24;
 
+    in-out property <string> text-value;
     in property <int> cursor-kind: 0;
     // Off while a system dialog (Save as) must appear above the overlay.
     in property <bool> on-top: true;
@@ -135,6 +136,11 @@ export component EditorWindow inherits Window {
     default-font-family: "Inter";
     width: image-width * 1phx;
     height: image-height * 1phx;
+
+    init => { focus.focus(); }
+    changed has-text-input => {
+        if !root.has-text-input { focus.focus(); }
+    }
 
     focus := FocusScope {
         key-pressed(event) => {
@@ -291,7 +297,7 @@ export component EditorWindow inherits Window {
             y: root.text-y * 1phx;
             font-size: root.text-size * 1phx;
             color: root.current-color;
-            single-line: false;
+            text <=> root.text-value;
             accepted => { root.text-committed(self.text); }
             init => { self.focus(); }
         }

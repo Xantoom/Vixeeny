@@ -166,3 +166,57 @@ fn key_mapping() {
     assert_eq!(overlay::tool_index(Some(Tool::Pen)), 1);
     assert_eq!(overlay::tool_index(None), 12);
 }
+
+#[test]
+fn input_events_drive_the_session_through_the_window() {
+    let o = overlay(900, 500, 1.0);
+    let w = o.window();
+    // draw a zone with the mouse
+    w.invoke_pointer_pressed(100.0, 80.0, false);
+    w.invoke_pointer_moved(300.0, 200.0, false);
+    w.invoke_pointer_released(400.0, 250.0, false);
+    assert!(w.get_has_toolbar());
+    assert_eq!((w.get_sel_w(), w.get_sel_h()), (300.0, 170.0));
+    // pick the text tool (index 6), click, type, validate
+    w.invoke_tool_chosen(6);
+    w.invoke_pointer_pressed(150.0, 120.0, false);
+    w.invoke_pointer_released(150.0, 120.0, false);
+    assert!(w.get_has_text_input());
+    w.set_text_value("Hello".into());
+    w.invoke_text_committed("Hello".into());
+    assert!(!w.get_has_text_input());
+    assert_eq!(w.get_text_value(), "");
+    assert!(w.get_has_annotated());
+    // a second text, validated by clicking elsewhere
+    w.invoke_pointer_pressed(150.0, 180.0, false);
+    w.invoke_pointer_released(150.0, 180.0, false);
+    w.set_text_value("Again".into());
+    w.invoke_pointer_pressed(300.0, 100.0, false);
+    w.invoke_pointer_released(300.0, 100.0, false);
+    let texts = o.session().borrow().editor().doc.items.len();
+    assert!(texts >= 2, "{texts}");
+    // undo through the toolbar action, close through the keyboard command
+    w.invoke_action("undo".into());
+    assert_eq!(o.session().borrow().editor().doc.items.len(), texts - 1);
+}
+
+#[test]
+fn commands_reach_the_handler_and_can_keep_the_window_open() {
+    use std::cell::RefCell;
+    WINDOW.with(|_| ());
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let log = seen.clone();
+    let session = Session::new(screen(300, 200), vec![]);
+    let o = Overlay::new(session, 1.0, move |c, s, _| {
+        log.borrow_mut().push((c, s.export().is_some()));
+        c != vixeeny_editor::Command::Ocr
+    })
+    .unwrap_or_else(|e| panic!("{e}"));
+    let w = o.window();
+    w.invoke_pointer_pressed(10.0, 10.0, false);
+    w.invoke_pointer_released(200.0, 150.0, false);
+    w.invoke_action("copy".into());
+    w.invoke_action("ocr".into());
+    use vixeeny_editor::Command::{Copy, Ocr};
+    assert_eq!(*seen.borrow(), [(Copy, true), (Ocr, true)]);
+}

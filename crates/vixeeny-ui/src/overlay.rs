@@ -153,6 +153,13 @@ impl Overlay {
         let sh = shift.clone();
         w.on_pointer_pressed(move |x, y, s| {
             sh.set(s);
+            // Clicking elsewhere validates the text being typed instead of dropping it.
+            if let Some(w) = weak.upgrade()
+                && session.borrow().is_typing()
+            {
+                session.borrow_mut().commit_text(&w.get_text_value());
+                w.set_text_value("".into());
+            }
             session
                 .borrow_mut()
                 .pointer_down(Point::new(x, y), Modifiers { shift: s });
@@ -233,6 +240,9 @@ impl Overlay {
         let (session, weak) = (self.session.clone(), w.as_weak());
         w.on_text_committed(move |text| {
             session.borrow_mut().commit_text(&text);
+            if let Some(w) = weak.upgrade() {
+                w.set_text_value("".into());
+            }
             refresh_from(&weak, &session);
         });
         let (session, weak, handler) = (self.session.clone(), w.as_weak(), on_command);
