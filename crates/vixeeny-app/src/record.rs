@@ -450,6 +450,7 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn record_loop(
     stream: &vixeeny_capture::VideoStream,
     gpu_frames: Option<&std::sync::mpsc::Receiver<(i64, HwFrame)>>,
@@ -466,7 +467,7 @@ fn record_loop(
     // The widget shows the recorded time: pauses do not count.
     let mut paused_ns = 0_i64;
     let mut paused_since = 0_i64;
-    let mut elapsed = |paused: bool, at: i64, paused_ns: i64, paused_since: i64| {
+    let elapsed = |paused: bool, at: i64, paused_ns: i64, paused_since: i64| {
         Duration::from_nanos(
             (at - paused_ns - if paused { at - paused_since } else { 0 }).max(0) as u64,
         )
