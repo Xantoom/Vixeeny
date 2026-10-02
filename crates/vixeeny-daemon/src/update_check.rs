@@ -34,10 +34,15 @@ fn updater_next_to(exe: &Path) -> Option<PathBuf> {
 }
 
 fn check_once(updater: &Path) -> Option<String> {
-    let output = std::process::Command::new(updater)
-        .arg("check")
-        .output()
-        .ok()?;
+    let mut command = std::process::Command::new(updater);
+    command.arg("check");
+    #[cfg(windows)]
+    {
+        // A console program: no terminal window may flash.
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+    let output = command.output().ok()?;
     if !output.status.success() {
         tracing::debug!(
             "update check failed: {}",

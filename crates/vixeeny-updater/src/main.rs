@@ -45,6 +45,15 @@ fn get(agent: &ureq::Agent, url: &str, limit: u64) -> anyhow::Result<Vec<u8>> {
     Ok(bytes)
 }
 
+fn is_not_found(error: &anyhow::Error) -> bool {
+    error.chain().any(|e| {
+        matches!(
+            e.downcast_ref::<ureq::Error>(),
+            Some(ureq::Error::StatusCode(404))
+        )
+    })
+}
+
 fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -60,8 +69,12 @@ fn state_path() -> anyhow::Result<PathBuf> {
 fn check() -> anyhow::Result<()> {
     let path = state_path()?;
     let mut state = State::load(&path);
-    let json = get(&agent(), &check_url(REPOSITORY), 4 << 20)?;
-    let release = Release::parse(std::str::from_utf8(&json)?)?;
+    // 404: nothing is published yet (drafts are invisible to the API), so nothing to offer.
+    let release = match get(&agent(), &check_url(REPOSITORY), 4 << 20) {
+        Ok(json) => Release::parse(std::str::from_utf8(&json)?)?,
+        Err(e) if is_not_found(&e) => None,
+        Err(e) => return Err(e),
+    };
     state.checked_at = now();
     state.available = release.filter(|r| is_newer(env!("CARGO_PKG_VERSION"), &r.version));
     if let Some(r) = &state.available

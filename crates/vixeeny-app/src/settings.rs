@@ -288,6 +288,13 @@ fn detect_hardware(handle: PanelHandle, lang: Lang, force: bool) {
     });
 }
 
+/// The updater is a console program: started from here it must not flash a terminal.
+fn quiet(command: &mut std::process::Command) -> &mut std::process::Command {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    command.creation_flags(CREATE_NO_WINDOW)
+}
+
 fn updater_exe() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let path = exe.parent()?.join("vixeeny-updater.exe");
@@ -317,8 +324,7 @@ fn check_for_update(handle: PanelHandle, lang: Lang) {
     };
     handle.set_extra(tr(Key::UpdateChecking, lang).into());
     std::thread::spawn(move || {
-        let done = std::process::Command::new(updater)
-            .arg("check")
+        let done = quiet(std::process::Command::new(updater).arg("check"))
             .output()
             .is_ok_and(|o| o.status.success());
         handle.set_extra(if done {
@@ -342,7 +348,7 @@ fn start_update(handle: &PanelHandle, lang: Lang) {
         handle.set_extra(tr(Key::UpdateNoKey, lang).into());
         return;
     }
-    match updater_exe().map(|u| std::process::Command::new(u).arg("apply").spawn()) {
+    match updater_exe().map(|u| quiet(std::process::Command::new(u).arg("apply")).spawn()) {
         Some(Ok(_)) => handle.set_extra(tr(Key::UpdateInstalling, lang).into()),
         _ => handle.set_extra(tr(Key::UpdateCheckFailed, lang).into()),
     }
