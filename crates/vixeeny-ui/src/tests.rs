@@ -260,3 +260,63 @@ fn the_ocr_window_renders_text_hint_and_buttons() {
     // not an all-black frame
     assert!(buffer.as_slice().iter().any(|p| p.r > 100));
 }
+
+#[test]
+fn the_convert_window_renders_and_reports_clicks() {
+    use crate::convert_panel::{ConvertTexts, new_window, set_files};
+    WINDOW.with(|_| ());
+    let texts = ConvertTexts {
+        title: "Convert images".into(),
+        drop_hint: "Drop images or folders here".into(),
+        add_files: "Add files…".into(),
+        add_folder: "Add folder…".into(),
+        clear: "Clear".into(),
+        format: "Format".into(),
+        quality: "Quality".into(),
+        lossless: "Lossless".into(),
+        existing: "If it exists".into(),
+        rename: "Rename".into(),
+        overwrite: "Overwrite".into(),
+        skip: "Skip".into(),
+        output: "Output folder".into(),
+        choose: "Choose…".into(),
+        reset: "Reset".into(),
+        convert: "Convert".into(),
+        cancel: "Cancel".into(),
+    };
+    let w = new_window(&texts, &["PNG", "JPEG", "WebP", "AVIF", "JXL"])
+        .unwrap_or_else(|e| panic!("{e}"));
+    let window = WINDOW.with(Rc::clone);
+    window.set_size(PhysicalSize::new(640, 560));
+    w.show().unwrap_or_else(|e| panic!("{e}"));
+    let draw = || {
+        let mut buffer = SharedPixelBuffer::<Rgb8Pixel>::new(640, 560);
+        window.draw_if_needed(|r| {
+            r.render(buffer.make_mut_slice(), 640);
+        });
+        buffer
+    };
+    save("6-convert-empty", &draw());
+    set_files(
+        &w,
+        &["C:\\Pictures\\a.png".into(), "C:\\Pictures\\b.jpg".into()],
+    );
+    w.set_summary("2 image(s)".into());
+    w.set_format_index(3);
+    w.set_show_lossless(true);
+    w.set_output_text("Same folder as each image".into());
+    w.set_progress(0.4);
+    w.set_status("Converting… 1 / 2".into());
+    w.set_running(true);
+    let buf = draw();
+    save("7-convert-running", &buf);
+    assert!(
+        buf.as_slice().iter().any(|p| p.b > 200 && p.r < 100),
+        "the progress bar is blue"
+    );
+    let clicked = Rc::new(std::cell::Cell::new(0));
+    let c = clicked.clone();
+    w.on_quality_step(move |d| c.set(d));
+    w.invoke_quality_step(-5);
+    assert_eq!(clicked.get(), -5);
+}

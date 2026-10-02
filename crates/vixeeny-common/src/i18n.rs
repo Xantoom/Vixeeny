@@ -39,6 +39,34 @@ pub enum Key {
     ScrollLost,
     /// `{height}`
     ScrollTruncated,
+    ConvMenuLabel,
+    ConvTitle,
+    ConvDropHint,
+    ConvAddFiles,
+    ConvAddFolder,
+    ConvClear,
+    ConvFormat,
+    ConvQuality,
+    ConvLossless,
+    ConvExisting,
+    ConvRename,
+    ConvOverwrite,
+    ConvSkip,
+    ConvOutput,
+    ConvSameFolder,
+    ConvChoose,
+    ConvReset,
+    ConvConvert,
+    ConvCancel,
+    /// `{count}`
+    ConvSummary,
+    /// `{done}`, `{total}`
+    ConvProgress,
+    /// `{converted}`, `{skipped}`, `{failed}`
+    ConvDone,
+    /// `{converted}`, `{failed}`, `{cancelled}`
+    ConvCancelled,
+    ConvNothing,
 }
 
 impl Lang {
@@ -127,6 +155,62 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::ScrollLost, Lang::Fr) => "Défilement trop rapide : remontez un peu",
         (Key::ScrollTruncated, Lang::En) => "Height limit reached ({height} px)",
         (Key::ScrollTruncated, Lang::Fr) => "Hauteur maximale atteinte ({height} px)",
+        (Key::ConvMenuLabel, Lang::En) => "Convert with Vixeeny",
+        (Key::ConvMenuLabel, Lang::Fr) => "Convertir avec Vixeeny",
+        (Key::ConvTitle, Lang::En) => "Convert images",
+        (Key::ConvTitle, Lang::Fr) => "Convertir des images",
+        (Key::ConvDropHint, Lang::En) => "Drop images or folders here",
+        (Key::ConvDropHint, Lang::Fr) => "Déposez des images ou des dossiers ici",
+        (Key::ConvAddFiles, Lang::En) => "Add files…",
+        (Key::ConvAddFiles, Lang::Fr) => "Ajouter des fichiers…",
+        (Key::ConvAddFolder, Lang::En) => "Add folder…",
+        (Key::ConvAddFolder, Lang::Fr) => "Ajouter un dossier…",
+        (Key::ConvClear, Lang::En) => "Clear",
+        (Key::ConvClear, Lang::Fr) => "Vider",
+        (Key::ConvFormat, Lang::En) => "Format",
+        (Key::ConvFormat, Lang::Fr) => "Format",
+        (Key::ConvQuality, Lang::En) => "Quality",
+        (Key::ConvQuality, Lang::Fr) => "Qualité",
+        (Key::ConvLossless, Lang::En) => "Lossless",
+        (Key::ConvLossless, Lang::Fr) => "Sans perte",
+        (Key::ConvExisting, Lang::En) => "If it exists",
+        (Key::ConvExisting, Lang::Fr) => "Si le fichier existe",
+        (Key::ConvRename, Lang::En) => "Rename",
+        (Key::ConvRename, Lang::Fr) => "Renommer",
+        (Key::ConvOverwrite, Lang::En) => "Overwrite",
+        (Key::ConvOverwrite, Lang::Fr) => "Écraser",
+        (Key::ConvSkip, Lang::En) => "Skip",
+        (Key::ConvSkip, Lang::Fr) => "Ignorer",
+        (Key::ConvOutput, Lang::En) => "Output folder",
+        (Key::ConvOutput, Lang::Fr) => "Dossier de sortie",
+        (Key::ConvSameFolder, Lang::En) => "Same folder as each image",
+        (Key::ConvSameFolder, Lang::Fr) => "Même dossier que chaque image",
+        (Key::ConvChoose, Lang::En) => "Choose…",
+        (Key::ConvChoose, Lang::Fr) => "Choisir…",
+        (Key::ConvReset, Lang::En) => "Reset",
+        (Key::ConvReset, Lang::Fr) => "Réinitialiser",
+        (Key::ConvConvert, Lang::En) => "Convert",
+        (Key::ConvConvert, Lang::Fr) => "Convertir",
+        (Key::ConvCancel, Lang::En) => "Cancel",
+        (Key::ConvCancel, Lang::Fr) => "Annuler",
+        (Key::ConvSummary, Lang::En) => "{count} image(s)",
+        (Key::ConvSummary, Lang::Fr) => "{count} image(s)",
+        (Key::ConvProgress, Lang::En) => "Converting… {done} / {total}",
+        (Key::ConvProgress, Lang::Fr) => "Conversion… {done} / {total}",
+        (Key::ConvDone, Lang::En) => {
+            "Done: {converted} converted, {skipped} skipped, {failed} failed"
+        }
+        (Key::ConvDone, Lang::Fr) => {
+            "Terminé : {converted} convertie(s), {skipped} ignorée(s), {failed} en échec"
+        }
+        (Key::ConvCancelled, Lang::En) => {
+            "Cancelled: {converted} converted, {failed} failed, {cancelled} not started"
+        }
+        (Key::ConvCancelled, Lang::Fr) => {
+            "Annulé : {converted} convertie(s), {failed} en échec, {cancelled} non traitée(s)"
+        }
+        (Key::ConvNothing, Lang::En) => "No supported image found",
+        (Key::ConvNothing, Lang::Fr) => "Aucune image prise en charge",
     }
 }
 

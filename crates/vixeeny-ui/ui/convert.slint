@@ -1,0 +1,236 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { PushButton } from "ocr.slint";
+
+component Chip inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected: false;
+    in property <bool> enabled: true;
+    callback clicked();
+    height: 28px;
+    preferred-width: lbl.preferred-width + 22px;
+    border-radius: 14px;
+    opacity: root.enabled ? 1 : 0.4;
+    background: root.selected ? #3b82f6 : (touch.has-hover && root.enabled ? #4b5563 : #374151);
+    lbl := Text {
+        text: root.label;
+        color: white;
+        font-size: 12px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    touch := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
+}
+
+component Caption inherits Text {
+    color: #9ca3af;
+    font-size: 12px;
+    vertical-alignment: center;
+    min-width: 96px;
+}
+
+// Batch conversion window (plan 5.5). Files arrive by drag and drop, buttons or the command
+// line; the host owns the list and the job.
+export component ConvertWindow inherits Window {
+    in property <string> window-title: "Vixeeny";
+    in property <[string]> files;
+    in property <string> drop-hint;
+    in property <string> summary;
+    in property <string> add-files-label;
+    in property <string> add-folder-label;
+    in property <string> clear-label;
+    in property <string> format-caption;
+    in property <string> quality-caption;
+    in property <string> lossless-label;
+    in property <string> existing-caption;
+    in property <[string]> existing-labels;
+    in property <string> output-caption;
+    in property <string> output-text;
+    in property <string> output-choose-label;
+    in property <string> output-reset-label;
+    in property <string> convert-label;
+    in property <string> cancel-label;
+    in property <string> status;
+    in property <[string]> formats;
+    in property <int> format-index: 0;
+    in property <int> quality: 90;
+    in property <bool> show-quality: true;
+    in property <bool> show-lossless: false;
+    in property <bool> lossless: false;
+    in property <int> existing-index: 0;
+    in property <float> progress: 0;
+    in property <bool> running: false;
+    in property <bool> hovering: false;
+
+    callback add-files();
+    callback add-folder();
+    callback clear();
+    callback format-chosen(int);
+    callback quality-step(int);
+    callback lossless-toggled();
+    callback existing-chosen(int);
+    callback choose-output();
+    callback reset-output();
+    callback start();
+    callback cancel();
+
+    title: root.window-title;
+    min-width: 560px;
+    min-height: 480px;
+    preferred-width: 640px;
+    preferred-height: 560px;
+    default-font-family: "Inter";
+    background: #1f2937;
+
+    VerticalLayout {
+        padding: 14px;
+        spacing: 10px;
+
+        Rectangle {
+            vertical-stretch: 1;
+            background: root.hovering ? #1e3a5f : #111827;
+            border-radius: 6px;
+            border-width: root.hovering ? 2px : 1px;
+            border-color: root.hovering ? #3b82f6 : #374151;
+            clip: true;
+            if root.files.length == 0 : Text {
+                text: root.drop-hint;
+                color: #9ca3af;
+                font-size: 14px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                wrap: word-wrap;
+            }
+            Flickable {
+                content-height: list.preferred-height + 12px;
+                list := VerticalLayout {
+                    padding: 6px;
+                    spacing: 2px;
+                    for file in root.files : Text {
+                        text: file;
+                        color: #e5e7eb;
+                        font-size: 12px;
+                        overflow: elide;
+                    }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            PushButton { label: root.add-files-label; enabled: !root.running; clicked => { root.add-files(); } }
+            PushButton { label: root.add-folder-label; enabled: !root.running; clicked => { root.add-folder(); } }
+            PushButton { label: root.clear-label; enabled: !root.running; clicked => { root.clear(); } }
+            Text {
+                text: root.summary;
+                color: #d1d5db;
+                font-size: 12px;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 6px;
+            Caption { text: root.format-caption; }
+            for name[i] in root.formats : Chip {
+                label: name;
+                selected: i == root.format-index;
+                enabled: !root.running;
+                clicked => { root.format-chosen(i); }
+            }
+            Rectangle { horizontal-stretch: 1; }
+        }
+
+        HorizontalLayout {
+            spacing: 6px;
+            height: root.show-quality || root.show-lossless ? 28px : 0px;
+            visible: root.show-quality || root.show-lossless;
+            Caption { text: root.quality-caption; }
+            if root.show-quality : Chip {
+                label: "−";
+                enabled: !root.running;
+                clicked => { root.quality-step(-5); }
+            }
+            if root.show-quality : Text {
+                text: root.quality;
+                color: white;
+                font-size: 13px;
+                vertical-alignment: center;
+                horizontal-alignment: center;
+                min-width: 34px;
+            }
+            if root.show-quality : Chip {
+                label: "+";
+                enabled: !root.running;
+                clicked => { root.quality-step(5); }
+            }
+            if root.show-lossless : Chip {
+                label: root.lossless-label;
+                selected: root.lossless;
+                enabled: !root.running;
+                clicked => { root.lossless-toggled(); }
+            }
+            Rectangle { horizontal-stretch: 1; }
+        }
+
+        HorizontalLayout {
+            spacing: 6px;
+            Caption { text: root.existing-caption; }
+            for name[i] in root.existing-labels : Chip {
+                label: name;
+                selected: i == root.existing-index;
+                enabled: !root.running;
+                clicked => { root.existing-chosen(i); }
+            }
+            Rectangle { horizontal-stretch: 1; }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            Caption { text: root.output-caption; }
+            Text {
+                text: root.output-text;
+                color: #e5e7eb;
+                font-size: 12px;
+                vertical-alignment: center;
+                overflow: elide;
+                horizontal-stretch: 1;
+            }
+            PushButton { label: root.output-choose-label; enabled: !root.running; clicked => { root.choose-output(); } }
+            PushButton { label: root.output-reset-label; enabled: !root.running; clicked => { root.reset-output(); } }
+        }
+
+        Rectangle {
+            height: 8px;
+            border-radius: 4px;
+            background: #374151;
+            Rectangle {
+                x: 0;
+                width: parent.width * clamp(root.progress, 0, 1);
+                height: parent.height;
+                border-radius: 4px;
+                background: #3b82f6;
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            Text {
+                text: root.status;
+                color: #d1d5db;
+                font-size: 12px;
+                vertical-alignment: center;
+                overflow: elide;
+                horizontal-stretch: 1;
+            }
+            if root.running : PushButton { label: root.cancel-label; clicked => { root.cancel(); } }
+            if !root.running : PushButton {
+                label: root.convert-label;
+                primary: true;
+                enabled: root.files.length > 0;
+                clicked => { root.start(); }
+            }
+        }
+    }
+}

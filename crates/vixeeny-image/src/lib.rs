@@ -6,6 +6,7 @@
 
 #[cfg(feature = "native-codecs")]
 mod avif;
+mod decode;
 mod icc;
 #[cfg(feature = "native-codecs")]
 mod jpegli;
@@ -16,6 +17,7 @@ mod png_enc;
 pub mod tonemap;
 mod webp;
 
+pub use decode::{Decoded, SourceFormat, decode};
 pub use pixels::Bgra;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -206,6 +208,8 @@ pub enum ImageError {
     Icc(String),
     #[error("avif: {0}")]
     Avif(String),
+    #[error("cannot read the image: {0}")]
+    Decode(String),
     #[error("jpeg xl: {0}")]
     Jxl(String),
     #[error("{0:?} encoding is not part of this build")]
@@ -235,6 +239,8 @@ pub fn encode(
     }
 }
 
+#[cfg(test)]
+mod decode_tests;
 #[cfg(test)]
 mod tests;
 

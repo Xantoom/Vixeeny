@@ -5,6 +5,7 @@
 //! [`ensure_dpi_aware`] first, otherwise Windows hands out scaled (virtualised) values.
 
 pub mod clipboard;
+pub mod context_menu;
 mod geometry;
 mod time;
 pub use geometry::{PhysicalRect, virtual_bounds};

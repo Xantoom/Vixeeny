@@ -8,6 +8,8 @@ use std::sync::mpsc::{RecvTimeoutError, channel};
 use std::time::Duration;
 
 #[cfg(windows)]
+mod convert;
+#[cfg(windows)]
 mod ocr;
 #[cfg(windows)]
 mod region;
@@ -172,6 +174,42 @@ fn parse_action() -> anyhow::Result<ActionId> {
 }
 
 fn run() -> anyhow::Result<()> {
+    // `--convert <paths…>`: the conversion window on its own, no daemon needed (it is what the
+    // Explorer context-menu entry starts).
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    // The Explorer context-menu entry (until the settings app offers the switch).
+    #[cfg(windows)]
+    if let Some(flag) = args
+        .first()
+        .filter(|a| a.starts_with("--") && a.ends_with("-context-menu"))
+    {
+        let config = vixeeny_common::paths::config_file()
+            .and_then(|path| Config::load(&path).ok())
+            .unwrap_or_default();
+        let lang = vixeeny_common::i18n::Lang::resolve(&config.general.language, None);
+        let result = if flag == "--install-context-menu" {
+            let label = vixeeny_common::i18n::tr(vixeeny_common::i18n::Key::ConvMenuLabel, lang);
+            vixeeny_platform::context_menu::install(&std::env::current_exe()?, label)
+        } else {
+            vixeeny_platform::context_menu::uninstall()
+        };
+        return result.map_err(|e| anyhow::anyhow!("{e}"));
+    }
+    if args.first().is_some_and(|a| a == "--convert") {
+        let config = vixeeny_common::paths::config_file()
+            .and_then(|path| Config::load(&path).ok())
+            .unwrap_or_default();
+        #[cfg(windows)]
+        {
+            let paths: Vec<std::path::PathBuf> = args[1..].iter().map(Into::into).collect();
+            return convert::run(&config, &paths);
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = config;
+            anyhow::bail!("the conversion window is not supported on this platform yet");
+        }
+    }
     let first_action = parse_action()?;
     let config = vixeeny_common::paths::config_file()
         .and_then(|path| Config::load(&path).ok())

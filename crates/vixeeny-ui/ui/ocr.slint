@@ -3,10 +3,12 @@
 export component PushButton inherits Rectangle {
     in property <string> label;
     in property <bool> primary: false;
+    in property <bool> enabled: true;
     callback clicked();
     height: 32px;
     preferred-width: lbl.preferred-width + 28px;
     border-radius: 6px;
+    opacity: root.enabled ? 1 : 0.4;
     background: root.primary ? (touch.has-hover ? #2563eb : #3b82f6) : (touch.has-hover ? #4b5563 : #374151);
     lbl := Text {
         text: root.label;
@@ -15,7 +17,7 @@ export component PushButton inherits Rectangle {
         horizontal-alignment: center;
         vertical-alignment: center;
     }
-    touch := TouchArea { clicked => { root.clicked(); } }
+    touch := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
 }
 
 // The result of a text recognition: editable text, a status line and, when a language is

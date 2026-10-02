@@ -95,9 +95,18 @@ pub(crate) fn encode(image: &Bgra<'_>, settings: &AvifSettings) -> Result<Vec<u8
     }
 }
 
-/// Test helper: decodes to tightly packed RGB8 through libavif (dav1d).
-#[cfg(test)]
-pub(crate) fn decode_rgb(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), ImageError> {
+/// What libavif decoded: tightly packed RGBA8, the embedded profile and the display transform.
+pub(crate) struct Decoded {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+    pub icc: Option<Vec<u8>>,
+    /// Anti-clockwise quarter turns (`irot`), then the mirror (`imir`), as stored in the file.
+    pub rotation: u8,
+    pub mirror: Option<u8>,
+}
+
+pub(crate) fn decode(bytes: &[u8]) -> Result<Decoded, ImageError> {
     // SAFETY: standard decode sequence; objects are destroyed before returning, and the RGB
     // buffer is allocated by libavif and copied out before being freed.
     unsafe {
@@ -110,12 +119,12 @@ pub(crate) fn decode_rgb(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), ImageError
             )?;
             let mut rgb = avifRGBImage::default();
             avifRGBImageSetDefaults(&raw mut rgb, image);
-            rgb.format = avifRGBFormat_AVIF_RGB_FORMAT_RGB;
+            rgb.format = avifRGBFormat_AVIF_RGB_FORMAT_RGBA;
             rgb.depth = 8;
             check(avifRGBImageAllocatePixels(&raw mut rgb), "alloc")?;
             let converted = check(avifImageYUVToRGB(image, &raw mut rgb), "yuv to rgb");
             let out = converted.map(|()| {
-                let row = rgb.width as usize * 3;
+                let row = rgb.width as usize * 4;
                 let mut v = Vec::with_capacity(row * rgb.height as usize);
                 for y in 0..rgb.height as usize {
                     v.extend_from_slice(std::slice::from_raw_parts(
@@ -123,7 +132,23 @@ pub(crate) fn decode_rgb(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), ImageError
                         row,
                     ));
                 }
-                (rgb.width, rgb.height, v)
+                let img = &*image;
+                let icc = (img.icc.size > 0 && !img.icc.data.is_null())
+                    .then(|| std::slice::from_raw_parts(img.icc.data, img.icc.size).to_vec());
+                let flags = img.transformFlags;
+                Decoded {
+                    width: rgb.width,
+                    height: rgb.height,
+                    rgba: v,
+                    icc,
+                    rotation: if flags & avifTransformFlag_AVIF_TRANSFORM_IROT != 0 {
+                        img.irot.angle & 3
+                    } else {
+                        0
+                    },
+                    mirror: (flags & avifTransformFlag_AVIF_TRANSFORM_IMIR != 0)
+                        .then_some(img.imir.axis),
+                }
             });
             avifRGBImageFreePixels(&raw mut rgb);
             out
@@ -132,4 +157,18 @@ pub(crate) fn decode_rgb(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), ImageError
         avifDecoderDestroy(decoder);
         result
     }
+}
+
+/// Test helper: tightly packed RGB8.
+#[cfg(test)]
+pub(crate) fn decode_rgb(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), ImageError> {
+    let d = decode(bytes)?;
+    let rgb = d
+        .rgba
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|p| [p[0], p[1], p[2]])
+        .collect();
+    Ok((d.width, d.height, rgb))
 }

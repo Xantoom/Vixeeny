@@ -66,7 +66,7 @@ jobs:
         env:
           PKG_CONFIG_PATH: ${{ github.workspace }}/native/build/work/prefix/lib/pkgconfig
       - name: Image codecs (AVIF, JPEG XL)
-        run: cargo test -p vixeeny-image -p vixeeny-app --features vixeeny-image/native-codecs,vixeeny-app/native-codecs
+        run: cargo test -p vixeeny-image -p vixeeny-app -p vixeeny-convert --features vixeeny-image/native-codecs,vixeeny-app/native-codecs,vixeeny-convert/native-codecs
         env:
           PKG_CONFIG_PATH: ${{ github.workspace }}/native/build/work/prefix/lib/pkgconfig
   native-windows:
@@ -142,6 +142,6 @@ jobs:
         env:
           PKG_CONFIG_PATH: ${{ github.workspace }}/native/build/work/prefix/lib/pkgconfig
       - name: Image codecs (AVIF, JPEG XL)
-        run: cargo test -p vixeeny-image -p vixeeny-app --features vixeeny-image/native-codecs,vixeeny-app/native-codecs
+        run: cargo test -p vixeeny-image -p vixeeny-app -p vixeeny-convert --features vixeeny-image/native-codecs,vixeeny-app/native-codecs,vixeeny-convert/native-codecs
         env:
           PKG_CONFIG_PATH: ${{ github.workspace }}/native/build/work/prefix/lib/pkgconfig
