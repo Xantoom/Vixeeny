@@ -584,27 +584,51 @@ fn the_cache_is_reused_until_the_key_changes() {
 
 #[test]
 fn a_probe_that_hangs_or_crashes_is_contained() {
-    // `sleep` ignores `--probe` and outlives the timeout; `false` exits with an error.
     #[cfg(unix)]
     {
-        let slow = crate::probe::run_child(
-            std::path::Path::new("/bin/sleep"),
-            std::time::Duration::from_millis(100),
-        );
+        use crate::probe::{ProbeError, run_child};
+        use std::os::unix::fs::PermissionsExt;
+        let dir = scratch("child");
+        std::fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("{e}"));
+        let script = |name: &str, body: &str| {
+            let path = dir.join(name);
+            std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap_or_else(|e| panic!("{e}"));
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+                .unwrap_or_else(|e| panic!("{e}"));
+            path
+        };
+        let hang = script("hang", "sleep 30");
+        let started = std::time::Instant::now();
         assert!(matches!(
-            slow,
-            Err(crate::probe::ProbeError::Failed(_) | crate::probe::ProbeError::Timeout)
+            run_child(&hang, std::time::Duration::from_millis(200)),
+            Err(ProbeError::Timeout)
         ));
-        let failing = crate::probe::run_child(
-            std::path::Path::new("/bin/false"),
-            std::time::Duration::from_secs(5),
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(10),
+            "the child was killed"
         );
-        assert!(matches!(failing, Err(crate::probe::ProbeError::Failed(_))));
-        let missing = crate::probe::run_child(
-            std::path::Path::new("/nonexistent/vixeeny"),
-            std::time::Duration::from_secs(1),
-        );
-        assert!(matches!(missing, Err(crate::probe::ProbeError::Spawn(_))));
+        let crash = script("crash", "exit 3");
+        assert!(matches!(
+            run_child(&crash, std::time::Duration::from_secs(10)),
+            Err(ProbeError::Failed(_))
+        ));
+        let junk = script("junk", "echo 'not toml {{{'");
+        assert!(matches!(
+            run_child(&junk, std::time::Duration::from_secs(10)),
+            Err(ProbeError::Output(_))
+        ));
+        let fine = script("fine", "echo 'key = \"k\"'");
+        let ok =
+            run_child(&fine, std::time::Duration::from_secs(10)).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(ok.key, "k");
+        assert!(matches!(
+            run_child(
+                std::path::Path::new("/nonexistent/vixeeny"),
+                std::time::Duration::from_secs(1)
+            ),
+            Err(ProbeError::Spawn(_))
+        ));
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
 

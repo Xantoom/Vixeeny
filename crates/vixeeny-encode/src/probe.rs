@@ -63,6 +63,7 @@ pub struct EncoderProbe {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ProbeResult {
     /// What the result is valid for: see [`cache_key`].
     pub key: String,
