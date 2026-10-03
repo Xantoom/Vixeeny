@@ -15,6 +15,10 @@ use vixeeny_updater::{Release, check_url, is_newer, swap, verify};
 const REPOSITORY: &str = "https://github.com/Xantoom/Vixeeny";
 const PLATFORM: &str = if cfg!(windows) {
     "windows-x64"
+} else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+    "macos-arm64"
+} else if cfg!(target_os = "macos") {
+    "macos-x64"
 } else {
     "unsupported"
 };
@@ -119,6 +123,12 @@ fn stop_daemon() -> anyhow::Result<()> {
 /// The settings window, a toast or a leftover app are processes of their own: they would go on
 /// running the old version. The daemon only quits when no recording runs, so this is safe.
 fn close_apps() {
+    if cfg!(target_os = "macos") {
+        let _ = std::process::Command::new("pkill")
+            .args(["-x", "vixeeny-app"])
+            .status();
+        return;
+    }
     if !cfg!(windows) {
         return;
     }
@@ -187,19 +197,40 @@ fn apply_inner() -> anyhow::Result<()> {
     verify::check_signature(&archive, &signature, verify::PUBLIC_KEY)?;
 
     let exe = std::env::current_exe()?;
-    let install = exe.parent().context("no install folder")?.to_owned();
-    let work = install.join(".update-staged");
-    let backup = install.join(".update-backup");
+    let exe_dir = exe.parent().context("no install folder")?.to_owned();
+    // Windows: the install folder itself. macOS: the whole `Vixeeny.app` bundle (the programs
+    // are in `Contents/MacOS`), staged outside of it so the bundle's signature stays valid.
+    let (install, work, backup, staged) = if cfg!(target_os = "macos") {
+        let bundle = exe_dir
+            .parent()
+            .and_then(Path::parent)
+            .filter(|b| b.extension().is_some_and(|e| e == "app"))
+            .context("Vixeeny is not running from an application bundle")?
+            .to_owned();
+        let area = path.parent().context("no settings folder")?.join("update");
+        let work = area.join("staged");
+        let backup = area.join("backup");
+        let staged = work.join(bundle.file_name().context("bundle name")?);
+        (bundle, work, backup, staged)
+    } else {
+        let work = exe_dir.join(".update-staged");
+        let backup = exe_dir.join(".update-backup");
+        (exe_dir.clone(), work.clone(), backup, work)
+    };
     let _ = std::fs::remove_dir_all(&work);
     swap::extract(&archive, &work)?;
+    anyhow::ensure!(
+        staged.exists(),
+        "the archive does not have the expected layout"
+    );
 
     log("stopping the daemon");
     stop_daemon()?;
     log("replacing the files");
-    swap::install(&work, &install, &backup).context("cannot replace the files")?;
+    swap::install(&staged, &install, &backup).context("cannot replace the files")?;
     let _ = std::fs::remove_dir_all(&work);
     log("starting the new version");
-    start_daemon(&install)?;
+    start_daemon(&exe_dir)?;
 
     let deadline = Instant::now() + START_TIMEOUT;
     while Instant::now() < deadline {
@@ -216,7 +247,7 @@ fn apply_inner() -> anyhow::Result<()> {
     }
     eprintln!("the new version did not start: going back");
     swap::rollback(&install, &backup)?;
-    start_daemon(&install)?;
+    start_daemon(&exe_dir)?;
     bail!("the new version did not start; the previous one was restored")
 }
 

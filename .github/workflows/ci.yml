@@ -169,7 +169,7 @@ jobs:
           PKG_CONFIG_PATH: ${{ github.workspace }}/native/build/work/prefix/lib/pkgconfig
       - name: The app bundle and the disk image build
         run: |
-          cargo build --release -p vixeeny-daemon -p vixeeny-app -p xtask
+          cargo build --release -p vixeeny-daemon -p vixeeny-app -p vixeeny-updater -p xtask
           cargo xtask dist-mac --out dist
           plutil -lint dist/stage/Vixeeny.app/Contents/Info.plist
           codesign --verify --deep dist/stage/Vixeeny.app
