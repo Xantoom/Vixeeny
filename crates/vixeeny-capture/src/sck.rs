@@ -2,7 +2,7 @@
 //! ScreenCaptureKit backend for single images (macOS 14+, `SCScreenshotManager`). The screen
 //! recording permission is checked first: without it the call would hang or return a wallpaper.
 //!
-//! Not done yet: windows (`grab_window`), macOS 13 (no screenshot manager there; needs a one-frame
+//! Not done yet: macOS 13 (no screenshot manager there; needs a one-frame
 //! `SCStream`), HDR, excluding the app's own windows.
 
 use std::ptr::NonNull;
@@ -52,23 +52,59 @@ fn error_text(error: *mut NSError) -> Option<String> {
     unsafe { Retained::retain(error) }.map(|e| e.localizedDescription().to_string())
 }
 
-/// The display with `id` among the shareable content.
-fn find_display(id: u32) -> Result<Retained<objc2_screen_capture_kit::SCDisplay>, CaptureError> {
+/// What can be captured right now (displays, windows).
+fn shareable_content() -> Result<Retained<SCShareableContent>, CaptureError> {
     let (tx, rx) = channel();
     let handler = RcBlock::new(
         move |content: *mut SCShareableContent, error: *mut NSError| {
-            // SAFETY: the pointers are valid for the duration of the call; they are retained here.
-            let found = unsafe {
-                Retained::retain(content)
-                    .and_then(|c| c.displays().iter().find(|d| d.displayID() == id))
-            };
-            let error = error_text(error);
+            // SAFETY: the content pointer is null or valid for the call; it is retained here.
+            let content = unsafe { Retained::retain(content) };
             let _ =
-                tx.send(found.ok_or_else(|| error.unwrap_or_else(|| "display not found".into())));
+                tx.send(content.ok_or_else(|| {
+                    error_text(error).unwrap_or_else(|| "nothing to capture".into())
+                }));
         },
     );
     // SAFETY: the block lives until the call returns and is copied by the framework.
     unsafe { SCShareableContent::getShareableContentWithCompletionHandler(&handler) };
+    rx.recv_timeout(TIMEOUT)
+        .map_err(|_| CaptureError::Timeout)?
+        .map_err(CaptureError::Os)
+}
+
+/// Takes the picture described by `filter`, `width`×`height` pixels.
+fn screenshot(
+    filter: &SCContentFilter,
+    width: usize,
+    height: usize,
+    cursor: bool,
+) -> Result<CpuFrame, CaptureError> {
+    // SAFETY: plain Objective-C object construction and property setters.
+    let config = unsafe {
+        let config = SCStreamConfiguration::new();
+        config.setWidth(width);
+        config.setHeight(height);
+        config.setShowsCursor(cursor);
+        config.setPixelFormat(PIXEL_FORMAT_BGRA);
+        config
+    };
+    let (tx, rx) = channel();
+    let handler = RcBlock::new(move |image: *mut CGImage, error: *mut NSError| {
+        let result = match NonNull::new(image) {
+            // SAFETY: the image is valid during the callback; the frame is copied out.
+            Some(image) => frame_of(unsafe { image.as_ref() }),
+            None => Err(error_text(error).unwrap_or_else(|| "no image".to_owned())),
+        };
+        let _ = tx.send(result);
+    });
+    // SAFETY: filter, configuration and block outlive the call.
+    unsafe {
+        SCScreenshotManager::captureImageWithFilter_configuration_completionHandler(
+            filter,
+            &config,
+            Some(&handler),
+        );
+    }
     rx.recv_timeout(TIMEOUT)
         .map_err(|_| CaptureError::Timeout)?
         .map_err(CaptureError::Os)
@@ -95,44 +131,45 @@ impl StillBackend for SckBackend {
         monitor: &MonitorInfo,
         cursor: bool,
     ) -> Result<CpuFrame, CaptureError> {
-        let display = find_display(monitor.id.0 as u32)?;
-        // SAFETY: plain Objective-C object construction and property setters.
-        let (filter, config) = unsafe {
-            let filter = SCContentFilter::initWithDisplay_excludingWindows(
+        let id = monitor.id.0 as u32;
+        let content = shareable_content()?;
+        // SAFETY: reading the displays of live content.
+        let display = unsafe { content.displays() }
+            .iter()
+            .find(|d| unsafe { d.displayID() } == id)
+            .ok_or(CaptureError::UnknownMonitor)?;
+        // SAFETY: object construction.
+        let filter = unsafe {
+            SCContentFilter::initWithDisplay_excludingWindows(
                 SCContentFilter::alloc(),
                 &display,
                 &NSArray::new(),
-            );
-            let config = SCStreamConfiguration::new();
-            config.setWidth(monitor.rect.width as usize);
-            config.setHeight(monitor.rect.height as usize);
-            config.setShowsCursor(cursor);
-            config.setPixelFormat(PIXEL_FORMAT_BGRA);
-            (filter, config)
+            )
         };
-        let (tx, rx) = channel();
-        let handler = RcBlock::new(move |image: *mut CGImage, error: *mut NSError| {
-            let result = match NonNull::new(image) {
-                // SAFETY: the image is valid during the callback; the frame is copied out.
-                Some(image) => frame_of(unsafe { image.as_ref() }),
-                None => Err(error_text(error).unwrap_or_else(|| "no image".to_owned())),
-            };
-            let _ = tx.send(result);
-        });
-        // SAFETY: filter, configuration and block outlive the call.
-        unsafe {
-            SCScreenshotManager::captureImageWithFilter_configuration_completionHandler(
-                &filter,
-                &config,
-                Some(&handler),
-            );
-        }
-        rx.recv_timeout(TIMEOUT)
-            .map_err(|_| CaptureError::Timeout)?
-            .map_err(CaptureError::Os)
+        screenshot(
+            &filter,
+            monitor.rect.width as usize,
+            monitor.rect.height as usize,
+            cursor,
+        )
     }
 
-    fn grab_window(&mut self, _window: WindowId, _cursor: bool) -> Result<CpuFrame, CaptureError> {
-        Err(CaptureError::Unsupported)
+    fn grab_window(&mut self, window: WindowId, cursor: bool) -> Result<CpuFrame, CaptureError> {
+        let content = shareable_content()?;
+        // SAFETY: reading the windows of live content.
+        let found = unsafe { content.windows() }
+            .iter()
+            .find(|w| unsafe { w.windowID() } == window.0 as u32)
+            .ok_or(CaptureError::UnknownMonitor)?;
+        // SAFETY: object construction, then reading what the filter says about its content.
+        let (filter, width, height) = unsafe {
+            let filter =
+                SCContentFilter::initWithDesktopIndependentWindow(SCContentFilter::alloc(), &found);
+            let rect = filter.contentRect();
+            let scale = f64::from(filter.pointPixelScale());
+            let size = |points: f64| (points * scale).round().max(1.0) as usize;
+            (filter, size(rect.size.width), size(rect.size.height))
+        };
+        screenshot(&filter, width, height, cursor)
     }
 }

@@ -4,13 +4,18 @@
 //!
 //! What is not here yet falls back to [`crate::unsupported`] (windows list, HDR, …).
 
+use objc2::rc::Retained;
+use objc2::runtime::AnyObject;
 use objc2_core_graphics::{
     CGDisplayBounds, CGDisplayPixelsHigh, CGDisplayPixelsWide, CGEvent, CGGetActiveDisplayList,
     CGMainDisplayID, CGPreflightScreenCaptureAccess, CGRequestScreenCaptureAccess,
+    CGWindowListCopyWindowInfo, CGWindowListOption,
 };
 
 pub use crate::unsupported::*;
-use crate::{MonitorId, MonitorInfo, PhysicalRect, PlatformError, Result};
+use objc2_foundation::{NSArray, NSDictionary, NSNumber, NSString};
+
+use crate::{MonitorId, MonitorInfo, PhysicalRect, PlatformError, Result, WindowId, WindowInfo};
 
 const MAX_DISPLAYS: usize = 16;
 
@@ -67,19 +72,105 @@ pub fn cursor_position() -> Result<(i32, i32)> {
     let event =
         CGEvent::new(None).ok_or_else(|| PlatformError::Os("cannot read the pointer".into()))?;
     let at = CGEvent::location(Some(&event));
+    let scale = scale_at(at.x, at.y)?;
+    Ok(((at.x * scale).round() as i32, (at.y * scale).round() as i32))
+}
+
+/// Backing scale of the display holding the point (in points), 1.0 when none does.
+fn scale_at(x: f64, y: f64) -> Result<f64> {
     let primary = CGMainDisplayID();
-    // Points → pixels with the scale of the display under the pointer.
-    let scale = display_ids()?
+    Ok(display_ids()?
         .into_iter()
         .map(|id| (describe(id, primary), CGDisplayBounds(id)))
         .find(|(_, b)| {
-            at.x >= b.origin.x
-                && at.x < b.origin.x + b.size.width
-                && at.y >= b.origin.y
-                && at.y < b.origin.y + b.size.height
+            x >= b.origin.x
+                && x < b.origin.x + b.size.width
+                && y >= b.origin.y
+                && y < b.origin.y + b.size.height
         })
-        .map_or(1.0, |(m, _)| f64::from(m.dpi) / 96.0);
-    Ok(((at.x * scale).round() as i32, (at.y * scale).round() as i32))
+        .map_or(1.0, |(m, _)| f64::from(m.dpi) / 96.0))
+}
+
+unsafe extern "C" {
+    /// libproc: the executable path of a process.
+    fn proc_pidpath(pid: i32, buffer: *mut std::ffi::c_void, size: u32) -> i32;
+}
+
+fn exe_path_of(pid: u32) -> Option<String> {
+    let mut buffer = vec![0u8; 4096];
+    // SAFETY: the buffer is valid for `size` bytes; the call returns how many it wrote.
+    let n = unsafe { proc_pidpath(pid as i32, buffer.as_mut_ptr().cast(), buffer.len() as u32) };
+    (n > 0).then(|| String::from_utf8_lossy(&buffer[..n as usize]).into_owned())
+}
+
+type Dict = NSDictionary<NSString, AnyObject>;
+
+fn number(dict: &Dict, key: &str) -> Option<f64> {
+    let value = dict.objectForKey(&NSString::from_str(key))?;
+    value.downcast_ref::<NSNumber>().map(NSNumber::as_f64)
+}
+
+/// The visible application windows, frontmost first (layer 0, on screen, not tiny).
+pub fn top_level_windows() -> Result<Vec<WindowInfo>> {
+    let list = CGWindowListCopyWindowInfo(
+        CGWindowListOption::OptionOnScreenOnly | CGWindowListOption::ExcludeDesktopElements,
+        0,
+    )
+    .ok_or_else(|| PlatformError::Os("cannot list the windows".into()))?;
+    // SAFETY: a CFArray is an NSArray (toll-free bridging); ownership of the +1 moves over.
+    let windows: Retained<NSArray<Dict>> = unsafe {
+        Retained::from_raw(
+            objc2_core_foundation::CFRetained::into_raw(list)
+                .as_ptr()
+                .cast(),
+        )
+    }
+    .ok_or_else(|| PlatformError::Os("cannot read the window list".into()))?;
+    let mut out = Vec::new();
+    for dict in windows.iter() {
+        if number(&dict, "kCGWindowLayer") != Some(0.0) {
+            continue;
+        }
+        let Some(bounds) = dict
+            .objectForKey(&NSString::from_str("kCGWindowBounds"))
+            .and_then(|b| b.downcast::<NSDictionary>().ok())
+            // SAFETY: window dictionaries are keyed by strings.
+            .map(|b| unsafe { Retained::cast_unchecked::<Dict>(b) })
+        else {
+            continue;
+        };
+        let (Some(x), Some(y), Some(w), Some(h)) = (
+            number(&bounds, "X"),
+            number(&bounds, "Y"),
+            number(&bounds, "Width"),
+            number(&bounds, "Height"),
+        ) else {
+            continue;
+        };
+        let scale = scale_at(x, y)?;
+        let rect = PhysicalRect::new(
+            (x * scale).round() as i32,
+            (y * scale).round() as i32,
+            (w * scale).round() as u32,
+            (h * scale).round() as u32,
+        );
+        if rect.width < 50 || rect.height < 50 {
+            continue;
+        }
+        let pid = number(&dict, "kCGWindowOwnerPID").map_or(0, |p| p as u32);
+        let title = dict
+            .objectForKey(&NSString::from_str("kCGWindowName"))
+            .and_then(|t| t.downcast::<NSString>().ok())
+            .map_or_else(String::new, |t| t.to_string());
+        out.push(WindowInfo {
+            id: WindowId(number(&dict, "kCGWindowNumber").map_or(0, |n| n as u64)),
+            title,
+            rect,
+            pid,
+            exe_path: exe_path_of(pid),
+        });
+    }
+    Ok(out)
 }
 
 /// Whether the app may record the screen (System Settings → Privacy → Screen Recording).

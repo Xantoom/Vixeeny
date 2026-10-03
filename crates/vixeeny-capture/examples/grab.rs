@@ -30,6 +30,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         std::fs::write(format!("grab-{n}.ppm"), out)?;
     }
+    let windows = vixeeny_platform::top_level_windows()?;
+    for w in windows.iter().take(8) {
+        println!(
+            "window {:?}: {:?} {:?} {:?}",
+            w.id, w.title, w.rect, w.exe_path
+        );
+    }
+    if let Some(w) = windows.first() {
+        let frame = capturer.grab(&CaptureTarget::Window(w.id), CaptureOptions::default())?;
+        println!("front window: {}x{}", frame.width, frame.height);
+    }
     Ok(())
 }
 
