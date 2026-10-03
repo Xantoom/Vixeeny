@@ -22,7 +22,8 @@ The corresponding source is available from the pinned build's project; the licen
   (the choice is remembered where the portal supports it); the captured application's name is not
   known, so file names use "Screen". Global shortcuts need the GlobalShortcuts portal, else bind
   `vixeeny-daemon ctl <action>` in the compositor.
-- **Scrolling capture and the "capture all monitors" overlay** are Windows only for now.
+- **Scrolling capture** works on X11 only: Wayland portals cannot grab a zone fifteen times a
+  second, so it is refused there with a message.
 - **No zero-copy capture** (DMA-BUF): frames go through memory, which costs CPU at high
   resolutions. Hardware encoding (VAAPI, Vulkan) uses the default render device.
 - **Clipboard** needs `wl-clipboard` or `xclip` (bundled in the Flatpak); **OCR** needs Tesseract
@@ -32,5 +33,9 @@ The corresponding source is available from the pinned build's project; the licen
 
 ## macOS
 
-- Apple silicon only, not notarized (right-click → Open the first time), no app icon yet.
-- SDR and stereo only; no scrolling capture, no recording widget.
+- Apple silicon only (no Intel / universal build), not notarized (right-click → Open the first
+  time).
+- SDR and stereo only. The recording pill is a floating window that shows on every Space; it is
+  kept out of the video by `sharingType = none`, but a plain window cannot be made non-activating
+  after creation, so clicking it may bring Vixeeny forward.
+- Scrolling capture needs the Screen Recording permission like any capture.
