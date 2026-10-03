@@ -14,9 +14,11 @@ thiserror.workspace = true
 tracing.workspace = true
 vixeeny-common = { path = "../vixeeny-common" }
 
-[target.'cfg(windows)'.dependencies]
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
 global-hotkey.workspace = true
 tray-icon.workspace = true
+
+[target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
     "Win32_Foundation",
     "Win32_Globalization",
@@ -24,6 +26,13 @@ windows = { workspace = true, features = [
     "Win32_System_LibraryLoader",
     "Win32_UI_WindowsAndMessaging",
 ] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+dispatch2.workspace = true
+objc2.workspace = true
+objc2-app-kit = "0.3.2"
+objc2-foundation.workspace = true
+vixeeny-platform = { path = "../vixeeny-platform" }
 
 [lints]
 workspace = true

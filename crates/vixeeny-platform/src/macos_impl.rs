@@ -241,3 +241,23 @@ pub fn microphone_via_screen_capture_kit() -> bool {
             .is_some()
     })
 }
+
+/// The topmost window that is not ours: what the user was looking at when the shortcut fired.
+pub fn foreground_window() -> Result<Option<WindowInfo>> {
+    let own = std::process::id();
+    Ok(top_level_windows()?.into_iter().find(|w| w.pid != own))
+}
+
+/// The application's name for file names: the `.app` bundle's, else nothing (the caller falls
+/// back to the executable name).
+pub fn exe_metadata(path: &str) -> crate::ExeMetadata {
+    let product_name = path.split_once(".app/").and_then(|(before, _)| {
+        std::path::Path::new(before)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+    });
+    crate::ExeMetadata {
+        product_name,
+        file_description: None,
+    }
+}

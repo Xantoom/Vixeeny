@@ -129,14 +129,51 @@ pub fn copy_text(text: &str) -> crate::Result<()> {
     with_clipboard(|put| put(CF_UNICODETEXT, &utf16_z(text)))
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 pub fn copy_text(_text: &str) -> crate::Result<()> {
     Err(crate::PlatformError::Unsupported)
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 pub fn copy_image(_width: u32, _height: u32, _bgra: &[u8], _png: &[u8]) -> crate::Result<()> {
     Err(crate::PlatformError::Unsupported)
+}
+
+/// The general pasteboard gets the PNG (what Preview, browsers and chat apps paste).
+#[cfg(target_os = "macos")]
+pub fn copy_image(_width: u32, _height: u32, _bgra: &[u8], png: &[u8]) -> crate::Result<()> {
+    use objc2_app_kit::{NSPasteboard, NSPasteboardTypePNG};
+    use objc2_foundation::NSData;
+
+    let board = NSPasteboard::generalPasteboard();
+    board.clearContents();
+    // SAFETY: the constant is a valid pasteboard type for the lifetime of the program.
+    let kind = unsafe { NSPasteboardTypePNG };
+    if board.setData_forType(Some(&NSData::with_bytes(png)), kind) {
+        Ok(())
+    } else {
+        Err(crate::PlatformError::Os(
+            "clipboard: the pasteboard refused the image".into(),
+        ))
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub fn copy_text(text: &str) -> crate::Result<()> {
+    use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
+    use objc2_foundation::NSString;
+
+    let board = NSPasteboard::generalPasteboard();
+    board.clearContents();
+    // SAFETY: the constant is a valid pasteboard type for the lifetime of the program.
+    let kind = unsafe { NSPasteboardTypeString };
+    if board.setString_forType(&NSString::from_str(text), kind) {
+        Ok(())
+    } else {
+        Err(crate::PlatformError::Os(
+            "clipboard: the pasteboard refused the text".into(),
+        ))
+    }
 }
 
 #[cfg(test)]

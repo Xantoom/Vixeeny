@@ -146,8 +146,40 @@ pub fn notify(config: &Config, toast: &Toast) {
             tracing::warn!("cannot show the notification: {e}");
         }
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    notify_mac(config, toast);
+    #[cfg(not(any(windows, target_os = "macos")))]
     tracing::info!("notification: {toast:?}");
+}
+
+/// macOS: a notification-centre banner through `osascript` (no click action: that needs the app
+/// to be a bundle with a notification delegate, see the packaging step).
+#[cfg(target_os = "macos")]
+fn notify_mac(config: &Config, toast: &Toast) {
+    use vixeeny_common::i18n::tr;
+
+    let lang = crate::lang(&config.general.language);
+    let (title, body) = match toast {
+        Toast::Saved(kind, path) => (
+            tr(kind.title(), lang).to_owned(),
+            path.file_name()
+                .map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
+        ),
+        Toast::Failed(kind, message) => (tr(kind.title(), lang).to_owned(), message.clone()),
+    };
+    // AppleScript string literals: backslash and quote escaped.
+    let quote = |s: &str| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""));
+    let script = format!(
+        "display notification {} with title \"Vixeeny\" subtitle {}",
+        quote(&body),
+        quote(&title)
+    );
+    if let Err(e) = std::process::Command::new("osascript")
+        .args(["-e", &script])
+        .spawn()
+    {
+        tracing::warn!("cannot show the notification: {e}");
+    }
 }
 
 /// The Windows notification: a click opens the file, the button its folder (or the settings).

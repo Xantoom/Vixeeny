@@ -9,6 +9,8 @@ use std::time::Duration;
 
 #[cfg(all(windows, feature = "ffmpeg"))]
 mod audio_rig;
+#[cfg(any(windows, target_os = "macos"))]
+mod clipboard;
 #[cfg(windows)]
 mod convert;
 #[cfg(any(windows, test))]
@@ -26,7 +28,7 @@ mod scroll;
 mod settings;
 #[cfg(windows)]
 mod side;
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "macos", test))]
 mod still;
 mod toast;
 #[cfg(windows)]
@@ -92,9 +94,9 @@ fn perform(action: ActionId, config: &Config) {
     }
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 fn direct_capture(action: ActionId, config: &Config) -> anyhow::Result<std::path::PathBuf> {
-    use vixeeny_capture::{CaptureOptions, Capturer, WgcBackend};
+    use vixeeny_capture::{CaptureOptions, Capturer};
 
     let started = std::time::Instant::now();
     vixeeny_platform::ensure_dpi_aware();
@@ -115,15 +117,23 @@ fn direct_capture(action: ActionId, config: &Config) -> anyhow::Result<std::path
         now: &now,
         after_save: None,
     };
-    let mut capturer = Capturer::new(WgcBackend::new()?, snapshot.monitors.clone());
+    #[cfg(windows)]
+    let backend = vixeeny_capture::WgcBackend::new()?;
+    #[cfg(target_os = "macos")]
+    let backend = vixeeny_capture::SckBackend::new()?;
+    let mut capturer = Capturer::new(backend, snapshot.monitors.clone());
     let options = CaptureOptions {
         show_cursor: false,
+        // macOS captures are SDR for now.
+        #[cfg(windows)]
         tonemap: (config.image.hdr == "tonemap_sdr")
             .then_some(tonemap_hdr as vixeeny_capture::ToneMapFn),
+        #[cfg(not(windows))]
+        tonemap: None,
     };
     let (format, settings) = image_output(config);
     let copy = |image: &vixeeny_image::Bgra<'_>| {
-        if let Err(e) = region::copy_bgra(image) {
+        if let Err(e) = clipboard::copy_bgra(image) {
             tracing::warn!("clipboard: {e:#}");
         }
     };
@@ -158,7 +168,7 @@ fn tonemap_hdr(rgba: &[f32], info: &vixeeny_platform::HdrInfo) -> Vec<u8> {
 
 /// Output format and settings from `[image]`. An unknown value falls back to the default (PNG,
 /// 4:4:4), never to a failed capture.
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "macos", test))]
 fn image_output(config: &Config) -> (vixeeny_image::ImageFormat, vixeeny_image::Settings) {
     use vixeeny_image::{Chroma, ImageFormat, Settings};
     let mut settings = Settings::default();
@@ -183,7 +193,7 @@ fn image_output(config: &Config) -> (vixeeny_image::ImageFormat, vixeeny_image::
     (format, settings)
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 fn direct_capture(_: ActionId, _: &Config) -> anyhow::Result<std::path::PathBuf> {
     anyhow::bail!("screen capture is not supported on this platform yet")
 }

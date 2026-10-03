@@ -12,7 +12,6 @@ use vixeeny_common::config::Config;
 use vixeeny_common::ipc::ActionId;
 use vixeeny_editor::{Command, Rect, RgbaImage, Session};
 use vixeeny_image::{Bgra, ImageFormat};
-use vixeeny_platform::PlatformError;
 
 use crate::still::{self, Destination, Snapshot};
 
@@ -35,27 +34,7 @@ fn copy_to_clipboard(img: &RgbaImage) -> anyhow::Result<()> {
     ))
 }
 
-/// Lossless copy: a `PNG` entry and a bitmap (see `vixeeny_platform::clipboard`).
-pub fn copy_bgra(image: &Bgra<'_>) -> anyhow::Result<()> {
-    let png = vixeeny_image::encode(ImageFormat::Png, image, &vixeeny_image::Settings::default())?;
-    // The clipboard wants tightly packed rows.
-    let row = image.width as usize * 4;
-    let packed: Vec<u8>;
-    let pixels = if image.stride == row {
-        image.data
-    } else {
-        packed = (0..image.height as usize)
-            .flat_map(|y| {
-                image.data[y * image.stride..y * image.stride + row]
-                    .iter()
-                    .copied()
-            })
-            .collect();
-        &packed
-    };
-    vixeeny_platform::clipboard::copy_image(image.width, image.height, pixels, &png)
-        .map_err(|e: PlatformError| anyhow::anyhow!("{e}"))
-}
+pub use crate::clipboard::copy_bgra;
 
 fn save(
     config: &Config,
