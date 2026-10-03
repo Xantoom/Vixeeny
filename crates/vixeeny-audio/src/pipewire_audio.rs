@@ -20,6 +20,9 @@ use crate::{
     AudioChunk, AudioError, AudioSink, AudioSource, CHANNELS, SAMPLE_RATE, SourceEvent, SourceKind,
 };
 
+/// `PW_KEY_TARGET_OBJECT` (the crate only names it behind a version feature).
+const TARGET_OBJECT: &str = "target.object";
+
 /// Tells the PipeWire thread to leave its loop.
 struct Quit;
 
@@ -180,11 +183,11 @@ fn run(
     match kind {
         SourceKind::System => props.insert(*pw::keys::STREAM_CAPTURE_SINK, "true"),
         SourceKind::Microphone(None) => {}
-        SourceKind::Microphone(Some(name)) => props.insert(*pw::keys::TARGET_OBJECT, name.as_str()),
+        SourceKind::Microphone(Some(name)) => props.insert(TARGET_OBJECT, name.as_str()),
         SourceKind::Application(exe) => {
             let serial = find_application(&mainloop, &core, exe)?
                 .ok_or_else(|| AudioError::Unavailable(format!("{exe} is not playing sound")))?;
-            props.insert(*pw::keys::TARGET_OBJECT, serial);
+            props.insert(TARGET_OBJECT, serial);
         }
     }
 

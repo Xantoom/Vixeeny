@@ -87,13 +87,13 @@ fn on_frame(stream: &pw::stream::Stream, state: &mut Callbacks) {
     let Some(data) = buffer.datas_mut().first_mut() else {
         return;
     };
-    let chunk = *data.chunk();
-    let stride = if chunk.stride() > 0 {
-        chunk.stride() as usize
+    let (chunk_stride, chunk_offset) = (data.chunk().stride(), data.chunk().offset());
+    let stride = if chunk_stride > 0 {
+        chunk_stride as usize
     } else {
         width * 4
     };
-    let offset = chunk.offset() as usize;
+    let offset = chunk_offset as usize;
     let Some(bytes) = data.data() else {
         // A DMA-BUF buffer: not mappable here.
         return;
