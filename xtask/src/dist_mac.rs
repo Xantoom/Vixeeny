@@ -29,6 +29,8 @@ fn info_plist() -> String {
 	<string>Vixeeny</string>
 	<key>CFBundleDisplayName</key>
 	<string>Vixeeny</string>
+	<key>CFBundleIconFile</key>
+	<string>Vixeeny</string>
 	<key>CFBundleExecutable</key>
 	<string>vixeeny-daemon</string>
 	<key>CFBundlePackageType</key>
@@ -94,6 +96,10 @@ pub fn dist(args: &[String]) -> Result<()> {
     let resources = app.join("Contents/Resources");
     std::fs::create_dir_all(&resources)?;
     std::fs::copy(root.join("LICENSE"), resources.join("LICENSE"))?;
+    std::fs::copy(
+        root.join("packaging/icons/vixeeny.icns"),
+        resources.join("Vixeeny.icns"),
+    )?;
 
     // Ad hoc signature: gives the bundle a stable identity for the permission prompts. A
     // Developer ID signature and notarization replace it when the maintainer has the account.

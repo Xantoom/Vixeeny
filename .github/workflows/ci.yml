@@ -150,6 +150,7 @@ jobs:
           mkdir stage
           cp ../io.github.Xantoom.Vixeeny.* ../../../LICENSE stage/
           cp ../../../LICENSE stage/THIRD-PARTY-LICENSES.txt
+          cp ../../icons/vixeeny-256.png stage/io.github.Xantoom.Vixeeny.png
           printf '#!/bin/sh\n' > stage/vixeeny-daemon && cp stage/vixeeny-daemon stage/vixeeny-app
           flatpak-builder --user --install-deps-from=flathub --force-clean build io.github.Xantoom.Vixeeny.yml
           flatpak-builder --run build io.github.Xantoom.Vixeeny.yml tesseract --version

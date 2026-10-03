@@ -132,6 +132,11 @@ pub fn dist(args: &[String]) -> Result<()> {
     ] {
         put(&pk.join(&name), &stage.join(&name), 0o644)?;
     }
+    put(
+        &root().join("packaging/icons/vixeeny-256.png"),
+        &stage.join(format!("{ID}.png")),
+        0o644,
+    )?;
     let zip = out.join(format!("Vixeeny-{VERSION}-linux-x64.zip"));
     write_zip(&stage, &zip)?;
 
@@ -162,6 +167,15 @@ pub fn dist(args: &[String]) -> Result<()> {
         &deb_root.join(format!("usr/share/icons/hicolor/scalable/apps/{ID}.svg")),
         0o644,
     )?;
+    for size in [16, 24, 32, 48, 64, 128, 256, 512] {
+        put(
+            &root().join(format!("packaging/icons/vixeeny-{size}.png")),
+            &deb_root.join(format!(
+                "usr/share/icons/hicolor/{size}x{size}/apps/{ID}.png"
+            )),
+            0o644,
+        )?;
+    }
     let kib: u64 = files_under(&deb_root)?
         .iter()
         .filter_map(|p| std::fs::metadata(p).ok())
@@ -201,6 +215,14 @@ pub fn dist(args: &[String]) -> Result<()> {
         &appdir.join(format!("usr/share/metainfo/{ID}.metainfo.xml")),
         0o644,
     )?;
+    // The AppImage icon: `<id>.png` next to the desktop file and `.DirIcon`.
+    for name in [format!("{ID}.png"), ".DirIcon".to_owned()] {
+        put(
+            &root().join("packaging/icons/vixeeny-256.png"),
+            &appdir.join(name),
+            0o644,
+        )?;
+    }
     write(
         &appdir.join("AppRun"),
         "#!/bin/sh\nHERE=\"$(dirname \"$(readlink -f \"$0\")\")\"\nexec \"$HERE/usr/bin/vixeeny-daemon\" \"$@\"\n",

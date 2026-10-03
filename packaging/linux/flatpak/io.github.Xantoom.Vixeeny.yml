@@ -98,6 +98,7 @@ modules:
       - install -Dm755 vixeeny-daemon vixeeny-app -t /app/bin
       - install -Dm644 io.github.Xantoom.Vixeeny.desktop -t /app/share/applications
       - install -Dm644 io.github.Xantoom.Vixeeny.svg -t /app/share/icons/hicolor/scalable/apps
+      - install -Dm644 io.github.Xantoom.Vixeeny.png /app/share/icons/hicolor/256x256/apps/io.github.Xantoom.Vixeeny.png
       - install -Dm644 io.github.Xantoom.Vixeeny.metainfo.xml -t /app/share/metainfo
       - install -Dm644 LICENSE THIRD-PARTY-LICENSES.txt -t /app/share/licenses/io.github.Xantoom.Vixeeny
     sources:

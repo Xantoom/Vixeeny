@@ -28,6 +28,7 @@ OutputBaseFilename=Vixeeny-{#AppVersion}-setup
 Compression=lzma2/ultra
 SolidCompression=yes
 UninstallDisplayIcon={app}\vixeeny-daemon.exe
+SetupIconFile=..\icons\vixeeny.ico
 LicenseFile={#StageDir}\LICENSE
 CloseApplications=yes
 RestartApplications=no
