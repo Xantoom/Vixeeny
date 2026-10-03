@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use anyhow::Context;
-use vixeeny_capture::{CaptureOptions, CaptureTarget, Capturer, WgcBackend};
+use vixeeny_capture::{CaptureOptions, CaptureTarget, Capturer};
 use vixeeny_common::config::Config;
 use vixeeny_common::ipc::ActionId;
 use vixeeny_editor::{Command, Rect, RgbaImage, Session};
@@ -173,8 +173,10 @@ pub enum Mode {
     /// Annotate, then copy or save (Print Screen).
     Editor,
     /// Recognise the text of the zone as soon as it is drawn.
+    #[cfg(windows)]
     Ocr,
     /// Pick the zone of a scrolling capture.
+    #[cfg(windows)]
     Scroll,
 }
 
@@ -188,12 +190,19 @@ pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
     let bounds = vixeeny_platform::virtual_bounds(monitors.iter().map(|m| &m.rect))
         .context("no monitor found")?;
 
+    #[cfg(windows)]
+    let backend = vixeeny_capture::WgcBackend::new()?;
+    #[cfg(target_os = "macos")]
+    let backend = vixeeny_capture::SckBackend::new()?;
     let options = CaptureOptions {
         show_cursor: false,
+        #[cfg(windows)]
         tonemap: (config.image.hdr == "tonemap_sdr")
             .then_some(crate::tonemap_hdr as vixeeny_capture::ToneMapFn),
+        #[cfg(not(windows))]
+        tonemap: None,
     };
-    let mut capturer = Capturer::new(WgcBackend::new()?, monitors.clone());
+    let mut capturer = Capturer::new(backend, monitors.clone());
     let frame = capturer.grab(&CaptureTarget::AllMonitors, options)?;
     let base = RgbaImage::from_bgra(frame.width, frame.height, frame.stride, &frame.data)
         .context("unexpected capture buffer")?;
@@ -212,6 +221,7 @@ pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
         .collect();
     let scale = vixeeny_platform::monitor_at(&monitors, cursor.0, cursor.1)
         .map_or(1.0, |m| m.scale_factor() as f32);
+    #[cfg(windows)]
     let scroll_snapshot = Snapshot {
         monitors: monitors.clone(),
         cursor,
@@ -223,18 +233,27 @@ pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
         foreground,
     };
     let config = config.clone();
+    #[cfg(windows)]
     let ocr_image: std::rc::Rc<std::cell::RefCell<Option<RgbaImage>>> = std::rc::Rc::default();
+    #[cfg(windows)]
     let ocr_slot = ocr_image.clone();
+    #[cfg(windows)]
     let ocr_config = config.clone();
+    #[cfg(windows)]
     let config_for_scroll = config.clone();
 
+    #[cfg(windows)]
     let scroll_zone: std::rc::Rc<std::cell::Cell<Option<Rect>>> = std::rc::Rc::default();
+    #[cfg(windows)]
     let scroll_slot = scroll_zone.clone();
 
+    #[allow(unused_mut)]
     let mut session = Session::new(base, zones);
     match mode {
         Mode::Editor => {}
+        #[cfg(windows)]
         Mode::Ocr => session = session.with_auto_command(Command::Ocr),
+        #[cfg(windows)]
         Mode::Scroll => session = session.with_auto_command(Command::Scroll),
     }
     session.dim = f32::from(config.editor.dim_percent.min(90)) / 100.0;
@@ -251,6 +270,9 @@ pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
         }
         match command {
             Command::Close | Command::Copy | Command::Save | Command::SaveAs => false,
+            #[cfg(not(windows))]
+            Command::Ocr | Command::Scroll => false,
+            #[cfg(windows)]
             Command::Scroll => match session.zone() {
                 Some(zone) => {
                     scroll_slot.set(Some(zone));
@@ -258,6 +280,7 @@ pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
                 }
                 None => false,
             },
+            #[cfg(windows)]
             Command::Ocr => match session.export() {
                 // The overlay closes first; the result window opens afterwards.
                 Some(img) => {
@@ -273,6 +296,7 @@ pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
     overlay
         .run((bounds.x, bounds.y), (bounds.width, bounds.height))
         .map_err(|e| anyhow::anyhow!("editor window: {e}"))?;
+    #[cfg(windows)]
     if let Some(zone) = scroll_zone.take() {
         let zone = vixeeny_platform::PhysicalRect::new(
             bounds.x + zone.x.round() as i32,
@@ -282,9 +306,12 @@ pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
         );
         return crate::scroll::run(&config_for_scroll, scroll_snapshot, zone, scale);
     }
-    let recognised = ocr_image.borrow_mut().take();
-    if let Some(img) = recognised {
-        crate::ocr::run(&img, &ocr_config)?;
+    #[cfg(windows)]
+    {
+        let recognised = ocr_image.borrow_mut().take();
+        if let Some(img) = recognised {
+            crate::ocr::run(&img, &ocr_config)?;
+        }
     }
     Ok(())
 }

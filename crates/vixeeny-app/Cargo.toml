@@ -17,17 +17,19 @@ vixeeny-encode = { path = "../vixeeny-encode" }
 vixeeny-image = { path = "../vixeeny-image" }
 vixeeny-platform = { path = "../vixeeny-platform" }
 
-# The Print Screen editor (plan 5.3) is Windows-only until M21/M22.
-[target.'cfg(windows)'.dependencies]
-vixeeny-audio = { path = "../vixeeny-audio" }
-vixeeny-editor = { path = "../vixeeny-editor" }
-vixeeny-stitch = { path = "../vixeeny-stitch" }
+# The Print Screen editor (plan 5.3) and the settings window.
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
 vixeeny-convert = { path = "../vixeeny-convert" }
-vixeeny-ocr = { path = "../vixeeny-ocr" }
+vixeeny-editor = { path = "../vixeeny-editor" }
 vixeeny-settings = { path = "../vixeeny-settings" }
 vixeeny-updater = { path = "../vixeeny-updater", default-features = false }
 vixeeny-ui = { path = "../vixeeny-ui", features = ["desktop"] }
 rfd = { version = "0.17.2", default-features = false }
+
+[target.'cfg(windows)'.dependencies]
+vixeeny-audio = { path = "../vixeeny-audio" }
+vixeeny-stitch = { path = "../vixeeny-stitch" }
+vixeeny-ocr = { path = "../vixeeny-ocr" }
 
 [features]
 # The FFmpeg-backed hardware probe (`--probe`); needs the native FFmpeg build.

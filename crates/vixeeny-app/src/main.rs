@@ -11,20 +11,20 @@ use std::time::Duration;
 mod audio_rig;
 #[cfg(any(windows, target_os = "macos"))]
 mod clipboard;
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 mod convert;
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "macos", test))]
 mod gallery;
 #[cfg(windows)]
 mod ocr;
 mod probe;
 #[cfg(all(windows, feature = "ffmpeg"))]
 mod record;
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 mod region;
 #[cfg(windows)]
 mod scroll;
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 mod settings;
 #[cfg(windows)]
 mod side;
@@ -58,7 +58,7 @@ fn lang(setting: &str) -> vixeeny_common::i18n::Lang {
 fn perform(action: ActionId, config: &Config) {
     use ActionId::{CaptureAllMonitors, CaptureFullscreen, CaptureWindow};
     match action {
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         ActionId::CaptureRegion => {
             if let Err(e) = region::run(config, region::Mode::Editor) {
                 tracing::error!("editor failed: {e:#}");
@@ -234,12 +234,12 @@ fn run_action(
 
 /// The settings window is a process of its own: the hotkeys keep working while it is open.
 fn open_settings() {
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     if let Err(e) = settings::spawn() {
         tracing::error!("{e:#}");
     }
-    #[cfg(not(windows))]
-    tracing::info!("the settings window needs Windows");
+    #[cfg(not(any(windows, target_os = "macos")))]
+    tracing::info!("the settings window needs Windows or macOS");
 }
 
 #[cfg(windows)]
@@ -404,10 +404,10 @@ fn run() -> anyhow::Result<()> {
         #[cfg(windows)]
         Some("--widget") => return widget::run_child(&args[1..]),
         // The settings window and gallery, a process of its own (see `settings`).
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         Some("--settings") => return settings::run_child(),
         // The installer adds or removes the Explorer entry.
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         Some(flag @ ("--install-menu" | "--uninstall-menu")) => {
             return settings::context_menu(flag == "--install-menu");
         }
@@ -431,7 +431,7 @@ fn run() -> anyhow::Result<()> {
         _ => {}
     }
     // The Explorer context-menu entry (until the settings app offers the switch).
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     if let Some(flag) = args
         .first()
         .filter(|a| a.starts_with("--") && a.ends_with("-context-menu"))
@@ -452,12 +452,12 @@ fn run() -> anyhow::Result<()> {
         let config = vixeeny_common::paths::config_file()
             .and_then(|path| Config::load(&path).ok())
             .unwrap_or_default();
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         {
             let paths: Vec<std::path::PathBuf> = args[1..].iter().map(Into::into).collect();
             return convert::run(&config, &paths);
         }
-        #[cfg(not(windows))]
+        #[cfg(not(any(windows, target_os = "macos")))]
         {
             let _ = config;
             anyhow::bail!("the conversion window is not supported on this platform yet");

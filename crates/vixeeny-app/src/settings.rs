@@ -289,15 +289,26 @@ fn detect_hardware(handle: PanelHandle, lang: Lang, force: bool) {
 }
 
 /// The updater is a console program: started from here it must not flash a terminal.
+#[cfg(windows)]
 fn quiet(command: &mut std::process::Command) -> &mut std::process::Command {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     command.creation_flags(CREATE_NO_WINDOW)
 }
 
+#[cfg(not(windows))]
+fn quiet(command: &mut std::process::Command) -> &mut std::process::Command {
+    command
+}
+
 fn updater_exe() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
-    let path = exe.parent()?.join("vixeeny-updater.exe");
+    let name = if cfg!(windows) {
+        "vixeeny-updater.exe"
+    } else {
+        "vixeeny-updater"
+    };
+    let path = exe.parent()?.join(name);
     path.exists().then_some(path)
 }
 
