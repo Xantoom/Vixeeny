@@ -38,6 +38,11 @@ unwrap_used = "warn"
 expect_used = "warn"
 undocumented_unsafe_blocks = "deny"
 
+# Development builds: line tables are enough for backtraces and panics; full debug info made every
+# test binary of vixeeny-ui about 200 MB and the build folder tens of gigabytes.
+[profile.dev]
+debug = "line-tables-only"
+
 [profile.release]
 lto = "thin"
 codegen-units = 1
