@@ -138,6 +138,11 @@ pub struct SckVideoStream {
     _queue: DispatchRetained<DispatchQueue>,
 }
 
+// SAFETY: `SCStream` and the dispatch queue are documented as thread-safe (any thread may stop
+// the stream or release it), and the handle is only moved to the recording thread, which receives
+// frames and drops it; nothing else touches the Objective-C objects.
+unsafe impl Send for SckVideoStream {}
+
 impl SckVideoStream {
     /// Captures `monitor` at up to `fps` images per second.
     pub fn start_monitor(
