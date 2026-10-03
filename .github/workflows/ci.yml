@@ -32,6 +32,11 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test --workspace
+      - name: X11 capture against a real X server (Xvfb)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y xvfb
+          VIXEENY_REQUIRE_X11=1 xvfb-run -a cargo test -p vixeeny-capture --test x11 -- --nocapture
   daemon-windows:
     # M2: release binaries for the manual NF-1/NF-2 measurement, plus a short idle smoke test.
     runs-on: windows-latest

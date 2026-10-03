@@ -1,17 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! macOS check of the ScreenCaptureKit backend: grabs every monitor and writes `grab-<n>.ppm`
+//! macOS / Linux (X11) check of the screen backends: grabs every monitor and writes `grab-<n>.ppm`
 //! (open them with Preview). `cargo run -p vixeeny-capture --example grab`.
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    use vixeeny_capture::{CaptureOptions, CaptureTarget, Capturer, SckBackend};
+    use vixeeny_capture::{CaptureOptions, CaptureTarget, Capturer};
+    #[cfg(target_os = "macos")]
+    use vixeeny_capture::{SckBackend as Backend, SckVideoStream as Stream};
+    #[cfg(target_os = "linux")]
+    use vixeeny_capture::{X11Backend as Backend, X11VideoStream as Stream};
 
     let monitors = vixeeny_platform::monitors()?;
     for m in &monitors {
         println!("{m:?}");
     }
     println!("cursor: {:?}", vixeeny_platform::cursor_position());
-    let backend = SckBackend::new()?;
+    let backend = Backend::new()?;
     let mut capturer = Capturer::new(backend, monitors.clone());
     for (n, m) in monitors.iter().enumerate() {
         let started = std::time::Instant::now();
@@ -43,7 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     // A two-second video stream on the first monitor: frames per second and clock sanity.
     if let Some(m) = monitors.first() {
-        let stream = vixeeny_capture::SckVideoStream::start_monitor(m, 30, false)?;
+        let stream = Stream::start_monitor(m, 30, false)?;
         let started = std::time::Instant::now();
         let (mut count, mut last_ns) = (0u32, 0i64);
         while started.elapsed() < std::time::Duration::from_secs(2) {
@@ -60,7 +64,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 fn main() {
-    eprintln!("macOS only");
+    eprintln!("macOS and Linux only");
 }

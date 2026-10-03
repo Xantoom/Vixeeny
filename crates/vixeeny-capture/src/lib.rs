@@ -27,6 +27,11 @@ mod sck_stream;
 #[cfg(target_os = "macos")]
 pub use sck_stream::{SckVideoStream, StreamFrame};
 
+#[cfg(target_os = "linux")]
+mod x11;
+#[cfg(target_os = "linux")]
+pub use x11::{StreamFrame, X11Backend, X11VideoStream};
+
 pub use fake::FakeBackend;
 pub use frame::{BYTES_PER_PIXEL, CpuFrame};
 use vixeeny_platform::{HdrInfo, MonitorId, MonitorInfo, PhysicalRect, WindowId, virtual_bounds};

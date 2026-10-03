@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Placeholder until the macOS (M21) and Linux (M22) integrations.
-#![cfg_attr(target_os = "macos", allow(dead_code))]
+#![cfg_attr(any(target_os = "macos", target_os = "linux"), allow(dead_code))]
 
 use crate::{MonitorInfo, PlatformError, Result, WindowId, WindowInfo};
 

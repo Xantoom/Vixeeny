@@ -22,9 +22,14 @@ mod macos_impl;
 #[cfg(target_os = "macos")]
 use macos_impl as os;
 
+#[cfg(target_os = "linux")]
+mod linux_impl;
+#[cfg(target_os = "linux")]
+use linux_impl as os;
+
 #[cfg(not(windows))]
 mod unsupported;
-#[cfg(all(not(windows), not(target_os = "macos")))]
+#[cfg(all(not(windows), not(target_os = "macos"), not(target_os = "linux")))]
 use unsupported as os;
 
 pub use os::{
