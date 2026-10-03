@@ -4,7 +4,6 @@
 //! are X11 key grabs or the GlobalShortcuts portal, and the loop is a plain channel: any thread
 //! wakes it by sending a token, and it sleeps in `recv` otherwise.
 
-use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::sync::mpsc::{Sender, channel};
 
@@ -158,19 +157,7 @@ impl Tray for LinuxTray {
     }
 
     fn notify(&mut self, message: &str) {
-        // `notify-send` (libnotify) talks to whatever notification daemon the desktop runs.
-        let sent = Command::new("notify-send")
-            .args([
-                "--app-name=Vixeeny",
-                "--icon=camera-photo",
-                "Vixeeny",
-                message,
-            ])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .is_ok_and(|status| status.success());
+        let sent = vixeeny_platform::notify::notify("Vixeeny", message).is_ok();
         if !sent {
             let message = message.to_string();
             self.update(|t| t.message = Some(message));

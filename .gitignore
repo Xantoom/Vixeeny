@@ -2,3 +2,4 @@
 /native/build/work
 *.log
 /dist
+packaging/linux/flatpak/stage

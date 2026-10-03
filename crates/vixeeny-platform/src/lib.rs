@@ -8,6 +8,8 @@ pub mod clipboard;
 pub mod context_menu;
 mod geometry;
 pub mod native_toast;
+#[cfg(target_os = "linux")]
+pub mod notify;
 mod time;
 pub use geometry::{PhysicalRect, virtual_bounds};
 pub use time::{LocalTime, local_time};

@@ -157,7 +157,7 @@ pub fn notify(config: &Config, toast: &Toast) {
     }
 }
 
-/// Linux: `notify-send` (libnotify) reaches whatever notification daemon the desktop runs.
+/// Linux: a banner through the notification portal (sandbox) or `notify-send`.
 /// Clicking a banner is not handled: that needs D-Bus actions, a later refinement.
 #[cfg(target_os = "linux")]
 fn notify_linux(config: &Config, toast: &Toast) {
@@ -172,10 +172,7 @@ fn notify_linux(config: &Config, toast: &Toast) {
         ),
         Toast::Failed(kind, message) => (tr(kind.title(), lang).to_owned(), message.clone()),
     };
-    let sent = std::process::Command::new("notify-send")
-        .args(["--app-name=Vixeeny", "--icon=camera-photo", &title, &body])
-        .spawn();
-    if let Err(e) = sent {
+    if let Err(e) = vixeeny_platform::notify::notify(&title, &body) {
         tracing::warn!("cannot show the notification: {e}");
     }
 }

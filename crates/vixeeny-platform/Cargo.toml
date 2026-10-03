@@ -46,6 +46,8 @@ objc2-core-graphics.workspace = true
 # X11 (also under Wayland through XWayland); the portals come with the capture crate.
 [target.'cfg(target_os = "linux")'.dependencies]
 x11rb.workspace = true
+ashpd.workspace = true
+async-io.workspace = true
 
 [lints]
 workspace = true

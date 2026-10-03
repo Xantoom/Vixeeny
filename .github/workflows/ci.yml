@@ -133,6 +133,27 @@ jobs:
       - run: cargo clippy -p vixeeny-capture -p vixeeny-audio --features vixeeny-capture/pipewire,vixeeny-audio/pipewire --all-targets -- -D warnings
       - run: cargo test -p vixeeny-capture -p vixeeny-audio --features vixeeny-capture/pipewire,vixeeny-audio/pipewire
       - run: cargo clippy -p vixeeny-app --features pipewire -- -D warnings
+  flatpak:
+    # The manifest's helper modules (wl-clipboard, xclip, Tesseract) must build; the programs are
+    # stubs here, the release workflow bundles the real ones.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          sudo apt-get update && sudo apt-get install -y flatpak flatpak-builder appstream desktop-file-utils
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          desktop-file-validate packaging/linux/io.github.Xantoom.Vixeeny.desktop
+          appstreamcli validate --no-net packaging/linux/io.github.Xantoom.Vixeeny.metainfo.xml
+      - name: Build the manifest
+        working-directory: packaging/linux/flatpak
+        run: |
+          mkdir stage
+          cp ../io.github.Xantoom.Vixeeny.* ../../../LICENSE stage/
+          cp ../../../LICENSE stage/THIRD-PARTY-LICENSES.txt
+          printf '#!/bin/sh\n' > stage/vixeeny-daemon && cp stage/vixeeny-daemon stage/vixeeny-app
+          flatpak-builder --user --install-deps-from=flathub --force-clean build io.github.Xantoom.Vixeeny.yml
+          flatpak-builder --user --run build io.github.Xantoom.Vixeeny.yml tesseract --version
+          flatpak-builder --user --run build io.github.Xantoom.Vixeeny.yml sh -c 'wl-copy --version && xclip -version'
   native-windows:
     # Prebuilt shared FFmpeg (checked by SHA-256); dav1d, SVT-AV1 and the image libraries are
     # built with MSVC for libavif and the image crates.

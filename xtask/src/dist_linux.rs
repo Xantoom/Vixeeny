@@ -125,7 +125,11 @@ pub fn dist(args: &[String]) -> Result<()> {
     let stage = out.join("stage");
     let _ = std::fs::remove_dir_all(&stage);
     install_programs(&stage, &stage)?;
-    for name in [format!("{ID}.desktop"), format!("{ID}.svg")] {
+    for name in [
+        format!("{ID}.desktop"),
+        format!("{ID}.svg"),
+        format!("{ID}.metainfo.xml"),
+    ] {
         put(&pk.join(&name), &stage.join(&name), 0o644)?;
     }
     let zip = out.join(format!("Vixeeny-{VERSION}-linux-x64.zip"));

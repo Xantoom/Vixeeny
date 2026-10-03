@@ -92,8 +92,16 @@ jobs:
           echo "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0  $RUNNER_TEMP/appimagetool" | sha256sum -c -
           chmod +x "$RUNNER_TEMP/appimagetool"
           ARCH=x86_64 "$RUNNER_TEMP/appimagetool" --appimage-extract-and-run dist/Vixeeny.AppDir "dist/Vixeeny-$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)-x86_64.AppImage"
+      - name: Flatpak bundle
+        run: |
+          sudo apt-get install -y flatpak flatpak-builder
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          cp -r dist/stage packaging/linux/flatpak/stage
+          cd packaging/linux/flatpak
+          flatpak-builder --user --install-deps-from=flathub --force-clean --repo=repo build io.github.Xantoom.Vixeeny.yml
+          flatpak build-bundle repo "$GITHUB_WORKSPACE/dist/Vixeeny-$(grep -m1 '^version' "$GITHUB_WORKSPACE/Cargo.toml" | cut -d'"' -f2).flatpak" io.github.Xantoom.Vixeeny
       - name: Checksums (the updater reads SHA256SUMS-linux)
-        run: cd dist && sha256sum *.zip *.deb *.AppImage > SHA256SUMS-linux
+        run: cd dist && sha256sum *.zip *.deb *.AppImage *.flatpak > SHA256SUMS-linux
       - name: Sign (minisign)
         env:
           MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
@@ -102,7 +110,7 @@ jobs:
           if [ -z "$MINISIGN_KEY" ]; then echo "::warning::No MINISIGN_KEY secret: the files are not signed."; exit 0; fi
           cargo install rsign2 --locked
           printf '%s' "$MINISIGN_KEY" > "$RUNNER_TEMP/minisign.key"
-          for f in dist/*.zip dist/*.deb dist/*.AppImage; do
+          for f in dist/*.zip dist/*.deb dist/*.AppImage dist/*.flatpak; do
             if [ -n "$MINISIGN_PASSWORD" ]; then
               printf '%s\n' "$MINISIGN_PASSWORD" | rsign sign -s "$RUNNER_TEMP/minisign.key" -x "$f.minisig" "$f"
             else
@@ -117,6 +125,7 @@ jobs:
             dist/*.zip
             dist/*.deb
             dist/*.AppImage
+            dist/*.flatpak
             dist/*.minisig
             dist/SHA256SUMS-linux
       - name: Add to the draft release
@@ -128,7 +137,7 @@ jobs:
             gh release view "${{ github.ref_name }}" >/dev/null 2>&1 && break
             sleep 30
           done
-          gh release upload "${{ github.ref_name }}" dist/*.zip dist/*.deb dist/*.AppImage dist/*.minisig dist/SHA256SUMS-linux --clobber
+          gh release upload "${{ github.ref_name }}" dist/*.zip dist/*.deb dist/*.AppImage dist/*.flatpak dist/*.minisig dist/SHA256SUMS-linux --clobber
   windows:
     runs-on: windows-latest
     env:
