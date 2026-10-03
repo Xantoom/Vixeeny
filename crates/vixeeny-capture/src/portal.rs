@@ -135,6 +135,42 @@ impl StillBackend for PortalBackend {
     }
 }
 
+/// The still backend of the running Linux session: the portal on Wayland, X11 otherwise.
+pub enum LinuxBackend {
+    Portal(PortalBackend),
+    X11(Box<crate::X11Backend>),
+}
+
+impl LinuxBackend {
+    pub fn new(monitors: &[MonitorInfo]) -> Result<Self, CaptureError> {
+        if is_wayland_session() {
+            Ok(Self::Portal(PortalBackend::new(monitors.to_vec())))
+        } else {
+            crate::X11Backend::new().map(|b| Self::X11(Box::new(b)))
+        }
+    }
+}
+
+impl StillBackend for LinuxBackend {
+    fn grab_monitor(
+        &mut self,
+        monitor: &MonitorInfo,
+        cursor: bool,
+    ) -> Result<CpuFrame, CaptureError> {
+        match self {
+            Self::Portal(b) => b.grab_monitor(monitor, cursor),
+            Self::X11(b) => b.grab_monitor(monitor, cursor),
+        }
+    }
+
+    fn grab_window(&mut self, window: WindowId, cursor: bool) -> Result<CpuFrame, CaptureError> {
+        match self {
+            Self::Portal(b) => b.grab_window(window, cursor),
+            Self::X11(b) => b.grab_window(window, cursor),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -194,41 +230,5 @@ mod tests {
             image_rect(&right, &bounds, (7680, 2160)),
             PhysicalRect::new(3840, 0, 3840, 2160)
         );
-    }
-}
-
-/// The still backend of the running Linux session: the portal on Wayland, X11 otherwise.
-pub enum LinuxBackend {
-    Portal(PortalBackend),
-    X11(Box<crate::X11Backend>),
-}
-
-impl LinuxBackend {
-    pub fn new(monitors: &[MonitorInfo]) -> Result<Self, CaptureError> {
-        if is_wayland_session() {
-            Ok(Self::Portal(PortalBackend::new(monitors.to_vec())))
-        } else {
-            crate::X11Backend::new().map(|b| Self::X11(Box::new(b)))
-        }
-    }
-}
-
-impl StillBackend for LinuxBackend {
-    fn grab_monitor(
-        &mut self,
-        monitor: &MonitorInfo,
-        cursor: bool,
-    ) -> Result<CpuFrame, CaptureError> {
-        match self {
-            Self::Portal(b) => b.grab_monitor(monitor, cursor),
-            Self::X11(b) => b.grab_monitor(monitor, cursor),
-        }
-    }
-
-    fn grab_window(&mut self, window: WindowId, cursor: bool) -> Result<CpuFrame, CaptureError> {
-        match self {
-            Self::Portal(b) => b.grab_window(window, cursor),
-            Self::X11(b) => b.grab_window(window, cursor),
-        }
     }
 }
