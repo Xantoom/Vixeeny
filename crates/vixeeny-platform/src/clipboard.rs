@@ -129,12 +129,12 @@ pub fn copy_text(text: &str) -> crate::Result<()> {
     with_clipboard(|put| put(CF_UNICODETEXT, &utf16_z(text)))
 }
 
-#[cfg(not(any(windows, target_os = "macos")))]
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
 pub fn copy_text(_text: &str) -> crate::Result<()> {
     Err(crate::PlatformError::Unsupported)
 }
 
-#[cfg(not(any(windows, target_os = "macos")))]
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
 pub fn copy_image(_width: u32, _height: u32, _bgra: &[u8], _png: &[u8]) -> crate::Result<()> {
     Err(crate::PlatformError::Unsupported)
 }
@@ -176,6 +176,83 @@ pub fn copy_text(text: &str) -> crate::Result<()> {
     }
 }
 
+/// Linux: the clipboard belongs to the process that set it and Vixeeny's app exits right after
+/// a capture, so the data is handed to a helper that stays behind as the owner: `wl-copy`
+/// (wl-clipboard) on Wayland, `xclip` or `xsel` on X11.
+#[cfg(target_os = "linux")]
+mod linux {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    use crate::PlatformError;
+
+    fn on_wayland() -> bool {
+        std::env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty())
+    }
+
+    /// Candidate helper commands for `mime`, most suitable first.
+    pub(super) fn helpers(mime: &str, wayland: bool) -> Vec<Vec<String>> {
+        let wl = vec!["wl-copy".into(), "--type".into(), mime.into()];
+        let xclip: Vec<String> = ["xclip", "-selection", "clipboard", "-t", mime, "-i"]
+            .map(String::from)
+            .to_vec();
+        let mut out = if wayland {
+            vec![wl, xclip]
+        } else {
+            vec![xclip]
+        };
+        if mime.starts_with("text/") {
+            out.push(
+                ["xsel", "--clipboard", "--input"]
+                    .map(String::from)
+                    .to_vec(),
+            );
+        }
+        out
+    }
+
+    pub(super) fn copy(mime: &str, data: &[u8]) -> crate::Result<()> {
+        let mut last = None;
+        for argv in helpers(mime, on_wayland()) {
+            let spawned = Command::new(&argv[0])
+                .args(&argv[1..])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn();
+            let mut child = match spawned {
+                Ok(child) => child,
+                Err(e) => {
+                    last = Some(format!("{}: {e}", argv[0]));
+                    continue;
+                }
+            };
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(data);
+            }
+            match child.wait() {
+                Ok(status) if status.success() => return Ok(()),
+                Ok(status) => last = Some(format!("{} exited with {status}", argv[0])),
+                Err(e) => last = Some(format!("{}: {e}", argv[0])),
+            }
+        }
+        Err(PlatformError::Os(format!(
+            "clipboard: install wl-clipboard (Wayland) or xclip (X11) ({})",
+            last.unwrap_or_default()
+        )))
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub fn copy_image(_width: u32, _height: u32, _bgra: &[u8], png: &[u8]) -> crate::Result<()> {
+    linux::copy("image/png", png)
+}
+
+#[cfg(target_os = "linux")]
+pub fn copy_text(text: &str) -> crate::Result<()> {
+    linux::copy("text/plain;charset=utf-8", text.as_bytes())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{dibv5, utf16_z};
@@ -209,5 +286,16 @@ mod tests {
         // the bottom row comes first
         assert_eq!(&d[124..128], &[7, 8, 9, 255]);
         assert_eq!(&d[132..136], &[1, 2, 3, 255]);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_helpers_follow_the_session() {
+        let wl = super::linux::helpers("image/png", true);
+        assert_eq!(wl[0][0], "wl-copy");
+        assert_eq!(wl[1][0], "xclip");
+        let x11 = super::linux::helpers("image/png", false);
+        assert_eq!(x11.len(), 1);
+        assert_eq!(super::linux::helpers("text/plain", false).len(), 2);
     }
 }

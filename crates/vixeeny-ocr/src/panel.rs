@@ -3,8 +3,10 @@
 //! caller (translations live elsewhere); `{languages}`, `{language}`, `{command}` and `{error}`
 //! are replaced.
 
-use crate::lang::install_hint;
 use crate::{OcrError, Recognition};
+
+/// Linux has no settings page to send the user to: the hint names the packages.
+const HAS_SETTINGS: bool = cfg!(not(target_os = "linux"));
 
 /// Plain data for the window.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -44,6 +46,15 @@ fn fill(template: &str, pairs: &[(&str, &str)]) -> String {
         .fold(template.to_owned(), |s, (k, v)| s.replace(k, v))
 }
 
+/// What the user runs to get the missing language: a Windows capability name, or the packages
+/// that hold Tesseract's data on Linux.
+fn install_command(tag: &str) -> String {
+    #[cfg(target_os = "linux")]
+    return crate::linux_engine::install_command(tag);
+    #[cfg(not(target_os = "linux"))]
+    crate::lang::install_hint(tag).capability
+}
+
 /// `display_name` turns a tag into the name to show (`en-US` → `English (United States)`).
 pub fn describe(
     result: &Result<Recognition, OcrError>,
@@ -57,7 +68,7 @@ pub fn describe(
         ..OcrPanel::default()
     };
     let hint_for = |missing: &[String]| {
-        let commands: Vec<String> = missing.iter().map(|m| install_hint(m).capability).collect();
+        let commands: Vec<String> = missing.iter().map(|m| install_command(m)).collect();
         fill(
             &texts.missing_languages,
             &[
@@ -82,13 +93,13 @@ pub fn describe(
             } else {
                 hint_for(&r.missing)
             },
-            show_settings: !r.missing.is_empty(),
+            show_settings: !r.missing.is_empty() && HAS_SETTINGS,
             ..base
         },
         Err(OcrError::NoLanguage { missing, .. }) => OcrPanel {
             status: fill(&texts.no_language, &[("{languages}", &missing.join(", "))]),
             hint: hint_for(missing),
-            show_settings: true,
+            show_settings: HAS_SETTINGS,
             ..base
         },
         Err(e) => OcrPanel {
@@ -136,6 +147,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "linux"))]
     fn missing_languages_come_with_the_install_command() {
         let r = Ok(Recognition {
             language: "en-US".into(),
@@ -161,6 +173,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "linux"))]
     fn no_installed_language_is_explained() {
         let r = Err(OcrError::NoLanguage {
             missing: vec!["ja".into()],

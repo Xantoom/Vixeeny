@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! vixeeny-ocr — text recognition with the engine of the OS (plan 5.6): `Windows.Media.Ocr`
-//! and Vision (macOS); Tesseract (Linux) arrives with M21–M22. Language selection and
+//! Vision (macOS) and Tesseract (Linux, run as a program). Language selection and
 //! result choice are pure code behind the [`Engine`] trait, tested with a fake engine.
 
 mod image;
 pub mod lang;
+#[cfg(target_os = "linux")]
+mod linux_engine;
 #[cfg(target_os = "macos")]
 mod mac_engine;
 pub mod panel;
@@ -13,6 +15,8 @@ mod windows_engine;
 
 pub use image::OcrImage;
 pub use lang::{InstallHint, LanguagePlan, install_hint};
+#[cfg(target_os = "linux")]
+pub use linux_engine::TesseractEngine;
 #[cfg(target_os = "macos")]
 pub use mac_engine::VisionEngine;
 pub use panel::{OcrPanel, Texts, describe};
@@ -114,7 +118,12 @@ pub fn system_engine() -> Result<Box<dyn Engine>, OcrError> {
     Ok(Box::new(WindowsEngine::new()))
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+pub fn system_engine() -> Result<Box<dyn Engine>, OcrError> {
+    Ok(Box::new(TesseractEngine::new()))
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 pub fn system_engine() -> Result<Box<dyn Engine>, OcrError> {
     Err(OcrError::Unsupported)
 }

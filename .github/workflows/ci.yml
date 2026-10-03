@@ -37,6 +37,23 @@ jobs:
         run: |
           sudo apt-get install -y xvfb
           VIXEENY_REQUIRE_X11=1 xvfb-run -a cargo test -p vixeeny-capture --test x11 -- --nocapture
+      - name: Daemon and app end to end on a real X server (Xvfb)
+        if: runner.os == 'Linux'
+        run: |
+          cargo build -p vixeeny-daemon -p vixeeny-app
+          export HOME="$RUNNER_TEMP/home" && mkdir -p "$HOME"
+          cat > "$RUNNER_TEMP/e2e.sh" <<'SH'
+          set -u
+          target/debug/vixeeny-daemon > "$HOME/daemon.log" 2>&1 &
+          for i in $(seq 20); do target/debug/vixeeny-daemon ctl open-settings >/dev/null 2>&1 && break; sleep 1; done
+          sleep 3
+          target/debug/vixeeny-daemon ctl capture-fullscreen
+          for i in $(seq 40); do [ -n "$(find "$HOME" -name '*.png' | head -1)" ] && break; sleep 1; done
+          find "$HOME" -name '*.png' -exec ls -l {} \;
+          target/debug/vixeeny-daemon ctl quit
+          [ -n "$(find "$HOME" -name '*.png' | head -1)" ]
+          SH
+          xvfb-run -a bash "$RUNNER_TEMP/e2e.sh" || { cat "$HOME/daemon.log"; exit 1; }
   daemon-windows:
     # M2: release binaries for the manual NF-1/NF-2 measurement, plus a short idle smoke test.
     runs-on: windows-latest
@@ -82,6 +99,10 @@ jobs:
       - run: cargo test -p vixeeny-encode --features ffmpeg-next --test software_encode --test verify_registry --test recorder
         env:
           PKG_CONFIG_PATH: ${{ github.workspace }}/native/build/work/prefix/lib/pkgconfig
+      - name: The app with recording builds (clippy)
+        run: cargo clippy -p vixeeny-app --features ffmpeg -- -D warnings
+        env:
+          PKG_CONFIG_PATH: ${{ github.workspace }}/native/build/work/prefix/lib/pkgconfig
       - name: Image codecs (AVIF, JPEG XL)
         run: cargo test -p vixeeny-image -p vixeeny-app -p vixeeny-convert --features vixeeny-image/native-codecs,vixeeny-app/native-codecs,vixeeny-convert/native-codecs
         env:
@@ -100,6 +121,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y libpipewire-0.3-dev libspa-0.2-dev clang pkg-config
       - run: cargo clippy -p vixeeny-capture -p vixeeny-audio --features vixeeny-capture/pipewire,vixeeny-audio/pipewire --all-targets -- -D warnings
       - run: cargo test -p vixeeny-capture -p vixeeny-audio --features vixeeny-capture/pipewire,vixeeny-audio/pipewire
+      - run: cargo clippy -p vixeeny-app --features pipewire -- -D warnings
   native-windows:
     # Prebuilt shared FFmpeg (checked by SHA-256); dav1d, SVT-AV1 and the image libraries are
     # built with MSVC for libavif and the image crates.

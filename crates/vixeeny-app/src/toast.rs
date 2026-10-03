@@ -148,8 +148,36 @@ pub fn notify(config: &Config, toast: &Toast) {
     }
     #[cfg(target_os = "macos")]
     notify_mac(config, toast);
-    #[cfg(not(any(windows, target_os = "macos")))]
-    tracing::info!("notification: {toast:?}");
+    #[cfg(target_os = "linux")]
+    notify_linux(config, toast);
+    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+    {
+        let _ = config;
+        tracing::info!("notification: {toast:?}");
+    }
+}
+
+/// Linux: `notify-send` (libnotify) reaches whatever notification daemon the desktop runs.
+/// Clicking a banner is not handled: that needs D-Bus actions, a later refinement.
+#[cfg(target_os = "linux")]
+fn notify_linux(config: &Config, toast: &Toast) {
+    use vixeeny_common::i18n::tr;
+
+    let lang = crate::lang(&config.general.language);
+    let (title, body) = match toast {
+        Toast::Saved(kind, path) => (
+            tr(kind.title(), lang).to_owned(),
+            path.file_name()
+                .map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
+        ),
+        Toast::Failed(kind, message) => (tr(kind.title(), lang).to_owned(), message.clone()),
+    };
+    let sent = std::process::Command::new("notify-send")
+        .args(["--app-name=Vixeeny", "--icon=camera-photo", &title, &body])
+        .spawn();
+    if let Err(e) = sent {
+        tracing::warn!("cannot show the notification: {e}");
+    }
 }
 
 /// macOS: a notification-centre banner through `osascript` (no click action: that needs the app

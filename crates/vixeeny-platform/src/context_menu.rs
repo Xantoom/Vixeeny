@@ -431,6 +431,129 @@ pub fn is_installed() -> bool {
     !quick_actions().is_empty()
 }
 
+/// Linux: no shell extension exists, so the entry is a `.desktop` file for the image types
+/// (the "Open With" list of every file manager) plus a Dolphin service menu (right-click).
+pub mod desktop_entry {
+    use std::path::{Path, PathBuf};
+
+    const MIME: &[&str] = &[
+        "image/png",
+        "image/jpeg",
+        "image/webp",
+        "image/avif",
+        "image/jxl",
+        "image/bmp",
+        "image/tiff",
+        "image/gif",
+    ];
+
+    /// Quotes the program path for an `Exec` key (desktop entry spec, "The Exec key").
+    fn exec_quote(path: &Path) -> String {
+        let mut out = String::from("\"");
+        for c in path.display().to_string().chars() {
+            if matches!(c, '"' | '`' | '$' | '\\') {
+                out.push('\\');
+            }
+            out.push(c);
+        }
+        out.push('"');
+        // Percent signs would be field codes.
+        out.replace('%', "%%")
+    }
+
+    /// The "Open With" entry. `%F`: every selected file in one command line.
+    pub fn application(exe: &Path, label: &str) -> String {
+        format!(
+            "[Desktop Entry]\nType=Application\nName={label}\nExec={} --convert %F\nIcon=vixeeny\nTerminal=false\nCategories=Graphics;\nMimeType={};\nX-Vixeny-Convert=true\n",
+            exec_quote(exe),
+            MIME.join(";") + ";"
+        )
+    }
+
+    /// Dolphin's right-click service menu.
+    pub fn service_menu(exe: &Path, label: &str) -> String {
+        format!(
+            "[Desktop Entry]\nType=Service\nX-KDE-ServiceTypes=KonqPopupMenu/Plugin\nMimeType={};\nActions=vixeenyConvert\nX-KDE-Priority=TopLevel\nX-Vixeny-Convert=true\n\n[Desktop Action vixeenyConvert]\nName={label}\nIcon=vixeeny\nExec={} --convert %F\n",
+            MIME.join(";"),
+            exec_quote(exe)
+        )
+    }
+
+    /// Where each file goes, relative to the user's data folder.
+    pub fn paths() -> Option<[PathBuf; 2]> {
+        let data = std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute())
+            .or_else(|| std::env::home_dir().map(|h| h.join(".local/share")))?;
+        Some([
+            data.join("applications/vixeeny-convert.desktop"),
+            data.join("kio/servicemenus/vixeeny-convert.desktop"),
+        ])
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn the_exec_line_survives_spaces_and_quotes() {
+            let entry = application(Path::new("/opt/My \"App\"/vixeeny-app"), "Convert");
+            assert!(entry.contains("Exec=\"/opt/My \\\"App\\\"/vixeeny-app\" --convert %F"));
+            assert!(entry.contains("MimeType=image/png;"));
+            assert!(entry.contains("X-Vixeny-Convert=true\n"));
+        }
+
+        #[test]
+        fn the_service_menu_has_its_action() {
+            let menu = service_menu(Path::new("/usr/bin/vixeeny-app"), "Convert");
+            assert!(menu.contains("Actions=vixeenyConvert"));
+            assert!(menu.contains("[Desktop Action vixeenyConvert]\nName=Convert"));
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub fn install(exe: &Path, label: &str) -> crate::Result<()> {
+    let io = |e: std::io::Error| crate::PlatformError::Os(format!("desktop entry: {e}"));
+    let paths =
+        desktop_entry::paths().ok_or_else(|| crate::PlatformError::Os("no home folder".into()))?;
+    let contents = [
+        desktop_entry::application(exe, label),
+        desktop_entry::service_menu(exe, label),
+    ];
+    for (path, text) in paths.iter().zip(contents) {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(io)?;
+        }
+        std::fs::write(path, text).map_err(io)?;
+    }
+    // Refresh the "Open With" cache; absent on minimal systems, which read the folder anyway.
+    if let Some(dir) = paths[0].parent() {
+        let _ = std::process::Command::new("update-desktop-database")
+            .arg(dir)
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+pub fn uninstall() -> crate::Result<()> {
+    for path in desktop_entry::paths().into_iter().flatten() {
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(crate::PlatformError::Os(format!("desktop entry: {e}"))),
+        }
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+pub fn is_installed() -> bool {
+    desktop_entry::paths().is_some_and(|paths| paths.iter().all(|p| p.exists()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

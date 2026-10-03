@@ -16,13 +16,20 @@ fn main() {
 }
 
 /// `vixeeny-daemon ctl <action>`: asks the running daemon to run an action, for a compositor
-/// shortcut (Wayland) or a script. `ctl` alone lists the actions.
+/// shortcut (Wayland) or a script. `ctl quit` stops the daemon; `ctl` alone lists the actions.
 fn ctl(args: &[String]) -> anyhow::Result<()> {
-    let Some(action) = args.first().and_then(|name| ActionId::from_cli_name(name)) else {
-        let names: Vec<_> = ActionId::ALL.iter().map(|a| a.cli_name()).collect();
-        anyhow::bail!("usage: vixeeny-daemon ctl <{}>", names.join("|"));
+    let request = match args.first().map(String::as_str) {
+        Some("quit") => ControlRequest::Quit,
+        Some(name) => match ActionId::from_cli_name(name) {
+            Some(action) => ControlRequest::Action(action),
+            None => anyhow::bail!("unknown action `{name}`"),
+        },
+        None => {
+            let names: Vec<_> = ActionId::ALL.iter().map(|a| a.cli_name()).collect();
+            anyhow::bail!("usage: vixeeny-daemon ctl <quit|{}>", names.join("|"));
+        }
     };
-    ask_running_daemon(&Endpoint::current_user(), ControlRequest::Action(action))
+    ask_running_daemon(&Endpoint::current_user(), request)
         .map_err(|e| anyhow::anyhow!("the Vixeeny daemon does not answer ({e}); is it running?"))
 }
 

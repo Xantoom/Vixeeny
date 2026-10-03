@@ -36,8 +36,8 @@ use vixeeny_encode::validate::{self, Context as ValidateContext, Severity};
 #[cfg(windows)]
 use vixeeny_capture::VideoStream as Video;
 
-/// A frame of the macOS stream, in the shape the Windows one has.
-#[cfg(target_os = "macos")]
+/// A frame of the macOS or Linux stream, in the shape the Windows one has.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 struct Captured {
     hdr: bool,
     time_ns: i64,
@@ -47,6 +47,53 @@ struct Captured {
 /// ScreenCaptureKit video; SDR only for now.
 #[cfg(target_os = "macos")]
 struct Video(vixeeny_capture::SckVideoStream);
+
+/// The X server's screen, or the portal's PipeWire stream on a Wayland session; SDR only.
+#[cfg(target_os = "linux")]
+enum Video {
+    X11(vixeeny_capture::X11VideoStream),
+    #[cfg(feature = "pipewire")]
+    PipeWire(vixeeny_capture::PipeWireVideoStream),
+}
+
+#[cfg(target_os = "linux")]
+impl Video {
+    fn start(
+        monitor: &vixeeny_platform::MonitorInfo,
+        fps: u32,
+        cursor: bool,
+    ) -> anyhow::Result<Self> {
+        if vixeeny_capture::is_wayland_session() {
+            #[cfg(feature = "pipewire")]
+            {
+                // The portal remembers the user's choice in this file, where it supports it.
+                let token = vixeeny_common::paths::config_file()
+                    .map(|p| p.with_file_name("screencast.token"));
+                return Ok(Self::PipeWire(vixeeny_capture::PipeWireVideoStream::start(
+                    fps, cursor, token,
+                )?));
+            }
+            #[cfg(not(feature = "pipewire"))]
+            anyhow::bail!("this build cannot record a Wayland session (built without PipeWire)");
+        }
+        Ok(Self::X11(vixeeny_capture::X11VideoStream::start_monitor(
+            monitor, fps, cursor,
+        )?))
+    }
+
+    fn recv(&self, timeout: Duration) -> Result<Option<Captured>, vixeeny_capture::CaptureError> {
+        let frame = match self {
+            Self::X11(s) => s.recv(timeout)?,
+            #[cfg(feature = "pipewire")]
+            Self::PipeWire(s) => s.recv(timeout)?,
+        };
+        Ok(frame.map(|f| Captured {
+            hdr: false,
+            time_ns: f.time_ns,
+            frame: f.frame,
+        }))
+    }
+}
 
 #[cfg(target_os = "macos")]
 impl Video {
@@ -546,6 +593,12 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
         (plan.config.fps.num / plan.config.fps.den.max(1)).max(1),
         plan.cursor,
     )?);
+    #[cfg(target_os = "linux")]
+    let stream = Video::start(
+        &plan.monitor,
+        (plan.config.fps.num / plan.config.fps.den.max(1)).max(1),
+        plan.cursor,
+    )?;
     let recorder = Recorder::start(plan.config, plan.namer)?;
     let (ctl, rx) = channel();
     // The widget is a nicety: without it the recording goes on (hotkeys still work).

@@ -5,6 +5,8 @@
 
 use std::sync::mpsc::{Receiver, Sender, channel};
 
+#[cfg(all(target_os = "linux", feature = "pipewire"))]
+use vixeeny_audio::PipeWireAudioSource as OsSource;
 #[cfg(target_os = "macos")]
 use vixeeny_audio::SckAudioSource as OsSource;
 #[cfg(windows)]
@@ -16,6 +18,30 @@ use vixeeny_common::config::Config;
 use vixeeny_encode::recorder::Recorder;
 
 use crate::toast::{Failed, Toast};
+
+/// Without PipeWire in the build, a recording on Linux has no audio: every source says why.
+#[cfg(all(target_os = "linux", not(feature = "pipewire")))]
+struct OsSource;
+
+#[cfg(all(target_os = "linux", not(feature = "pipewire")))]
+impl OsSource {
+    fn new(_: vixeeny_audio::SourceKind) -> Self {
+        Self
+    }
+}
+
+#[cfg(all(target_os = "linux", not(feature = "pipewire")))]
+impl AudioSource for OsSource {
+    fn start(&mut self, _: Box<dyn AudioSink>) -> Result<(), vixeeny_audio::AudioError> {
+        Err(vixeeny_audio::AudioError::Unavailable(
+            "this build has no PipeWire audio".into(),
+        ))
+    }
+
+    fn stop(&mut self) -> Result<(), vixeeny_audio::AudioError> {
+        Ok(())
+    }
+}
 
 enum Msg {
     Chunk(usize, AudioChunk),
@@ -82,13 +108,13 @@ impl Rig {
         let mut sources: Vec<(SourceSpec, OsSource)> = wanted
             .into_iter()
             .map(|(spec, channels)| {
-                // macOS captures stereo only for now.
+                // macOS and Linux capture stereo only for now.
                 #[cfg(windows)]
                 let source = {
                     let widest = channels.into_iter().max().unwrap_or(2);
                     OsSource::with_max_channels(spec.kind.clone(), widest)
                 };
-                #[cfg(target_os = "macos")]
+                #[cfg(any(target_os = "macos", target_os = "linux"))]
                 let source = {
                     let _ = channels;
                     OsSource::new(spec.kind.clone())

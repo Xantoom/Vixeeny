@@ -8,6 +8,8 @@ use anyhow::Context;
 use vixeeny_common::config::Config;
 use vixeeny_common::i18n::{Key, Lang, tr};
 use vixeeny_editor::RgbaImage;
+#[cfg(target_os = "linux")]
+use vixeeny_ocr::TesseractEngine as OsEngine;
 #[cfg(target_os = "macos")]
 use vixeeny_ocr::VisionEngine as OsEngine;
 #[cfg(windows)]
@@ -21,7 +23,15 @@ fn texts(lang: Lang) -> Texts {
         open_settings: tr(Key::OcrOpenSettings, lang).into(),
         no_text: tr(Key::OcrNoText, lang).into(),
         language_used: tr(Key::OcrLanguageUsed, lang).into(),
-        missing_languages: tr(Key::OcrMissingLanguages, lang).into(),
+        missing_languages: tr(
+            if cfg!(target_os = "linux") {
+                Key::OcrMissingLanguagesLinux
+            } else {
+                Key::OcrMissingLanguages
+            },
+            lang,
+        )
+        .into(),
         no_language: tr(Key::OcrNoLanguage, lang).into(),
         failed: tr(Key::OcrFailed, lang).into(),
     }
@@ -42,7 +52,7 @@ pub fn run(image: &RgbaImage, config: &Config) -> anyhow::Result<()> {
         .context("unexpected image buffer")?;
     let requested = config.ocr.languages.clone();
 
-    // WinRT calls block: keep them off the UI thread.
+    // WinRT calls (and the Tesseract child process) block: keep them off the UI thread.
     let (result, names) = std::thread::spawn(move || {
         let engine = OsEngine::new();
         let names: BTreeMap<String, String> = engine

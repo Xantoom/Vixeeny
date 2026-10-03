@@ -193,6 +193,8 @@ pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
     let backend = vixeeny_capture::WgcBackend::new()?;
     #[cfg(target_os = "macos")]
     let backend = vixeeny_capture::SckBackend::new()?;
+    #[cfg(target_os = "linux")]
+    let backend = vixeeny_capture::LinuxBackend::new(&monitors)?;
     let options = CaptureOptions {
         show_cursor: false,
         #[cfg(windows)]

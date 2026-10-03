@@ -7,36 +7,42 @@
 use std::sync::mpsc::{RecvTimeoutError, channel};
 use std::time::Duration;
 
-#[cfg(all(any(windows, target_os = "macos"), feature = "ffmpeg"))]
+#[cfg(all(
+    any(windows, target_os = "macos", target_os = "linux"),
+    feature = "ffmpeg"
+))]
 mod audio_rig;
-#[cfg(any(windows, target_os = "macos"))]
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 mod clipboard;
-#[cfg(any(windows, target_os = "macos"))]
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 mod convert;
-#[cfg(any(windows, target_os = "macos", test))]
+#[cfg(any(windows, target_os = "macos", target_os = "linux", test))]
 mod gallery;
-#[cfg(any(windows, target_os = "macos"))]
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 mod ocr;
 mod probe;
-#[cfg(all(any(windows, target_os = "macos"), feature = "ffmpeg"))]
+#[cfg(all(
+    any(windows, target_os = "macos", target_os = "linux"),
+    feature = "ffmpeg"
+))]
 mod record;
-#[cfg(any(windows, target_os = "macos"))]
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 mod region;
 #[cfg(windows)]
 mod scroll;
-#[cfg(any(windows, target_os = "macos"))]
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 mod settings;
-#[cfg(any(windows, target_os = "macos"))]
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 mod side;
-#[cfg(any(windows, target_os = "macos", test))]
+#[cfg(any(windows, target_os = "macos", target_os = "linux", test))]
 mod still;
 mod toast;
 #[cfg(windows)]
 mod widget;
-#[cfg(target_os = "macos")]
-#[path = "widget_mac.rs"]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[path = "widget_stub.rs"]
 mod widget;
-#[cfg(any(windows, target_os = "macos", test))]
+#[cfg(any(windows, target_os = "macos", target_os = "linux", test))]
 mod widget_math;
 
 use anyhow::Context;
@@ -61,7 +67,7 @@ fn lang(setting: &str) -> vixeeny_common::i18n::Lang {
 fn perform(action: ActionId, config: &Config) {
     use ActionId::{CaptureAllMonitors, CaptureFullscreen, CaptureWindow};
     match action {
-        #[cfg(any(windows, target_os = "macos"))]
+        #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
         ActionId::CaptureRegion => {
             if let Err(e) = region::run(config, region::Mode::Editor) {
                 tracing::error!("editor failed: {e:#}");
@@ -73,7 +79,7 @@ fn perform(action: ActionId, config: &Config) {
                 tracing::error!("scrolling capture failed: {e:#}");
             }
         }
-        #[cfg(any(windows, target_os = "macos"))]
+        #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
         ActionId::OcrRegion => {
             if let Err(e) = region::run(config, region::Mode::Ocr) {
                 tracing::error!("OCR failed: {e:#}");
@@ -97,7 +103,7 @@ fn perform(action: ActionId, config: &Config) {
     }
 }
 
-#[cfg(any(windows, target_os = "macos"))]
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 fn direct_capture(action: ActionId, config: &Config) -> anyhow::Result<std::path::PathBuf> {
     use vixeeny_capture::{CaptureOptions, Capturer};
 
@@ -124,6 +130,8 @@ fn direct_capture(action: ActionId, config: &Config) -> anyhow::Result<std::path
     let backend = vixeeny_capture::WgcBackend::new()?;
     #[cfg(target_os = "macos")]
     let backend = vixeeny_capture::SckBackend::new()?;
+    #[cfg(target_os = "linux")]
+    let backend = vixeeny_capture::LinuxBackend::new(&snapshot.monitors)?;
     let mut capturer = Capturer::new(backend, snapshot.monitors.clone());
     let options = CaptureOptions {
         show_cursor: false,
@@ -171,7 +179,7 @@ fn tonemap_hdr(rgba: &[f32], info: &vixeeny_platform::HdrInfo) -> Vec<u8> {
 
 /// Output format and settings from `[image]`. An unknown value falls back to the default (PNG,
 /// 4:4:4), never to a failed capture.
-#[cfg(any(windows, target_os = "macos", test))]
+#[cfg(any(windows, target_os = "macos", target_os = "linux", test))]
 fn image_output(config: &Config) -> (vixeeny_image::ImageFormat, vixeeny_image::Settings) {
     use vixeeny_image::{Chroma, ImageFormat, Settings};
     let mut settings = Settings::default();
@@ -196,7 +204,7 @@ fn image_output(config: &Config) -> (vixeeny_image::ImageFormat, vixeeny_image::
     (format, settings)
 }
 
-#[cfg(not(any(windows, target_os = "macos")))]
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
 fn direct_capture(_: ActionId, _: &Config) -> anyhow::Result<std::path::PathBuf> {
     anyhow::bail!("screen capture is not supported on this platform yet")
 }
@@ -237,15 +245,15 @@ fn run_action(
 
 /// The settings window is a process of its own: the hotkeys keep working while it is open.
 fn open_settings() {
-    #[cfg(any(windows, target_os = "macos"))]
+    #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
     if let Err(e) = settings::spawn() {
         tracing::error!("{e:#}");
     }
-    #[cfg(not(any(windows, target_os = "macos")))]
+    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
     tracing::info!("the settings window needs Windows or macOS");
 }
 
-#[cfg(any(windows, target_os = "macos"))]
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 fn overlay(
     config: &mut Config,
     recording: &Recording,
@@ -277,7 +285,7 @@ fn overlay(
     Ok(outcome.action)
 }
 
-#[cfg(not(any(windows, target_os = "macos")))]
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
 fn overlay(
     _: &mut Config,
     _: &Recording,
@@ -290,38 +298,59 @@ fn overlay(
 /// The recording started by `RecordToggle`, if any (Windows with FFmpeg only).
 #[derive(Default)]
 struct Recording {
-    #[cfg(all(any(windows, target_os = "macos"), feature = "ffmpeg"))]
+    #[cfg(all(
+        any(windows, target_os = "macos", target_os = "linux"),
+        feature = "ffmpeg"
+    ))]
     handle: Option<record::Handle>,
     /// The replay buffer (`ReplayToggle`), which runs alongside a recording.
-    #[cfg(all(any(windows, target_os = "macos"), feature = "ffmpeg"))]
+    #[cfg(all(
+        any(windows, target_os = "macos", target_os = "linux"),
+        feature = "ffmpeg"
+    ))]
     replay: Option<record::Handle>,
 }
 
 impl Recording {
     /// `(recording, replay buffer)` is running.
-    #[cfg(all(any(windows, target_os = "macos"), feature = "ffmpeg"))]
+    #[cfg(all(
+        any(windows, target_os = "macos", target_os = "linux"),
+        feature = "ffmpeg"
+    ))]
     fn flags(&self) -> (bool, bool) {
         (self.handle.is_some(), self.replay.is_some())
     }
 
-    #[cfg(not(all(any(windows, target_os = "macos"), feature = "ffmpeg")))]
+    #[cfg(not(all(
+        any(windows, target_os = "macos", target_os = "linux"),
+        feature = "ffmpeg"
+    )))]
     #[allow(clippy::unused_self, dead_code)]
     fn flags(&self) -> (bool, bool) {
         (false, false)
     }
 
-    #[cfg(all(any(windows, target_os = "macos"), feature = "ffmpeg"))]
+    #[cfg(all(
+        any(windows, target_os = "macos", target_os = "linux"),
+        feature = "ffmpeg"
+    ))]
     fn active(&self) -> bool {
         self.handle.is_some() || self.replay.is_some()
     }
 
-    #[cfg(not(all(any(windows, target_os = "macos"), feature = "ffmpeg")))]
+    #[cfg(not(all(
+        any(windows, target_os = "macos", target_os = "linux"),
+        feature = "ffmpeg"
+    )))]
     #[allow(clippy::unused_self)]
     fn active(&self) -> bool {
         false
     }
 
-    #[cfg(all(any(windows, target_os = "macos"), feature = "ffmpeg"))]
+    #[cfg(all(
+        any(windows, target_os = "macos", target_os = "linux"),
+        feature = "ffmpeg"
+    ))]
     fn handle(&mut self, action: ActionId, config: &Config) {
         match action {
             ActionId::ReplayToggle => {
@@ -362,14 +391,20 @@ impl Recording {
         }
     }
 
-    #[cfg(not(all(any(windows, target_os = "macos"), feature = "ffmpeg")))]
+    #[cfg(not(all(
+        any(windows, target_os = "macos", target_os = "linux"),
+        feature = "ffmpeg"
+    )))]
     #[allow(clippy::unused_self)]
     fn handle(&mut self, action: ActionId, _: &Config) {
         tracing::info!("action {action:?}: recording needs Windows and the `ffmpeg` feature");
     }
 
     /// Tells the daemon (tray icon) when the state changed, and forgets a finished recording.
-    #[cfg(all(any(windows, target_os = "macos"), feature = "ffmpeg"))]
+    #[cfg(all(
+        any(windows, target_os = "macos", target_os = "linux"),
+        feature = "ffmpeg"
+    ))]
     fn report(&mut self, send: &mut impl std::io::Write) -> anyhow::Result<()> {
         let Some(handle) = self.handle.as_mut() else {
             return Ok(());
@@ -389,7 +424,10 @@ impl Recording {
         Ok(())
     }
 
-    #[cfg(not(all(any(windows, target_os = "macos"), feature = "ffmpeg")))]
+    #[cfg(not(all(
+        any(windows, target_os = "macos", target_os = "linux"),
+        feature = "ffmpeg"
+    )))]
     #[allow(clippy::unused_self)]
     fn report(&mut self, _: &mut impl std::io::Write) -> anyhow::Result<()> {
         Ok(())
@@ -407,10 +445,10 @@ fn run() -> anyhow::Result<()> {
         #[cfg(windows)]
         Some("--widget") => return widget::run_child(&args[1..]),
         // The settings window and gallery, a process of its own (see `settings`).
-        #[cfg(any(windows, target_os = "macos"))]
+        #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
         Some("--settings") => return settings::run_child(),
         // The installer adds or removes the Explorer entry.
-        #[cfg(any(windows, target_os = "macos"))]
+        #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
         Some(flag @ ("--install-menu" | "--uninstall-menu")) => {
             return settings::context_menu(flag == "--install-menu");
         }
@@ -434,7 +472,7 @@ fn run() -> anyhow::Result<()> {
         _ => {}
     }
     // The Explorer context-menu entry (until the settings app offers the switch).
-    #[cfg(any(windows, target_os = "macos"))]
+    #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
     if let Some(flag) = args
         .first()
         .filter(|a| a.starts_with("--") && a.ends_with("-context-menu"))
@@ -455,12 +493,12 @@ fn run() -> anyhow::Result<()> {
         let config = vixeeny_common::paths::config_file()
             .and_then(|path| Config::load(&path).ok())
             .unwrap_or_default();
-        #[cfg(any(windows, target_os = "macos"))]
+        #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
         {
             let paths: Vec<std::path::PathBuf> = args[1..].iter().map(Into::into).collect();
             return convert::run(&config, &paths);
         }
-        #[cfg(not(any(windows, target_os = "macos")))]
+        #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
         {
             let _ = config;
             anyhow::bail!("the conversion window is not supported on this platform yet");
