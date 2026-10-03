@@ -253,12 +253,19 @@ fn plan(config: &Config, allow_gpu: bool, replay: bool) -> anyhow::Result<Plan> 
         .iter()
         .map(|(k, v)| (k.clone(), v.to_ffmpeg()))
         .collect();
-    let (audio, unknown) = vixeeny_audio::plan_tracks(&profile.audio);
+    let (mut audio, unknown) = vixeeny_audio::plan_tracks(&profile.audio);
     for name in unknown {
         tracing::warn!("unknown audio source `{name}` ignored");
     }
     let audio_codec = AudioCodec::from_setting(&profile.audio.codec, container)
         .with_context(|| format!("unknown audio codec `{}`", profile.audio.codec))?;
+    if profile.audio.surround && audio_codec.surround_in(container) {
+        vixeeny_audio::assign_channels(
+            &mut audio,
+            vixeeny_audio::MAX_CHANNELS,
+            vixeeny_audio::source_channels,
+        );
+    }
     let audio_configs = audio
         .iter()
         .map(|t| AudioTrackConfig {
@@ -266,6 +273,7 @@ fn plan(config: &Config, allow_gpu: bool, replay: bool) -> anyhow::Result<Plan> 
             codec: audio_codec,
             bitrate_kbps: profile.audio.bitrate_kbps,
             vbr: profile.audio.vbr,
+            channels: t.channels,
         })
         .collect();
     // An SDR monitor has nothing to preserve: such a recording stays SDR.

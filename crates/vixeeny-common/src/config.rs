@@ -347,6 +347,8 @@ pub struct Audio {
     pub codec: String,
     pub bitrate_kbps: u32,
     pub vbr: bool,
+    /// Keep 5.1/7.1 sources in surround (Matroska with Opus, FLAC or PCM; stereo elsewhere).
+    pub surround: bool,
     /// Volume per source (`"mic" = 0.8`); missing = 1.0.
     pub volumes: BTreeMap<String, f32>,
     /// The tracks of `routing = "advanced"`.
@@ -369,6 +371,7 @@ impl Default for Audio {
             codec: "auto".into(),
             bitrate_kbps: 160,
             vbr: true,
+            surround: true,
             volumes: BTreeMap::new(),
             tracks: Vec::new(),
         }

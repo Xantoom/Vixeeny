@@ -280,9 +280,9 @@ impl Recorder {
         }
     }
 
-    /// Appends samples (48 kHz, stereo, interleaved f32) to audio track `track`. The track is one
-    /// gapless stream starting at the recording's time zero (the origin of the video timestamps):
-    /// `vixeeny_audio::Mixer` produces exactly that. Blocks when the encoder is behind, so no
+    /// Appends samples (48 kHz, interleaved f32, in the track's channel count) to audio track
+    /// `track`. The track is one gapless stream starting at the recording's time zero (the origin
+    /// of the video timestamps): `vixeeny_audio::Mixer` produces exactly that. Blocks when the encoder is behind, so no
     /// audio is ever dropped (a dropped block would shift the track).
     pub fn push_audio(&self, track: usize, samples: Vec<f32>) {
         let _ = self.tx.send(Cmd::Audio(track, samples));
@@ -572,9 +572,10 @@ impl Worker {
             t.pending.extend_from_slice(&samples);
             return Ok(());
         }
-        let skip = t.to_skip.min(samples.len() / 2);
+        let channels = t.enc.channels();
+        let skip = t.to_skip.min(samples.len() / channels);
         t.to_skip -= skip;
-        samples.drain(..skip * 2);
+        samples.drain(..skip * channels);
         if samples.is_empty() {
             return Ok(());
         }

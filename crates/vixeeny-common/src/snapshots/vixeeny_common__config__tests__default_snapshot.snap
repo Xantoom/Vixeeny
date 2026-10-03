@@ -86,6 +86,7 @@ sources = ["system"]
 codec = "auto"
 bitrate_kbps = 160
 vbr = true
+surround = true
 tracks = []
 
 [profiles.default.audio.volumes]

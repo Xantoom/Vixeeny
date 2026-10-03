@@ -8,6 +8,7 @@
 //! is placed by its timestamp (a gap becomes silence, an overlap overwrites), which bounds the
 //! error against the master clock whatever the drift.
 
+use crate::layout::convert;
 use crate::{AudioChunk, CHANNELS, SAMPLE_RATE};
 
 /// 20 ms.
@@ -20,12 +21,13 @@ const RESYNC_FRAMES: i64 = 480;
 /// A run of mixed, gapless samples: the next ones of the track.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Block {
+    pub channels: usize,
     pub samples: Vec<f32>,
 }
 
 impl Block {
     pub fn frames(&self) -> usize {
-        self.samples.len() / CHANNELS
+        self.samples.len() / self.channels.max(1)
     }
 }
 
@@ -49,6 +51,8 @@ enum State {
 }
 
 pub struct Mixer {
+    /// Channels of the track (2, 6 or 8); chunks of other layouts are converted.
+    channels: usize,
     sources: Vec<Source>,
     /// Master time and track index at which the current stretch (since the last resume) began.
     epoch_ns: i64,
@@ -59,9 +63,15 @@ pub struct Mixer {
 }
 
 impl Mixer {
-    /// One source per entry of `volumes` (1.0 = unchanged). The track starts at `origin_ns`.
+    /// A stereo track: one source per entry of `volumes` (1.0 = unchanged), starting at `origin_ns`.
     pub fn new(volumes: &[f32], origin_ns: i64) -> Self {
+        Self::with_channels(volumes, origin_ns, CHANNELS)
+    }
+
+    /// Like [`new`](Self::new) for a track of `channels` channels.
+    pub fn with_channels(volumes: &[f32], origin_ns: i64, channels: usize) -> Self {
         Self {
+            channels,
             sources: volumes
                 .iter()
                 .map(|&volume| Source {
@@ -120,17 +130,23 @@ impl Mixer {
             _ => at,
         };
         s.expected = Some((start + frames as i64).max(0) as u64);
-        let mut data = &chunk.samples[..frames as usize * CHANNELS];
+        let converted = convert(
+            &chunk.samples[..frames as usize * chunk.channels.max(1)],
+            chunk.channels,
+            self.channels,
+        );
+        let channels = self.channels;
+        let mut data: &[f32] = &converted;
         if start < next as i64 {
             // Already emitted: keep only what is still ahead.
             let skip = next as i64 - start;
             if skip >= frames as i64 {
                 return;
             }
-            data = &data[skip as usize * CHANNELS..];
+            data = &data[skip as usize * channels..];
             start = next as i64;
         }
-        let from = (start - next as i64) as usize * CHANNELS;
+        let from = (start - next as i64) as usize * channels;
         if s.buf.len() < from + data.len() {
             s.buf.resize(from + data.len(), 0.0);
         }
@@ -140,9 +156,9 @@ impl Mixer {
     fn emit_until(&mut self, limit: u64, partial: bool, out: &mut Vec<Block>) {
         while self.next < limit && (partial || self.next + BLOCK_FRAMES <= limit) {
             let len = BLOCK_FRAMES.min(limit - self.next) as usize;
-            let mut samples = vec![0.0f32; len * CHANNELS];
+            let mut samples = vec![0.0f32; len * self.channels];
             for s in &mut self.sources {
-                let take = (len * CHANNELS).min(s.buf.len());
+                let take = (len * self.channels).min(s.buf.len());
                 for (acc, v) in samples.iter_mut().zip(&s.buf[..take]) {
                     *acc += v * s.volume;
                 }
@@ -152,7 +168,10 @@ impl Mixer {
                 *v = v.clamp(-1.0, 1.0);
             }
             self.next += len as u64;
-            out.push(Block { samples });
+            out.push(Block {
+                channels: self.channels,
+                samples,
+            });
         }
     }
 
@@ -244,7 +263,7 @@ mod tests {
             let v = f(i);
             samples.extend_from_slice(&[v, v]);
         }
-        AudioChunk { time_ns, samples }
+        AudioChunk::stereo(time_ns, samples)
     }
 
     fn collect(blocks: &[Block]) -> Vec<f32> {
@@ -369,5 +388,28 @@ mod tests {
         m.push(0, &chunk(0, 480, |_| 0.9));
         let rest = collect(&m.finish(2 * S));
         assert!(rest.iter().all(|v| *v == 0.0));
+    }
+
+    #[test]
+    fn a_surround_track_takes_surround_and_stereo_sources() {
+        let mut m = Mixer::with_channels(&[1.0, 1.0], 0, 6);
+        // 100 ms of 5.1 with only the centre on, and of stereo with only the left on.
+        let surround = AudioChunk {
+            time_ns: 0,
+            channels: 6,
+            samples: [0.0, 0.0, 0.5, 0.0, 0.0, 0.0].repeat(4_800),
+        };
+        let stereo = AudioChunk::stereo(0, [0.25, 0.0].repeat(4_800));
+        m.push(0, &surround);
+        m.push(1, &stereo);
+        let blocks = m.finish(100 * MS);
+        assert!(!blocks.is_empty());
+        for b in &blocks {
+            assert_eq!(b.channels, 6);
+            assert_eq!(b.samples.len(), b.frames() * 6);
+            for frame in b.samples.chunks(6) {
+                assert_eq!(frame, [0.25, 0.0, 0.5, 0.0, 0.0, 0.0]);
+            }
+        }
     }
 }

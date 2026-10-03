@@ -19,6 +19,25 @@ pub struct TrackPlan {
     /// The name the track carries in the file.
     pub title: String,
     pub members: Vec<TrackMember>,
+    /// Channels of the track: 2, or 6/8 when `assign_channels` found a surround source.
+    pub channels: usize,
+}
+
+/// Gives each track the layout of its richest source, at most `max` channels (2 keeps every
+/// track stereo). `probe` tells the channels a source delivers when allowed up to `max`.
+pub fn assign_channels(
+    tracks: &mut [TrackPlan],
+    max: usize,
+    probe: impl Fn(&crate::SourceKind, usize) -> usize,
+) {
+    for track in tracks {
+        track.channels = track
+            .members
+            .iter()
+            .map(|m| probe(&m.source.kind, max))
+            .max()
+            .map_or(2, |n| crate::track_channels(n, max));
+    }
 }
 
 /// The tracks of a profile, and the source names that could not be understood.
@@ -49,6 +68,7 @@ pub fn plan_tracks(audio: &Audio) -> (Vec<TrackPlan>, Vec<String>) {
                 Vec::new()
             } else {
                 vec![TrackPlan {
+                    channels: 2,
                     title: "Mix".into(),
                     members: sources.into_iter().map(member).collect(),
                 }]
@@ -60,6 +80,7 @@ pub fn plan_tracks(audio: &Audio) -> (Vec<TrackPlan>, Vec<String>) {
             .filter_map(|t| {
                 let sources = parse_all(&t.sources, &mut unknown);
                 (!sources.is_empty()).then(|| TrackPlan {
+                    channels: 2,
                     title: if t.name.trim().is_empty() {
                         sources[0].title()
                     } else {
@@ -73,6 +94,7 @@ pub fn plan_tracks(audio: &Audio) -> (Vec<TrackPlan>, Vec<String>) {
         _ => parse_all(&audio.sources, &mut unknown)
             .into_iter()
             .map(|s| TrackPlan {
+                channels: 2,
                 title: s.title(),
                 members: vec![member(s)],
             })
@@ -149,6 +171,22 @@ mod tests {
         assert_eq!(titles, ["Tout", "Micro seul", "Spotify"]);
         assert_eq!(tracks[0].members.len(), 3);
         assert_eq!(unknown, ["nonsense"]);
+    }
+
+    #[test]
+    fn a_track_takes_the_richest_layout_of_its_sources_up_to_the_limit() {
+        use crate::SourceKind;
+        let (mut tracks, _) = plan_tracks(&audio("mix_all", &["mic", "system"]));
+        let probe = |kind: &SourceKind, max: usize| match kind {
+            SourceKind::System => 8.min(max),
+            _ => 2,
+        };
+        assign_channels(&mut tracks, 8, probe);
+        assert_eq!(tracks[0].channels, 8);
+        assign_channels(&mut tracks, 6, probe);
+        assert_eq!(tracks[0].channels, 6);
+        assign_channels(&mut tracks, 2, probe);
+        assert_eq!(tracks[0].channels, 2);
     }
 
     #[test]

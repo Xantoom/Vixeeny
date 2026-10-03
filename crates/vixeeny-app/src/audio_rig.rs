@@ -53,29 +53,36 @@ impl Rig {
     /// Starts every source of `plan`. A source that cannot start now is retried by itself.
     pub fn start(plan: &[TrackPlan], origin: i64, notice: Config) -> Self {
         let (tx, rx) = channel();
-        let mut sources: Vec<(SourceSpec, WasapiSource)> = Vec::new();
+        let mut wanted: Vec<(SourceSpec, Vec<usize>)> = Vec::new();
         let mut tracks = Vec::new();
         for track in plan {
             let mut members = Vec::new();
             for member in &track.members {
-                let index = match sources.iter().position(|(s, _)| *s == member.source) {
+                let index = match wanted.iter().position(|(s, _)| *s == member.source) {
                     Some(i) => i,
                     None => {
-                        sources.push((
-                            member.source.clone(),
-                            WasapiSource::new(member.source.kind.clone()),
-                        ));
-                        sources.len() - 1
+                        wanted.push((member.source.clone(), Vec::new()));
+                        wanted.len() - 1
                     }
                 };
+                // A source shared by several tracks serves the widest of them.
+                wanted[index].1.push(track.channels);
                 members.push(index);
             }
             let volumes: Vec<f32> = track.members.iter().map(|m| m.volume).collect();
             tracks.push(TrackRt {
-                mixer: Mixer::new(&volumes, 0),
+                mixer: Mixer::with_channels(&volumes, 0, track.channels),
                 members,
             });
         }
+        let mut sources: Vec<(SourceSpec, WasapiSource)> = wanted
+            .into_iter()
+            .map(|(spec, channels)| {
+                let widest = channels.into_iter().max().unwrap_or(2);
+                let source = WasapiSource::with_max_channels(spec.kind.clone(), widest);
+                (spec, source)
+            })
+            .collect();
         for (i, (spec, source)) in sources.iter_mut().enumerate() {
             let sink = ChannelSink {
                 source: i,

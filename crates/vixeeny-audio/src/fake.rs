@@ -46,7 +46,7 @@ impl FakeAudioSource {
         }
         let time_ns = (self.produced as f64 / f64::from(SAMPLE_RATE) / self.drift * 1e9) as i64;
         self.produced += frames as u64;
-        AudioChunk { time_ns, samples }
+        AudioChunk::stereo(time_ns, samples)
     }
 
     /// Makes a chunk and hands it to the sink given to `start`.

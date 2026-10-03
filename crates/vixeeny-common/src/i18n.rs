@@ -167,6 +167,7 @@ pub enum Key {
     SetAudioCodec,
     SetAudioBitrate,
     SetAudioVbr,
+    SetAudioSurround,
     SetReplayStart,
     SetReplayDuration,
     SetReplayProfile,
@@ -432,6 +433,7 @@ impl Key {
         Self::SetAudioCodec,
         Self::SetAudioBitrate,
         Self::SetAudioVbr,
+        Self::SetAudioSurround,
         Self::SetReplayStart,
         Self::SetReplayDuration,
         Self::SetReplayProfile,
@@ -891,6 +893,12 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::SetAudioBitrate, Lang::Fr) => "Débit audio (kbit/s)",
         (Key::SetAudioVbr, Lang::En) => "Variable bitrate",
         (Key::SetAudioVbr, Lang::Fr) => "Débit variable",
+        (Key::SetAudioSurround, Lang::En) => {
+            "Keep 5.1 / 7.1 sound (Matroska with Opus, FLAC or PCM)"
+        }
+        (Key::SetAudioSurround, Lang::Fr) => {
+            "Conserver le son 5.1 / 7.1 (Matroska avec Opus, FLAC ou PCM)"
+        }
         (Key::SetReplayStart, Lang::En) => "Start the replay buffer with the system",
         (Key::SetReplayStart, Lang::Fr) => "Activer le replay au démarrage",
         (Key::SetReplayDuration, Lang::En) => "Replay duration (seconds)",

@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Audio capture and mixing for recordings (plan 5.10).
 //!
-//! Every source delivers 48 kHz, stereo, 32-bit float samples (the OS converts), each chunk dated
+//! Every source delivers 48 kHz, 32-bit float samples in 2, 6 or 8 channels (the OS converts the
+//! sample rate; the channel count is the device's own, see [`layout`]), each chunk dated
 //! on the master clock (the OS monotonic clock, nanoseconds, same as video). The [`Mixer`]
 //! places the chunks of one track on a continuous timeline, fills gaps with silence and corrects
 //! clock drift, so the encoder gets gapless audio that stays in sync with the video.
 
 mod fake;
+mod layout;
 mod mixer;
 mod routing;
 mod spec;
@@ -14,29 +16,50 @@ mod spec;
 mod wasapi;
 
 pub use fake::FakeAudioSource;
+pub use layout::{convert as convert_layout, track_channels};
 pub use mixer::{Block, Mixer};
-pub use routing::{TrackMember, TrackPlan, plan_tracks};
+pub use routing::{TrackMember, TrackPlan, assign_channels, plan_tracks};
 pub use spec::{SourceKind, SourceSpec, parse_sources};
 #[cfg(windows)]
-pub use wasapi::{AppInfo, DeviceInfo, WasapiSource, list_applications, list_microphones};
+pub use wasapi::{
+    AppInfo, DeviceInfo, WasapiSource, list_applications, list_microphones, source_channels,
+};
 
 /// Samples per second, per channel.
 pub const SAMPLE_RATE: u32 = 48_000;
-/// Interleaved channels in every chunk.
+/// Channels of a stereo chunk, the default.
 pub const CHANNELS: usize = 2;
+/// The most channels a track can have (7.1).
+pub const MAX_CHANNELS: usize = 8;
+
+/// Without WASAPI every source is stereo.
+#[cfg(not(windows))]
+pub fn source_channels(_kind: &SourceKind, _max: usize) -> usize {
+    CHANNELS
+}
 
 /// A run of interleaved samples.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AudioChunk {
     /// Master-clock time of the first sample, nanoseconds.
     pub time_ns: i64,
-    /// `frames × CHANNELS` samples in -1…1.
+    /// Interleaved channels: 2, 6 or 8.
+    pub channels: usize,
+    /// `frames × channels` samples in -1…1.
     pub samples: Vec<f32>,
 }
 
 impl AudioChunk {
+    pub fn stereo(time_ns: i64, samples: Vec<f32>) -> Self {
+        Self {
+            time_ns,
+            channels: CHANNELS,
+            samples,
+        }
+    }
+
     pub fn frames(&self) -> usize {
-        self.samples.len() / CHANNELS
+        self.samples.len() / self.channels.max(1)
     }
 }
 

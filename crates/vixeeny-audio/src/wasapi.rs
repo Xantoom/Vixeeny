@@ -3,8 +3,9 @@
 //! (Windows 10 2004+ "process loopback": the audio one process tree plays, whatever the
 //! speakers do).
 //!
-//! All streams are opened as 48 kHz stereo float with `AUTOCONVERTPCM`, so Windows does the
-//! sample-rate and channel conversion. Each packet is dated with the QPC time the driver gives
+//! All streams are opened as 48 kHz float with `AUTOCONVERTPCM`, so Windows does the sample-rate
+//! conversion. Speakers and microphones keep their own layout (stereo, 5.1 or 7.1, up to what the
+//! track asked for); process loopback is stereo. Each packet is dated with the QPC time the driver gives
 //! (100 ns units), the same clock as `vixeeny_platform::monotonic_ns`.
 //!
 //! A source that fails (device unplugged, application gone) reports `Lost` and retries every
@@ -27,7 +28,8 @@ use windows::Win32::Media::Audio::{
     IActivateAudioInterfaceCompletionHandler_Impl, IAudioCaptureClient, IAudioClient,
     IAudioSessionControl2, IAudioSessionManager2, IMMDevice, IMMDeviceEnumerator,
     MMDeviceEnumerator, PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE,
-    VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, WAVEFORMATEX, eCapture, eConsole, eRender,
+    VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, WAVEFORMATEX, WAVEFORMATEXTENSIBLE,
+    WAVEFORMATEXTENSIBLE_0, eCapture, eConsole, eRender,
 };
 use windows::Win32::System::Com::StructuredStorage::{PROPVARIANT, PROPVARIANT_0_0};
 use windows::Win32::System::Com::{
@@ -46,6 +48,7 @@ use windows::core::{GUID, Interface, PCWSTR, PWSTR, implement};
 
 use crate::{
     AudioChunk, AudioError, AudioSink, AudioSource, CHANNELS, SAMPLE_RATE, SourceEvent, SourceKind,
+    track_channels,
 };
 
 /// `AUDCLNT_E_DEVICE_INVALIDATED`.
@@ -247,16 +250,47 @@ fn find_process(exe: &str) -> Option<u32> {
     }
 }
 
-fn wave_format() -> WAVEFORMATEX {
-    let bytes_per_frame = (CHANNELS * 4) as u16;
-    WAVEFORMATEX {
+/// The capture format: 48 kHz float. More than two channels need the extensible form, with the
+/// speaker mask (FL FR FC LFE BL BR [SL SR]).
+fn wave_format(channels: usize) -> WAVEFORMATEXTENSIBLE {
+    let bytes_per_frame = (channels * 4) as u16;
+    let mut format = WAVEFORMATEX {
         wFormatTag: 3, // WAVE_FORMAT_IEEE_FLOAT
-        nChannels: CHANNELS as u16,
+        nChannels: channels as u16,
         nSamplesPerSec: SAMPLE_RATE,
         nAvgBytesPerSec: SAMPLE_RATE * u32::from(bytes_per_frame),
         nBlockAlign: bytes_per_frame,
         wBitsPerSample: 32,
         cbSize: 0,
+    };
+    let mut mask = 0;
+    if channels > 2 {
+        format.wFormatTag = 0xFFFE; // WAVE_FORMAT_EXTENSIBLE
+        format.cbSize = 22;
+        mask = if channels >= 8 { 0x63F } else { 0x3F };
+    }
+    WAVEFORMATEXTENSIBLE {
+        Format: format,
+        Samples: WAVEFORMATEXTENSIBLE_0 {
+            wValidBitsPerSample: 32,
+        },
+        dwChannelMask: mask,
+        // KSDATAFORMAT_SUBTYPE_IEEE_FLOAT
+        SubFormat: GUID::from_u128(0x00000003_0000_0010_8000_00aa00389b71),
+    }
+}
+
+/// Channels of the device's own mix format.
+fn mix_channels(client: &IAudioClient) -> Option<usize> {
+    // SAFETY: GetMixFormat returns a CoTaskMem block that is read once and freed.
+    unsafe {
+        let format = client.GetMixFormat().ok()?;
+        if format.is_null() {
+            return None;
+        }
+        let channels = usize::from((*format).nChannels);
+        CoTaskMemFree(Some(format.cast_const().cast()));
+        Some(channels)
     }
 }
 
@@ -290,6 +324,8 @@ struct Stream {
     /// The endpoint it was opened on (to notice a change of default device).
     device_id: Option<String>,
     follows_default: bool,
+    /// Channels of the samples this stream delivers.
+    channels: usize,
 }
 
 impl Drop for Stream {
@@ -303,8 +339,12 @@ impl Drop for Stream {
 }
 
 /// Initialises `client` for event-driven float capture; `loopback` for render endpoints.
-fn initialise(client: &IAudioClient, loopback: bool) -> Result<HANDLE, AudioError> {
-    let format = wave_format();
+fn initialise(
+    client: &IAudioClient,
+    loopback: bool,
+    channels: usize,
+) -> Result<HANDLE, AudioError> {
+    let format = wave_format(channels);
     let mut flags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK
         | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM
         | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
@@ -319,7 +359,7 @@ fn initialise(client: &IAudioClient, loopback: bool) -> Result<HANDLE, AudioErro
                 flags,
                 2_000_000,
                 0,
-                &raw const format,
+                (&raw const format).cast::<WAVEFORMATEX>(),
                 None,
             )
             .map_err(os("Initialize"))?;
@@ -334,8 +374,15 @@ fn finish_open(
     loopback: bool,
     device_id: Option<String>,
     follows_default: bool,
+    max_channels: usize,
 ) -> Result<Stream, AudioError> {
-    let event = initialise(&client, loopback)?;
+    // Endpoints keep their layout; the process loopback has no mix format and stays stereo.
+    let channels = if device_id.is_some() {
+        track_channels(mix_channels(&client).unwrap_or(CHANNELS), max_channels)
+    } else {
+        CHANNELS
+    };
+    let event = initialise(&client, loopback, channels)?;
     // SAFETY: the client is initialised; the service is requested for the capture interface.
     let capture: IAudioCaptureClient =
         unsafe { client.GetService() }.map_err(os("GetService(capture)"))?;
@@ -347,6 +394,7 @@ fn finish_open(
         event,
         device_id,
         follows_default,
+        channels,
     })
 }
 
@@ -354,11 +402,18 @@ fn open_device(
     device: &IMMDevice,
     loopback: bool,
     follows_default: bool,
+    max_channels: usize,
 ) -> Result<Stream, AudioError> {
     // SAFETY: activating the audio client of a live endpoint.
     let client: IAudioClient =
         unsafe { device.Activate(CLSCTX_ALL, None) }.map_err(os("Activate"))?;
-    finish_open(client, loopback, Some(device_id(device)), follows_default)
+    finish_open(
+        client,
+        loopback,
+        Some(device_id(device)),
+        follows_default,
+        max_channels,
+    )
 }
 
 fn open_process_loopback(pid: u32) -> Result<Stream, AudioError> {
@@ -424,24 +479,26 @@ fn open_process_loopback(pid: u32) -> Result<Stream, AudioError> {
             .cast::<IAudioClient>()
             .map_err(os("IAudioClient"))?
     };
-    finish_open(client, true, None, false)
+    finish_open(client, true, None, false, CHANNELS)
 }
 
-fn open(kind: &SourceKind) -> Result<Stream, AudioError> {
-    match kind {
+/// The endpoint a speakers/microphone source reads, `None` for an application. The flag says
+/// whether it follows the default device.
+fn endpoint(kind: &SourceKind) -> Result<Option<(IMMDevice, bool, bool)>, AudioError> {
+    Ok(match kind {
         SourceKind::System => {
             let e = enumerator()?;
             // SAFETY: a live enumerator.
             let device = unsafe { e.GetDefaultAudioEndpoint(eRender, eConsole) }
                 .map_err(os("default output"))?;
-            open_device(&device, true, true)
+            Some((device, true, true))
         }
         SourceKind::Microphone(None) => {
             let e = enumerator()?;
             // SAFETY: a live enumerator.
             let device = unsafe { e.GetDefaultAudioEndpoint(eCapture, eConsole) }
                 .map_err(os("default microphone"))?;
-            open_device(&device, false, true)
+            Some((device, false, true))
         }
         SourceKind::Microphone(Some(wanted)) => {
             let e = enumerator()?;
@@ -461,14 +518,36 @@ fn open(kind: &SourceKind) -> Result<Stream, AudioError> {
             let device = found.ok_or_else(|| {
                 AudioError::Unavailable(format!("no microphone matches `{wanted}`"))
             })?;
-            open_device(&device, false, false)
+            Some((device, false, false))
         }
-        SourceKind::Application(exe) => {
-            let pid = find_process(exe)
-                .ok_or_else(|| AudioError::Unavailable(format!("{exe} is not running")))?;
-            open_process_loopback(pid)
-        }
+        SourceKind::Application(_) => None,
+    })
+}
+
+fn open(kind: &SourceKind, max_channels: usize) -> Result<Stream, AudioError> {
+    if let Some((device, loopback, follows_default)) = endpoint(kind)? {
+        return open_device(&device, loopback, follows_default, max_channels);
     }
+    let SourceKind::Application(exe) = kind else {
+        return Err(AudioError::Unsupported);
+    };
+    let pid = find_process(exe)
+        .ok_or_else(|| AudioError::Unavailable(format!("{exe} is not running")))?;
+    open_process_loopback(pid)
+}
+
+/// The channels `kind` would deliver now when allowed up to `max`: its device's own layout
+/// (stereo, 5.1 or 7.1), stereo for an application or when the device cannot be examined.
+pub fn source_channels(kind: &SourceKind, max: usize) -> usize {
+    let _com = ComGuard::new();
+    let Ok(Some((device, ..))) = endpoint(kind) else {
+        return CHANNELS;
+    };
+    // SAFETY: activating the audio client of a live endpoint, only to read its mix format.
+    let client: Option<IAudioClient> = unsafe { device.Activate(CLSCTX_ALL, None) }.ok();
+    client
+        .and_then(|c| mix_channels(&c))
+        .map_or(CHANNELS, |n| track_channels(n, max))
 }
 
 /// Why a capture loop ended.
@@ -516,7 +595,7 @@ fn capture_loop(
                         Ended::Lost(e.message())
                     };
                 }
-                let count = frames as usize * CHANNELS;
+                let count = frames as usize * stream.channels;
                 let samples =
                     if flags & (AUDCLNT_BUFFERFLAGS_SILENT.0 as u32) != 0 || data.is_null() {
                         vec![0.0f32; count]
@@ -526,6 +605,7 @@ fn capture_loop(
                 let _ = stream.capture.ReleaseBuffer(frames);
                 AudioChunk {
                     time_ns: (qpc as i64).saturating_mul(100),
+                    channels: stream.channels,
                     samples,
                 }
             };
@@ -568,25 +648,33 @@ fn default_changed(stream: &Stream, kind: &SourceKind) -> bool {
 /// A WASAPI source; see the module documentation.
 pub struct WasapiSource {
     kind: SourceKind,
+    /// The most channels the sink wants (a stereo track gains nothing from 7.1).
+    max_channels: usize,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
 
 impl WasapiSource {
     pub fn new(kind: SourceKind) -> Self {
+        Self::with_max_channels(kind, CHANNELS)
+    }
+
+    /// A source that keeps its device's surround layout, up to `max_channels`.
+    pub fn with_max_channels(kind: SourceKind, max_channels: usize) -> Self {
         Self {
             kind,
+            max_channels,
             stop: Arc::new(AtomicBool::new(false)),
             thread: None,
         }
     }
 }
 
-fn run(kind: &SourceKind, mut sink: Box<dyn AudioSink>, stop: &AtomicBool) {
+fn run(kind: &SourceKind, max_channels: usize, mut sink: Box<dyn AudioSink>, stop: &AtomicBool) {
     let _com = ComGuard::new();
     let mut lost = false;
     while !stop.load(Ordering::Acquire) {
-        let reason = match open(kind) {
+        let reason = match open(kind, max_channels) {
             Ok(stream) => {
                 if lost {
                     sink.on_event(SourceEvent::Back);
@@ -621,10 +709,11 @@ impl AudioSource for WasapiSource {
         }
         self.stop.store(false, Ordering::Release);
         let kind = self.kind.clone();
+        let max_channels = self.max_channels;
         let stop = Arc::clone(&self.stop);
         let thread = std::thread::Builder::new()
             .name("audio-source".into())
-            .spawn(move || run(&kind, sink, &stop))
+            .spawn(move || run(&kind, max_channels, sink, &stop))
             .map_err(|e| AudioError::Os(e.to_string()))?;
         self.thread = Some(thread);
         Ok(())

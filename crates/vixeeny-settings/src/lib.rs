@@ -765,6 +765,12 @@ pub fn rows(section: Section, env: &Env, config: &Config) -> Vec<Row> {
                 |c| c.cur().audio.vbr,
                 |c, v| c.cur_mut().audio.vbr = v,
             ),
+            toggle(
+                "audio_surround",
+                t(Key::SetAudioSurround),
+                |c| c.cur().audio.surround,
+                |c, v| c.cur_mut().audio.surround = v,
+            ),
         ],
         Section::Replay => {
             let mut profiles = vec![opt("", t(Key::SetSameAsRecording))];

@@ -616,6 +616,7 @@ fn audio_track(title: &str, codec: AudioCodec) -> AudioTrackConfig {
         codec,
         bitrate_kbps: 128,
         vbr: true,
+        channels: 2,
     }
 }
 
@@ -689,11 +690,30 @@ fn record_av(
     seconds: usize,
     video_start_ms: i64,
 ) -> vixeeny_encode::recorder::Summary {
+    record_av_channels(cfg, dir, seconds, video_start_ms, 2)
+}
+
+/// As [`record_av`], the tone on the front pair of tracks that have `channels` channels.
+fn record_av_channels(
+    cfg: RecordConfig,
+    dir: &Path,
+    seconds: usize,
+    video_start_ms: i64,
+    channels: usize,
+) -> vixeeny_encode::recorder::Summary {
     let ext = cfg.container.extension();
     let tracks = cfg.audio.len();
     let rec = Recorder::start(cfg, namer(dir, ext)).unwrap();
     let blocks = tone_blocks(seconds, 0);
     for (k, block) in blocks.into_iter().enumerate() {
+        let block: Vec<f32> = block
+            .chunks(2)
+            .flat_map(|f| {
+                let mut frame = vec![0.0; channels];
+                frame[..2].copy_from_slice(f);
+                frame
+            })
+            .collect();
         let t = k as i64 * 20 * MS;
         // 0.6 video frames per audio block: push the frames whose time has come.
         for i in 0..tracks {
@@ -745,6 +765,48 @@ fn every_audio_codec_muxes_in_the_containers_that_allow_it() {
             assert_eq!(title.as_deref(), Some("Micro"), "{codec_:?} {container:?}");
         }
     }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn surround_tracks_keep_their_channels_in_matroska() {
+    let registry = Registry::builtin().unwrap();
+    let dir = scratch("audio-surround");
+    let mut n = 0;
+    for codec_ in [
+        AudioCodec::Opus,
+        AudioCodec::Flac,
+        AudioCodec::Pcm16,
+        AudioCodec::Pcm24,
+    ] {
+        assert!(codec_.surround_in(OutputContainer::Mkv));
+        for channels in [6usize, 8] {
+            let mut cfg = config(&registry, "libx264", OutputContainer::Mkv, 30);
+            cfg.audio = vec![AudioTrackConfig {
+                channels,
+                ..audio_track("Jeu", codec_)
+            }];
+            n += 1;
+            let summary = record_av_channels(cfg, &dir.join(n.to_string()), 2, 0, channels);
+            let mut input = format::input(&summary.files[0]).unwrap();
+            let layouts: Vec<usize> = input
+                .streams()
+                .filter(|s| s.parameters().medium() == media::Type::Audio)
+                .map(|s| {
+                    codec::context::Context::from_parameters(s.parameters())
+                        .unwrap()
+                        .decoder()
+                        .audio()
+                        .unwrap()
+                        .channels() as usize
+                })
+                .collect();
+            assert_eq!(layouts, [channels], "{codec_:?} {channels}");
+            let _ = input.packets().count();
+        }
+    }
+    assert!(!AudioCodec::Aac.surround_in(OutputContainer::Mkv));
+    assert!(!AudioCodec::Opus.surround_in(OutputContainer::WebM));
     let _ = std::fs::remove_dir_all(dir);
 }
 

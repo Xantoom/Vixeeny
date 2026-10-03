@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Audio encoders of the recorder (plan 5.10): AAC (Media Foundation / AudioToolbox / native),
-//! Opus, FLAC, PCM. Input is 48 kHz stereo 32-bit float; swresample converts to whatever the
-//! encoder wants, and a FIFO cuts the frame size it asks for.
+//! Opus, FLAC, PCM. Input is 48 kHz 32-bit float in 2, 6 (5.1) or 8 (7.1) channels; swresample
+//! converts to whatever the encoder wants, and a FIFO cuts the frame size it asks for.
 
 use ffmpeg_next::format::Sample;
 use ffmpeg_next::format::sample::Type as SampleType;
@@ -10,9 +10,18 @@ use ffmpeg_next::{ChannelLayout, Dictionary, Packet, Rational, codec, encoder, f
 
 use crate::recorder::{OutputContainer, RecordError};
 
-/// The sample rate and layout of the recorder's audio input.
+/// The sample rate of the recorder's audio input.
 pub const SAMPLE_RATE: u32 = 48_000;
-pub const CHANNELS: usize = 2;
+
+/// FFmpeg's layout for a track of `channels` interleaved channels (the order Windows delivers).
+pub fn layout_of(channels: usize) -> ChannelLayout {
+    match channels {
+        1 => ChannelLayout::MONO,
+        6 => ChannelLayout::_5POINT1_BACK,
+        8 => ChannelLayout::_7POINT1,
+        _ => ChannelLayout::STEREO,
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AudioCodec {
@@ -62,6 +71,17 @@ pub struct AudioTrackConfig {
     pub bitrate_kbps: u32,
     /// Variable bit rate where the encoder offers it (Opus); AAC stays constant.
     pub vbr: bool,
+    /// Channels of the samples fed to the track: 2, 6 or 8.
+    pub channels: usize,
+}
+
+impl AudioCodec {
+    /// Whether the codec can carry more than two channels in `container`. AAC (Media Foundation)
+    /// and the WebM/MP4 players in the wild cannot be counted on, so those stay stereo.
+    pub fn surround_in(self, container: OutputContainer) -> bool {
+        container == OutputContainer::Mkv
+            && matches!(self, Self::Opus | Self::Flac | Self::Pcm16 | Self::Pcm24)
+    }
 }
 
 /// One track's encoder, fed with interleaved f32 samples.
@@ -71,6 +91,7 @@ pub(crate) struct AudioEncoder {
     resampler: resampling::Context,
     fifo: Vec<f32>,
     frame_samples: usize,
+    channels: usize,
     /// Index (in samples) of the next frame to encode.
     next_pts: i64,
 }
@@ -95,14 +116,21 @@ impl AudioEncoder {
             .and_then(|mut f| f.next())
             .ok_or_else(|| RecordError::Config("audio encoder without sample formats".into()))?;
         ctx.set_rate(SAMPLE_RATE as i32);
-        ctx.set_channel_layout(ChannelLayout::STEREO);
+        let channels = if matches!(cfg.channels, 1 | 2 | 6 | 8) {
+            cfg.channels
+        } else {
+            2
+        };
+        let layout = layout_of(channels);
+        ctx.set_channel_layout(layout);
         ctx.set_format(format);
         ctx.set_time_base(Rational(1, SAMPLE_RATE as i32));
         if !matches!(
             cfg.codec,
             AudioCodec::Flac | AudioCodec::Pcm16 | AudioCodec::Pcm24
         ) {
-            ctx.set_bit_rate(cfg.bitrate_kbps as usize * 1000);
+            // The setting is for a stereo pair: surround gets its share per extra pair.
+            ctx.set_bit_rate(cfg.bitrate_kbps as usize * channels.max(2) / 2 * 1000);
         }
         if global_header {
             ctx.set_flags(codec::Flags::GLOBAL_HEADER);
@@ -116,10 +144,10 @@ impl AudioEncoder {
         let opened = ctx.open_with(options)?;
         let resampler = resampling::Context::get(
             Sample::F32(SampleType::Packed),
-            ChannelLayout::STEREO,
+            layout,
             SAMPLE_RATE,
             format,
-            ChannelLayout::STEREO,
+            layout,
             SAMPLE_RATE,
         )?;
         let frame_samples = match opened.frame_size() as usize {
@@ -132,15 +160,20 @@ impl AudioEncoder {
             resampler,
             fifo: Vec::new(),
             frame_samples,
+            channels,
             next_pts: 0,
         })
+    }
+
+    pub(crate) fn channels(&self) -> usize {
+        self.channels
     }
 
     /// Queues samples and returns the packets that became ready.
     pub(crate) fn push(&mut self, samples: &[f32]) -> Result<Vec<Packet>, RecordError> {
         self.fifo.extend_from_slice(samples);
         let mut packets = Vec::new();
-        let per_frame = self.frame_samples * CHANNELS;
+        let per_frame = self.frame_samples * self.channels;
         while self.fifo.len() >= per_frame {
             let chunk: Vec<f32> = self.fifo.drain(..per_frame).collect();
             self.encode(&chunk, &mut packets)?;
@@ -153,7 +186,7 @@ impl AudioEncoder {
         let mut packets = Vec::new();
         if !self.fifo.is_empty() {
             let mut rest = std::mem::take(&mut self.fifo);
-            rest.resize(self.frame_samples * CHANNELS, 0.0);
+            rest.resize(self.frame_samples * self.channels, 0.0);
             self.encode(&rest, &mut packets)?;
         }
         self.encoder.send_eof()?;
@@ -162,11 +195,11 @@ impl AudioEncoder {
     }
 
     fn encode(&mut self, interleaved: &[f32], out: &mut Vec<Packet>) -> Result<(), RecordError> {
-        let frames = interleaved.len() / CHANNELS;
+        let frames = interleaved.len() / self.channels;
         let mut input = frame::Audio::new(
             Sample::F32(SampleType::Packed),
             frames,
-            ChannelLayout::STEREO,
+            layout_of(self.channels),
         );
         input.set_rate(SAMPLE_RATE);
         let bytes: &[u8] = bytemuck_cast(interleaved);
