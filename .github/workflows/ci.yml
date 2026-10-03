@@ -152,8 +152,8 @@ jobs:
           cp ../../../LICENSE stage/THIRD-PARTY-LICENSES.txt
           printf '#!/bin/sh\n' > stage/vixeeny-daemon && cp stage/vixeeny-daemon stage/vixeeny-app
           flatpak-builder --user --install-deps-from=flathub --force-clean build io.github.Xantoom.Vixeeny.yml
-          flatpak-builder --user --run build io.github.Xantoom.Vixeeny.yml tesseract --version
-          flatpak-builder --user --run build io.github.Xantoom.Vixeeny.yml sh -c 'wl-copy --version && xclip -version'
+          flatpak-builder --run build io.github.Xantoom.Vixeeny.yml tesseract --version
+          flatpak-builder --run build io.github.Xantoom.Vixeeny.yml sh -c 'wl-copy --version && xclip -version'
   native-windows:
     # Prebuilt shared FFmpeg (checked by SHA-256); dav1d, SVT-AV1 and the image libraries are
     # built with MSVC for libavif and the image crates.
