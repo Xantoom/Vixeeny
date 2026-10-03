@@ -47,13 +47,13 @@ impl SckBackend {
 }
 
 /// The message of an `NSError` a completion handler received (null = none).
-fn error_text(error: *mut NSError) -> Option<String> {
+pub(crate) fn error_text(error: *mut NSError) -> Option<String> {
     // SAFETY: a completion handler's error is null or a valid object for the call's duration.
     unsafe { Retained::retain(error) }.map(|e| e.localizedDescription().to_string())
 }
 
 /// What can be captured right now (displays, windows).
-fn shareable_content() -> Result<Retained<SCShareableContent>, CaptureError> {
+pub(crate) fn shareable_content() -> Result<Retained<SCShareableContent>, CaptureError> {
     let (tx, rx) = channel();
     let handler = RcBlock::new(
         move |content: *mut SCShareableContent, error: *mut NSError| {

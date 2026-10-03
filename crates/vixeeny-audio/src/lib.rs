@@ -11,6 +11,8 @@ mod fake;
 mod layout;
 mod mixer;
 mod routing;
+#[cfg(target_os = "macos")]
+mod sck_audio;
 mod spec;
 #[cfg(windows)]
 mod wasapi;
@@ -19,6 +21,8 @@ pub use fake::FakeAudioSource;
 pub use layout::{convert as convert_layout, track_channels};
 pub use mixer::{Block, Mixer};
 pub use routing::{TrackMember, TrackPlan, assign_channels, plan_tracks};
+#[cfg(target_os = "macos")]
+pub use sck_audio::SckAudioSource;
 pub use spec::{SourceKind, SourceSpec, parse_sources};
 #[cfg(windows)]
 pub use wasapi::{

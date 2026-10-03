@@ -22,6 +22,10 @@ pub use wgc_stream::{CapturedFrame, GpuCapture, StreamTarget, TextureSink, Video
 mod sck;
 #[cfg(target_os = "macos")]
 pub use sck::SckBackend;
+#[cfg(target_os = "macos")]
+mod sck_stream;
+#[cfg(target_os = "macos")]
+pub use sck_stream::{SckVideoStream, StreamFrame};
 
 pub use fake::FakeBackend;
 pub use frame::{BYTES_PER_PIXEL, CpuFrame};

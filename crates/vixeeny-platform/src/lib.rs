@@ -35,7 +35,9 @@ pub use os::{
 };
 
 #[cfg(target_os = "macos")]
-pub use os::{request_screen_capture_access, screen_capture_allowed};
+pub use os::{
+    microphone_via_screen_capture_kit, request_screen_capture_access, screen_capture_allowed,
+};
 
 /// A graphics adapter as the OS reports it (the encoder probe derives its own view from it).
 #[derive(Debug, Clone, PartialEq, Eq)]

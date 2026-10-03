@@ -41,6 +41,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let frame = capturer.grab(&CaptureTarget::Window(w.id), CaptureOptions::default())?;
         println!("front window: {}x{}", frame.width, frame.height);
     }
+    // A two-second video stream on the first monitor: frames per second and clock sanity.
+    if let Some(m) = monitors.first() {
+        let stream = vixeeny_capture::SckVideoStream::start_monitor(m, 30, false)?;
+        let started = std::time::Instant::now();
+        let (mut count, mut last_ns) = (0u32, 0i64);
+        while started.elapsed() < std::time::Duration::from_secs(2) {
+            if let Some(f) = stream.recv(std::time::Duration::from_millis(200))? {
+                count += 1;
+                last_ns = f.time_ns;
+            }
+        }
+        println!(
+            "stream: {count} frames in 2 s; last frame {} ms before now",
+            (vixeeny_platform::monotonic_ns() - last_ns) / 1_000_000
+        );
+    }
     Ok(())
 }
 

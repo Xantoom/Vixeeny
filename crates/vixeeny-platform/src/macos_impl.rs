@@ -206,3 +206,38 @@ pub fn open_path(path: &str) -> Result<()> {
         .map(|_| ())
         .map_err(|e| PlatformError::Os(e.to_string()))
 }
+
+#[repr(C)]
+struct MachTimebase {
+    numer: u32,
+    denom: u32,
+}
+
+unsafe extern "C" {
+    fn mach_absolute_time() -> u64;
+    fn mach_timebase_info(info: *mut MachTimebase) -> i32;
+}
+
+/// Nanoseconds on the host clock `mach_absolute_time`, which is also the clock ScreenCaptureKit
+/// dates its frames and audio with: video and audio line up without conversion.
+pub fn monotonic_ns() -> i64 {
+    static BASE: std::sync::OnceLock<(u32, u32)> = std::sync::OnceLock::new();
+    let (numer, denom) = *BASE.get_or_init(|| {
+        let mut info = MachTimebase { numer: 1, denom: 1 };
+        // SAFETY: `info` is a valid out-parameter.
+        unsafe { mach_timebase_info(&raw mut info) };
+        (info.numer.max(1), info.denom.max(1))
+    });
+    // SAFETY: no preconditions.
+    let ticks = unsafe { mach_absolute_time() };
+    (u128::from(ticks) * u128::from(numer) / u128::from(denom)) as i64
+}
+
+/// `SCStreamConfiguration.captureMicrophone` exists from macOS 15.
+pub fn microphone_via_screen_capture_kit() -> bool {
+    use objc2::runtime::{AnyClass, Sel};
+    AnyClass::get(c"SCStreamConfiguration").is_some_and(|c| {
+        c.instance_method(Sel::register(c"setCaptureMicrophone:"))
+            .is_some()
+    })
+}
