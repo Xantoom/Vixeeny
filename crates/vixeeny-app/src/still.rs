@@ -31,6 +31,7 @@ pub enum StillError {
 }
 
 /// What the OS says at the moment of the shortcut.
+#[derive(Clone)]
 pub struct Snapshot {
     pub monitors: Vec<MonitorInfo>,
     pub cursor: (i32, i32),

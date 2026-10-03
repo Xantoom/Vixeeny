@@ -582,6 +582,12 @@ pub fn rows(section: Section, env: &Env, config: &Config) -> Vec<Row> {
                 |c| i64::from(c.scrolling.max_height),
                 |c, v| c.scrolling.max_height = v as u32,
             ),
+            toggle(
+                "scroll_annotate",
+                t(Key::SetScrollAnnotate),
+                |c| c.scrolling.annotate,
+                |c, v| c.scrolling.annotate = v,
+            ),
         ],
         Section::Video => {
             let mut encoders = vec![opt("auto", t(Key::SetEncoderAuto))];

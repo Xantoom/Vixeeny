@@ -837,3 +837,35 @@ fn the_wizard_walks_its_steps_and_relabels_in_the_chosen_language() {
     assert!(panel.is_finished());
     assert!(!panel.choices().general.autostart);
 }
+
+#[test]
+fn a_long_image_scrolls_under_a_fixed_toolbar() {
+    WINDOW.with(|_| ());
+    let mut session = Session::new(screen(400, 1200), vec![]);
+    session.select_all();
+    let o = Overlay::new(session, 1.0, |_, _, _| true).unwrap_or_else(|e| panic!("{e}"));
+    o.set_scrolling(true);
+    let px = |buf: &SharedPixelBuffer<Rgb8Pixel>, x: usize, y: usize| buf.as_slice()[y * 640 + x];
+
+    let top = render(&o, 640, 360);
+    save("5-long-top", &top);
+    assert!(o.window().get_has_toolbar());
+    // centred horizontally, the toolbar pinned at the top whatever the image height
+    assert!(
+        o.window().get_toolbar_y() < 40.0,
+        "{}",
+        o.window().get_toolbar_y()
+    );
+    assert!(px(&top, 130, 300).g < 70, "{:?}", px(&top, 130, 300));
+
+    o.window().set_scroll_y(800.0);
+    let scrolled = render(&o, 640, 360);
+    save("5-long-scrolled", &scrolled);
+    // the same screen row now shows a lower part of the image
+    assert!(
+        px(&scrolled, 130, 300).g > 180,
+        "{:?}",
+        px(&scrolled, 130, 300)
+    );
+    assert!(o.window().get_toolbar_y() < 40.0);
+}

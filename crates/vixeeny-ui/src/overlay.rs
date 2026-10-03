@@ -141,6 +141,12 @@ impl Overlay {
         self.window.run()
     }
 
+    /// Image taller than the window: it scrolls (wheel, Page Up/Down) under a fixed toolbar.
+    pub fn set_scrolling(&self, scrolling: bool) {
+        self.window.set_scrolling(scrolling);
+        self.refresh();
+    }
+
     pub fn session(&self) -> Rc<RefCell<Session>> {
         self.session.clone()
     }
@@ -327,6 +333,13 @@ fn refresh_from(weak: &slint::Weak<EditorWindow>, session: &Rc<RefCell<Session>>
     if let Some(at) = v.toolbar {
         w.set_toolbar_x(at.x);
         w.set_toolbar_y(at.y);
+        if w.get_scrolling() {
+            // The zone is the whole long image: keep the bar in view, top right.
+            let u = w.get_ui_scale();
+            let width = w.window().size().width as f32;
+            w.set_toolbar_x((width - 716.0 * u).max(0.0));
+            w.set_toolbar_y(16.0 * u);
+        }
     }
     w.set_tool(tool_index(v.tool));
     w.set_current_color(slint_color(v.color));

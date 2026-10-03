@@ -2,8 +2,8 @@
 //! Scrolling capture (plan 5.7): the user picked a zone and scrolls the content; this module
 //! captures the zone about 15 times a second, assembles the frames and saves the long image.
 //!
-//! Deviation from the plan: the result is saved (and copied, if configured) right away. The
-//! annotation overlay is a frozen screen and cannot show an image taller than it.
+//! The result opens in the editor (scrolling view, whole image selected) unless
+//! `[scrolling] annotate` is off, in which case it is saved right away.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -14,6 +14,7 @@ use vixeeny_capture::{CaptureOptions, CaptureTarget, Capturer, CpuFrame, WgcBack
 use vixeeny_common::config::Config;
 use vixeeny_common::i18n::{Key, Lang, tr};
 use vixeeny_common::ipc::ActionId;
+use vixeeny_editor::{RgbaImage, Session};
 use vixeeny_image::Bgra;
 use vixeeny_platform::{MonitorInfo, PhysicalRect};
 use vixeeny_stitch::{Frame, Push, Stitched, Stitcher};
@@ -227,6 +228,13 @@ pub fn run(
         tracing::warn!("scrolling capture cut at {} px", stitched.frame.height);
     }
     let frame = stitched.frame;
+    if config.scrolling.annotate {
+        match annotate(config, snapshot.clone(), &monitor, scale, &frame) {
+            Ok(()) => return Ok(()),
+            // Saving what was captured beats losing it.
+            Err(e) => tracing::error!("editor: {e:#}, saving directly"),
+        }
+    }
     let bitmap = Bgra::new(
         frame.width,
         frame.height,
@@ -247,4 +255,44 @@ pub fn run(
         tracing::warn!("clipboard: {e:#}");
     }
     Ok(())
+}
+
+/// Shows the long image in the editor, on the monitor it was captured from.
+fn annotate(
+    config: &Config,
+    snapshot: Snapshot,
+    monitor: &MonitorInfo,
+    scale: f32,
+    frame: &Frame,
+) -> anyhow::Result<()> {
+    let base = RgbaImage::from_bgra(
+        frame.width,
+        frame.height,
+        frame.width as usize * 4,
+        &frame.data,
+    )
+    .context("unexpected stitched image")?;
+    let mut session = Session::new(base, Vec::new());
+    session.select_all();
+    session.dim = 0.0;
+    let config = config.clone();
+    let overlay = vixeeny_ui::Overlay::new(session, scale, move |command, session, window| {
+        crate::region::output_command(
+            &config,
+            &snapshot,
+            ActionId::CaptureScrolling,
+            command,
+            session,
+            window,
+        )
+        .unwrap_or(false)
+    })
+    .map_err(|e| anyhow::anyhow!("cannot create the editor window: {e}"))?;
+    overlay.set_scrolling(true);
+    overlay
+        .run(
+            (monitor.rect.x, monitor.rect.y),
+            (monitor.rect.width, monitor.rect.height),
+        )
+        .map_err(|e| anyhow::anyhow!("editor window: {e}"))
 }

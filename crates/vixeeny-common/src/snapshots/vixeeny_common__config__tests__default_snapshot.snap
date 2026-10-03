@@ -108,3 +108,4 @@ languages = ["auto"]
 
 [scrolling]
 max_height = 30000
+annotate = true

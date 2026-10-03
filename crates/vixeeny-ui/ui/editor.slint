@@ -125,6 +125,9 @@ export component EditorWindow inherits Window {
     property <float> sat: 1;
     property <float> val: 1;
     in property <int> cursor-kind: 0;
+    // Image taller than the window (scrolling capture): the image scrolls, the toolbar stays.
+    in property <bool> scrolling: false;
+    in-out property <float> scroll-y: 0;
     // Off while a system dialog (Save as) must appear above the overlay.
     in property <bool> on-top: true;
 
@@ -141,6 +144,9 @@ export component EditorWindow inherits Window {
     callback text-committed(string);
 
     property <length> u: 1phx * root.ui-scale;
+    pure function clamp-scroll(v: float) -> float {
+        return Math.max(0, Math.min(v, root.image-height - root.height / 1phx));
+    }
 
     no-frame: true;
     always-on-top: root.on-top;
@@ -156,6 +162,12 @@ export component EditorWindow inherits Window {
 
     focus := FocusScope {
         key-pressed(event) => {
+            if root.scrolling && !root.has-text-input {
+                if event.text == Key.PageDown { root.scroll-y = clamp-scroll(root.scroll-y + root.height / 1phx * 0.9); return accept; }
+                if event.text == Key.PageUp { root.scroll-y = clamp-scroll(root.scroll-y - root.height / 1phx * 0.9); return accept; }
+                if event.text == Key.Home { root.scroll-y = 0; return accept; }
+                if event.text == Key.End { root.scroll-y = clamp-scroll(root.image-height); return accept; }
+            }
             root.key-pressed(event.text, event.modifiers.control, event.modifiers.shift);
             accept
         }
@@ -164,154 +176,178 @@ export component EditorWindow inherits Window {
             accept
         }
 
-        Image {
+        content := Rectangle {
             x: 0phx;
-            y: 0phx;
+            y: -root.scroll-y * 1phx;
             width: root.image-width * 1phx;
             height: root.image-height * 1phx;
-            source: root.frozen;
-            image-rendering: pixelated;
-        }
 
-        // Veil around the zone (everywhere when there is none).
-        Rectangle { x: 0phx; y: 0phx; width: parent.width; height: root.has-selection ? root.sel-y * 1phx : parent.height; background: black.with-alpha(root.dim); }
-        Rectangle { visible: root.has-selection; x: 0phx; y: (root.sel-y + root.sel-h) * 1phx; width: parent.width; height: parent.height - (root.sel-y + root.sel-h) * 1phx; background: black.with-alpha(root.dim); }
-        Rectangle { visible: root.has-selection; x: 0phx; y: root.sel-y * 1phx; width: root.sel-x * 1phx; height: root.sel-h * 1phx; background: black.with-alpha(root.dim); }
-        Rectangle { visible: root.has-selection; x: (root.sel-x + root.sel-w) * 1phx; y: root.sel-y * 1phx; width: parent.width - (root.sel-x + root.sel-w) * 1phx; height: root.sel-h * 1phx; background: black.with-alpha(root.dim); }
-
-        // Window under the cursor, before any zone exists.
-        if root.has-hover && !root.has-selection : Rectangle {
-            x: root.hover-x * 1phx;
-            y: root.hover-y * 1phx;
-            width: root.hover-w * 1phx;
-            height: root.hover-h * 1phx;
-            background: #3b82f633;
-            border-width: 2phx;
-            border-color: #3b82f6;
-        }
-
-        if root.has-annotated : Image {
-            x: root.annotated-x * 1phx;
-            y: root.annotated-y * 1phx;
-            source: root.annotated;
-            image-rendering: pixelated;
-        }
-
-        TouchArea {
-            mouse-cursor: root.cursor-kind == 0 ? MouseCursor.crosshair
-                : root.cursor-kind == 1 ? MouseCursor.move
-                : root.cursor-kind == 2 ? MouseCursor.ns-resize
-                : root.cursor-kind == 3 ? MouseCursor.ew-resize
-                : root.cursor-kind == 4 ? MouseCursor.nesw-resize
-                : root.cursor-kind == 5 ? MouseCursor.nwse-resize
-                : MouseCursor.default;
-            pointer-event(event) => {
-                if event.button == PointerEventButton.left {
-                    if event.kind == PointerEventKind.down {
-                        root.pointer-pressed(self.mouse-x / 1phx, self.mouse-y / 1phx, event.modifiers.shift);
-                    } else if event.kind == PointerEventKind.up {
-                        root.pointer-released(self.mouse-x / 1phx, self.mouse-y / 1phx, event.modifiers.shift);
-                    }
-                }
-            }
-            moved => { root.pointer-moved(self.mouse-x / 1phx, self.mouse-y / 1phx, false); }
-        }
-
-        // Zone border and handles.
-        if root.has-selection : Rectangle {
-            x: root.sel-x * 1phx;
-            y: root.sel-y * 1phx;
-            width: root.sel-w * 1phx;
-            height: root.sel-h * 1phx;
-            border-width: 1phx;
-            border-color: #3b82f6;
-        }
-        if root.has-selection && root.settled : Rectangle {
-            x: 0phx; y: 0phx; width: 0phx; height: 0phx;
-            for hx[i] in [0.0, 0.5, 1.0, 1.0, 1.0, 0.5, 0.0, 0.0] : Rectangle {
-                property <float> hy: [0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 0.5][i];
-                x: (root.sel-x + root.sel-w * hx) * 1phx - 4 * root.u;
-                y: (root.sel-y + root.sel-h * hy) * 1phx - 4 * root.u;
-                width: 8 * root.u;
-                height: 8 * root.u;
-                background: white;
-                border-width: 1phx;
-                border-color: #3b82f6;
-            }
-        }
-
-        // Size label.
-        if root.has-selection : Rectangle {
-            x: root.size-x * 1phx;
-            y: root.size-y * 1phx;
-            height: 22 * root.u;
-            width: label.preferred-width + 14 * root.u;
-            background: #000000cc;
-            border-radius: 4 * root.u;
-            label := Text {
-                text: root.size-text;
-                color: white;
-                font-size: 12 * root.u;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-        }
-
-        // Magnifier with reticle and the colour under the cursor.
-        if root.has-magnifier : Rectangle {
-            x: root.mag-x * 1phx;
-            y: root.mag-y * 1phx;
-            width: root.mag-size * 1phx;
-            height: root.mag-size * 1phx + 28 * root.u;
-            background: #000000cc;
-            border-radius: 6 * root.u;
-            clip: true;
             Image {
                 x: 0phx;
                 y: 0phx;
-                width: root.mag-size * 1phx;
-                height: root.mag-size * 1phx;
-                source: root.magnifier;
+                width: root.image-width * 1phx;
+                height: root.image-height * 1phx;
+                source: root.frozen;
                 image-rendering: pixelated;
             }
-            // reticle: the centre cell
-            Rectangle {
-                x: (root.mag-size * 1phx - root.mag-size / 11 * 1phx) / 2;
-                y: self.x;
-                width: root.mag-size / 11 * 1phx;
-                height: self.width;
+
+            // Veil around the zone (everywhere when there is none).
+            Rectangle { x: 0phx; y: 0phx; width: parent.width; height: root.has-selection ? root.sel-y * 1phx : parent.height; background: black.with-alpha(root.dim); }
+            Rectangle { visible: root.has-selection; x: 0phx; y: (root.sel-y + root.sel-h) * 1phx; width: parent.width; height: parent.height - (root.sel-y + root.sel-h) * 1phx; background: black.with-alpha(root.dim); }
+            Rectangle { visible: root.has-selection; x: 0phx; y: root.sel-y * 1phx; width: root.sel-x * 1phx; height: root.sel-h * 1phx; background: black.with-alpha(root.dim); }
+            Rectangle { visible: root.has-selection; x: (root.sel-x + root.sel-w) * 1phx; y: root.sel-y * 1phx; width: parent.width - (root.sel-x + root.sel-w) * 1phx; height: root.sel-h * 1phx; background: black.with-alpha(root.dim); }
+
+            // Window under the cursor, before any zone exists.
+            if root.has-hover && !root.has-selection : Rectangle {
+                x: root.hover-x * 1phx;
+                y: root.hover-y * 1phx;
+                width: root.hover-w * 1phx;
+                height: root.hover-h * 1phx;
+                background: #3b82f633;
+                border-width: 2phx;
+                border-color: #3b82f6;
+            }
+
+            if root.has-annotated : Image {
+                x: root.annotated-x * 1phx;
+                y: root.annotated-y * 1phx;
+                source: root.annotated;
+                image-rendering: pixelated;
+            }
+
+            TouchArea {
+                mouse-cursor: root.cursor-kind == 0 ? MouseCursor.crosshair
+                    : root.cursor-kind == 1 ? MouseCursor.move
+                    : root.cursor-kind == 2 ? MouseCursor.ns-resize
+                    : root.cursor-kind == 3 ? MouseCursor.ew-resize
+                    : root.cursor-kind == 4 ? MouseCursor.nesw-resize
+                    : root.cursor-kind == 5 ? MouseCursor.nwse-resize
+                    : MouseCursor.default;
+                pointer-event(event) => {
+                    if event.button == PointerEventButton.left {
+                        if event.kind == PointerEventKind.down {
+                            root.pointer-pressed(self.mouse-x / 1phx, self.mouse-y / 1phx, event.modifiers.shift);
+                        } else if event.kind == PointerEventKind.up {
+                            root.pointer-released(self.mouse-x / 1phx, self.mouse-y / 1phx, event.modifiers.shift);
+                        }
+                    }
+                }
+                moved => { root.pointer-moved(self.mouse-x / 1phx, self.mouse-y / 1phx, false); }
+            scroll-event(event) => {
+                if root.scrolling {
+                    root.scroll-y = clamp-scroll(root.scroll-y - event.delta-y / 1phx);
+                    return accept;
+                }
+                reject
+            }
+            }
+
+            // Zone border and handles.
+            if root.has-selection : Rectangle {
+                x: root.sel-x * 1phx;
+                y: root.sel-y * 1phx;
+                width: root.sel-w * 1phx;
+                height: root.sel-h * 1phx;
                 border-width: 1phx;
-                border-color: white;
-                Rectangle { border-width: 1phx; border-color: black; }
+                border-color: #3b82f6;
             }
-            Rectangle {
-                x: 6 * root.u;
-                y: root.mag-size * 1phx + 6 * root.u;
-                width: 16 * root.u;
-                height: 16 * root.u;
-                background: root.mag-color;
-                border-width: 1phx;
-                border-color: white;
+            if root.has-selection && root.settled : Rectangle {
+                x: 0phx; y: 0phx; width: 0phx; height: 0phx;
+                for hx[i] in [0.0, 0.5, 1.0, 1.0, 1.0, 0.5, 0.0, 0.0] : Rectangle {
+                    property <float> hy: [0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 0.5][i];
+                    x: (root.sel-x + root.sel-w * hx) * 1phx - 4 * root.u;
+                    y: (root.sel-y + root.sel-h * hy) * 1phx - 4 * root.u;
+                    width: 8 * root.u;
+                    height: 8 * root.u;
+                    background: white;
+                    border-width: 1phx;
+                    border-color: #3b82f6;
+                }
             }
-            Text {
-                x: 28 * root.u;
-                y: root.mag-size * 1phx;
-                height: 28 * root.u;
-                text: root.mag-hex;
-                color: white;
-                font-size: 13 * root.u;
-                vertical-alignment: center;
+
+            // Size label.
+            if root.has-selection : Rectangle {
+                x: root.size-x * 1phx;
+                y: root.size-y * 1phx;
+                height: 22 * root.u;
+                width: label.preferred-width + 14 * root.u;
+                background: #000000cc;
+                border-radius: 4 * root.u;
+                label := Text {
+                    text: root.size-text;
+                    color: white;
+                    font-size: 12 * root.u;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
             }
+
+            // Magnifier with reticle and the colour under the cursor.
+            if root.has-magnifier : Rectangle {
+                x: root.mag-x * 1phx;
+                y: root.mag-y * 1phx;
+                width: root.mag-size * 1phx;
+                height: root.mag-size * 1phx + 28 * root.u;
+                background: #000000cc;
+                border-radius: 6 * root.u;
+                clip: true;
+                Image {
+                    x: 0phx;
+                    y: 0phx;
+                    width: root.mag-size * 1phx;
+                    height: root.mag-size * 1phx;
+                    source: root.magnifier;
+                    image-rendering: pixelated;
+                }
+                // reticle: the centre cell
+                Rectangle {
+                    x: (root.mag-size * 1phx - root.mag-size / 11 * 1phx) / 2;
+                    y: self.x;
+                    width: root.mag-size / 11 * 1phx;
+                    height: self.width;
+                    border-width: 1phx;
+                    border-color: white;
+                    Rectangle { border-width: 1phx; border-color: black; }
+                }
+                Rectangle {
+                    x: 6 * root.u;
+                    y: root.mag-size * 1phx + 6 * root.u;
+                    width: 16 * root.u;
+                    height: 16 * root.u;
+                    background: root.mag-color;
+                    border-width: 1phx;
+                    border-color: white;
+                }
+                Text {
+                    x: 28 * root.u;
+                    y: root.mag-size * 1phx;
+                    height: 28 * root.u;
+                    text: root.mag-hex;
+                    color: white;
+                    font-size: 13 * root.u;
+                    vertical-alignment: center;
+                }
+            }
+
+            if root.has-text-input : text-field := TextInput {
+                x: root.text-x * 1phx;
+                y: root.text-y * 1phx;
+                font-size: root.text-size * 1phx;
+                color: root.current-color;
+                text <=> root.text-value;
+                accepted => { root.text-committed(self.text); }
+                init => { self.focus(); }
+            }
+
         }
 
-        if root.has-text-input : text-field := TextInput {
-            x: root.text-x * 1phx;
-            y: root.text-y * 1phx;
-            font-size: root.text-size * 1phx;
-            color: root.current-color;
-            text <=> root.text-value;
-            accepted => { root.text-committed(self.text); }
-            init => { self.focus(); }
+        if root.scrolling && root.image-height > root.height / 1phx : Rectangle {
+            x: root.width - 6 * root.u;
+            y: root.scroll-y / root.image-height * root.height;
+            width: 4 * root.u;
+            height: Math.max(24 * root.u, root.height * root.height / (root.image-height * 1phx));
+            background: #ffffff88;
+            border-radius: 2 * root.u;
         }
 
         // Toolbar.

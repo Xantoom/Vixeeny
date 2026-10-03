@@ -325,6 +325,11 @@ impl Session {
         }
     }
 
+    /// Takes the whole image as the zone.
+    pub fn select_all(&mut self) {
+        self.selection.select_all();
+    }
+
     pub fn undo(&mut self) {
         self.editor.undo();
     }

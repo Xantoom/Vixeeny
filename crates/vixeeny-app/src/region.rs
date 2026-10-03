@@ -60,12 +60,65 @@ pub fn copy_bgra(image: &Bgra<'_>) -> anyhow::Result<()> {
 fn save(
     config: &Config,
     snap: &Snapshot,
+    action: ActionId,
     img: &RgbaImage,
     chosen: Option<PathBuf>,
 ) -> anyhow::Result<PathBuf> {
     let bgra = to_bgra(img);
     let bitmap = Bgra::new(img.width, img.height, img.width as usize * 4, &bgra);
-    save_bgra(config, snap, ActionId::CaptureRegion, &bitmap, chosen)
+    save_bgra(config, snap, action, &bitmap, chosen)
+}
+
+/// Close, copy, save and save-as, shared by every editor. `Some(close)` when `command` is one
+/// of them (`close`: the overlay should go away), `None` otherwise.
+pub fn output_command(
+    config: &Config,
+    snapshot: &Snapshot,
+    action: ActionId,
+    command: Command,
+    session: &Session,
+    window: &vixeeny_ui::EditorWindow,
+) -> Option<bool> {
+    match command {
+        Command::Close => Some(true),
+        Command::Copy => {
+            let img = session.export()?;
+            Some(match copy_to_clipboard(&img) {
+                Ok(()) => true,
+                Err(e) => {
+                    tracing::error!("clipboard: {e:#}");
+                    false
+                }
+            })
+        }
+        Command::Save | Command::SaveAs => {
+            let img = session.export()?;
+            let chosen = if command == Command::SaveAs {
+                match save_as_dialog(config, window) {
+                    Some(path) => Some(path),
+                    None => return Some(false), // cancelled: stay in the editor
+                }
+            } else {
+                None
+            };
+            Some(match save(config, snapshot, action, &img, chosen) {
+                Ok(path) => {
+                    tracing::info!("saved {}", path.display());
+                    if config.image.copy_to_clipboard
+                        && let Err(e) = copy_to_clipboard(&img)
+                    {
+                        tracing::warn!("clipboard: {e:#}");
+                    }
+                    true
+                }
+                Err(e) => {
+                    tracing::error!("save failed: {e:#}");
+                    false
+                }
+            })
+        }
+        Command::Ocr | Command::Scroll => None,
+    }
 }
 
 /// Writes `bitmap` to the images folder (or to `chosen`, whose extension picks the format).
@@ -207,45 +260,18 @@ pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
     }
     session.dim = f32::from(config.editor.dim_percent.min(90)) / 100.0;
     let overlay = vixeeny_ui::Overlay::new(session, scale, move |command, session, window| {
-        let export = || session.export();
+        if let Some(close) = output_command(
+            &config,
+            &snapshot,
+            ActionId::CaptureRegion,
+            command,
+            session,
+            window,
+        ) {
+            return close;
+        }
         match command {
-            Command::Close => true,
-            Command::Copy => match export() {
-                Some(img) => {
-                    if let Err(e) = copy_to_clipboard(&img) {
-                        tracing::error!("clipboard: {e:#}");
-                        return false;
-                    }
-                    true
-                }
-                None => false,
-            },
-            Command::Save | Command::SaveAs => {
-                let Some(img) = export() else { return false };
-                let chosen = if command == Command::SaveAs {
-                    match save_as_dialog(&config, window) {
-                        Some(path) => Some(path),
-                        None => return false, // cancelled: stay in the editor
-                    }
-                } else {
-                    None
-                };
-                match save(&config, &snapshot, &img, chosen) {
-                    Ok(path) => {
-                        tracing::info!("saved {}", path.display());
-                        if config.image.copy_to_clipboard
-                            && let Err(e) = copy_to_clipboard(&img)
-                        {
-                            tracing::warn!("clipboard: {e:#}");
-                        }
-                        true
-                    }
-                    Err(e) => {
-                        tracing::error!("save failed: {e:#}");
-                        false
-                    }
-                }
-            }
+            Command::Close | Command::Copy | Command::Save | Command::SaveAs => false,
             Command::Scroll => match session.zone() {
                 Some(zone) => {
                     scroll_slot.set(Some(zone));
@@ -253,7 +279,7 @@ pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
                 }
                 None => false,
             },
-            Command::Ocr => match export() {
+            Command::Ocr => match session.export() {
                 // The overlay closes first; the result window opens afterwards.
                 Some(img) => {
                     *ocr_slot.borrow_mut() = Some(img);

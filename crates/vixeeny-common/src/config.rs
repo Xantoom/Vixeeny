@@ -444,11 +444,16 @@ impl Default for Ocr {
 pub struct Scrolling {
     /// The assembled image is cut at this height (plan 5.7).
     pub max_height: u32,
+    /// Open the assembled image in the editor before saving it.
+    pub annotate: bool,
 }
 
 impl Default for Scrolling {
     fn default() -> Self {
-        Self { max_height: 30_000 }
+        Self {
+            max_height: 30_000,
+            annotate: true,
+        }
     }
 }
 
