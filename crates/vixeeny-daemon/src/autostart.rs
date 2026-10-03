@@ -13,6 +13,10 @@ pub fn apply(enabled: bool) -> anyhow::Result<()> {
         tracing::debug!("autostart left untouched ({DISABLE_ENV} is set)");
         return Ok(());
     }
+    #[cfg(target_os = "linux")]
+    if ashpd::is_sandboxed() {
+        return portal(enabled);
+    }
     let exe = std::env::current_exe()?;
     let mut builder = AutoLaunchBuilder::new();
     builder
@@ -30,5 +34,25 @@ pub fn apply(enabled: bool) -> anyhow::Result<()> {
         launcher.disable()?;
         tracing::info!("autostart disabled");
     }
+    Ok(())
+}
+
+/// Inside Flatpak the autostart file cannot be written by hand: the Background portal makes it
+/// (and may ask the user once).
+#[cfg(target_os = "linux")]
+fn portal(enabled: bool) -> anyhow::Result<()> {
+    use ashpd::desktop::background::Background;
+
+    async_io::block_on(
+        Background::request()
+            .auto_start(enabled)
+            .command(["vixeeny-daemon"])
+            .reason("Capture shortcuts and the tray icon")
+            .send(),
+    )?;
+    tracing::info!(
+        "autostart {} (portal)",
+        if enabled { "enabled" } else { "disabled" }
+    );
     Ok(())
 }

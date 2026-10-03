@@ -62,7 +62,7 @@ fn write_zip(stage: &Path, extra: &[(&str, &[u8])], out: &Path) -> Result<()> {
 
 /// The libraries of the build with their licences: the crates (from `cargo metadata`) and the
 /// native libraries (from `native/versions.toml`).
-fn third_party_licenses() -> Result<String> {
+pub fn third_party_licenses() -> Result<String> {
     let root = root();
     let output = std::process::Command::new("cargo")
         .current_dir(&root)

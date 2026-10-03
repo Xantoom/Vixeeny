@@ -464,7 +464,7 @@ pub mod desktop_entry {
     /// The "Open With" entry. `%F`: every selected file in one command line.
     pub fn application(exe: &Path, label: &str) -> String {
         format!(
-            "[Desktop Entry]\nType=Application\nName={label}\nExec={} --convert %F\nIcon=vixeeny\nTerminal=false\nCategories=Graphics;\nMimeType={};\nX-Vixeny-Convert=true\n",
+            "[Desktop Entry]\nType=Application\nName={label}\nExec={} --convert %F\nIcon=io.github.Xantoom.Vixeeny\nTerminal=false\nCategories=Graphics;\nMimeType={};\nX-Vixeny-Convert=true\n",
             exec_quote(exe),
             MIME.join(";") + ";"
         )
@@ -473,7 +473,7 @@ pub mod desktop_entry {
     /// Dolphin's right-click service menu.
     pub fn service_menu(exe: &Path, label: &str) -> String {
         format!(
-            "[Desktop Entry]\nType=Service\nX-KDE-ServiceTypes=KonqPopupMenu/Plugin\nMimeType={};\nActions=vixeenyConvert\nX-KDE-Priority=TopLevel\nX-Vixeny-Convert=true\n\n[Desktop Action vixeenyConvert]\nName={label}\nIcon=vixeeny\nExec={} --convert %F\n",
+            "[Desktop Entry]\nType=Service\nX-KDE-ServiceTypes=KonqPopupMenu/Plugin\nMimeType={};\nActions=vixeenyConvert\nX-KDE-Priority=TopLevel\nX-Vixeny-Convert=true\n\n[Desktop Action vixeenyConvert]\nName={label}\nIcon=io.github.Xantoom.Vixeeny\nExec={} --convert %F\n",
             MIME.join(";"),
             exec_quote(exe)
         )

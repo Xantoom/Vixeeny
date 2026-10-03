@@ -19,6 +19,8 @@ const PLATFORM: &str = if cfg!(windows) {
     "macos-arm64"
 } else if cfg!(target_os = "macos") {
     "macos-x64"
+} else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+    "linux-x64"
 } else {
     "unsupported"
 };
@@ -123,7 +125,7 @@ fn stop_daemon() -> anyhow::Result<()> {
 /// The settings window, a toast or a leftover app are processes of their own: they would go on
 /// running the old version. The daemon only quits when no recording runs, so this is safe.
 fn close_apps() {
-    if cfg!(target_os = "macos") {
+    if cfg!(unix) {
         let _ = std::process::Command::new("pkill")
             .args(["-x", "vixeeny-app"])
             .status();
@@ -148,6 +150,22 @@ fn close_apps() {
     taskkill(false);
     std::thread::sleep(Duration::from_secs(2));
     taskkill(true);
+}
+
+/// On Linux the update replaces the files next to the programs, which only a portable (archive)
+/// install can do: a package (deb, AUR), a Flatpak or an AppImage is updated by its own channel.
+fn ensure_portable_install(dir: &Path) -> anyhow::Result<()> {
+    let managed = ["/usr", "/opt", "/app", "/snap"]
+        .iter()
+        .any(|prefix| dir.starts_with(prefix));
+    let probe = dir.join(".update-probe");
+    let writable = std::fs::write(&probe, b"").is_ok();
+    let _ = std::fs::remove_file(&probe);
+    anyhow::ensure!(
+        !managed && writable,
+        "Vixeeny is installed by a package manager, a Flatpak or an AppImage: update it the same way"
+    );
+    Ok(())
 }
 
 fn start_daemon(dir: &Path) -> std::io::Result<()> {
@@ -198,6 +216,9 @@ fn apply_inner() -> anyhow::Result<()> {
 
     let exe = std::env::current_exe()?;
     let exe_dir = exe.parent().context("no install folder")?.to_owned();
+    if cfg!(target_os = "linux") {
+        ensure_portable_install(&exe_dir)?;
+    }
     // Windows: the install folder itself. macOS: the whole `Vixeeny.app` bundle (the programs
     // are in `Contents/MacOS`), staged outside of it so the bundle's signature stays valid.
     let (install, work, backup, staged) = if cfg!(target_os = "macos") {

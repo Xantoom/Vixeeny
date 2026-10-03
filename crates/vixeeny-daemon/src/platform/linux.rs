@@ -125,7 +125,9 @@ impl LinuxTray {
         };
         // Without a StatusNotifierWatcher (a bare window manager) there is no tray; the daemon
         // still serves shortcuts and `ctl`, so this is not fatal.
-        let handle = match state.spawn() {
+        // A sandbox may not own the well-known name the specification asks for.
+        let spawned = state.disable_dbus_name(ashpd::is_sandboxed()).spawn();
+        let handle = match spawned {
             Ok(handle) => Some(handle),
             Err(e) => {
                 tracing::warn!("no system tray available: {e}");

@@ -1,0 +1,35 @@
+# Maintainer: Xantoom <xantoom@gmail.com>
+# Installs the release archive built by the Vixeeny release workflow (FFmpeg and the image
+# codecs are linked statically in it). After a release, refresh the checksum with `updpkgsums`.
+pkgname=vixeeny-bin
+pkgver=0.5.2
+pkgrel=1
+pkgdesc='Screenshots, screen recording and text recognition from the system tray'
+arch=('x86_64')
+url='https://github.com/Xantoom/Vixeeny'
+license=('GPL-3.0-or-later')
+depends=('fontconfig' 'libpipewire' 'libxkbcommon')
+optdepends=('tesseract: text recognition (OCR)'
+            'tesseract-data-eng: English text recognition'
+            'wl-clipboard: copying to the clipboard on Wayland'
+            'xclip: copying to the clipboard on X11'
+            'libnotify: notifications')
+provides=('vixeeny')
+conflicts=('vixeeny')
+options=('!strip')
+source=("Vixeeny-$pkgver-linux-x64.zip::$url/releases/download/v$pkgver/Vixeeny-$pkgver-linux-x64.zip")
+sha256sums=('SKIP')
+noextract=("Vixeeny-$pkgver-linux-x64.zip")
+
+package() {
+  bsdtar -xf "$srcdir/Vixeeny-$pkgver-linux-x64.zip" -C "$srcdir"
+  install -Dm755 "$srcdir/vixeeny-daemon" "$pkgdir/usr/bin/vixeeny-daemon"
+  install -Dm755 "$srcdir/vixeeny-app" "$pkgdir/usr/bin/vixeeny-app"
+  install -Dm755 "$srcdir/vixeeny-updater" "$pkgdir/usr/bin/vixeeny-updater"
+  install -Dm644 "$srcdir/io.github.Xantoom.Vixeeny.desktop" \
+    "$pkgdir/usr/share/applications/io.github.Xantoom.Vixeeny.desktop"
+  install -Dm644 "$srcdir/io.github.Xantoom.Vixeeny.svg" \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.Xantoom.Vixeeny.svg"
+  install -Dm644 "$srcdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 "$srcdir/THIRD-PARTY-LICENSES.txt" "$pkgdir/usr/share/licenses/$pkgname/THIRD-PARTY-LICENSES.txt"
+}

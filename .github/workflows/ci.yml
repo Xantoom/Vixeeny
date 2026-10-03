@@ -107,6 +107,17 @@ jobs:
         run: cargo test -p vixeeny-image -p vixeeny-app -p vixeeny-convert --features vixeeny-image/native-codecs,vixeeny-app/native-codecs,vixeeny-convert/native-codecs
         env:
           PKG_CONFIG_PATH: ${{ github.workspace }}/native/build/work/prefix/lib/pkgconfig
+      - name: Packages build (update archive, .deb, AppDir)
+        run: |
+          sudo apt-get install -y libpipewire-0.3-dev libspa-0.2-dev clang
+          cargo build --release -p vixeeny-daemon -p vixeeny-updater -p xtask
+          cargo build --release -p vixeeny-app --features "ffmpeg native-codecs pipewire"
+          cargo xtask dist-linux --out dist
+          dpkg-deb -I dist/*.deb
+          dpkg-deb -c dist/*.deb
+          ls -l dist
+        env:
+          PKG_CONFIG_PATH: ${{ github.workspace }}/native/build/work/prefix/lib/pkgconfig
   pipewire-linux:
     # Wayland video (ScreenCast portal + PipeWire) and PipeWire audio: they need the system
     # libraries to build; neither can run on a CI machine without a compositor.

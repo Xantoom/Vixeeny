@@ -3,6 +3,7 @@
 - `windows/vixeeny.iss` — Inno Setup script (per-user installer, no administrator rights).
 - `minisign.pub` — the public key updates are verified with, embedded in `vixeeny-updater`.
   While it contains the word `unconfigured`, the updater refuses every update.
+- `linux/` — desktop entry, icon and AppStream data (shared by the .deb, the AppImage and the update archive); `arch/PKGBUILD` — AUR `vixeeny-bin`.
 - `.github/workflows/release.yml` — builds, packages, signs and drafts a release on a `v*` tag
   (or builds without publishing on a manual run).
 

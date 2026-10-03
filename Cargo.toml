@@ -38,7 +38,7 @@ dispatch2 = "0.3.1"
 objc2-core-audio-types = "0.3.2"
 objc2-core-foundation = "0.3.2"
 objc2-vision = "0.3.2"
-ashpd = { version = "0.13.13", default-features = false, features = ["async-io", "screenshot", "screencast", "global_shortcuts"] }
+ashpd = { version = "0.13.13", default-features = false, features = ["async-io", "screenshot", "screencast", "global_shortcuts", "background"] }
 futures-lite = "2"
 # StatusNotifierItem tray over D-Bus: no GTK.
 ksni = { version = "0.3.6", default-features = false, features = ["async-io", "blocking"] }

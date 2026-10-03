@@ -1,5 +1,5 @@
 name: Release
-# A tag `v*` builds the Windows and macOS packages, signs them and prepares a draft GitHub release.
+# A tag `v*` builds the Windows, macOS and Linux packages, signs them and prepares a draft GitHub release.
 # A tag `v*-test` builds the same files without drafting a release (to check the packaging).
 on:
   push:
@@ -56,6 +56,79 @@ jobs:
             sleep 30
           done
           gh release upload "${{ github.ref_name }}" dist/*.zip dist/*.dmg dist/*.minisig dist/SHA256SUMS-macos --clobber
+  linux:
+    # x86-64 Linux: update archive (zip, what the updater unpacks over a portable install), .deb
+    # and AppImage. FFmpeg and the image codecs are built by `cargo xtask build-native`.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y cmake nasm meson ninja-build pkg-config libfontconfig1-dev libpipewire-0.3-dev libspa-0.2-dev clang
+      - uses: actions/cache/restore@v4
+        with:
+          path: native/build/work
+          key: native-linux22-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}
+          restore-keys: native-linux22-
+      - run: cargo xtask build-native
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: native/build/work
+          key: native-linux22-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}-${{ github.run_id }}
+      - name: Build the programs
+        run: |
+          cargo build --release -p vixeeny-daemon -p vixeeny-updater -p xtask
+          cargo build --release -p vixeeny-app --features "ffmpeg native-codecs pipewire"
+        env:
+          PKG_CONFIG_PATH: ${{ github.workspace }}/native/build/work/prefix/lib/pkgconfig
+      - name: Package (update archive, .deb, AppDir)
+        run: cargo xtask dist-linux --out dist
+      - name: AppImage
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/appimagetool" https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+          echo "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0  $RUNNER_TEMP/appimagetool" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/appimagetool"
+          ARCH=x86_64 "$RUNNER_TEMP/appimagetool" --appimage-extract-and-run dist/Vixeeny.AppDir "dist/Vixeeny-$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)-x86_64.AppImage"
+      - name: Checksums (the updater reads SHA256SUMS-linux)
+        run: cd dist && sha256sum *.zip *.deb *.AppImage > SHA256SUMS-linux
+      - name: Sign (minisign)
+        env:
+          MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: |
+          if [ -z "$MINISIGN_KEY" ]; then echo "::warning::No MINISIGN_KEY secret: the files are not signed."; exit 0; fi
+          cargo install rsign2 --locked
+          printf '%s' "$MINISIGN_KEY" > "$RUNNER_TEMP/minisign.key"
+          for f in dist/*.zip dist/*.deb dist/*.AppImage; do
+            if [ -n "$MINISIGN_PASSWORD" ]; then
+              printf '%s\n' "$MINISIGN_PASSWORD" | rsign sign -s "$RUNNER_TEMP/minisign.key" -x "$f.minisig" "$f"
+            else
+              rsign sign -W -s "$RUNNER_TEMP/minisign.key" -x "$f.minisig" "$f"
+            fi
+          done
+          rm "$RUNNER_TEMP/minisign.key"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vixeeny-linux
+          path: |
+            dist/*.zip
+            dist/*.deb
+            dist/*.AppImage
+            dist/*.minisig
+            dist/SHA256SUMS-linux
+      - name: Add to the draft release
+        if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-test')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 60); do
+            gh release view "${{ github.ref_name }}" >/dev/null 2>&1 && break
+            sleep 30
+          done
+          gh release upload "${{ github.ref_name }}" dist/*.zip dist/*.deb dist/*.AppImage dist/*.minisig dist/SHA256SUMS-linux --clobber
   windows:
     runs-on: windows-latest
     env:
