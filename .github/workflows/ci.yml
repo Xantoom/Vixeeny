@@ -77,13 +77,6 @@ jobs:
       - run: cargo test -p vixeeny-encode --features ffmpeg-next --test software_encode --test verify_registry --test recorder
         env:
           PKG_CONFIG_PATH: ${{ github.workspace }}/native/build/work/prefix/lib/pkgconfig
-      - name: The app bundle and the disk image build
-        run: |
-          cargo build --release -p vixeeny-daemon -p vixeeny-app -p xtask
-          cargo xtask dist-mac --out dist
-          plutil -lint dist/stage/Vixeeny.app/Contents/Info.plist
-          codesign --verify --deep dist/stage/Vixeeny.app
-          ls -l dist
       - name: Image codecs (AVIF, JPEG XL)
         run: cargo test -p vixeeny-image -p vixeeny-app -p vixeeny-convert --features vixeeny-image/native-codecs,vixeeny-app/native-codecs,vixeeny-convert/native-codecs
         env:
@@ -174,6 +167,13 @@ jobs:
         run: cargo build -p vixeeny-encode --features ffmpeg-next --example record_mac
         env:
           PKG_CONFIG_PATH: ${{ github.workspace }}/native/build/work/prefix/lib/pkgconfig
+      - name: The app bundle and the disk image build
+        run: |
+          cargo build --release -p vixeeny-daemon -p vixeeny-app -p xtask
+          cargo xtask dist-mac --out dist
+          plutil -lint dist/stage/Vixeeny.app/Contents/Info.plist
+          codesign --verify --deep dist/stage/Vixeeny.app
+          ls -l dist
       - name: Image codecs (AVIF, JPEG XL)
         run: cargo test -p vixeeny-image -p vixeeny-app -p vixeeny-convert --features vixeeny-image/native-codecs,vixeeny-app/native-codecs,vixeeny-convert/native-codecs
         env:

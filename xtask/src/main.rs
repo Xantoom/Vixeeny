@@ -3,6 +3,7 @@
 
 mod bench;
 mod dist;
+#[cfg(unix)]
 mod dist_mac;
 mod native;
 
@@ -15,6 +16,7 @@ fn main() -> Result<()> {
         Some("bench-idle") => bench::run(&args.collect::<Vec<_>>()),
         Some("verify-registry") => verify_registry(),
         Some("dist") => dist::dist(&args.collect::<Vec<_>>()),
+        #[cfg(unix)]
         Some("dist-mac") => dist_mac::dist(&args.collect::<Vec<_>>()),
         Some("sums") => dist::sums(&args.collect::<Vec<_>>()),
         Some("bench-latency" | "test-hw") => {
