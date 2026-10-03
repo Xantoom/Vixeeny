@@ -13,7 +13,8 @@ use objc2::MainThreadMarker;
 use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
 
 use super::Startup;
-use super::desktop::{DesktopHotkeys, DesktopTray};
+use super::desktop::DesktopTray;
+use super::hotkeys::DesktopHotkeys;
 use crate::runtime::{Flow, Runtime};
 use crate::server::{self, EventTx, Waker};
 use crate::supervisor::ProcessSpawner;

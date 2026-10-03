@@ -87,6 +87,7 @@ impl Core {
                 }
             }
             Event::Control(ControlRequest::Ping) => {}
+            Event::Control(ControlRequest::Action(action)) => self.run(action, &mut fx),
             Event::UpdateAvailable(version) => fx.push(Effect::NotifyUpdate(version)),
             Event::Action(action) => self.run(action, &mut fx),
             Event::AppConnected => self.connected = true,
@@ -408,5 +409,17 @@ mod tests {
     fn ping_does_nothing() {
         let mut core = Core::new();
         assert!(core.handle(Event::Control(ControlRequest::Ping)).is_empty());
+    }
+
+    #[test]
+    fn ctl_action_runs_like_its_shortcut() {
+        let mut a = Core::new();
+        let mut b = Core::new();
+        assert_eq!(
+            a.handle(Event::Control(ControlRequest::Action(
+                ActionId::CaptureRegion
+            ))),
+            b.handle(Event::Action(ActionId::CaptureRegion)),
+        );
     }
 }

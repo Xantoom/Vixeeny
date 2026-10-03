@@ -122,6 +122,9 @@ pub enum ControlRequest {
     Ping,
     /// Like `Quit`, but ignored while a recording runs; the updater asks again until it works.
     QuitForUpdate,
+    /// Runs an action, like its shortcut would: `vixeeny-daemon ctl <action>`, for the desktops
+    /// where an application cannot register a global shortcut itself.
+    Action(ActionId),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -18,6 +18,8 @@ pub struct Startup {
 
 #[cfg(any(windows, target_os = "macos"))]
 mod desktop;
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+mod hotkeys;
 
 #[cfg(windows)]
 mod windows;
@@ -29,7 +31,14 @@ mod macos;
 #[cfg(target_os = "macos")]
 pub use macos::run;
 
-#[cfg(not(any(windows, target_os = "macos")))]
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "linux")]
+mod portal_shortcuts;
+#[cfg(target_os = "linux")]
+pub use linux::run;
+
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
 mod stub;
-#[cfg(not(any(windows, target_os = "macos")))]
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
 pub use stub::run;

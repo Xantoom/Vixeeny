@@ -18,6 +18,14 @@ vixeeny-common = { path = "../vixeeny-common" }
 global-hotkey.workspace = true
 tray-icon.workspace = true
 
+# Linux: StatusNotifierItem tray, X11 shortcuts, GlobalShortcuts portal (Wayland).
+[target.'cfg(target_os = "linux")'.dependencies]
+ashpd.workspace = true
+async-io.workspace = true
+futures-lite.workspace = true
+global-hotkey.workspace = true
+ksni.workspace = true
+
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
     "Win32_Foundation",
