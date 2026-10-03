@@ -15,7 +15,7 @@ mod clipboard;
 mod convert;
 #[cfg(any(windows, target_os = "macos", test))]
 mod gallery;
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 mod ocr;
 mod probe;
 #[cfg(all(windows, feature = "ffmpeg"))]
@@ -70,7 +70,7 @@ fn perform(action: ActionId, config: &Config) {
                 tracing::error!("scrolling capture failed: {e:#}");
             }
         }
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         ActionId::OcrRegion => {
             if let Err(e) = region::run(config, region::Mode::Ocr) {
                 tracing::error!("OCR failed: {e:#}");

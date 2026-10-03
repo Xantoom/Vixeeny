@@ -8,7 +8,11 @@ use anyhow::Context;
 use vixeeny_common::config::Config;
 use vixeeny_common::i18n::{Key, Lang, tr};
 use vixeeny_editor::RgbaImage;
-use vixeeny_ocr::{Engine, OcrImage, Texts, WindowsEngine};
+#[cfg(target_os = "macos")]
+use vixeeny_ocr::VisionEngine as OsEngine;
+#[cfg(windows)]
+use vixeeny_ocr::WindowsEngine as OsEngine;
+use vixeeny_ocr::{Engine, OcrImage, Texts};
 
 fn texts(lang: Lang) -> Texts {
     Texts {
@@ -40,7 +44,7 @@ pub fn run(image: &RgbaImage, config: &Config) -> anyhow::Result<()> {
 
     // WinRT calls block: keep them off the UI thread.
     let (result, names) = std::thread::spawn(move || {
-        let engine = WindowsEngine::new();
+        let engine = OsEngine::new();
         let names: BTreeMap<String, String> = engine
             .installed_languages()
             .map(|l| l.into_iter().map(|l| (l.tag, l.display_name)).collect())
@@ -78,8 +82,13 @@ pub fn run(image: &RgbaImage, config: &Config) -> anyhow::Result<()> {
             }
         },
         || {
+            #[cfg(windows)]
             let _ = std::process::Command::new("explorer.exe")
                 .arg("ms-settings:regionlanguage")
+                .spawn();
+            #[cfg(target_os = "macos")]
+            let _ = std::process::Command::new("open")
+                .arg("x-apple.systempreferences:com.apple.Localization-Settings.extension")
                 .spawn();
         },
     )

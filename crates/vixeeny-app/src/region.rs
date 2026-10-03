@@ -173,7 +173,6 @@ pub enum Mode {
     /// Annotate, then copy or save (Print Screen).
     Editor,
     /// Recognise the text of the zone as soon as it is drawn.
-    #[cfg(windows)]
     Ocr,
     /// Pick the zone of a scrolling capture.
     #[cfg(windows)]
@@ -233,11 +232,8 @@ pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
         foreground,
     };
     let config = config.clone();
-    #[cfg(windows)]
     let ocr_image: std::rc::Rc<std::cell::RefCell<Option<RgbaImage>>> = std::rc::Rc::default();
-    #[cfg(windows)]
     let ocr_slot = ocr_image.clone();
-    #[cfg(windows)]
     let ocr_config = config.clone();
     #[cfg(windows)]
     let config_for_scroll = config.clone();
@@ -251,7 +247,6 @@ pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
     let mut session = Session::new(base, zones);
     match mode {
         Mode::Editor => {}
-        #[cfg(windows)]
         Mode::Ocr => session = session.with_auto_command(Command::Ocr),
         #[cfg(windows)]
         Mode::Scroll => session = session.with_auto_command(Command::Scroll),
@@ -271,7 +266,7 @@ pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
         match command {
             Command::Close | Command::Copy | Command::Save | Command::SaveAs => false,
             #[cfg(not(windows))]
-            Command::Ocr | Command::Scroll => false,
+            Command::Scroll => false,
             #[cfg(windows)]
             Command::Scroll => match session.zone() {
                 Some(zone) => {
@@ -280,7 +275,6 @@ pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
                 }
                 None => false,
             },
-            #[cfg(windows)]
             Command::Ocr => match session.export() {
                 // The overlay closes first; the result window opens afterwards.
                 Some(img) => {
@@ -306,12 +300,9 @@ pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
         );
         return crate::scroll::run(&config_for_scroll, scroll_snapshot, zone, scale);
     }
-    #[cfg(windows)]
-    {
-        let recognised = ocr_image.borrow_mut().take();
-        if let Some(img) = recognised {
-            crate::ocr::run(&img, &ocr_config)?;
-        }
+    let recognised = ocr_image.borrow_mut().take();
+    if let Some(img) = recognised {
+        crate::ocr::run(&img, &ocr_config)?;
     }
     Ok(())
 }

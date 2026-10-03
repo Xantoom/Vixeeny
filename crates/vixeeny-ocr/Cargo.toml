@@ -24,3 +24,9 @@ windows = { workspace = true, features = [
     "Storage_Streams",
     "Win32_System_WinRT",
 ] }
+
+# Vision (VNRecognizeTextRequest) on macOS.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2.workspace = true
+objc2-foundation = { workspace = true, features = ["NSArray", "NSData", "NSDictionary", "NSError", "NSString", "NSObject"] }
+objc2-vision = { workspace = true, features = ["VNObservation", "VNRecognizeTextRequest", "VNRequest", "VNRequestHandler", "VNTypes"] }

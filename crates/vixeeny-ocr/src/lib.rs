@@ -1,16 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! vixeeny-ocr — text recognition with the engine of the OS (plan 5.6): `Windows.Media.Ocr`
-//! today; Vision (macOS) and Tesseract (Linux) arrive with M20–M22. Language selection and
+//! and Vision (macOS); Tesseract (Linux) arrives with M21–M22. Language selection and
 //! result choice are pure code behind the [`Engine`] trait, tested with a fake engine.
 
 mod image;
 pub mod lang;
+#[cfg(target_os = "macos")]
+mod mac_engine;
 pub mod panel;
 #[cfg(windows)]
 mod windows_engine;
 
 pub use image::OcrImage;
 pub use lang::{InstallHint, LanguagePlan, install_hint};
+#[cfg(target_os = "macos")]
+pub use mac_engine::VisionEngine;
 pub use panel::{OcrPanel, Texts, describe};
 #[cfg(windows)]
 pub use windows_engine::WindowsEngine;
