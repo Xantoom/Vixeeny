@@ -25,6 +25,11 @@ pub struct HwFrame(*mut ffi::AVFrame);
 unsafe impl Send for HwFrame {}
 
 impl HwFrame {
+    /// Takes ownership of an `AVFrame` that was allocated with `av_frame_alloc`.
+    pub(crate) fn from_raw(frame: *mut ffi::AVFrame) -> Self {
+        Self(frame)
+    }
+
     pub(crate) fn as_ptr(&self) -> *mut ffi::AVFrame {
         self.0
     }

@@ -332,6 +332,89 @@ fn desktop_name_for(entry: &str, exe_name: &str) -> Option<String> {
     (base == exe_name).then_some(name?)
 }
 
+/// The GPUs of the machine, from the DRM devices of `/sys/class/drm` (`cardN`, not the
+/// connectors `cardN-HDMI-A-1`). The name comes from the PCI id database when the system has one.
+pub fn gpu_adapters() -> Result<Vec<crate::GpuInfo>> {
+    let entries = std::fs::read_dir("/sys/class/drm").map_err(os_error)?;
+    let mut cards: Vec<std::path::PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
+                n.strip_prefix("card")
+                    .is_some_and(|r| r.chars().all(|c| c.is_ascii_digit()))
+            })
+        })
+        .collect();
+    cards.sort();
+    let hex = |path: std::path::PathBuf| {
+        std::fs::read_to_string(path)
+            .ok()
+            .and_then(|t| u32::from_str_radix(t.trim().trim_start_matches("0x"), 16).ok())
+    };
+    let ids = pci_ids();
+    let mut out = Vec::new();
+    for card in cards {
+        let device = card.join("device");
+        let (Some(vendor_id), Some(device_id)) =
+            (hex(device.join("vendor")), hex(device.join("device")))
+        else {
+            continue;
+        };
+        let driver = std::fs::read_link(device.join("driver"))
+            .ok()
+            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()));
+        let version = driver
+            .as_deref()
+            .and_then(|d| std::fs::read_to_string(format!("/sys/module/{d}/version")).ok())
+            .map(|v| v.trim().to_owned())
+            .or_else(|| {
+                std::fs::read_to_string("/proc/sys/kernel/osrelease")
+                    .ok()
+                    .map(|v| v.trim().to_owned())
+            })
+            .unwrap_or_default();
+        let name = pci_name(&ids, vendor_id, device_id)
+            .unwrap_or_else(|| format!("GPU {vendor_id:04x}:{device_id:04x}"));
+        out.push(crate::GpuInfo {
+            name,
+            vendor_id,
+            device_id,
+            driver_version: version,
+            software: false,
+        });
+    }
+    Ok(out)
+}
+
+/// The text of the PCI id database, empty when the system has none.
+fn pci_ids() -> String {
+    [
+        "/usr/share/hwdata/pci.ids",
+        "/usr/share/misc/pci.ids",
+        "/usr/share/pci.ids",
+    ]
+    .iter()
+    .find_map(|p| std::fs::read_to_string(p).ok())
+    .unwrap_or_default()
+}
+
+/// `vendor name device name` from the database format (`vvvv  Vendor`, `\tdddd  Device`).
+fn pci_name(ids: &str, vendor: u32, device: u32) -> Option<String> {
+    let (v, d) = (format!("{vendor:04x}  "), format!("\t{device:04x}  "));
+    let mut lines = ids.lines();
+    let vendor_name = lines.find_map(|l| l.strip_prefix(v.as_str()))?.trim();
+    for line in lines {
+        if !line.starts_with('\t') && !line.starts_with('#') && !line.is_empty() {
+            break;
+        }
+        if let Some(name) = line.strip_prefix(d.as_str()) {
+            return Some(format!("{vendor_name} {}", name.trim()));
+        }
+    }
+    Some(vendor_name.to_owned())
+}
+
 pub fn user_locale() -> Option<String> {
     ["LC_ALL", "LC_MESSAGES", "LANG"]
         .iter()
@@ -392,6 +475,20 @@ mod tests {
             Some("Firefox")
         );
         assert_eq!(desktop_name_for(entry, "chrome"), None);
+    }
+
+    #[test]
+    fn a_gpu_is_named_from_the_pci_database() {
+        let ids = "# comment\n10de  NVIDIA Corporation\n\t2684  AD102 [GeForce RTX 4090]\n\t2685  AD102 [x]\n1002  Advanced Micro Devices, Inc.\n\t744c  Navi 31\n";
+        assert_eq!(
+            pci_name(ids, 0x10de, 0x2684).as_deref(),
+            Some("NVIDIA Corporation AD102 [GeForce RTX 4090]")
+        );
+        assert_eq!(
+            pci_name(ids, 0x1002, 0x9999).as_deref(),
+            Some("Advanced Micro Devices, Inc.")
+        );
+        assert_eq!(pci_name(ids, 0x8086, 0x1), None);
     }
 
     #[test]

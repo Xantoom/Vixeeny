@@ -42,16 +42,6 @@ impl Prober for FfmpegProber {
         size: (u32, u32),
         hdr: bool,
     ) -> Result<(), String> {
-        // These encoders only take frames living on the GPU, which needs a device context we
-        // do not create here (Linux and macOS integration: M20, M22).
-        if encoder
-            .hw_frames
-            .iter()
-            .all(|h| h == "vaapi" || h == "vulkan")
-            && encoder.kind == Kind::Hardware
-        {
-            return Err("needs a hardware device context".into());
-        }
         let codec = encoder::find_by_name(&encoder.ffmpeg_encoder)
             .ok_or_else(|| format!("{} is not built in", encoder.ffmpeg_encoder))?;
         let pix = pixel(&format.ffmpeg)?;
@@ -75,10 +65,30 @@ impl Prober for FfmpegProber {
         {
             options.set("gpu", &adapter.index.to_string());
         }
+        // VAAPI and Vulkan encoders read GPU surfaces: they get a device and an upload.
+        let upload = if crate::hwupload::needed(encoder.vendor) {
+            let upload = crate::hwupload::Upload::new(encoder.vendor, pix, size, None)?;
+            upload.attach(&mut ctx)?;
+            Some(upload)
+        } else {
+            None
+        };
         let mut opened = ctx.open_with(options).map_err(|e| e.to_string())?;
         let mut frame = frame::Video::new(pix, size.0, size.1);
         frame.set_pts(Some(0));
-        opened.send_frame(&frame).map_err(|e| e.to_string())?;
+        match &upload {
+            Some(upload) => {
+                let hw = upload.upload(&frame)?;
+                // SAFETY: a live frame from the upload; the encoder takes its own reference.
+                let code = unsafe {
+                    ffmpeg_next::ffi::avcodec_send_frame(opened.as_mut_ptr(), hw.as_ptr())
+                };
+                if code < 0 {
+                    return Err(format!("avcodec_send_frame: {code}"));
+                }
+            }
+            None => opened.send_frame(&frame).map_err(|e| e.to_string())?,
+        }
         opened.send_eof().map_err(|e| e.to_string())?;
         let mut packet = Packet::empty();
         opened

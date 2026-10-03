@@ -427,6 +427,8 @@ struct Worker {
     pix: Pixel,
     enc_tb: Rational,
     scaler: Option<(scaling::Context, (u32, u32, FrameFormat))>,
+    /// VAAPI / Vulkan: frames are uploaded to the device after the conversion.
+    upload: Option<crate::hwupload::Upload>,
     last: Option<Last>,
     out: Option<Output>,
     audio: Vec<AudioTrack>,
@@ -474,6 +476,14 @@ impl Worker {
         if let Some(gpu) = &cfg.gpu {
             crate::gpu::attach(&mut ctx, gpu)?;
         }
+        let upload = if crate::hwupload::needed(cfg.encoder.vendor) {
+            let upload = crate::hwupload::Upload::new(cfg.encoder.vendor, pix, (w, h), None)
+                .map_err(RecordError::Config)?;
+            upload.attach(&mut ctx).map_err(RecordError::Config)?;
+            Some(upload)
+        } else {
+            None
+        };
         if cfg.vfr && !matches!(cfg.container, OutputContainer::Mkv | OutputContainer::WebM) {
             return Err(RecordError::Config(
                 "variable frame rate needs Matroska or WebM".into(),
@@ -518,6 +528,7 @@ impl Worker {
             pix,
             enc_tb,
             scaler: None,
+            upload,
             last: None,
             out: None,
             audio: Vec::new(),
@@ -806,7 +817,15 @@ impl Worker {
     /// Software frames are converted and scaled here; GPU frames already are.
     fn prepare(&mut self, input: Input) -> Result<Last, RecordError> {
         Ok(match input {
-            Input::Cpu(frame) => Last::Sw(self.convert(&frame)?),
+            Input::Cpu(frame) => {
+                let converted = self.convert(&frame)?;
+                match &self.upload {
+                    Some(upload) => {
+                        Last::Hw(upload.upload(&converted).map_err(RecordError::Config)?)
+                    }
+                    None => Last::Sw(converted),
+                }
+            }
             Input::Hw(frame) => Last::Hw(frame),
         })
     }

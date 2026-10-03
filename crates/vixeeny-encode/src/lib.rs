@@ -17,6 +17,8 @@ pub mod ffmpeg_probe;
 #[cfg(feature = "ffmpeg-next")]
 pub mod gpu;
 #[cfg(feature = "ffmpeg-next")]
+pub mod hwupload;
+#[cfg(feature = "ffmpeg-next")]
 pub mod recorder;
 #[cfg(feature = "ffmpeg-next")]
 pub mod replay;
