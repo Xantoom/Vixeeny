@@ -38,3 +38,9 @@ ffmpeg-next = ["dep:ffmpeg-next"]
 
 [dev-dependencies]
 vixeeny-audio = { path = "../vixeeny-audio" }
+vixeeny-capture = { path = "../vixeeny-capture" }
+vixeeny-platform = { path = "../vixeeny-platform" }
+
+[[example]]
+name = "record_mac"
+required-features = ["ffmpeg-next"]

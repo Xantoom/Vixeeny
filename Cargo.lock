@@ -5916,7 +5916,9 @@ dependencies = [
  "toml",
  "tracing",
  "vixeeny-audio",
+ "vixeeny-capture",
  "vixeeny-common",
+ "vixeeny-platform",
  "windows",
 ]
 

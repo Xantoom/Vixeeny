@@ -163,6 +163,10 @@ jobs:
       - run: cargo test -p vixeeny-encode --features ffmpeg-next --test software_encode --test verify_registry --test recorder
         env:
           PKG_CONFIG_PATH: ${{ github.workspace }}/native/build/work/prefix/lib/pkgconfig
+      - name: The macOS recording example builds (it needs a Mac with permissions to run)
+        run: cargo build -p vixeeny-encode --features ffmpeg-next --example record_mac
+        env:
+          PKG_CONFIG_PATH: ${{ github.workspace }}/native/build/work/prefix/lib/pkgconfig
       - name: Image codecs (AVIF, JPEG XL)
         run: cargo test -p vixeeny-image -p vixeeny-app -p vixeeny-convert --features vixeeny-image/native-codecs,vixeeny-app/native-codecs,vixeeny-convert/native-codecs
         env:
