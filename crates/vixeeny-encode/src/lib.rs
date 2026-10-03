@@ -20,6 +20,8 @@ pub mod gpu;
 pub mod recorder;
 #[cfg(feature = "ffmpeg-next")]
 pub mod replay;
+#[cfg(feature = "ffmpeg-next")]
+pub mod thumbnail;
 
 /// FFmpeg bindings, built against the pinned static libraries of `native/versions.toml`.
 #[cfg(feature = "ffmpeg-next")]

@@ -978,3 +978,20 @@ fn a_replay_and_a_recording_share_one_encoder_session() {
     assert_eq!(demux(&path).pts_ms[0], demux(&summary.files[0]).pts_ms[0]);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn a_recording_has_a_thumbnail_no_bigger_than_asked() {
+    let registry = Registry::builtin().unwrap();
+    let dir = scratch("thumbnail");
+    let summary = record(
+        config(&registry, "libx264", OutputContainer::Mp4Hybrid, 30),
+        &dir,
+        20,
+    );
+    let file = summary.files.first().unwrap();
+    let (w, h, rgba) = vixeeny_encode::thumbnail::video_thumbnail(file, 160).unwrap();
+    assert_eq!((w, h), (160, 90));
+    assert_eq!(rgba.len(), 160 * 90 * 4);
+    assert!(rgba.iter().any(|b| *b != 0), "the thumbnail is blank");
+    assert!(vixeeny_encode::thumbnail::video_thumbnail(&dir.join("missing.mp4"), 160).is_none());
+}

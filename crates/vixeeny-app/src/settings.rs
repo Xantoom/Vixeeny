@@ -111,7 +111,7 @@ fn show_gallery(shared: &SharedGallery, handle: &PanelHandle, offset: i64) {
             .shown
             .iter()
             .filter_map(|i| g.items.get(*i))
-            .filter(|i| i.kind == Kind::Image && !g.thumbs.contains_key(&i.path))
+            .filter(|i| !g.thumbs.contains_key(&i.path))
             .map(|i| i.path.clone())
             .collect();
         (entries(&g, offset), g.selected, missing)
