@@ -261,3 +261,55 @@ pub fn exe_metadata(path: &str) -> crate::ExeMetadata {
         file_description: None,
     }
 }
+
+/// The `NSView` behind a window id (the winit handle of the window's content view).
+///
+/// # Safety
+/// `id` must be the `NSView` pointer of a live window, used from the main thread.
+unsafe fn view_of<'a>(id: WindowId) -> Result<&'a objc2_app_kit::NSView> {
+    let ptr = id.0 as *const objc2_app_kit::NSView;
+    // SAFETY: the caller guarantees the pointer designates a live view.
+    unsafe { ptr.as_ref() }.ok_or_else(|| PlatformError::Os("no native view".into()))
+}
+
+/// Vibrancy: a behind-window `NSVisualEffectView` under the content, and a clear window so it
+/// shows. `id` is the content `NSView` that winit reports.
+pub fn apply_acrylic(id: WindowId) -> Result<()> {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{
+        NSAutoresizingMaskOptions, NSColor, NSVisualEffectBlendingMode, NSVisualEffectMaterial,
+        NSVisualEffectState, NSVisualEffectView, NSWindowOrderingMode,
+    };
+
+    let mtm = MainThreadMarker::new()
+        .ok_or_else(|| PlatformError::Os("not on the main thread".into()))?;
+    // SAFETY: `id` comes from the live window of the caller, on the main thread (checked).
+    let view = unsafe { view_of(id)? };
+    let window = view
+        .window()
+        .ok_or_else(|| PlatformError::Os("the view has no window yet".into()))?;
+    let effect = NSVisualEffectView::initWithFrame(mtm.alloc(), view.bounds());
+    effect.setMaterial(NSVisualEffectMaterial::HUDWindow);
+    effect.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
+    effect.setState(NSVisualEffectState::Active);
+    effect.setAutoresizingMask(
+        NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable,
+    );
+    view.addSubview_positioned_relativeTo(&effect, NSWindowOrderingMode::Below, None);
+    window.setOpaque(false);
+    window.setBackgroundColor(Some(&NSColor::clearColor()));
+    Ok(())
+}
+
+/// Keeps the window out of screenshots and recordings (`sharingType = none`).
+pub fn exclude_from_capture(id: WindowId) -> Result<()> {
+    use objc2_app_kit::NSWindowSharingType;
+
+    // SAFETY: as in `apply_acrylic`; `setSharingType` is thread-safe enough for a window we own.
+    let view = unsafe { view_of(id)? };
+    let window = view
+        .window()
+        .ok_or_else(|| PlatformError::Os("the view has no window yet".into()))?;
+    window.setSharingType(NSWindowSharingType::None);
+    Ok(())
+}

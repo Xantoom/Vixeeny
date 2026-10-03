@@ -167,6 +167,10 @@ jobs:
         run: cargo build -p vixeeny-encode --features ffmpeg-next --example record_mac
         env:
           PKG_CONFIG_PATH: ${{ github.workspace }}/native/build/work/prefix/lib/pkgconfig
+      - name: The app with recording builds (clippy)
+        run: cargo clippy -p vixeeny-app --features ffmpeg -- -D warnings
+        env:
+          PKG_CONFIG_PATH: ${{ github.workspace }}/native/build/work/prefix/lib/pkgconfig
       - name: The app bundle and the disk image build
         run: |
           cargo build --release -p vixeeny-daemon -p vixeeny-app -p vixeeny-updater -p xtask

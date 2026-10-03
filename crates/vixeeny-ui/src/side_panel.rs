@@ -461,7 +461,7 @@ impl SidePanel {
         w.set_position(slint::PhysicalPosition::new(x, y));
     }
 
-    /// The native window handle (`HWND` on Windows) once the window is shown.
+    /// The native window handle (`HWND` on Windows, `NSView` on macOS) once the window is shown.
     #[cfg(feature = "desktop")]
     pub fn native_handle(&self) -> Option<u64> {
         use slint::winit_030::WinitWindowAccessor;
@@ -470,6 +470,8 @@ impl SidePanel {
             .window()
             .with_winit_window(|w| match w.window_handle().ok()?.as_raw() {
                 RawWindowHandle::Win32(h) => Some(h.hwnd.get() as u64),
+                // The content `NSView`, which the platform layer dresses.
+                RawWindowHandle::AppKit(h) => Some(h.ns_view.as_ptr() as u64),
                 _ => None,
             })
             .flatten()

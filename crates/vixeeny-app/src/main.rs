@@ -7,7 +7,7 @@
 use std::sync::mpsc::{RecvTimeoutError, channel};
 use std::time::Duration;
 
-#[cfg(all(windows, feature = "ffmpeg"))]
+#[cfg(all(any(windows, target_os = "macos"), feature = "ffmpeg"))]
 mod audio_rig;
 #[cfg(any(windows, target_os = "macos"))]
 mod clipboard;
@@ -18,7 +18,7 @@ mod gallery;
 #[cfg(any(windows, target_os = "macos"))]
 mod ocr;
 mod probe;
-#[cfg(all(windows, feature = "ffmpeg"))]
+#[cfg(all(any(windows, target_os = "macos"), feature = "ffmpeg"))]
 mod record;
 #[cfg(any(windows, target_os = "macos"))]
 mod region;
@@ -26,14 +26,17 @@ mod region;
 mod scroll;
 #[cfg(any(windows, target_os = "macos"))]
 mod settings;
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 mod side;
 #[cfg(any(windows, target_os = "macos", test))]
 mod still;
 mod toast;
 #[cfg(windows)]
 mod widget;
-#[cfg(any(windows, test))]
+#[cfg(target_os = "macos")]
+#[path = "widget_mac.rs"]
+mod widget;
+#[cfg(any(windows, target_os = "macos", test))]
 mod widget_math;
 
 use anyhow::Context;
@@ -242,7 +245,7 @@ fn open_settings() {
     tracing::info!("the settings window needs Windows or macOS");
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 fn overlay(
     config: &mut Config,
     recording: &Recording,
@@ -274,7 +277,7 @@ fn overlay(
     Ok(outcome.action)
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 fn overlay(
     _: &mut Config,
     _: &Recording,
@@ -287,38 +290,38 @@ fn overlay(
 /// The recording started by `RecordToggle`, if any (Windows with FFmpeg only).
 #[derive(Default)]
 struct Recording {
-    #[cfg(all(windows, feature = "ffmpeg"))]
+    #[cfg(all(any(windows, target_os = "macos"), feature = "ffmpeg"))]
     handle: Option<record::Handle>,
     /// The replay buffer (`ReplayToggle`), which runs alongside a recording.
-    #[cfg(all(windows, feature = "ffmpeg"))]
+    #[cfg(all(any(windows, target_os = "macos"), feature = "ffmpeg"))]
     replay: Option<record::Handle>,
 }
 
 impl Recording {
     /// `(recording, replay buffer)` is running.
-    #[cfg(all(windows, feature = "ffmpeg"))]
+    #[cfg(all(any(windows, target_os = "macos"), feature = "ffmpeg"))]
     fn flags(&self) -> (bool, bool) {
         (self.handle.is_some(), self.replay.is_some())
     }
 
-    #[cfg(not(all(windows, feature = "ffmpeg")))]
+    #[cfg(not(all(any(windows, target_os = "macos"), feature = "ffmpeg")))]
     #[allow(clippy::unused_self, dead_code)]
     fn flags(&self) -> (bool, bool) {
         (false, false)
     }
 
-    #[cfg(all(windows, feature = "ffmpeg"))]
+    #[cfg(all(any(windows, target_os = "macos"), feature = "ffmpeg"))]
     fn active(&self) -> bool {
         self.handle.is_some() || self.replay.is_some()
     }
 
-    #[cfg(not(all(windows, feature = "ffmpeg")))]
+    #[cfg(not(all(any(windows, target_os = "macos"), feature = "ffmpeg")))]
     #[allow(clippy::unused_self)]
     fn active(&self) -> bool {
         false
     }
 
-    #[cfg(all(windows, feature = "ffmpeg"))]
+    #[cfg(all(any(windows, target_os = "macos"), feature = "ffmpeg"))]
     fn handle(&mut self, action: ActionId, config: &Config) {
         match action {
             ActionId::ReplayToggle => {
@@ -359,14 +362,14 @@ impl Recording {
         }
     }
 
-    #[cfg(not(all(windows, feature = "ffmpeg")))]
+    #[cfg(not(all(any(windows, target_os = "macos"), feature = "ffmpeg")))]
     #[allow(clippy::unused_self)]
     fn handle(&mut self, action: ActionId, _: &Config) {
         tracing::info!("action {action:?}: recording needs Windows and the `ffmpeg` feature");
     }
 
     /// Tells the daemon (tray icon) when the state changed, and forgets a finished recording.
-    #[cfg(all(windows, feature = "ffmpeg"))]
+    #[cfg(all(any(windows, target_os = "macos"), feature = "ffmpeg"))]
     fn report(&mut self, send: &mut impl std::io::Write) -> anyhow::Result<()> {
         let Some(handle) = self.handle.as_mut() else {
             return Ok(());
@@ -386,7 +389,7 @@ impl Recording {
         Ok(())
     }
 
-    #[cfg(not(all(windows, feature = "ffmpeg")))]
+    #[cfg(not(all(any(windows, target_os = "macos"), feature = "ffmpeg")))]
     #[allow(clippy::unused_self)]
     fn report(&mut self, _: &mut impl std::io::Write) -> anyhow::Result<()> {
         Ok(())

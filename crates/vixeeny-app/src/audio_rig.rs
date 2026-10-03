@@ -5,8 +5,12 @@
 
 use std::sync::mpsc::{Receiver, Sender, channel};
 
+#[cfg(target_os = "macos")]
+use vixeeny_audio::SckAudioSource as OsSource;
+#[cfg(windows)]
+use vixeeny_audio::WasapiSource as OsSource;
 use vixeeny_audio::{
-    AudioChunk, AudioSink, AudioSource, Mixer, SourceEvent, SourceSpec, TrackPlan, WasapiSource,
+    AudioChunk, AudioSink, AudioSource, Mixer, SourceEvent, SourceSpec, TrackPlan,
 };
 use vixeeny_common::config::Config;
 use vixeeny_encode::recorder::Recorder;
@@ -40,7 +44,7 @@ struct TrackRt {
 }
 
 pub struct Rig {
-    sources: Vec<(SourceSpec, WasapiSource)>,
+    sources: Vec<(SourceSpec, OsSource)>,
     rx: Receiver<Msg>,
     tracks: Vec<TrackRt>,
     /// Master-clock time of the recording's zero.
@@ -75,11 +79,20 @@ impl Rig {
                 members,
             });
         }
-        let mut sources: Vec<(SourceSpec, WasapiSource)> = wanted
+        let mut sources: Vec<(SourceSpec, OsSource)> = wanted
             .into_iter()
             .map(|(spec, channels)| {
-                let widest = channels.into_iter().max().unwrap_or(2);
-                let source = WasapiSource::with_max_channels(spec.kind.clone(), widest);
+                // macOS captures stereo only for now.
+                #[cfg(windows)]
+                let source = {
+                    let widest = channels.into_iter().max().unwrap_or(2);
+                    OsSource::with_max_channels(spec.kind.clone(), widest)
+                };
+                #[cfg(target_os = "macos")]
+                let source = {
+                    let _ = channels;
+                    OsSource::new(spec.kind.clone())
+                };
                 (spec, source)
             })
             .collect();

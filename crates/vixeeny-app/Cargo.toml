@@ -19,6 +19,7 @@ vixeeny-platform = { path = "../vixeeny-platform" }
 
 # The Print Screen editor (plan 5.3) and the settings window.
 [target.'cfg(any(windows, target_os = "macos"))'.dependencies]
+vixeeny-audio = { path = "../vixeeny-audio" }
 vixeeny-convert = { path = "../vixeeny-convert" }
 vixeeny-editor = { path = "../vixeeny-editor" }
 vixeeny-ocr = { path = "../vixeeny-ocr" }
@@ -28,7 +29,6 @@ vixeeny-ui = { path = "../vixeeny-ui", features = ["desktop"] }
 rfd = { version = "0.17.2", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
-vixeeny-audio = { path = "../vixeeny-audio" }
 vixeeny-stitch = { path = "../vixeeny-stitch" }
 
 [features]

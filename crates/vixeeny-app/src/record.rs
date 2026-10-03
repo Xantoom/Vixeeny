@@ -18,15 +18,46 @@ use vixeeny_common::config::{Config, Profile};
 use vixeeny_common::ipc::RecState;
 use vixeeny_encode::audio::{AudioCodec, AudioTrackConfig};
 use vixeeny_encode::clock::Fps;
+#[cfg(windows)]
 use vixeeny_encode::d3d_convert as d3d;
+#[cfg(windows)]
 use vixeeny_encode::gpu::{GpuPipeline, HwFrame, Source as GpuSource};
 use vixeeny_encode::probe::ProbeResult;
 use vixeeny_encode::recorder::{
     FrameFormat, OutputContainer, RecordConfig, Recorder, Split, VideoFrame,
 };
-use vixeeny_encode::registry::{Chroma, Encoder, Platform, PresetName, Registry, Vendor};
+#[cfg(windows)]
+use vixeeny_encode::registry::Vendor;
+use vixeeny_encode::registry::{Chroma, Encoder, Platform, PresetName, Registry};
 use vixeeny_encode::replay;
 use vixeeny_encode::validate::{self, Context as ValidateContext, Severity};
+
+/// The capture stream, and what it hands over.
+#[cfg(windows)]
+use vixeeny_capture::VideoStream as Video;
+
+/// A frame of the macOS stream, in the shape the Windows one has.
+#[cfg(target_os = "macos")]
+struct Captured {
+    hdr: bool,
+    time_ns: i64,
+    frame: vixeeny_capture::CpuFrame,
+}
+
+/// ScreenCaptureKit video; SDR only for now.
+#[cfg(target_os = "macos")]
+struct Video(vixeeny_capture::SckVideoStream);
+
+#[cfg(target_os = "macos")]
+impl Video {
+    fn recv(&self, timeout: Duration) -> Result<Option<Captured>, vixeeny_capture::CaptureError> {
+        Ok(self.0.recv(timeout)?.map(|f| Captured {
+            hdr: false,
+            time_ns: f.time_ns,
+            frame: f.frame,
+        }))
+    }
+}
 
 /// How often a still screen gets its frame repeated.
 const TICK: Duration = Duration::from_millis(100);
@@ -127,11 +158,13 @@ struct Plan {
     monitor: vixeeny_platform::MonitorInfo,
     cursor: bool,
     /// The monitor shows HDR and the profile keeps it: frames are scRGB half floats.
+    #[cfg_attr(not(windows), allow(dead_code))]
     hdr: bool,
     namer: Namer,
     /// Replay only: the path of the next save.
     save_as: Option<SaveNamer>,
     /// Frames are converted on the GPU on this device (see `try_gpu`).
+    #[cfg(windows)]
     gpu: Option<GpuParts>,
     audio: Vec<vixeeny_audio::TrackPlan>,
     /// The widget to show, and the language of its labels.
@@ -140,6 +173,7 @@ struct Plan {
     notice: Config,
 }
 
+#[cfg(windows)]
 struct GpuParts {
     pipeline: Arc<GpuPipeline>,
     device: d3d::Device,
@@ -147,12 +181,15 @@ struct GpuParts {
 }
 
 /// Keeps the D3D11 device alive for the length of the recording.
+#[cfg(windows)]
 struct KeepAlive(#[allow(dead_code)] Option<GpuParts>);
 
 // SAFETY: the device is free-threaded and multithread protected; the value is only held, never
 // used, by the recording thread.
+#[cfg(windows)]
 unsafe impl Send for KeepAlive {}
 
+#[cfg(windows)]
 /// The GPU path: NVENC / AMF read D3D11 textures converted by the video processor. `None` (with
 /// the reason logged) when the encoder or the machine cannot do it: the CPU path then records.
 fn try_gpu(
@@ -202,6 +239,7 @@ fn try_gpu(
     }
 }
 
+#[cfg_attr(not(windows), allow(unused_variables))]
 fn plan(config: &Config, allow_gpu: bool, replay: bool) -> anyhow::Result<Plan> {
     vixeeny_platform::ensure_dpi_aware();
     let monitors = vixeeny_platform::monitors()?;
@@ -278,6 +316,7 @@ fn plan(config: &Config, allow_gpu: bool, replay: bool) -> anyhow::Result<Plan> 
         .collect();
     // An SDR monitor has nothing to preserve: such a recording stays SDR.
     let hdr = monitor.hdr.is_some() && matches!(profile.hdr.as_str(), "keep_hdr" | "hdr");
+    #[allow(unused_mut)]
     let mut record = RecordConfig {
         options,
         container,
@@ -302,12 +341,16 @@ fn plan(config: &Config, allow_gpu: bool, replay: bool) -> anyhow::Result<Plan> 
         replay_storage: replay_storage(config),
         files: !replay,
     };
+    #[cfg(windows)]
     let gpu = if allow_gpu {
         try_gpu(&record.encoder, &record, source, hdr)
     } else {
         None
     };
-    record.gpu = gpu.as_ref().map(|g| Arc::clone(&g.pipeline));
+    #[cfg(windows)]
+    {
+        record.gpu = gpu.as_ref().map(|g| Arc::clone(&g.pipeline));
+    }
 
     let extension = container.extension();
     let (namer, save_as): (Namer, Option<SaveNamer>) = if replay {
@@ -337,6 +380,7 @@ fn plan(config: &Config, allow_gpu: bool, replay: bool) -> anyhow::Result<Plan> 
         hdr,
         namer,
         save_as,
+        #[cfg(windows)]
         gpu,
         audio,
         widget: (config.recording_widget.enabled && !replay).then(|| {
@@ -430,9 +474,14 @@ pub fn start_replay(config: &Config) -> anyhow::Result<Handle> {
 
 fn start_session(config: &Config, replay: bool) -> anyhow::Result<Handle> {
     let first = plan(config, true, replay)?;
+    #[cfg(not(windows))]
+    return launch(first);
+    #[cfg(windows)]
     if first.gpu.is_none() {
         return launch(first);
     }
+    #[cfg(windows)]
+    #[cfg(windows)]
     match launch(first) {
         Ok(handle) => Ok(handle),
         Err(e) => {
@@ -443,48 +492,60 @@ fn start_session(config: &Config, replay: bool) -> anyhow::Result<Handle> {
 }
 
 /// Frames the GPU sink may queue for the recording thread.
+#[cfg(windows)]
 const GPU_BACKLOG: usize = 4;
 
 fn launch(plan: Plan) -> anyhow::Result<Handle> {
     // The recording's time zero: video and audio timestamps are relative to it.
     let origin = vixeeny_platform::monotonic_ns();
-    let target = vixeeny_capture::StreamTarget::Monitor(plan.monitor.clone());
-    let (stream, gpu_frames) = match &plan.gpu {
-        None => (
-            vixeeny_capture::VideoStream::start(&target, plan.cursor, plan.hdr)?,
-            None,
-        ),
-        Some(gpu) => {
-            let (tx, rx) = std::sync::mpsc::sync_channel::<(i64, HwFrame)>(GPU_BACKLOG);
-            let pipeline = Arc::clone(&gpu.pipeline);
-            let sink: vixeeny_capture::TextureSink = Box::new(move |texture, content, time_ns| {
-                let rect = d3d::Rect {
-                    left: 0,
-                    top: 0,
-                    right: content.0 as i32,
-                    bottom: content.1 as i32,
+    #[cfg(windows)]
+    let (stream, gpu_frames) = {
+        let target = vixeeny_capture::StreamTarget::Monitor(plan.monitor.clone());
+        let (stream, gpu_frames) = match &plan.gpu {
+            None => (
+                vixeeny_capture::VideoStream::start(&target, plan.cursor, plan.hdr)?,
+                None,
+            ),
+            Some(gpu) => {
+                let (tx, rx) = std::sync::mpsc::sync_channel::<(i64, HwFrame)>(GPU_BACKLOG);
+                let pipeline = Arc::clone(&gpu.pipeline);
+                let sink: vixeeny_capture::TextureSink =
+                    Box::new(move |texture, content, time_ns| {
+                        let rect = d3d::Rect {
+                            left: 0,
+                            top: 0,
+                            right: content.0 as i32,
+                            bottom: content.1 as i32,
+                        };
+                        // A refused conversion (pool exhausted, GPU busy) is a dropped frame.
+                        if let Ok(frame) = pipeline.convert(texture, rect) {
+                            let _ = tx.try_send((time_ns, frame));
+                        }
+                    });
+                let capture = vixeeny_capture::GpuCapture {
+                    device: gpu.device.clone(),
+                    context: gpu.context.clone(),
+                    sink,
                 };
-                // A refused conversion (pool exhausted, GPU busy) is a dropped frame.
-                if let Ok(frame) = pipeline.convert(texture, rect) {
-                    let _ = tx.try_send((time_ns, frame));
-                }
-            });
-            let capture = vixeeny_capture::GpuCapture {
-                device: gpu.device.clone(),
-                context: gpu.context.clone(),
-                sink,
-            };
-            (
-                vixeeny_capture::VideoStream::start_with(
-                    &target,
-                    plan.cursor,
-                    plan.hdr,
-                    Some(capture),
-                )?,
-                Some(rx),
-            )
-        }
+                (
+                    vixeeny_capture::VideoStream::start_with(
+                        &target,
+                        plan.cursor,
+                        plan.hdr,
+                        Some(capture),
+                    )?,
+                    Some(rx),
+                )
+            }
+        };
+        (stream, gpu_frames)
     };
+    #[cfg(target_os = "macos")]
+    let stream = Video(vixeeny_capture::SckVideoStream::start_monitor(
+        &plan.monitor,
+        (plan.config.fps.num / plan.config.fps.den.max(1)).max(1),
+        plan.cursor,
+    )?);
     let recorder = Recorder::start(plan.config, plan.namer)?;
     let (ctl, rx) = channel();
     // The widget is a nicety: without it the recording goes on (hotkeys still work).
@@ -506,12 +567,14 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
     // The GPU parts must outlive the recording (the device the textures live on).
     let save_as = plan.save_as;
     let notice = plan.notice;
+    #[cfg(windows)]
     let keep_alive = KeepAlive(plan.gpu);
     let thread = std::thread::Builder::new()
         .name("recording".into())
         .spawn(move || {
             let result = record_loop(
                 &stream,
+                #[cfg(windows)]
                 gpu_frames.as_ref(),
                 recorder,
                 rig,
@@ -523,6 +586,7 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
                 &notice,
             );
             drop(stream);
+            #[cfg(windows)]
             drop(keep_alive);
             thread_state.store(IDLE, Ordering::Release);
             match result {
@@ -586,8 +650,8 @@ fn save_replay(recorder: &Recorder, next_path: &mut SaveNamer, notice: &Config) 
 
 #[allow(clippy::too_many_arguments)]
 fn record_loop(
-    stream: &vixeeny_capture::VideoStream,
-    gpu_frames: Option<&std::sync::mpsc::Receiver<(i64, HwFrame)>>,
+    stream: &Video,
+    #[cfg(windows)] gpu_frames: Option<&std::sync::mpsc::Receiver<(i64, HwFrame)>>,
     recorder: Recorder,
     mut rig: Option<Rig>,
     mut widget: Option<crate::widget::Widget>,
@@ -659,6 +723,7 @@ fn record_loop(
                 last_shown = shown;
             }
         }
+        #[cfg(windows)]
         if let Some(frames) = gpu_frames {
             // The stream only reports its end; the frames arrive through the sink's channel.
             if let Err(e) = stream.recv(Duration::ZERO) {
