@@ -1,7 +1,9 @@
 name: CI
 on:
   push:
+    # With only `tags-ignore`, GitHub skips branches altogether: name them explicitly.
     # Tags are built by the Release workflow.
+    branches: ["**"]
     tags-ignore: ["**"]
     paths-ignore: ["**.md", "docs/**", "LICENSE"]
   pull_request:
