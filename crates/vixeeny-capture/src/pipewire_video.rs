@@ -308,7 +308,7 @@ fn run(
             }
             let _ = state.format.parse(param);
         })
-        .process(|stream, state| on_frame(stream, state))
+        .process(on_frame)
         .register()
         .map_err(os_error)?;
     let values = format_params(fps)?;

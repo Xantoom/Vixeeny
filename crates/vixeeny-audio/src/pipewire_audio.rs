@@ -224,7 +224,7 @@ fn run(
                 let _ = state.format.parse(param);
             }
         })
-        .process(|stream, state| on_samples(stream, state))
+        .process(on_samples)
         .register()
         .map_err(os)?;
 
