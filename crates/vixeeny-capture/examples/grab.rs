@@ -4,18 +4,21 @@
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(target_os = "linux")]
+    use vixeeny_capture::X11VideoStream as Stream;
     use vixeeny_capture::{CaptureOptions, CaptureTarget, Capturer};
     #[cfg(target_os = "macos")]
     use vixeeny_capture::{SckBackend as Backend, SckVideoStream as Stream};
-    #[cfg(target_os = "linux")]
-    use vixeeny_capture::{X11Backend as Backend, X11VideoStream as Stream};
 
     let monitors = vixeeny_platform::monitors()?;
     for m in &monitors {
         println!("{m:?}");
     }
     println!("cursor: {:?}", vixeeny_platform::cursor_position());
+    #[cfg(target_os = "macos")]
     let backend = Backend::new()?;
+    #[cfg(target_os = "linux")]
+    let backend = vixeeny_capture::LinuxBackend::new(&monitors)?;
     let mut capturer = Capturer::new(backend, monitors.clone());
     for (n, m) in monitors.iter().enumerate() {
         let started = std::time::Instant::now();

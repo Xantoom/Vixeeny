@@ -28,7 +28,11 @@ mod sck_stream;
 pub use sck_stream::{SckVideoStream, StreamFrame};
 
 #[cfg(target_os = "linux")]
+mod portal;
+#[cfg(target_os = "linux")]
 mod x11;
+#[cfg(target_os = "linux")]
+pub use portal::{LinuxBackend, PortalBackend, is_wayland_session};
 #[cfg(target_os = "linux")]
 pub use x11::{StreamFrame, X11Backend, X11VideoStream};
 

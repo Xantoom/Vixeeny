@@ -38,6 +38,8 @@ dispatch2 = "0.3.1"
 objc2-core-audio-types = "0.3.2"
 objc2-core-foundation = "0.3.2"
 objc2-vision = "0.3.2"
+ashpd = { version = "0.13.13", default-features = false, features = ["async-io", "screenshot", "screencast"] }
+async-io = "2"
 x11rb = { version = "0.14.0", features = ["randr"] }
 tiny-skia = "0.12.0"
 fontdue = "0.9.4"
