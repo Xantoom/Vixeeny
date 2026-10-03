@@ -175,7 +175,6 @@ pub enum Mode {
     /// Recognise the text of the zone as soon as it is drawn.
     Ocr,
     /// Pick the zone of a scrolling capture.
-    #[cfg(windows)]
     Scroll,
 }
 
@@ -222,7 +221,6 @@ pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
         .collect();
     let scale = vixeeny_platform::monitor_at(&monitors, cursor.0, cursor.1)
         .map_or(1.0, |m| m.scale_factor() as f32);
-    #[cfg(windows)]
     let scroll_snapshot = Snapshot {
         monitors: monitors.clone(),
         cursor,
@@ -237,12 +235,9 @@ pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
     let ocr_image: std::rc::Rc<std::cell::RefCell<Option<RgbaImage>>> = std::rc::Rc::default();
     let ocr_slot = ocr_image.clone();
     let ocr_config = config.clone();
-    #[cfg(windows)]
     let config_for_scroll = config.clone();
 
-    #[cfg(windows)]
     let scroll_zone: std::rc::Rc<std::cell::Cell<Option<Rect>>> = std::rc::Rc::default();
-    #[cfg(windows)]
     let scroll_slot = scroll_zone.clone();
 
     #[allow(unused_mut)]
@@ -250,7 +245,6 @@ pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
     match mode {
         Mode::Editor => {}
         Mode::Ocr => session = session.with_auto_command(Command::Ocr),
-        #[cfg(windows)]
         Mode::Scroll => session = session.with_auto_command(Command::Scroll),
     }
     session.dim = f32::from(config.editor.dim_percent.min(90)) / 100.0;
@@ -267,9 +261,6 @@ pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
         }
         match command {
             Command::Close | Command::Copy | Command::Save | Command::SaveAs => false,
-            #[cfg(not(windows))]
-            Command::Scroll => false,
-            #[cfg(windows)]
             Command::Scroll => match session.zone() {
                 Some(zone) => {
                     scroll_slot.set(Some(zone));
@@ -292,7 +283,6 @@ pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
     overlay
         .run((bounds.x, bounds.y), (bounds.width, bounds.height))
         .map_err(|e| anyhow::anyhow!("editor window: {e}"))?;
-    #[cfg(windows)]
     if let Some(zone) = scroll_zone.take() {
         let zone = vixeeny_platform::PhysicalRect::new(
             bounds.x + zone.x.round() as i32,

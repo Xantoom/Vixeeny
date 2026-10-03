@@ -170,6 +170,7 @@ pub enum Key {
     SetAudioBitrate,
     SetAudioVbr,
     SetAudioSurround,
+    SetAudioDenoise,
     SetReplayStart,
     SetReplayDuration,
     SetReplayProfile,
@@ -439,6 +440,7 @@ impl Key {
         Self::SetAudioBitrate,
         Self::SetAudioVbr,
         Self::SetAudioSurround,
+        Self::SetAudioDenoise,
         Self::SetReplayStart,
         Self::SetReplayDuration,
         Self::SetReplayProfile,
@@ -912,6 +914,8 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::SetAudioSurround, Lang::Fr) => {
             "Conserver le son 5.1 / 7.1 (Matroska avec Opus, FLAC ou PCM)"
         }
+        (Key::SetAudioDenoise, Lang::En) => "Reduce microphone background noise",
+        (Key::SetAudioDenoise, Lang::Fr) => "Réduire le bruit de fond du micro",
         (Key::SetReplayStart, Lang::En) => "Start the replay buffer with the system",
         (Key::SetReplayStart, Lang::Fr) => "Activer le replay au démarrage",
         (Key::SetReplayDuration, Lang::En) => "Replay duration (seconds)",

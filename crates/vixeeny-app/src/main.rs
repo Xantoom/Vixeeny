@@ -28,7 +28,7 @@ mod probe;
 mod record;
 #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 mod region;
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 mod scroll;
 #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 mod settings;
@@ -39,9 +39,9 @@ mod still;
 #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 mod sysinfo;
 mod toast;
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 mod widget;
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(target_os = "linux")]
 #[path = "widget_stub.rs"]
 mod widget;
 #[cfg(any(windows, target_os = "macos", target_os = "linux", test))]
@@ -75,7 +75,7 @@ fn perform(action: ActionId, config: &Config) {
                 tracing::error!("editor failed: {e:#}");
             }
         }
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
         ActionId::CaptureScrolling => {
             if let Err(e) = region::run(config, region::Mode::Scroll) {
                 tracing::error!("scrolling capture failed: {e:#}");
@@ -444,7 +444,7 @@ fn run() -> anyhow::Result<()> {
         // The probe child: prints TOML on stdout (see `vixeeny_encode::probe::run_child`).
         Some("--probe") => return probe::child(),
         // The recording widget, a process of its own (see `widget`).
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         Some("--widget") => return widget::run_child(&args[1..]),
         // The settings window and gallery, a process of its own (see `settings`).
         #[cfg(any(windows, target_os = "macos", target_os = "linux"))]

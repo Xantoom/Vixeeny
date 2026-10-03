@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
-use vixeeny_capture::{CaptureOptions, CaptureTarget, Capturer, CpuFrame, WgcBackend};
+use vixeeny_capture::{CaptureOptions, CaptureTarget, Capturer, CpuFrame};
 use vixeeny_common::config::Config;
 use vixeeny_common::i18n::{Key, Lang, tr};
 use vixeeny_common::ipc::ActionId;
@@ -94,7 +94,21 @@ fn capture_loop(
     preview: &vixeeny_ui::scroll_panel::ScrollHandle,
     preview_box: (u32, u32),
 ) -> anyhow::Result<Option<Stitched>> {
-    let mut capturer = Capturer::new(WgcBackend::new()?, monitors);
+    #[cfg(windows)]
+    let backend = vixeeny_capture::WgcBackend::new()?;
+    #[cfg(target_os = "macos")]
+    let backend = vixeeny_capture::SckBackend::new()?;
+    // A portal screenshot per frame is far too slow, and a ScreenCast stream is not a still
+    // backend: on Wayland the capture is refused with a clear message.
+    #[cfg(target_os = "linux")]
+    let backend = {
+        anyhow::ensure!(
+            !vixeeny_capture::is_wayland_session(),
+            "scrolling capture needs an X11 session (Wayland portals cannot grab a zone 15 times a second)"
+        );
+        vixeeny_capture::LinuxBackend::new(&monitors)?
+    };
+    let mut capturer = Capturer::new(backend, monitors);
     let options = CaptureOptions {
         show_cursor: false,
         tonemap: None,

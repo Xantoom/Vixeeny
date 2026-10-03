@@ -69,7 +69,63 @@ struct TrackRt {
     members: Vec<usize>,
 }
 
+/// Noise reduction of one microphone source. The filter holds a little audio inside, so output
+/// samples are placed on the timeline by counting them from where the input stream began.
+struct Denoise {
+    filter: vixeeny_encode::denoise::Denoiser,
+    /// Time of the first sample of the current continuous stretch, nanoseconds.
+    base_ns: i64,
+    in_frames: i64,
+    out_frames: i64,
+}
+
+/// A hole in the input longer than this restarts the filter (the source was lost and came back).
+const DENOISE_GAP_NS: i64 = 50_000_000;
+
+fn frames_ns(frames: i64) -> i64 {
+    frames * 1_000_000_000 / 48_000
+}
+
+impl Denoise {
+    fn new() -> Option<Self> {
+        match vixeeny_encode::denoise::Denoiser::new(12.0, -45.0) {
+            Ok(filter) => Some(Self {
+                filter,
+                base_ns: 0,
+                in_frames: 0,
+                out_frames: 0,
+            }),
+            Err(e) => {
+                tracing::warn!("microphone noise reduction is not available: {e}");
+                None
+            }
+        }
+    }
+
+    fn apply(&mut self, chunk: AudioChunk) -> Option<AudioChunk> {
+        if chunk.channels != 2 {
+            return Some(chunk);
+        }
+        let expected = self.base_ns + frames_ns(self.in_frames);
+        if self.in_frames == 0 || (chunk.time_ns - expected).abs() > DENOISE_GAP_NS {
+            if let Some(fresh) = Self::new() {
+                *self = fresh;
+            }
+            self.base_ns = chunk.time_ns;
+        }
+        self.in_frames += (chunk.samples.len() / 2) as i64;
+        let samples = self.filter.process(&chunk.samples).ok()?;
+        if samples.is_empty() {
+            return None;
+        }
+        let time_ns = self.base_ns + frames_ns(self.out_frames);
+        self.out_frames += (samples.len() / 2) as i64;
+        Some(AudioChunk::stereo(time_ns, samples))
+    }
+}
+
 pub struct Rig {
+    denoise: Vec<Option<Denoise>>,
     sources: Vec<(SourceSpec, OsSource)>,
     rx: Receiver<Msg>,
     tracks: Vec<TrackRt>,
@@ -81,7 +137,7 @@ pub struct Rig {
 
 impl Rig {
     /// Starts every source of `plan`. A source that cannot start now is retried by itself.
-    pub fn start(plan: &[TrackPlan], origin: i64, notice: Config) -> Self {
+    pub fn start(plan: &[TrackPlan], origin: i64, notice: Config, mic_denoise: bool) -> Self {
         let (tx, rx) = channel();
         let mut wanted: Vec<(SourceSpec, Vec<usize>)> = Vec::new();
         let mut tracks = Vec::new();
@@ -131,7 +187,16 @@ impl Rig {
                 tracing::warn!("audio source `{}` did not start: {e}", spec.name);
             }
         }
+        let denoise = sources
+            .iter()
+            .map(|(spec, _)| {
+                (mic_denoise && matches!(spec.kind, vixeeny_audio::SourceKind::Microphone(_)))
+                    .then(Denoise::new)
+                    .flatten()
+            })
+            .collect();
         Self {
+            denoise,
             sources,
             rx,
             tracks,
@@ -146,6 +211,12 @@ impl Rig {
             match msg {
                 Msg::Chunk(source, mut chunk) => {
                     chunk.time_ns -= self.origin;
+                    if let Some(Some(filter)) = self.denoise.get_mut(source) {
+                        match filter.apply(chunk) {
+                            Some(filtered) => chunk = filtered,
+                            None => continue,
+                        }
+                    }
                     for track in &mut self.tracks {
                         for (pos, member) in track.members.iter().enumerate() {
                             if *member == source {

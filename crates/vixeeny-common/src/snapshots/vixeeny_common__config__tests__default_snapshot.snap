@@ -87,6 +87,7 @@ codec = "auto"
 bitrate_kbps = 160
 vbr = true
 surround = true
+mic_noise_reduction = false
 tracks = []
 
 [profiles.default.audio.volumes]

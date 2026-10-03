@@ -349,6 +349,8 @@ pub struct Audio {
     pub vbr: bool,
     /// Keep 5.1/7.1 sources in surround (Matroska with Opus, FLAC or PCM; stereo elsewhere).
     pub surround: bool,
+    /// Remove steady background noise from microphone sources (FFmpeg `afftdn`).
+    pub mic_noise_reduction: bool,
     /// Volume per source (`"mic" = 0.8`); missing = 1.0.
     pub volumes: BTreeMap<String, f32>,
     /// The tracks of `routing = "advanced"`.
@@ -372,6 +374,7 @@ impl Default for Audio {
             bitrate_kbps: 160,
             vbr: true,
             surround: true,
+            mic_noise_reduction: false,
             volumes: BTreeMap::new(),
             tracks: Vec::new(),
         }

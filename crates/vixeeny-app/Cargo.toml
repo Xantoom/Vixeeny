@@ -24,6 +24,7 @@ vixeeny-convert = { path = "../vixeeny-convert" }
 vixeeny-editor = { path = "../vixeeny-editor" }
 vixeeny-ocr = { path = "../vixeeny-ocr" }
 vixeeny-settings = { path = "../vixeeny-settings" }
+vixeeny-stitch = { path = "../vixeeny-stitch" }
 vixeeny-updater = { path = "../vixeeny-updater", default-features = false }
 vixeeny-ui = { path = "../vixeeny-ui", features = ["desktop"] }
 rfd = { version = "0.17.2", default-features = false }
@@ -32,8 +33,6 @@ rfd = { version = "0.17.2", default-features = false }
 [target.'cfg(target_os = "linux")'.dependencies]
 rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }
 
-[target.'cfg(windows)'.dependencies]
-vixeeny-stitch = { path = "../vixeeny-stitch" }
 
 [features]
 # Wayland recording (ScreenCast portal + PipeWire) and PipeWire audio; needs libpipewire to build.

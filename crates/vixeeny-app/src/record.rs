@@ -214,6 +214,8 @@ struct Plan {
     #[cfg(windows)]
     gpu: Option<GpuParts>,
     audio: Vec<vixeeny_audio::TrackPlan>,
+    /// Filter the microphone sources (`[audio] mic_noise_reduction`).
+    mic_denoise: bool,
     /// The widget to show, and the language of its labels.
     widget: Option<(vixeeny_common::config::RecordingWidget, String)>,
     /// The settings, for the notifications that end a session.
@@ -430,6 +432,7 @@ fn plan(config: &Config, allow_gpu: bool, replay: bool) -> anyhow::Result<Plan> 
         #[cfg(windows)]
         gpu,
         audio,
+        mic_denoise: profile.audio.mic_noise_reduction,
         widget: (config.recording_widget.enabled && !replay).then(|| {
             (
                 config.recording_widget.clone(),
@@ -613,8 +616,8 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
         .inspect_err(|e| tracing::warn!("recording widget: {e:#}"))
         .ok()
     });
-    let rig =
-        (!plan.audio.is_empty()).then(|| Rig::start(&plan.audio, origin, plan.notice.clone()));
+    let rig = (!plan.audio.is_empty())
+        .then(|| Rig::start(&plan.audio, origin, plan.notice.clone(), plan.mic_denoise));
     let state = Arc::new(AtomicU8::new(RECORDING));
     let thread_state = Arc::clone(&state);
     // The GPU parts must outlive the recording (the device the textures live on).

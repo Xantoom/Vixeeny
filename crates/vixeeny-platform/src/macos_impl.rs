@@ -301,6 +301,28 @@ pub fn apply_acrylic(id: WindowId) -> Result<()> {
     Ok(())
 }
 
+/// A floating window that shows on every Space and above full-screen apps and stays when the app
+/// is not active: the recording pill. (A plain `NSWindow` cannot be made non-activating after
+/// creation; clicking the pill may therefore bring the widget process forward.)
+pub fn set_noactivate_tool_window(id: WindowId) -> Result<()> {
+    use objc2_app_kit::{NSFloatingWindowLevel, NSWindowCollectionBehavior};
+
+    // SAFETY: as in `apply_acrylic`.
+    let view = unsafe { view_of(id)? };
+    let window = view
+        .window()
+        .ok_or_else(|| PlatformError::Os("the view has no window yet".into()))?;
+    window.setLevel(NSFloatingWindowLevel);
+    window.setHidesOnDeactivate(false);
+    window.setCollectionBehavior(
+        NSWindowCollectionBehavior::CanJoinAllSpaces
+            | NSWindowCollectionBehavior::Stationary
+            | NSWindowCollectionBehavior::FullScreenAuxiliary
+            | NSWindowCollectionBehavior::IgnoresCycle,
+    );
+    Ok(())
+}
+
 /// Keeps the window out of screenshots and recordings (`sharingType = none`).
 pub fn exclude_from_capture(id: WindowId) -> Result<()> {
     use objc2_app_kit::NSWindowSharingType;
