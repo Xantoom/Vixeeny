@@ -83,6 +83,8 @@ pub struct General {
     pub app_idle_exit_seconds: u32,
     pub sounds: bool,
     pub notifications: bool,
+    /// `native` (Windows notification, click opens the file) or `card` (Vixeeny's own).
+    pub notification_style: String,
     pub check_updates: bool,
     /// The welcome assistant has been through (or skipped).
     pub first_run_done: bool,
@@ -97,6 +99,7 @@ impl Default for General {
             app_idle_exit_seconds: 30,
             sounds: true,
             notifications: true,
+            notification_style: "native".into(),
             check_updates: true,
             first_run_done: false,
         }

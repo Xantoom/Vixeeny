@@ -158,6 +158,12 @@ pub fn install(exe: &Path, label: &str) -> crate::Result<()> {
     imp::write(&entries(exe, label))
 }
 
+/// Writes arbitrary per-user registry entries (used by the native notifications).
+#[cfg(windows)]
+pub(crate) fn write_entries(entries: &[Entry]) -> crate::Result<()> {
+    imp::write(entries)
+}
+
 /// Removes the entry (a no-op when it is absent).
 #[cfg(windows)]
 pub fn uninstall() -> crate::Result<()> {

@@ -11,6 +11,7 @@ autostart = true
 app_idle_exit_seconds = 30
 sounds = true
 notifications = true
+notification_style = "native"
 check_updates = true
 first_run_done = false
 

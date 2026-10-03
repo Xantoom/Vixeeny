@@ -130,6 +130,12 @@ pub fn notify(config: &Config, toast: &Toast) {
     }
     #[cfg(windows)]
     {
+        if config.general.notification_style == "native" {
+            match show_native(config, toast) {
+                Ok(()) => return,
+                Err(e) => tracing::warn!("native notification failed, using the card: {e:#}"),
+            }
+        }
         let [kind, text] = toast.to_args();
         let spawned = std::env::current_exe().and_then(|exe| {
             std::process::Command::new(exe)
@@ -142,6 +148,73 @@ pub fn notify(config: &Config, toast: &Toast) {
     }
     #[cfg(not(windows))]
     tracing::info!("notification: {toast:?}");
+}
+
+/// The Windows notification: a click opens the file, the button its folder (or the settings).
+#[cfg(windows)]
+fn show_native(config: &Config, toast: &Toast) -> anyhow::Result<()> {
+    use vixeeny_common::i18n::tr;
+    use vixeeny_platform::native_toast::{NativeToast, file_uri};
+
+    let lang = crate::lang(&config.general.language);
+    let settings = format!("{}://settings", vixeeny_platform::native_toast::SCHEME);
+    let content = match toast {
+        Toast::Saved(kind, path) => NativeToast {
+            title: tr(kind.title(), lang).to_owned(),
+            body: path
+                .file_name()
+                .map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
+            image: (*kind == Saved::Image).then(|| path.clone()),
+            launch: file_uri(path),
+            actions: vec![(
+                tr(Key::ToastOpenFolder, lang).to_owned(),
+                file_uri(&folder_of(path)),
+            )],
+        },
+        Toast::Failed(kind, message) => NativeToast {
+            title: tr(kind.title(), lang).to_owned(),
+            body: message.clone(),
+            image: None,
+            launch: settings.clone(),
+            actions: vec![(tr(Key::ToastOpenSettings, lang).to_owned(), settings)],
+        },
+    };
+    vixeeny_platform::native_toast::show(&content, &std::env::current_exe()?)?;
+    Ok(())
+}
+
+/// `--update-toast <text>`: tells that an update is available; a click opens the settings.
+#[cfg(windows)]
+pub fn update_toast(text: &str) -> anyhow::Result<()> {
+    use vixeeny_common::i18n::tr;
+    use vixeeny_platform::native_toast::{NativeToast, SCHEME, show};
+
+    let config = vixeeny_common::paths::config_file()
+        .and_then(|p| Config::load(&p).ok())
+        .unwrap_or_default();
+    let lang = crate::lang(&config.general.language);
+    let settings = format!("{SCHEME}://settings");
+    let toast = NativeToast {
+        title: "Vixeeny".to_owned(),
+        body: text.to_owned(),
+        image: None,
+        launch: settings.clone(),
+        actions: vec![(tr(Key::ToastOpenSettings, lang).to_owned(), settings)],
+    };
+    show(&toast, &std::env::current_exe()?)?;
+    Ok(())
+}
+
+/// `--uri vixeeny://…`: a click on a notification.
+#[cfg(windows)]
+pub fn open_uri(uri: &str) {
+    // Only the settings for now; anything else is ignored.
+    if uri.starts_with(&format!(
+        "{}://settings",
+        vixeeny_platform::native_toast::SCHEME
+    )) {
+        crate::open_settings();
+    }
 }
 
 /// The folder that holds `path`.

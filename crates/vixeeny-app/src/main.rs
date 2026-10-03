@@ -404,6 +404,19 @@ fn run() -> anyhow::Result<()> {
         // A notification card (see `toast`).
         #[cfg(windows)]
         Some("--toast") => return toast::run_child(&args[1..]),
+        // The daemon announces an update with a native notification.
+        #[cfg(windows)]
+        Some("--update-toast") => {
+            return toast::update_toast(args.get(1).map_or("", String::as_str));
+        }
+        // A click on a native notification (`vixeeny://settings`).
+        #[cfg(windows)]
+        Some("--uri") => {
+            if let Some(uri) = args.get(1) {
+                toast::open_uri(uri);
+            }
+            return Ok(());
+        }
         Some("--probe-report") => return probe::report(args.iter().any(|a| a == "--force")),
         _ => {}
     }

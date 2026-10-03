@@ -456,6 +456,16 @@ pub fn rows(section: Section, env: &Env, config: &Config) -> Vec<Row> {
                 |c, v| c.general.notifications = v,
             ),
             choice(
+                "notif_style",
+                t(Key::SetNotifStyle),
+                vec![
+                    opt("native", t(Key::SetNotifNative)),
+                    opt("card", t(Key::SetNotifCard)),
+                ],
+                |c| c.general.notification_style.clone(),
+                |c, v| c.general.notification_style = v,
+            ),
+            choice(
                 "overlay_edge",
                 t(Key::SetOverlayEdge),
                 vec![

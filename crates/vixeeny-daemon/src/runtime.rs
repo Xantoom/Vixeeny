@@ -179,7 +179,11 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
             Effect::NotifyUpdate(version) => {
                 let text = tr(Key::UpdateAvailable, self.lang).replace("{version}", &version);
                 tracing::info!("{text}");
-                self.tray.notify(&text);
+                if !(self.config.general.notification_style == "native"
+                    && native_update_toast(&text))
+                {
+                    self.tray.notify(&text);
+                }
             }
             Effect::ReloadConfig => self.reload_config(),
             Effect::Quit => return Flow::Quit,
@@ -213,6 +217,32 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
 }
 
 /// Convenience used by the tray implementations.
+/// Asks the app (next to the daemon) to show the clickable Windows notification. `false` when it
+/// could not be started: the caller falls back to the tray balloon.
+fn native_update_toast(text: &str) -> bool {
+    #[cfg(windows)]
+    {
+        let started = std::env::current_exe().and_then(|mut path| {
+            path.set_file_name(format!("vixeeny-app{}", std::env::consts::EXE_SUFFIX));
+            std::process::Command::new(path)
+                .args(["--update-toast", text])
+                .spawn()
+        });
+        match started {
+            Ok(_) => true,
+            Err(e) => {
+                tracing::warn!("cannot start the update notification: {e}");
+                false
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = text;
+        false
+    }
+}
+
 pub fn menu_label(key: Key, lang: Lang) -> &'static str {
     tr(key, lang)
 }
