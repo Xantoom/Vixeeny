@@ -90,7 +90,7 @@ jobs:
         with:
           toolchain: 1.98.1
       - uses: Swatinem/rust-cache@v2
-      - run: sudo apt-get update && sudo apt-get install -y cmake nasm meson ninja-build pkg-config
+      - run: sudo apt-get update && sudo apt-get install -y cmake nasm meson ninja-build pkg-config libfontconfig1-dev
       - uses: actions/cache@v4
         with:
           path: native/build/work
@@ -118,7 +118,7 @@ jobs:
           toolchain: 1.98.1
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - run: sudo apt-get update && sudo apt-get install -y libpipewire-0.3-dev libspa-0.2-dev clang pkg-config
+      - run: sudo apt-get update && sudo apt-get install -y libpipewire-0.3-dev libspa-0.2-dev clang pkg-config libfontconfig1-dev
       - run: cargo clippy -p vixeeny-capture -p vixeeny-audio --features vixeeny-capture/pipewire,vixeeny-audio/pipewire --all-targets -- -D warnings
       - run: cargo test -p vixeeny-capture -p vixeeny-audio --features vixeeny-capture/pipewire,vixeeny-audio/pipewire
       - run: cargo clippy -p vixeeny-app --features pipewire -- -D warnings
