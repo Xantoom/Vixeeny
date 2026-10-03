@@ -57,9 +57,9 @@ jobs:
           done
           gh release upload "${{ github.ref_name }}" dist/*.zip dist/*.dmg dist/*.minisig dist/SHA256SUMS-macos --clobber
   linux:
-    # x86-64 Linux: update archive (zip, what the updater unpacks over a portable install), .deb
+    # x86-64 Linux (Ubuntu 24.04: the PipeWire bindings need its newer libspa): update archive (zip, what the updater unpacks over a portable install), .deb
     # and AppImage. FFmpeg and the image codecs are built by `cargo xtask build-native`.
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -70,14 +70,13 @@ jobs:
       - uses: actions/cache/restore@v4
         with:
           path: native/build/work
-          key: native-linux22-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}
-          restore-keys: native-linux22-
+          key: native-linux-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}
       - run: cargo xtask build-native
       - uses: actions/cache/save@v4
         if: always()
         with:
           path: native/build/work
-          key: native-linux22-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}-${{ github.run_id }}
+          key: native-linux-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}-release-${{ github.run_id }}
       - name: Build the programs
         run: |
           cargo build --release -p vixeeny-daemon -p vixeeny-updater -p xtask

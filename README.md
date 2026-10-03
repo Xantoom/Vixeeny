@@ -22,8 +22,8 @@ Download from the [releases page](https://github.com/Xantoom/Vixeeny/releases).
 |---|---|
 | Windows 10 / 11 | `Vixeeny-<v>-setup.exe`, or the portable `.zip` |
 | macOS 13+ (Apple silicon) | `Vixeeny-<v>-macos-arm64.dmg` (not notarized: right-click → Open the first time) |
-| Debian / Ubuntu | `vixeeny_<v>_amd64.deb` |
-| Any Linux | `Vixeeny-<v>-x86_64.AppImage` or `Vixeeny-<v>.flatpak` |
+| Debian 13 / Ubuntu 24.04+ | `vixeeny_<v>_amd64.deb` |
+| Any recent Linux (glibc 2.39+) | `Vixeeny-<v>-x86_64.AppImage` or `Vixeeny-<v>.flatpak` |
 | Arch | `vixeeny-bin` (AUR; `packaging/arch/PKGBUILD`) |
 
 Linux needs a system tray (KDE, GNOME with the AppIndicator extension, waybar…). On Wayland the

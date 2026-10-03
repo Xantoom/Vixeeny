@@ -102,7 +102,7 @@ fn control(installed_kib: u64) -> String {
     format!(
         "Package: vixeeny\nVersion: {VERSION}\nSection: graphics\nPriority: optional\nArchitecture: amd64\n\
          Installed-Size: {installed_kib}\nMaintainer: Xantoom <xantoom@gmail.com>\n\
-         Depends: libc6 (>= 2.35), libfontconfig1, libpipewire-0.3-0, libxkbcommon0\n\
+         Depends: libc6 (>= 2.39), libfontconfig1, libpipewire-0.3-0, libxkbcommon0\n\
          Recommends: tesseract-ocr, wl-clipboard, xclip, libnotify-bin\n\
          Homepage: https://github.com/Xantoom/Vixeeny\n\
          Description: Screenshots, screen recording and text recognition\n \
