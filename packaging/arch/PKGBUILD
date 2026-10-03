@@ -2,7 +2,7 @@
 # Installs the release archive built by the Vixeeny release workflow (FFmpeg and the image
 # codecs are linked statically in it). After a release, refresh the checksum with `updpkgsums`.
 pkgname=vixeeny-bin
-pkgver=0.5.2
+pkgver=0.9.0
 pkgrel=1
 pkgdesc='Screenshots, screen recording and text recognition from the system tray'
 arch=('x86_64')

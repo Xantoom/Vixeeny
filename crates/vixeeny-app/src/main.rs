@@ -36,6 +36,8 @@ mod settings;
 mod side;
 #[cfg(any(windows, target_os = "macos", target_os = "linux", test))]
 mod still;
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+mod sysinfo;
 mod toast;
 #[cfg(windows)]
 mod widget;
@@ -466,6 +468,19 @@ fn run() -> anyhow::Result<()> {
             if let Some(uri) = args.get(1) {
                 toast::open_uri(uri);
             }
+            return Ok(());
+        }
+        #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+        Some("--system-info") => {
+            vixeeny_platform::attach_console();
+            let config = vixeeny_common::paths::config_file()
+                .and_then(|path| Config::load(&path).ok())
+                .unwrap_or_default();
+            let probe = probe::current(false).ok();
+            print!(
+                "{}",
+                sysinfo::format(&sysinfo::collect(&config, probe.as_ref()))
+            );
             return Ok(());
         }
         Some("--probe-report") => return probe::report(args.iter().any(|a| a == "--force")),

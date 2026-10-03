@@ -164,6 +164,7 @@ fn ui_texts(lang: Lang) -> UiTexts {
         update_now: t(Key::UpdateNow),
         github: t(Key::UiGithub),
         logs: t(Key::UiLogs),
+        copy_info: t(Key::UiCopyInfo),
         empty: t(Key::UiGalleryEmpty),
         name_hint: t(Key::UiNameHint),
         shortcut_hint: t(Key::UiShortcutHint),

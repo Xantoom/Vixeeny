@@ -210,6 +210,8 @@ pub enum Key {
     UiRemove,
     UiGithub,
     UiLogs,
+    UiCopyInfo,
+    AboutInfoCopied,
     UiGalleryEmpty,
     UiNameHint,
     UiShortcutHint,
@@ -477,6 +479,8 @@ impl Key {
         Self::UiRemove,
         Self::UiGithub,
         Self::UiLogs,
+        Self::UiCopyInfo,
+        Self::AboutInfoCopied,
         Self::UiGalleryEmpty,
         Self::UiNameHint,
         Self::UiShortcutHint,
@@ -988,6 +992,14 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::UiRemove, Lang::Fr) => "Retirer",
         (Key::UiGithub, Lang::En) => "GitHub page",
         (Key::UiGithub, Lang::Fr) => "Page GitHub",
+        (Key::UiCopyInfo, Lang::En) => "Copy system info",
+        (Key::UiCopyInfo, Lang::Fr) => "Copier les infos système",
+        (Key::AboutInfoCopied, Lang::En) => {
+            "Copied: paste it into your bug report (it holds no personal data)."
+        }
+        (Key::AboutInfoCopied, Lang::Fr) => {
+            "Copié : collez-le dans votre rapport de bug (aucune donnée personnelle)."
+        }
         (Key::UiLogs, Lang::En) => "Open the logs folder",
         (Key::UiLogs, Lang::Fr) => "Ouvrir le dossier des logs",
         (Key::UiGalleryEmpty, Lang::En) => "Nothing captured yet.",

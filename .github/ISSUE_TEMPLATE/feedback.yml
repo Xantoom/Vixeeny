@@ -1,0 +1,28 @@
+name: Beta feedback
+description: Tell us how Vixeeny works on your system (it is fine if everything works)
+labels: [feedback]
+body:
+  - type: dropdown
+    id: system
+    attributes:
+      label: System
+      options: [Windows, macOS, "Linux (X11)", "Linux (Wayland: GNOME)", "Linux (Wayland: KDE)", "Linux (Wayland: other)"]
+    validations:
+      required: true
+  - type: dropdown
+    id: package
+    attributes:
+      label: Package
+      options: [Installer / dmg, Portable zip, .deb, AppImage, Flatpak, AUR, Other]
+  - type: textarea
+    id: worked
+    attributes:
+      label: What you tried and how it went
+      description: "Screenshots (region, window, full screen), recording, OCR, converting, shortcuts, tray icon…"
+    validations:
+      required: true
+  - type: textarea
+    id: sysinfo
+    attributes:
+      label: System info (Settings → About → Copy system info)
+      render: markdown

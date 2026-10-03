@@ -67,6 +67,7 @@ export struct UiTexts {
     update-now: string,
     github: string,
     logs: string,
+    copy-info: string,
     empty: string,
     name-hint: string,
     shortcut-hint: string,
@@ -616,6 +617,7 @@ export component SettingsWindow inherits Window {
                         if root.section == 12 : Button { label: root.t.install; dark: root.dark; primary: true; clicked => { root.page-action("install", ""); } }
                         if root.section == 12 : Button { label: root.t.remove; dark: root.dark; clicked => { root.page-action("remove", ""); } }
                         if root.section == 13 : Button { label: root.t.github; dark: root.dark; clicked => { root.page-action("github", ""); } }
+                        if root.section == 13 : Button { label: root.t.copy-info; dark: root.dark; clicked => { root.page-action("copy-info", ""); } }
                         if root.section == 13 : Button { label: root.t.logs; dark: root.dark; clicked => { root.page-action("logs", ""); } }
                         Rectangle { horizontal-stretch: 1; }
                     }

@@ -1,0 +1,35 @@
+name: Bug report
+description: Something does not work as it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing Vixeeny. In the app: **Settings → About → Copy system info**, then paste it below.
+        From a terminal: `vixeeny-app --system-info`.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. Press the region capture shortcut\n2. …"
+    validations:
+      required: true
+  - type: textarea
+    id: sysinfo
+    attributes:
+      label: System info
+      description: Paste the output of "Copy system info".
+      render: markdown
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: The newest file of the logs folder (Settings → About → Open the logs folder), if the problem is a crash or an error message.
