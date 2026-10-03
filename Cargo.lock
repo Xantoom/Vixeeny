@@ -5800,6 +5800,7 @@ dependencies = [
  "serde",
  "thiserror 2.0.21",
  "toml",
+ "tracing",
  "vixeeny-audio",
  "vixeeny-common",
  "windows",

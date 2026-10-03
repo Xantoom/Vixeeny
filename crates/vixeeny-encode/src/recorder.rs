@@ -23,7 +23,7 @@ use crate::audio::{AudioEncoder, AudioTrackConfig, SAMPLE_RATE};
 use crate::clock::{Cfr, Emit, Fps};
 use crate::gpu::{GpuPipeline, HwFrame};
 use crate::registry::{Chroma, Encoder};
-use crate::replay::{Ring, Snapshot, share};
+use crate::replay::{Ring, Snapshot, Storage};
 
 #[derive(Debug, thiserror::Error)]
 pub enum RecordError {
@@ -125,6 +125,8 @@ pub struct RecordConfig {
     pub gpu: Option<Arc<GpuPipeline>>,
     /// Keep the last seconds of encoded packets in RAM for [`Recorder::save_replay`] (plan 5.11).
     pub replay_seconds: Option<u32>,
+    /// Where the replay keeps its packets.
+    pub replay_storage: Storage,
     /// Write files. A replay-only session has none: the namer is never called.
     pub files: bool,
 }
@@ -525,10 +527,9 @@ impl Worker {
             files: Vec::new(),
             ring: None,
         };
-        worker.ring = worker
-            .cfg
-            .replay_seconds
-            .map(|seconds| Ring::new(seconds, worker.cfg.audio.len()));
+        worker.ring = worker.cfg.replay_seconds.map(|seconds| {
+            Ring::with_storage(seconds, worker.cfg.audio.len(), &worker.cfg.replay_storage)
+        });
         for track in &worker.cfg.audio {
             let enc = AudioEncoder::open(track, global)?;
             let codec = enc.codec;
@@ -1024,7 +1025,9 @@ fn write_snapshot(
                 let Some((_, original)) = video.next() else {
                     break;
                 };
-                let mut packet = share(original);
+                let mut packet = original
+                    .load()
+                    .map_err(|e| RecordError::Io(e.to_string()))?;
                 packet.set_pts(packet.pts().map(|p| p - offset));
                 packet.set_dts(packet.dts().map(|d| d - offset));
                 packet.rescale_ts(enc_tb, out.stream_tb);
@@ -1034,7 +1037,9 @@ fn write_snapshot(
             (_, Some((_, track))) => {
                 let (_, original) = &snapshot.audio[track][next[track]];
                 next[track] += 1;
-                let mut packet = share(original);
+                let mut packet = original
+                    .load()
+                    .map_err(|e| RecordError::Io(e.to_string()))?;
                 let Some(pts) = packet.pts().map(|p| p - cut) else {
                     continue;
                 };

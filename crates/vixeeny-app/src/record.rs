@@ -291,6 +291,7 @@ fn plan(config: &Config, allow_gpu: bool, replay: bool) -> anyhow::Result<Plan> 
         gpu: None,
         encoder,
         replay_seconds: replay.then(|| replay::clamp_seconds(config.replay.duration_seconds)),
+        replay_storage: replay_storage(config),
         files: !replay,
     };
     let gpu = if allow_gpu {
@@ -710,5 +711,14 @@ fn record_loop(
     match failure {
         Some(e) => Err(anyhow::anyhow!("capture stopped: {e}")).context(format!("{summary:?}")),
         None => Ok(summary),
+    }
+}
+
+/// Where the replay keeps its packets: in RAM, or in temporary files (`[replay] storage`).
+fn replay_storage(config: &Config) -> replay::Storage {
+    if config.replay.storage == "disk" {
+        replay::Storage::Disk(std::env::temp_dir().join("Vixeeny-replay"))
+    } else {
+        replay::Storage::Ram
     }
 }

@@ -768,6 +768,16 @@ pub fn rows(section: Section, env: &Env, config: &Config) -> Vec<Row> {
                     |c, v| c.replay.duration_seconds = v as u32,
                 ),
                 choice(
+                    "replay_storage",
+                    t(Key::SetReplayStorage),
+                    vec![
+                        opt("ram", t(Key::SetStorageRam)),
+                        opt("disk", t(Key::SetStorageDisk)),
+                    ],
+                    |c| c.replay.storage.clone(),
+                    |c, v| c.replay.storage = v,
+                ),
+                choice(
                     "replay_profile",
                     t(Key::SetReplayProfile),
                     profiles,
@@ -1066,6 +1076,10 @@ mod tests {
             .apply(&mut c, Value::Int(33))
             .unwrap();
         assert_eq!(c.replay.duration_seconds, 35);
+        row(&replay, "replay_storage")
+            .apply(&mut c, Value::Text("disk".into()))
+            .unwrap();
+        assert_eq!(c.replay.storage, "disk");
     }
 
     #[test]

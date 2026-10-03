@@ -274,6 +274,9 @@ pub enum Key {
     UpdateNoKey,
     ToastAudioLost,
     UpdateFailed,
+    SetReplayStorage,
+    SetStorageRam,
+    SetStorageDisk,
 }
 
 impl Key {
@@ -532,6 +535,9 @@ impl Key {
         Self::UpdateNoKey,
         Self::ToastAudioLost,
         Self::UpdateFailed,
+        Self::SetReplayStorage,
+        Self::SetStorageRam,
+        Self::SetStorageDisk,
     ];
 }
 
@@ -1141,6 +1147,12 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         }
         (Key::UpdateFailed, Lang::En) => "The last update failed: {error}",
         (Key::UpdateFailed, Lang::Fr) => "La dernière mise à jour a échoué : {error}",
+        (Key::SetReplayStorage, Lang::En) => "Keep the replay in",
+        (Key::SetReplayStorage, Lang::Fr) => "Garder le replay en",
+        (Key::SetStorageRam, Lang::En) => "Memory (RAM)",
+        (Key::SetStorageRam, Lang::Fr) => "Mémoire (RAM)",
+        (Key::SetStorageDisk, Lang::En) => "Temporary files on disk",
+        (Key::SetStorageDisk, Lang::Fr) => "Fichiers temporaires sur le disque",
     }
 }
 

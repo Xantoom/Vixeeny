@@ -81,6 +81,7 @@ fn config(registry: &Registry, id: &str, container: OutputContainer, fps: u32) -
         audio: Vec::new(),
         gpu: None,
         replay_seconds: None,
+        replay_storage: vixeeny_encode::replay::Storage::Ram,
         files: true,
     }
 }
@@ -994,4 +995,42 @@ fn a_recording_has_a_thumbnail_no_bigger_than_asked() {
     assert_eq!(rgba.len(), 160 * 90 * 4);
     assert!(rgba.iter().any(|b| *b != 0), "the thumbnail is blank");
     assert!(vixeeny_encode::thumbnail::video_thumbnail(&dir.join("missing.mp4"), 160).is_none());
+}
+
+#[test]
+fn a_replay_kept_on_disk_saves_the_same_file_as_one_kept_in_ram() {
+    use vixeeny_encode::replay::Storage;
+    let registry = Registry::builtin().unwrap();
+    let dir = scratch("replay-disk");
+    let buffer = dir.join("buffer");
+    let mut seen = Vec::new();
+    for (name, storage) in [
+        ("ram", Storage::Ram),
+        ("disk", Storage::Disk(buffer.clone())),
+    ] {
+        let mut cfg = config(&registry, "libx264", OutputContainer::Mkv, 30);
+        cfg.files = false;
+        cfg.replay_seconds = Some(5);
+        cfg.replay_storage = storage;
+        let rec = Recorder::start(cfg, namer(&dir, "mkv")).unwrap();
+        for i in 0..240 {
+            rec.push_frame(i * 1_000 * MS / 30, frame(320, 180, i as usize));
+        }
+        let path = rec
+            .save_replay(dir.join(format!("{name}.mkv")))
+            .unwrap()
+            .wait()
+            .unwrap();
+        seen.push(demux(&path));
+        drop(rec);
+    }
+    // Same packets, same times: the disk is only a place to keep them.
+    assert_eq!(seen[0].pts_ms, seen[1].pts_ms);
+    assert_eq!(seen[0].keyframes, seen[1].keyframes);
+    // The buffer's temporary files are gone with the recorder.
+    let left: Vec<_> = std::fs::read_dir(&buffer)
+        .map(|d| d.flatten().collect())
+        .unwrap_or_default();
+    assert!(left.iter().all(|e| e.path().is_dir()), "{left:?}");
+    let _ = std::fs::remove_dir_all(dir);
 }
