@@ -27,6 +27,11 @@ tray-icon = { version = "0.26.0", default-features = false }
 global-hotkey = { version = "0.8.0", default-features = false }
 auto-launch = "0.6.0"
 windows = "0.62.2"
+objc2 = "0.6.4"
+block2 = "0.6.2"
+objc2-foundation = "0.3.2"
+objc2-core-graphics = "0.3.2"
+objc2-screen-capture-kit = "0.3.2"
 tiny-skia = "0.12.0"
 fontdue = "0.9.4"
 

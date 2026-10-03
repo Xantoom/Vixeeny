@@ -17,9 +17,14 @@ mod windows_impl;
 #[cfg(windows)]
 use windows_impl as os;
 
+#[cfg(target_os = "macos")]
+mod macos_impl;
+#[cfg(target_os = "macos")]
+use macos_impl as os;
+
 #[cfg(not(windows))]
 mod unsupported;
-#[cfg(not(windows))]
+#[cfg(all(not(windows), not(target_os = "macos")))]
 use unsupported as os;
 
 pub use os::{
@@ -28,6 +33,9 @@ pub use os::{
     gpu_adapters, hdr_info, monitors, monotonic_ns, open_path, recycle, set_noactivate_tool_window,
     single_instance, system_prefers_dark, top_level_windows, user_locale, window_info,
 };
+
+#[cfg(target_os = "macos")]
+pub use os::{request_screen_capture_access, screen_capture_allowed};
 
 /// A graphics adapter as the OS reports it (the encoder probe derives its own view from it).
 #[derive(Debug, Clone, PartialEq, Eq)]

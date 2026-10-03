@@ -18,6 +18,11 @@ mod wgc_stream;
 #[cfg(windows)]
 pub use wgc_stream::{CapturedFrame, GpuCapture, StreamTarget, TextureSink, VideoStream};
 
+#[cfg(target_os = "macos")]
+mod sck;
+#[cfg(target_os = "macos")]
+pub use sck::SckBackend;
+
 pub use fake::FakeBackend;
 pub use frame::{BYTES_PER_PIXEL, CpuFrame};
 use vixeeny_platform::{HdrInfo, MonitorId, MonitorInfo, PhysicalRect, WindowId, virtual_bounds};
