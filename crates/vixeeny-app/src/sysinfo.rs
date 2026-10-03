@@ -79,6 +79,7 @@ fn first_line(command: &str, args: &[&str]) -> Option<String> {
 }
 
 /// `PRETTY_NAME` of an os-release file.
+#[cfg(any(target_os = "linux", test))]
 pub fn pretty_name(os_release: &str) -> Option<String> {
     os_release.lines().find_map(|line| {
         line.strip_prefix("PRETTY_NAME=")
