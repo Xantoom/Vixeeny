@@ -3,6 +3,7 @@
 
 mod bench;
 mod dist;
+mod dist_mac;
 mod native;
 
 use anyhow::{Result, bail};
@@ -14,12 +15,13 @@ fn main() -> Result<()> {
         Some("bench-idle") => bench::run(&args.collect::<Vec<_>>()),
         Some("verify-registry") => verify_registry(),
         Some("dist") => dist::dist(&args.collect::<Vec<_>>()),
+        Some("dist-mac") => dist_mac::dist(&args.collect::<Vec<_>>()),
         Some("sums") => dist::sums(&args.collect::<Vec<_>>()),
         Some("bench-latency" | "test-hw") => {
             bail!("task not implemented yet (see VIXEENY_PLAN.md section 11)")
         }
         _ => bail!(
-            "usage: cargo xtask <build-native [lib…]|dist [--out dir]|sums <dir>|verify-registry|bench-idle|bench-latency|test-hw>"
+            "usage: cargo xtask <build-native [lib…]|dist [--out dir]|dist-mac [--out dir]|sums <dir>|verify-registry|bench-idle|bench-latency|test-hw>"
         ),
     }
 }

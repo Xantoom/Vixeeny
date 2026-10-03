@@ -14,10 +14,14 @@ pub fn apply(enabled: bool) -> anyhow::Result<()> {
         return Ok(());
     }
     let exe = std::env::current_exe()?;
-    let launcher = AutoLaunchBuilder::new()
+    let mut builder = AutoLaunchBuilder::new();
+    builder
         .set_app_name("Vixeeny")
-        .set_app_path(&exe.to_string_lossy())
-        .build()?;
+        .set_app_path(&exe.to_string_lossy());
+    // A plist in ~/Library/LaunchAgents (`com.vixeeny.Vixeeny`): no login-item permission prompt.
+    #[cfg(target_os = "macos")]
+    builder.set_macos_launch_mode(auto_launch::MacOSLaunchMode::LaunchAgent);
+    let launcher = builder.build()?;
     let current = launcher.is_enabled()?;
     if enabled && !current {
         launcher.enable()?;
