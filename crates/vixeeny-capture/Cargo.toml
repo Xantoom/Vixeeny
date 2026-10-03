@@ -44,6 +44,11 @@ x11rb.workspace = true
 ashpd.workspace = true
 async-io.workspace = true
 png.workspace = true
+pipewire = { workspace = true, optional = true }
+
+[features]
+# Wayland video through the ScreenCast portal and PipeWire; needs libpipewire-0.3 and clang to build.
+pipewire = ["dep:pipewire"]
 
 [lints]
 workspace = true

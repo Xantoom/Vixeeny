@@ -26,6 +26,14 @@ objc2-core-audio-types.workspace = true
 objc2-screen-capture-kit.workspace = true
 vixeeny-platform = { path = "../vixeeny-platform" }
 
+# Linux: PipeWire (behind the `pipewire` feature, which needs libpipewire-0.3 and clang to build).
+[target.'cfg(target_os = "linux")'.dependencies]
+pipewire = { workspace = true, optional = true }
+vixeeny-platform = { path = "../vixeeny-platform" }
+
+[features]
+pipewire = ["dep:pipewire"]
+
 # Windows: WASAPI (system loopback, microphones, per-application loopback).
 [target.'cfg(windows)'.dependencies]
 # The `implement` macro refers to this crate by name.

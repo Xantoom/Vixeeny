@@ -10,6 +10,8 @@
 mod fake;
 mod layout;
 mod mixer;
+#[cfg(all(target_os = "linux", feature = "pipewire"))]
+mod pipewire_audio;
 mod routing;
 #[cfg(target_os = "macos")]
 mod sck_audio;
@@ -20,6 +22,8 @@ mod wasapi;
 pub use fake::FakeAudioSource;
 pub use layout::{convert as convert_layout, track_channels};
 pub use mixer::{Block, Mixer};
+#[cfg(all(target_os = "linux", feature = "pipewire"))]
+pub use pipewire_audio::PipeWireAudioSource;
 pub use routing::{TrackMember, TrackPlan, assign_channels, plan_tracks};
 #[cfg(target_os = "macos")]
 pub use sck_audio::SckAudioSource;

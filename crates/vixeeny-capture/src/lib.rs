@@ -27,10 +27,14 @@ mod sck_stream;
 #[cfg(target_os = "macos")]
 pub use sck_stream::{SckVideoStream, StreamFrame};
 
+#[cfg(all(target_os = "linux", feature = "pipewire"))]
+mod pipewire_video;
 #[cfg(target_os = "linux")]
 mod portal;
 #[cfg(target_os = "linux")]
 mod x11;
+#[cfg(all(target_os = "linux", feature = "pipewire"))]
+pub use pipewire_video::PipeWireVideoStream;
 #[cfg(target_os = "linux")]
 pub use portal::{LinuxBackend, PortalBackend, is_wayland_session};
 #[cfg(target_os = "linux")]
