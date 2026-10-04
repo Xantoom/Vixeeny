@@ -4,7 +4,6 @@ import { Theme, Icons, Button } from "controls.slint";
 // Control window of a scrolling capture (plan 5.7): the live vertical preview of what has been
 // assembled, and the Start / Finish / Cancel buttons.
 export component ScrollWindow inherits Window {
-    in property <string> window-title: "Vixeeny";
     in property <string> status;
     in property <image> preview;
     in property <bool> running: false;
@@ -16,7 +15,7 @@ export component ScrollWindow inherits Window {
     callback finish();
     callback cancel();
 
-    title: root.window-title;
+    title: "Vixeeny";
     icon: Theme.app-icon;
     always-on-top: true;
     min-width: 240px;

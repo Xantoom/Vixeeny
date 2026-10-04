@@ -8,7 +8,6 @@ use vixeeny_common::i18n::{Key, Lang, tr};
 use vixeeny_common::ipc::{ActionId, RecState};
 
 use crate::core::Event;
-use crate::icon;
 use crate::server::EventTx;
 
 pub struct Tray {
@@ -62,8 +61,10 @@ impl Tray {
     }
 }
 
+/// The icons of the executable's resource (see `build.rs`): 1 is the application's, 2 the
+/// one with the recording dot. Windows picks the size that suits the display scale.
 fn tray_image(recording: bool) -> anyhow::Result<Icon> {
-    Icon::from_rgba(icon::render(recording), icon::SIZE, icon::SIZE).context("building the icon")
+    Icon::from_resource(if recording { 2 } else { 1 }, None).context("loading the tray icon")
 }
 
 impl crate::runtime::Tray for Tray {

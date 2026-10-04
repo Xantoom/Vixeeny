@@ -7,6 +7,11 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[[bin]]
+# The program people start (Start menu, autostart): its file name is the product's.
+name = "Vixeeny"
+path = "src/main.rs"
+
 [dependencies]
 anyhow.workspace = true
 auto-launch.workspace = true

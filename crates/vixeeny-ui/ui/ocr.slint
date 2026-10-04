@@ -5,7 +5,6 @@ export { Button as PushButton } from "controls.slint";
 // The result of a text recognition: editable text, a status line and, when a language is
 // missing, how to install it (plan 5.6).
 export component OcrWindow inherits Window {
-    in property <string> window-title: "Vixeeny";
     in-out property <string> text;
     in property <string> status;
     in property <string> hint;
@@ -16,7 +15,7 @@ export component OcrWindow inherits Window {
     callback copy(string);
     callback open-settings();
 
-    title: root.window-title;
+    title: "Vixeeny";
     icon: Theme.app-icon;
     min-width: 420px;
     min-height: 260px;

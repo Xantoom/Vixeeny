@@ -367,6 +367,9 @@ fn init_look() {
 }
 
 fn run() -> anyhow::Result<()> {
+    if let Err(e) = vixeeny_platform::set_app_id() {
+        tracing::warn!("{e}");
+    }
     init_look();
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {

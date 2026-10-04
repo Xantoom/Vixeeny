@@ -198,7 +198,7 @@ pub fn window_info(id: WindowId) -> Result<Option<WindowInfo>> {
 }
 
 unsafe extern "system" fn collect_window(hwnd: HWND, data: LPARAM) -> windows::core::BOOL {
-    // SAFETY: `data` is the `&mut Vec<HWND>` passed by `top_level_windows()`.
+    // SAFETY: `data` is the `&mut Vec<HWND>` passed by the `EnumWindows` callers of this module.
     let list = unsafe { &mut *(data.0 as *mut Vec<HWND>) };
     list.push(hwnd);
     TRUE
@@ -413,21 +413,61 @@ pub fn single_instance(name: &str) -> Option<InstanceGuard> {
     Some(InstanceGuard(handle))
 }
 
-/// Brings the top-level window titled `title` to the front. `true` when there was one.
-pub fn focus_window_titled(title: &str) -> bool {
-    use windows::Win32::UI::WindowsAndMessaging::{
-        FindWindowW, SW_RESTORE, SetForegroundWindow, ShowWindow,
-    };
-    let wide: Vec<u16> = title.encode_utf16().chain(std::iter::once(0)).collect();
-    // SAFETY: `wide` is NUL-terminated and outlives the calls; the window is another process's,
-    // which these calls are allowed to address.
+/// The application identity of every Vixeeny process: their windows group under one taskbar
+/// button, with the name and icon of the Start menu shortcut (which carries the same id).
+pub const APP_ID: &str = "Xantoom.Vixeeny";
+
+pub fn set_app_id() -> Result<()> {
+    use windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
+    let wide: Vec<u16> = APP_ID.encode_utf16().chain(std::iter::once(0)).collect();
+    // SAFETY: `wide` is NUL-terminated and outlives the call.
+    unsafe { SetCurrentProcessExplicitAppUserModelID(windows::core::PCWSTR(wide.as_ptr())) }
+        .map_err(|e| os_err("SetCurrentProcessExplicitAppUserModelID", e))
+}
+
+/// Marks a window of this process with `tag`, so that another process can find it again with
+/// [`focus_tagged_window`] (every window of Vixeeny has the same title).
+pub fn tag_window(id: WindowId, tag: &str) -> Result<()> {
+    use windows::Win32::UI::WindowsAndMessaging::SetPropW;
+    let wide: Vec<u16> = tag.encode_utf16().chain(std::iter::once(0)).collect();
+    // SAFETY: `wide` is NUL-terminated and outlives the call; the property holds no pointer
+    // (a non-null marker value), so nothing must be freed when the window goes away.
     unsafe {
-        let Ok(hwnd) = FindWindowW(None, windows::core::PCWSTR(wide.as_ptr())) else {
-            return false;
-        };
-        let _ = ShowWindow(hwnd, SW_RESTORE);
-        SetForegroundWindow(hwnd).as_bool()
+        SetPropW(
+            hwnd_of(id),
+            windows::core::PCWSTR(wide.as_ptr()),
+            Some(HANDLE(std::ptr::dangling_mut::<c_void>())),
+        )
     }
+    .map_err(|e| os_err("SetPropW", e))
+}
+
+/// Brings the top-level window marked with `tag` (see [`tag_window`]) to the front. `true` when
+/// there was one.
+pub fn focus_tagged_window(tag: &str) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetPropW, IsIconic, SW_RESTORE, SetForegroundWindow, ShowWindow,
+    };
+    let wide: Vec<u16> = tag.encode_utf16().chain(std::iter::once(0)).collect();
+    let mut handles: Vec<HWND> = Vec::new();
+    // SAFETY: the callback only pushes into `handles`, which outlives the enumeration.
+    if unsafe { EnumWindows(Some(collect_window), LPARAM(&raw mut handles as isize)) }.is_err() {
+        return false;
+    }
+    for handle in handles {
+        // SAFETY: `wide` is NUL-terminated; the window may belong to another process, which
+        // these calls are allowed to address.
+        unsafe {
+            if GetPropW(handle, windows::core::PCWSTR(wide.as_ptr())).is_invalid() {
+                continue;
+            }
+            if IsIconic(handle).as_bool() {
+                let _ = ShowWindow(handle, SW_RESTORE);
+            }
+            return SetForegroundWindow(handle).as_bool();
+        }
+    }
+    false
 }
 
 /// Opens a file, folder or address with the program Windows associates with it.

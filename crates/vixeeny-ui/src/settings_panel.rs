@@ -454,8 +454,6 @@ impl SettingsPanel {
         let lang = self.state.lang();
         self.rebuild_env();
         self.window.set_t(ui_texts(lang));
-        self.window
-            .set_window_title(tr(Key::SettingsTitle, lang).into());
         self.window.set_section_titles(strings(
             Section::ALL.iter().map(|s| tr(s.title(), lang).to_owned()),
         ));

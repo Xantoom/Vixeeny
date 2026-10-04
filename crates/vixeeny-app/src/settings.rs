@@ -23,6 +23,8 @@ use crate::gallery::{self, Item, Kind};
 
 const REPO: &str = "https://github.com/Xantoom/Vixeeny";
 const THUMB_SIDE: u32 = 256;
+/// Marks the settings window so that a second launch can bring it forward.
+const SETTINGS_TAG: &str = "Vixeeny.Settings";
 /// How many captures the gallery shows.
 const GALLERY_LIMIT: usize = 80;
 
@@ -406,7 +408,7 @@ pub fn run_child() -> anyhow::Result<()> {
     let lang = crate::lang(&config.general.language);
     // One window per session: a second launch brings the first one forward.
     let Some(_guard) = vixeeny_platform::single_instance("Vixeeny.Settings") else {
-        vixeeny_platform::focus_window_titled(tr(Key::SettingsTitle, lang));
+        vixeeny_platform::focus_tagged_window(SETTINGS_TAG);
         return Ok(());
     };
     let look = look_of(&config);

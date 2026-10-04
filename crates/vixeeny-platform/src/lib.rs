@@ -12,11 +12,11 @@ pub use time::{LocalTime, local_time};
 
 mod windows_impl;
 pub use windows_impl::{
-    InstanceGuard, animations_enabled, apply_acrylic, attach_console, cursor_position,
-    ensure_dpi_aware, exclude_from_capture, exe_metadata, focus_window_titled, foreground_window,
-    gpu_adapters, hdr_info, monitors, monotonic_ns, open_path, recycle, set_noactivate_tool_window,
-    single_instance, style_window, system_accent, system_prefers_dark, top_level_windows,
-    user_locale, window_info,
+    APP_ID, InstanceGuard, animations_enabled, apply_acrylic, attach_console, cursor_position,
+    ensure_dpi_aware, exclude_from_capture, exe_metadata, focus_tagged_window, foreground_window,
+    gpu_adapters, hdr_info, monitors, monotonic_ns, open_path, recycle, set_app_id,
+    set_noactivate_tool_window, single_instance, style_window, system_accent, system_prefers_dark,
+    tag_window, top_level_windows, user_locale, window_info,
 };
 
 /// A graphics adapter as the OS reports it (the encoder probe derives its own view from it).

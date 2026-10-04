@@ -332,7 +332,6 @@ component KeyChip inherits Rectangle {
 }
 
 export component SettingsWindow inherits Window {
-    in property <string> window-title: "Vixeeny";
     in property <UiTexts> t;
     in property <[string]> section-titles;
     // 0 gallery, 1 general, 2 shortcuts, 3 images, 4 video, 5 audio, 6 replay, 7 folders, 8 ocr,
@@ -369,7 +368,7 @@ export component SettingsWindow inherits Window {
     callback line-select(int);
     callback page-action(string, string);
 
-    title: root.window-title;
+    title: "Vixeeny";
     icon: Theme.app-icon;
     background: Theme.bg;
     min-width: 820px;

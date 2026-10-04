@@ -73,7 +73,7 @@ fn letter(scale: f32) -> Option<tiny_skia::Path> {
 
 /// The four corners of a capture zone around the letter.
 fn corners() -> Option<tiny_skia::Path> {
-    let (lo, hi, arm) = (6.6, 25.4, 4.6);
+    let (lo, hi, arm) = (6.0, 26.0, 4.0);
     let mut p = PathBuilder::new();
     for (x, y, dx, dy) in [
         (lo, lo, 1.0, 1.0),
@@ -86,6 +86,28 @@ fn corners() -> Option<tiny_skia::Path> {
         p.line_to(x + dx * arm, y);
     }
     p.finish()
+}
+
+/// The red dot of the "recording" tray icon, ringed with the tile's ink so it stays round on
+/// the letter.
+fn recording_dot(pixmap: &mut Pixmap, size: u32) -> Result<()> {
+    let scale = Transform::from_scale(size as f32 / 32.0, size as f32 / 32.0);
+    let circle = |r: f32| PathBuilder::from_circle(24.5, 7.5, r).context("dot");
+    pixmap.fill_path(
+        &circle(7.5)?,
+        &paint(INK.0, INK.1, INK.2, 255),
+        FillRule::Winding,
+        scale,
+        None,
+    );
+    pixmap.fill_path(
+        &circle(5.5)?,
+        &paint(0xe5, 0x32, 0x2d, 255),
+        FillRule::Winding,
+        scale,
+        None,
+    );
+    Ok(())
 }
 
 /// The icon at `size` pixels, as RGBA.
@@ -102,14 +124,14 @@ pub fn pixmap(size: u32) -> Result<Pixmap> {
     let white = paint(255, 255, 255, 255);
     if size >= DETAILED_FROM {
         let stroke = Stroke {
-            width: 2.0,
+            width: 1.7,
             line_cap: LineCap::Round,
             line_join: LineJoin::Round,
             ..Stroke::default()
         };
         pixmap.stroke_path(&corners().context("corners")?, &white, &stroke, scale, None);
         pixmap.fill_path(
-            &letter(1.0).context("letter")?,
+            &letter(1.12).context("letter")?,
             &white,
             FillRule::Winding,
             scale,
@@ -150,31 +172,6 @@ fn ico(images: &[(u32, Vec<u8>)]) -> Vec<u8> {
     out
 }
 
-/// An Apple icon: `icns`, then (type, length, PNG) entries. The types name the pixel size.
-fn icns(images: &[(u32, Vec<u8>)]) -> Vec<u8> {
-    const TYPES: [(u32, &[u8; 4]); 7] = [
-        (16, b"icp4"),
-        (32, b"icp5"),
-        (64, b"icp6"),
-        (128, b"ic07"),
-        (256, b"ic08"),
-        (512, b"ic09"),
-        (1024, b"ic10"),
-    ];
-    let mut body = Vec::new();
-    for (size, kind) in TYPES {
-        if let Some((_, png)) = images.iter().find(|(s, _)| *s == size) {
-            body.extend_from_slice(kind);
-            body.extend_from_slice(&(png.len() as u32 + 8).to_be_bytes());
-            body.extend_from_slice(png);
-        }
-    }
-    let mut out = b"icns".to_vec();
-    out.extend_from_slice(&(body.len() as u32 + 8).to_be_bytes());
-    out.extend_from_slice(&body);
-    out
-}
-
 pub fn run() -> Result<()> {
     let dir = out_dir();
     std::fs::create_dir_all(&dir)?;
@@ -187,7 +184,16 @@ pub fn run() -> Result<()> {
     }
     let small: Vec<_> = images.iter().filter(|(s, _)| *s <= 256).cloned().collect();
     std::fs::write(dir.join("vixeeny.ico"), ico(&small))?;
-    std::fs::write(dir.join("vixeeny.icns"), icns(&images))?;
+    // The tray icon while recording: the small sizes only, with the red dot.
+    let recording: Vec<(u32, Vec<u8>)> = [16, 20, 24, 32, 40, 48, 64]
+        .iter()
+        .map(|&size| {
+            let mut p = pixmap(size)?;
+            recording_dot(&mut p, size)?;
+            Ok((size, p.encode_png().context("png")?))
+        })
+        .collect::<Result<_>>()?;
+    std::fs::write(dir.join("vixeeny-recording.ico"), ico(&recording))?;
     println!("wrote {}", dir.display());
     Ok(())
 }
@@ -206,12 +212,6 @@ mod tests {
         assert_eq!(
             u32::from_le_bytes(ico[6 + 16 + 12..6 + 16 + 16].try_into().unwrap_or([0; 4])),
             6 + 32 + 3
-        );
-        let icns = icns(&[(16, vec![9; 10]), (1024, vec![8; 4])]);
-        assert_eq!(&icns[..4], b"icns");
-        assert_eq!(
-            u32::from_be_bytes(icns[4..8].try_into().unwrap_or([0; 4])) as usize,
-            icns.len()
         );
     }
 
