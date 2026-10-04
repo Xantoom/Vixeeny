@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! `cargo xtask icons`: draws the application icon (a near-black rounded tile with a white V
 //! framed by the corners of a capture zone, after the Vixely logo) at every size and writes
-//! `packaging/icons/`: PNGs and `vixeeny.ico`.
+//! `packaging/icons/`: `vixeeny.ico` (the programs and the installer), `vixeeny-recording.ico`
+//! (the tray while recording), and PNGs for the windows (64) and the repository page (256).
 //! The files are committed; run this again only when the drawing changes.
 
 use std::path::{Path, PathBuf};
@@ -13,7 +14,9 @@ use tiny_skia::{
 
 /// The ink of the tile, the same near-black as the Vixely logo.
 const INK: (u8, u8, u8) = (0x13, 0x14, 0x16);
-const SIZES: [u32; 9] = [16, 24, 32, 48, 64, 128, 256, 512, 1024];
+const SIZES: [u32; 7] = [16, 24, 32, 48, 64, 128, 256];
+/// The sizes also written as PNG files.
+const PNGS: [u32; 2] = [64, 256];
 /// Below this size the capture corners would blur into the letter: the small icons show the V
 /// alone, larger.
 const DETAILED_FROM: u32 = 32;
@@ -179,11 +182,10 @@ pub fn run() -> Result<()> {
         .iter()
         .map(|&size| draw(size).map(|png| (size, png)))
         .collect::<Result<_>>()?;
-    for (size, png) in &images {
+    for (size, png) in images.iter().filter(|(s, _)| PNGS.contains(s)) {
         std::fs::write(dir.join(format!("vixeeny-{size}.png")), png)?;
     }
-    let small: Vec<_> = images.iter().filter(|(s, _)| *s <= 256).cloned().collect();
-    std::fs::write(dir.join("vixeeny.ico"), ico(&small))?;
+    std::fs::write(dir.join("vixeeny.ico"), ico(&images))?;
     // The tray icon while recording: the small sizes only, with the red dot.
     let recording: Vec<(u32, Vec<u8>)> = [16, 20, 24, 32, 40, 48, 64]
         .iter()

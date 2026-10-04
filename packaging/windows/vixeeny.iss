@@ -27,7 +27,7 @@ OutputDir={#OutDir}
 OutputBaseFilename=Vixeeny-{#AppVersion}-setup
 Compression=lzma2/ultra
 SolidCompression=yes
-UninstallDisplayIcon={app}\vixeeny-daemon.exe
+UninstallDisplayIcon={app}\Vixeeny.exe
 SetupIconFile=..\icons\vixeeny.ico
 LicenseFile={#StageDir}\LICENSE
 CloseApplications=yes
@@ -56,17 +56,23 @@ french.KeepSettings=Conserver vos paramètres et les informations de mise à jou
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\Vixeeny"; Filename: "{app}\vixeeny-daemon.exe"; Tasks: startmenu
+; The same identity as the program's windows: Windows groups them under this entry.
+Name: "{group}\Vixeeny"; Filename: "{app}\Vixeeny.exe"; AppUserModelID: "Xantoom.Vixeeny"; Tasks: startmenu
 
 [Registry]
 ; The daemon keeps this entry in line with the `autostart` setting afterwards.
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Vixeeny"; ValueData: """{app}\vixeeny-daemon.exe"""; Tasks: autostart; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Vixeeny"; ValueData: """{app}\Vixeeny.exe"""; Tasks: autostart; Flags: uninsdeletevalue
 
 [Run]
-Filename: "{app}\vixeeny-daemon.exe"; Description: "Vixeeny"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\Vixeeny.exe"; Description: "Vixeeny"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
-Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM vixeeny-daemon.exe /IM vixeeny-app.exe /IM vixeeny-updater.exe"; RunOnceId: "StopVixeeny"; Flags: runhidden
+; Hidden: no window shows.
+Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM Vixeeny.exe /IM vixeeny-daemon.exe /IM vixeeny-app.exe"; RunOnceId: "StopVixeeny"; Flags: runhidden
+
+[InstallDelete]
+; The console updater of the versions before 1.0.
+Type: files; Name: "{app}\vixeeny-updater.exe"
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\.update-staged"

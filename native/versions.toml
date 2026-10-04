@@ -2,39 +2,14 @@
 # Every library is fetched by exact commit; `tag` is informational. Versions resolved 2026-10-01.
 #
 # `cargo xtask build-native` reads this file, so keep the keys stable.
-# `fallback` documents a drop-in replacement (plan section 3).
 
 [ffmpeg]
-url = "https://github.com/FFmpeg/FFmpeg"
-tag = "n9.0.2"
-commit = "ce8f11b9fac4cd7ccfb41ca7c01bc17f5cda8cc3"
-license = "GPL-3.0-or-later (built with --enable-gpl --enable-version3, never --enable-nonfree)"
-
-[ffmpeg-windows-prebuilt]
-# Windows only: prebuilt shared GPL build (FFmpeg n9.0.2 + 22 commits) with x264, x265,
-# SVT-AV1, libvpx, dav1d, opus, NVENC, AMF and QSV. Replaces building FFmpeg and its encoders
-# on Windows (maintainer decision 2026-10-01; plan section 3 said static, see section 14).
+# Prebuilt shared GPL build (FFmpeg n9.0.2 + 22 commits) with x264, x265, SVT-AV1, libvpx,
+# dav1d, opus, NVENC, AMF and QSV, checked by SHA-256 (maintainer decision 2026-10-01).
 url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-01-13-06/ffmpeg-n9.0.2-22-g46d8f462ee-win64-gpl-shared-9.0.zip"
 sha256 = "64f7d1460ce986804386582eeec3bd95117a4e84f7567ad416dd33f434fe8286"
-license = "GPL-3.0-or-later (BtbN build, --enable-gpl --enable-version3, no nonfree)"
-
-[x264]
-url = "https://code.videolan.org/videolan/x264.git"
-tag = "stable"
-commit = "b35605ace3ddf7c1a5d67a2eb553f034aef41d55"
-license = "GPL-2.0-or-later"
-
-[x265]
-url = "https://bitbucket.org/multicoreware/x265_git"
-tag = "4.2"
-commit = "e7a37608685a1ea61c59342cb19208d688928287"
-license = "GPL-2.0-or-later"
-
-[libvpx]
-url = "https://github.com/webmproject/libvpx"
-tag = "v1.17.0"
-commit = "82615ff0733cd4063838c352bc2e2ab225f37ade"
-license = "BSD-3-Clause"
+tag = "n9.0.2"
+license = "GPL-3.0-or-later (BtbN build, --enable-gpl --enable-version3, no nonfree); bundles x264 and x265 (GPL-2.0-or-later), libvpx and opus (BSD-3-Clause), SVT-AV1 and dav1d"
 
 [svt-av1]
 # Official SVT-AV1 (maintainer decision 2026-10-01: Tritium not used).

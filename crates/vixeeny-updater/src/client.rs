@@ -249,12 +249,14 @@ fn install_inner(reopen: Option<ControlRequest>) -> anyhow::Result<()> {
     bail!("the new version did not start; the previous one was restored")
 }
 
-/// Removes what an update left behind (the old files, still in use while it ran).
+/// Removes what an update left behind (the old files, still in use while it ran, and the
+/// console updater of the versions before 1.0).
 pub fn clean_up() {
     if let Ok(dir) = install_dir() {
         let backup = dir.join(BACKUP);
         if backup.exists() {
             let _ = swap::commit(&backup);
         }
+        let _ = std::fs::remove_file(dir.join("vixeeny-updater.exe"));
     }
 }

@@ -5,30 +5,34 @@ and make sure the checks below pass.
 
 ## Build and check
 
+On Windows, with the MSVC toolchain:
+
 ```
 cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-Clippy runs with warnings as errors (the lints are in the workspace `Cargo.toml`). Code that is
-specific to an OS is behind `cfg`, so a plain run on Linux does not compile the Windows and macOS
-parts: CI does (three operating systems), and you can check them locally with
-`--target x86_64-pc-windows-msvc` or `--target aarch64-apple-darwin` (add `CC_<target>`/`AR_<target>`
-set to a stub if a C build script complains, nothing is linked by `check`).
+Clippy runs with warnings as errors (the lints are in the workspace `Cargo.toml`). Vixeeny is a
+Windows program; from Linux or WSL the workspace can be checked and its tests run with
+[`cargo-xwin`](https://github.com/rust-cross/cargo-xwin) (`cargo xwin clippy --target
+x86_64-pc-windows-msvc …`).
 
-Linux needs `libfontconfig1-dev`; PipeWire support needs `libpipewire-0.3-dev libspa-0.2-dev clang`
-(`--features pipewire` on `vixeeny-app`).
+Release builds also need the pinned native libraries: `cargo xtask build-native` from a Visual
+Studio developer prompt (it downloads the prebuilt FFmpeg and builds SVT-AV1, dav1d and the image
+libraries; see `native/versions.toml`), then set `FFMPEG_DIR=native\build\work\ffmpeg-prebuilt`
+and `PKG_CONFIG_PATH=native\build\work\prefix\lib\pkgconfig` and build `vixeeny-app` with
+`--features "ffmpeg native-codecs"`. `cargo xtask dist` gathers the release files.
 
-Release builds also need the pinned native libraries (FFmpeg, codecs): `cargo xtask build-native`
-(see `native/versions.toml`), then `--features "ffmpeg native-codecs"` on `vixeeny-app`.
+The UI tests render every window without a display; set `VIXEENY_SCREENSHOTS=<folder>` to keep
+the images (`cargo test -p vixeeny-ui`).
 
 ## Rules the project holds to
 
-- **Windows is the priority**; macOS and Linux are tested by volunteers. Do not break Windows for
-  them, and say in the pull request what you could and could not test.
 - **Logic that can be pure is pure** and has tests: put it in a crate without OS code. A bug fix
   comes with a test that fails without it.
+- **No console window, ever**: both programs use the Windows subsystem, and anything they start
+  is a windowed program or runs with `CREATE_NO_WINDOW`.
 - **No unsafe without a `// SAFETY:` comment**, no `unwrap` in non-test code (clippy enforces it).
 - **Licences**: GPL-3.0-or-later project; a new dependency must pass `cargo deny check`
   (`deny.toml` lists the allowed licences). Record native libraries in `native/versions.toml`.
@@ -37,7 +41,7 @@ Release builds also need the pinned native libraries (FFmpeg, codecs): `cargo xt
   [docs/ADDING_A_CODEC.md](docs/ADDING_A_CODEC.md).
 - **Decisions and deviations** from [VIXEENY_PLAN.md](VIXEENY_PLAN.md) go in its journal (the
   table at the end), with the reason.
-- Commits: a short imperative subject (`feat(linux): …`, `fix: …`, `docs: …`).
+- Commits: a short imperative subject (`feat(editor): …`, `fix: …`, `docs: …`).
 
 ## Reporting a bug
 

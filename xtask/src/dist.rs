@@ -2,7 +2,7 @@
 //! `cargo xtask dist [--out <dir>]` (Windows release layout, plan 10.1) and
 //! `cargo xtask sums <dir>`.
 //!
-//! `dist` expects `cargo build --release` to have produced the three programs, and gathers them
+//! `dist` expects `cargo build --release` to have produced the two programs, and gathers them
 //! with the FFmpeg DLLs and the licences into `<out>/stage` (what the installer packs), then
 //! writes the update archive `Vixeeny-<version>-windows-x64.zip` and the portable archive
 //! `Vixeeny-<version>-windows-x64-portable.zip` (the same files plus `portable.flag`).
@@ -14,11 +14,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
 
-const PROGRAMS: [&str; 3] = [
-    "vixeeny-daemon.exe",
-    "vixeeny-app.exe",
-    "vixeeny-updater.exe",
-];
+const PROGRAMS: [&str; 2] = ["Vixeeny.exe", "vixeeny-app.exe"];
+/// The name of `Vixeeny.exe` before 1.0: the updater of those versions restarts the program by
+/// that name, and their Start menu entry points at it. This copy hands over to `Vixeeny.exe`.
+const LEGACY_DAEMON: &str = "vixeeny-daemon.exe";
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..")
@@ -102,7 +101,7 @@ pub fn third_party_licenses() -> Result<String> {
         }
     }
     text.push_str(
-        "\nAssets:\nInter (the typeface used where Segoe UI is missing) — SIL OFL 1.1\n\
+        "\nAssets:\nInter (the typeface of the text drawn on captures) — SIL OFL 1.1\n\
          Fluent UI System Icons (Microsoft; the icons of the windows) — MIT\n",
     );
     text.push_str("\nRust crates:\n");
@@ -132,6 +131,7 @@ pub fn dist(args: &[String]) -> Result<()> {
         std::fs::copy(release.join(program), stage.join(program))
             .with_context(|| format!("{program} is missing: run `cargo build --release` first"))?;
     }
+    std::fs::copy(release.join(PROGRAMS[0]), stage.join(LEGACY_DAEMON))?;
     let ffmpeg_bin = root.join("native/build/work/ffmpeg-prebuilt/bin");
     if let Ok(entries) = std::fs::read_dir(&ffmpeg_bin) {
         for entry in entries.flatten() {

@@ -26,7 +26,7 @@ pub mod replay;
 #[cfg(feature = "ffmpeg-next")]
 pub mod thumbnail;
 
-/// FFmpeg bindings, built against the pinned static libraries of `native/versions.toml`.
+/// FFmpeg bindings, built against the pinned prebuilt FFmpeg of `native/versions.toml`.
 #[cfg(feature = "ffmpeg-next")]
 pub use ffmpeg_next as ffmpeg;
 

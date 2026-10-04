@@ -14,11 +14,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   check:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -26,138 +22,25 @@ jobs:
           toolchain: 1.98.1
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Slint needs fontconfig on Linux
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
       - run: cargo fmt --check
-      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
-      - name: X11 capture against a real X server (Xvfb)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get install -y xvfb
-          VIXEENY_REQUIRE_X11=1 xvfb-run -a cargo test -p vixeeny-capture --test x11 -- --nocapture
-      - name: Daemon and app end to end on a real X server (Xvfb)
-        if: runner.os == 'Linux'
-        run: |
-          cargo build -p vixeeny-daemon -p vixeeny-app
-          export HOME="$RUNNER_TEMP/home" && mkdir -p "$HOME"
-          cat > "$RUNNER_TEMP/e2e.sh" <<'SH'
-          set -u
-          target/debug/vixeeny-daemon > "$HOME/daemon.log" 2>&1 &
-          for i in $(seq 20); do target/debug/vixeeny-daemon ctl open-settings >/dev/null 2>&1 && break; sleep 1; done
-          sleep 3
-          target/debug/vixeeny-daemon ctl capture-fullscreen
-          for i in $(seq 40); do [ -n "$(find "$HOME" -name '*.png' | head -1)" ] && break; sleep 1; done
-          find "$HOME" -name '*.png' -exec ls -l {} \;
-          target/debug/vixeeny-daemon ctl quit
-          [ -n "$(find "$HOME" -name '*.png' | head -1)" ]
-          SH
-          xvfb-run -a bash "$RUNNER_TEMP/e2e.sh" || { cat "$HOME/daemon.log"; exit 1; }
-  daemon-windows:
-    # M2: release binaries for the manual NF-1/NF-2 measurement, plus a short idle smoke test.
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.98.1
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release -p vixeeny-daemon -p vixeeny-app -p xtask
       - name: Real capture smoke test (output only)
         run: cargo test -p vixeeny-capture --test wgc_smoke -- --nocapture
       - name: Idle smoke test (20 s, informational)
         continue-on-error: true
-        run: target\release\xtask.exe bench-idle --seconds 20
-      - uses: actions/upload-artifact@v4
-        with:
-          name: vixeeny-m2-windows
-          path: |
-            target/release/vixeeny-daemon.exe
-            target/release/vixeeny-app.exe
-            target/release/xtask.exe
+        run: |
+          cargo build --release -p vixeeny-daemon -p vixeeny-app -p xtask
+          target\release\xtask.exe bench-idle --seconds 20
   deny:
+    # cargo-deny runs in a Linux container; it only reads the Windows dependency graph.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
-  native-linux:
-    # M1: build the pinned native libraries and run the software-encode matrix.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.98.1
-      - uses: Swatinem/rust-cache@v2
-      - run: sudo apt-get update && sudo apt-get install -y cmake nasm meson ninja-build pkg-config libfontconfig1-dev
-      - uses: actions/cache@v4
-        with:
-          path: native/build/work
-          key: native-linux-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}
-      - run: cargo xtask build-native
-      - run: cargo test -p vixeeny-encode --features ffmpeg-next --test software_encode --test verify_registry --test recorder
-        env:
-          PKG_CONFIG_PATH: ${{ github.workspace }}/native/build/work/prefix/lib/pkgconfig
-      - name: The app with recording builds (clippy)
-        run: cargo clippy -p vixeeny-app --features ffmpeg -- -D warnings
-        env:
-          PKG_CONFIG_PATH: ${{ github.workspace }}/native/build/work/prefix/lib/pkgconfig
-      - name: Image codecs (AVIF, JPEG XL)
-        run: cargo test -p vixeeny-image -p vixeeny-app --features vixeeny-image/native-codecs,vixeeny-app/native-codecs
-        env:
-          PKG_CONFIG_PATH: ${{ github.workspace }}/native/build/work/prefix/lib/pkgconfig
-      - name: Packages build (update archive, .deb, AppDir)
-        run: |
-          sudo apt-get install -y libpipewire-0.3-dev libspa-0.2-dev clang
-          cargo build --release -p vixeeny-daemon -p vixeeny-updater -p xtask
-          cargo build --release -p vixeeny-app --features "ffmpeg native-codecs pipewire"
-          cargo xtask dist-linux --out dist
-          dpkg-deb -I dist/*.deb
-          dpkg-deb -c dist/*.deb
-          ls -l dist
-        env:
-          PKG_CONFIG_PATH: ${{ github.workspace }}/native/build/work/prefix/lib/pkgconfig
-  pipewire-linux:
-    # Wayland video (ScreenCast portal + PipeWire) and PipeWire audio: they need the system
-    # libraries to build; neither can run on a CI machine without a compositor.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.98.1
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-      - run: sudo apt-get update && sudo apt-get install -y libpipewire-0.3-dev libspa-0.2-dev clang pkg-config libfontconfig1-dev
-      - run: cargo clippy -p vixeeny-capture -p vixeeny-audio --features vixeeny-capture/pipewire,vixeeny-audio/pipewire --all-targets -- -D warnings
-      - run: cargo test -p vixeeny-capture -p vixeeny-audio --features vixeeny-capture/pipewire,vixeeny-audio/pipewire
-      - run: cargo clippy -p vixeeny-app --features pipewire -- -D warnings
-  flatpak:
-    # The manifest's helper modules (wl-clipboard, xclip, Tesseract) must build; the programs are
-    # stubs here, the release workflow bundles the real ones.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: |
-          sudo apt-get update && sudo apt-get install -y flatpak flatpak-builder appstream desktop-file-utils
-          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-          desktop-file-validate packaging/linux/io.github.Xantoom.Vixeeny.desktop
-          appstreamcli validate --no-net packaging/linux/io.github.Xantoom.Vixeeny.metainfo.xml
-      - name: Build the manifest
-        working-directory: packaging/linux/flatpak
-        run: |
-          mkdir stage
-          cp ../io.github.Xantoom.Vixeeny.* ../../../LICENSE stage/
-          cp ../../../LICENSE stage/THIRD-PARTY-LICENSES.txt
-          cp ../../icons/vixeeny-256.png stage/io.github.Xantoom.Vixeeny.png
-          printf '#!/bin/sh\n' > stage/vixeeny-daemon && cp stage/vixeeny-daemon stage/vixeeny-app
-          flatpak-builder --user --install-deps-from=flathub --force-clean build io.github.Xantoom.Vixeeny.yml
-          flatpak-builder --run build io.github.Xantoom.Vixeeny.yml tesseract --version
-          flatpak-builder --run build io.github.Xantoom.Vixeeny.yml sh -c 'wl-copy --version && xclip -version'
-  native-windows:
-    # Prebuilt shared FFmpeg (checked by SHA-256); dav1d, SVT-AV1 and the image libraries are
-    # built with MSVC for libavif and the image crates.
+  native:
+    # The prebuilt FFmpeg (checked by SHA-256), and SVT-AV1, dav1d and the image libraries built
+    # with MSVC for libavif and the image crates. The same build as a release, without packaging.
     runs-on: windows-latest
     env:
       FFMPEG_DIR: ${{ github.workspace }}\native\build\work\ffmpeg-prebuilt
@@ -167,13 +50,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.98.1
+          components: clippy
       - uses: Swatinem/rust-cache@v2
       - uses: ilammy/msvc-dev-cmd@v1
-      - name: Tools (nasm, meson)
+      - name: Tools (nasm, meson, pkg-config)
         shell: pwsh
         run: |
-          choco install nasm -y --no-progress
+          choco install nasm pkgconfiglite -y --no-progress
           "C:\Program Files\NASM" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          "C:\ProgramData\chocolatey\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          "$env:FFMPEG_DIR\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
           pip install meson
       - uses: actions/cache/restore@v4
         with:
@@ -187,78 +73,15 @@ jobs:
           path: native/build/work
           key: native-windows-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}-${{ github.run_id }}
       - name: Software encode matrix
-        shell: pwsh
-        run: |
-          $env:PATH = "$env:FFMPEG_DIR\bin;$env:PATH"
-          cargo test -p vixeeny-encode --features ffmpeg-next --test software_encode --test recorder
-      - name: Recording app (Windows capture + recorder) compiles
-        shell: pwsh
-        run: |
-          $env:PATH = "$env:FFMPEG_DIR\bin;$env:PATH"
-          cargo clippy -p vixeeny-app -p vixeeny-capture --features vixeeny-app/ffmpeg --all-targets -- -D warnings
-      - name: Registry against FFmpeg (every Windows encoder must exist and expose the declared options)
-        shell: pwsh
-        run: |
-          $env:PATH = "$env:FFMPEG_DIR\bin;$env:PATH"
-          cargo test -p vixeeny-encode --features ffmpeg-next --test verify_registry -- --nocapture
+        run: cargo test -p vixeeny-encode --features ffmpeg-next --test software_encode --test recorder
+      - name: Registry against FFmpeg (every encoder must exist and expose the declared options)
+        run: cargo test -p vixeeny-encode --features ffmpeg-next --test verify_registry -- --nocapture
+      - name: The app with recording and image codecs (clippy)
+        env:
+          PKG_CONFIG_PATH: ${{ github.workspace }}\native\build\work\prefix\lib\pkgconfig
+        run: cargo clippy -p vixeeny-app -p vixeeny-capture --features vixeeny-app/ffmpeg,vixeeny-app/native-codecs --all-targets -- -D warnings
       - name: Image codecs (AVIF, JPEG XL)
-        shell: pwsh
         continue-on-error: true
-        run: |
-          choco install pkgconfiglite -y --no-progress
-          $env:PATH = "$env:PATH;C:\ProgramData\chocolatey\bin"
-          pkg-config --version
-          Get-ChildItem "${{ github.workspace }}\native\build\work\prefix\lib" -Filter *.lib | Select-Object -ExpandProperty Name
-          Get-Content "${{ github.workspace }}\native\build\work\prefix\lib\pkgconfig\libjxl.pc"
-          Get-Content "${{ github.workspace }}\native\build\work\prefix\lib\pkgconfig\libavif.pc"
-          $env:PKG_CONFIG_PATH = "${{ github.workspace }}\native\build\work\prefix\lib\pkgconfig"
-          cargo test -p vixeeny-image --features native-codecs
-  native-macos:
-    # One build per architecture (Apple Silicon and Intel): the native libraries are built on the
-    # runner itself, there is no universal binary.
-    strategy:
-      fail-fast: false
-      matrix:
-        runner: [macos-latest, macos-15-intel]
-    name: native-macos (${{ matrix.runner }})
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.98.1
-      - uses: Swatinem/rust-cache@v2
-      - run: brew install cmake nasm meson ninja pkgconf
-      - uses: actions/cache/restore@v4
-        with:
-          path: native/build/work
-          key: native-${{ matrix.runner }}-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}
-          restore-keys: native-${{ matrix.runner }}-
-      - run: cargo xtask build-native
-      - uses: actions/cache/save@v4
-        if: always()
-        with:
-          path: native/build/work
-          key: native-${{ matrix.runner }}-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}-${{ github.run_id }}
-      - run: cargo test -p vixeeny-encode --features ffmpeg-next --test software_encode --test verify_registry --test recorder
         env:
-          PKG_CONFIG_PATH: ${{ github.workspace }}/native/build/work/prefix/lib/pkgconfig
-      - name: The macOS recording example builds (it needs a Mac with permissions to run)
-        run: cargo build -p vixeeny-encode --features ffmpeg-next --example record_mac
-        env:
-          PKG_CONFIG_PATH: ${{ github.workspace }}/native/build/work/prefix/lib/pkgconfig
-      - name: The app with recording builds (clippy)
-        run: cargo clippy -p vixeeny-app --features ffmpeg -- -D warnings
-        env:
-          PKG_CONFIG_PATH: ${{ github.workspace }}/native/build/work/prefix/lib/pkgconfig
-      - name: The app bundle and the disk image build
-        run: |
-          cargo build --release -p vixeeny-daemon -p vixeeny-app -p vixeeny-updater -p xtask
-          cargo xtask dist-mac --out dist
-          plutil -lint dist/stage/Vixeeny.app/Contents/Info.plist
-          codesign --verify --deep dist/stage/Vixeeny.app
-          ls -l dist
-      - name: Image codecs (AVIF, JPEG XL)
-        run: cargo test -p vixeeny-image -p vixeeny-app --features vixeeny-image/native-codecs,vixeeny-app/native-codecs
-        env:
-          PKG_CONFIG_PATH: ${{ github.workspace }}/native/build/work/prefix/lib/pkgconfig
+          PKG_CONFIG_PATH: ${{ github.workspace }}\native\build\work\prefix\lib\pkgconfig
+        run: cargo test -p vixeeny-image --features native-codecs

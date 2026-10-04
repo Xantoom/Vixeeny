@@ -121,7 +121,7 @@ fn measure(pid: u32, seconds: u64, child: &mut std::process::Child) -> Result<()
 
 fn default_daemon() -> Result<PathBuf> {
     let mut path = std::env::current_exe()?;
-    path.set_file_name(format!("vixeeny-daemon{}", std::env::consts::EXE_SUFFIX));
+    path.set_file_name("Vixeeny.exe");
     if !path.exists() {
         bail!(
             "{} not found; build it (`cargo build --release -p vixeeny-daemon`) or pass --daemon",

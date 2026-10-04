@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! `cargo xtask build-native`: fetch the pinned native libraries of `native/versions.toml`
-//! by exact commit and build them statically into `native/build/work/prefix`.
+//! `cargo xtask build-native`: download the pinned prebuilt FFmpeg, then fetch the image
+//! libraries of `native/versions.toml` by exact commit and build them statically with MSVC into
+//! `native/build/work/prefix`. Run it from a Visual Studio developer prompt.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -18,32 +19,24 @@ struct Lib {
     tag: String,
 }
 
-/// Prebuilt FFmpeg used on Windows instead of building it (maintainer decision 2026-10-01).
+/// The prebuilt FFmpeg (maintainer decision 2026-10-01): it bundles the video encoders.
 #[derive(Deserialize)]
 struct Prebuilt {
     url: String,
     sha256: String,
 }
 
-/// Libraries not built on Windows: FFmpeg ships prebuilt, bundling these encoders.
-const WINDOWS_PREBUILT: &[&str] = &["x264", "x265", "libvpx", "opus", "ffmpeg"];
-
 /// Bump a library's revision to force its rebuild when its recipe changes (stamps embed it).
 fn recipe_rev(name: &str) -> &'static str {
     match name {
-        "libvpx" => "6",
-        "x265" => "3",
         "libjxl" => "3",
         "jpegli" => "5",
         _ => "2",
     }
 }
 
-/// Build order matters: FFmpeg links against everything before it.
-const ORDER: &[&str] = &[
-    "x264", "x265", "libvpx", "svt-av1", "dav1d", "opus", "ffmpeg", "libwebp", "libjxl", "jpegli",
-    "libavif",
-];
+/// Build order matters: libavif links against SVT-AV1 and dav1d.
+const ORDER: &[&str] = &["svt-av1", "dav1d", "libwebp", "libjxl", "jpegli", "libavif"];
 
 struct Ctx {
     work: PathBuf,
@@ -61,8 +54,8 @@ pub fn build(only: &[String]) -> Result<()> {
         toml::from_str(&std::fs::read_to_string(root.join("native/versions.toml"))?)
             .context("parsing native/versions.toml")?;
     let prebuilt: Prebuilt = table
-        .remove("ffmpeg-windows-prebuilt")
-        .context("ffmpeg-windows-prebuilt missing from versions.toml")?
+        .remove("ffmpeg")
+        .context("ffmpeg missing from versions.toml")?
         .try_into()?;
     let libs: BTreeMap<String, Lib> = table.try_into()?;
     let work = root.join("native/build/work");
@@ -73,14 +66,11 @@ pub fn build(only: &[String]) -> Result<()> {
         .to_string();
     let ctx = Ctx { work, prefix, jobs };
 
-    if cfg!(windows) && (only.is_empty() || only.iter().any(|o| o == "ffmpeg")) {
+    if only.is_empty() || only.iter().any(|o| o == "ffmpeg") {
         ffmpeg_prebuilt(&ctx, &prebuilt)?;
     }
     for name in ORDER {
         if !only.is_empty() && !only.iter().any(|o| o == name) {
-            continue;
-        }
-        if cfg!(windows) && WINDOWS_PREBUILT.contains(name) {
             continue;
         }
         let lib = libs
@@ -95,20 +85,13 @@ pub fn build(only: &[String]) -> Result<()> {
         println!("== {name}: fetching {}", lib.commit);
         let src = fetch(&ctx, name, lib)?;
         println!("== {name}: building");
-        if cfg!(windows) {
-            normalize_msvc_libs(&ctx)?;
-        }
+        normalize_msvc_libs(&ctx)?;
         recipe(&ctx, name, &src)?;
-        if cfg!(windows) {
-            normalize_msvc_libs(&ctx)?;
-        }
+        normalize_msvc_libs(&ctx)?;
         std::fs::write(&stamp, &stamp_value)?;
     }
-    if cfg!(windows) {
-        // Also for cached prefixes built before a normalisation rule existed.
-        normalize_msvc_libs(&ctx)?;
-    }
-    Ok(())
+    // Also for cached prefixes built before a normalisation rule existed.
+    normalize_msvc_libs(&ctx)
 }
 
 /// Downloads the pinned prebuilt FFmpeg (shared, GPL) into `work/ffmpeg-prebuilt`, verifying
@@ -190,17 +173,7 @@ fn run(dir: &Path, prog: &str, args: &[&str], env: &[(&str, String)]) -> Result<
     Ok(())
 }
 
-/// Runs `script` in `dir` through bash. Unix only (autotools-style libraries).
-fn sh(dir: &Path, script: &str, env: &[(&str, String)]) -> Result<()> {
-    run(
-        Path::new("."),
-        "bash",
-        &["-c", &format!("cd '{}' && {script}", dir.display())],
-        env,
-    )
-}
-
-/// Windows: `cl` links `-lfoo` as `foo.lib`, so make every `libfoo.{a,lib}` available under
+/// `cl` links `-lfoo` as `foo.lib`, so make every `libfoo.{a,lib}` available under
 /// that name too, and drop Unix-only libraries from the `.pc` files.
 fn normalize_msvc_libs(ctx: &Ctx) -> Result<()> {
     let dir = ctx.prefix.join("lib");
@@ -302,10 +275,9 @@ fn cmake(ctx: &Ctx, src: &Path, sub: &str, extra: &[&str]) -> Result<()> {
         "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
         "-DBUILD_SHARED_LIBS=OFF",
         &prefix,
+        "-DCMAKE_C_COMPILER=cl",
+        "-DCMAKE_CXX_COMPILER=cl",
     ];
-    if cfg!(windows) {
-        args.extend(["-DCMAKE_C_COMPILER=cl", "-DCMAKE_CXX_COMPILER=cl"]);
-    }
     args.extend_from_slice(extra);
     run(src, "cmake", &args, &[])?;
     let build = build.to_string_lossy().into_owned();
@@ -315,33 +287,7 @@ fn cmake(ctx: &Ctx, src: &Path, sub: &str, extra: &[&str]) -> Result<()> {
 
 fn recipe(ctx: &Ctx, name: &str, src: &Path) -> Result<()> {
     let prefix = ctx.prefix.display().to_string();
-    let pkg_env = [(
-        "PKG_CONFIG_PATH",
-        format!("{prefix}/lib/pkgconfig:{prefix}/lib64/pkgconfig"),
-    )];
     match name {
-        "x264" => sh(
-            src,
-            &format!(
-                "./configure --prefix='{prefix}' --enable-static --enable-pic --disable-cli \
-                 --disable-opencl && make -j{j} && make install",
-                j = ctx.jobs
-            ),
-            &[],
-        ),
-        "x265" => x265(ctx, src),
-        "libvpx" => sh(
-            src,
-            &format!(
-                "./configure --prefix='{prefix}' --enable-static --disable-shared --enable-pic \
-                 --enable-vp9-highbitdepth --disable-examples --disable-tools --disable-docs \
-                 --disable-unit-tests && make -j{j} && make install",
-                j = ctx.jobs
-            ),
-            &[],
-        ),
-        // LTO off: GCC "slim" LTO objects have no symbols in the archive index, so lld (Rust's
-        // linker) cannot resolve libSvtAv1Enc.a.
         "svt-av1" => cmake(
             ctx,
             src,
@@ -374,24 +320,6 @@ fn recipe(ctx: &Ctx, name: &str, src: &Path) -> Result<()> {
             )?;
             run(src, "ninja", &["-C", "vx-build", "install"], &[])
         }
-        "opus" => cmake(
-            ctx,
-            src,
-            ".",
-            &["-DOPUS_BUILD_PROGRAMS=OFF", "-DOPUS_BUILD_TESTING=OFF"],
-        ),
-        "ffmpeg" => sh(
-            src,
-            &format!(
-                "./configure --enable-pic --prefix='{prefix}' --enable-gpl --enable-version3 \
-                 --enable-static --disable-shared --disable-programs --disable-doc \
-                 --disable-debug --pkg-config-flags=--static --enable-libx264 --enable-libx265 \
-                 --enable-libvpx --enable-libsvtav1 --enable-libdav1d --enable-libopus \
-                 && make -j{j} && make install",
-                j = ctx.jobs
-            ),
-            &pkg_env,
-        ),
         "libwebp" => cmake(
             ctx,
             src,
@@ -455,139 +383,39 @@ fn recipe(ctx: &Ctx, name: &str, src: &Path) -> Result<()> {
             )?;
             install_jpegli(ctx, src)
         }
-        "libavif" => {
-            let _ = pkg_env;
-            cmake(
-                ctx,
-                src,
-                ".",
-                &[
-                    "-DAVIF_CODEC_SVT=SYSTEM",
-                    "-DAVIF_CODEC_DAV1D=SYSTEM",
-                    "-DAVIF_LIBYUV=OFF",
-                    "-DAVIF_BUILD_APPS=OFF",
-                    "-DAVIF_BUILD_TESTS=OFF",
-                    &format!("-DCMAKE_PREFIX_PATH={prefix}"),
-                ],
-            )
-        }
+        "libavif" => cmake(
+            ctx,
+            src,
+            ".",
+            &[
+                "-DAVIF_CODEC_SVT=SYSTEM",
+                "-DAVIF_CODEC_DAV1D=SYSTEM",
+                "-DAVIF_LIBYUV=OFF",
+                "-DAVIF_BUILD_APPS=OFF",
+                "-DAVIF_BUILD_TESTS=OFF",
+                &format!("-DCMAKE_PREFIX_PATH={prefix}"),
+            ],
+        ),
         other => bail!("no recipe for {other}"),
     }
 }
 
 /// jpegli's own install step leaves out the core library (only its helpers are installed), so
-/// copy `jpegli-static` to `libjpegli.a` / `jpegli.lib` and describe it for pkg-config. Its C API
+/// copy `jpegli-static` to `jpegli.lib` and describe it for pkg-config. Its C API
 /// (`jpegli_*`) is declared by `vixeeny-image`.
 fn install_jpegli(ctx: &Ctx, src: &Path) -> Result<()> {
     let built = src.join("vx-build/lib");
-    let (from, to) = if cfg!(windows) {
-        ("jpegli-static.lib", "jpegli.lib")
-    } else {
-        ("libjpegli-static.a", "libjpegli.a")
-    };
+    let (from, to) = ("jpegli-static.lib", "jpegli.lib");
     std::fs::copy(built.join(from), ctx.prefix.join("lib").join(to))
         .with_context(|| format!("copying {from}"))?;
-    let cxx = if cfg!(target_os = "macos") {
-        "-lc++"
-    } else {
-        "-lstdc++"
-    };
     let pc = format!(
         "prefix={p}\nlibdir=${{prefix}}/lib\nincludedir=${{prefix}}/include\n\n\
          Name: libjpegli\nDescription: jpegli, libjpeg-compatible JPEG codec\nVersion: 0.12.0\n\
-         Requires: libhwy\nLibs: -L${{libdir}} -ljpegli -lm {cxx}\nCflags: -I${{includedir}}/jpegli\n",
+         Requires: libhwy\nLibs: -L${{libdir}} -ljpegli\nCflags: -I${{includedir}}/jpegli\n",
         p = ctx.prefix.display()
     );
     let pc_dir = ctx.prefix.join("lib/pkgconfig");
     std::fs::create_dir_all(&pc_dir)?;
     std::fs::write(pc_dir.join("libjpegli.pc"), pc)?;
-    Ok(())
-}
-
-/// x265 multilib (8/10-bit in one static library; 12-bit deliberately not built).
-/// Unix only: Windows uses the prebuilt FFmpeg.
-fn x265(ctx: &Ctx, src: &Path) -> Result<()> {
-    let prefix = format!("-DCMAKE_INSTALL_PREFIX={}", ctx.prefix.display());
-    let common = [
-        "-G",
-        "Ninja",
-        "-DCMAKE_BUILD_TYPE=Release",
-        "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
-        "-DENABLE_SHARED=OFF",
-        "-DENABLE_CLI=OFF",
-        "-DCMAKE_POSITION_INDEPENDENT_CODE=ON",
-        // x265 4.2 json11 lacks <cstdint>, which recent GCC no longer pulls in transitively.
-        "-DCMAKE_CXX_FLAGS=-include cstdint",
-    ];
-    let d10 = src.join("vx10");
-    let d8 = src.join("vx8");
-
-    std::fs::create_dir_all(&d10)?;
-    let mut args = vec!["../source"];
-    args.extend(common);
-    args.extend([
-        "-DHIGH_BIT_DEPTH=ON",
-        "-DEXPORT_C_API=OFF",
-        "-DENABLE_HDR10_PLUS=ON",
-        "-DMAIN10=ON",
-    ]);
-    run(&d10, "cmake", &args, &[])?;
-    run(&d10, "ninja", &["-j", &ctx.jobs], &[])?;
-
-    std::fs::create_dir_all(&d8)?;
-    std::fs::copy(d10.join("libx265.a"), d8.join("libx265_main10.a"))?;
-    let mut args = vec!["../source"];
-    args.extend(common);
-    args.extend([
-        "-DEXTRA_LIB=libx265_main10.a",
-        "-DEXTRA_LINK_FLAGS=-L.",
-        "-DLINKED_10BIT=ON",
-        "-DENABLE_HDR10_PLUS=ON",
-        &prefix,
-    ]);
-    run(&d8, "cmake", &args, &[])?;
-    run(&d8, "ninja", &["-j", &ctx.jobs], &[])?;
-    run(&d8, "ninja", &["install"], &[])?;
-
-    // Merge the 8-bit and 10-bit archives into the installed libx265.a.
-    let libdir = ctx.prefix.join("lib");
-    std::fs::rename(d8.join("libx265.a"), d8.join("libx265_main.a"))?;
-    if cfg!(target_os = "macos") {
-        // Apple's `ar` has no MRI scripts.
-        run(
-            &d8,
-            "libtool",
-            &[
-                "-static",
-                "-o",
-                "libx265.a",
-                "libx265_main.a",
-                "libx265_main10.a",
-            ],
-            &[],
-        )?;
-    } else {
-        let script =
-            "create libx265.a\naddlib libx265_main.a\naddlib libx265_main10.a\nsave\nend\n";
-        std::fs::write(d8.join("merge.mri"), script)?;
-        run(&d8, "sh", &["-c", "ar -M < merge.mri"], &[])?;
-    }
-    std::fs::copy(d8.join("libx265.a"), libdir.join("libx265.a"))?;
-
-    // x265 only generates its .pc file for shared builds; FFmpeg's configure needs one.
-    let p = ctx.prefix.display();
-    let cxx = if cfg!(target_os = "macos") {
-        "-lc++"
-    } else {
-        "-lstdc++"
-    };
-    let pc = format!(
-        "prefix={p}\nlibdir={p}/lib\nincludedir={p}/include\n\nName: x265\n\
-         Description: H.265/HEVC video encoder (8/10-bit)\nVersion: 4.2\n\
-         Libs: -L${{libdir}} -lx265\nLibs.private: -lhdr10plus {cxx} -lm -ldl -lpthread\n\
-         Cflags: -I${{includedir}}\n"
-    );
-    std::fs::create_dir_all(libdir.join("pkgconfig"))?;
-    std::fs::write(libdir.join("pkgconfig/x265.pc"), pc)?;
     Ok(())
 }

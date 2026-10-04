@@ -6,14 +6,14 @@ body:
     id: system
     attributes:
       label: System
-      options: [Windows, macOS, "Linux (X11)", "Linux (Wayland: GNOME)", "Linux (Wayland: KDE)", "Linux (Wayland: other)"]
+      options: [Windows 11, Windows 10]
     validations:
       required: true
   - type: dropdown
     id: package
     attributes:
       label: Package
-      options: [Installer / dmg, Portable zip, .deb, AppImage, Flatpak, AUR, Other]
+      options: [Installer, Portable zip]
   - type: textarea
     id: worked
     attributes:
