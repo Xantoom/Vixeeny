@@ -13,6 +13,7 @@ app_idle_exit_seconds = 30
 sounds = true
 notifications = true
 check_updates = true
+auto_update = true
 first_run_done = false
 
 [hotkeys]

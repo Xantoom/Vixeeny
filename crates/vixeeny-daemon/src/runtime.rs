@@ -176,13 +176,6 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
                 tracing::warn!("notification: {text}");
                 self.tray.notify(text);
             }
-            Effect::NotifyUpdate(version) => {
-                let text = tr(Key::UpdateAvailable, self.lang).replace("{version}", &version);
-                tracing::info!("{text}");
-                if !show_update_card(&text) {
-                    self.tray.notify(&text);
-                }
-            }
             Effect::PauseHotkeys(true) => {
                 let _ = self.hotkeys.apply(&[]);
             }
@@ -215,24 +208,6 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
     /// Entry point for tray menu clicks.
     pub fn open_settings_event() -> Event {
         Event::Action(ActionId::OpenSettings)
-    }
-}
-
-/// Asks the app (next to the daemon) to show the update card. `false` when it could not be
-/// started: the caller falls back to the tray balloon.
-fn show_update_card(text: &str) -> bool {
-    let started = std::env::current_exe().and_then(|mut path| {
-        path.set_file_name(format!("vixeeny-app{}", std::env::consts::EXE_SUFFIX));
-        std::process::Command::new(path)
-            .args(["--toast", "update", text])
-            .spawn()
-    });
-    match started {
-        Ok(_) => true,
-        Err(e) => {
-            tracing::warn!("cannot start the update notification: {e}");
-            false
-        }
     }
 }
 

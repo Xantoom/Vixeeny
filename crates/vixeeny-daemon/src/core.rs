@@ -27,8 +27,6 @@ pub enum Event {
         success: bool,
     },
     TrayQuit,
-    /// The update check found a version the user has not been told about.
-    UpdateAvailable(String),
 }
 
 /// Something to do.
@@ -42,8 +40,6 @@ pub enum Effect {
     SendToApp(DaemonToApp),
     SetRecording(RecState),
     Notify(Key),
-    /// Tell the user that this version can be installed.
-    NotifyUpdate(String),
     /// Re-read `config.toml` and apply it (language, autostart…).
     ReloadConfig,
     /// Release (`true`) or register again (`false`) the global shortcuts.
@@ -93,7 +89,6 @@ impl Core {
             }
             Event::Control(ControlRequest::Ping) => {}
             Event::Control(ControlRequest::Action(action)) => self.run(action, &mut fx),
-            Event::UpdateAvailable(version) => fx.push(Effect::NotifyUpdate(version)),
             Event::Action(action) => self.run(action, &mut fx),
             Event::AppConnected => self.connected = true,
             Event::App(msg) => self.on_app_message(msg, &mut fx),
@@ -149,8 +144,6 @@ impl Core {
                 self.ready = false;
             }
             AppToDaemon::ConfigChanged => fx.push(Effect::ReloadConfig),
-            // Self-update arrives with M18.
-            AppToDaemon::RequestRestartForUpdate => {}
         }
     }
 
@@ -320,15 +313,6 @@ mod tests {
         assert_eq!(
             core.handle(Event::Action(ActionId::OpenSettings)),
             vec![spawn(2, ActionId::OpenSettings)]
-        );
-    }
-
-    #[test]
-    fn a_new_version_is_announced() {
-        let mut core = Core::default();
-        assert_eq!(
-            core.handle(Event::UpdateAvailable("1.2.0".into())),
-            vec![Effect::NotifyUpdate("1.2.0".into())]
         );
     }
 

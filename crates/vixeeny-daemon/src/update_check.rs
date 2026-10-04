@@ -1,65 +1,27 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The daily update check (plan 10.2). The network client lives in `vixeeny-updater`, not here:
-//! the daemon only starts it once a day and reads the one line it prints.
+//! The daily update check (plan 10.2). The network client lives in the app: the daemon only
+//! starts `vixeeny-app --update background` once a day (a windowed program, so nothing shows)
+//! and the app checks, downloads and installs, or tells the user, by the settings.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use vixeeny_common::config::Config;
-
-use crate::core::Event;
-use crate::server::EventTx;
 
 /// First check this long after the start, so it never competes with it.
 const FIRST_DELAY: Duration = Duration::from_secs(90);
 const PERIOD: Duration = Duration::from_secs(24 * 3600);
 
-/// `new <version>` from the updater's output.
-pub fn parse_output(output: &str) -> Option<String> {
-    output
-        .lines()
-        .find_map(|l| l.strip_prefix("new "))
-        .map(|v| v.trim().to_owned())
-        .filter(|v| !v.is_empty())
-}
-
-fn updater_next_to(exe: &Path) -> Option<PathBuf> {
-    let name = if cfg!(windows) {
-        "vixeeny-updater.exe"
-    } else {
-        "vixeeny-updater"
-    };
-    let path = exe.parent()?.join(name);
+fn app_next_to_daemon() -> Option<PathBuf> {
+    let path = std::env::current_exe()
+        .ok()?
+        .with_file_name("vixeeny-app.exe");
     path.exists().then_some(path)
 }
 
-fn check_once(updater: &Path) -> Option<String> {
-    let mut command = std::process::Command::new(updater);
-    command.arg("check");
-    #[cfg(windows)]
-    {
-        // A console program: no terminal window may flash.
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x0800_0000);
-    }
-    let output = command.output().ok()?;
-    if !output.status.success() {
-        tracing::debug!(
-            "update check failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        return None;
-    }
-    parse_output(&String::from_utf8_lossy(&output.stdout))
-}
-
-/// Starts the checking thread (nothing happens without the updater next to the daemon, as in a
-/// package-manager install, or when the setting is off).
-pub fn spawn(config_path: Option<PathBuf>, tx: EventTx) {
-    let Some(updater) = std::env::current_exe()
-        .ok()
-        .and_then(|e| updater_next_to(&e))
-    else {
+/// Starts the checking thread (nothing happens when the setting is off).
+pub fn spawn(config_path: Option<PathBuf>) {
+    let Some(app) = app_next_to_daemon() else {
         return;
     };
     let result = std::thread::Builder::new()
@@ -72,26 +34,21 @@ pub fn spawn(config_path: Option<PathBuf>, tx: EventTx) {
                     .as_deref()
                     .and_then(|p| Config::load(p).ok())
                     .is_none_or(|c| c.general.check_updates);
-                if enabled && let Some(version) = check_once(&updater) {
-                    tx.send(Event::UpdateAvailable(version));
+                if enabled {
+                    match std::process::Command::new(&app)
+                        .args(["--update", "background"])
+                        .spawn()
+                    {
+                        Ok(mut child) => {
+                            let _ = child.wait();
+                        }
+                        Err(e) => tracing::warn!("cannot start the update check: {e}"),
+                    }
                 }
                 std::thread::sleep(PERIOD);
             }
         });
     if let Err(e) = result {
         tracing::warn!("cannot start the update check: {e}");
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn only_a_new_version_line_counts() {
-        assert_eq!(parse_output("new 1.2.0\n"), Some("1.2.0".into()));
-        assert_eq!(parse_output("noise\nnew 0.5.1\r\n"), Some("0.5.1".into()));
-        assert_eq!(parse_output(""), None);
-        assert_eq!(parse_output("new \n"), None);
     }
 }

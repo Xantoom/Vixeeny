@@ -7,8 +7,8 @@ use vixeeny_encode::registry::ParamType;
 
 use crate::encoders::{self, param_label, param_range};
 use crate::{
-    Current, Env, Invalid, Kind, Opt, Row, Value, choice, folder, header, hinted, info, info_of,
-    list, number, opt, raw, row, segmented, slider, text, toggle, unlist, when, when_boxed,
+    Current, Env, Invalid, Kind, Opt, Row, Value, choice, folder, header, hinted, info, list,
+    number, opt, row, segmented, slider, text, toggle, unlist, when, when_boxed,
 };
 
 /// `off`, `size:<MB>` or `duration:<minutes>` → (kind, amount).
@@ -47,9 +47,9 @@ fn hdr_on(setting: &str) -> bool {
     matches!(setting, "keep_hdr" | "hdr")
 }
 
-pub fn general(env: &Env) -> Vec<Row> {
+pub fn general(env: &Env, config: &Config) -> Vec<Row> {
     let t = |k| env.t(k);
-    vec![
+    let mut rows = vec![
         header("h_app", t(Key::GrpApplication)),
         choice(
             "language",
@@ -79,24 +79,17 @@ pub fn general(env: &Env) -> Vec<Row> {
             |c| c.general.autostart,
             |c, v| c.general.autostart = v,
         ),
-        number(
-            "idle_exit",
-            t(Key::SetIdleExit),
-            (0, 600, 5),
-            |c| i64::from(c.general.app_idle_exit_seconds),
-            |c, v| c.general.app_idle_exit_seconds = v as u32,
+        toggle(
+            "notifications",
+            t(Key::SetNotifications),
+            |c| c.general.notifications,
+            |c, v| c.general.notifications = v,
         ),
         toggle(
             "sounds",
             t(Key::SetSounds),
             |c| c.general.sounds,
             |c, v| c.general.sounds = v,
-        ),
-        toggle(
-            "notifications",
-            t(Key::SetNotifications),
-            |c| c.general.notifications,
-            |c, v| c.general.notifications = v,
         ),
         header("h_overlay", t(Key::GrpOverlay)),
         choice(
@@ -117,36 +110,92 @@ pub fn general(env: &Env) -> Vec<Row> {
             |c| c.recording_widget.enabled,
             |c, v| c.recording_widget.enabled = v,
         ),
-        when(
-            choice(
-                "widget_corner",
-                t(Key::SetWidgetCorner),
-                vec![
-                    opt("top_left", t(Key::SetCornerTl)),
-                    opt("top_right", t(Key::SetCornerTr)),
-                    opt("bottom_left", t(Key::SetCornerBl)),
-                    opt("bottom_right", t(Key::SetCornerBr)),
-                ],
-                |c| c.recording_widget.corner.clone(),
-                |c, v| c.recording_widget.corner = v,
+    ];
+    if config.recording_widget.enabled {
+        rows.push(choice(
+            "widget_corner",
+            t(Key::SetWidgetCorner),
+            vec![
+                opt("top_left", t(Key::SetCornerTl)),
+                opt("top_right", t(Key::SetCornerTr)),
+                opt("bottom_left", t(Key::SetCornerBl)),
+                opt("bottom_right", t(Key::SetCornerBr)),
+            ],
+            |c| c.recording_widget.corner.clone(),
+            |c, v| c.recording_widget.corner = v,
+        ));
+        rows.push(toggle(
+            "widget_hide",
+            t(Key::SetWidgetHide),
+            |c| c.recording_widget.auto_hide,
+            |c, v| c.recording_widget.auto_hide = v,
+        ));
+    }
+    rows.extend([
+        header("h_naming", t(Key::GrpNaming)),
+        hinted(
+            text(
+                "template",
+                t(Key::SetTemplate),
+                |c| c.paths.filename_template.clone(),
+                |c, v| {
+                    if !v.is_empty() {
+                        c.paths.filename_template = v;
+                    }
+                },
             ),
-            |c| c.recording_widget.enabled,
+            t(Key::SetTemplateHint),
         ),
-        when(
-            toggle(
-                "widget_hide",
-                t(Key::SetWidgetHide),
-                |c| c.recording_widget.auto_hide,
-                |c, v| c.recording_widget.auto_hide = v,
+        toggle(
+            "foreground_app",
+            t(Key::SetForegroundApp),
+            |c| c.paths.use_foreground_app,
+            |c, v| c.paths.use_foreground_app = v,
+        ),
+        hinted(
+            text("app_names", t(Key::SetAppNames), app_names_text, |c, v| {
+                c.paths.app_names = parse_app_names(&v);
+            }),
+            t(Key::SetAppNamesHint),
+        ),
+        header("h_subfolders", t(Key::GrpSubfolders)),
+        toggle(
+            "sub_images",
+            t(Key::SetSubImages),
+            |c| c.paths.per_app_subfolder.images,
+            |c, v| c.paths.per_app_subfolder.images = v,
+        ),
+        toggle(
+            "sub_videos",
+            t(Key::SetSubVideos),
+            |c| c.paths.per_app_subfolder.videos,
+            |c, v| c.paths.per_app_subfolder.videos = v,
+        ),
+        toggle(
+            "sub_replays",
+            t(Key::SetSubReplays),
+            |c| c.paths.per_app_subfolder.replays,
+            |c, v| c.paths.per_app_subfolder.replays = v,
+        ),
+        header("h_advanced", t(Key::GrpAdvanced)),
+        hinted(
+            number(
+                "idle_exit",
+                t(Key::SetIdleExit),
+                (0, 600, 5),
+                |c| i64::from(c.general.app_idle_exit_seconds),
+                |c, v| c.general.app_idle_exit_seconds = v as u32,
             ),
-            |c| c.recording_widget.enabled,
+            t(Key::SetIdleExitHint),
         ),
-    ]
+    ]);
+    rows
 }
 
-pub fn images(env: &Env) -> Vec<Row> {
+/// Screenshots: format and its options, capture, folder, text recognition.
+pub fn capture(env: &Env, config: &Config) -> Vec<Row> {
     let t = |k| env.t(k);
-    vec![
+    let mut rows = vec![
         header("h_format", t(Key::GrpFormat)),
         segmented(
             "image_format",
@@ -161,47 +210,59 @@ pub fn images(env: &Env) -> Vec<Row> {
             |c| c.image.format.clone(),
             |c, v| c.image.format = v,
         ),
-        when(
-            slider(
+    ];
+    match config.image.format.as_str() {
+        "jpeg" => {
+            rows.push(slider(
                 "jpeg_quality",
                 t(Key::SetJpegQuality),
                 (1, 100, 1),
                 |c| i64::from(c.image.jpeg.quality),
                 |c, v| c.image.jpeg.quality = v as u8,
-            ),
-            |c| c.image.format == "jpeg",
-        ),
-        when(
-            segmented(
+            ));
+            rows.push(segmented(
                 "jpeg_chroma",
                 t(Key::SetJpegChroma),
-                raw(&["444", "420"]),
+                vec![
+                    opt("444", t(Key::OptChromaSharp)),
+                    opt("420", t(Key::OptChromaLight)),
+                ],
                 |c| c.image.jpeg.chroma.clone(),
                 |c, v| c.image.jpeg.chroma = v,
-            ),
-            |c| c.image.format == "jpeg",
-        ),
-        when(
-            slider(
+            ));
+        }
+        "avif" => {
+            rows.push(slider(
                 "avif_quality",
                 t(Key::SetAvifQuality),
                 (0, 100, 1),
                 |c| i64::from(c.image.avif.quality),
                 |c, v| c.image.avif.quality = v as u8,
-            ),
-            |c| c.image.format == "avif",
-        ),
-        when(
-            segmented(
+            ));
+            rows.push(segmented(
                 "avif_depth",
                 t(Key::SetAvifDepth),
-                raw(&["8", "10"]),
+                vec![opt("8", "8 bits"), opt("10", "10 bits")],
                 |c| c.image.avif.depth.to_string(),
                 |c, v| c.image.avif.depth = v.parse().unwrap_or(10),
-            ),
-            |c| c.image.format == "avif",
-        ),
+            ));
+        }
+        _ => {}
+    }
+    rows.extend([
         header("h_capture", t(Key::GrpCapture)),
+        toggle(
+            "clipboard",
+            t(Key::SetCopyClipboard),
+            |c| c.image.copy_to_clipboard,
+            |c, v| c.image.copy_to_clipboard = v,
+        ),
+        toggle(
+            "image_cursor",
+            t(Key::SetShowCursor),
+            |c| c.image.show_cursor,
+            |c, v| c.image.show_cursor = v,
+        ),
         hinted(
             toggle(
                 "image_hdr",
@@ -211,18 +272,6 @@ pub fn images(env: &Env) -> Vec<Row> {
             ),
             t(Key::SetHdrEnableHint),
         ),
-        toggle(
-            "image_cursor",
-            t(Key::SetShowCursor),
-            |c| c.image.show_cursor,
-            |c, v| c.image.show_cursor = v,
-        ),
-        toggle(
-            "clipboard",
-            t(Key::SetCopyClipboard),
-            |c| c.image.copy_to_clipboard,
-            |c, v| c.image.copy_to_clipboard = v,
-        ),
         slider(
             "dim",
             t(Key::SetDim),
@@ -230,7 +279,32 @@ pub fn images(env: &Env) -> Vec<Row> {
             |c| i64::from(c.editor.dim_percent),
             |c, v| c.editor.dim_percent = v as u8,
         ),
-    ]
+        header("h_location", t(Key::GrpLocation)),
+        folder(
+            "dir_images",
+            t(Key::SetDirImages),
+            |c| c.paths.images.clone(),
+            |c, v| c.paths.images = v,
+        ),
+        header("h_ocr", t(Key::GrpOcr)),
+        hinted(
+            text(
+                "ocr_languages",
+                t(Key::SetOcrLanguages),
+                |c| list(&c.ocr.languages),
+                |c, v| {
+                    let languages = unlist(&v);
+                    c.ocr.languages = if languages.is_empty() {
+                        vec!["auto".into()]
+                    } else {
+                        languages
+                    };
+                },
+            ),
+            t(Key::SetOcrLanguagesHint),
+        ),
+    ]);
+    rows
 }
 
 /// The registry parameters of the encoder in use, as editable rows (the `custom` preset).
@@ -333,9 +407,26 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
     let list = encoders::choices(env, hardware);
     let current = encoders::resolved(env, &profile).map(|e| e.id.clone());
 
-    let mut rows = vec![info_of("editing", t(Key::SetEditing), |c| {
-        c.video.profile.clone()
-    })];
+    let names = crate::profiles::names(config);
+    let mut rows = vec![
+        header("h_profile", t(Key::GrpProfile)),
+        hinted(
+            row(
+                "profile",
+                t(Key::SetProfile),
+                Kind::Profile(names),
+                Box::new(|c| Value::Text(c.video.profile.clone())),
+                Box::new(|c, v| match v {
+                    Value::Text(name) => {
+                        c.video.profile = name;
+                        Ok(())
+                    }
+                    _ => Err(Invalid),
+                }),
+            ),
+            t(Key::SetProfileHint),
+        ),
+    ];
 
     rows.push(header("h_encoder", t(Key::GrpEncoder)));
     rows.push(hinted(
@@ -357,16 +448,17 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
         t(Key::SetEncoderKindHint),
     ));
     let options: Vec<Opt> = list.iter().map(|e| opt(&e.id, e.name.as_str())).collect();
-    let hint = if env.detecting && hardware && env.probe.is_none() {
-        t(Key::SetDetecting)
-    } else if hardware && list.is_empty() {
-        t(Key::SetNoHardware)
-    } else {
-        t(Key::SetEncoderHint)
-    };
     let shown = current.clone();
-    rows.push(when_boxed(
-        hinted(
+    if list.is_empty() {
+        // Nothing to choose from (yet): say why instead of an empty list.
+        let why = if env.detecting && env.probe.is_none() {
+            t(Key::SetDetecting)
+        } else {
+            t(Key::SetNoHardware)
+        };
+        rows.push(info("encoder", t(Key::SetEncoder), why));
+    } else {
+        rows.push(hinted(
             row(
                 "encoder",
                 t(Key::SetEncoder),
@@ -388,13 +480,20 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
                     _ => Err(Invalid),
                 }),
             ),
-            hint,
-        ),
-        {
-            let any = !list.is_empty();
-            move |_| any
-        },
-    ));
+            t(Key::SetEncoderHint),
+        ));
+    }
+    if hardware && let Some(probe) = &env.probe {
+        let cards: Vec<&str> = probe
+            .adapters
+            .iter()
+            .filter(|a| !a.software)
+            .map(|a| a.name.as_str())
+            .collect();
+        if !cards.is_empty() {
+            rows.push(info("gpu", t(Key::SetGpu), cards.join("\n")));
+        }
+    }
     rows.push(hinted(
         segmented(
             "preset",
@@ -418,7 +517,12 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
     rows.push(choice(
         "container",
         t(Key::SetContainer),
-        raw(&["mp4_hybrid", "mp4_fragmented", "mkv", "webm"]),
+        vec![
+            opt("mp4_hybrid", t(Key::OptMp4)),
+            opt("mp4_fragmented", t(Key::OptMp4Fragmented)),
+            opt("mkv", "MKV"),
+            opt("webm", "WebM"),
+        ],
         |c| c.cur().container,
         |c, v| c.cur_mut().container = v,
     ));
@@ -439,7 +543,10 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
     rows.push(choice(
         "fps",
         t(Key::SetFps),
-        raw(&["24", "30", "60", "90", "120", "144", "240"]),
+        ["24", "30", "60", "90", "120", "144", "240"]
+            .iter()
+            .map(|f| opt(f, format!("{f} fps")))
+            .collect(),
         |c| c.cur().fps.to_string(),
         |c, v| c.cur_mut().fps = v.parse().unwrap_or(60),
     ));
@@ -498,7 +605,11 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
         rows.push(choice(
             "chroma",
             t(Key::SetChroma),
-            raw(&["420", "422", "444"]),
+            vec![
+                opt("420", "4:2:0"),
+                opt("422", "4:2:2"),
+                opt("444", "4:4:4"),
+            ],
             |c| c.cur().chroma,
             |c, v| c.cur_mut().chroma = v,
         ));
@@ -526,10 +637,12 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
             c.cur_mut().split.mode = split_join(&v, amount);
         },
     ));
-    rows.push(when(
-        number(
+    let mode = config.cur().split.mode;
+    let split = split_parts(&mode).0;
+    if split != "off" {
+        rows.push(number(
             "split_amount",
-            t(if split_parts(&config.cur().split.mode).0 == "duration" {
+            t(if split == "duration" {
                 Key::SetSplitMinutes
             } else {
                 Key::SetSplitSizeMb
@@ -540,9 +653,17 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
                 let kind = split_parts(&c.cur().split.mode).0.to_owned();
                 c.cur_mut().split.mode = split_join(&kind, v);
             },
-        ),
-        |c| split_parts(&c.cur().split.mode).0 != "off",
+        ));
+    }
+
+    rows.push(header("h_location", t(Key::GrpLocation)));
+    rows.push(folder(
+        "dir_videos",
+        t(Key::SetDirVideos),
+        |c| c.paths.videos.clone(),
+        |c, v| c.paths.videos = v,
     ));
+    rows.extend(replay(env, config));
     rows
 }
 
@@ -575,7 +696,7 @@ fn source_row(spec: String, label: String, hint: String) -> Row {
 pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
     let t = |k| env.t(k);
     let chosen = config.cur().audio.sources;
-    let mut rows = vec![header("h_sources", t(Key::GrpSources))];
+    let mut rows = Vec::new();
 
     let mut offered: Vec<String> = Vec::new();
     let mut add = |rows: &mut Vec<Row>, spec: String, label: String, hint: String| {
@@ -647,7 +768,14 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
     rows.push(choice(
         "audio_codec",
         t(Key::SetAudioCodec),
-        raw(&["auto", "aac", "opus", "flac", "pcm16", "pcm24"]),
+        vec![
+            opt("auto", t(Key::OptAuto)),
+            opt("aac", "AAC"),
+            opt("opus", "Opus"),
+            opt("flac", t(Key::OptFlac)),
+            opt("pcm16", t(Key::OptPcm16)),
+            opt("pcm24", t(Key::OptPcm24)),
+        ],
         |c| c.cur().audio.codec,
         |c, v| c.cur_mut().audio.codec = v,
     ));
@@ -679,11 +807,13 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
     rows
 }
 
-pub fn replay(env: &Env, config: &Config) -> Vec<Row> {
+/// The replay buffer, at the end of the video page.
+fn replay(env: &Env, config: &Config) -> Vec<Row> {
     let t = |k| env.t(k);
     let mut profiles = vec![opt("", t(Key::SetSameAsRecording))];
     profiles.extend(config.profiles.keys().map(|name| opt(name, name.as_str())));
     vec![
+        header("h_replay", t(Key::GrpReplay)),
         toggle(
             "replay_start",
             t(Key::SetReplayStart),
@@ -714,96 +844,36 @@ pub fn replay(env: &Env, config: &Config) -> Vec<Row> {
             |c| c.replay.profile.clone(),
             |c, v| c.replay.profile = v,
         ),
-    ]
-}
-
-pub fn folders(env: &Env) -> Vec<Row> {
-    let t = |k| env.t(k);
-    vec![
-        header("h_folders", t(Key::GrpFolders)),
-        folder(
-            "dir_images",
-            t(Key::SetDirImages),
-            |c| c.paths.images.clone(),
-            |c, v| c.paths.images = v,
-        ),
-        folder(
-            "dir_videos",
-            t(Key::SetDirVideos),
-            |c| c.paths.videos.clone(),
-            |c, v| c.paths.videos = v,
-        ),
         folder(
             "dir_replays",
             t(Key::SetDirReplays),
             |c| c.paths.replays.clone(),
             |c, v| c.paths.replays = v,
         ),
-        header("h_naming", t(Key::GrpNaming)),
-        text(
-            "template",
-            t(Key::SetTemplate),
-            |c| c.paths.filename_template.clone(),
-            |c, v| {
-                if !v.is_empty() {
-                    c.paths.filename_template = v;
-                }
-            },
-        ),
-        toggle(
-            "foreground_app",
-            t(Key::SetForegroundApp),
-            |c| c.paths.use_foreground_app,
-            |c, v| c.paths.use_foreground_app = v,
-        ),
-        text("app_names", t(Key::SetAppNames), app_names_text, |c, v| {
-            c.paths.app_names = parse_app_names(&v)
-        }),
-        toggle(
-            "sub_images",
-            t(Key::SetSubImages),
-            |c| c.paths.per_app_subfolder.images,
-            |c, v| c.paths.per_app_subfolder.images = v,
-        ),
-        toggle(
-            "sub_videos",
-            t(Key::SetSubVideos),
-            |c| c.paths.per_app_subfolder.videos,
-            |c, v| c.paths.per_app_subfolder.videos = v,
-        ),
-        toggle(
-            "sub_replays",
-            t(Key::SetSubReplays),
-            |c| c.paths.per_app_subfolder.replays,
-            |c, v| c.paths.per_app_subfolder.replays = v,
-        ),
     ]
 }
 
-pub fn ocr(env: &Env) -> Vec<Row> {
-    vec![text(
-        "ocr_languages",
-        env.t(Key::SetOcrLanguages),
-        |c| list(&c.ocr.languages),
-        |c, v| {
-            let languages = unlist(&v);
-            c.ocr.languages = if languages.is_empty() {
-                vec!["auto".into()]
-            } else {
-                languages
-            };
-        },
-    )]
-}
-
-pub fn updates(env: &Env) -> Vec<Row> {
+/// The settings of the about page (the version and the update card are drawn by the page).
+pub fn about(env: &Env) -> Vec<Row> {
     vec![
+        header("h_updates", env.t(Key::GrpUpdates)),
         toggle(
             "check_updates",
             env.t(Key::SetCheckUpdates),
             |c| c.general.check_updates,
             |c, v| c.general.check_updates = v,
         ),
-        info("version", env.t(Key::SetVersion), env.version.clone()),
+        when(
+            hinted(
+                toggle(
+                    "auto_update",
+                    env.t(Key::SetAutoUpdate),
+                    |c| c.general.auto_update,
+                    |c, v| c.general.auto_update = v,
+                ),
+                env.t(Key::SetAutoUpdateHint),
+            ),
+            |c| c.general.check_updates,
+        ),
     ]
 }

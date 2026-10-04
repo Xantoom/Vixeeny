@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! What the last check found, kept in `update.json` next to the settings: the settings window
-//! reads it to show the banner, the daemon to decide whether to notify.
+//! and the background check read it.
 
 use std::path::{Path, PathBuf};
 
@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::release::Release;
 
-/// Appends a line to `update.log` next to the settings (the updater has no console).
+/// Appends a line to `update.log` next to the settings (the update runs without a window).
 pub fn log(message: &str) {
     use std::io::Write;
     let Some(dir) = vixeeny_common::paths::config_dir() else {
@@ -36,6 +36,9 @@ pub struct State {
     pub available: Option<Release>,
     /// The version the user was already told about.
     pub notified: Option<String>,
+    /// The version that is downloaded, verified and waiting to be installed.
+    #[serde(default)]
+    pub ready: Option<String>,
     /// Why the last attempt to install failed (cleared by a new attempt or a success).
     pub error: Option<String>,
 }
@@ -86,6 +89,7 @@ mod tests {
                 assets: Vec::new(),
             }),
             notified: Some("1.0.0".into()),
+            ready: Some("1.0.0".into()),
             error: Some("boom".into()),
         };
         state.save(&path).unwrap_or_else(|e| panic!("{e}"));

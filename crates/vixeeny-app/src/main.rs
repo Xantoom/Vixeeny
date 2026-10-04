@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #![windows_subsystem = "windows"]
-//! On-demand Vixeeny app. M2: only the IPC client side exists; the UI arrives with M3+.
-//! The app connects to the daemon, announces itself and exits after
-//! `general.app_idle_exit_seconds` without activity (plan section 1.2).
+//! The on-demand side of Vixeeny: the daemon starts it to capture, record or show a window, and
+//! it exits after `general.app_idle_exit_seconds` without activity (plan section 1.2). The same
+//! program also runs the settings, the notifications, the recording widget and the updates, each
+//! as a process of its own (see the `--` modes of `run`).
 
 use std::sync::mpsc::{RecvTimeoutError, channel};
 use std::time::Duration;
@@ -22,6 +23,7 @@ mod side;
 mod still;
 mod sysinfo;
 mod toast;
+mod update;
 mod widget;
 mod widget_math;
 
@@ -205,7 +207,7 @@ fn run_action(
 
 /// The settings window is a process of its own: the hotkeys keep working while it is open.
 fn open_settings() {
-    if let Err(e) = settings::spawn() {
+    if let Err(e) = settings::spawn(false) {
         tracing::error!("{e:#}");
     }
 }
@@ -379,9 +381,11 @@ fn run() -> anyhow::Result<()> {
         // The recording widget, a process of its own (see `widget`).
         Some("--widget") => return widget::run_child(&args[1..]),
         // The settings window and gallery, a process of its own (see `settings`).
-        Some("--settings") => return settings::run_child(),
+        Some("--settings") => return settings::run_child(&args[1..]),
         // A notification card (see `toast`).
         Some("--toast") => return toast::run_child(&args[1..]),
+        // The daily update check, and the installation (see `update`).
+        Some("--update") => return update::run_child(&args[1..]),
         Some("--system-info") => {
             vixeeny_platform::attach_console();
             let config = vixeeny_common::paths::config_file()

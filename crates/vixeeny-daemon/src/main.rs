@@ -15,7 +15,23 @@ fn main() {
     }
 }
 
+/// Versions before 1.0 named this program `vixeeny-daemon.exe`, and their updater restarts it by
+/// that name: the copy that the 1.0 archive ships under the old name hands over to `Vixeeny.exe`.
+fn hand_over_to_new_name() -> bool {
+    let Ok(exe) = std::env::current_exe() else {
+        return false;
+    };
+    let legacy = exe
+        .file_name()
+        .is_some_and(|n| n.eq_ignore_ascii_case("vixeeny-daemon.exe"));
+    let new = exe.with_file_name("Vixeeny.exe");
+    legacy && new.exists() && std::process::Command::new(new).spawn().is_ok()
+}
+
 fn real_main() -> anyhow::Result<()> {
+    if hand_over_to_new_name() {
+        return Ok(());
+    }
     let endpoint = Endpoint::current_user();
     // Binding the endpoint is the single-instance lock.
     let listener = match endpoint.bind() {

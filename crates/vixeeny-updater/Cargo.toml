@@ -21,13 +21,8 @@ vixeeny-common = { path = "../vixeeny-common" }
 
 [features]
 default = ["net"]
-# The network client and the `vixeeny-updater` program; the daemon and the app only read the state.
+# The network client (`client`); the daemon only reads the state.
 net = ["dep:ureq"]
-
-[[bin]]
-name = "vixeeny-updater"
-path = "src/main.rs"
-required-features = ["net"]
 
 [dev-dependencies]
 tempfile = "3.27.0"

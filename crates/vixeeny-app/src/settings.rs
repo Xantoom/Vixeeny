@@ -17,7 +17,11 @@ use vixeeny_encode::probe::ProbeResult;
 use vixeeny_encode::registry::Registry;
 use vixeeny_settings::Section;
 use vixeeny_ui::ComponentHandle;
-use vixeeny_ui::settings_panel::{GalleryEntry, GalleryRequest, Line, PanelHandle, SettingsPanel};
+use vixeeny_ui::settings_panel::{
+    GalleryEntry, GalleryRequest, Line, PanelHandle, SettingsPanel, UpdateStage, UpdateView,
+};
+use vixeeny_updater::client;
+use vixeeny_updater::state::State as UpdateState;
 
 use crate::gallery::{self, Item, Kind};
 
@@ -28,10 +32,14 @@ const SETTINGS_TAG: &str = "Vixeeny.Settings";
 /// How many captures the gallery shows.
 const GALLERY_LIMIT: usize = 80;
 
-/// Starts the settings window in its own process.
-pub fn spawn() -> anyhow::Result<()> {
-    std::process::Command::new(std::env::current_exe()?)
-        .arg("--settings")
+/// Starts the settings window in its own process (on the about page with `about`).
+pub fn spawn(about: bool) -> anyhow::Result<()> {
+    let mut command = std::process::Command::new(std::env::current_exe()?);
+    command.arg("--settings");
+    if about {
+        command.arg("--about");
+    }
+    command
         .spawn()
         .context("cannot start the settings window")?;
     Ok(())
@@ -287,93 +295,140 @@ pub fn hardware_lines(lang: Lang, result: &ProbeResult) -> Vec<Line> {
     lines
 }
 
-/// Runs the detection (a child process, up to several seconds) and shows the result.
-fn detect_hardware(handle: PanelHandle, lang: Lang, force: bool) {
-    handle.set_extra(tr(Key::HwDetecting, lang).into());
-    std::thread::spawn(move || match crate::probe::current(force) {
-        Ok(result) => {
-            handle.set_lines(hardware_lines(lang, &result));
-            handle.set_extra(String::new());
-        }
-        Err(e) => {
-            tracing::warn!("hardware detection: {e:#}");
-            handle.set_lines(Vec::new());
-            handle.set_extra(tr(Key::HwUnavailable, lang).into());
-        }
-    });
+fn update_state() -> UpdateState {
+    vixeeny_updater::state::file()
+        .map(|p| UpdateState::load(&p))
+        .unwrap_or_default()
 }
 
-/// The updater is a console program: started from here it must not flash a terminal.
-fn quiet(command: &mut std::process::Command) -> &mut std::process::Command {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    command.creation_flags(CREATE_NO_WINDOW)
-}
-
-fn updater_exe() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    let name = if cfg!(windows) {
-        "vixeeny-updater.exe"
-    } else {
-        "vixeeny-updater"
-    };
-    let path = exe.parent()?.join(name);
-    path.exists().then_some(path)
-}
-
-/// What the Updates page says: the running version and what the last check found.
-fn update_text(lang: Lang) -> String {
+/// What the update card says, from what the last check and download left.
+fn update_view(lang: Lang) -> UpdateView {
+    let state = update_state();
     let current = env!("CARGO_PKG_VERSION");
-    let state = vixeeny_updater::state::file()
-        .map(|p| vixeeny_updater::state::State::load(&p))
-        .unwrap_or_default();
+    if let Some(version) = client::ready() {
+        return UpdateView {
+            stage: UpdateStage::Ready,
+            title: tr(Key::UpdateReady, lang).replace("{version}", &version),
+            detail: tr(Key::UpdateReadyHint, lang).into(),
+            progress: 1.0,
+            action: tr(Key::UpdateRestart, lang).into(),
+        };
+    }
     if let Some(error) = &state.error {
-        return tr(Key::UpdateFailed, lang).replace("{error}", error);
+        return UpdateView {
+            stage: UpdateStage::Failed,
+            title: tr(Key::UpdateFailedShort, lang).into(),
+            detail: error.clone(),
+            progress: 0.0,
+            action: tr(Key::UiRetry, lang).into(),
+        };
     }
     match state.newer_than(current) {
-        Some(release) => format!(
-            "{}\n\n{}",
-            tr(Key::UpdateFound, lang).replace("{version}", &release.version),
-            release.notes.trim()
-        ),
-        None => tr(Key::UpdateUpToDate, lang).replace("{version}", current),
+        Some(release) => UpdateView {
+            stage: UpdateStage::Available,
+            title: tr(Key::UpdateFound, lang).replace("{version}", &release.version),
+            detail: release
+                .notes
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .to_owned(),
+            progress: 0.0,
+            action: tr(Key::UpdateNow, lang).into(),
+        },
+        None => UpdateView {
+            stage: UpdateStage::Idle,
+            title: tr(Key::UpdateUpToDate, lang).into(),
+            detail: if state.checked_at == 0 {
+                tr(Key::UpdateNever, lang).into()
+            } else {
+                String::new()
+            },
+            progress: 0.0,
+            action: tr(Key::SetCheckNow, lang).into(),
+        },
     }
 }
 
 fn check_for_update(handle: PanelHandle, lang: Lang) {
-    let Some(updater) = updater_exe() else {
-        handle.set_extra(tr(Key::UpdateCheckFailed, lang).into());
-        return;
-    };
-    handle.set_extra(tr(Key::UpdateChecking, lang).into());
-    std::thread::spawn(move || {
-        let done = quiet(std::process::Command::new(updater).arg("check"))
-            .output()
-            .is_ok_and(|o| o.status.success());
-        handle.set_extra(if done {
-            update_text(lang)
-        } else {
-            tr(Key::UpdateCheckFailed, lang).into()
-        });
+    handle.set_update(UpdateView {
+        stage: UpdateStage::Checking,
+        title: tr(Key::UpdateChecking, lang).into(),
+        ..UpdateView::default()
+    });
+    std::thread::spawn(move || match client::check() {
+        Ok(_) => handle.set_update(update_view(lang)),
+        Err(e) => {
+            tracing::warn!("update check: {e:#}");
+            handle.set_update(UpdateView {
+                stage: UpdateStage::Failed,
+                title: tr(Key::UpdateCheckFailedShort, lang).into(),
+                detail: tr(Key::UpdateCheckFailed, lang).into(),
+                progress: 0.0,
+                action: tr(Key::UiRetry, lang).into(),
+            });
+        }
     });
 }
 
-fn start_update(handle: &PanelHandle, lang: Lang) {
-    let current = env!("CARGO_PKG_VERSION");
-    let available = vixeeny_updater::state::file()
-        .map(|p| vixeeny_updater::state::State::load(&p))
-        .is_some_and(|s| s.newer_than(current).is_some());
-    if !available {
-        handle.set_extra(update_text(lang));
-        return;
-    }
-    if !vixeeny_updater::verify::has_key() {
-        handle.set_extra(tr(Key::UpdateNoKey, lang).into());
-        return;
-    }
-    match updater_exe().map(|u| quiet(std::process::Command::new(u).arg("apply")).spawn()) {
-        Some(Ok(_)) => handle.set_extra(tr(Key::UpdateInstalling, lang).into()),
-        _ => handle.set_extra(tr(Key::UpdateCheckFailed, lang).into()),
+fn megabytes(bytes: u64) -> String {
+    format!("{:.1} MB", bytes as f64 / 1_000_000.0)
+}
+
+/// Downloads with the progress on the card; the card then offers to restart.
+fn download_update(handle: PanelHandle, lang: Lang) {
+    let version = update_state()
+        .newer_than(env!("CARGO_PKG_VERSION"))
+        .map(|r| r.version.clone())
+        .unwrap_or_default();
+    let title = tr(Key::UpdateDownloading, lang).replace("{version}", &version);
+    handle.set_update(UpdateView {
+        stage: UpdateStage::Downloading,
+        title: title.clone(),
+        ..UpdateView::default()
+    });
+    std::thread::spawn(move || {
+        let mut shown = u64::MAX;
+        let result = client::download(&mut |done, total| {
+            let percent = done * 100 / total.max(1);
+            if percent != shown {
+                shown = percent;
+                handle.set_update(UpdateView {
+                    stage: UpdateStage::Downloading,
+                    title: title.clone(),
+                    detail: format!("{} / {}", megabytes(done), megabytes(total)),
+                    progress: done as f32 / total.max(1) as f32,
+                    action: String::new(),
+                });
+            }
+        });
+        if let Err(e) = &result {
+            tracing::error!("update download: {e:#}");
+            if let Some(path) = vixeeny_updater::state::file() {
+                let mut state = UpdateState::load(&path);
+                state.error = Some(format!("{e:#}"));
+                let _ = state.save(&path);
+            }
+        }
+        handle.set_update(update_view(lang));
+    });
+}
+
+/// Installs in a process of its own and closes this window: the new version opens it again.
+fn restart_for_update(handle: &PanelHandle, lang: Lang) {
+    handle.set_update(UpdateView {
+        stage: UpdateStage::Restarting,
+        title: tr(Key::UpdateInstalling, lang).into(),
+        progress: 1.0,
+        ..UpdateView::default()
+    });
+    match crate::update::spawn_install() {
+        Ok(()) => handle.close(),
+        Err(e) => {
+            tracing::error!("cannot start the installation: {e:#}");
+            handle.set_update(update_view(lang));
+        }
     }
 }
 
@@ -382,12 +437,8 @@ fn about_lines(lang: Lang) -> Vec<Line> {
         vixeeny_common::paths::log_dir().map_or_else(String::new, |p| p.display().to_string());
     vec![
         Line {
-            text: format!("Vixeeny {}", env!("CARGO_PKG_VERSION")),
-            detail: REPO.into(),
-            strong: true,
-        },
-        Line {
             text: tr(Key::AboutLicense, lang).into(),
+            detail: REPO.into(),
             ..Line::default()
         },
         Line {
@@ -401,8 +452,9 @@ fn about_lines(lang: Lang) -> Vec<Line> {
     ]
 }
 
-/// `--settings`: the window, until it is closed.
-pub fn run_child() -> anyhow::Result<()> {
+/// `--settings [--about]`: the window, until it is closed.
+pub fn run_child(args: &[String]) -> anyhow::Result<()> {
+    let open_about = args.iter().any(|a| a == "--about");
     vixeeny_platform::ensure_dpi_aware();
     let config = load_config();
     let lang = crate::lang(&config.general.language);
@@ -468,11 +520,20 @@ pub fn run_child() -> anyhow::Result<()> {
                     }
                     show_gallery(&shared, &handle, offset);
                 }
-                Section::Hardware => detect_hardware(handle.clone(), lang, false),
-                Section::Updates => handle.set_extra(update_text(lang)),
                 Section::About => {
                     handle.set_lines(about_lines(lang));
                     handle.set_extra(String::new());
+                    let checked = update_state().checked_at;
+                    let due = UpdateState {
+                        checked_at: checked,
+                        ..UpdateState::default()
+                    }
+                    .due(now());
+                    if due && client::ready().is_none() {
+                        check_for_update(handle.clone(), lang);
+                    } else {
+                        handle.set_update(update_view(lang));
+                    }
                 }
                 _ => {}
             }
@@ -483,9 +544,17 @@ pub fn run_child() -> anyhow::Result<()> {
         panel.on_page_action(move |section, action, _| {
             let lang = crate::lang(&load_config().general.language);
             match (section, action) {
-                (Section::Hardware, "redetect") => detect_hardware(handle.clone(), lang, true),
-                (Section::Updates, "check") => check_for_update(handle.clone(), lang),
-                (Section::Updates, "update") => start_update(&handle, lang),
+                (Section::About, "update-check") => check_for_update(handle.clone(), lang),
+                (Section::About, "update-download") => {
+                    // A failed attempt is forgotten when the user tries again.
+                    if let Some(path) = vixeeny_updater::state::file() {
+                        let mut state = UpdateState::load(&path);
+                        state.error = None;
+                        let _ = state.save(&path);
+                    }
+                    download_update(handle.clone(), lang);
+                }
+                (Section::About, "update-restart") => restart_for_update(&handle, lang),
                 (Section::About, "github") => {
                     let _ = vixeeny_platform::open_path(REPO);
                 }
@@ -516,8 +585,28 @@ pub fn run_child() -> anyhow::Result<()> {
         });
     }
 
-    panel.select_section(Section::General);
+    // The sidebar shows when an update waits for a restart.
+    panel.set_update(&update_view(lang));
+    panel.select_section(if open_about {
+        Section::About
+    } else {
+        Section::General
+    });
+    // A second launch finds the window by this mark and brings it forward.
+    vixeeny_ui::theme::when_native(panel.window(), |handle| {
+        if let Err(e) =
+            vixeeny_platform::tag_window(vixeeny_platform::WindowId(handle), SETTINGS_TAG)
+        {
+            tracing::warn!("{e}");
+        }
+    });
     panel.window().run().map_err(|e| anyhow::anyhow!("{e}"))
+}
+
+fn now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
 }
 
 /// Light or dark by the setting (or the system), with the accent colour of the system.

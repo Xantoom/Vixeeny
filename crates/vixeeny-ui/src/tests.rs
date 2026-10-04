@@ -546,13 +546,25 @@ fn settings_render(
     panel: &settings_panel::SettingsPanel,
     name: &str,
 ) -> SharedPixelBuffer<Rgb8Pixel> {
+    settings_render_at(panel, name, (1040, 720))
+}
+
+fn settings_render_at(
+    panel: &settings_panel::SettingsPanel,
+    name: &str,
+    (w, h): (u32, u32),
+) -> SharedPixelBuffer<Rgb8Pixel> {
     let window = WINDOW.with(Rc::clone);
-    window.set_size(PhysicalSize::new(980, 680));
+    window.set_size(PhysicalSize::new(w, h));
     panel.window().show().unwrap_or_else(|e| panic!("{e}"));
-    let mut buffer = SharedPixelBuffer::<Rgb8Pixel>::new(980, 680);
-    window.draw_if_needed(|r| {
-        r.render(buffer.make_mut_slice(), 980);
-    });
+    let mut buffer = SharedPixelBuffer::<Rgb8Pixel>::new(w, h);
+    // Twice: wrapped texts settle their height on the second layout.
+    for _ in 0..2 {
+        window.request_redraw();
+        window.draw_if_needed(|r| {
+            r.render(buffer.make_mut_slice(), w as usize);
+        });
+    }
     save(name, &buffer);
     buffer
 }
@@ -577,7 +589,7 @@ fn settings_apply_immediately_and_each_section_resets() {
     assert_eq!(seen.borrow().len(), 3);
 
     // Another section's change survives this section's reset.
-    panel.select_section(Section::Images);
+    panel.select_section(Section::Capture);
     w.invoke_row_chosen("image_format".into(), 1);
     panel.select_section(Section::General);
     w.invoke_reset();
@@ -608,10 +620,9 @@ fn changing_the_language_relabels_the_window_at_once() {
     panel.window().invoke_row_chosen("language".into(), 1); // auto, fr, en
     assert_eq!(panel.config().general.language, "fr");
     assert_eq!(titles(&panel)[1], "Général");
-    assert_eq!(
-        panel.window().get_rows().row_data(1).unwrap().label,
-        "Langue"
-    );
+    let first = panel.window().get_groups().row_data(0).unwrap();
+    assert_eq!(first.title, "Application");
+    assert_eq!(first.rows.row_data(0).unwrap().label, "Langue");
 }
 
 #[test]
@@ -689,31 +700,37 @@ fn every_page_of_the_settings_renders() {
         let name = format!("9-page-{section:?}").to_lowercase();
         settings_render(&panel, &name);
     }
+    // Narrow: the navigation keeps its icons only, the controls go under their text.
+    panel.select_section(Section::General);
+    settings_render_at(&panel, "9-page-narrow", (660, 720));
 }
 
 #[test]
-fn profiles_are_created_renamed_used_and_deleted_from_the_page() {
-    use slint::Model;
+fn profiles_are_created_renamed_chosen_and_deleted_from_their_row() {
     use vixeeny_settings::Section;
     let (panel, _) = settings_panel();
-    panel.select_section(Section::Profiles);
+    panel.select_section(Section::Video);
     let w = panel.window();
-    w.invoke_page_action("new".into(), "Jeu 4K".into());
-    assert_eq!(panel.config().video.profile, "Jeu 4K");
-    w.invoke_page_action("duplicate".into(), "Tuto".into());
+    let action = |a: &str, arg: &str| w.invoke_row_action("profile".into(), a.into(), arg.into());
+    action("profile-new", "");
+    assert_eq!(panel.config().video.profile, "Profile");
+    action("profile-duplicate", "");
+    assert_eq!(panel.config().video.profile, "Profile (copy)");
     assert_eq!(panel.config().profiles.len(), 3);
-    settings_render(&panel, "9-settings-profiles");
-    // Select "Jeu 4K" (profiles are listed by name: Jeu 4K, Tuto, default) and use it.
-    w.invoke_line_select(0);
-    w.invoke_page_action("use".into(), "".into());
+    action("profile-rename", "Jeu 4K");
+    assert!(panel.config().profiles.contains_key("Jeu 4K"));
     assert_eq!(panel.config().video.profile, "Jeu 4K");
-    w.invoke_page_action("rename".into(), "Jeu".into());
-    assert!(panel.config().profiles.contains_key("Jeu") && panel.config().video.profile == "Jeu");
-    w.invoke_page_action("new".into(), "Jeu".into());
-    assert!(!w.get_extra().is_empty(), "name taken");
-    w.invoke_page_action("delete".into(), "".into());
-    assert_eq!(panel.config().profiles.len(), 2);
-    assert_eq!(w.get_lines().row_count(), 2);
+    // Listed by name: Jeu 4K, Profile, default.
+    w.invoke_row_chosen("profile".into(), 1);
+    assert_eq!(panel.config().video.profile, "Profile");
+    action("profile-rename", "Jeu 4K");
+    assert!(!w.get_notice().is_empty(), "the name is taken");
+    action("profile-delete", "");
+    action("profile-delete", "");
+    assert_eq!(panel.config().profiles.len(), 1);
+    action("profile-delete", "");
+    assert_eq!(panel.config().profiles.len(), 1, "the last one stays");
+    settings_render(&panel, "9-settings-profile");
 }
 
 #[test]
@@ -755,23 +772,35 @@ fn the_gallery_and_the_other_pages_show_what_the_host_gives_them() {
             GalleryRequest::Filter(1, "mine".into()),
         ]
     );
-    panel.select_section(Section::Hardware);
-    panel.set_lines(
-        vec![
-            Line {
-                text: "NVIDIA GeForce RTX 5080".into(),
-                detail: "NVENC H.264 · HEVC · AV1".into(),
-                strong: true,
-            },
-            Line {
-                text: "Software".into(),
-                detail: "x264 · x265 · SVT-AV1".into(),
-                strong: false,
-            },
-        ],
-        None,
-    );
-    settings_render(&panel, "9-settings-hardware");
+    panel.select_section(Section::About);
+    panel.set_lines(vec![
+        Line {
+            text: "Licence GPL-3.0-or-later".into(),
+            detail: "https://github.com/Xantoom/Vixeeny".into(),
+            strong: false,
+        },
+        Line {
+            text: "Logs".into(),
+            detail: "C:\\Users\\me\\AppData\\Local\\Vixeeny\\logs".into(),
+            strong: false,
+        },
+    ]);
+    panel.set_update(&settings_panel::UpdateView {
+        stage: settings_panel::UpdateStage::Downloading,
+        title: "Downloading version 1.3.0…".into(),
+        detail: "12.4 MB of 31.0 MB".into(),
+        progress: 0.4,
+        action: String::new(),
+    });
+    settings_render(&panel, "9-settings-about");
+    panel.set_update(&settings_panel::UpdateView {
+        stage: settings_panel::UpdateStage::Ready,
+        title: "Version 1.3.0 is ready".into(),
+        detail: "Restart Vixeeny to finish. It takes a second.".into(),
+        progress: 1.0,
+        action: "Restart".into(),
+    });
+    settings_render(&panel, "9-settings-about-ready");
 }
 
 #[test]

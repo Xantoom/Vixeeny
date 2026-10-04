@@ -23,6 +23,31 @@ fn clean(name: &str) -> Result<String, ProfileError> {
     }
 }
 
+/// Every profile, the current one included (it is only stored once something is written to it).
+pub fn names(config: &Config) -> Vec<String> {
+    let mut names: Vec<String> = config.profiles.keys().cloned().collect();
+    if !names.contains(&config.video.profile) {
+        names.push(config.video.profile.clone());
+        names.sort();
+    }
+    names
+}
+
+/// `base`, else `base 2`, `base 3`…: a name no profile has yet.
+pub fn free_name(config: &Config, base: &str) -> String {
+    let taken = names(config);
+    std::iter::once(base.to_owned())
+        .chain((2..).map(|n| format!("{base} {n}")))
+        .find(|name| !taken.contains(name))
+        .unwrap_or_default()
+}
+
+/// Stores the current profile, so that it can be copied, renamed or deleted like the others.
+pub fn materialize(config: &mut Config) {
+    let name = config.video.profile.clone();
+    config.profiles.entry(name).or_default();
+}
+
 /// A new profile with the default settings, made the current one.
 pub fn create(config: &mut Config, name: &str) -> Result<(), ProfileError> {
     let name = clean(name)?;
@@ -98,6 +123,17 @@ mod tests {
         c.profiles.insert("default".into(), Profile::default());
         c.video.profile = "default".into();
         c
+    }
+
+    #[test]
+    fn the_current_profile_is_listed_before_it_is_stored_and_names_stay_free() {
+        let mut c = Config::default();
+        assert_eq!(names(&c), [c.video.profile.clone()]);
+        assert_eq!(free_name(&c, "Profil"), "Profil");
+        materialize(&mut c);
+        create(&mut c, "Profil").unwrap();
+        assert_eq!(free_name(&c, "Profil"), "Profil 2");
+        assert_eq!(names(&c).len(), 2);
     }
 
     #[test]

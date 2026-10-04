@@ -41,9 +41,9 @@ impl Look {
     /// The window background, for the title bar to match.
     pub const fn caption(self) -> [u8; 3] {
         if self.dark {
-            [0x20, 0x20, 0x20]
+            [0x14, 0x14, 0x16]
         } else {
-            [0xf3, 0xf3, 0xf3]
+            [0xf6, 0xf6, 0xf7]
         }
     }
 }
@@ -61,12 +61,12 @@ pub fn default_look() -> Look {
     DEFAULT.lock().map_or(Look::dark(), |d| *d)
 }
 
-/// The font of the platform: Segoe UI on Windows (Inter, which ships with the program, elsewhere).
+/// The font of every window: Segoe UI Variable (Windows 11), which falls back to Segoe UI.
 pub const fn font() -> &'static str {
-    if cfg!(windows) { "Segoe UI" } else { "Inter" }
+    "Segoe UI Variable Text"
 }
 
-/// The native window handle (`HWND` on Windows, `NSView` on macOS) once the window is shown.
+/// The native window handle (`HWND`) once the window is shown.
 #[cfg(feature = "desktop")]
 pub fn native_handle(window: &slint::Window) -> Option<u64> {
     use slint::winit_030::WinitWindowAccessor;
@@ -74,7 +74,6 @@ pub fn native_handle(window: &slint::Window) -> Option<u64> {
     window
         .with_winit_window(|w| match w.window_handle().ok()?.as_raw() {
             RawWindowHandle::Win32(h) => Some(h.hwnd.get() as u64),
-            RawWindowHandle::AppKit(h) => Some(h.ns_view.as_ptr() as u64),
             _ => None,
         })
         .flatten()

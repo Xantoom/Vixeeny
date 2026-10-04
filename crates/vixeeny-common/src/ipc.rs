@@ -103,7 +103,6 @@ pub enum DaemonToApp {
 pub enum AppToDaemon {
     Ready,
     RecordingStateChanged(RecState),
-    RequestRestartForUpdate,
     /// The app is about to exit.
     Idle,
     /// The UI saved the config; the daemon re-reads it. (Added to the plan's 4.6 list.)
@@ -118,10 +117,9 @@ pub enum ControlRequest {
     ReloadConfig,
     Quit,
     Ping,
-    /// Like `Quit`, but ignored while a recording runs; the updater asks again until it works.
+    /// Like `Quit`, but ignored while a recording runs; the update asks again until it works.
     QuitForUpdate,
-    /// Runs an action, like its shortcut would: `vixeeny-daemon ctl <action>`, for the desktops
-    /// where an application cannot register a global shortcut itself.
+    /// Runs an action, like its shortcut would.
     Action(ActionId),
     /// `true` while the settings window records a shortcut: the global shortcuts are released so
     /// that pressing one does not run it. `false` (or any reload of the settings) gives them back.

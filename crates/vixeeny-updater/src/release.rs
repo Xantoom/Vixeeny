@@ -89,16 +89,7 @@ impl Release {
         Some(UpdateFiles {
             archive,
             signature: find(&format!("{}.minisig", archive.name))?,
-            // Each platform's job writes its own list (`SHA256SUMS-macos-arm64`), or one per OS
-            // (`SHA256SUMS-linux`); Windows keeps the plain name.
-            sums: find(&format!("SHA256SUMS-{platform}"))
-                .or_else(|| {
-                    find(&format!(
-                        "SHA256SUMS-{}",
-                        platform.split('-').next().unwrap_or_default()
-                    ))
-                })
-                .or_else(|| find("SHA256SUMS"))?,
+            sums: find("SHA256SUMS")?,
         })
     }
 }
@@ -139,39 +130,7 @@ mod tests {
             .unwrap_or_else(|| panic!("no files"));
         assert_eq!(files.archive.url, "https://x/a.zip");
         assert_eq!(files.signature.url, "https://x/a.sig");
-        assert!(release.files("macos-arm64").is_none());
-    }
-
-    #[test]
-    fn each_system_finds_its_own_checksum_list() {
-        let json = r#"{"tag_name":"v1.0.0","draft":false,"prerelease":false,"body":"","assets":[
-            {"name":"Vixeeny-1.0.0-macos-arm64.zip","browser_download_url":"https://x/a","size":1},
-            {"name":"Vixeeny-1.0.0-macos-arm64.zip.minisig","browser_download_url":"https://x/b","size":1},
-            {"name":"SHA256SUMS","browser_download_url":"https://x/win","size":1},
-            {"name":"SHA256SUMS-macos","browser_download_url":"https://x/mac","size":1}]}"#;
-        let release = Release::parse(json)
-            .unwrap_or_else(|e| panic!("{e}"))
-            .unwrap_or_else(|| panic!("none"));
-        let files = release
-            .files("macos-arm64")
-            .unwrap_or_else(|| panic!("no files"));
-        assert_eq!(files.sums.url, "https://x/mac");
-    }
-
-    #[test]
-    fn a_platform_checksum_list_wins_over_the_system_one() {
-        let json = r#"{"tag_name":"v1.0.0","draft":false,"prerelease":false,"body":"","assets":[
-            {"name":"Vixeeny-1.0.0-macos-x64.zip","browser_download_url":"https://x/a","size":1},
-            {"name":"Vixeeny-1.0.0-macos-x64.zip.minisig","browser_download_url":"https://x/b","size":1},
-            {"name":"SHA256SUMS-macos-arm64","browser_download_url":"https://x/arm","size":1},
-            {"name":"SHA256SUMS-macos-x64","browser_download_url":"https://x/x64","size":1}]}"#;
-        let release = Release::parse(json)
-            .unwrap_or_else(|e| panic!("{e}"))
-            .unwrap_or_else(|| panic!("none"));
-        let files = release
-            .files("macos-x64")
-            .unwrap_or_else(|| panic!("no files"));
-        assert_eq!(files.sums.url, "https://x/x64");
+        assert!(release.files("windows-arm64").is_none());
     }
 
     #[test]

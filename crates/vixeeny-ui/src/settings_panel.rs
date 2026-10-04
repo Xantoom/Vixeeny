@@ -17,7 +17,10 @@ use vixeeny_settings::{
 };
 
 use crate::theme::{self, Look};
-use crate::{GalleryItem, LineItem, SettingRow, SettingsWindow, ShortcutKey, ShortcutRow, UiTexts};
+use crate::{
+    GalleryItem, LineItem, SettingGroup, SettingRow, SettingsWindow, ShortcutKey, ShortcutRow,
+    UiTexts,
+};
 
 /// One tile of the gallery.
 #[derive(Debug, Clone, Default)]
@@ -30,12 +33,59 @@ pub struct GalleryEntry {
     pub thumb: Option<(u32, u32, Vec<u8>)>,
 }
 
-/// One line of a page (hardware, integration, about, profiles).
+/// One line of the about page.
 #[derive(Debug, Clone, Default)]
 pub struct Line {
     pub text: String,
     pub detail: String,
     pub strong: bool,
+}
+
+/// Where the update stands, for the card of the about page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum UpdateStage {
+    /// Up to date, or not checked yet.
+    #[default]
+    Idle,
+    Checking,
+    Available,
+    Downloading,
+    /// Downloaded and verified: a restart installs it.
+    Ready,
+    Failed,
+    Restarting,
+}
+
+/// What the update card shows.
+#[derive(Debug, Clone, Default)]
+pub struct UpdateView {
+    pub stage: UpdateStage,
+    pub title: String,
+    pub detail: String,
+    /// 0.0–1.0 while downloading.
+    pub progress: f32,
+    /// The label of the button (empty: none).
+    pub action: String,
+}
+
+fn stage_index(stage: UpdateStage) -> i32 {
+    match stage {
+        UpdateStage::Idle => 0,
+        UpdateStage::Checking => 1,
+        UpdateStage::Available => 2,
+        UpdateStage::Downloading => 3,
+        UpdateStage::Ready => 4,
+        UpdateStage::Failed => 5,
+        UpdateStage::Restarting => 6,
+    }
+}
+
+fn show_update(w: &SettingsWindow, view: &UpdateView) {
+    w.set_update_state(stage_index(view.stage));
+    w.set_update_title(view.title.as_str().into());
+    w.set_update_detail(view.detail.as_str().into());
+    w.set_update_progress(view.progress);
+    w.set_update_action(view.action.as_str().into());
 }
 
 /// A key press while a shortcut is being recorded.
@@ -69,7 +119,6 @@ struct State {
     os_locale: Option<String>,
     version: String,
     rows: RefCell<Vec<Row>>,
-    selected_profile: RefCell<usize>,
     /// The hardware probe, once known, and whether it is still running.
     probe: RefCell<(Option<ProbeResult>, bool)>,
     audio: RefCell<AudioDevices>,
@@ -99,6 +148,19 @@ impl PanelHandle {
         let _ = self
             .0
             .upgrade_in_event_loop(move |w| w.set_extra(text.into()));
+    }
+
+    pub fn set_update(&self, view: UpdateView) {
+        let _ = self
+            .0
+            .upgrade_in_event_loop(move |w| show_update(&w, &view));
+    }
+
+    /// Closes the window (the program then ends).
+    pub fn close(&self) {
+        let _ = self.0.upgrade_in_event_loop(|w| {
+            let _ = w.hide();
+        });
     }
 
     pub fn set_gallery(&self, entries: Vec<GalleryEntry>, selected: Option<usize>) {
@@ -196,7 +258,15 @@ fn ui_texts(lang: Lang) -> UiTexts {
         press_keys: t(Key::UiPressKeys),
         keys_help: t(Key::UiKeysHelp),
         add_shortcut: t(Key::UiAddShortcut),
-        details: t(Key::UiDetails),
+        details: t(Key::GrpLinks),
+        restart: t(Key::UpdateRestart),
+        retry: t(Key::UiRetry),
+        profile_new: t(Key::ProfileNew),
+        profile_duplicate: t(Key::ProfileDuplicate),
+        profile_rename: t(Key::ProfileRename),
+        profile_delete: t(Key::ProfileDelete),
+        ok: t(Key::UiOk),
+        cancel: t(Key::UiCancel),
     }
 }
 
@@ -219,6 +289,42 @@ pub fn action_label(action: ActionId, lang: Lang) -> &'static str {
         },
         lang,
     )
+}
+
+/// The rows as groups: each header starts one.
+fn group_model(rows: &[Row], config: &Config) -> ModelRc<SettingGroup> {
+    let mut groups: Vec<(String, Vec<SettingRow>)> = Vec::new();
+    for row in rows {
+        if matches!(row.kind, Kind::Header) {
+            groups.push((row.label.clone(), Vec::new()));
+            continue;
+        }
+        if groups.is_empty() {
+            groups.push((String::new(), Vec::new()));
+        }
+        if let Some((_, list)) = groups.last_mut() {
+            list.push(row_model(row, config));
+        }
+    }
+    let model: Vec<SettingGroup> = groups
+        .into_iter()
+        .filter(|(_, rows)| !rows.is_empty())
+        .map(|(title, rows)| SettingGroup {
+            title: title.into(),
+            rows: ModelRc::from(Rc::new(VecModel::from(rows))),
+        })
+        .collect();
+    ModelRc::from(Rc::new(VecModel::from(model)))
+}
+
+/// The group a shortcut belongs to, when it is the first of it.
+fn shortcut_group(action: ActionId) -> Option<Key> {
+    match action {
+        ActionId::CaptureRegion => Some(Key::SecCapture),
+        ActionId::RecordToggle => Some(Key::GrpRecording),
+        ActionId::OverlayToggle => Some(Key::GrpApplication),
+        _ => None,
+    }
 }
 
 fn row_model(row: &Row, config: &Config) -> SettingRow {
@@ -244,6 +350,12 @@ fn row_model(row: &Row, config: &Config) -> SettingRow {
             out.on = b;
         }
         (Kind::Header, _) => out.kind = 6,
+        (Kind::Profile(names), Value::Text(t)) => {
+            out.kind = 9;
+            out.selected = names.iter().position(|n| *n == t).map_or(-1, |i| i as i32);
+            out.options = strings(names.iter().cloned());
+            out.text = t.into();
+        }
         (Kind::Choice(options) | Kind::Segmented(options), Value::Text(t)) => {
             out.kind = if matches!(row.kind, Kind::Segmented(_)) {
                 7
@@ -309,7 +421,6 @@ impl SettingsPanel {
             os_locale,
             version: version.to_owned(),
             rows: RefCell::default(),
-            selected_profile: RefCell::new(0),
             probe: RefCell::new((None, false)),
             audio: RefCell::default(),
             recording: Cell::new(None),
@@ -435,8 +546,12 @@ impl SettingsPanel {
         self.window.set_gallery(gallery_model(entries, selected));
     }
 
-    pub fn set_lines(&self, lines: Vec<Line>, selected: Option<usize>) {
-        self.window.set_lines(line_model(lines, selected));
+    pub fn set_lines(&self, lines: Vec<Line>) {
+        self.window.set_lines(line_model(lines, None));
+    }
+
+    pub fn set_update(&self, view: &UpdateView) {
+        show_update(&self.window, view);
     }
 
     /// A handle for other threads.
@@ -457,6 +572,9 @@ impl SettingsPanel {
         self.window.set_section_titles(strings(
             Section::ALL.iter().map(|s| tr(s.title(), lang).to_owned()),
         ));
+        self.window
+            .set_version(format!("Version {}", self.state.version).into());
+        self.window.set_tagline(tr(Key::AboutTagline, lang).into());
     }
 
     /// The model's view of this machine: language, hardware probe, audio devices.
@@ -474,21 +592,17 @@ impl SettingsPanel {
         let section = self.current_section();
         let config = state.config.borrow();
         let env = state.env.borrow();
+        self.window.set_can_reset(section.can_reset());
         if section.is_rows() {
             let built = rows(section, &env, &config);
-            let model: Vec<SettingRow> = built.iter().map(|r| row_model(r, &config)).collect();
-            self.window
-                .set_rows(ModelRc::from(Rc::new(VecModel::from(model))));
+            self.window.set_groups(group_model(&built, &config));
             *state.rows.borrow_mut() = built;
         } else {
-            self.window.set_rows(ModelRc::default());
+            self.window.set_groups(ModelRc::default());
             state.rows.borrow_mut().clear();
         }
         let notice = if section == Section::Video {
-            video_problems(&config, (1920, 1080))
-                .into_iter()
-                .collect::<Vec<_>>()
-                .join("\n")
+            video_problems(&config, (1920, 1080), env.lang).join("\n")
         } else {
             String::new()
         };
@@ -498,19 +612,10 @@ impl SettingsPanel {
             format!("{}\n{notice}", tr(Key::SetProblems, env.lang))
         };
         self.window.set_notice(heading.into());
-        match section {
-            Section::Shortcuts => {
-                drop(config);
-                drop(env);
-                self.refresh_shortcuts(&[]);
-            }
-            Section::Profiles => {
-                drop(config);
-                drop(env);
-                self.refresh_profiles();
-            }
-            Section::Updates => self.window.set_extra("".into()),
-            _ => {}
+        if section == Section::Shortcuts {
+            drop(config);
+            drop(env);
+            self.refresh_shortcuts(&[]);
         }
     }
 
@@ -531,6 +636,8 @@ impl SettingsPanel {
                     })
                     .collect();
                 ShortcutRow {
+                    group: shortcut_group(action)
+                        .map_or_else(SharedString::new, |k| tr(k, lang).into()),
                     label: action_label(action, lang).into(),
                     free_slot: slots
                         .iter()
@@ -666,33 +773,6 @@ impl SettingsPanel {
         });
     }
 
-    fn refresh_profiles(&self) {
-        let config = self.state.config.borrow();
-        let lang = self.state.lang();
-        let selected =
-            (*self.state.selected_profile.borrow()).min(config.profiles.len().saturating_sub(1));
-        let lines: Vec<Line> = config
-            .profiles
-            .keys()
-            .map(|name| {
-                let mut tags = Vec::new();
-                if *name == config.video.profile {
-                    tags.push(tr(Key::ProfileCurrent, lang));
-                }
-                if *name == config.replay.profile {
-                    tags.push(tr(Key::ProfileReplay, lang));
-                }
-                Line {
-                    text: name.clone(),
-                    detail: tags.join(", "),
-                    strong: *name == config.video.profile,
-                }
-            })
-            .collect();
-        drop(config);
-        self.set_lines(lines, Some(selected));
-    }
-
     fn wire(&self) {
         let w = &self.window;
         let weak = w.as_weak();
@@ -783,6 +863,7 @@ impl SettingsPanel {
                         Kind::Choice(options) | Kind::Segmented(options) => {
                             options.get(index as usize).map(|o| o.value.clone())
                         }
+                        Kind::Profile(names) => names.get(index as usize).cloned(),
                         _ => None,
                     });
                 if let Some(value) = value {
@@ -847,12 +928,11 @@ impl SettingsPanel {
             }
         });
 
-        w.on_line_select({
+        w.on_row_action({
             let (weak, state) = (weak.clone(), self.state.clone());
-            move |i| {
+            move |_, action, arg| {
                 if let Some(p) = panel(&weak, &state) {
-                    *state.selected_profile.borrow_mut() = i.max(0) as usize;
-                    p.refresh_profiles();
+                    p.profile_action(&action, &arg);
                 }
             }
         });
@@ -863,52 +943,54 @@ impl SettingsPanel {
                     return;
                 };
                 let section = p.current_section();
-                if section == Section::Profiles {
-                    p.profile_action(&action, &arg);
-                } else {
-                    (state.on_page_action.borrow())(section, &action, &arg);
-                }
+                (state.on_page_action.borrow())(section, &action, &arg);
             }
         });
     }
 
+    /// The buttons of the profile row: a new profile, a copy, a new name, or deleting it.
     fn profile_action(&self, action: &str, arg: &str) {
         let state = &self.state;
         let lang = state.lang();
-        let names: Vec<String> = state.config.borrow().profiles.keys().cloned().collect();
-        let selected = names
-            .get((*state.selected_profile.borrow()).min(names.len().saturating_sub(1)))
-            .cloned()
-            .unwrap_or_default();
         let result = {
             let mut config = state.config.borrow_mut();
+            profiles::materialize(&mut config);
+            let current = config.video.profile.clone();
             match action {
-                "new" => profiles::create(&mut config, arg),
-                "duplicate" => profiles::duplicate(&mut config, &selected, arg),
-                "rename" => profiles::rename(&mut config, &selected, arg),
-                "delete" => profiles::delete(&mut config, &selected),
-                "use" => {
-                    config.video.profile.clone_from(&selected);
-                    Ok(())
+                "profile-new" => {
+                    let name = profiles::free_name(&config, tr(Key::ProfileNewName, lang));
+                    profiles::create(&mut config, &name)
                 }
+                "profile-duplicate" => {
+                    let base = tr(Key::ProfileCopyName, lang).replace("{name}", &current);
+                    let name = profiles::free_name(&config, &base);
+                    profiles::duplicate(&mut config, &current, &name)
+                }
+                "profile-rename" => profiles::rename(&mut config, &current, arg),
+                "profile-delete" => profiles::delete(&mut config, &current),
                 _ => Ok(()),
             }
         };
-        match result {
+        let notice = match result {
             Ok(()) => {
-                self.set_extra("");
                 state.changed();
+                String::new()
             }
-            Err(e) => self.set_extra(tr(
+            Err(e) => tr(
                 match e {
-                    profiles::ProfileError::EmptyName => Key::ProfileEmpty,
+                    profiles::ProfileError::EmptyName | profiles::ProfileError::NotFound => {
+                        Key::ProfileEmpty
+                    }
                     profiles::ProfileError::Taken => Key::ProfileTaken,
                     profiles::ProfileError::LastOne => Key::ProfileLast,
-                    profiles::ProfileError::NotFound => Key::ProfileEmpty,
                 },
                 lang,
-            )),
+            )
+            .to_owned(),
+        };
+        self.refresh();
+        if !notice.is_empty() {
+            self.window.set_notice(notice.into());
         }
-        self.refresh_profiles();
     }
 }

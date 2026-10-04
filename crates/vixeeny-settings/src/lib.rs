@@ -22,32 +22,23 @@ pub enum Section {
     Gallery,
     General,
     Shortcuts,
-    Images,
+    /// Screenshots: format, capture options, folder, text recognition.
+    Capture,
+    /// Recording: profile, encoder, video, file splitting, folder, replay.
     Video,
     Audio,
-    Replay,
-    Folders,
-    Ocr,
-    Profiles,
-    Hardware,
-    Updates,
+    /// Version, updates, links.
     About,
 }
 
 impl Section {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 7] = [
         Self::Gallery,
         Self::General,
         Self::Shortcuts,
-        Self::Images,
+        Self::Capture,
         Self::Video,
         Self::Audio,
-        Self::Replay,
-        Self::Folders,
-        Self::Ocr,
-        Self::Profiles,
-        Self::Hardware,
-        Self::Updates,
         Self::About,
     ];
 
@@ -56,32 +47,22 @@ impl Section {
             Self::Gallery => Key::SecGallery,
             Self::General => Key::SecGeneral,
             Self::Shortcuts => Key::SecShortcuts,
-            Self::Images => Key::SecImages,
+            Self::Capture => Key::SecCapture,
             Self::Video => Key::SecVideo,
             Self::Audio => Key::SecAudio,
-            Self::Replay => Key::SecReplay,
-            Self::Folders => Key::SecFolders,
-            Self::Ocr => Key::SecOcr,
-            Self::Profiles => Key::SecProfiles,
-            Self::Hardware => Key::SecHardware,
-            Self::Updates => Key::SecUpdates,
             Self::About => Key::SecAbout,
         }
     }
 
-    /// Whether the section is a plain list of [`Row`]s (the others have a page of their own).
+    /// Whether the section is made of [`Row`]s (the gallery and the shortcuts have a page of
+    /// their own).
     pub const fn is_rows(self) -> bool {
-        matches!(
-            self,
-            Self::General
-                | Self::Images
-                | Self::Video
-                | Self::Audio
-                | Self::Replay
-                | Self::Folders
-                | Self::Ocr
-                | Self::Updates
-        )
+        !matches!(self, Self::Gallery | Self::Shortcuts)
+    }
+
+    /// Whether "Reset" makes sense on the page.
+    pub const fn can_reset(self) -> bool {
+        !matches!(self, Self::Gallery | Self::About)
     }
 }
 
@@ -108,6 +89,8 @@ pub enum Kind {
     Choice(Vec<Opt>),
     /// Two or three choices side by side.
     Segmented(Vec<Opt>),
+    /// The recording profile: a choice among the profiles, with buttons to manage them.
+    Profile(Vec<String>),
     Number {
         min: i64,
         max: i64,
@@ -164,6 +147,12 @@ impl Row {
             (Kind::Toggle, v @ Value::Bool(_)) => v,
             (Kind::Choice(options) | Kind::Segmented(options), Value::Text(t)) => {
                 if !options.iter().any(|o| o.value == t) {
+                    return Err(Invalid);
+                }
+                Value::Text(t)
+            }
+            (Kind::Profile(names), Value::Text(t)) => {
+                if !names.contains(&t) {
                     return Err(Invalid);
                 }
                 Value::Text(t)
@@ -243,10 +232,6 @@ fn opt(value: &str, label: impl Into<String>) -> Opt {
         value: value.to_owned(),
         label: label.into(),
     }
-}
-
-fn raw(values: &[&str]) -> Vec<Opt> {
-    values.iter().map(|v| opt(v, *v)).collect()
 }
 
 fn always(_: &Config) -> bool {
@@ -405,16 +390,6 @@ fn info(id: &str, label: String, value: String) -> Row {
     )
 }
 
-fn info_of(id: &str, label: String, get: fn(&Config) -> String) -> Row {
-    row(
-        id,
-        label,
-        Kind::Info,
-        Box::new(move |c| Value::Text(get(c))),
-        Box::new(|_, _| Err(Invalid)),
-    )
-}
-
 /// The profile the video and audio rows edit: `video.profile`, created on first write.
 pub(crate) trait Current {
     fn cur(&self) -> Profile;
@@ -447,18 +422,16 @@ fn unlist(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// The rows of a section (empty for the sections that have a page of their own).
+/// The rows of a section (empty for the sections that have a page of their own). Rows that do
+/// not apply with the current settings are left out, so a page only shows what matters.
 pub fn rows(section: Section, env: &Env, config: &Config) -> Vec<Row> {
     match section {
-        Section::General => pages::general(env),
-        Section::Images => pages::images(env),
+        Section::General => pages::general(env, config),
+        Section::Capture => pages::capture(env, config),
         Section::Video => pages::video(env, config),
         Section::Audio => pages::audio(env, config),
-        Section::Replay => pages::replay(env, config),
-        Section::Folders => pages::folders(env),
-        Section::Ocr => pages::ocr(env),
-        Section::Updates => pages::updates(env),
-        _ => Vec::new(),
+        Section::About => pages::about(env),
+        Section::Gallery | Section::Shortcuts => Vec::new(),
     }
 }
 
@@ -466,8 +439,9 @@ pub fn rows(section: Section, env: &Env, config: &Config) -> Vec<Row> {
 /// through their own modules.
 pub fn reset(section: Section, env: &Env, config: &mut Config) {
     let defaults = Config::default();
-    for row in rows(section, env, config) {
-        if matches!(row.kind, Kind::Info | Kind::Header) {
+    // The rows of the defaults: a row hidden now (a JPEG quality while PNG is chosen) is reset too.
+    for row in rows(section, env, &defaults) {
+        if matches!(row.kind, Kind::Info | Kind::Header | Kind::Profile(_)) {
             continue;
         }
         let value = row.value(&defaults);
@@ -477,13 +451,17 @@ pub fn reset(section: Section, env: &Env, config: &mut Config) {
         // The options of the custom preset are not rows of the defaults.
         config.cur_mut().params.clear();
     }
+    if section == Section::Audio {
+        // The sources depend on the devices: the whole audio part goes back to the defaults.
+        config.cur_mut().audio = Profile::default().audio;
+    }
     if section == Section::Shortcuts {
         config.hotkeys = defaults.hotkeys;
     }
 }
 
 /// Things wrong with the current video settings, for the user to read (empty when fine).
-pub fn video_problems(config: &Config, source: (u32, u32)) -> Vec<String> {
+pub fn video_problems(config: &Config, source: (u32, u32), lang: Lang) -> Vec<String> {
     use vixeeny_encode::registry::Registry;
     use vixeeny_encode::validate::{Context, Severity, validate};
     static REGISTRY: std::sync::LazyLock<Option<Registry>> =
@@ -499,8 +477,61 @@ pub fn video_problems(config: &Config, source: (u32, u32)) -> Vec<String> {
     validate(&config.cur(), &ctx)
         .into_iter()
         .filter(|i| i.severity == Severity::Error)
-        .map(|i| format!("{:?}", i.kind))
+        .map(|i| problem_text(&i.kind, lang))
         .collect()
+}
+
+/// What a problem of the video settings means, for the user.
+fn problem_text(kind: &vixeeny_encode::validate::IssueKind, lang: Lang) -> String {
+    use vixeeny_encode::validate::IssueKind as I;
+    let (en, fr): (String, String) = match kind {
+        I::UnknownEncoder(_) | I::NotAvailable => (
+            "The chosen encoder is not available on this computer.".into(),
+            "L'encodeur choisi n'est pas disponible sur cet ordinateur.".into(),
+        ),
+        I::UnknownContainer(_) | I::ContainerNotSupported { .. } => (
+            "This encoder cannot write to the chosen container: pick another one.".into(),
+            "Cet encodeur ne peut pas écrire dans le conteneur choisi : choisissez-en un autre."
+                .into(),
+        ),
+        I::UnknownChroma(_) | I::BadDepth(_) | I::FormatNotSupported { .. } => (
+            "This encoder does not support the chosen colour format.".into(),
+            "Cet encodeur ne gère pas le format de couleur choisi.".into(),
+        ),
+        I::UnknownHdrSetting(_) | I::HdrNotSupported | I::HdrNeedsHevcOrAv1 => (
+            "HDR needs an HEVC or AV1 encoder that supports it.".into(),
+            "Le HDR demande un encodeur HEVC ou AV1 qui le gère.".into(),
+        ),
+        I::HdrNeeds10Bit => (
+            "HDR needs 10-bit colour.".into(),
+            "Le HDR demande la couleur 10 bits.".into(),
+        ),
+        I::HdrContainer(_) => (
+            "HDR cannot be stored in this container.".into(),
+            "Le HDR ne peut pas être enregistré dans ce conteneur.".into(),
+        ),
+        I::VfrContainer(_) => (
+            "A variable frame rate needs MKV or WebM.".into(),
+            "Une cadence variable demande MKV ou WebM.".into(),
+        ),
+        I::AudioCodec { .. } | I::UnknownAudioCodec(_) => (
+            "The audio codec does not fit the container.".into(),
+            "Le codec audio ne convient pas au conteneur.".into(),
+        ),
+        I::UnknownPreset(_) => (
+            "Unknown preset: choose one again.".into(),
+            "Préréglage inconnu : choisissez-en un.".into(),
+        ),
+        I::ZeroFps | I::BadResolution(_) => (
+            "The resolution or the frame rate is not valid.".into(),
+            "La résolution ou la cadence n'est pas valide.".into(),
+        ),
+        I::FramerateTooHigh { max_fps } => (
+            format!("Too many frames per second for this codec at this size (at most {max_fps})."),
+            format!("Trop d'images par seconde pour ce codec à cette taille ({max_fps} au plus)."),
+        ),
+    };
+    if lang == Lang::Fr { fr } else { en }
 }
 
 #[cfg(test)]
@@ -537,9 +568,6 @@ mod tests {
                 .iter()
                 .filter(|r| !matches!(r.kind, Kind::Info | Kind::Header))
             {
-                if matches!(&row.kind, Kind::Choice(o) if o.is_empty()) {
-                    continue; // no hardware encoder known yet
-                }
                 let mut copy = config.clone();
                 let value = row.value(&config);
                 row.apply(&mut copy, value.clone())
@@ -572,18 +600,24 @@ mod tests {
         assert_eq!(c.general.app_idle_exit_seconds, 0);
     }
 
+    fn has(section: Section, c: &Config, id: &str) -> bool {
+        rows(section, &env(), c).iter().any(|r| r.id == id)
+    }
+
     #[test]
-    fn dependent_rows_are_greyed_out_when_they_do_not_apply() {
+    fn rows_that_do_not_apply_are_left_out() {
         let mut c = Config::default();
-        let images = rows(Section::Images, &env(), &c);
-        assert!(!row(&images, "jpeg_quality").enabled(&c));
+        assert!(!has(Section::Capture, &c, "jpeg_quality"));
         c.image.format = "jpeg".into();
-        assert!(row(&images, "jpeg_quality").enabled(&c));
-        assert!(!row(&images, "avif_depth").enabled(&c));
-        let general = rows(Section::General, &env(), &c);
-        assert!(row(&general, "widget_corner").enabled(&c));
+        assert!(has(Section::Capture, &c, "jpeg_quality"));
+        assert!(!has(Section::Capture, &c, "avif_depth"));
+        assert!(has(Section::General, &c, "widget_corner"));
         c.recording_widget.enabled = false;
-        assert!(!row(&general, "widget_corner").enabled(&c));
+        assert!(!has(Section::General, &c, "widget_corner"));
+        let about = rows(Section::About, &env(), &c);
+        assert!(row(&about, "auto_update").enabled(&c));
+        c.general.check_updates = false;
+        assert!(!row(&about, "auto_update").enabled(&c));
     }
 
     #[test]
@@ -618,11 +652,13 @@ mod tests {
     #[test]
     fn the_split_is_a_kind_and_an_amount() {
         let mut c = Config::default();
+        assert!(!has(Section::Video, &c, "split_amount"));
         let video = rows(Section::Video, &env(), &c);
-        let (kind, amount) = (row(&video, "split"), row(&video, "split_amount"));
-        assert!(!amount.enabled(&c));
+        let kind = row(&video, "split");
         kind.apply(&mut c, Value::Text("size".into())).unwrap();
         assert_eq!(c.cur().split.mode, "size:2048");
+        let video = rows(Section::Video, &env(), &c);
+        let (kind, amount) = (row(&video, "split"), row(&video, "split_amount"));
         amount.apply(&mut c, Value::Int(4096)).unwrap();
         assert_eq!(c.cur().split.mode, "size:4096");
         kind.apply(&mut c, Value::Text("duration".into())).unwrap();
@@ -635,7 +671,7 @@ mod tests {
     #[test]
     fn lists_and_tables_are_typed_as_text() {
         let mut c = Config::default();
-        let folders = rows(Section::Folders, &env(), &c);
+        let folders = rows(Section::General, &env(), &c);
         row(&folders, "app_names")
             .apply(
                 &mut c,
@@ -648,7 +684,7 @@ mod tests {
             row(&folders, "app_names").value(&c),
             Value::Text("game.exe=Mon Jeu; x.exe=X".into())
         );
-        let ocr = rows(Section::Ocr, &env(), &c);
+        let ocr = rows(Section::Capture, &env(), &c);
         row(&ocr, "ocr_languages")
             .apply(&mut c, Value::Text("fr, en ,, ja".into()))
             .unwrap();
@@ -668,7 +704,7 @@ mod tests {
     fn the_replay_can_follow_any_profile() {
         let mut c = Config::default();
         c.profiles.insert("Jeu".into(), Profile::default());
-        let replay = rows(Section::Replay, &env(), &c);
+        let replay = rows(Section::Video, &env(), &c);
         let r = row(&replay, "replay_profile");
         let Kind::Choice(options) = &r.kind else {
             panic!()
@@ -733,10 +769,11 @@ mod tests {
     }
 
     fn encoder_options(rows_: &[Row]) -> Vec<String> {
-        let Kind::Choice(options) = &row(rows_, "encoder").kind else {
-            panic!("not a choice")
-        };
-        options.iter().map(|o| o.value.clone()).collect()
+        match &row(rows_, "encoder").kind {
+            Kind::Choice(options) => options.iter().map(|o| o.value.clone()).collect(),
+            // Nothing to choose: the row says why.
+            _ => Vec::new(),
+        }
     }
 
     #[test]
@@ -782,7 +819,7 @@ mod tests {
     #[test]
     fn hdr_is_one_switch() {
         let mut c = Config::default();
-        let images = rows(Section::Images, &env(), &c);
+        let images = rows(Section::Capture, &env(), &c);
         let hdr = row(&images, "image_hdr");
         assert_eq!(hdr.value(&c), Value::Bool(false));
         assert_eq!(c.image.hdr, "tonemap_sdr");
@@ -872,9 +909,13 @@ mod tests {
     #[test]
     fn bad_video_settings_are_reported() {
         let mut c = Config::default();
-        assert!(video_problems(&c, (1920, 1080)).is_empty());
+        assert!(video_problems(&c, (1920, 1080), Lang::En).is_empty());
         c.profiles.insert("default".into(), Profile::default());
         c.profiles.get_mut("default").unwrap().container = "avi".into();
-        assert!(!video_problems(&c, (1920, 1080)).is_empty());
+        let problems = video_problems(&c, (1920, 1080), Lang::Fr);
+        assert!(
+            problems.iter().any(|p| p.contains("conteneur")),
+            "{problems:?}"
+        );
     }
 }

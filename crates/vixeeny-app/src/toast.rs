@@ -193,7 +193,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
             thumb: None,
             error: false,
             dark,
-            action_label: tr(Key::ToastOpenSettings, lang).into(),
+            action_label: tr(Key::UpdateView, lang).into(),
         },
     };
     let panel = ToastPanel::new(&content).map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -225,7 +225,12 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
                 .spawn();
             let _ = folder_of(path);
         }
-        (Some(_), Toast::Failed(..) | Toast::Update(_)) => crate::open_settings(),
+        (Some(_), Toast::Failed(..)) => crate::open_settings(),
+        (Some(_), Toast::Update(_)) => {
+            if let Err(e) = crate::settings::spawn(true) {
+                tracing::error!("{e:#}");
+            }
+        }
         (None, _) => {}
     }
     Ok(())
