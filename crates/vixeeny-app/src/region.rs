@@ -180,11 +180,18 @@ pub enum Mode {
 
 pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
     let started = Instant::now();
+    tracing::info!("zone capture ({mode:?}) starting");
     vixeeny_platform::ensure_dpi_aware();
     let monitors = vixeeny_platform::monitors()?;
     let cursor = vixeeny_platform::cursor_position()?;
     let foreground = vixeeny_platform::foreground_window()?;
     let windows = vixeeny_platform::top_level_windows().unwrap_or_default();
+    tracing::info!(
+        "{} monitor(s), {} window(s) after {:?}",
+        monitors.len(),
+        windows.len(),
+        started.elapsed()
+    );
     let bounds = vixeeny_platform::virtual_bounds(monitors.iter().map(|m| &m.rect))
         .context("no monitor found")?;
 
@@ -204,6 +211,12 @@ pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
     };
     let mut capturer = Capturer::new(backend, monitors.clone());
     let frame = capturer.grab(&CaptureTarget::AllMonitors, options)?;
+    tracing::info!(
+        "screen frozen ({}x{}) after {:?}",
+        frame.width,
+        frame.height,
+        started.elapsed()
+    );
     let base = RgbaImage::from_bgra(frame.width, frame.height, frame.stride, &frame.data)
         .context("unexpected capture buffer")?;
     drop(frame);

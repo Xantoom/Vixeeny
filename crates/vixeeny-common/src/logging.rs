@@ -30,4 +30,8 @@ pub fn init(name: &str) {
         .with_ansi(false)
         .with_writer(Mutex::new(appender))
         .try_init();
+    // The programs have no console (Windows subsystem): a panic would vanish without a trace.
+    std::panic::set_hook(Box::new(|info| {
+        tracing::error!("panic: {info}");
+    }));
 }

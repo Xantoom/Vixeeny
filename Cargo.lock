@@ -6082,6 +6082,7 @@ dependencies = [
  "serde",
  "thiserror 2.0.21",
  "toml",
+ "tracing",
  "tracing-appender",
  "tracing-subscriber",
  "widestring",
