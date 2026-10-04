@@ -339,7 +339,10 @@ fn plan(config: &Config, allow_gpu: bool, replay: bool) -> anyhow::Result<Plan> 
     };
     let preset = PresetName::from_setting(&profile.preset).unwrap_or(PresetName::Balanced);
     let options = if profile.preset == "custom" {
-        encoder.custom_options(&profile.params)
+        encoder
+            .custom_options(&profile.params)
+            .into_iter()
+            .collect()
     } else {
         encoder
             .presets
