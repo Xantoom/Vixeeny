@@ -81,7 +81,6 @@ jobs:
           PKG_CONFIG_PATH: ${{ github.workspace }}\native\build\work\prefix\lib\pkgconfig
         run: cargo clippy -p vixeeny-app -p vixeeny-capture --features vixeeny-app/ffmpeg,vixeeny-app/native-codecs --all-targets -- -D warnings
       - name: Image codecs (AVIF, JPEG XL)
-        continue-on-error: true
         env:
           PKG_CONFIG_PATH: ${{ github.workspace }}\native\build\work\prefix\lib\pkgconfig
         run: cargo test -p vixeeny-image --features native-codecs
