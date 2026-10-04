@@ -385,7 +385,7 @@ fn row_model(row: &Row, config: &Config) -> SettingRow {
         }
         (Kind::Folder, Value::Text(t)) => {
             out.kind = 4;
-            out.text = t.into();
+            out.text = vixeeny_common::paths::display_dir(&t).into();
         }
         (_, Value::Text(t)) => out.text = t.into(),
         _ => {}

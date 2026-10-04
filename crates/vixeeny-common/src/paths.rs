@@ -77,9 +77,24 @@ pub fn expand_user_dir(template: &str) -> Option<PathBuf> {
     Some(PathBuf::from(expanded))
 }
 
+/// A `[paths]` setting as people read it: placeholders expanded, Windows separators.
+pub fn display_dir(template: &str) -> String {
+    expand_user_dir(template)
+        .map_or_else(|| template.to_owned(), |p| p.to_string_lossy().into_owned())
+        .replace('/', "\\")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn folders_are_shown_without_placeholders_or_forward_slashes() {
+        let shown = display_dir("{videos}/Vixeeny/Replays");
+        assert!(!shown.contains('{') && !shown.contains('/'), "{shown}");
+        assert!(shown.ends_with("Vixeeny\\Replays"), "{shown}");
+        assert_eq!(display_dir(r"D:\Captures"), r"D:\Captures");
+    }
 
     #[test]
     fn placeholders_are_expanded() {

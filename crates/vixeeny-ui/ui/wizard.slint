@@ -8,8 +8,9 @@ component PathRow inherits HorizontalLayout {
     in property <string> path;
     in property <string> browse-text;
     callback browse();
-    spacing: 10px;
+    spacing: 8px;
     VerticalLayout {
+        horizontal-stretch: 1;
         spacing: 4px;
         Text { text: root.caption; color: Theme.text-2; font-size: 12px; }
         Rectangle {
@@ -30,6 +31,7 @@ component PathRow inherits HorizontalLayout {
         }
     }
     VerticalLayout {
+        horizontal-stretch: 0;
         alignment: end;
         Button { text: root.browse-text; icon: Icons.folder-open; clicked => { root.browse(); } }
     }
@@ -80,7 +82,24 @@ export component WizardWindow inherits Window {
         padding: 32px;
         spacing: 14px;
 
-        Text { text: root.step-text; color: Theme.text-3; font-size: 12px; }
+        HorizontalLayout {
+            spacing: 10px;
+            alignment: start;
+            // One segment per step; the done ones in the accent colour.
+            HorizontalLayout {
+                spacing: 4px;
+                alignment: start;
+                for i in 4: Rectangle {
+                    y: (parent.height - self.height) / 2;
+                    width: i == root.step ? 22px : 10px;
+                    height: 4px;
+                    border-radius: 2px;
+                    background: i <= root.step ? Theme.accent : Theme.stroke-strong;
+                    animate width, background { duration: Theme.t-normal; easing: cubic-bezier(0.2, 0, 0, 1); }
+                }
+            }
+            Text { text: root.step-text; color: Theme.text-3; font-size: 12px; vertical-alignment: center; }
+        }
         Text { text: root.heading; color: Theme.text; font-size: 26px; font-weight: 600; wrap: word-wrap; }
         if root.body != "": Text { text: root.body; color: Theme.text-2; font-size: 14px; wrap: word-wrap; }
 

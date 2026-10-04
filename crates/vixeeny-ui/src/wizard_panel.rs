@@ -7,6 +7,7 @@ use std::rc::Rc;
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use vixeeny_common::config::Config;
 use vixeeny_common::i18n::{Key, Lang, tr};
+use vixeeny_common::paths::display_dir;
 
 use crate::WizardWindow;
 
@@ -85,8 +86,8 @@ fn show(window: &WizardWindow, state: &State) {
     window.set_language(chosen as i32);
     window.set_images_label(tr(Key::WizImagesLabel, lang).into());
     window.set_videos_label(tr(Key::WizVideosLabel, lang).into());
-    window.set_images_path(state.config.paths.images.as_str().into());
-    window.set_videos_path(state.config.paths.videos.as_str().into());
+    window.set_images_path(display_dir(&state.config.paths.images).into());
+    window.set_videos_path(display_dir(&state.config.paths.videos).into());
     window.set_browse_label(tr(Key::WizBrowse, lang).into());
     window.set_autostart_label(tr(Key::WizAutostart, lang).into());
     window.set_autostart(state.config.general.autostart);
