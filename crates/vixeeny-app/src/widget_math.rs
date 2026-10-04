@@ -4,11 +4,12 @@
 //! keeps answering the daemon while it is on screen.)
 #![cfg_attr(not(feature = "ffmpeg"), allow(dead_code))]
 
-/// The pill's size at 96 DPI, in pixels.
-pub const WIDTH: u32 = 200;
-pub const HEIGHT: u32 = 40;
-/// Gap to the screen edge at 96 DPI.
-pub const MARGIN: u32 = 16;
+/// The window's size at 96 DPI, in pixels: the bar (196 × 40) and 10 px around it for its
+/// shadow.
+pub const WIDTH: u32 = 216;
+pub const HEIGHT: u32 = 60;
+/// Gap from the window to the screen edge at 96 DPI (the bar is 16 px from it).
+pub const MARGIN: u32 = 6;
 
 /// Top-left corner and size, in physical pixels, of the widget in `corner` of a monitor
 /// (`x, y, width, height` of the monitor in physical pixels; `dpi` 96 = 100 %).
@@ -108,26 +109,23 @@ mod tests {
     #[test]
     fn corners_hug_the_edges_with_a_margin_scaled_by_dpi() {
         let monitor = (1920, 0, 2560, 1440); // a second monitor to the right
-        assert_eq!(
-            corner_geometry("top_left", monitor, 96),
-            (1936, 16, 200, 40)
-        );
+        assert_eq!(corner_geometry("top_left", monitor, 96), (1926, 6, 216, 60));
         assert_eq!(
             corner_geometry("top_right", monitor, 96),
-            (1920 + 2560 - 200 - 16, 16, 200, 40)
+            (1920 + 2560 - 216 - 6, 6, 216, 60)
         );
         assert_eq!(
             corner_geometry("bottom_left", monitor, 96),
-            (1936, 1440 - 40 - 16, 200, 40)
+            (1926, 1440 - 60 - 6, 216, 60)
         );
         assert_eq!(
             corner_geometry("bottom_right", monitor, 96),
-            (1920 + 2560 - 216, 1440 - 56, 200, 40)
+            (1920 + 2560 - 222, 1440 - 66, 216, 60)
         );
         // 200 % scaling doubles everything; an unknown corner is the default one.
         assert_eq!(
             corner_geometry("???", (0, 0, 3840, 2160), 192),
-            (32, 32, 400, 80)
+            (12, 12, 432, 120)
         );
     }
 

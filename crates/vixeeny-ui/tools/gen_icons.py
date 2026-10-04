@@ -46,6 +46,9 @@ ICONS = {
     "convert": ("Convert Range", "regular"), "app": ("App Folder", "regular"), "apps": ("Apps List", "regular"),
     "resize": ("Resize", "regular"), "screenshot": ("Screenshot", "regular"), "star": ("Star", "regular"),
     "arrow-right": ("Arrow Right", "regular"), "alert": ("Alert", "regular"), "slider": ("Options", "regular"),
+    "pin": ("Pin", "regular"), "pin-filled": ("Pin", "filled"),
+    "minimize": ("Line Horizontal 1", "regular"), "maximize": ("Maximize", "regular"),
+    "restore": ("Square Multiple", "regular"),
 }
 
 def fetch(folder, style):

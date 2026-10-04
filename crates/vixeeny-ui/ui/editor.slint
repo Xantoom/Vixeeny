@@ -132,6 +132,8 @@ export component EditorWindow inherits Window {
     in property <float> text-size: 24;
 
     in-out property <string> text-value;
+    // The style panel (colours, thickness, fill) and, inside it, the colour picker.
+    in-out property <bool> style-open: false;
     in-out property <bool> picker-open: false;
     property <float> hue: 0;
     property <float> sat: 1;
@@ -384,23 +386,26 @@ export component EditorWindow inherits Window {
             border-radius: 2 * root.u;
         }
 
-        // Toolbar.
+        // Toolbar: one row (tools · style · undo/redo · outputs · close). Colours, thickness and
+        // fill are in a small panel that opens from the style button.
         if root.has-toolbar : Rectangle {
             // Rises into place when the zone is settled.
             property <bool> shown: !root.fade-in;
+            property <length> pop-w: 240 * root.u;
+            property <length> pop-h: (root.picker-open ? 250 : 110) * root.u;
             x: (root.toolbar-x - root.area-x) * 1phx;
             y: (root.toolbar-y - root.area-y) * 1phx + (self.shown ? 0 : 6 * root.u);
-            width: 700 * root.u;
-            height: 88 * root.u;
+            width: 722 * root.u;
+            height: 46 * root.u;
             opacity: self.shown ? 1 : 0;
             animate opacity, y { duration: Theme.t-normal; easing: cubic-bezier(0.2, 0, 0, 1); }
-            background: Theme.flyout.with-alpha(0.97);
+            background: Theme.flyout.with-alpha(0.94);
             border-radius: 12 * root.u;
             border-width: 1phx;
             border-color: Theme.stroke-strong;
-            drop-shadow-blur: 24phx;
-            drop-shadow-color: #00000070;
-            drop-shadow-offset-y: 8phx;
+            drop-shadow-blur: 18phx;
+            drop-shadow-color: #00000060;
+            drop-shadow-offset-y: 6phx;
             Timer {
                 interval: 16ms;
                 running: !parent.shown;
@@ -409,173 +414,221 @@ export component EditorWindow inherits Window {
 
             TouchArea { } // swallows clicks on the bar itself
 
-            // Row 1: tools, then actions.
-            for ico[i] in [
-                Icons.cursor, Icons.pen, Icons.line, Icons.arrow, Icons.square, Icons.circle, Icons.text,
-                Icons.highlight, Icons.blur, Icons.pixelate, Icons.marker, Icons.eyedropper, Icons.crop,
+            // Tools (the index is the session's tool number).
+            for t[k] in [
+                { i: 0, icon: Icons.cursor }, { i: 1, icon: Icons.pen }, { i: 7, icon: Icons.highlight },
+                { i: 2, icon: Icons.line }, { i: 3, icon: Icons.arrow }, { i: 4, icon: Icons.square },
+                { i: 5, icon: Icons.circle }, { i: 6, icon: Icons.text }, { i: 10, icon: Icons.marker },
+                { i: 8, icon: Icons.blur }, { i: 9, icon: Icons.pixelate },
             ] : IconButton {
                 u: root.u;
-                x: 8 * root.u + i * 32 * root.u;
+                x: (6 + k * 34) * root.u;
                 y: 8 * root.u;
-                icon: ico;
-                active: root.tool == i || (i == 12 && root.tool == -1);
-                clicked => { root.tool-chosen(i); }
+                icon: t.icon;
+                active: root.tool == t.i;
+                clicked => { root.tool-chosen(t.i); }
             }
-
-            Rectangle {
-                x: 8 * root.u + 13 * 32 * root.u + 5 * root.u;
-                y: 12 * root.u;
+            for sx in [383, 425, 501, 679] : Rectangle {
+                x: sx * root.u;
+                y: 14 * root.u;
                 width: 1phx;
-                height: 22 * root.u;
+                height: 18 * root.u;
                 background: Theme.divider;
             }
 
-            // Row 1, right: undo/redo, then copy, save, save as, scrolling capture, OCR, close.
-            for ico[i] in [
-                Icons.undo, Icons.redo, Icons.copy, Icons.save, Icons.save-as, Icons.scroll, Icons.scan-text, Icons.dismiss,
-            ] : IconButton {
-                u: root.u;
-                x: 8 * root.u + 13 * 32 * root.u + 12 * root.u + i * 32 * root.u;
+            // Style: the current colour; opens the panel.
+            Rectangle {
+                x: 388 * root.u;
                 y: 8 * root.u;
-                icon: ico;
-                enabled: i == 0 ? root.can-undo : i == 1 ? root.can-redo : true;
-                clicked => { root.action(["undo", "redo", "copy", "save", "save-as", "scroll", "ocr", "close"][i]); }
+                width: 30 * root.u;
+                height: 30 * root.u;
+                border-radius: 6 * root.u;
+                background: root.style-open ? Theme.accent-soft : (style-touch.has-hover ? Theme.subtle-hover : transparent);
+                animate background { duration: Theme.t-fast; }
+                Rectangle {
+                    x: 6 * root.u;
+                    y: 6 * root.u;
+                    width: 18 * root.u;
+                    height: 18 * root.u;
+                    border-radius: 9 * root.u;
+                    background: root.current-color;
+                    animate background { duration: Theme.t-fast; }
+                    border-width: 1phx;
+                    border-color: Theme.stroke-strong;
+                }
+                style-touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.style-open = !root.style-open; root.picker-open = false; }
+                }
             }
 
-            // Row 2: palette, recent colours, thickness, fill.
-            for c[i] in root.palette : Swatch {
+            // Undo, redo, then copy, save, save as, scrolling capture, OCR; then close.
+            for a[k] in [
+                { x: 430, icon: Icons.undo, name: "undo" }, { x: 464, icon: Icons.redo, name: "redo" },
+                { x: 506, icon: Icons.copy, name: "copy" }, { x: 540, icon: Icons.save, name: "save" },
+                { x: 574, icon: Icons.save-as, name: "save-as" }, { x: 608, icon: Icons.scroll, name: "scroll" },
+                { x: 642, icon: Icons.scan-text, name: "ocr" }, { x: 684, icon: Icons.dismiss, name: "close" },
+            ] : IconButton {
                 u: root.u;
-                x: 8 * root.u + i * 28 * root.u;
-                y: 50 * root.u;
-                swatch: c;
-                chosen: c == root.current-color;
-                clicked => { root.color-chosen(c); }
+                x: a.x * root.u;
+                y: 8 * root.u;
+                icon: a.icon;
+                enabled: k == 0 ? root.can-undo : k == 1 ? root.can-redo : true;
+                clicked => { root.action(a.name); }
             }
-            for c[i] in root.recent : Swatch {
-                u: root.u;
-                x: 8 * root.u + 9 * 28 * root.u + 10 * root.u + i * 28 * root.u;
-                y: 50 * root.u;
-                swatch: c;
-                chosen: c == root.current-color;
-                clicked => { root.color-chosen(c); }
-            }
-            // Full colour picker: opens the panel below/above the bar.
-            Swatch {
-                u: root.u;
-                x: 8 * root.u + 8 * 28 * root.u;
-                y: 50 * root.u;
-                swatch: #00000000;
-                chosen: root.picker-open;
-                Icon { x: 4 * root.u; y: 4 * root.u; data: Icons.add; tint: Theme.text; size: 16 * root.u; }
-                clicked => { root.picker-open = !root.picker-open; }
-            }
-            if root.picker-open : Rectangle {
-                x: 8 * root.u;
-                y: root.toolbar-y - root.area-y > 190 ? -176 * root.u : 96 * root.u;
-                width: 280 * root.u;
-                height: 168 * root.u;
+
+            // The style panel, above the bar when there is room, else below.
+            if root.style-open : Rectangle {
+                property <bool> above: (root.toolbar-y - root.area-y) * 1phx > parent.pop-h + 8 * root.u;
+                property <bool> open: !root.fade-in;
+                x: 403 * root.u - parent.pop-w / 2;
+                y: (self.above ? -parent.pop-h - 8 * root.u : 54 * root.u) + (self.open ? 0 : (self.above ? 4 : -4) * root.u);
+                width: parent.pop-w;
+                height: parent.pop-h;
+                opacity: self.open ? 1 : 0;
+                animate opacity, y, height { duration: Theme.t-fast; easing: cubic-bezier(0.2, 0, 0, 1); }
                 background: Theme.flyout.with-alpha(0.97);
                 border-radius: 12 * root.u;
                 border-width: 1phx;
                 border-color: Theme.stroke-strong;
+                drop-shadow-blur: 18phx;
+                drop-shadow-color: #00000050;
+                drop-shadow-offset-y: 6phx;
+                clip: true;
+                Timer { interval: 16ms; running: !parent.open; triggered => { parent.open = true; } }
                 TouchArea { }
-                // saturation (x) / value (y) square for the current hue
-                sv := Rectangle {
-                    x: 10 * root.u;
+
+                // The palette.
+                for c[i] in root.palette : Swatch {
+                    u: root.u;
+                    x: (10 + i * 28) * root.u;
                     y: 10 * root.u;
-                    width: 200 * root.u;
-                    height: 120 * root.u;
-                    background: Colors.hsv(root.hue, 1, 1, 1);
-                    Rectangle { background: @linear-gradient(90deg, white, #ffffff00); }
-                    Rectangle { background: @linear-gradient(180deg, #00000000, black); }
-                    Rectangle {
-                        x: root.sat * parent.width - 5 * root.u;
-                        y: (1 - root.val) * parent.height - 5 * root.u;
-                        width: 10 * root.u;
-                        height: 10 * root.u;
-                        border-radius: 5 * root.u;
-                        border-width: 2 * root.u;
-                        border-color: white;
-                    }
-                    TouchArea {
-                        function pick() {
-                            root.sat = max(0, min(1, self.mouse-x / self.width));
-                            root.val = 1 - max(0, min(1, self.mouse-y / self.height));
-                            root.color-chosen(Colors.hsv(root.hue, root.sat, root.val, 1));
+                    swatch: c;
+                    chosen: c == root.current-color;
+                    clicked => { root.color-chosen(c); }
+                }
+                // Recent colours, then a colour of one's own and the eyedropper.
+                for c[i] in root.recent : Swatch {
+                    u: root.u;
+                    x: (10 + i * 28) * root.u;
+                    y: 42 * root.u;
+                    swatch: c;
+                    chosen: c == root.current-color;
+                    clicked => { root.color-chosen(c); }
+                }
+                Swatch {
+                    u: root.u;
+                    x: 174 * root.u;
+                    y: 42 * root.u;
+                    swatch: #00000000;
+                    chosen: root.picker-open;
+                    Icon { x: 4 * root.u; y: 4 * root.u; data: Icons.add; tint: Theme.text; size: 16 * root.u; }
+                    clicked => { root.picker-open = !root.picker-open; }
+                }
+                IconButton {
+                    u: root.u;
+                    x: 202 * root.u;
+                    y: 39 * root.u;
+                    icon: Icons.eyedropper;
+                    active: root.tool == 11;
+                    clicked => { root.tool-chosen(11); root.style-open = false; }
+                }
+                Rectangle { x: 10 * root.u; y: 74 * root.u; width: parent.width - 20 * root.u; height: 1phx; background: Theme.divider; }
+                // Thickness: − value +, and the fill of shapes.
+                IconButton {
+                    u: root.u;
+                    x: 6 * root.u;
+                    y: 78 * root.u;
+                    icon: Icons.subtract;
+                    clicked => { root.width-changed(root.stroke-width - 1); }
+                }
+                Text {
+                    x: 36 * root.u;
+                    y: 78 * root.u;
+                    width: 36 * root.u;
+                    height: 30 * root.u;
+                    text: round(root.stroke-width) + " px";
+                    color: Theme.text;
+                    font-size: 13 * root.u;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                IconButton {
+                    u: root.u;
+                    x: 72 * root.u;
+                    y: 78 * root.u;
+                    icon: Icons.add;
+                    clicked => { root.width-changed(root.stroke-width + 1); }
+                }
+                IconButton {
+                    u: root.u;
+                    x: parent.width - 36 * root.u;
+                    y: 78 * root.u;
+                    icon: Icons.square;
+                    active: root.filled;
+                    clicked => { root.filled-toggled(); }
+                }
+
+                // A colour of one's own: saturation (x) / value (y), and the hue bar.
+                if root.picker-open : Rectangle {
+                    x: 0px;
+                    y: 110 * root.u;
+                    width: parent.width;
+                    height: 140 * root.u;
+                    Rectangle { x: 10 * root.u; y: 0px; width: parent.width - 20 * root.u; height: 1phx; background: Theme.divider; }
+                    sv := Rectangle {
+                        x: 10 * root.u;
+                        y: 10 * root.u;
+                        width: 180 * root.u;
+                        height: 120 * root.u;
+                        border-radius: 4 * root.u;
+                        clip: true;
+                        background: Colors.hsv(root.hue, 1, 1, 1);
+                        Rectangle { background: @linear-gradient(90deg, white, #ffffff00); }
+                        Rectangle { background: @linear-gradient(180deg, #00000000, black); }
+                        Rectangle {
+                            x: root.sat * parent.width - 5 * root.u;
+                            y: (1 - root.val) * parent.height - 5 * root.u;
+                            width: 10 * root.u;
+                            height: 10 * root.u;
+                            border-radius: 5 * root.u;
+                            border-width: 2 * root.u;
+                            border-color: white;
                         }
-                        pointer-event(e) => { if e.kind == PointerEventKind.down { self.pick(); } }
-                        moved => { if self.pressed { self.pick(); } }
-                    }
-                }
-                // hue bar
-                Rectangle {
-                    x: 222 * root.u;
-                    y: 10 * root.u;
-                    width: 24 * root.u;
-                    height: 120 * root.u;
-                    background: @linear-gradient(180deg, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000);
-                    border-radius: 3 * root.u;
-                    Rectangle {
-                        y: root.hue / 360 * parent.height - 2 * root.u;
-                        height: 4 * root.u;
-                        background: white;
-                        border-width: 1phx;
-                        border-color: black;
-                    }
-                    TouchArea {
-                        function pick() {
-                            root.hue = 360 * max(0, min(0.999, self.mouse-y / self.height));
-                            root.color-chosen(Colors.hsv(root.hue, root.sat, root.val, 1));
+                        TouchArea {
+                            function pick() {
+                                root.sat = max(0, min(1, self.mouse-x / self.width));
+                                root.val = 1 - max(0, min(1, self.mouse-y / self.height));
+                                root.color-chosen(Colors.hsv(root.hue, root.sat, root.val, 1));
+                            }
+                            pointer-event(e) => { if e.kind == PointerEventKind.down { self.pick(); } }
+                            moved => { if self.pressed { self.pick(); } }
                         }
-                        pointer-event(e) => { if e.kind == PointerEventKind.down { self.pick(); } }
-                        moved => { if self.pressed { self.pick(); } }
+                    }
+                    Rectangle {
+                        x: 202 * root.u;
+                        y: 10 * root.u;
+                        width: 28 * root.u;
+                        height: 120 * root.u;
+                        background: @linear-gradient(180deg, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000);
+                        border-radius: 4 * root.u;
+                        Rectangle {
+                            y: root.hue / 360 * parent.height - 2 * root.u;
+                            height: 4 * root.u;
+                            background: white;
+                            border-width: 1phx;
+                            border-color: black;
+                        }
+                        TouchArea {
+                            function pick() {
+                                root.hue = 360 * max(0, min(0.999, self.mouse-y / self.height));
+                                root.color-chosen(Colors.hsv(root.hue, root.sat, root.val, 1));
+                            }
+                            pointer-event(e) => { if e.kind == PointerEventKind.down { self.pick(); } }
+                            moved => { if self.pressed { self.pick(); } }
+                        }
                     }
                 }
-                // preview of the current colour
-                Rectangle {
-                    x: 10 * root.u;
-                    y: 138 * root.u;
-                    width: 24 * root.u;
-                    height: 22 * root.u;
-                    background: root.current-color;
-                    border-radius: 4 * root.u;
-                    border-width: 1phx;
-                    border-color: Theme.stroke-strong;
-                }
-            }
-            IconButton {
-                u: root.u;
-                x: 700 * root.u - 8 * root.u - 30 * root.u;
-                y: 47 * root.u;
-                icon: Icons.square;
-                active: root.filled;
-                clicked => { root.filled-toggled(); }
-            }
-            // Thickness: − value +
-            IconButton {
-                u: root.u;
-                x: 700 * root.u - 8 * root.u - 30 * root.u - 4 * root.u - 30 * root.u - 40 * root.u - 30 * root.u;
-                y: 47 * root.u;
-                icon: Icons.subtract;
-                clicked => { root.width-changed(root.stroke-width - 1); }
-            }
-            Text {
-                x: 700 * root.u - 8 * root.u - 30 * root.u - 4 * root.u - 30 * root.u - 40 * root.u;
-                y: 47 * root.u;
-                width: 40 * root.u;
-                height: 30 * root.u;
-                text: round(root.stroke-width);
-                color: Theme.text;
-                font-size: 13 * root.u;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-            IconButton {
-                u: root.u;
-                x: 700 * root.u - 8 * root.u - 30 * root.u - 4 * root.u - 30 * root.u;
-                y: 47 * root.u;
-                icon: Icons.add;
-                clicked => { root.width-changed(root.stroke-width + 1); }
             }
         }
     }

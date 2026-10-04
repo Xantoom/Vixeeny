@@ -17,6 +17,8 @@ pub struct Outcome {
     pub action: Option<ActionId>,
     /// A new video profile, to save to the settings.
     pub profile: Option<String>,
+    /// The strip was pinned: it comes back once the action is done.
+    pub pinned: bool,
 }
 
 /// The action behind a pick.
@@ -52,11 +54,18 @@ fn texts(lang: Lang) -> SideTexts {
         replay_save: tr(Key::OvlReplaySave, lang).into(),
         profile: tr(Key::OvlProfile, lang).into(),
         settings: tr(Key::OvlSettings, lang).into(),
+        pin: tr(Key::OvlPin, lang).into(),
+        close: tr(Key::OvlClose, lang).into(),
     }
 }
 
 /// Shows the overlay until the user picks, dismisses it, or clicks elsewhere.
-pub fn run(config: &Config, recording: bool, replay: bool) -> anyhow::Result<Outcome> {
+pub fn run(
+    config: &Config,
+    recording: bool,
+    replay: bool,
+    pinned: bool,
+) -> anyhow::Result<Outcome> {
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -86,6 +95,7 @@ pub fn run(config: &Config, recording: bool, replay: bool) -> anyhow::Result<Out
         edge: Edge::from_setting(&config.overlay.edge),
         animate: vixeeny_platform::animations_enabled(),
         backdrop: false,
+        pinned,
     };
     let texts = texts(lang);
     let panel = SidePanel::new(&texts, &state).map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -109,13 +119,8 @@ pub fn run(config: &Config, recording: bool, replay: bool) -> anyhow::Result<Out
     // The blurred Windows 11 backdrop needs the native window, which exists once it is shown:
     // the strip is shown first, then dressed (a failure just leaves the opaque fill).
     let choice = panel
-        .run_with(|handle| {
-            if let Err(e) = vixeeny_platform::apply_acrylic(vixeeny_platform::WindowId(handle)) {
-                tracing::debug!("no acrylic backdrop: {e}");
-                return false;
-            }
-            true
-        })
+        // No blurred backdrop: it would cover the whole window, the room for the labels too.
+        .run_with(|_| false)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     let profile = picked
         .borrow()
@@ -124,6 +129,7 @@ pub fn run(config: &Config, recording: bool, replay: bool) -> anyhow::Result<Out
     Ok(Outcome {
         action: choice.map(action_of),
         profile,
+        pinned: panel.pinned(),
     })
 }
 

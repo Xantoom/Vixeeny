@@ -300,6 +300,8 @@ pub enum Key {
     ProfileDelete,
     UpdateCheckFailedShort,
     UpdateFailedShort,
+    OvlPin,
+    OvlClose,
 }
 
 impl Key {
@@ -584,6 +586,8 @@ impl Key {
         Self::ProfileDelete,
         Self::UpdateCheckFailedShort,
         Self::UpdateFailedShort,
+        Self::OvlPin,
+        Self::OvlClose,
     ];
 }
 
@@ -1265,6 +1269,10 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::UpdateCheckFailedShort, Lang::Fr) => "Impossible de vérifier les mises à jour",
         (Key::UpdateFailedShort, Lang::En) => "The update failed",
         (Key::UpdateFailedShort, Lang::Fr) => "La mise à jour a échoué",
+        (Key::OvlPin, Lang::En) => "Keep open",
+        (Key::OvlPin, Lang::Fr) => "Garder ouvert",
+        (Key::OvlClose, Lang::En) => "Close",
+        (Key::OvlClose, Lang::Fr) => "Fermer",
     }
 }
 

@@ -561,7 +561,7 @@ fn refresh_window(w: &EditorWindow, v: &vixeeny_editor::View) {
             // The zone is the whole long image: keep the bar in view, top right.
             let u = w.get_ui_scale();
             let width = w.window().size().width as f32;
-            w.set_toolbar_x((width - 716.0 * u).max(0.0));
+            w.set_toolbar_x((width - 738.0 * u).max(0.0));
             w.set_toolbar_y(16.0 * u);
         }
     }

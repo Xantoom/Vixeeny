@@ -309,6 +309,9 @@ fn the_colour_picker_panel_renders() {
     let w = o.window();
     w.invoke_pointer_pressed(100.0, 60.0, false);
     w.invoke_pointer_released(400.0, 200.0, false);
+    w.set_style_open(true);
+    let buf = render(&o, 900, 500);
+    save("4-style", &buf);
     w.set_picker_open(true);
     let buf = render(&o, 900, 500);
     save("4-picker", &buf);
@@ -358,12 +361,13 @@ fn the_recording_widget_renders_both_states_and_reports_clicks() {
     let sink = events.clone();
     panel.on_event(move |e| sink.borrow_mut().push(e));
     let window = WINDOW.with(Rc::clone);
-    window.set_size(PhysicalSize::new(200, 40));
+    window.set_size(PhysicalSize::new(216, 60));
+    panel.window().set_rise_in(false);
     panel.window().show().unwrap_or_else(|e| panic!("{e}"));
     let draw = || {
-        let mut buffer = SharedPixelBuffer::<Rgb8Pixel>::new(200, 40);
+        let mut buffer = SharedPixelBuffer::<Rgb8Pixel>::new(216, 60);
         window.draw_if_needed(|r| {
-            r.render(buffer.make_mut_slice(), 200);
+            r.render(buffer.make_mut_slice(), 216);
         });
         buffer
     };
@@ -378,10 +382,10 @@ fn the_recording_widget_renders_both_states_and_reports_clicks() {
     assert_ne!(recording.as_slice(), paused.as_slice());
     assert_eq!(panel.window().get_time(), "01:02:05");
 
-    // Clicks: pause button at the right, stop at the far right.
+    // Clicks: the bar is 10 px inside the window; stop at its right end, pause just before.
     use slint::platform::{PointerEventButton, WindowEvent};
     let click = |x: f32| {
-        let pos = slint::LogicalPosition::new(x, 20.0);
+        let pos = slint::LogicalPosition::new(x, 30.0);
         window.dispatch_event(WindowEvent::PointerMoved { position: pos });
         window.dispatch_event(WindowEvent::PointerPressed {
             position: pos,
@@ -392,8 +396,8 @@ fn the_recording_widget_renders_both_states_and_reports_clicks() {
             button: PointerEventButton::Left,
         });
     };
-    click(140.0);
-    click(178.0);
+    click(150.0);
+    click(186.0);
     assert_eq!(
         *events.borrow(),
         [WidgetEvent::TogglePause, WidgetEvent::Stop]
@@ -417,6 +421,8 @@ fn side_texts() -> side_panel::SideTexts {
         replay_save: "Save replay".into(),
         profile: "Profile: {name}".into(),
         settings: "Settings".into(),
+        pin: "Keep open".into(),
+        close: "Close".into(),
     }
 }
 
@@ -430,6 +436,7 @@ fn side_state(edge: side_panel::Edge, dark: bool) -> side_panel::SideState {
         edge,
         animate: false,
         backdrop: false,
+        pinned: false,
     }
 }
 
@@ -462,13 +469,23 @@ fn the_side_strip_renders_in_both_themes_and_orientations() {
         .unwrap_or_else(|e| panic!("{e}"));
     let (light_img, _) = side_render(&light, Edge::Bottom);
     save("8-side-light-bottom", &light_img);
-    // Drawn (not blank), dark strip dark, light strip light.
-    let mean = |b: &SharedPixelBuffer<Rgb8Pixel>| {
-        let s = b.as_slice();
-        s.iter().map(|p| u64::from(p.r)).sum::<u64>() / s.len() as u64
+    // Drawn, dark strip dark, light strip light: a point of the strip between two icons (the
+    // rest of the window is the transparent room for the labels).
+    let at = |b: &SharedPixelBuffer<Rgb8Pixel>, x: u32, y: u32| {
+        b.as_slice()[(y * b.width() + x) as usize].r
     };
-    assert!(mean(&dark_img) < 120, "{}", mean(&dark_img));
-    assert!(mean(&light_img) > 120, "{}", mean(&light_img));
+    let (w, _) = (dark_img.width(), dark_img.height());
+    assert!(
+        at(&dark_img, w - 12 - 4, 200) < 80,
+        "{}",
+        at(&dark_img, w - 12 - 4, 200)
+    );
+    let h = light_img.height();
+    assert!(
+        at(&light_img, 300, h - 12 - 3) > 200,
+        "{}",
+        at(&light_img, 300, h - 12 - 3)
+    );
 }
 
 #[test]
@@ -504,13 +521,14 @@ fn the_side_strip_answers_to_the_keyboard_and_the_mouse() {
     assert_eq!(panel.chosen(), None);
     assert!(!panel.window().get_shown(), "Escape starts the exit");
 
-    // A click on the "Record" row (a window-sized strip: 12 px margin, 8 px padding, rows of 44
-    // and titles of 30, 2 px apart) picks it; a click on a title does nothing.
+    // A click on the "Record" button picks it; a click on a separator does nothing. The strip:
+    // 12 px from the window's edges, 6 px padding, the pin and close row (28), a separator (9),
+    // then the entries (separators of 9, buttons of 40), 2 px apart.
     let panel = SidePanel::new(&side_texts(), &side_state(Edge::Right, true))
         .unwrap_or_else(|e| panic!("{e}"));
     let (_, window) = side_render(&panel, Edge::Right);
     let click = |y: f32| {
-        let position = slint::LogicalPosition::new(150.0, y);
+        let position = slint::LogicalPosition::new(296.0 - 12.0 - 26.0, y);
         window.dispatch_event(WindowEvent::PointerMoved { position });
         window.dispatch_event(WindowEvent::PointerPressed {
             position,
@@ -521,10 +539,11 @@ fn the_side_strip_answers_to_the_keyboard_and_the_mouse() {
             button: PointerEventButton::Left,
         });
     };
-    click(12.0 + 8.0 + 15.0); // the "Screenshot" title
+    let first = 12.0 + 6.0 + 28.0 + 2.0 + 9.0 + 2.0;
+    click(first + 4.0); // the separator before the screenshots
     assert_eq!(panel.chosen(), None);
-    // title 30 + 6 rows × 44 + title 30 + 7 gaps × 2 → the first video row starts here
-    let record_y = 12.0 + 8.0 + 30.0 + 6.0 * 44.0 + 30.0 + 8.0 * 2.0 + 22.0;
+    // separator, 6 buttons, separator, each followed by a gap → the record button starts here
+    let record_y = first + 9.0 + 2.0 + 6.0 * 42.0 + 9.0 + 2.0 + 20.0;
     click(record_y);
     assert_eq!(panel.chosen(), Some(Choice::RecordToggle));
 }

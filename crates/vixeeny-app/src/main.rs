@@ -202,7 +202,14 @@ fn run_action(
         ActionId::OpenSettings => open_settings(),
         _ => perform(action, config),
     }
-    Ok(None)
+    Ok(REOPEN_STRIP.take().then_some(ActionId::OverlayToggle))
+}
+
+thread_local! {
+    /// The side strip was pinned the last time it closed: it opens pinned.
+    static STRIP_PINNED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The strip was pinned when the user picked the action that runs now: show it again after.
+    static REOPEN_STRIP: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// The settings window is a process of its own: the hotkeys keep working while it is open.
@@ -218,7 +225,7 @@ fn overlay(
     send: &mut impl std::io::Write,
 ) -> anyhow::Result<Option<ActionId>> {
     let (recording, replay) = recording.flags();
-    let outcome = match side::run(config, recording, replay) {
+    let outcome = match side::run(config, recording, replay, STRIP_PINNED.get()) {
         Ok(outcome) => outcome,
         Err(e) => {
             tracing::error!("overlay failed: {e:#}");
@@ -235,11 +242,14 @@ fn overlay(
             None => tracing::error!("no settings folder: the profile choice is not saved"),
         }
     }
+    STRIP_PINNED.set(outcome.pinned);
     // The strip is gone once the loop ends, but give the compositor a moment to repaint before
     // a capture freezes the screen: the strip must not be in it.
     if outcome.action.is_some() {
         std::thread::sleep(Duration::from_millis(120));
     }
+    // Pinned: it comes back once the action is done (see `run_action`).
+    REOPEN_STRIP.set(outcome.pinned && outcome.action.is_some());
     Ok(outcome.action)
 }
 

@@ -107,6 +107,9 @@ pub struct SideTexts {
     /// With a `{name}` placeholder.
     pub profile: String,
     pub settings: String,
+    /// The buttons of the strip's corner.
+    pub pin: String,
+    pub close: String,
 }
 
 /// What the strip needs to know when it opens.
@@ -122,6 +125,8 @@ pub struct SideState {
     pub animate: bool,
     /// The OS blurs the background behind the window.
     pub backdrop: bool,
+    /// Opens pinned: it stays until closed (it was pinned the last time).
+    pub pinned: bool,
 }
 
 /// One row of the strip, before it becomes a Slint item.
@@ -240,38 +245,30 @@ pub fn first_selectable(entries: &[Entry]) -> i32 {
         .map_or(-1, |i| i as i32)
 }
 
-// Layout constants, in logical pixels, matching `side_panel.slint`.
-const PAD: f64 = 8.0;
+// Layout constants, in logical pixels, matching `Side` in `side_panel.slint`.
+const PAD: f64 = 6.0;
 const GAP: f64 = 2.0;
-const SHADOW: f64 = 12.0;
-const ROW: f64 = 44.0;
-const HEADER_ROW: f64 = 32.0;
-const COLUMN_WIDTH: f64 = 272.0;
-const TILE: f64 = 96.0;
-const TILE_HEIGHT: f64 = 84.0;
-const HEADER_TILE: f64 = 12.0;
+const MARGIN: f64 = 12.0;
+const BUTTON: f64 = 40.0;
+const SEPARATOR: f64 = 9.0;
+const SMALL: f64 = 28.0;
+/// Beside the strip, for the name of the action under the pointer.
+const TIP_ROOM: f64 = 220.0;
+const TIP_HEIGHT: f64 = 40.0;
 
-/// The window's size in logical pixels: the strip plus the margin it slides in through.
+/// The window's size in logical pixels: the strip (the pin and close buttons, a separator, the
+/// entries), the room for the label beside it, and the margin it slides in through.
 fn logical_size(entries: &[Entry], vertical: bool) -> (f64, f64) {
-    let gaps = GAP * entries.len().saturating_sub(1) as f64;
+    let along: f64 = entries
+        .iter()
+        .map(|e| if e.header { SEPARATOR } else { BUTTON })
+        .sum();
+    let along = 2.0 * PAD + SMALL + SEPARATOR + along + GAP * (entries.len() + 1) as f64;
+    let across = BUTTON + 2.0 * PAD;
     if vertical {
-        let rows: f64 = entries
-            .iter()
-            .map(|e| if e.header { HEADER_ROW } else { ROW })
-            .sum();
-        (
-            COLUMN_WIDTH + 2.0 * PAD + 2.0 * SHADOW,
-            rows + gaps + 2.0 * PAD + 2.0 * SHADOW,
-        )
+        (across + TIP_ROOM + 2.0 * MARGIN, along + 2.0 * MARGIN)
     } else {
-        let tiles: f64 = entries
-            .iter()
-            .map(|e| if e.header { HEADER_TILE } else { TILE })
-            .sum();
-        (
-            tiles + gaps + 2.0 * PAD + 2.0 * SHADOW,
-            TILE_HEIGHT + 2.0 * PAD + 2.0 * SHADOW,
-        )
+        (along + 2.0 * MARGIN, across + TIP_HEIGHT + 2.0 * MARGIN)
     }
 }
 
@@ -355,6 +352,9 @@ impl SidePanel {
         window.set_enter(enter.as_millis() as i64);
         window.set_exit(exit.as_millis() as i64);
         window.set_selected(first_selectable(&entries));
+        window.set_pinned(state.pinned);
+        window.set_pin_label(texts.pin.as_str().into());
+        window.set_close_label(texts.close.as_str().into());
 
         let chosen = Rc::new(Cell::new(None));
         let on_profile: ProfileHandler = Rc::default();
@@ -452,6 +452,11 @@ impl SidePanel {
         self.chosen.get()
     }
 
+    /// The user pinned the strip: it comes back after the action it was closed for.
+    pub fn pinned(&self) -> bool {
+        self.window.get_pinned()
+    }
+
     /// Called with the new index into the profile list each time the user cycles the profile.
     pub fn on_profile(&self, handler: impl Fn(usize) + 'static) {
         *self.on_profile.borrow_mut() = Some(Box::new(handler));
@@ -502,8 +507,11 @@ impl SidePanel {
                 self.window.set_backdrop(dress(handle));
             }
             let closing = self.closer();
+            let weak = self.window.as_weak();
             self.window.window().on_winit_window_event(move |_, event| {
-                if matches!(event, WindowEvent::Focused(false)) {
+                // The user went to another window: the strip goes, unless it is pinned.
+                let pinned = weak.upgrade().is_some_and(|w| w.get_pinned());
+                if matches!(event, WindowEvent::Focused(false)) && !pinned {
                     closing();
                 }
                 EventResult::Propagate
@@ -539,6 +547,8 @@ mod tests {
             replay_save: "Save replay".into(),
             profile: "Profile: {name}".into(),
             settings: "Settings".into(),
+            pin: "Keep open".into(),
+            close: "Close".into(),
         }
     }
 
@@ -552,6 +562,7 @@ mod tests {
             edge: Edge::Right,
             animate: false,
             backdrop: false,
+            pinned: false,
         }
     }
 

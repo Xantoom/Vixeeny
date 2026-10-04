@@ -105,6 +105,18 @@ impl WidgetPanel {
         window.set_stop_label(SharedString::from(texts.stop.as_str()));
         crate::theme::apply(&window, crate::theme::Look::dark());
         window.set_auto_hide(auto_hide);
+        #[cfg(feature = "desktop")]
+        {
+            let weak = window.as_weak();
+            window.on_drag(move || {
+                use slint::winit_030::WinitWindowAccessor;
+                if let Some(w) = weak.upgrade() {
+                    w.window().with_winit_window(|w| {
+                        let _ = w.drag_window();
+                    });
+                }
+            });
+        }
         CLOCK.with(|c| *c.borrow_mut() = Some(Clock::new(Instant::now())));
         let ticker = slint::Timer::default();
         let weak = window.as_weak();
