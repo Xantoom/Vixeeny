@@ -15,7 +15,7 @@ use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
 
 const PROGRAMS: [&str; 2] = ["Vixeeny.exe", "vixeeny-app.exe"];
-/// The name of `Vixeeny.exe` before 1.0: the updater of those versions restarts the program by
+/// The name of `Vixeeny.exe` before 0.9.2: the updater of those versions restarts the program by
 /// that name, and their Start menu entry points at it. This copy hands over to `Vixeeny.exe`.
 const LEGACY_DAEMON: &str = "vixeeny-daemon.exe";
 

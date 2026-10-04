@@ -250,7 +250,7 @@ fn install_inner(reopen: Option<ControlRequest>) -> anyhow::Result<()> {
 }
 
 /// Removes what an update left behind (the old files, still in use while it ran, and the
-/// console updater of the versions before 1.0).
+/// console updater of the versions before 0.9.2).
 pub fn clean_up() {
     if let Ok(dir) = install_dir() {
         let backup = dir.join(BACKUP);

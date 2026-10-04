@@ -4,8 +4,8 @@ See section 8 of [VIXEENY_PLAN.md](../VIXEENY_PLAN.md).
 
 ## Windows only
 
-Vixeeny 1.0 runs on Windows 10 and 11, x64. The macOS and Linux
-builds of the 0.9 betas were dropped: the project focuses on one system done well.
+Vixeeny runs on Windows 10 and 11, x64. The macOS and Linux
+builds of 0.9.0 and 0.9.1 were dropped in 0.9.2: the project focuses on one system done well.
 
 ## FFmpeg as shared libraries
 

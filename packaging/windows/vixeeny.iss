@@ -71,7 +71,7 @@ Filename: "{app}\Vixeeny.exe"; Description: "Vixeeny"; Flags: nowait postinstall
 Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM Vixeeny.exe /IM vixeeny-daemon.exe /IM vixeeny-app.exe"; RunOnceId: "StopVixeeny"; Flags: runhidden
 
 [InstallDelete]
-; The console updater of the versions before 1.0.
+; The console updater of the versions before 0.9.2.
 Type: files; Name: "{app}\vixeeny-updater.exe"
 
 [UninstallDelete]

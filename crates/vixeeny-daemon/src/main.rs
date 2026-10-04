@@ -15,8 +15,8 @@ fn main() {
     }
 }
 
-/// Versions before 1.0 named this program `vixeeny-daemon.exe`, and their updater restarts it by
-/// that name: the copy that the 1.0 archive ships under the old name hands over to `Vixeeny.exe`.
+/// Versions before 0.9.2 named this program `vixeeny-daemon.exe`, and their updater restarts it by
+/// that name: the copy that the 0.9.2 archive ships under the old name hands over to `Vixeeny.exe`.
 fn hand_over_to_new_name() -> bool {
     let Ok(exe) = std::env::current_exe() else {
         return false;
