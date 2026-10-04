@@ -6,7 +6,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use slint::{ComponentHandle, ModelRc, SharedPixelBuffer, SharedString, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, SharedPixelBuffer, SharedString, VecModel};
 use vixeeny_common::config::Config;
 use vixeeny_common::i18n::{Key, Lang, tr};
 use vixeeny_common::ipc::ActionId;
@@ -292,7 +292,7 @@ pub fn action_label(action: ActionId, lang: Lang) -> &'static str {
 }
 
 /// The rows as groups: each header starts one.
-fn group_model(rows: &[Row], config: &Config) -> ModelRc<SettingGroup> {
+fn grouped(rows: &[Row], config: &Config) -> Vec<(String, Vec<SettingRow>)> {
     let mut groups: Vec<(String, Vec<SettingRow>)> = Vec::new();
     for row in rows {
         if matches!(row.kind, Kind::Header) {
@@ -306,15 +306,69 @@ fn group_model(rows: &[Row], config: &Config) -> ModelRc<SettingGroup> {
             list.push(row_model(row, config));
         }
     }
+    groups.retain(|(_, rows)| !rows.is_empty());
+    groups
+}
+
+/// The same row as far as the eye can tell (the option lists compared by content).
+fn same_row(a: &SettingRow, b: &SettingRow) -> bool {
+    let options = |r: &SettingRow| r.options.iter().collect::<Vec<_>>();
+    a.id == b.id
+        && a.label == b.label
+        && a.hint == b.hint
+        && a.kind == b.kind
+        && a.enabled == b.enabled
+        && a.on == b.on
+        && a.text == b.text
+        && a.num == b.num
+        && a.min == b.min
+        && a.max == b.max
+        && a.step == b.step
+        && a.selected == b.selected
+        && options(a) == options(b)
+}
+
+/// Shows `groups`. When the page keeps its shape (same groups, same rows) only the rows that
+/// changed are updated, in place: their controls stay, so a toggle slides instead of being
+/// redrawn in its new state, and nothing flickers.
+fn show_groups(window: &SettingsWindow, groups: Vec<(String, Vec<SettingRow>)>) {
+    let current = window.get_groups();
+    let same_shape = current.row_count() == groups.len()
+        && groups.iter().enumerate().all(|(i, (title, rows))| {
+            current.row_data(i).is_some_and(|g| {
+                g.title == title.as_str()
+                    && g.rows.row_count() == rows.len()
+                    && rows
+                        .iter()
+                        .enumerate()
+                        .all(|(j, r)| g.rows.row_data(j).is_some_and(|old| old.id == r.id))
+            })
+        });
+    if same_shape {
+        for (i, (_, rows)) in groups.into_iter().enumerate() {
+            let Some(group) = current.row_data(i) else {
+                continue;
+            };
+            for (j, row) in rows.into_iter().enumerate() {
+                if group
+                    .rows
+                    .row_data(j)
+                    .is_some_and(|old| !same_row(&old, &row))
+                {
+                    group.rows.set_row_data(j, row);
+                }
+            }
+        }
+        return;
+    }
     let model: Vec<SettingGroup> = groups
         .into_iter()
-        .filter(|(_, rows)| !rows.is_empty())
         .map(|(title, rows)| SettingGroup {
             title: title.into(),
             rows: ModelRc::from(Rc::new(VecModel::from(rows))),
         })
         .collect();
-    ModelRc::from(Rc::new(VecModel::from(model)))
+    window.set_groups(ModelRc::from(Rc::new(VecModel::from(model))));
 }
 
 /// The group a shortcut belongs to, when it is the first of it.
@@ -691,7 +745,7 @@ impl SettingsPanel {
         self.window.set_can_reset(section.can_reset());
         if section.is_rows() {
             let built = rows(section, &env, &config);
-            self.window.set_groups(group_model(&built, &config));
+            show_groups(&self.window, grouped(&built, &config));
             *state.rows.borrow_mut() = built;
         } else {
             self.window.set_groups(ModelRc::default());

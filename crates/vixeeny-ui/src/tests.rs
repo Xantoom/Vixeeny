@@ -630,7 +630,10 @@ fn settings_apply_immediately_and_each_section_resets() {
     panel.select_section(Section::General);
     settings_render(&panel, "9-settings-general");
     let w = panel.window();
+    let groups = w.get_groups();
     w.invoke_row_toggled("sounds".into(), false);
+    // The page keeps its rows (and their controls, which then animate): only the row changed.
+    assert!(w.get_groups() == groups, "the rows were rebuilt");
     w.invoke_row_chosen("theme".into(), 2); // system, light, dark
     w.invoke_row_number("idle_exit".into(), 62);
     assert_eq!(seen.borrow().len(), 3, "one notification per change");
