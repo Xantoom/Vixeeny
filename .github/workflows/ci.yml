@@ -214,8 +214,14 @@ jobs:
           $env:PKG_CONFIG_PATH = "${{ github.workspace }}\native\build\work\prefix\lib\pkgconfig"
           cargo test -p vixeeny-image --features native-codecs
   native-macos:
-    # Native arch of the runner (arm64); the universal binary is a later milestone.
-    runs-on: macos-latest
+    # One build per architecture (Apple Silicon and Intel): the native libraries are built on the
+    # runner itself, there is no universal binary.
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-latest, macos-15-intel]
+    name: native-macos (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -226,14 +232,14 @@ jobs:
       - uses: actions/cache/restore@v4
         with:
           path: native/build/work
-          key: native-macos-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}
-          restore-keys: native-macos-
+          key: native-${{ matrix.runner }}-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}
+          restore-keys: native-${{ matrix.runner }}-
       - run: cargo xtask build-native
       - uses: actions/cache/save@v4
         if: always()
         with:
           path: native/build/work
-          key: native-macos-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}-${{ github.run_id }}
+          key: native-${{ matrix.runner }}-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}-${{ github.run_id }}
       - run: cargo test -p vixeeny-encode --features ffmpeg-next --test software_encode --test verify_registry --test recorder
         env:
           PKG_CONFIG_PATH: ${{ github.workspace }}/native/build/work/prefix/lib/pkgconfig

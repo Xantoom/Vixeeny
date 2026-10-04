@@ -33,7 +33,7 @@ The corresponding source is available from the pinned build's project; the licen
 
 ## macOS
 
-- Apple silicon only (no Intel / universal build), not notarized (right-click → Open the first
+- Two builds (Apple silicon and Intel, no universal binary), not notarized (right-click → Open the first
   time).
 - SDR and stereo only. The recording pill is a floating window that shows on every Space; it is
   kept out of the video by `sharingType = none`, but a plain window cannot be made non-activating

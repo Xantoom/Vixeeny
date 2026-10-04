@@ -89,12 +89,16 @@ impl Release {
         Some(UpdateFiles {
             archive,
             signature: find(&format!("{}.minisig", archive.name))?,
-            // Each OS's job writes its own list (`SHA256SUMS-macos`); Windows keeps the plain name.
-            sums: find(&format!(
-                "SHA256SUMS-{}",
-                platform.split('-').next().unwrap_or_default()
-            ))
-            .or_else(|| find("SHA256SUMS"))?,
+            // Each platform's job writes its own list (`SHA256SUMS-macos-arm64`), or one per OS
+            // (`SHA256SUMS-linux`); Windows keeps the plain name.
+            sums: find(&format!("SHA256SUMS-{platform}"))
+                .or_else(|| {
+                    find(&format!(
+                        "SHA256SUMS-{}",
+                        platform.split('-').next().unwrap_or_default()
+                    ))
+                })
+                .or_else(|| find("SHA256SUMS"))?,
         })
     }
 }
@@ -152,6 +156,22 @@ mod tests {
             .files("macos-arm64")
             .unwrap_or_else(|| panic!("no files"));
         assert_eq!(files.sums.url, "https://x/mac");
+    }
+
+    #[test]
+    fn a_platform_checksum_list_wins_over_the_system_one() {
+        let json = r#"{"tag_name":"v1.0.0","draft":false,"prerelease":false,"body":"","assets":[
+            {"name":"Vixeeny-1.0.0-macos-x64.zip","browser_download_url":"https://x/a","size":1},
+            {"name":"Vixeeny-1.0.0-macos-x64.zip.minisig","browser_download_url":"https://x/b","size":1},
+            {"name":"SHA256SUMS-macos-arm64","browser_download_url":"https://x/arm","size":1},
+            {"name":"SHA256SUMS-macos-x64","browser_download_url":"https://x/x64","size":1}]}"#;
+        let release = Release::parse(json)
+            .unwrap_or_else(|e| panic!("{e}"))
+            .unwrap_or_else(|| panic!("none"));
+        let files = release
+            .files("macos-x64")
+            .unwrap_or_else(|| panic!("no files"));
+        assert_eq!(files.sums.url, "https://x/x64");
     }
 
     #[test]

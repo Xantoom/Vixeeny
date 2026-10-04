@@ -10,7 +10,14 @@ permissions:
 jobs:
   macos:
     # Unsigned (ad hoc) disk image and update archive; a Developer ID signature comes later.
-    runs-on: macos-latest
+    # One build per architecture, each on its own runner (the native libraries are built there).
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-latest, arch: arm64 }
+          - { runner: macos-15-intel, arch: x64 }
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -20,7 +27,7 @@ jobs:
       - run: cargo build --release -p vixeeny-daemon -p vixeeny-app -p vixeeny-updater -p xtask
       - run: cargo xtask dist-mac --out dist
       - name: Checksums (the updater reads SHA256SUMS-mac; the Windows job owns SHA256SUMS)
-        run: cd dist && shasum -a 256 *.zip *.dmg | sed 's/ \*/  /' > SHA256SUMS-macos
+        run: cd dist && shasum -a 256 *.zip *.dmg | sed 's/ \*/  /' > SHA256SUMS-macos-${{ matrix.arch }}
       - name: Sign (minisign)
         env:
           MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
@@ -39,12 +46,12 @@ jobs:
           rm "$RUNNER_TEMP/minisign.key"
       - uses: actions/upload-artifact@v4
         with:
-          name: vixeeny-macos
+          name: vixeeny-macos-${{ matrix.arch }}
           path: |
             dist/*.zip
             dist/*.dmg
             dist/*.minisig
-            dist/SHA256SUMS-macos
+            dist/SHA256SUMS-macos-${{ matrix.arch }}
       - name: Add to the draft release
         if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-test')
         env:
@@ -55,7 +62,7 @@ jobs:
             gh release view "${{ github.ref_name }}" >/dev/null 2>&1 && break
             sleep 30
           done
-          gh release upload "${{ github.ref_name }}" dist/*.zip dist/*.dmg dist/*.minisig dist/SHA256SUMS-macos --clobber
+          gh release upload "${{ github.ref_name }}" dist/*.zip dist/*.dmg dist/*.minisig dist/SHA256SUMS-macos-${{ matrix.arch }} --clobber
   linux:
     # x86-64 Linux (Ubuntu 24.04: the PipeWire bindings need its newer libspa): update archive (zip, what the updater unpacks over a portable install), .deb
     # and AppImage. FFmpeg and the image codecs are built by `cargo xtask build-native`.
