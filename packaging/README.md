@@ -17,6 +17,22 @@ rsign generate -p packaging/minisign.pub -s vixeeny.key
 Commit `packaging/minisign.pub`; keep `vixeeny.key` secret. In the repository settings add the
 secrets `MINISIGN_KEY` (the content of `vixeeny.key`) and `MINISIGN_PASSWORD`.
 
+## macOS signature and notarization (optional)
+
+Without the secrets below the macOS build is signed ad hoc (right-click → Open the first time).
+With a paid Apple Developer account, add these repository secrets and the release job signs with
+the hardened runtime and notarizes the disk image:
+
+| Secret | Content |
+|---|---|
+| `APPLE_CERTIFICATE` | the "Developer ID Application" certificate exported as `.p12`, base64-encoded |
+| `APPLE_CERTIFICATE_PASSWORD` | the password chosen at export |
+| `APPLE_ID` | the Apple ID e-mail |
+| `APPLE_APP_PASSWORD` | an app-specific password (appleid.apple.com) |
+| `APPLE_TEAM_ID` | the 10-character team id |
+
+Locally: `VIXEENY_SIGN_IDENTITY="Developer ID Application: …" cargo xtask dist-mac`.
+
 ## Files of a release
 
 | File | Use |

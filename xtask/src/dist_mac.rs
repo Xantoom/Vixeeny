@@ -17,6 +17,17 @@ fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..")
 }
 
+/// Hardened-runtime exceptions: the microphone (recording) is the only one Vixeeny needs.
+const ENTITLEMENTS: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+</dict>
+</plist>
+"#;
+
 fn info_plist() -> String {
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -101,11 +112,50 @@ pub fn dist(args: &[String]) -> Result<()> {
         resources.join("Vixeeny.icns"),
     )?;
 
-    // Ad hoc signature: gives the bundle a stable identity for the permission prompts. A
-    // Developer ID signature and notarization replace it when the maintainer has the account.
-    run(Command::new("codesign")
-        .args(["--force", "--deep", "--sign", "-"])
-        .arg(&app))?;
+    // Without `VIXEENY_SIGN_IDENTITY`: an ad hoc signature, which gives the bundle a stable
+    // identity for the permission prompts. With it (a "Developer ID Application: …" identity in
+    // the keychain): hardened runtime + secure timestamp, as notarization requires.
+    let identity = std::env::var("VIXEENY_SIGN_IDENTITY")
+        .ok()
+        .filter(|v| !v.is_empty());
+    match &identity {
+        Some(identity) => {
+            let entitlements = out.join("entitlements.plist");
+            std::fs::write(&entitlements, ENTITLEMENTS)?;
+            // Inside out: the executables first, then the bundle.
+            for program in ["vixeeny-daemon", "vixeeny-app", "vixeeny-updater"] {
+                let path = macos.join(program);
+                if path.exists() {
+                    run(Command::new("codesign")
+                        .args([
+                            "--force",
+                            "--options",
+                            "runtime",
+                            "--timestamp",
+                            "--entitlements",
+                        ])
+                        .arg(&entitlements)
+                        .args(["--sign", identity])
+                        .arg(&path))?;
+                }
+            }
+            run(Command::new("codesign")
+                .args([
+                    "--force",
+                    "--options",
+                    "runtime",
+                    "--timestamp",
+                    "--entitlements",
+                ])
+                .arg(&entitlements)
+                .args(["--sign", identity])
+                .arg(&app))?;
+            let _ = std::fs::remove_file(&entitlements);
+        }
+        None => run(Command::new("codesign")
+            .args(["--force", "--deep", "--sign", "-"])
+            .arg(&app))?,
+    }
 
     let zip = out.join(format!("{base}.zip"));
     let _ = std::fs::remove_file(&zip);
@@ -135,6 +185,11 @@ pub fn dist(args: &[String]) -> Result<()> {
         .arg(&dmg_dir)
         .arg(&dmg))?;
     let _ = std::fs::remove_dir_all(&dmg_dir);
+    if let Some(identity) = &identity {
+        run(Command::new("codesign")
+            .args(["--force", "--timestamp", "--sign", identity])
+            .arg(&dmg))?;
+    }
     println!("{}\n{}", zip.display(), dmg.display());
     Ok(())
 }

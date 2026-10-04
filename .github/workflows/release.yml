@@ -25,7 +25,40 @@ jobs:
           toolchain: 1.98.1
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release -p vixeeny-daemon -p vixeeny-app -p vixeeny-updater -p xtask
+      - name: Developer ID certificate (only when the APPLE_* secrets exist)
+        id: apple
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -z "$APPLE_CERTIFICATE" ]; then echo "::warning::No APPLE_CERTIFICATE secret: ad hoc signature, no notarization."; exit 0; fi
+          keychain="$RUNNER_TEMP/build.keychain-db"
+          pw="$(openssl rand -hex 16)"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$pw" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$pw" "$keychain"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$pw" "$keychain"
+          security list-keychains -d user -s "$keychain" login.keychain-db
+          rm "$RUNNER_TEMP/cert.p12"
+          identity="$(security find-identity -v -p codesigning "$keychain" | grep 'Developer ID Application' | head -1 | sed 's/.*"\(.*\)"/\1/')"
+          [ -n "$identity" ] || { echo "::error::No Developer ID Application identity in the certificate"; exit 1; }
+          echo "identity=$identity" >> "$GITHUB_OUTPUT"
       - run: cargo xtask dist-mac --out dist
+        env:
+          VIXEENY_SIGN_IDENTITY: ${{ steps.apple.outputs.identity }}
+      - name: Notarize the disk image (only when signed with a Developer ID)
+        if: steps.apple.outputs.identity != ''
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          for dmg in dist/*.dmg; do
+            xcrun notarytool submit "$dmg" --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
+            xcrun stapler staple "$dmg"
+          done
       - name: Checksums (the updater reads SHA256SUMS-mac; the Windows job owns SHA256SUMS)
         run: cd dist && shasum -a 256 *.zip *.dmg | sed 's/ \*/  /' > SHA256SUMS-macos-${{ matrix.arch }}
       - name: Sign (minisign)
