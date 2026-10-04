@@ -719,64 +719,142 @@ fn source_row(spec: String, label: String, hint: String) -> Row {
     )
 }
 
+/// A microphone source: `mic` (the Windows default) or `mic:<device id>`.
+fn is_mic(spec: &str) -> bool {
+    spec == "mic" || spec.starts_with("mic:")
+}
+
+/// The label of a source the machine does not offer right now.
+fn absent_label(spec: &str) -> String {
+    spec.split_once(':')
+        .map_or(spec, |(_, name)| name)
+        .to_owned()
+}
+
 pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
     let t = |k| env.t(k);
     let chosen = config.cur().audio.sources;
     let mut rows = Vec::new();
 
-    let mut offered: Vec<String> = Vec::new();
-    let mut add = |rows: &mut Vec<Row>, spec: String, label: String, hint: String| {
-        offered.push(spec.clone());
-        rows.push(source_row(spec, label, hint));
-    };
+    // ---- what the PC plays
+    rows.push(header("h_pc", t(Key::GrpPcSound)));
+    rows.push(source_row(
+        "system".into(),
+        t(Key::SrcSystem),
+        t(Key::SrcSystemHint),
+    ));
+    // A particular output, from older settings: it stays visible so it can be turned off.
+    for spec in chosen.iter().filter(|s| s.starts_with("out:")) {
+        let label = env
+            .audio
+            .outputs
+            .iter()
+            .find(|d| format!("out:{}", d.id) == *spec)
+            .map_or_else(|| absent_label(spec), |d| d.name.clone());
+        rows.push(source_row(spec.clone(), label, String::new()));
+    }
 
-    rows.push(header("h_outputs", t(Key::GrpOutputs)));
-    add(&mut rows, "system".into(), t(Key::SrcSystem), String::new());
-    for device in &env.audio.outputs {
-        add(
-            &mut rows,
-            format!("out:{}", device.id),
-            device.name.clone(),
-            String::new(),
-        );
-    }
-    rows.push(header("h_inputs", t(Key::GrpInputs)));
-    add(&mut rows, "mic".into(), t(Key::SrcMic), String::new());
-    for device in &env.audio.inputs {
-        add(
-            &mut rows,
-            format!("mic:{}", device.id),
-            device.name.clone(),
-            String::new(),
-        );
-    }
-    if !env.audio.programs.is_empty() {
-        rows.push(header("h_programs", t(Key::GrpPrograms)));
-        for program in &env.audio.programs {
-            add(
-                &mut rows,
-                format!("app:{}", program.id),
-                program.name.clone(),
-                String::new(),
-            );
+    // ---- the microphone: a switch, then which one
+    rows.push(header("h_mic", t(Key::GrpMic)));
+    rows.push(row(
+        "mic_on",
+        t(Key::SetMicOn),
+        Kind::Toggle,
+        Box::new(|c| Value::Bool(c.cur().audio.sources.iter().any(|s| is_mic(s)))),
+        Box::new(|c, v| match v {
+            Value::Bool(on) => {
+                let sources = &mut c.cur_mut().audio.sources;
+                if !on {
+                    sources.retain(|s| !is_mic(s));
+                } else if !sources.iter().any(|s| is_mic(s)) {
+                    sources.push("mic".into());
+                }
+                Ok(())
+            }
+            _ => Err(Invalid),
+        }),
+    ));
+    let mut mics = vec![opt("mic", t(Key::SrcMic))];
+    mics.extend(
+        env.audio
+            .inputs
+            .iter()
+            .map(|d| opt(&format!("mic:{}", d.id), d.name.as_str())),
+    );
+    // An unplugged microphone that the profile records.
+    for spec in chosen.iter().filter(|s| s.starts_with("mic:")) {
+        if !mics.iter().any(|o| o.value == *spec) {
+            mics.push(opt(
+                spec,
+                format!("{} ({})", absent_label(spec), t(Key::SrcAbsent)),
+            ));
         }
     }
-    // A source of the profile that is not here now (a program that is closed, an unplugged
-    // microphone) stays visible so it can be unticked.
-    let missing: Vec<String> = chosen
+    rows.push(when(
+        choice(
+            "mic_device",
+            t(Key::SetMicDevice),
+            mics,
+            |c| {
+                c.cur()
+                    .audio
+                    .sources
+                    .into_iter()
+                    .find(|s| is_mic(s))
+                    .unwrap_or_else(|| "mic".into())
+            },
+            // Greyed out while the microphone is off: nothing to change then.
+            |c, v| {
+                let sources = &mut c.cur_mut().audio.sources;
+                if sources.iter().any(|s| is_mic(s)) {
+                    sources.retain(|s| !is_mic(s));
+                    sources.push(v);
+                }
+            },
+        ),
+        |c| c.cur().audio.sources.iter().any(|s| is_mic(s)),
+    ));
+    rows.push(when(
+        toggle(
+            "audio_denoise",
+            t(Key::SetAudioDenoise),
+            |c| c.cur().audio.mic_noise_reduction,
+            |c, v| c.cur_mut().audio.mic_noise_reduction = v,
+        ),
+        |c| c.cur().audio.sources.iter().any(|s| is_mic(s)),
+    ));
+
+    // ---- the programs open now that have sound, and those the profile records
+    let programs: Vec<(String, String, String)> = env
+        .audio
+        .programs
         .iter()
-        .filter(|s| !offered.contains(s))
-        .cloned()
+        .map(|p| (format!("app:{}", p.id), p.name.clone(), String::new()))
+        .chain(
+            chosen
+                .iter()
+                .filter(|s| s.starts_with("app:"))
+                .filter(|s| {
+                    !env.audio
+                        .programs
+                        .iter()
+                        .any(|p| format!("app:{}", p.id) == **s)
+                })
+                .map(|s| (s.clone(), absent_label(s), t(Key::SrcAbsent))),
+        )
         .collect();
-    if !missing.is_empty() {
-        rows.push(header("h_missing", t(Key::SrcAbsent)));
-        for spec in missing {
-            let label = spec
-                .split_once(':')
-                .map_or(spec.as_str(), |(_, name)| name)
-                .to_owned();
-            rows.push(source_row(spec, label, t(Key::SrcAbsent)));
-        }
+    rows.push(header("h_programs", t(Key::GrpPrograms)));
+    rows.push(info(
+        "programs_hint",
+        if programs.is_empty() {
+            t(Key::SrcNoPrograms)
+        } else {
+            t(Key::SrcProgramsHint)
+        },
+        String::new(),
+    ));
+    for (spec, label, hint) in programs {
+        rows.push(source_row(spec, label, hint));
     }
 
     rows.push(header("h_tracks", t(Key::GrpTracks)));
@@ -823,12 +901,6 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
         t(Key::SetAudioSurround),
         |c| c.cur().audio.surround,
         |c, v| c.cur_mut().audio.surround = v,
-    ));
-    rows.push(toggle(
-        "audio_denoise",
-        t(Key::SetAudioDenoise),
-        |c| c.cur().audio.mic_noise_reduction,
-        |c, v| c.cur_mut().audio.mic_noise_reduction = v,
     ));
     rows
 }

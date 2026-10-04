@@ -643,15 +643,34 @@ fn audio_devices() -> vixeeny_settings::AudioDevices {
         AudioDevices {
             outputs: devices(vixeeny_audio::list_outputs()),
             inputs: devices(vixeeny_audio::list_microphones()),
-            programs: vixeeny_audio::list_applications()
-                .into_iter()
-                .map(|a| AudioEntry {
-                    name: a.exe.clone(),
-                    id: a.exe,
-                })
-                .collect(),
+            programs: programs(vixeeny_audio::list_applications()),
         }
     }
+}
+
+/// The programs with sound, once each (a browser has many sessions), named as their
+/// executable describes itself ("Spotify" rather than "Spotify.exe"); those playing first.
+fn programs(mut apps: Vec<vixeeny_audio::AppInfo>) -> Vec<vixeeny_settings::AudioEntry> {
+    apps.sort_by_key(|a| !a.active);
+    let mut seen = std::collections::HashSet::new();
+    apps.into_iter()
+        .filter(|a| !a.exe.is_empty() && !a.exe.to_ascii_lowercase().starts_with("vixeeny"))
+        .filter(|a| seen.insert(a.exe.to_ascii_lowercase()))
+        .map(|a| {
+            let meta = vixeeny_platform::process_path(a.pid)
+                .map(|p| vixeeny_platform::exe_metadata(&p))
+                .unwrap_or_default();
+            let name = meta
+                .file_description
+                .or(meta.product_name)
+                .filter(|n| !n.trim().is_empty())
+                .unwrap_or_else(|| a.exe.trim_end_matches(".exe").to_owned());
+            vixeeny_settings::AudioEntry {
+                id: a.exe,
+                name: name.trim().to_owned(),
+            }
+        })
+        .collect()
 }
 
 /// Releases (or gives back) the global shortcuts of the daemon while a shortcut is recorded.

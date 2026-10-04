@@ -948,11 +948,25 @@ mod tests {
             }],
         });
         let audio = rows(Section::Audio, &e, &c);
-        // The profile records the default output; the rest is off.
+        // The profile records the PC sound; the microphone is off, its choice greyed out.
         assert_eq!(row(&audio, "src:system").value(&c), Value::Bool(true));
-        assert_eq!(row(&audio, "src:out:{out-1}").value(&c), Value::Bool(false));
-        row(&audio, "src:mic:{in-1}")
+        assert_eq!(row(&audio, "mic_on").value(&c), Value::Bool(false));
+        assert!(!row(&audio, "mic_device").enabled(&c));
+        // On: the Windows default, then the one picked.
+        row(&audio, "mic_on")
             .apply(&mut c, Value::Bool(true))
+            .unwrap();
+        assert_eq!(c.cur().audio.sources, ["system", "mic"]);
+        assert!(row(&audio, "mic_device").enabled(&c));
+        match &row(&audio, "mic_device").kind {
+            Kind::Choice(o) => assert_eq!(
+                o.iter().map(|o| o.label.as_str()).collect::<Vec<_>>(),
+                ["Windows default", "Blue Yeti"]
+            ),
+            _ => panic!("mic_device is a choice"),
+        }
+        row(&audio, "mic_device")
+            .apply(&mut c, Value::Text("mic:{in-1}".into()))
             .unwrap();
         row(&audio, "src:app:spotify.exe")
             .apply(&mut c, Value::Bool(true))
@@ -961,13 +975,20 @@ mod tests {
             .apply(&mut c, Value::Bool(false))
             .unwrap();
         assert_eq!(c.cur().audio.sources, ["mic:{in-1}", "app:spotify.exe"]);
+        // Off removes the microphone, whichever it was.
+        row(&audio, "mic_on")
+            .apply(&mut c, Value::Bool(false))
+            .unwrap();
+        assert_eq!(c.cur().audio.sources, ["app:spotify.exe"]);
         // A source that is not available now stays listed, so it can be unticked.
         c.cur_mut().audio.sources.push("app:closed.exe".into());
+        c.cur_mut().audio.sources.push("out:{out-1}".into());
         let audio = rows(Section::Audio, &e, &c);
         assert_eq!(
             row(&audio, "src:app:closed.exe").value(&c),
             Value::Bool(true)
         );
+        assert_eq!(row(&audio, "src:out:{out-1}").label, "Headset");
     }
 
     #[test]

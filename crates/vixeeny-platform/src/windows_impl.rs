@@ -194,6 +194,11 @@ fn frame_rect(hwnd: HWND) -> Option<PhysicalRect> {
     Some(rect_of(r))
 }
 
+/// The full path of the executable of process `pid`, when it can be read.
+pub fn process_path(pid: u32) -> Option<String> {
+    exe_path(pid)
+}
+
 fn exe_path(pid: u32) -> Option<String> {
     // SAFETY: standard query of a process image name into a buffer whose capacity is passed
     // and updated by the call; the handle is closed on every path.

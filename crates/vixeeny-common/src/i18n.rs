@@ -144,8 +144,6 @@ pub enum Key {
     GrpVideo,
     GrpCustom,
     GrpSplit,
-    GrpOutputs,
-    GrpInputs,
     GrpPrograms,
     GrpTracks,
     GrpNaming,
@@ -305,6 +303,13 @@ pub enum Key {
     UiConfirmDelete,
     UiConfirmDeleteHint,
     SetHdrOffInWindows,
+    GrpPcSound,
+    GrpMic,
+    SetMicOn,
+    SetMicDevice,
+    SrcSystemHint,
+    SrcProgramsHint,
+    SrcNoPrograms,
 }
 
 impl Key {
@@ -433,8 +438,6 @@ impl Key {
         Self::GrpVideo,
         Self::GrpCustom,
         Self::GrpSplit,
-        Self::GrpOutputs,
-        Self::GrpInputs,
         Self::GrpPrograms,
         Self::GrpTracks,
         Self::GrpNaming,
@@ -594,6 +597,13 @@ impl Key {
         Self::UiConfirmDelete,
         Self::UiConfirmDeleteHint,
         Self::SetHdrOffInWindows,
+        Self::GrpPcSound,
+        Self::GrpMic,
+        Self::SetMicOn,
+        Self::SetMicDevice,
+        Self::SrcSystemHint,
+        Self::SrcProgramsHint,
+        Self::SrcNoPrograms,
     ];
 }
 
@@ -911,10 +921,6 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::GrpCustom, Lang::Fr) => "Options de l'encodeur",
         (Key::GrpSplit, Lang::En) => "File splitting",
         (Key::GrpSplit, Lang::Fr) => "Découpage des fichiers",
-        (Key::GrpOutputs, Lang::En) => "System outputs (what you hear)",
-        (Key::GrpOutputs, Lang::Fr) => "Sorties système (ce que vous entendez)",
-        (Key::GrpInputs, Lang::En) => "Inputs (microphones)",
-        (Key::GrpInputs, Lang::Fr) => "Entrées (microphones)",
         (Key::GrpPrograms, Lang::En) => "Programs",
         (Key::GrpPrograms, Lang::Fr) => "Programmes",
         (Key::GrpTracks, Lang::En) => "Tracks and encoding",
@@ -925,10 +931,10 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::GrpReplay, Lang::Fr) => "Replay",
         (Key::GrpUpdates, Lang::En) => "Updates",
         (Key::GrpUpdates, Lang::Fr) => "Mises à jour",
-        (Key::SrcSystem, Lang::En) => "System sound (default output)",
-        (Key::SrcSystem, Lang::Fr) => "Son du système (sortie par défaut)",
-        (Key::SrcMic, Lang::En) => "Default microphone",
-        (Key::SrcMic, Lang::Fr) => "Microphone par défaut",
+        (Key::SrcSystem, Lang::En) => "Record the PC sound",
+        (Key::SrcSystem, Lang::Fr) => "Enregistrer le son du PC",
+        (Key::SrcMic, Lang::En) => "Windows default",
+        (Key::SrcMic, Lang::Fr) => "Celui par défaut de Windows",
         (Key::SrcAbsent, Lang::En) => "not available right now",
         (Key::SrcAbsent, Lang::Fr) => "indisponible pour le moment",
         (Key::UiPressKeys, Lang::En) => "Press the shortcut…",
@@ -1293,6 +1299,26 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::SetHdrOffInWindows, Lang::Fr) => {
             "Activez « Utiliser le HDR » dans les paramètres d’affichage de Windows pour enregistrer en HDR."
         }
+        (Key::GrpPcSound, Lang::En) => "PC sound",
+        (Key::GrpPcSound, Lang::Fr) => "Son du PC",
+        (Key::GrpMic, Lang::En) => "Microphone",
+        (Key::GrpMic, Lang::Fr) => "Microphone",
+        (Key::SetMicOn, Lang::En) => "Record the microphone",
+        (Key::SetMicOn, Lang::Fr) => "Enregistrer le microphone",
+        (Key::SetMicDevice, Lang::En) => "Microphone to use",
+        (Key::SetMicDevice, Lang::Fr) => "Microphone utilisé",
+        (Key::SrcSystemHint, Lang::En) => "Everything you hear, from the Windows default output.",
+        (Key::SrcSystemHint, Lang::Fr) => {
+            "Tout ce que vous entendez, depuis la sortie par défaut de Windows."
+        }
+        (Key::SrcProgramsHint, Lang::En) => {
+            "Record only some programs: turn off the PC sound above and pick them here."
+        }
+        (Key::SrcProgramsHint, Lang::Fr) => {
+            "Pour n’enregistrer que certains programmes, coupez le son du PC ci-dessus et choisissez-les ici."
+        }
+        (Key::SrcNoPrograms, Lang::En) => "No program is playing sound right now.",
+        (Key::SrcNoPrograms, Lang::Fr) => "Aucun programme ne joue de son pour le moment.",
     }
 }
 
