@@ -3,9 +3,12 @@
 //! Everything the UI needs is read from [`Session::view`]; everything the user does goes
 //! through the `pointer_*`, `key` and `choose_*` methods. No UI toolkit is involved.
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use crate::editor::{Editor, Modifiers, Outcome, Tool};
 use crate::geometry::{Point, Rect};
-use crate::model::Color;
+use crate::model::{Annotation, Color};
 use crate::render::{RgbaImage, render_region};
 use crate::selection::{CursorHint, Selection, magnifier_position, magnifier_source, place_beside};
 
@@ -17,6 +20,8 @@ pub const MAGNIFIER_ZOOM: f32 = 10.0;
 /// Space around the toolbar and the magnifier.
 const GAP: f32 = 8.0;
 const MAGNIFIER_OFFSET: f32 = 24.0;
+/// Drawn around the annotations' bounds: miter joins and anti-aliasing reach a little past them.
+const DRAW_MARGIN: f32 = 8.0;
 
 /// What the user asked the host to do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,9 +82,10 @@ pub struct View {
     pub size_label: Option<(String, Point)>,
     pub magnifier: Option<MagnifierView>,
     pub toolbar: Option<Point>,
-    /// The zone with its annotations (and the gesture in progress) drawn on it. `None` when
-    /// there is nothing to draw: show the frozen image as is.
-    pub annotated: Option<(RgbaImage, Point)>,
+    /// The part of the zone that annotations (and the gesture in progress) cover, drawn, and
+    /// where it goes. `None` when there is nothing to draw: show the frozen image as is. The same
+    /// `Rc` comes back while nothing changes, so the host can skip uploading it again.
+    pub annotated: Option<(Rc<RgbaImage>, Point)>,
     pub cursor: CursorHint,
     pub tool: Option<Tool>,
     pub color: Color,
@@ -117,6 +123,16 @@ pub struct Session {
     ui_scale: f32,
     /// The monitors, in image pixels: the toolbar and the magnifier stay on one of them.
     screens: Vec<Rect>,
+    /// The last drawing of the annotations, with what it was drawn from.
+    drawn: RefCell<Option<Drawn>>,
+}
+
+/// A drawing of the annotations: what was drawn, where, and the result.
+#[derive(Debug)]
+struct Drawn {
+    layers: Vec<Annotation>,
+    region: Rect,
+    image: Rc<RgbaImage>,
 }
 
 impl Session {
@@ -135,6 +151,7 @@ impl Session {
             auto_command: None,
             ui_scale: 1.0,
             screens: vec![bounds],
+            drawn: RefCell::new(None),
         }
     }
 
@@ -395,25 +412,46 @@ impl Session {
         }
     }
 
-    fn annotated(&self, zone: &Rect) -> Option<(RgbaImage, Point)> {
+    fn annotated(&self, zone: &Rect) -> Option<(Rc<RgbaImage>, Point)> {
         let preview = self.editor.preview();
         if self.editor.doc.items.is_empty() && preview.is_none() {
             return None;
         }
         let hidden = self.editor.hidden();
-        let items = self
+        let layers: Vec<Annotation> = self
             .editor
             .doc
             .items
             .iter()
             .filter(|i| Some(i.id) != hidden)
-            .map(|i| &i.annotation)
-            .chain(preview.as_ref());
-        let image = render_region(&self.base, items, zone)?;
-        // `render_region` rounds the zone outwards; the image sits at the rounded corner.
+            .map(|i| i.annotation.clone())
+            .chain(preview)
+            .collect();
+        // Only what the annotations cover (with a margin for joins and anti-aliasing): the
+        // frozen image already shows the rest, and a small image is quick to draw and upload.
+        let covered = layers
+            .iter()
+            .map(Annotation::bounds)
+            .reduce(|a, b| a.union(&b))?
+            .inflate(DRAW_MARGIN);
+        let region = covered.intersect(zone)?;
+        let mut drawn = self.drawn.borrow_mut();
+        let image = match drawn.as_ref() {
+            Some(d) if d.region == region && d.layers == layers => d.image.clone(),
+            _ => {
+                let image = Rc::new(render_region(&self.base, layers.iter(), &region)?);
+                *drawn = Some(Drawn {
+                    layers,
+                    region,
+                    image: image.clone(),
+                });
+                image
+            }
+        };
+        // `render_region` rounds the region outwards; the image sits at the rounded corner.
         Some((
             image,
-            Point::new(zone.x.floor().max(0.0), zone.y.floor().max(0.0)),
+            Point::new(region.x.floor().max(0.0), region.y.floor().max(0.0)),
         ))
     }
 

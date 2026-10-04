@@ -11,6 +11,16 @@ use vixeeny_editor::{
     Color, Command, Key, KeyInput, Modifiers, Point, Rect, RgbaImage, Session, Tool,
 };
 
+thread_local! {
+    /// The annotation drawing each window has as a texture (by window), to upload it once.
+    static UPLOADED: RefCell<Vec<(usize, Rc<RgbaImage>)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Identifies a window of the overlay for [`UPLOADED`].
+fn window_id(w: &EditorWindow) -> usize {
+    std::ptr::from_ref(w.window()) as usize
+}
+
 use crate::EditorWindow;
 
 /// Toolbar button index → tool. Index 12 is "crop", i.e. adjusting the zone itself.
@@ -252,6 +262,7 @@ impl Overlay {
         for w in &self.windows {
             let _ = w.hide();
         }
+        UPLOADED.with(|u| u.borrow_mut().clear());
         Ok(())
     }
 
@@ -444,36 +455,97 @@ fn wire_window(
     });
 }
 
+/// Where something that does not touch a window is put: values that never change, so the
+/// window has nothing to redraw (each redraw of each monitor's window waits for its vsync).
+const PARKED: Rect = Rect {
+    x: -100_000.0,
+    y: -100_000.0,
+    w: 0.0,
+    h: 0.0,
+};
+
+/// The part of the image `w` shows.
+fn area_of(w: &EditorWindow) -> Rect {
+    Rect::new(
+        w.get_area_x(),
+        w.get_area_y(),
+        w.get_area_w(),
+        w.get_area_h(),
+    )
+}
+
+/// `r` (with a margin for what is drawn around it) touches the window's area.
+fn shows(area: &Rect, r: &Rect, margin: f32) -> bool {
+    area.intersect(&r.inflate(margin)).is_some()
+}
+
 fn refresh_window(w: &EditorWindow, v: &vixeeny_editor::View) {
+    let area = area_of(w);
+    let u = w.get_ui_scale();
+    // The zone, its handles and its size label (above or below it).
+    let selection = v.selection.map(|r| {
+        if shows(&area, &r, 40.0 * u) {
+            r
+        } else {
+            PARKED
+        }
+    });
     w.set_dim(v.dim);
-    w.set_has_selection(v.selection.is_some());
+    w.set_has_selection(selection.is_some());
     w.set_settled(v.settled);
-    if let Some(r) = v.selection {
+    if let Some(r) = selection {
         w.set_sel_x(r.x);
         w.set_sel_y(r.y);
         w.set_sel_w(r.w);
         w.set_sel_h(r.h);
     }
-    w.set_has_hover(v.hover_window.is_some());
-    if let Some(r) = v.hover_window {
+    let hover = v.hover_window.filter(|r| shows(&area, r, 4.0));
+    w.set_has_hover(hover.is_some());
+    if let Some(r) = hover {
         w.set_hover_x(r.x);
         w.set_hover_y(r.y);
         w.set_hover_w(r.w);
         w.set_hover_h(r.h);
     }
     if let Some((text, at)) = &v.size_label {
+        let at = if selection == Some(PARKED) {
+            Point::new(PARKED.x, PARKED.y)
+        } else {
+            *at
+        };
         w.set_size_text(text.as_str().into());
         w.set_size_x(at.x);
         w.set_size_y(at.y);
     }
-    w.set_has_annotated(v.annotated.is_some());
-    if let Some((img, at)) = &v.annotated {
-        w.set_annotated(slint_image(img));
+    let annotated = v.annotated.as_ref().filter(|(img, at)| {
+        let r = Rect::new(at.x, at.y, img.width as f32, img.height as f32);
+        shows(&area, &r, 0.0)
+    });
+    w.set_has_annotated(annotated.is_some());
+    if let Some((img, at)) = annotated {
+        // The same drawing as last time: no new texture.
+        let uploaded = UPLOADED.with(|u| {
+            u.borrow()
+                .iter()
+                .any(|(id, image)| *id == window_id(w) && Rc::ptr_eq(image, img))
+        });
+        if !uploaded {
+            w.set_annotated(slint_image(img));
+            UPLOADED.with(|u| {
+                let mut u = u.borrow_mut();
+                u.retain(|(id, _)| *id != window_id(w));
+                u.push((window_id(w), img.clone()));
+            });
+        }
         w.set_annotated_x(at.x);
         w.set_annotated_y(at.y);
     }
-    w.set_has_magnifier(v.magnifier.is_some());
-    if let Some(m) = &v.magnifier {
+    let magnifier = v.magnifier.as_ref().filter(|m| {
+        let r = Rect::new(m.position.x, m.position.y, m.size, m.size + 28.0 * u);
+        shows(&area, &r, 0.0)
+    });
+    w.set_has_magnifier(magnifier.is_some());
+    if let Some(m) = magnifier {
         w.set_magnifier(slint_image(&m.pixels));
         w.set_mag_x(m.position.x);
         w.set_mag_y(m.position.y);

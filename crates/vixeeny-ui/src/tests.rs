@@ -154,6 +154,41 @@ fn a_window_shows_its_own_part_of_the_desktop() {
 }
 
 #[test]
+fn a_zone_on_one_monitor_leaves_the_other_window_unchanged() {
+    WINDOW.with(|_| ());
+    // Two monitors side by side; the zone is drawn on the left one only.
+    let session = Session::new(screen(640, 360), Vec::new());
+    let right = Screen {
+        position: (320, 0),
+        size: (320, 360),
+        area: vixeeny_editor::Rect::new(320.0, 0.0, 320.0, 360.0),
+    };
+    let o = Overlay::on_screens(session, 1.0, &[right], |_, _, _| true)
+        .unwrap_or_else(|e| panic!("{e}"));
+    let w = o.window();
+    let mods = vixeeny_editor::Modifiers::default();
+    let s = o.session();
+    s.borrow_mut()
+        .pointer_down(vixeeny_editor::Point::new(20.0, 20.0), mods);
+    s.borrow_mut()
+        .pointer_move(vixeeny_editor::Point::new(80.0, 70.0), mods);
+    o.refresh();
+    let parked = (w.get_sel_x(), w.get_sel_y(), w.get_size_x());
+    // The zone grows, still far from the right monitor: nothing changes there.
+    s.borrow_mut()
+        .pointer_move(vixeeny_editor::Point::new(150.0, 120.0), mods);
+    o.refresh();
+    assert!(w.get_has_selection());
+    assert_eq!((w.get_sel_x(), w.get_sel_y(), w.get_size_x()), parked);
+    assert!(!w.get_has_magnifier());
+    // It reaches the right monitor: the window shows it.
+    s.borrow_mut()
+        .pointer_move(vixeeny_editor::Point::new(400.0, 120.0), mods);
+    o.refresh();
+    assert_eq!(w.get_sel_x(), 20.0);
+}
+
+#[test]
 fn a_settled_zone_shows_handles_and_the_toolbar() {
     let o = overlay(900, 500, 1.0);
     {

@@ -295,6 +295,8 @@ pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
         })
         .map_err(|e| anyhow::anyhow!("cannot create the editor window: {e}"))?;
     tracing::info!("editor ready after {:?}", started.elapsed());
+    // The windows show the screen as it is: they must not zoom or fade in.
+    let _instant = vixeeny_platform::without_open_animation();
     overlay
         .run(cursor)
         .map_err(|e| anyhow::anyhow!("editor window: {e}"))?;

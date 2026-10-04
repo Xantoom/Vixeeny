@@ -9,10 +9,12 @@ use windows::Win32::Devices::Display::{
     DISPLAYCONFIG_SDR_WHITE_LEVEL, DISPLAYCONFIG_SOURCE_DEVICE_NAME, DisplayConfigGetDeviceInfo,
     GetDisplayConfigBufferSizes, QDC_ONLY_ACTIVE_PATHS, QueryDisplayConfig,
 };
-use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, POINT, RECT, TRUE};
+use windows::Win32::Foundation::{
+    CloseHandle, HANDLE, HWND, LPARAM, LRESULT, POINT, RECT, TRUE, WPARAM,
+};
 use windows::Win32::Graphics::Dwm::{
-    DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DWMWINDOWATTRIBUTE, DwmGetWindowAttribute,
-    DwmSetWindowAttribute,
+    DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DWMWA_TRANSITIONS_FORCEDISABLED,
+    DWMWINDOWATTRIBUTE, DwmGetWindowAttribute, DwmSetWindowAttribute,
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
 use windows::Win32::Graphics::Dxgi::{
@@ -22,16 +24,19 @@ use windows::Win32::Graphics::Gdi::{
     EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO, MONITORINFOEXW,
 };
 use windows::Win32::System::Threading::{
-    OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
+    GetCurrentThreadId, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+    QueryFullProcessImageNameW,
 };
 use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForMonitor, MDT_EFFECTIVE_DPI,
     SetProcessDpiAwarenessContext,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GWL_EXSTYLE, GetCursorPos, GetForegroundWindow, GetWindowLongW, GetWindowRect,
-    GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible, SetWindowDisplayAffinity,
-    SetWindowLongW, WDA_EXCLUDEFROMCAPTURE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    CWPSTRUCT, CallNextHookEx, EnumWindows, GWL_EXSTYLE, GetCursorPos, GetForegroundWindow,
+    GetWindowLongW, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, HHOOK,
+    IsWindowVisible, SetWindowDisplayAffinity, SetWindowLongW, SetWindowsHookExW,
+    UnhookWindowsHookEx, WDA_EXCLUDEFROMCAPTURE, WH_CALLWNDPROC, WM_CREATE, WS_EX_NOACTIVATE,
+    WS_EX_TOOLWINDOW,
 };
 use windows::core::{Interface, PWSTR};
 
@@ -302,6 +307,45 @@ pub fn animations_enabled() -> bool {
         )
     };
     ok.is_err() || on.as_bool()
+}
+
+/// While it lives, the windows this thread creates appear and disappear at once, without the
+/// zoom and fade of Windows (the frozen screens must look like the screen itself).
+pub struct NoOpenAnimation(HHOOK);
+
+impl Drop for NoOpenAnimation {
+    fn drop(&mut self) {
+        // SAFETY: the hook was installed by `without_open_animation` and is removed once.
+        let _ = unsafe { UnhookWindowsHookEx(self.0) };
+    }
+}
+
+/// Turns the DWM transitions off for every window this thread creates while the guard lives.
+pub fn without_open_animation() -> Option<NoOpenAnimation> {
+    unsafe extern "system" fn hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+        if code >= 0 {
+            // SAFETY: for `WH_CALLWNDPROC`, `lparam` points at the message being sent.
+            let msg = unsafe { &*(lparam.0 as *const CWPSTRUCT) };
+            if msg.message == WM_CREATE {
+                let off = TRUE;
+                // SAFETY: `off` is a live BOOL, the size the attribute wants.
+                let _ = unsafe {
+                    DwmSetWindowAttribute(
+                        msg.hwnd,
+                        DWMWA_TRANSITIONS_FORCEDISABLED,
+                        (&raw const off).cast(),
+                        std::mem::size_of_val(&off) as u32,
+                    )
+                };
+            }
+        }
+        // SAFETY: passes the message on, as every hook must.
+        unsafe { CallNextHookEx(None, code, wparam, lparam) }
+    }
+    // SAFETY: a hook for this thread only, with a procedure that lives as long as the program.
+    unsafe { SetWindowsHookExW(WH_CALLWNDPROC, Some(hook), None, GetCurrentThreadId()) }
+        .ok()
+        .map(NoOpenAnimation)
 }
 
 /// Gives one of our windows the blurred "acrylic" backdrop and rounded corners of Windows 11.

@@ -114,10 +114,20 @@ fn tools_draw_inside_the_zone_and_the_export_contains_them() {
     assert_eq!(out.pixel(25, 25), Color::rgb(0, 255, 0)); // inside the rectangle
     assert_eq!(out.pixel(2, 2), Color::rgb(255, 0, 0)); // untouched red
     assert_eq!(out.pixel(90, 2), Color::rgb(0, 0, 255)); // untouched blue
-    // the live view agrees with the export
-    let (annotated, at) = s.view().annotated.unwrap();
-    assert_eq!(at, p(20.0, 20.0));
-    assert_eq!(annotated, out);
+    // the live view agrees with the export, over what the annotation covers only
+    let view = s.view();
+    let (annotated, at) = view.annotated.clone().unwrap();
+    assert!(at.x >= 20.0 && at.y >= 20.0, "{at:?}");
+    assert!(annotated.width < out.width && annotated.height < out.height);
+    for y in 0..annotated.height {
+        for x in 0..annotated.width {
+            let (ox, oy) = (at.x as u32 - 20 + x, at.y as u32 - 20 + y);
+            assert_eq!(annotated.pixel(x, y), out.pixel(ox, oy), "at {x},{y}");
+        }
+    }
+    // nothing changed: the same drawing comes back, not a new one
+    let again = s.view().annotated.unwrap().0;
+    assert!(std::rc::Rc::ptr_eq(&annotated, &again));
 }
 
 #[test]
