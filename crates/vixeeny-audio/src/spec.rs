@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Source names as the profile writes them: `system`, `mic`, `mic:<device id or name>`,
-//! `app:<executable name>`.
+//! Source names as the profile writes them: `system`, `out:<device id or name>`, `mic`,
+//! `mic:<device id or name>`, `app:<executable name>`.
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SourceKind {
-    /// Everything the speakers play.
+    /// Everything the default speakers play.
     System,
+    /// Everything one output device plays, by device id or part of its name.
+    Output(String),
     /// A capture device; `None` = the default one.
     Microphone(Option<String>),
     /// One application (and its child processes), by executable name, e.g. `spotify.exe`.
@@ -31,6 +33,7 @@ impl SourceSpec {
             Some(("mic", id)) if !id.trim().is_empty() => {
                 SourceKind::Microphone(Some(id.trim().to_owned()))
             }
+            Some(("out", id)) if !id.trim().is_empty() => SourceKind::Output(id.trim().to_owned()),
             Some(("app", exe)) if !exe.trim().is_empty() => {
                 SourceKind::Application(exe.trim().to_owned())
             }
@@ -46,6 +49,7 @@ impl SourceSpec {
     pub fn title(&self) -> String {
         match &self.kind {
             SourceKind::System => "System".into(),
+            SourceKind::Output(_) => "Output".into(),
             SourceKind::Microphone(_) => "Micro".into(),
             SourceKind::Application(exe) => exe
                 .strip_suffix(".exe")
@@ -92,7 +96,11 @@ mod tests {
             SourceSpec::parse(" app:Spotify.exe ").unwrap().kind,
             SourceKind::Application("Spotify.exe".into())
         );
-        for bad in ["", "app:", "mic:", "speakers", "app", "sys"] {
+        assert_eq!(
+            SourceSpec::parse("out:Speakers").unwrap().kind,
+            SourceKind::Output("Speakers".into())
+        );
+        for bad in ["", "app:", "mic:", "out:", "speakers", "app", "sys"] {
             assert!(SourceSpec::parse(bad).is_none(), "{bad}");
         }
     }

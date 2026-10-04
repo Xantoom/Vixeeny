@@ -72,6 +72,19 @@ pub fn current(force: bool) -> anyhow::Result<ProbeResult> {
     )?)
 }
 
+/// The probe result if the cache already holds it (no process is started).
+pub fn cached() -> Option<ProbeResult> {
+    let path = vixeeny_common::paths::hw_cache_file()?;
+    let key = vixeeny_encode::probe::cache_key(&adapters(), env!("CARGO_PKG_VERSION"));
+    vixeeny_encode::probe::load_cache(&path, &key)
+}
+
+/// `--warm-probe`: fills the cache when it is missing, so the first recording and the settings
+/// find the answer ready. The daemon starts it in the background at launch.
+pub fn warm() -> anyhow::Result<()> {
+    current(false).map(|_| ())
+}
+
 /// `--probe-report [--force]`: a readable summary.
 pub fn report(force: bool) -> anyhow::Result<()> {
     vixeeny_platform::attach_console();

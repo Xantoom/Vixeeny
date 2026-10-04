@@ -30,7 +30,8 @@ pub use sck_audio::SckAudioSource;
 pub use spec::{SourceKind, SourceSpec, parse_sources};
 #[cfg(windows)]
 pub use wasapi::{
-    AppInfo, DeviceInfo, WasapiSource, list_applications, list_microphones, source_channels,
+    AppInfo, DeviceInfo, WasapiSource, list_applications, list_microphones, list_outputs,
+    source_channels,
 };
 
 /// Samples per second, per channel.

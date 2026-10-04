@@ -91,3 +91,11 @@ pub fn recycle(_path: &str) -> Result<()> {
 pub fn user_locale() -> Option<String> {
     None
 }
+
+pub fn system_accent() -> Option<[u8; 3]> {
+    None
+}
+
+pub fn style_window(_id: WindowId, _dark: bool, _caption: [u8; 3]) -> Result<()> {
+    Ok(())
+}

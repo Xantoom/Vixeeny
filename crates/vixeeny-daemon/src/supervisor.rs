@@ -34,6 +34,29 @@ impl ProcessSpawner {
     }
 }
 
+/// Detects the hardware encoders in the background (`vixeeny-app --warm-probe`), as soon as the
+/// daemon starts, so the settings and the first recording find the answer in the cache.
+pub fn warm_probe() {
+    let Ok(spawner) = ProcessSpawner::next_to_current_exe() else {
+        return;
+    };
+    let mut command = Command::new(&spawner.app_path);
+    command.arg("--warm-probe");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+    match command.spawn() {
+        Ok(mut child) => {
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+        }
+        Err(e) => tracing::debug!("cannot start the hardware detection: {e}"),
+    }
+}
+
 impl Spawner for ProcessSpawner {
     fn spawn(&mut self, id: SpawnId, action: ActionId, tx: EventTx) -> io::Result<()> {
         let mut child = Command::new(&self.app_path)

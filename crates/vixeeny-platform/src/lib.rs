@@ -5,9 +5,7 @@
 //! [`ensure_dpi_aware`] first, otherwise Windows hands out scaled (virtualised) values.
 
 pub mod clipboard;
-pub mod context_menu;
 mod geometry;
-pub mod native_toast;
 #[cfg(target_os = "linux")]
 pub mod notify;
 mod time;
@@ -40,6 +38,11 @@ pub use os::{
     gpu_adapters, hdr_info, monitors, monotonic_ns, open_path, recycle, set_noactivate_tool_window,
     single_instance, system_prefers_dark, top_level_windows, user_locale, window_info,
 };
+
+#[cfg(windows)]
+pub use os::{style_window, system_accent};
+#[cfg(not(windows))]
+pub use unsupported::{style_window, system_accent};
 
 #[cfg(target_os = "macos")]
 pub use os::{

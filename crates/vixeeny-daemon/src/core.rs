@@ -46,6 +46,8 @@ pub enum Effect {
     NotifyUpdate(String),
     /// Re-read `config.toml` and apply it (language, autostart…).
     ReloadConfig,
+    /// Release (`true`) or register again (`false`) the global shortcuts.
+    PauseHotkeys(bool),
     /// Leave the message loop.
     Quit,
 }
@@ -85,6 +87,9 @@ impl Core {
                 if self.recording_state() == RecState::Idle {
                     self.quit(&mut fx);
                 }
+            }
+            Event::Control(ControlRequest::PauseHotkeys(paused)) => {
+                fx.push(Effect::PauseHotkeys(paused));
             }
             Event::Control(ControlRequest::Ping) => {}
             Event::Control(ControlRequest::Action(action)) => self.run(action, &mut fx),

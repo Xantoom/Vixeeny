@@ -5,14 +5,17 @@
 //!
 //! No UI and no OS code here, so all of it is tested on any machine.
 
+pub mod encoders;
+mod pages;
 pub mod profiles;
 pub mod shortcuts;
 
-use std::sync::LazyLock;
-
 use vixeeny_common::config::{Config, Profile};
 use vixeeny_common::i18n::{Key, Lang, tr};
-use vixeeny_encode::registry::{Platform, Registry};
+use vixeeny_encode::probe::ProbeResult;
+use vixeeny_encode::registry::Platform;
+
+pub use encoders::{EncoderInfo, param_label};
 
 /// The sections of the settings window, in the order of the sidebar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,12 +32,11 @@ pub enum Section {
     Profiles,
     Hardware,
     Updates,
-    Integration,
     About,
 }
 
 impl Section {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 13] = [
         Self::Gallery,
         Self::General,
         Self::Shortcuts,
@@ -47,7 +49,6 @@ impl Section {
         Self::Profiles,
         Self::Hardware,
         Self::Updates,
-        Self::Integration,
         Self::About,
     ];
 
@@ -65,7 +66,6 @@ impl Section {
             Self::Profiles => Key::SecProfiles,
             Self::Hardware => Key::SecHardware,
             Self::Updates => Key::SecUpdates,
-            Self::Integration => Key::SecIntegration,
             Self::About => Key::SecAbout,
         }
     }
@@ -105,8 +105,17 @@ pub struct Opt {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Kind {
     Toggle,
+    /// A drop-down list.
     Choice(Vec<Opt>),
+    /// Two or three choices side by side.
+    Segmented(Vec<Opt>),
     Number {
+        min: i64,
+        max: i64,
+        step: i64,
+    },
+    /// A number on a slider.
+    Slider {
         min: i64,
         max: i64,
         step: i64,
@@ -115,6 +124,8 @@ pub enum Kind {
     Folder,
     /// Read-only.
     Info,
+    /// A title that groups the rows under it; nothing to edit.
+    Header,
 }
 
 /// The value was refused (not one of the choices, not a number, empty where it must not be).
@@ -123,14 +134,17 @@ pub struct Invalid;
 
 type Get = Box<dyn Fn(&Config) -> Value>;
 type Set = Box<dyn Fn(&mut Config, Value) -> Result<(), Invalid>>;
+type Enabled = Box<dyn Fn(&Config) -> bool>;
 
 pub struct Row {
-    pub id: &'static str,
+    pub id: String,
     pub label: String,
+    /// A line of explanation under the label (empty = none).
+    pub hint: String,
     pub kind: Kind,
     get: Get,
     set: Set,
-    enabled: fn(&Config) -> bool,
+    enabled: Enabled,
 }
 
 impl Row {
@@ -141,7 +155,7 @@ impl Row {
     /// Greyed out (a setting that does not apply with the others, like the amount of a split
     /// that is off).
     pub fn enabled(&self, config: &Config) -> bool {
-        self.kind != Kind::Info && (self.enabled)(config)
+        !matches!(self.kind, Kind::Info | Kind::Header) && (self.enabled)(config)
     }
 
     /// Checks `value` against the kind of the row, then writes it. Numbers are brought into
@@ -149,13 +163,16 @@ impl Row {
     pub fn apply(&self, config: &mut Config, value: Value) -> Result<(), Invalid> {
         let value = match (&self.kind, value) {
             (Kind::Toggle, v @ Value::Bool(_)) => v,
-            (Kind::Choice(options), Value::Text(t)) => {
+            (Kind::Choice(options) | Kind::Segmented(options), Value::Text(t)) => {
                 if !options.iter().any(|o| o.value == t) {
                     return Err(Invalid);
                 }
                 Value::Text(t)
             }
-            (Kind::Number { min, max, step }, Value::Int(n)) => {
+            (
+                Kind::Number { min, max, step } | Kind::Slider { min, max, step },
+                Value::Int(n),
+            ) => {
                 let step = (*step).max(1);
                 let snapped = (n.clamp(*min, *max) - min + step / 2) / step * step + min;
                 Value::Int(snapped.clamp(*min, *max))
@@ -167,32 +184,57 @@ impl Row {
     }
 }
 
+/// An output device, microphone or program that can be recorded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AudioEntry {
+    /// The device id, or the executable name of a program.
+    pub id: String,
+    pub name: String,
+}
+
+/// What the audio page offers to record (filled by the host, which asks the OS).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AudioDevices {
+    pub outputs: Vec<AudioEntry>,
+    pub inputs: Vec<AudioEntry>,
+    pub programs: Vec<AudioEntry>,
+}
+
 /// What the rows need to know about this machine.
 #[derive(Debug, Clone)]
 pub struct Env {
     pub lang: Lang,
-    /// `(id, name)` of the encoders of this platform.
-    pub encoders: Vec<(String, String)>,
+    /// The encoders of this platform, best first within each kind.
+    pub encoders: Vec<EncoderInfo>,
+    /// The hardware probe, once it has run.
+    pub probe: Option<ProbeResult>,
+    /// The probe is running (the hardware encoders are not known yet).
+    pub detecting: bool,
+    pub audio: AudioDevices,
     pub version: String,
 }
 
-static REGISTRY: LazyLock<Option<Registry>> = LazyLock::new(|| Registry::builtin().ok());
-
 impl Env {
     pub fn new(lang: Lang, version: &str) -> Self {
-        let encoders = REGISTRY
-            .as_ref()
-            .map(|r| {
-                r.for_platform(Platform::current())
-                    .map(|e| (e.id.clone(), e.display_name.clone()))
-                    .collect()
-            })
-            .unwrap_or_default();
         Self {
             lang,
-            encoders,
+            encoders: encoders::for_platform(Platform::current()),
+            probe: None,
+            detecting: false,
+            audio: AudioDevices::default(),
             version: version.to_owned(),
         }
+    }
+
+    pub fn with_probe(mut self, probe: Option<ProbeResult>, detecting: bool) -> Self {
+        self.probe = probe;
+        self.detecting = detecting;
+        self
+    }
+
+    pub fn with_audio(mut self, audio: AudioDevices) -> Self {
+        self.audio = audio;
+        self
     }
 
     fn t(&self, key: Key) -> String {
@@ -215,76 +257,97 @@ fn always(_: &Config) -> bool {
     true
 }
 
+fn row(id: impl Into<String>, label: String, kind: Kind, get: Get, set: Set) -> Row {
+    Row {
+        id: id.into(),
+        label,
+        hint: String::new(),
+        kind,
+        get,
+        set,
+        enabled: Box::new(always),
+    }
+}
+
 fn toggle(
-    id: &'static str,
+    id: &str,
     label: String,
     get: fn(&Config) -> bool,
     set: fn(&mut Config, bool),
 ) -> Row {
-    Row {
+    row(
         id,
         label,
-        kind: Kind::Toggle,
-        get: Box::new(move |c| Value::Bool(get(c))),
-        set: Box::new(move |c, v| match v {
+        Kind::Toggle,
+        Box::new(move |c| Value::Bool(get(c))),
+        Box::new(move |c, v| match v {
             Value::Bool(b) => {
                 set(c, b);
                 Ok(())
             }
             _ => Err(Invalid),
         }),
-        enabled: always,
-    }
+    )
 }
 
 fn number(
-    id: &'static str,
+    id: &str,
     label: String,
     (min, max, step): (i64, i64, i64),
     get: fn(&Config) -> i64,
     set: fn(&mut Config, i64),
 ) -> Row {
-    Row {
+    row(
         id,
         label,
-        kind: Kind::Number { min, max, step },
-        get: Box::new(move |c| Value::Int(get(c))),
-        set: Box::new(move |c, v| match v {
+        Kind::Number { min, max, step },
+        Box::new(move |c| Value::Int(get(c))),
+        Box::new(move |c, v| match v {
             Value::Int(n) => {
                 set(c, n);
                 Ok(())
             }
             _ => Err(Invalid),
         }),
-        enabled: always,
-    }
+    )
+}
+
+fn slider(
+    id: &str,
+    label: String,
+    (min, max, step): (i64, i64, i64),
+    get: fn(&Config) -> i64,
+    set: fn(&mut Config, i64),
+) -> Row {
+    let mut r = number(id, label, (min, max, step), get, set);
+    r.kind = Kind::Slider { min, max, step };
+    r
 }
 
 fn text_like(
     kind: Kind,
-    id: &'static str,
+    id: &str,
     label: String,
     get: fn(&Config) -> String,
     set: fn(&mut Config, String),
 ) -> Row {
-    Row {
+    row(
         id,
         label,
         kind,
-        get: Box::new(move |c| Value::Text(get(c))),
-        set: Box::new(move |c, v| match v {
+        Box::new(move |c| Value::Text(get(c))),
+        Box::new(move |c, v| match v {
             Value::Text(t) => {
                 set(c, t);
                 Ok(())
             }
             _ => Err(Invalid),
         }),
-        enabled: always,
-    }
+    )
 }
 
 fn choice(
-    id: &'static str,
+    id: &str,
     label: String,
     options: Vec<Opt>,
     get: fn(&Config) -> String,
@@ -293,17 +356,22 @@ fn choice(
     text_like(Kind::Choice(options), id, label, get, set)
 }
 
-fn text(
-    id: &'static str,
+fn segmented(
+    id: &str,
     label: String,
+    options: Vec<Opt>,
     get: fn(&Config) -> String,
     set: fn(&mut Config, String),
 ) -> Row {
+    text_like(Kind::Segmented(options), id, label, get, set)
+}
+
+fn text(id: &str, label: String, get: fn(&Config) -> String, set: fn(&mut Config, String)) -> Row {
     text_like(Kind::Text, id, label, get, set)
 }
 
 fn folder(
-    id: &'static str,
+    id: &str,
     label: String,
     get: fn(&Config) -> String,
     set: fn(&mut Config, String),
@@ -312,34 +380,52 @@ fn folder(
 }
 
 fn when(mut row: Row, enabled: fn(&Config) -> bool) -> Row {
-    row.enabled = enabled;
+    row.enabled = Box::new(enabled);
     row
 }
 
-fn info(id: &'static str, label: String, value: String) -> Row {
-    Row {
-        id,
-        label,
-        kind: Kind::Info,
-        get: Box::new(move |_| Value::Text(value.clone())),
-        set: Box::new(|_, _| Err(Invalid)),
-        enabled: always,
-    }
+fn when_boxed(mut row: Row, enabled: impl Fn(&Config) -> bool + 'static) -> Row {
+    row.enabled = Box::new(enabled);
+    row
 }
 
-fn info_of(id: &'static str, label: String, get: fn(&Config) -> String) -> Row {
-    Row {
+fn hinted(mut row: Row, hint: String) -> Row {
+    row.hint = hint;
+    row
+}
+
+fn header(id: &str, label: String) -> Row {
+    row(
         id,
         label,
-        kind: Kind::Info,
-        get: Box::new(move |c| Value::Text(get(c))),
-        set: Box::new(|_, _| Err(Invalid)),
-        enabled: always,
-    }
+        Kind::Header,
+        Box::new(|_| Value::Text(String::new())),
+        Box::new(|_, _| Err(Invalid)),
+    )
+}
+
+fn info(id: &str, label: String, value: String) -> Row {
+    row(
+        id,
+        label,
+        Kind::Info,
+        Box::new(move |_| Value::Text(value.clone())),
+        Box::new(|_, _| Err(Invalid)),
+    )
+}
+
+fn info_of(id: &str, label: String, get: fn(&Config) -> String) -> Row {
+    row(
+        id,
+        label,
+        Kind::Info,
+        Box::new(move |c| Value::Text(get(c))),
+        Box::new(|_, _| Err(Invalid)),
+    )
 }
 
 /// The profile the video and audio rows edit: `video.profile`, created on first write.
-trait Current {
+pub(crate) trait Current {
     fn cur(&self) -> Profile;
     fn cur_mut(&mut self) -> &mut Profile;
 }
@@ -358,21 +444,6 @@ impl Current for Config {
     }
 }
 
-/// `off`, `size:<MB>` or `duration:<minutes>` → (kind, amount).
-fn split_parts(mode: &str) -> (&str, i64) {
-    match mode.split_once(':') {
-        Some((kind @ ("size" | "duration"), n)) => (kind, n.parse().unwrap_or(0)),
-        _ => ("off", 0),
-    }
-}
-
-fn split_join(kind: &str, amount: i64) -> String {
-    match kind {
-        "size" | "duration" => format!("{kind}:{}", amount.max(1)),
-        _ => "off".into(),
-    }
-}
-
 fn list(items: &[String]) -> String {
     items.join(", ")
 }
@@ -385,528 +456,35 @@ fn unlist(text: &str) -> Vec<String> {
         .collect()
 }
 
-fn app_names_text(c: &Config) -> String {
-    c.paths
-        .app_names
-        .iter()
-        .map(|(exe, name)| format!("{exe}={name}"))
-        .collect::<Vec<_>>()
-        .join("; ")
-}
-
-fn parse_app_names(text: &str) -> std::collections::BTreeMap<String, String> {
-    text.split(';')
-        .filter_map(|pair| pair.split_once('='))
-        .map(|(exe, name)| (exe.trim().to_owned(), name.trim().to_owned()))
-        .filter(|(exe, name)| !exe.is_empty() && !name.is_empty())
-        .collect()
-}
-
 /// The rows of a section (empty for the sections that have a page of their own).
-#[allow(clippy::too_many_lines)]
 pub fn rows(section: Section, env: &Env, config: &Config) -> Vec<Row> {
-    let t = |k| env.t(k);
     match section {
-        Section::General => vec![
-            choice(
-                "language",
-                t(Key::SetLanguage),
-                vec![
-                    opt("auto", t(Key::SetLangAuto)),
-                    opt("fr", "Français"),
-                    opt("en", "English"),
-                ],
-                |c| c.general.language.clone(),
-                |c, v| c.general.language = v,
-            ),
-            choice(
-                "theme",
-                t(Key::SetTheme),
-                vec![
-                    opt("system", t(Key::SetThemeSystem)),
-                    opt("light", t(Key::SetThemeLight)),
-                    opt("dark", t(Key::SetThemeDark)),
-                ],
-                |c| c.general.theme.clone(),
-                |c, v| c.general.theme = v,
-            ),
-            toggle(
-                "autostart",
-                t(Key::SetAutostart),
-                |c| c.general.autostart,
-                |c, v| c.general.autostart = v,
-            ),
-            number(
-                "idle_exit",
-                t(Key::SetIdleExit),
-                (0, 600, 5),
-                |c| i64::from(c.general.app_idle_exit_seconds),
-                |c, v| c.general.app_idle_exit_seconds = v as u32,
-            ),
-            toggle(
-                "sounds",
-                t(Key::SetSounds),
-                |c| c.general.sounds,
-                |c, v| c.general.sounds = v,
-            ),
-            toggle(
-                "notifications",
-                t(Key::SetNotifications),
-                |c| c.general.notifications,
-                |c, v| c.general.notifications = v,
-            ),
-            choice(
-                "notif_style",
-                t(Key::SetNotifStyle),
-                vec![
-                    opt("native", t(Key::SetNotifNative)),
-                    opt("card", t(Key::SetNotifCard)),
-                ],
-                |c| c.general.notification_style.clone(),
-                |c, v| c.general.notification_style = v,
-            ),
-            choice(
-                "overlay_edge",
-                t(Key::SetOverlayEdge),
-                vec![
-                    opt("left", t(Key::SetEdgeLeft)),
-                    opt("right", t(Key::SetEdgeRight)),
-                    opt("top", t(Key::SetEdgeTop)),
-                    opt("bottom", t(Key::SetEdgeBottom)),
-                ],
-                |c| c.overlay.edge.clone(),
-                |c, v| c.overlay.edge = v,
-            ),
-            toggle(
-                "widget",
-                t(Key::SetWidget),
-                |c| c.recording_widget.enabled,
-                |c, v| c.recording_widget.enabled = v,
-            ),
-            when(
-                choice(
-                    "widget_corner",
-                    t(Key::SetWidgetCorner),
-                    vec![
-                        opt("top_left", t(Key::SetCornerTl)),
-                        opt("top_right", t(Key::SetCornerTr)),
-                        opt("bottom_left", t(Key::SetCornerBl)),
-                        opt("bottom_right", t(Key::SetCornerBr)),
-                    ],
-                    |c| c.recording_widget.corner.clone(),
-                    |c, v| c.recording_widget.corner = v,
-                ),
-                |c| c.recording_widget.enabled,
-            ),
-            when(
-                toggle(
-                    "widget_hide",
-                    t(Key::SetWidgetHide),
-                    |c| c.recording_widget.auto_hide,
-                    |c, v| c.recording_widget.auto_hide = v,
-                ),
-                |c| c.recording_widget.enabled,
-            ),
-        ],
-        Section::Images => vec![
-            choice(
-                "image_format",
-                t(Key::SetImageFormat),
-                raw(&["png", "jpeg", "webp", "avif", "jxl"]),
-                |c| c.image.format.clone(),
-                |c, v| c.image.format = v,
-            ),
-            toggle(
-                "image_cursor",
-                t(Key::SetShowCursor),
-                |c| c.image.show_cursor,
-                |c, v| c.image.show_cursor = v,
-            ),
-            choice(
-                "image_hdr",
-                t(Key::SetHdr),
-                vec![
-                    opt("tonemap_sdr", t(Key::SetHdrTonemap)),
-                    opt("keep_hdr", t(Key::SetHdrKeep)),
-                ],
-                |c| c.image.hdr.clone(),
-                |c, v| c.image.hdr = v,
-            ),
-            toggle(
-                "clipboard",
-                t(Key::SetCopyClipboard),
-                |c| c.image.copy_to_clipboard,
-                |c, v| c.image.copy_to_clipboard = v,
-            ),
-            when(
-                number(
-                    "jpeg_quality",
-                    t(Key::SetJpegQuality),
-                    (1, 100, 1),
-                    |c| i64::from(c.image.jpeg.quality),
-                    |c, v| c.image.jpeg.quality = v as u8,
-                ),
-                |c| c.image.format == "jpeg",
-            ),
-            when(
-                choice(
-                    "jpeg_chroma",
-                    t(Key::SetJpegChroma),
-                    raw(&["444", "420"]),
-                    |c| c.image.jpeg.chroma.clone(),
-                    |c, v| c.image.jpeg.chroma = v,
-                ),
-                |c| c.image.format == "jpeg",
-            ),
-            when(
-                number(
-                    "avif_quality",
-                    t(Key::SetAvifQuality),
-                    (0, 100, 1),
-                    |c| i64::from(c.image.avif.quality),
-                    |c, v| c.image.avif.quality = v as u8,
-                ),
-                |c| c.image.format == "avif",
-            ),
-            when(
-                choice(
-                    "avif_depth",
-                    t(Key::SetAvifDepth),
-                    raw(&["8", "10"]),
-                    |c| c.image.avif.depth.to_string(),
-                    |c, v| c.image.avif.depth = v.parse().unwrap_or(10),
-                ),
-                |c| c.image.format == "avif",
-            ),
-            number(
-                "dim",
-                t(Key::SetDim),
-                (0, 90, 5),
-                |c| i64::from(c.editor.dim_percent),
-                |c, v| c.editor.dim_percent = v as u8,
-            ),
-            number(
-                "scroll_max",
-                t(Key::SetScrollMax),
-                (1_000, 100_000, 1_000),
-                |c| i64::from(c.scrolling.max_height),
-                |c, v| c.scrolling.max_height = v as u32,
-            ),
-            toggle(
-                "scroll_annotate",
-                t(Key::SetScrollAnnotate),
-                |c| c.scrolling.annotate,
-                |c, v| c.scrolling.annotate = v,
-            ),
-        ],
-        Section::Video => {
-            let mut encoders = vec![opt("auto", t(Key::SetEncoderAuto))];
-            encoders.extend(env.encoders.iter().map(|(id, name)| opt(id, name.as_str())));
-            vec![
-                info_of("editing", t(Key::SetEditing), |c| c.video.profile.clone()),
-                choice(
-                    "encoder",
-                    t(Key::SetEncoder),
-                    encoders,
-                    |c| c.cur().encoder,
-                    |c, v| c.cur_mut().encoder = v,
-                ),
-                choice(
-                    "container",
-                    t(Key::SetContainer),
-                    raw(&["mp4_hybrid", "mp4_fragmented", "mkv", "webm"]),
-                    |c| c.cur().container,
-                    |c, v| c.cur_mut().container = v,
-                ),
-                choice(
-                    "resolution",
-                    t(Key::SetResolution),
-                    vec![
-                        opt("source", t(Key::SetResSource)),
-                        opt("2160p", "2160p"),
-                        opt("1440p", "1440p"),
-                        opt("1080p", "1080p"),
-                        opt("720p", "720p"),
-                        opt("480p", "480p"),
-                    ],
-                    |c| c.cur().resolution,
-                    |c, v| c.cur_mut().resolution = v,
-                ),
-                choice(
-                    "fps",
-                    t(Key::SetFps),
-                    raw(&["24", "30", "60", "90", "120", "144", "240"]),
-                    |c| c.cur().fps.to_string(),
-                    |c, v| c.cur_mut().fps = v.parse().unwrap_or(60),
-                ),
-                choice(
-                    "depth",
-                    t(Key::SetDepth),
-                    raw(&["8", "10"]),
-                    |c| c.cur().depth.to_string(),
-                    |c, v| c.cur_mut().depth = v.parse().unwrap_or(8),
-                ),
-                choice(
-                    "chroma",
-                    t(Key::SetChroma),
-                    raw(&["420", "422", "444"]),
-                    |c| c.cur().chroma,
-                    |c, v| c.cur_mut().chroma = v,
-                ),
-                choice(
-                    "hdr",
-                    t(Key::SetHdr),
-                    vec![
-                        opt("tonemap_sdr", t(Key::SetHdrTonemap)),
-                        opt("keep_hdr", t(Key::SetHdrKeep)),
-                    ],
-                    |c| c.cur().hdr,
-                    |c, v| c.cur_mut().hdr = v,
-                ),
-                choice(
-                    "preset",
-                    t(Key::SetPreset),
-                    vec![
-                        opt("quality", t(Key::SetPresetQuality)),
-                        opt("balanced", t(Key::SetPresetBalanced)),
-                        opt("performance", t(Key::SetPresetPerformance)),
-                        opt("small", t(Key::SetPresetSmall)),
-                    ],
-                    |c| c.cur().preset,
-                    |c, v| c.cur_mut().preset = v,
-                ),
-                toggle(
-                    "video_cursor",
-                    t(Key::SetShowCursor),
-                    |c| c.cur().show_cursor,
-                    |c, v| c.cur_mut().show_cursor = v,
-                ),
-                toggle(
-                    "vfr",
-                    t(Key::SetVfr),
-                    |c| c.cur().vfr,
-                    |c, v| c.cur_mut().vfr = v,
-                ),
-                choice(
-                    "split",
-                    t(Key::SetSplit),
-                    vec![
-                        opt("off", t(Key::SetSplitOff)),
-                        opt("size", t(Key::SetSplitSize)),
-                        opt("duration", t(Key::SetSplitDuration)),
-                    ],
-                    |c| split_parts(&c.cur().split.mode).0.to_owned(),
-                    |c, v| {
-                        let amount = split_parts(&c.cur().split.mode).1;
-                        let amount = if amount > 0 {
-                            amount
-                        } else if v == "size" {
-                            2_048
-                        } else {
-                            10
-                        };
-                        c.cur_mut().split.mode = split_join(&v, amount);
-                    },
-                ),
-                when(
-                    number(
-                        "split_amount",
-                        t(if split_parts(&config.cur().split.mode).0 == "duration" {
-                            Key::SetSplitMinutes
-                        } else {
-                            Key::SetSplitSizeMb
-                        }),
-                        (1, 1_000_000, 1),
-                        |c| split_parts(&c.cur().split.mode).1,
-                        |c, v| {
-                            let kind = split_parts(&c.cur().split.mode).0.to_owned();
-                            c.cur_mut().split.mode = split_join(&kind, v);
-                        },
-                    ),
-                    |c| split_parts(&c.cur().split.mode).0 != "off",
-                ),
-            ]
-        }
-        Section::Audio => vec![
-            choice(
-                "audio_routing",
-                t(Key::SetAudioRouting),
-                vec![
-                    opt("one_track_per_source", t(Key::SetRouteEach)),
-                    opt("mix_all", t(Key::SetRouteMix)),
-                    opt("advanced", t(Key::SetRouteAdvanced)),
-                ],
-                |c| c.cur().audio.routing,
-                |c, v| c.cur_mut().audio.routing = v,
-            ),
-            text(
-                "audio_sources",
-                t(Key::SetAudioSources),
-                |c| list(&c.cur().audio.sources),
-                |c, v| c.cur_mut().audio.sources = unlist(&v),
-            ),
-            choice(
-                "audio_codec",
-                t(Key::SetAudioCodec),
-                raw(&["auto", "aac", "opus", "flac", "pcm16", "pcm24"]),
-                |c| c.cur().audio.codec,
-                |c, v| c.cur_mut().audio.codec = v,
-            ),
-            number(
-                "audio_bitrate",
-                t(Key::SetAudioBitrate),
-                (32, 512, 16),
-                |c| i64::from(c.cur().audio.bitrate_kbps),
-                |c, v| c.cur_mut().audio.bitrate_kbps = v as u32,
-            ),
-            toggle(
-                "audio_vbr",
-                t(Key::SetAudioVbr),
-                |c| c.cur().audio.vbr,
-                |c, v| c.cur_mut().audio.vbr = v,
-            ),
-            toggle(
-                "audio_surround",
-                t(Key::SetAudioSurround),
-                |c| c.cur().audio.surround,
-                |c, v| c.cur_mut().audio.surround = v,
-            ),
-            toggle(
-                "audio_denoise",
-                t(Key::SetAudioDenoise),
-                |c| c.cur().audio.mic_noise_reduction,
-                |c, v| c.cur_mut().audio.mic_noise_reduction = v,
-            ),
-        ],
-        Section::Replay => {
-            let mut profiles = vec![opt("", t(Key::SetSameAsRecording))];
-            profiles.extend(config.profiles.keys().map(|name| opt(name, name.as_str())));
-            vec![
-                toggle(
-                    "replay_start",
-                    t(Key::SetReplayStart),
-                    |c| c.replay.enabled_on_start,
-                    |c, v| c.replay.enabled_on_start = v,
-                ),
-                number(
-                    "replay_duration",
-                    t(Key::SetReplayDuration),
-                    (5, 1_200, 5),
-                    |c| i64::from(c.replay.duration_seconds),
-                    |c, v| c.replay.duration_seconds = v as u32,
-                ),
-                choice(
-                    "replay_storage",
-                    t(Key::SetReplayStorage),
-                    vec![
-                        opt("ram", t(Key::SetStorageRam)),
-                        opt("disk", t(Key::SetStorageDisk)),
-                    ],
-                    |c| c.replay.storage.clone(),
-                    |c, v| c.replay.storage = v,
-                ),
-                choice(
-                    "replay_profile",
-                    t(Key::SetReplayProfile),
-                    profiles,
-                    |c| c.replay.profile.clone(),
-                    |c, v| c.replay.profile = v,
-                ),
-            ]
-        }
-        Section::Folders => vec![
-            folder(
-                "dir_images",
-                t(Key::SetDirImages),
-                |c| c.paths.images.clone(),
-                |c, v| c.paths.images = v,
-            ),
-            folder(
-                "dir_videos",
-                t(Key::SetDirVideos),
-                |c| c.paths.videos.clone(),
-                |c, v| c.paths.videos = v,
-            ),
-            folder(
-                "dir_replays",
-                t(Key::SetDirReplays),
-                |c| c.paths.replays.clone(),
-                |c, v| c.paths.replays = v,
-            ),
-            text(
-                "template",
-                t(Key::SetTemplate),
-                |c| c.paths.filename_template.clone(),
-                |c, v| {
-                    if !v.is_empty() {
-                        c.paths.filename_template = v;
-                    }
-                },
-            ),
-            toggle(
-                "sub_images",
-                t(Key::SetSubImages),
-                |c| c.paths.per_app_subfolder.images,
-                |c, v| c.paths.per_app_subfolder.images = v,
-            ),
-            toggle(
-                "sub_videos",
-                t(Key::SetSubVideos),
-                |c| c.paths.per_app_subfolder.videos,
-                |c, v| c.paths.per_app_subfolder.videos = v,
-            ),
-            toggle(
-                "sub_replays",
-                t(Key::SetSubReplays),
-                |c| c.paths.per_app_subfolder.replays,
-                |c, v| c.paths.per_app_subfolder.replays = v,
-            ),
-            toggle(
-                "foreground_app",
-                t(Key::SetForegroundApp),
-                |c| c.paths.use_foreground_app,
-                |c, v| c.paths.use_foreground_app = v,
-            ),
-            text("app_names", t(Key::SetAppNames), app_names_text, |c, v| {
-                c.paths.app_names = parse_app_names(&v)
-            }),
-        ],
-        Section::Ocr => vec![text(
-            "ocr_languages",
-            t(Key::SetOcrLanguages),
-            |c| list(&c.ocr.languages),
-            |c, v| {
-                let languages = unlist(&v);
-                c.ocr.languages = if languages.is_empty() {
-                    vec!["auto".into()]
-                } else {
-                    languages
-                };
-            },
-        )],
-        Section::Updates => vec![
-            toggle(
-                "check_updates",
-                t(Key::SetCheckUpdates),
-                |c| c.general.check_updates,
-                |c, v| c.general.check_updates = v,
-            ),
-            info("version", t(Key::SetVersion), env.version.clone()),
-        ],
+        Section::General => pages::general(env),
+        Section::Images => pages::images(env),
+        Section::Video => pages::video(env, config),
+        Section::Audio => pages::audio(env, config),
+        Section::Replay => pages::replay(env, config),
+        Section::Folders => pages::folders(env),
+        Section::Ocr => pages::ocr(env),
+        Section::Updates => pages::updates(env),
         _ => Vec::new(),
     }
 }
 
-/// Sets every row of `section` back to its default. The shortcuts and profile pages reset
+/// Sets every row of `section` back to its defaults. The shortcuts and profile pages reset
 /// through their own modules.
 pub fn reset(section: Section, env: &Env, config: &mut Config) {
     let defaults = Config::default();
     for row in rows(section, env, config) {
-        if row.kind == Kind::Info {
+        if matches!(row.kind, Kind::Info | Kind::Header) {
             continue;
         }
         let value = row.value(&defaults);
         let _ = row.apply(config, value);
+    }
+    if section == Section::Video {
+        // The options of the custom preset are not rows of the defaults.
+        config.cur_mut().params.clear();
     }
     if section == Section::Shortcuts {
         config.hotkeys = defaults.hotkeys;
@@ -915,7 +493,10 @@ pub fn reset(section: Section, env: &Env, config: &mut Config) {
 
 /// Things wrong with the current video settings, for the user to read (empty when fine).
 pub fn video_problems(config: &Config, source: (u32, u32)) -> Vec<String> {
+    use vixeeny_encode::registry::Registry;
     use vixeeny_encode::validate::{Context, Severity, validate};
+    static REGISTRY: std::sync::LazyLock<Option<Registry>> =
+        std::sync::LazyLock::new(|| Registry::builtin().ok());
     let Some(registry) = REGISTRY.as_ref() else {
         return Vec::new();
     };
@@ -958,11 +539,14 @@ mod tests {
         let config = Config::default();
         for section in Section::ALL {
             let rows = rows(section, &env(), &config);
-            let mut ids: Vec<_> = rows.iter().map(|r| r.id).collect();
+            let mut ids: Vec<_> = rows.iter().map(|r| r.id.clone()).collect();
             ids.sort_unstable();
             ids.dedup();
             assert_eq!(ids.len(), rows.len(), "{section:?}");
-            for row in rows.iter().filter(|r| r.kind != Kind::Info) {
+            for row in rows.iter().filter(|r| !matches!(r.kind, Kind::Info | Kind::Header)) {
+                if matches!(&row.kind, Kind::Choice(o) if o.is_empty()) {
+                    continue; // no hardware encoder known yet
+                }
                 let mut copy = config.clone();
                 let value = row.value(&config);
                 row.apply(&mut copy, value.clone())
@@ -1131,9 +715,163 @@ mod tests {
         let c = Config::default();
         let fr = Env::new(Lang::Fr, "1");
         let en = env();
-        assert_eq!(rows(Section::General, &fr, &c)[0].label, "Langue");
-        assert_eq!(rows(Section::General, &en, &c)[0].label, "Language");
+        assert_eq!(rows(Section::General, &fr, &c)[1].label, "Langue");
+        assert_eq!(rows(Section::General, &en, &c)[1].label, "Language");
         assert!(!fr.encoders.is_empty() || cfg!(not(any(windows, unix))));
+    }
+
+    fn with_nvenc() -> Env {
+        use vixeeny_encode::probe::{EncoderProbe, FormatProbe, ProbeResult};
+        use vixeeny_encode::registry::Chroma;
+        let probe = ProbeResult {
+            encoders: vec![EncoderProbe {
+                id: "nvenc_h264".into(),
+                adapter: Some(0),
+                formats: vec![FormatProbe {
+                    depth: 8,
+                    chroma: Chroma::C420,
+                    uhd: true,
+                    hdr: false,
+                }],
+            }],
+            ..ProbeResult::default()
+        };
+        env().with_probe(Some(probe), false)
+    }
+
+    fn encoder_options(rows_: &[Row]) -> Vec<String> {
+        let Kind::Choice(options) = &row(rows_, "encoder").kind else {
+            panic!("not a choice")
+        };
+        options.iter().map(|o| o.value.clone()).collect()
+    }
+
+    #[test]
+    fn the_encoders_listed_are_the_ones_of_the_chosen_kind_that_exist_here() {
+        if !cfg!(any(windows, target_os = "linux")) {
+            return; // NVENC is not an encoder of this platform
+        }
+        let mut c = Config::default();
+        // Hardware by default; nothing listed before the probe has run.
+        assert!(encoder_options(&rows(Section::Video, &env(), &c)).is_empty());
+        let e = with_nvenc();
+        let video = rows(Section::Video, &e, &c);
+        assert_eq!(encoder_options(&video), ["nvenc_h264"]);
+        // `auto` shows the encoder it resolves to.
+        assert_eq!(
+            row(&video, "encoder").value(&c),
+            Value::Text("nvenc_h264".into())
+        );
+        // Software lists the software encoders only, and resets the choice.
+        row(&video, "encoder_kind")
+            .apply(&mut c, Value::Text("software".into()))
+            .unwrap();
+        let video = rows(Section::Video, &e, &c);
+        let software = encoder_options(&video);
+        assert!(software.contains(&"libx264".to_owned()));
+        assert!(!software.contains(&"nvenc_h264".to_owned()));
+        assert_eq!(c.cur().encoder, "auto");
+    }
+
+    #[test]
+    fn ten_bit_needs_an_encoder_that_can_do_it() {
+        let mut c = Config::default();
+        c.cur_mut().encoder_kind = "software".into();
+        let video = rows(Section::Video, &env(), &c);
+        assert!(row(&video, "ten_bit").enabled(&c));
+        row(&video, "ten_bit")
+            .apply(&mut c, Value::Bool(true))
+            .unwrap();
+        assert_eq!(c.cur().depth, 10);
+        if cfg!(any(windows, target_os = "linux")) {
+            // The only probed hardware encoder does 8-bit only.
+            let mut hw = Config::default();
+            let video = rows(Section::Video, &with_nvenc(), &hw);
+            assert!(!row(&video, "ten_bit").enabled(&hw));
+            hw.cur_mut().depth = 8;
+        }
+    }
+
+    #[test]
+    fn hdr_is_one_switch() {
+        let mut c = Config::default();
+        let images = rows(Section::Images, &env(), &c);
+        let hdr = row(&images, "image_hdr");
+        assert_eq!(hdr.value(&c), Value::Bool(false));
+        assert_eq!(c.image.hdr, "tonemap_sdr");
+        hdr.apply(&mut c, Value::Bool(true)).unwrap();
+        assert_eq!(c.image.hdr, "keep_hdr");
+        let video = rows(Section::Video, &env(), &c);
+        row(&video, "hdr").apply(&mut c, Value::Bool(true)).unwrap();
+        assert_eq!(c.cur().hdr, "keep_hdr");
+        row(&video, "hdr").apply(&mut c, Value::Bool(false)).unwrap();
+        assert_eq!(c.cur().hdr, "tonemap_sdr");
+    }
+
+    #[test]
+    fn presets_are_best_quality_light_or_custom_and_custom_shows_the_encoder_options() {
+        let mut c = Config::default();
+        c.cur_mut().encoder_kind = "software".into();
+        let ids = |c: &Config| -> Vec<String> {
+            rows(Section::Video, &env(), c)
+                .into_iter()
+                .map(|r| r.id)
+                .collect()
+        };
+        assert!(!ids(&c).iter().any(|i| i.starts_with("p:")));
+        // Older presets are shown as custom.
+        c.cur_mut().preset = "balanced".into();
+        let video = rows(Section::Video, &env(), &c);
+        assert_eq!(row(&video, "preset").value(&c), Value::Text("custom".into()));
+        c.cur_mut().preset = "custom".into();
+        let video = rows(Section::Video, &env(), &c);
+        assert!(ids(&c).iter().any(|i| i == "p:crf"));
+        // A custom option is stored by its key and read back (the default until set).
+        let crf = row(&video, "p:crf");
+        assert_eq!(crf.value(&c), Value::Int(23));
+        crf.apply(&mut c, Value::Int(18)).unwrap();
+        assert_eq!(c.cur().params["crf"], "18");
+        assert_eq!(crf.value(&c), Value::Int(18));
+        // Resetting the page forgets them.
+        reset(Section::Video, &env(), &mut c);
+        assert!(c.cur().params.is_empty());
+    }
+
+    #[test]
+    fn audio_sources_are_ticked_one_by_one() {
+        let mut c = Config::default();
+        let e = env().with_audio(AudioDevices {
+            outputs: vec![AudioEntry {
+                id: "{out-1}".into(),
+                name: "Headset".into(),
+            }],
+            inputs: vec![AudioEntry {
+                id: "{in-1}".into(),
+                name: "Blue Yeti".into(),
+            }],
+            programs: vec![AudioEntry {
+                id: "spotify.exe".into(),
+                name: "Spotify".into(),
+            }],
+        });
+        let audio = rows(Section::Audio, &e, &c);
+        // The profile records the default output; the rest is off.
+        assert_eq!(row(&audio, "src:system").value(&c), Value::Bool(true));
+        assert_eq!(row(&audio, "src:out:{out-1}").value(&c), Value::Bool(false));
+        row(&audio, "src:mic:{in-1}")
+            .apply(&mut c, Value::Bool(true))
+            .unwrap();
+        row(&audio, "src:app:spotify.exe")
+            .apply(&mut c, Value::Bool(true))
+            .unwrap();
+        row(&audio, "src:system")
+            .apply(&mut c, Value::Bool(false))
+            .unwrap();
+        assert_eq!(c.cur().audio.sources, ["mic:{in-1}", "app:spotify.exe"]);
+        // A source that is not available now stays listed, so it can be unticked.
+        c.cur_mut().audio.sources.push("app:closed.exe".into());
+        let audio = rows(Section::Audio, &e, &c);
+        assert_eq!(row(&audio, "src:app:closed.exe").value(&c), Value::Bool(true));
     }
 
     #[test]

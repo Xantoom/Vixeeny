@@ -175,6 +175,10 @@ fn choose_encoder<'a>(
     probe: Option<&ProbeResult>,
 ) -> anyhow::Result<&'a Encoder> {
     if profile.encoder == "auto" {
+        // The kind the user chose: software never picks a GPU encoder.
+        if profile.encoder_kind == "software" {
+            return registry.get("libx264").context("no encoder available");
+        }
         return validate::pick_auto(registry, Platform::current(), probe)
             .context("no encoder available");
     }
@@ -334,12 +338,16 @@ fn plan(config: &Config, allow_gpu: bool, replay: bool) -> anyhow::Result<Plan> 
         _ => Chroma::C420,
     };
     let preset = PresetName::from_setting(&profile.preset).unwrap_or(PresetName::Balanced);
-    let options = encoder
-        .presets
-        .get(preset)
-        .iter()
-        .map(|(k, v)| (k.clone(), v.to_ffmpeg()))
-        .collect();
+    let options = if profile.preset == "custom" {
+        encoder.custom_options(&profile.params)
+    } else {
+        encoder
+            .presets
+            .get(preset)
+            .iter()
+            .map(|(k, v)| (k.clone(), v.to_ffmpeg()))
+            .collect()
+    };
     let (mut audio, unknown) = vixeeny_audio::plan_tracks(&profile.audio);
     for name in unknown {
         tracing::warn!("unknown audio source `{name}` ignored");

@@ -20,7 +20,6 @@ vixeeny-platform = { path = "../vixeeny-platform" }
 # The Print Screen editor (plan 5.3) and the settings window.
 [target.'cfg(any(windows, target_os = "macos", target_os = "linux"))'.dependencies]
 vixeeny-audio = { path = "../vixeeny-audio" }
-vixeeny-convert = { path = "../vixeeny-convert" }
 vixeeny-editor = { path = "../vixeeny-editor" }
 vixeeny-ocr = { path = "../vixeeny-ocr" }
 vixeeny-settings = { path = "../vixeeny-settings" }

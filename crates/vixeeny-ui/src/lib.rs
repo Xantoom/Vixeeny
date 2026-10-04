@@ -14,12 +14,12 @@ mod generated {
 }
 pub use generated::*;
 
-pub mod convert_panel;
 pub mod ocr_panel;
 pub mod overlay;
 pub mod scroll_panel;
 pub mod settings_panel;
 pub mod side_panel;
+pub mod theme;
 pub mod toast_panel;
 pub mod widget_panel;
 pub mod wizard_panel;

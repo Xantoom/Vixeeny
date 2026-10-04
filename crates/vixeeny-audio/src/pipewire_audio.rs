@@ -182,6 +182,10 @@ fn run(
     };
     match kind {
         SourceKind::System => props.insert(*pw::keys::STREAM_CAPTURE_SINK, "true"),
+        SourceKind::Output(name) => {
+            props.insert(*pw::keys::STREAM_CAPTURE_SINK, "true");
+            props.insert(TARGET_OBJECT, name.as_str());
+        }
         SourceKind::Microphone(None) => {}
         SourceKind::Microphone(Some(name)) => props.insert(TARGET_OBJECT, name.as_str()),
         SourceKind::Application(exe) => {

@@ -125,6 +125,9 @@ pub enum ControlRequest {
     /// Runs an action, like its shortcut would: `vixeeny-daemon ctl <action>`, for the desktops
     /// where an application cannot register a global shortcut itself.
     Action(ActionId),
+    /// `true` while the settings window records a shortcut: the global shortcuts are released so
+    /// that pressing one does not run it. `false` (or any reload of the settings) gives them back.
+    PauseHotkeys(bool),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

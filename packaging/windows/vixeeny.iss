@@ -41,20 +41,15 @@ Name: "french"; MessagesFile: "compiler:Languages\French.isl"
 [Tasks]
 Name: "startmenu"; Description: "{cm:CreateStartMenu}"; GroupDescription: "{cm:ShortcutsGroup}"
 Name: "autostart"; Description: "{cm:StartWithWindows}"; GroupDescription: "{cm:ShortcutsGroup}"
-Name: "contextmenu"; Description: "{cm:ContextMenu}"; GroupDescription: "{cm:IntegrationGroup}"; Flags: unchecked
 
 [CustomMessages]
 english.CreateStartMenu=Create a Start menu entry
 english.StartWithWindows=Start Vixeeny when I sign in
-english.ContextMenu=Add "Convert with Vixeeny" to the Explorer menu of images
 english.ShortcutsGroup=Shortcuts
-english.IntegrationGroup=Integration
 english.KeepSettings=Keep your settings and the update information?
 french.CreateStartMenu=Créer une entrée dans le menu Démarrer
 french.StartWithWindows=Lancer Vixeeny à l'ouverture de session
-french.ContextMenu=Ajouter « Convertir avec Vixeeny » au menu contextuel des images
 french.ShortcutsGroup=Raccourcis
-french.IntegrationGroup=Intégration
 french.KeepSettings=Conserver vos paramètres et les informations de mise à jour ?
 
 [Files]
@@ -68,11 +63,9 @@ Name: "{group}\Vixeeny"; Filename: "{app}\vixeeny-daemon.exe"; Tasks: startmenu
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Vixeeny"; ValueData: """{app}\vixeeny-daemon.exe"""; Tasks: autostart; Flags: uninsdeletevalue
 
 [Run]
-Filename: "{app}\vixeeny-app.exe"; Parameters: "--install-menu"; Tasks: contextmenu; Flags: runhidden
 Filename: "{app}\vixeeny-daemon.exe"; Description: "Vixeeny"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
-Filename: "{app}\vixeeny-app.exe"; Parameters: "--uninstall-menu"; RunOnceId: "RemoveMenu"; Flags: runhidden skipifdoesntexist
 Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM vixeeny-daemon.exe /IM vixeeny-app.exe /IM vixeeny-updater.exe"; RunOnceId: "StopVixeeny"; Flags: runhidden
 
 [UninstallDelete]

@@ -15,7 +15,6 @@ mod audio_rig;
 #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 mod clipboard;
 #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
-mod convert;
 #[cfg(any(windows, target_os = "macos", target_os = "linux", test))]
 mod gallery;
 #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
@@ -443,33 +442,16 @@ fn run() -> anyhow::Result<()> {
     match args.first().map(String::as_str) {
         // The probe child: prints TOML on stdout (see `vixeeny_encode::probe::run_child`).
         Some("--probe") => return probe::child(),
+        Some("--warm-probe") => return probe::warm(),
         // The recording widget, a process of its own (see `widget`).
         #[cfg(any(windows, target_os = "macos"))]
         Some("--widget") => return widget::run_child(&args[1..]),
         // The settings window and gallery, a process of its own (see `settings`).
         #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
         Some("--settings") => return settings::run_child(),
-        // The installer adds or removes the Explorer entry.
-        #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
-        Some(flag @ ("--install-menu" | "--uninstall-menu")) => {
-            return settings::context_menu(flag == "--install-menu");
-        }
         // A notification card (see `toast`).
         #[cfg(windows)]
         Some("--toast") => return toast::run_child(&args[1..]),
-        // The daemon announces an update with a native notification.
-        #[cfg(windows)]
-        Some("--update-toast") => {
-            return toast::update_toast(args.get(1).map_or("", String::as_str));
-        }
-        // A click on a native notification (`vixeeny://settings`).
-        #[cfg(windows)]
-        Some("--uri") => {
-            if let Some(uri) = args.get(1) {
-                toast::open_uri(uri);
-            }
-            return Ok(());
-        }
         #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
         Some("--system-info") => {
             vixeeny_platform::attach_console();
@@ -485,39 +467,6 @@ fn run() -> anyhow::Result<()> {
         }
         Some("--probe-report") => return probe::report(args.iter().any(|a| a == "--force")),
         _ => {}
-    }
-    // The Explorer context-menu entry (until the settings app offers the switch).
-    #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
-    if let Some(flag) = args
-        .first()
-        .filter(|a| a.starts_with("--") && a.ends_with("-context-menu"))
-    {
-        let config = vixeeny_common::paths::config_file()
-            .and_then(|path| Config::load(&path).ok())
-            .unwrap_or_default();
-        let lang = lang(&config.general.language);
-        let result = if flag == "--install-context-menu" {
-            let label = vixeeny_common::i18n::tr(vixeeny_common::i18n::Key::ConvMenuLabel, lang);
-            vixeeny_platform::context_menu::install(&std::env::current_exe()?, label)
-        } else {
-            vixeeny_platform::context_menu::uninstall()
-        };
-        return result.map_err(|e| anyhow::anyhow!("{e}"));
-    }
-    if args.first().is_some_and(|a| a == "--convert") {
-        let config = vixeeny_common::paths::config_file()
-            .and_then(|path| Config::load(&path).ok())
-            .unwrap_or_default();
-        #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
-        {
-            let paths: Vec<std::path::PathBuf> = args[1..].iter().map(Into::into).collect();
-            return convert::run(&config, &paths);
-        }
-        #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
-        {
-            let _ = config;
-            anyhow::bail!("the conversion window is not supported on this platform yet");
-        }
     }
     let first_action = parse_action()?;
     let mut config = vixeeny_common::paths::config_file()

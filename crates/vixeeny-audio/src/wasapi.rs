@@ -137,13 +137,22 @@ fn friendly_name(device: &IMMDevice) -> String {
 
 /// The active capture devices.
 pub fn list_microphones() -> Vec<DeviceInfo> {
+    list_endpoints(eCapture)
+}
+
+/// The active output devices (what `out:` sources record).
+pub fn list_outputs() -> Vec<DeviceInfo> {
+    list_endpoints(eRender)
+}
+
+fn list_endpoints(flow: windows::Win32::Media::Audio::EDataFlow) -> Vec<DeviceInfo> {
     let _com = ComGuard::new();
     let Ok(enumerator) = enumerator() else {
         return Vec::new();
     };
     // SAFETY: plain COM calls on live interfaces; each result is checked.
     unsafe {
-        let Ok(devices) = enumerator.EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE) else {
+        let Ok(devices) = enumerator.EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE) else {
             return Vec::new();
         };
         let count = devices.GetCount().unwrap_or(0);
@@ -492,6 +501,26 @@ fn endpoint(kind: &SourceKind) -> Result<Option<(IMMDevice, bool, bool)>, AudioE
             let device = unsafe { e.GetDefaultAudioEndpoint(eRender, eConsole) }
                 .map_err(os("default output"))?;
             Some((device, true, true))
+        }
+        SourceKind::Output(wanted) => {
+            let e = enumerator()?;
+            // SAFETY: live enumerator and collection; every item is checked.
+            let found = unsafe {
+                let devices = e
+                    .EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE)
+                    .map_err(os("render devices"))?;
+                let count = devices.GetCount().unwrap_or(0);
+                (0..count).filter_map(|i| devices.Item(i).ok()).find(|d| {
+                    device_id(d) == *wanted
+                        || friendly_name(d)
+                            .to_lowercase()
+                            .contains(&wanted.to_lowercase())
+                })
+            };
+            let device = found.ok_or_else(|| {
+                AudioError::Unavailable(format!("no output device matches `{wanted}`"))
+            })?;
+            Some((device, true, false))
         }
         SourceKind::Microphone(None) => {
             let e = enumerator()?;

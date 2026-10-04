@@ -1,5 +1,6 @@
 ---
 source: crates/vixeeny-common/src/config.rs
+assertion_line: 566
 expression: "Config::default().to_toml().unwrap()"
 ---
 schema_version = 1
@@ -11,7 +12,6 @@ autostart = true
 app_idle_exit_seconds = 30
 sounds = true
 notifications = true
-notification_style = "native"
 check_updates = true
 first_run_done = false
 
@@ -65,6 +65,7 @@ dim_percent = 40
 profile = "default"
 
 [profiles.default]
+encoder_kind = "hardware"
 encoder = "auto"
 container = "mp4_hybrid"
 resolution = "source"
@@ -73,9 +74,11 @@ depth = 8
 chroma = "420"
 hdr = "tonemap_sdr"
 mode = "simple"
-preset = "balanced"
+preset = "quality"
 show_cursor = true
 vfr = false
+
+[profiles.default.params]
 
 [profiles.default.split]
 mode = "off"

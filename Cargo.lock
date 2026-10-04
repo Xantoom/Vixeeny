@@ -6015,7 +6015,6 @@ dependencies = [
  "vixeeny-audio",
  "vixeeny-capture",
  "vixeeny-common",
- "vixeeny-convert",
  "vixeeny-editor",
  "vixeeny-encode",
  "vixeeny-image",
@@ -6086,14 +6085,6 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "widestring",
-]
-
-[[package]]
-name = "vixeeny-convert"
-version = "0.9.0"
-dependencies = [
- "png",
- "vixeeny-image",
 ]
 
 [[package]]
@@ -6212,6 +6203,7 @@ dependencies = [
  "slint-build",
  "vixeeny-common",
  "vixeeny-editor",
+ "vixeeny-encode",
  "vixeeny-ocr",
  "vixeeny-settings",
 ]

@@ -136,6 +136,15 @@ fn show_gallery(shared: &SharedGallery, handle: &PanelHandle, offset: i64) {
     });
 }
 
+/// The selection changed: the tiles keep their thumbnails, only the detail line moves.
+fn show_selection(shared: &SharedGallery, handle: &PanelHandle, offset: i64) {
+    let detail = selected_item(shared).map_or_else(String::new, |item| {
+        format!("{}\n{}", item.name, gallery::detail(&item, offset))
+    });
+    handle.set_gallery_detail(detail);
+    show_gallery(shared, handle, offset);
+}
+
 fn refilter(g: &mut Gallery) {
     g.shown = gallery::filter(&g.items, g.kind, &g.app);
     g.selected = None;
@@ -170,7 +179,18 @@ fn gallery_request(
             if let Ok(mut g) = shared.lock() {
                 g.selected = (position < g.shown.len()).then_some(position);
             }
-            show_gallery(shared, handle, offset);
+            show_selection(shared, handle, offset);
+        }
+        GalleryRequest::Open(position) => {
+            if let Ok(mut g) = shared.lock() {
+                g.selected = (position < g.shown.len()).then_some(position);
+            }
+            show_selection(shared, handle, offset);
+            if let Some(item) = selected_item(shared)
+                && let Err(e) = vixeeny_platform::open_path(&item.path.display().to_string())
+            {
+                tracing::error!("gallery open: {e}");
+            }
         }
         GalleryRequest::Filter(kind, app) => {
             if let Ok(mut g) = shared.lock() {
@@ -193,13 +213,6 @@ fn gallery_request(
                     .map(|_| ())
                     .map_err(Into::into),
                 "copy" => copy_to_clipboard(&item.path),
-                "convert" => {
-                    std::process::Command::new(std::env::current_exe().unwrap_or_default())
-                        .args(["--convert", &path])
-                        .spawn()
-                        .map(|_| ())
-                        .map_err(Into::into)
-                }
                 "delete" => {
                     let done = vixeeny_platform::recycle(&path).map_err(|e| anyhow::anyhow!("{e}"));
                     if done.is_ok()
@@ -368,35 +381,6 @@ fn start_update(handle: &PanelHandle, lang: Lang) {
     }
 }
 
-/// `--install-menu` / `--uninstall-menu`, run by the installer.
-pub fn context_menu(install: bool) -> anyhow::Result<()> {
-    let lang = crate::lang(&load_config().general.language);
-    if install {
-        let exe = std::env::current_exe()?;
-        vixeeny_platform::context_menu::install(&exe, tr(Key::ConvMenuLabel, lang))
-            .map_err(|e| anyhow::anyhow!("{e}"))
-    } else {
-        vixeeny_platform::context_menu::uninstall().map_err(|e| anyhow::anyhow!("{e}"))
-    }
-}
-
-fn integration_lines(lang: Lang) -> Vec<Line> {
-    let installed = vixeeny_platform::context_menu::is_installed();
-    vec![Line {
-        text: tr(
-            if installed {
-                Key::IntegInstalled
-            } else {
-                Key::IntegNotInstalled
-            },
-            lang,
-        )
-        .into(),
-        detail: String::new(),
-        strong: installed,
-    }]
-}
-
 fn about_lines(lang: Lang) -> Vec<Line> {
     let logs =
         vixeeny_common::paths::log_dir().map_or_else(String::new, |p| p.display().to_string());
@@ -431,10 +415,7 @@ pub fn run_child() -> anyhow::Result<()> {
         vixeeny_platform::focus_window_titled(tr(Key::SettingsTitle, lang));
         return Ok(());
     };
-    let dark = vixeeny_ui::side_panel::dark_theme(
-        &config.general.theme,
-        vixeeny_platform::system_prefers_dark(),
-    );
+    let look = look_of(&config);
     if !config.general.first_run_done {
         return first_run(&config, lang);
     }
@@ -442,21 +423,24 @@ pub fn run_child() -> anyhow::Result<()> {
         config.clone(),
         vixeeny_platform::user_locale(),
         env!("CARGO_PKG_VERSION"),
-        dark,
+        look,
     )
     .map_err(|e| anyhow::anyhow!("{e}"))?;
+    dress_when_shown(panel.window(), look);
+    panel.capture_keys();
+    panel.set_audio(audio_devices());
+    panel.on_recording(pause_hotkeys);
+    start_probe_watch(&panel);
     let handle = panel.handle();
     let offset = gallery::local_offset_secs();
 
     let weak = panel.window().as_weak();
     panel.on_change(move |config| {
         save(config);
-        let dark = vixeeny_ui::side_panel::dark_theme(
-            &config.general.theme,
-            vixeeny_platform::system_prefers_dark(),
-        );
+        let look = look_of(config);
         if let Some(w) = weak.upgrade() {
-            w.set_dark(dark);
+            vixeeny_ui::theme::apply(&w, look);
+            dress_when_shown(&w, look);
         }
     });
     panel.on_browse(|current| {
@@ -491,10 +475,6 @@ pub fn run_child() -> anyhow::Result<()> {
                     show_gallery(&shared, &handle, offset);
                 }
                 Section::Hardware => detect_hardware(handle.clone(), lang, false),
-                Section::Integration => {
-                    handle.set_lines(integration_lines(lang));
-                    handle.set_extra(String::new());
-                }
                 Section::Updates => handle.set_extra(update_text(lang)),
                 Section::About => {
                     handle.set_lines(about_lines(lang));
@@ -510,24 +490,6 @@ pub fn run_child() -> anyhow::Result<()> {
             let lang = crate::lang(&load_config().general.language);
             match (section, action) {
                 (Section::Hardware, "redetect") => detect_hardware(handle.clone(), lang, true),
-                (Section::Integration, "install" | "remove") => {
-                    let result = if action == "install" {
-                        let label = tr(Key::ConvMenuLabel, lang);
-                        std::env::current_exe()
-                            .map_err(|e| anyhow::anyhow!("{e}"))
-                            .and_then(|exe| {
-                                vixeeny_platform::context_menu::install(&exe, label)
-                                    .map_err(|e| anyhow::anyhow!("{e}"))
-                            })
-                    } else {
-                        vixeeny_platform::context_menu::uninstall()
-                            .map_err(|e| anyhow::anyhow!("{e}"))
-                    };
-                    if let Err(e) = result {
-                        tracing::error!("context menu: {e:#}");
-                    }
-                    handle.set_lines(integration_lines(lang));
-                }
                 (Section::Updates, "check") => check_for_update(handle.clone(), lang),
                 (Section::Updates, "update") => start_update(&handle, lang),
                 (Section::About, "github") => {
@@ -564,15 +526,98 @@ pub fn run_child() -> anyhow::Result<()> {
     panel.window().run().map_err(|e| anyhow::anyhow!("{e}"))
 }
 
+/// Light or dark by the setting (or the system), with the accent colour of the system.
+pub fn look_of(config: &Config) -> vixeeny_ui::theme::Look {
+    let dark = vixeeny_ui::side_panel::dark_theme(
+        &config.general.theme,
+        vixeeny_platform::system_prefers_dark(),
+    );
+    vixeeny_ui::theme::Look::new(dark, vixeeny_platform::system_accent(), true)
+}
+
+/// Once the window exists: the title bar follows the theme (Windows 11).
+pub fn dress_when_shown<C: ComponentHandle + 'static>(window: &C, look: vixeeny_ui::theme::Look) {
+    vixeeny_ui::theme::when_native(window, move |handle| {
+        let _ = vixeeny_platform::style_window(
+            vixeeny_platform::WindowId(handle),
+            look.dark,
+            look.caption(),
+        );
+    });
+}
+
+/// The programs, microphones and outputs the audio page offers.
+fn audio_devices() -> vixeeny_settings::AudioDevices {
+    #[cfg(windows)]
+    {
+        use vixeeny_settings::{AudioDevices, AudioEntry};
+        let devices = |list: Vec<vixeeny_audio::DeviceInfo>| {
+            list.into_iter()
+                .map(|d| AudioEntry {
+                    id: d.id,
+                    name: d.name,
+                })
+                .collect()
+        };
+        AudioDevices {
+            outputs: devices(vixeeny_audio::list_outputs()),
+            inputs: devices(vixeeny_audio::list_microphones()),
+            programs: vixeeny_audio::list_applications()
+                .into_iter()
+                .map(|a| AudioEntry {
+                    name: a.exe.clone(),
+                    id: a.exe,
+                })
+                .collect(),
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        vixeeny_settings::AudioDevices::default()
+    }
+}
+
+/// Releases (or gives back) the global shortcuts of the daemon while a shortcut is recorded.
+fn pause_hotkeys(paused: bool) {
+    std::thread::spawn(move || {
+        let _ = Endpoint::current_user().connect().and_then(|mut stream| {
+            ipc::write_msg(&mut stream, &Hello::Control(ControlRequest::PauseHotkeys(paused)))
+                .map_err(std::io::Error::other)?;
+            ipc::read_msg::<_, ipc::ControlReply>(&mut stream)
+                .map(|_| ())
+                .map_err(std::io::Error::other)
+        });
+    });
+}
+
+/// The hardware probe for the video page: the cache if it exists, else a background run whose
+/// answer the page picks up when it is there.
+fn start_probe_watch(panel: &SettingsPanel) {
+    let state: Arc<Mutex<(Option<ProbeResult>, bool)>> = Arc::new(Mutex::new((
+        crate::probe::cached(),
+        false,
+    )));
+    if let Ok(mut s) = state.lock()
+        && s.0.is_none()
+    {
+        s.1 = true;
+        let shared = Arc::clone(&state);
+        std::thread::spawn(move || {
+            let result = crate::probe::current(false).ok();
+            if let Ok(mut s) = shared.lock() {
+                *s = (result, false);
+            }
+        });
+    }
+    panel.watch_probe(move || state.lock().map_or((None, false), |s| s.clone()));
+}
+
 /// The welcome assistant, before the very first use of the settings. Closing it counts as
 /// skipping it: it is shown once.
 fn first_run(config: &Config, lang: Lang) -> anyhow::Result<()> {
     use vixeeny_ui::wizard_panel::WizardPanel;
 
-    let dark = vixeeny_ui::side_panel::dark_theme(
-        &config.general.theme,
-        vixeeny_platform::system_prefers_dark(),
-    );
+    let dark = look_of(config).dark;
     let browse = |current: &str| {
         let mut dialog = rfd::FileDialog::new();
         if let Some(dir) = vixeeny_common::paths::expand_user_dir(current) {

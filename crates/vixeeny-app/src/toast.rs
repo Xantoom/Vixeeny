@@ -17,6 +17,8 @@ pub enum Toast {
     Saved(Saved, PathBuf),
     /// Something failed; the message is already user-facing.
     Failed(Failed, String),
+    /// A new version can be installed (sent by the daemon); a click opens the settings.
+    Update(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,6 +83,7 @@ impl Toast {
                 [format!("saved-{}", kind.name()), path.display().to_string()]
             }
             Self::Failed(kind, message) => [format!("failed-{}", kind.name()), message.clone()],
+            Self::Update(text) => ["update".to_owned(), text.clone()],
         }
     }
 
@@ -95,6 +98,7 @@ impl Toast {
             "failed-recording" => failed(Failed::Recording),
             "failed-replay" => failed(Failed::Replay),
             "failed-audio" => failed(Failed::Audio),
+            "update" => Some(Self::Update(text.to_owned())),
             _ => None,
         }
     }
@@ -130,12 +134,6 @@ pub fn notify(config: &Config, toast: &Toast) {
     }
     #[cfg(windows)]
     {
-        if config.general.notification_style == "native" {
-            match show_native(config, toast) {
-                Ok(()) => return,
-                Err(e) => tracing::warn!("native notification failed, using the card: {e:#}"),
-            }
-        }
         let [kind, text] = toast.to_args();
         let spawned = std::env::current_exe().and_then(|exe| {
             std::process::Command::new(exe)
@@ -171,6 +169,7 @@ fn notify_linux(config: &Config, toast: &Toast) {
                 .map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
         ),
         Toast::Failed(kind, message) => (tr(kind.title(), lang).to_owned(), message.clone()),
+        Toast::Update(text) => ("Vixeeny".to_owned(), text.clone()),
     };
     if let Err(e) = vixeeny_platform::notify::notify(&title, &body) {
         tracing::warn!("cannot show the notification: {e}");
@@ -191,6 +190,7 @@ fn notify_mac(config: &Config, toast: &Toast) {
                 .map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
         ),
         Toast::Failed(kind, message) => (tr(kind.title(), lang).to_owned(), message.clone()),
+        Toast::Update(text) => ("Vixeeny".to_owned(), text.clone()),
     };
     // AppleScript string literals: backslash and quote escaped.
     let quote = |s: &str| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""));
@@ -204,73 +204,6 @@ fn notify_mac(config: &Config, toast: &Toast) {
         .spawn()
     {
         tracing::warn!("cannot show the notification: {e}");
-    }
-}
-
-/// The Windows notification: a click opens the file, the button its folder (or the settings).
-#[cfg(windows)]
-fn show_native(config: &Config, toast: &Toast) -> anyhow::Result<()> {
-    use vixeeny_common::i18n::tr;
-    use vixeeny_platform::native_toast::{NativeToast, file_uri};
-
-    let lang = crate::lang(&config.general.language);
-    let settings = format!("{}://settings", vixeeny_platform::native_toast::SCHEME);
-    let content = match toast {
-        Toast::Saved(kind, path) => NativeToast {
-            title: tr(kind.title(), lang).to_owned(),
-            body: path
-                .file_name()
-                .map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
-            image: (*kind == Saved::Image).then(|| path.clone()),
-            launch: file_uri(path),
-            actions: vec![(
-                tr(Key::ToastOpenFolder, lang).to_owned(),
-                file_uri(&folder_of(path)),
-            )],
-        },
-        Toast::Failed(kind, message) => NativeToast {
-            title: tr(kind.title(), lang).to_owned(),
-            body: message.clone(),
-            image: None,
-            launch: settings.clone(),
-            actions: vec![(tr(Key::ToastOpenSettings, lang).to_owned(), settings)],
-        },
-    };
-    vixeeny_platform::native_toast::show(&content, &std::env::current_exe()?)?;
-    Ok(())
-}
-
-/// `--update-toast <text>`: tells that an update is available; a click opens the settings.
-#[cfg(windows)]
-pub fn update_toast(text: &str) -> anyhow::Result<()> {
-    use vixeeny_common::i18n::tr;
-    use vixeeny_platform::native_toast::{NativeToast, SCHEME, show};
-
-    let config = vixeeny_common::paths::config_file()
-        .and_then(|p| Config::load(&p).ok())
-        .unwrap_or_default();
-    let lang = crate::lang(&config.general.language);
-    let settings = format!("{SCHEME}://settings");
-    let toast = NativeToast {
-        title: "Vixeeny".to_owned(),
-        body: text.to_owned(),
-        image: None,
-        launch: settings.clone(),
-        actions: vec![(tr(Key::ToastOpenSettings, lang).to_owned(), settings)],
-    };
-    show(&toast, &std::env::current_exe()?)?;
-    Ok(())
-}
-
-/// `--uri vixeeny://…`: a click on a notification.
-#[cfg(windows)]
-pub fn open_uri(uri: &str) {
-    // Only the settings for now; anything else is ignored.
-    if uri.starts_with(&format!(
-        "{}://settings",
-        vixeeny_platform::native_toast::SCHEME
-    )) {
-        crate::open_settings();
     }
 }
 
@@ -319,6 +252,14 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
             dark,
             action_label: tr(Key::ToastOpenSettings, lang).into(),
         },
+        Toast::Update(text) => ToastContent {
+            heading: "Vixeeny".into(),
+            body: text.clone(),
+            thumb: None,
+            error: false,
+            dark,
+            action_label: tr(Key::ToastOpenSettings, lang).into(),
+        },
     };
     let panel = ToastPanel::new(&content).map_err(|e| anyhow::anyhow!("{e}"))?;
     let monitors = vixeeny_platform::monitors()?;
@@ -348,7 +289,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
                 .spawn();
             let _ = folder_of(path);
         }
-        (Some(_), Toast::Failed(..)) => crate::open_settings(),
+        (Some(_), Toast::Failed(..) | Toast::Update(_)) => crate::open_settings(),
         (None, _) => {}
     }
     Ok(())
@@ -365,6 +306,7 @@ mod tests {
             Toast::Saved(Saved::Replay, PathBuf::from("r.mp4")),
             Toast::Failed(Failed::Recording, "no encoder: \"x\"".into()),
             Toast::Failed(Failed::Audio, "mic: device removed".into()),
+            Toast::Update("Version 1.2 is available".into()),
         ] {
             let [kind, text] = toast.to_args();
             assert_eq!(Toast::from_args(&kind, &text), Some(toast));

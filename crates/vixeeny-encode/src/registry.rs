@@ -174,6 +174,8 @@ impl PresetName {
             "balanced" => Some(Self::Balanced),
             "performance" => Some(Self::Performance),
             "small" => Some(Self::Small),
+            // The custom preset starts from the balanced one and overrides its options.
+            "custom" => Some(Self::Balanced),
             _ => None,
         }
     }
@@ -247,6 +249,40 @@ pub struct Encoder {
 }
 
 impl Encoder {
+    /// The FFmpeg options of the `custom` preset: the balanced preset with the user's values
+    /// (by parameter key) on top. A value that does not parse for its parameter is ignored.
+    pub fn custom_options(
+        &self,
+        params: &std::collections::BTreeMap<String, String>,
+    ) -> BTreeMap<String, String> {
+        let mut options: BTreeMap<String, String> = self
+            .presets
+            .balanced
+            .iter()
+            .map(|(k, v)| (k.clone(), v.to_ffmpeg()))
+            .collect();
+        for param in &self.params {
+            let Some(raw) = params.get(&param.key) else {
+                continue;
+            };
+            let value = match param.kind {
+                ParamType::Enum => param.values.iter().any(|v| v == raw).then(|| raw.clone()),
+                ParamType::Int => raw.parse::<i64>().ok().map(|v| v.to_string()),
+                ParamType::Float => raw.parse::<f64>().ok().map(|v| v.to_string()),
+                ParamType::Bool => match raw.as_str() {
+                    "1" | "true" | "on" => Some("1".into()),
+                    "0" | "false" | "off" => Some("0".into()),
+                    _ => None,
+                },
+                ParamType::String => Some(raw.clone()),
+            };
+            if let Some(value) = value {
+                options.insert(param.ffmpeg_option.clone(), value);
+            }
+        }
+        options
+    }
+
     pub fn supports_format(&self, depth: u8, chroma: Chroma) -> bool {
         self.pixel_formats
             .iter()

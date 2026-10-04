@@ -325,6 +325,54 @@ pub fn apply_acrylic(id: WindowId) -> Result<()> {
     set(38, 3).map_err(|e| PlatformError::Os(e.to_string()))
 }
 
+/// The accent colour the user chose in Windows (`[r, g, b]`).
+pub fn system_accent() -> Option<[u8; 3]> {
+    use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
+    use windows::core::w;
+    let mut data = 0_u32;
+    let mut size = std::mem::size_of::<u32>() as u32;
+    // SAFETY: `data` and `size` are valid for the call; a missing value leaves `data` at 0.
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            w!(r"Software\Microsoft\Windows\DWM"),
+            w!("AccentColor"),
+            RRF_RT_REG_DWORD,
+            None,
+            Some((&raw mut data).cast()),
+            Some(&raw mut size),
+        )
+    };
+    // 0xAABBGGRR
+    (status.is_ok() && data != 0).then_some([data as u8, (data >> 8) as u8, (data >> 16) as u8])
+}
+
+/// Dresses a normal window the Windows 11 way: the title bar follows the theme and takes the
+/// colour of the window, so the two look like one. Older Windows ignore the parts they lack.
+pub fn style_window(id: WindowId, dark: bool, caption: [u8; 3]) -> Result<()> {
+    // DWMWA_USE_IMMERSIVE_DARK_MODE = 20, DWMWA_BORDER_COLOR = 34, DWMWA_CAPTION_COLOR = 35,
+    // DWMWA_TEXT_COLOR = 36 (the colours are COLORREFs: 0x00BBGGRR).
+    let hwnd = hwnd_of(id);
+    let set = |attribute: i32, value: u32| {
+        // SAFETY: `value` is a live u32 of the size the attribute wants.
+        unsafe {
+            DwmSetWindowAttribute(
+                hwnd,
+                DWMWINDOWATTRIBUTE(attribute),
+                (&raw const value).cast(),
+                std::mem::size_of::<u32>() as u32,
+            )
+        }
+    };
+    let colorref = |[r, g, b]: [u8; 3]| u32::from(r) | u32::from(g) << 8 | u32::from(b) << 16;
+    let text = if dark { [255, 255, 255] } else { [26, 26, 26] };
+    let result = set(20, u32::from(dark));
+    let _ = set(35, colorref(caption));
+    let _ = set(34, colorref(caption));
+    let _ = set(36, colorref(text));
+    result.map_err(|e| PlatformError::Os(e.to_string()))
+}
+
 /// The user's locale tag (`fr-FR`), for the `auto` language.
 pub fn user_locale() -> Option<String> {
     use windows::Win32::Globalization::GetUserDefaultLocaleName;

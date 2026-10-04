@@ -262,66 +262,6 @@ fn the_ocr_window_renders_text_hint_and_buttons() {
 }
 
 #[test]
-fn the_convert_window_renders_and_reports_clicks() {
-    use crate::convert_panel::{ConvertTexts, new_window, set_files};
-    WINDOW.with(|_| ());
-    let texts = ConvertTexts {
-        title: "Convert images".into(),
-        drop_hint: "Drop images or folders here".into(),
-        add_files: "Add files…".into(),
-        add_folder: "Add folder…".into(),
-        clear: "Clear".into(),
-        format: "Format".into(),
-        quality: "Quality".into(),
-        lossless: "Lossless".into(),
-        existing: "If it exists".into(),
-        rename: "Rename".into(),
-        overwrite: "Overwrite".into(),
-        skip: "Skip".into(),
-        output: "Output folder".into(),
-        choose: "Choose…".into(),
-        reset: "Reset".into(),
-        convert: "Convert".into(),
-        cancel: "Cancel".into(),
-    };
-    let w = new_window(&texts, &["PNG", "JPEG", "WebP", "AVIF", "JXL"])
-        .unwrap_or_else(|e| panic!("{e}"));
-    let window = WINDOW.with(Rc::clone);
-    window.set_size(PhysicalSize::new(640, 560));
-    w.show().unwrap_or_else(|e| panic!("{e}"));
-    let draw = || {
-        let mut buffer = SharedPixelBuffer::<Rgb8Pixel>::new(640, 560);
-        window.draw_if_needed(|r| {
-            r.render(buffer.make_mut_slice(), 640);
-        });
-        buffer
-    };
-    save("6-convert-empty", &draw());
-    set_files(
-        &w,
-        &["C:\\Pictures\\a.png".into(), "C:\\Pictures\\b.jpg".into()],
-    );
-    w.set_summary("2 image(s)".into());
-    w.set_format_index(3);
-    w.set_show_lossless(true);
-    w.set_output_text("Same folder as each image".into());
-    w.set_progress(0.4);
-    w.set_status("Converting… 1 / 2".into());
-    w.set_running(true);
-    let buf = draw();
-    save("7-convert-running", &buf);
-    assert!(
-        buf.as_slice().iter().any(|p| p.b > 200 && p.r < 100),
-        "the progress bar is blue"
-    );
-    let clicked = Rc::new(std::cell::Cell::new(0));
-    let c = clicked.clone();
-    w.on_quality_step(move |d| c.set(d));
-    w.invoke_quality_step(-5);
-    assert_eq!(clicked.get(), -5);
-}
-
-#[test]
 fn the_recording_widget_renders_both_states_and_reports_clicks() {
     use crate::widget_panel::{WidgetEvent, WidgetPanel, WidgetTexts};
     use std::cell::RefCell;
@@ -546,7 +486,7 @@ fn settings_panel() -> (
         vixeeny_common::config::Config::default(),
         Some("en-US".into()),
         "1.2.3",
-        true,
+        crate::theme::Look::dark(),
     )
     .unwrap_or_else(|e| panic!("{e}"));
     let seen = Rc::new(RefCell::new(Vec::new()));
@@ -622,7 +562,7 @@ fn changing_the_language_relabels_the_window_at_once() {
     assert_eq!(panel.config().general.language, "fr");
     assert_eq!(titles(&panel)[1], "Général");
     assert_eq!(
-        panel.window().get_rows().row_data(0).unwrap().label,
+        panel.window().get_rows().row_data(1).unwrap().label,
         "Langue"
     );
 }
@@ -652,17 +592,24 @@ fn shortcuts_are_edited_in_place_and_conflicts_are_explained() {
     panel.select_section(Section::Shortcuts);
     settings_render(&panel, "9-settings-shortcuts");
     let w = panel.window();
-    // Row 8 is the replay toggle, row 9 the replay save (Ctrl+Shift+S).
-    w.invoke_shortcut_edited(8, 0, "shift+ctrl+f9".into());
+    // Row 8 is the replay toggle, row 9 the replay save (Ctrl+Shift+S). Keys are recorded, never typed.
+    let record = |row: i32, slot: i32, keys: &str| {
+        w.invoke_shortcut_record(row, slot);
+        panel.captured(settings_panel::Captured::Combination(keys.into()));
+    };
+    record(8, 0, "Ctrl+Shift+F9");
     assert_eq!(panel.config().hotkeys.replay_toggle, ["Ctrl+Shift+F9"]);
     assert_eq!(seen.borrow().len(), 1);
-    w.invoke_shortcut_edited(8, 1, "Ctrl+Shift+S".into());
+    record(8, 1, "Ctrl+Shift+S");
     assert_eq!(panel.config().hotkeys.replay_toggle.len(), 1, "refused");
     let row = w.get_shortcuts().row_data(8).unwrap();
     assert!(row.error.contains("Save the replay"), "{}", row.error);
     assert_eq!(seen.borrow().len(), 1, "a refusal is not a change");
-    w.invoke_shortcut_edited(8, 1, "nonsense+".into());
-    assert!(!w.get_shortcuts().row_data(8).unwrap().error.is_empty());
+    // Escape stops the recording without touching anything.
+    w.invoke_shortcut_record(8, 1);
+    assert!(panel.captured(settings_panel::Captured::Cancel));
+    assert!(!panel.captured(settings_panel::Captured::Cancel), "nothing is recording any more");
+    assert_eq!(seen.borrow().len(), 1);
 }
 
 #[test]
@@ -717,12 +664,14 @@ fn the_gallery_and_the_other_pages_show_what_the_host_gives_them() {
     settings_render(&panel, "9-settings-gallery");
     let w = panel.window();
     w.invoke_gallery_select(2);
+    w.invoke_gallery_open(2);
     w.invoke_gallery_action("open".into());
     w.invoke_gallery_filter(1, "mine".into());
     assert_eq!(
         *requests.borrow(),
         [
             GalleryRequest::Select(2),
+            GalleryRequest::Open(2),
             GalleryRequest::Action("open".into()),
             GalleryRequest::Filter(1, "mine".into()),
         ]

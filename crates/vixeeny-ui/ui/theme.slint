@@ -1,0 +1,62 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+// The design tokens of every Vixeeny window: Windows 11 (Fluent) surfaces, text, accent and
+// motion, in a light and a dark variant. The host sets `dark`, `accent-base` (the system accent
+// colour) and `font` once per window; everything else follows.
+export global Theme {
+    in property <bool> dark: true;
+    in property <color> accent-base: #0078d4;
+    in property <string> font: "Segoe UI Variable Text";
+    // 1.0 = animations on; 0.0 = the user turned them off in the OS.
+    in property <float> motion: 1.0;
+    // The icon of the program, for title bars, task bars and the like (set by the host).
+    in property <image> app-icon;
+
+    // ---- surfaces
+    out property <color> bg: dark ? #202020 : #f3f3f3;
+    out property <color> bg-deep: dark ? #1a1a1a : #ececec;
+    out property <color> card: dark ? #2b2b2b : #fbfbfb;
+    out property <color> card-hover: dark ? #323232 : #f6f6f6;
+    out property <color> flyout: dark ? #2c2c2c : #fcfcfc;
+    out property <color> stroke: dark ? #ffffff14 : #0000000f;
+    out property <color> stroke-strong: dark ? #ffffff30 : #00000030;
+    out property <color> divider: dark ? #ffffff10 : #0000000d;
+
+    // ---- text
+    out property <color> text: dark ? #ffffff : #1a1a1a;
+    out property <color> text-2: dark ? #cfcfcf : #5f5f5f;
+    out property <color> text-3: dark ? #9d9d9d : #7a7a7a;
+    out property <color> text-off: dark ? #ffffff5d : #00000037;
+
+    // ---- controls
+    out property <color> control: dark ? #ffffff0f : #ffffffb3;
+    out property <color> control-hover: dark ? #ffffff17 : #f9f9f9;
+    out property <color> control-pressed: dark ? #ffffff0a : #f9f9f980;
+    out property <color> control-stroke: dark ? #ffffff14 : #00000018;
+    out property <color> subtle-hover: dark ? #ffffff0f : #0000000a;
+    out property <color> subtle-pressed: dark ? #ffffff0a : #00000006;
+    out property <color> selected: dark ? #ffffff14 : #0000000d;
+
+    // ---- accent
+    out property <color> accent: dark ? accent-base.brighter(0.45) : accent-base.darker(0.05);
+    out property <color> accent-hover: dark ? accent-base.brighter(0.3) : accent-base.darker(0.15);
+    out property <color> accent-pressed: dark ? accent-base.brighter(0.15) : accent-base.darker(0.25);
+    out property <color> on-accent: dark ? #000000 : #ffffff;
+    out property <color> accent-soft: accent.with-alpha(0.18);
+
+    // ---- status
+    out property <color> danger: dark ? #ff99a4 : #c42b1c;
+    out property <color> danger-fill: dark ? #442726 : #fde7e9;
+    out property <color> success: dark ? #6ccb5f : #0f7b0f;
+    out property <color> warning: dark ? #fce100 : #9d5d00;
+    out property <color> warning-fill: dark ? #433519 : #fff4ce;
+    out property <color> record: #e5322d;
+
+    // ---- shape and motion
+    out property <length> radius: 4px;
+    out property <length> radius-card: 8px;
+    out property <length> radius-flyout: 8px;
+    out property <duration> t-fast: motion > 0.5 ? 83ms : 0ms;
+    out property <duration> t-normal: motion > 0.5 ? 167ms : 0ms;
+    out property <duration> t-slow: motion > 0.5 ? 250ms : 0ms;
+}

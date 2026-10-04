@@ -83,8 +83,6 @@ pub struct General {
     pub app_idle_exit_seconds: u32,
     pub sounds: bool,
     pub notifications: bool,
-    /// `native` (Windows notification, click opens the file) or `card` (Vixeeny's own).
-    pub notification_style: String,
     pub check_updates: bool,
     /// The welcome assistant has been through (or skipped).
     pub first_run_done: bool,
@@ -99,7 +97,6 @@ impl Default for General {
             app_idle_exit_seconds: 30,
             sounds: true,
             notifications: true,
-            notification_style: "native".into(),
             check_updates: true,
             first_run_done: false,
         }
@@ -289,7 +286,10 @@ impl Default for Video {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Profile {
-    /// `auto` = best detected hardware encoder, else libx264.
+    /// `hardware` or `software`: which family of encoders the settings list.
+    pub encoder_kind: String,
+    /// An encoder id of the codec registry. `auto` (older files) = the best detected hardware
+    /// encoder, else libx264.
     pub encoder: String,
     pub container: String,
     pub resolution: String,
@@ -298,7 +298,10 @@ pub struct Profile {
     pub chroma: String,
     pub hdr: String,
     pub mode: String,
+    /// `quality` (best picture), `small` (light files) or `custom` (`params`).
     pub preset: String,
+    /// The encoder options of the `custom` preset, by the registry's parameter key.
+    pub params: BTreeMap<String, String>,
     pub show_cursor: bool,
     /// Variable frame rate (Matroska and WebM only).
     pub vfr: bool,
@@ -309,6 +312,7 @@ pub struct Profile {
 impl Default for Profile {
     fn default() -> Self {
         Self {
+            encoder_kind: "hardware".into(),
             encoder: "auto".into(),
             container: "mp4_hybrid".into(),
             resolution: "source".into(),
@@ -317,7 +321,8 @@ impl Default for Profile {
             chroma: "420".into(),
             hdr: "tonemap_sdr".into(),
             mode: "simple".into(),
-            preset: "balanced".into(),
+            preset: "quality".into(),
+            params: BTreeMap::new(),
             show_cursor: true,
             vfr: false,
             split: Split::default(),

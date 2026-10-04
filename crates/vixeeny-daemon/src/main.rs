@@ -59,6 +59,7 @@ fn real_main() -> anyhow::Result<()> {
         None => Config::default(),
     };
     tracing::info!("daemon started (pid {})", std::process::id());
+    vixeeny_daemon::supervisor::warm_probe();
     platform::run(Startup {
         config,
         config_path,

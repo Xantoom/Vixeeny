@@ -6,7 +6,7 @@
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
   <description>
-    <p>Vixeeny sits in the system tray and answers to global shortcuts: it captures a region, a window or the screen, edits the capture, reads text from it, converts images and records the screen with hardware encoders.</p>
+    <p>Vixeeny sits in the system tray and answers to global shortcuts: it captures a region, a window or the screen, edits the capture, reads text from it and records the screen with hardware encoders.</p>
   </description>
   <launchable type="desktop-id">io.github.Xantoom.Vixeeny.desktop</launchable>
   <url type="homepage">https://github.com/Xantoom/Vixeeny</url>
