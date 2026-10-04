@@ -10,8 +10,8 @@ use slint::{ComponentHandle, ModelRc, SharedPixelBuffer, SharedString, VecModel}
 use vixeeny_common::config::Config;
 use vixeeny_common::i18n::{Key, Lang, tr};
 use vixeeny_common::ipc::ActionId;
-use vixeeny_settings::shortcuts::{self, Refusal};
 use vixeeny_encode::probe::ProbeResult;
+use vixeeny_settings::shortcuts::{self, Refusal};
 use vixeeny_settings::{
     AudioDevices, Env, Kind, Row, Section, Value, profiles, reset, rows, video_problems,
 };
@@ -245,7 +245,11 @@ fn row_model(row: &Row, config: &Config) -> SettingRow {
         }
         (Kind::Header, _) => out.kind = 6,
         (Kind::Choice(options) | Kind::Segmented(options), Value::Text(t)) => {
-            out.kind = if matches!(row.kind, Kind::Segmented(_)) { 7 } else { 1 };
+            out.kind = if matches!(row.kind, Kind::Segmented(_)) {
+                7
+            } else {
+                1
+            };
             out.selected = options
                 .iter()
                 .position(|o| o.value == t)
@@ -253,7 +257,11 @@ fn row_model(row: &Row, config: &Config) -> SettingRow {
             out.options = strings(options.iter().map(|o| o.label.clone()));
         }
         (Kind::Number { min, max, step } | Kind::Slider { min, max, step }, Value::Int(n)) => {
-            out.kind = if matches!(row.kind, Kind::Slider { .. }) { 8 } else { 2 };
+            out.kind = if matches!(row.kind, Kind::Slider { .. }) {
+                8
+            } else {
+                2
+            };
             out.num = n as i32;
             out.min = *min as i32;
             out.max = *max as i32;

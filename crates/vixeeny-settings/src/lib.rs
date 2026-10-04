@@ -169,10 +169,7 @@ impl Row {
                 }
                 Value::Text(t)
             }
-            (
-                Kind::Number { min, max, step } | Kind::Slider { min, max, step },
-                Value::Int(n),
-            ) => {
+            (Kind::Number { min, max, step } | Kind::Slider { min, max, step }, Value::Int(n)) => {
                 let step = (*step).max(1);
                 let snapped = (n.clamp(*min, *max) - min + step / 2) / step * step + min;
                 Value::Int(snapped.clamp(*min, *max))
@@ -269,12 +266,7 @@ fn row(id: impl Into<String>, label: String, kind: Kind, get: Get, set: Set) -> 
     }
 }
 
-fn toggle(
-    id: &str,
-    label: String,
-    get: fn(&Config) -> bool,
-    set: fn(&mut Config, bool),
-) -> Row {
+fn toggle(id: &str, label: String, get: fn(&Config) -> bool, set: fn(&mut Config, bool)) -> Row {
     row(
         id,
         label,
@@ -543,7 +535,10 @@ mod tests {
             ids.sort_unstable();
             ids.dedup();
             assert_eq!(ids.len(), rows.len(), "{section:?}");
-            for row in rows.iter().filter(|r| !matches!(r.kind, Kind::Info | Kind::Header)) {
+            for row in rows
+                .iter()
+                .filter(|r| !matches!(r.kind, Kind::Info | Kind::Header))
+            {
                 if matches!(&row.kind, Kind::Choice(o) if o.is_empty()) {
                     continue; // no hardware encoder known yet
                 }
@@ -804,7 +799,9 @@ mod tests {
         let video = rows(Section::Video, &env(), &c);
         row(&video, "hdr").apply(&mut c, Value::Bool(true)).unwrap();
         assert_eq!(c.cur().hdr, "keep_hdr");
-        row(&video, "hdr").apply(&mut c, Value::Bool(false)).unwrap();
+        row(&video, "hdr")
+            .apply(&mut c, Value::Bool(false))
+            .unwrap();
         assert_eq!(c.cur().hdr, "tonemap_sdr");
     }
 
@@ -822,7 +819,10 @@ mod tests {
         // Older presets are shown as custom.
         c.cur_mut().preset = "balanced".into();
         let video = rows(Section::Video, &env(), &c);
-        assert_eq!(row(&video, "preset").value(&c), Value::Text("custom".into()));
+        assert_eq!(
+            row(&video, "preset").value(&c),
+            Value::Text("custom".into())
+        );
         c.cur_mut().preset = "custom".into();
         let video = rows(Section::Video, &env(), &c);
         assert!(ids(&c).iter().any(|i| i == "p:crf"));
@@ -871,7 +871,10 @@ mod tests {
         // A source that is not available now stays listed, so it can be unticked.
         c.cur_mut().audio.sources.push("app:closed.exe".into());
         let audio = rows(Section::Audio, &e, &c);
-        assert_eq!(row(&audio, "src:app:closed.exe").value(&c), Value::Bool(true));
+        assert_eq!(
+            row(&audio, "src:app:closed.exe").value(&c),
+            Value::Bool(true)
+        );
     }
 
     #[test]

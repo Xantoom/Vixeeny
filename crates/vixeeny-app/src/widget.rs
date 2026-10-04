@@ -139,18 +139,17 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     panel.show().map_err(|e| anyhow::anyhow!("{e}"))?;
     // Never in the video, never stealing the keyboard. If the exclusion fails the widget could
     // end up in the recording: that is logged loudly and the recording goes on.
-    match panel.native_handle() {
-        Some(hwnd) => {
-            let id = vixeeny_platform::WindowId(hwnd);
-            if let Err(e) = vixeeny_platform::exclude_from_capture(id) {
-                tracing::error!("the widget cannot be excluded from the capture: {e}");
-            }
-            if let Err(e) = vixeeny_platform::set_noactivate_tool_window(id) {
-                tracing::warn!("widget window style: {e}");
-            }
+    // The native window exists only once the event loop runs: the handle is fetched then (and
+    // asked again for a moment if it is not there yet).
+    vixeeny_ui::theme::when_native(panel.window(), |hwnd| {
+        let id = vixeeny_platform::WindowId(hwnd);
+        if let Err(e) = vixeeny_platform::exclude_from_capture(id) {
+            tracing::error!("the widget cannot be excluded from the capture: {e}");
         }
-        None => tracing::error!("no native handle: the widget is not excluded from the capture"),
-    }
+        if let Err(e) = vixeeny_platform::set_noactivate_tool_window(id) {
+            tracing::warn!("widget window style: {e}");
+        }
+    });
 
     // Messages from the recorder arrive on a thread and are applied on the event loop; when the
     // recorder is gone (or says quit) the widget closes.

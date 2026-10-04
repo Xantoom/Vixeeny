@@ -568,8 +568,11 @@ fn audio_devices() -> vixeeny_settings::AudioDevices {
 fn pause_hotkeys(paused: bool) {
     std::thread::spawn(move || {
         let _ = Endpoint::current_user().connect().and_then(|mut stream| {
-            ipc::write_msg(&mut stream, &Hello::Control(ControlRequest::PauseHotkeys(paused)))
-                .map_err(std::io::Error::other)?;
+            ipc::write_msg(
+                &mut stream,
+                &Hello::Control(ControlRequest::PauseHotkeys(paused)),
+            )
+            .map_err(std::io::Error::other)?;
             ipc::read_msg::<_, ipc::ControlReply>(&mut stream)
                 .map(|_| ())
                 .map_err(std::io::Error::other)
@@ -580,10 +583,8 @@ fn pause_hotkeys(paused: bool) {
 /// The hardware probe for the video page: the cache if it exists, else a background run whose
 /// answer the page picks up when it is there.
 fn start_probe_watch(panel: &SettingsPanel) {
-    let state: Arc<Mutex<(Option<ProbeResult>, bool)>> = Arc::new(Mutex::new((
-        crate::probe::cached(),
-        false,
-    )));
+    let state: Arc<Mutex<(Option<ProbeResult>, bool)>> =
+        Arc::new(Mutex::new((crate::probe::cached(), false)));
     if let Ok(mut s) = state.lock()
         && s.0.is_none()
     {

@@ -8,7 +8,6 @@ system tray and answers to global shortcuts; nothing runs on screen until you as
 - **Screen recording** — hardware encoders (NVENC, AMF, QuickSync, VAAPI, VideoToolbox) or
   software, H.264 / HEVC / AV1, several audio tracks, replay buffer.
 - **Text recognition (OCR)** from any zone, with the engine of the system.
-- **Convert images** from the file manager's context menu.
 
 Default shortcuts: `PrintScreen` region · `Alt+PrintScreen` window · `Shift+PrintScreen` screen ·
 `Ctrl+Shift+R` record · `Ctrl+Shift+P` pause · `Ctrl+Shift+S` save the replay. Everything is

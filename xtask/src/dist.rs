@@ -101,6 +101,10 @@ pub fn third_party_licenses() -> Result<String> {
             let _ = writeln!(text, "{name} {tag} — {license}");
         }
     }
+    text.push_str(
+        "\nAssets:\nInter (the typeface used where Segoe UI is missing) — SIL OFL 1.1\n\
+         Fluent UI System Icons (Microsoft; the icons of the windows) — MIT\n",
+    );
     text.push_str("\nRust crates:\n");
     for line in lines {
         text.push_str(&line);

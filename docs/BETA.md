@@ -10,9 +10,7 @@ and checked by automated tests only, so **reports from real machines are what we
    and paste it into another application.
 3. Record 30 seconds with system audio, pause, resume, stop; play the file.
 4. Read the text of a zone (OCR).
-5. Convert an image from the file manager (Windows: right-click; macOS: Quick Action; Linux:
-   "Open With" or the Dolphin menu — install it in Settings → Integration).
-6. Quit from the tray icon; start it again; try "Start with the session".
+5. Quit from the tray icon; start it again; try "Start with the session".
 
 ## Especially wanted
 

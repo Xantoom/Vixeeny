@@ -47,10 +47,15 @@ pub fn corner(
 pub fn size_for(content: &ToastContent) -> (f64, f64) {
     const WIDTH: f64 = 380.0;
     // The card is 16 px narrower than the window (shadow), minus padding and the thumbnail/icon.
-    let text_width = WIDTH - 16.0 - 18.0 - 14.0 - 14.0 - if content.thumb.is_some() { 76.0 } else { 38.0 };
+    let text_width =
+        WIDTH - 16.0 - 18.0 - 14.0 - 14.0 - if content.thumb.is_some() { 76.0 } else { 38.0 };
     let lines = |text: &str, per_char: f64| -> f64 {
         text.split('\n')
-            .map(|line| ((line.chars().count() as f64 * per_char) / text_width).ceil().max(1.0))
+            .map(|line| {
+                ((line.chars().count() as f64 * per_char) / text_width)
+                    .ceil()
+                    .max(1.0)
+            })
             .sum()
     };
     let mut text = lines(&content.heading, 8.0) * 20.0 + lines(&content.body, 6.8) * 16.0 + 3.0;

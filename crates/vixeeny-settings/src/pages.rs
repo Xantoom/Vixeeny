@@ -333,7 +333,9 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
     let list = encoders::choices(env, hardware);
     let current = encoders::resolved(env, &profile).map(|e| e.id.clone());
 
-    let mut rows = vec![info_of("editing", t(Key::SetEditing), |c| c.video.profile.clone())];
+    let mut rows = vec![info_of("editing", t(Key::SetEditing), |c| {
+        c.video.profile.clone()
+    })];
 
     rows.push(header("h_encoder", t(Key::GrpEncoder)));
     rows.push(hinted(
@@ -441,7 +443,9 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
         |c| c.cur().fps.to_string(),
         |c, v| c.cur_mut().fps = v.parse().unwrap_or(60),
     ));
-    let ten = current.as_deref().is_some_and(|id| encoders::ten_bit(env, id));
+    let ten = current
+        .as_deref()
+        .is_some_and(|id| encoders::ten_bit(env, id));
     rows.push(when_boxed(
         hinted(
             toggle(
@@ -582,17 +586,32 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
     rows.push(header("h_outputs", t(Key::GrpOutputs)));
     add(&mut rows, "system".into(), t(Key::SrcSystem), String::new());
     for device in &env.audio.outputs {
-        add(&mut rows, format!("out:{}", device.id), device.name.clone(), String::new());
+        add(
+            &mut rows,
+            format!("out:{}", device.id),
+            device.name.clone(),
+            String::new(),
+        );
     }
     rows.push(header("h_inputs", t(Key::GrpInputs)));
     add(&mut rows, "mic".into(), t(Key::SrcMic), String::new());
     for device in &env.audio.inputs {
-        add(&mut rows, format!("mic:{}", device.id), device.name.clone(), String::new());
+        add(
+            &mut rows,
+            format!("mic:{}", device.id),
+            device.name.clone(),
+            String::new(),
+        );
     }
     if !env.audio.programs.is_empty() {
         rows.push(header("h_programs", t(Key::GrpPrograms)));
         for program in &env.audio.programs {
-            add(&mut rows, format!("app:{}", program.id), program.name.clone(), String::new());
+            add(
+                &mut rows,
+                format!("app:{}", program.id),
+                program.name.clone(),
+                String::new(),
+            );
         }
     }
     // A source of the profile that is not here now (a program that is closed, an unplugged

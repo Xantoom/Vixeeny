@@ -104,20 +104,38 @@ pub fn spec(id: &str) -> Option<&'static Encoder> {
 /// The label of an encoder option, by its registry key.
 pub fn param_label(key: &str, lang: Lang) -> String {
     let (en, fr) = match key {
-        "preset" => ("Speed / efficiency preset", "Préréglage vitesse / efficacité"),
+        "preset" => (
+            "Speed / efficiency preset",
+            "Préréglage vitesse / efficacité",
+        ),
         "tune" => ("Tuning", "Optimisation"),
         "profile" => ("Profile", "Profil"),
-        "crf" => ("Quality (CRF, lower = better)", "Qualité (CRF, plus bas = meilleur)"),
-        "cq" => ("Quality (CQ, lower = better)", "Qualité (CQ, plus bas = meilleur)"),
-        "qp" => ("Quantizer (QP, lower = better)", "Quantificateur (QP, plus bas = meilleur)"),
+        "crf" => (
+            "Quality (CRF, lower = better)",
+            "Qualité (CRF, plus bas = meilleur)",
+        ),
+        "cq" => (
+            "Quality (CQ, lower = better)",
+            "Qualité (CQ, plus bas = meilleur)",
+        ),
+        "qp" => (
+            "Quantizer (QP, lower = better)",
+            "Quantificateur (QP, plus bas = meilleur)",
+        ),
         "qp_i" => ("Quantizer of key frames", "Quantificateur des images clés"),
-        "qp_p" => ("Quantizer of other frames", "Quantificateur des autres images"),
+        "qp_p" => (
+            "Quantizer of other frames",
+            "Quantificateur des autres images",
+        ),
         "global_quality" => ("Quality (lower = better)", "Qualité (plus bas = meilleur)"),
         "quality" => ("Quality level", "Niveau de qualité"),
         "rc" | "rc_mode" => ("Rate control", "Contrôle du débit"),
         "usage" => ("Usage", "Usage"),
         "multipass" => ("Multi-pass encoding", "Encodage multi-passes"),
-        "keyint" => ("Key frame interval (frames)", "Intervalle d'images clés (images)"),
+        "keyint" => (
+            "Key frame interval (frames)",
+            "Intervalle d'images clés (images)",
+        ),
         "bframes" => ("B-frames", "Images B"),
         "lookahead" => ("Look-ahead (frames)", "Anticipation (images)"),
         "low_power" => ("Low-power mode", "Mode basse consommation"),
@@ -125,7 +143,10 @@ pub fn param_label(key: &str, lang: Lang) -> String {
         "realtime" => ("Real-time mode", "Mode temps réel"),
         "row-mt" => ("Multi-threaded rows", "Lignes multi-thread"),
         "deadline" => ("Deadline", "Délai d'encodage"),
-        "cpu-used" => ("CPU effort (higher = faster)", "Effort CPU (plus haut = plus rapide)"),
+        "cpu-used" => (
+            "CPU effort (higher = faster)",
+            "Effort CPU (plus haut = plus rapide)",
+        ),
         other => return other.to_owned(),
     };
     if lang == Lang::Fr { fr } else { en }.to_owned()

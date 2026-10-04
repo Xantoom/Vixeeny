@@ -33,7 +33,7 @@ runtime (`runtime.rs`); only the platform layer differs per OS (`platform/`):
 | Crate | Role | OS code |
 |---|---|---|
 | `vixeeny-common` | config (`config.toml`, profiles), IPC, hotkey parsing, i18n table, paths, naming | no |
-| `vixeeny-platform` | monitors/DPI, windows, clipboard, notifications, autostart helpers, context-menu entry | yes |
+| `vixeeny-platform` | monitors/DPI, windows, clipboard, notifications, autostart helpers | yes |
 | `vixeeny-capture` | still and video capture: WGC (Windows), ScreenCaptureKit (macOS), X11 / portals / PipeWire (Linux) | yes |
 | `vixeeny-audio` | audio sources (WASAPI, ScreenCaptureKit, PipeWire), the time-driven `Mixer` | yes |
 | `vixeeny-encode` | codec registry (`codecs/registry.toml`), validation, hardware probe, recorder, replay ring, denoiser | FFmpeg |
@@ -41,7 +41,6 @@ runtime (`runtime.rs`); only the platform layer differs per OS (`platform/`):
 | `vixeeny-editor` | the annotation model (tools, undo/redo, rendering) | no |
 | `vixeeny-ocr` | `Engine` trait; Windows.Media.Ocr, Vision, Tesseract; language selection | yes |
 | `vixeeny-stitch` | scrolling-capture assembly | no |
-| `vixeeny-convert` | batch image conversion | no |
 | `vixeeny-settings` | the settings model: rows, validation, reset | no |
 | `vixeeny-ui` | Slint files and their Rust bindings | no |
 | `vixeeny-updater` | release check, SHA-256 + minisign verification, file swap with rollback | no |

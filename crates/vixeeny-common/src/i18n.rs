@@ -876,34 +876,56 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::GrpSources, Lang::Fr) => "Sources audio",
         (Key::SetHdrEnable, Lang::En) => "Enable HDR",
         (Key::SetHdrEnable, Lang::Fr) => "Activer le HDR",
-        (Key::SetHdrEnableHint, Lang::En) => "When off, HDR screens are converted to SDR automatically.",
-        (Key::SetHdrEnableHint, Lang::Fr) => "Désactivé : les écrans HDR sont convertis automatiquement en SDR.",
+        (Key::SetHdrEnableHint, Lang::En) => {
+            "When off, HDR screens are converted to SDR automatically."
+        }
+        (Key::SetHdrEnableHint, Lang::Fr) => {
+            "Désactivé : les écrans HDR sont convertis automatiquement en SDR."
+        }
         (Key::SetTenBit, Lang::En) => "Enable 10-bit",
         (Key::SetTenBit, Lang::Fr) => "Activer le 10 bits",
-        (Key::SetTenBitHint, Lang::En) => "Smoother gradients, needed for HDR. Not every encoder supports it.",
-        (Key::SetTenBitHint, Lang::Fr) => "Dégradés plus doux, nécessaire pour le HDR. Tous les encodeurs ne le gèrent pas.",
+        (Key::SetTenBitHint, Lang::En) => {
+            "Smoother gradients, needed for HDR. Not every encoder supports it."
+        }
+        (Key::SetTenBitHint, Lang::Fr) => {
+            "Dégradés plus doux, nécessaire pour le HDR. Tous les encodeurs ne le gèrent pas."
+        }
         (Key::SetEncoderKind, Lang::En) => "Encoder type",
         (Key::SetEncoderKind, Lang::Fr) => "Type d'encodeur",
-        (Key::SetEncoderKindHint, Lang::En) => "Hardware uses your graphics card and barely slows the game down.",
-        (Key::SetEncoderKindHint, Lang::Fr) => "Le matériel utilise votre carte graphique et ralentit à peine le jeu.",
+        (Key::SetEncoderKindHint, Lang::En) => {
+            "Hardware uses your graphics card and barely slows the game down."
+        }
+        (Key::SetEncoderKindHint, Lang::Fr) => {
+            "Le matériel utilise votre carte graphique et ralentit à peine le jeu."
+        }
         (Key::SetKindHardware, Lang::En) => "Hardware (GPU)",
         (Key::SetKindHardware, Lang::Fr) => "Matériel (GPU)",
         (Key::SetKindSoftware, Lang::En) => "Software (CPU)",
         (Key::SetKindSoftware, Lang::Fr) => "Logiciel (CPU)",
         (Key::SetEncoderHint, Lang::En) => "Only the encoders found on this computer are listed.",
-        (Key::SetEncoderHint, Lang::Fr) => "Seuls les encodeurs détectés sur cet ordinateur sont listés.",
+        (Key::SetEncoderHint, Lang::Fr) => {
+            "Seuls les encodeurs détectés sur cet ordinateur sont listés."
+        }
         (Key::SetPresetBest, Lang::En) => "Maximum quality",
         (Key::SetPresetBest, Lang::Fr) => "Qualité maximale",
         (Key::SetPresetLight, Lang::En) => "Light files",
         (Key::SetPresetLight, Lang::Fr) => "Poids léger",
         (Key::SetPresetCustom, Lang::En) => "Custom",
         (Key::SetPresetCustom, Lang::Fr) => "Personnalisé",
-        (Key::SetPresetHint, Lang::En) => "Maximum quality: best picture, large files. Light files: small files, good picture. Custom: every option of the encoder.",
-        (Key::SetPresetHint, Lang::Fr) => "Qualité maximale : meilleure image, gros fichiers. Poids léger : petits fichiers, bonne image. Personnalisé : toutes les options de l'encodeur.",
+        (Key::SetPresetHint, Lang::En) => {
+            "Maximum quality: best picture, large files. Light files: small files, good picture. Custom: every option of the encoder."
+        }
+        (Key::SetPresetHint, Lang::Fr) => {
+            "Qualité maximale : meilleure image, gros fichiers. Poids léger : petits fichiers, bonne image. Personnalisé : toutes les options de l'encodeur."
+        }
         (Key::SetDetecting, Lang::En) => "Detecting the encoders of this computer…",
         (Key::SetDetecting, Lang::Fr) => "Détection des encodeurs de cet ordinateur…",
-        (Key::SetNoHardware, Lang::En) => "No hardware encoder was found: use the software encoders.",
-        (Key::SetNoHardware, Lang::Fr) => "Aucun encodeur matériel détecté : utilisez les encodeurs logiciels.",
+        (Key::SetNoHardware, Lang::En) => {
+            "No hardware encoder was found: use the software encoders."
+        }
+        (Key::SetNoHardware, Lang::Fr) => {
+            "Aucun encodeur matériel détecté : utilisez les encodeurs logiciels."
+        }
         (Key::GrpApplication, Lang::En) => "Application",
         (Key::GrpApplication, Lang::Fr) => "Application",
         (Key::GrpOverlay, Lang::En) => "Overlay and recording widget",
@@ -943,7 +965,9 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::SrcAbsent, Lang::En) => "not available right now",
         (Key::SrcAbsent, Lang::Fr) => "indisponible pour le moment",
         (Key::SrcHint, Lang::En) => "Tick every source to record, each one gets its own track.",
-        (Key::SrcHint, Lang::Fr) => "Cochez chaque source à enregistrer : chacune a sa propre piste.",
+        (Key::SrcHint, Lang::Fr) => {
+            "Cochez chaque source à enregistrer : chacune a sa propre piste."
+        }
         (Key::SrcNone, Lang::En) => "No audio device found.",
         (Key::SrcNone, Lang::Fr) => "Aucun périphérique audio détecté.",
         (Key::UiPressKeys, Lang::En) => "Press the shortcut…",

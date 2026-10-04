@@ -608,8 +608,40 @@ fn shortcuts_are_edited_in_place_and_conflicts_are_explained() {
     // Escape stops the recording without touching anything.
     w.invoke_shortcut_record(7, 1);
     assert!(panel.captured(settings_panel::Captured::Cancel));
-    assert!(!panel.captured(settings_panel::Captured::Cancel), "nothing is recording any more");
+    assert!(
+        !panel.captured(settings_panel::Captured::Cancel),
+        "nothing is recording any more"
+    );
     assert_eq!(seen.borrow().len(), 1);
+}
+
+#[test]
+fn every_page_of_the_settings_renders() {
+    use vixeeny_settings::{AudioDevices, AudioEntry, Section};
+    let (panel, _) = settings_panel();
+    let entry = |id: &str, name: &str| AudioEntry {
+        id: id.into(),
+        name: name.into(),
+    };
+    panel.set_audio(AudioDevices {
+        outputs: vec![
+            entry("o1", "Speakers (Realtek Audio)"),
+            entry("o2", "Headset (Arctis 7)"),
+        ],
+        inputs: vec![entry("i1", "Microphone (Blue Yeti)")],
+        programs: vec![
+            entry("Spotify.exe", "Spotify.exe"),
+            entry("chrome.exe", "chrome.exe"),
+        ],
+    });
+    for section in Section::ALL {
+        if matches!(section, Section::Gallery) {
+            continue;
+        }
+        panel.select_section(section);
+        let name = format!("9-page-{section:?}").to_lowercase();
+        settings_render(&panel, &name);
+    }
 }
 
 #[test]

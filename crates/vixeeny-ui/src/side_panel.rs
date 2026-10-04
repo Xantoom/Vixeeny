@@ -342,7 +342,10 @@ impl SidePanel {
         window.set_items(model.clone().into());
         window.set_vertical(state.edge.is_vertical());
         window.set_edge(state.edge.index());
-        crate::theme::apply(&window, crate::theme::Look::new(state.dark, None, state.animate));
+        crate::theme::apply(
+            &window,
+            crate::theme::Look::new(state.dark, None, state.animate),
+        );
         window.set_backdrop(state.backdrop);
         let (enter, exit) = if state.animate {
             (ENTER, EXIT)

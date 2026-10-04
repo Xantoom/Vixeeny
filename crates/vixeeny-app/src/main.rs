@@ -523,6 +523,13 @@ fn run() -> anyhow::Result<()> {
         env!("CARGO_PKG_VERSION")
     );
     let mut recording = Recording::default();
+    // The daemon started this process for an action: it comes on the command line, not over the
+    // connection (it is not queued on the daemon's side).
+    let mut next = Some(first_action);
+    while let Some(action) = next.take() {
+        next = run_action(action, &mut config, &mut recording, &mut send)?;
+    }
+    recording.report(&mut send)?;
     loop {
         // While recording the app must not exit as idle; it polls the recording state instead.
         let wait = if recording.active() {

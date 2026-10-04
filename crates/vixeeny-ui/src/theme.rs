@@ -142,14 +142,19 @@ pub fn set_dresser(f: fn(u64, Look)) {
 pub fn app_icon() -> slint::Image {
     const PNG: &[u8] = include_bytes!("../../../packaging/icons/vixeeny-64.png");
     let decoded = (|| {
-        let mut reader = png::Decoder::new(std::io::Cursor::new(PNG)).read_info().ok()?;
+        let mut reader = png::Decoder::new(std::io::Cursor::new(PNG))
+            .read_info()
+            .ok()?;
         let mut data = vec![0; reader.output_buffer_size()?];
         let info = reader.next_frame(&mut data).ok()?;
         if info.color_type != png::ColorType::Rgba || info.bit_depth != png::BitDepth::Eight {
             return None;
         }
-        let mut buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(info.width, info.height);
-        buffer.make_mut_bytes().copy_from_slice(data.get(..info.buffer_size())?);
+        let mut buffer =
+            slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(info.width, info.height);
+        buffer
+            .make_mut_bytes()
+            .copy_from_slice(data.get(..info.buffer_size())?);
         Some(slint::Image::from_rgba8(buffer))
     })();
     decoded.unwrap_or_default()
