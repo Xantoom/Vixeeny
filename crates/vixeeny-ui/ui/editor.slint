@@ -24,7 +24,7 @@ component IconButton inherits Rectangle {
 
     width: 30 * u;
     height: 30 * u;
-    border-radius: 4 * u;
+    border-radius: 6 * u;
     background: root.active ? Theme.accent-soft
         : (touch.pressed && root.enabled ? Theme.subtle-pressed : (touch.has-hover && root.enabled ? Theme.subtle-hover : transparent));
     animate background { duration: Theme.t-fast; }
@@ -386,17 +386,26 @@ export component EditorWindow inherits Window {
 
         // Toolbar.
         if root.has-toolbar : Rectangle {
+            // Rises into place when the zone is settled.
+            property <bool> shown: !root.fade-in;
             x: (root.toolbar-x - root.area-x) * 1phx;
-            y: (root.toolbar-y - root.area-y) * 1phx;
+            y: (root.toolbar-y - root.area-y) * 1phx + (self.shown ? 0 : 6 * root.u);
             width: 700 * root.u;
             height: 88 * root.u;
-            background: Theme.dark ? #2c2c2cf5 : #fcfcfcf5;
-            border-radius: 8 * root.u;
+            opacity: self.shown ? 1 : 0;
+            animate opacity, y { duration: Theme.t-normal; easing: cubic-bezier(0.2, 0, 0, 1); }
+            background: Theme.flyout.with-alpha(0.97);
+            border-radius: 12 * root.u;
             border-width: 1phx;
             border-color: Theme.stroke-strong;
-            drop-shadow-blur: 16phx;
-            drop-shadow-color: #00000066;
-            drop-shadow-offset-y: 4phx;
+            drop-shadow-blur: 24phx;
+            drop-shadow-color: #00000070;
+            drop-shadow-offset-y: 8phx;
+            Timer {
+                interval: 16ms;
+                running: !parent.shown;
+                triggered => { parent.shown = true; }
+            }
 
             TouchArea { } // swallows clicks on the bar itself
 
@@ -465,8 +474,8 @@ export component EditorWindow inherits Window {
                 y: root.toolbar-y - root.area-y > 190 ? -176 * root.u : 96 * root.u;
                 width: 280 * root.u;
                 height: 168 * root.u;
-                background: Theme.dark ? #2c2c2cf5 : #fcfcfcf5;
-                border-radius: 8 * root.u;
+                background: Theme.flyout.with-alpha(0.97);
+                border-radius: 12 * root.u;
                 border-width: 1phx;
                 border-color: Theme.stroke-strong;
                 TouchArea { }
