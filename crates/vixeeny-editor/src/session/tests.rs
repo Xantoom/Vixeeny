@@ -34,16 +34,40 @@ fn ctrl(c: char) -> KeyInput {
 }
 
 #[test]
-fn before_any_selection_there_is_a_magnifier_and_no_toolbar() {
+fn before_any_selection_the_screen_is_calm() {
     let mut s = session();
     s.pointer_move(p(50.0, 50.0), NO);
     let v = s.view();
-    let m = v.magnifier.expect("magnifier");
+    assert!(v.magnifier.is_none() && v.toolbar.is_none() && v.selection.is_none());
+}
+
+#[test]
+fn the_magnifier_shows_the_pixel_under_the_drag() {
+    let mut s = session();
+    s.pointer_down(p(20.0, 20.0), NO);
+    s.pointer_move(p(50.0, 50.0), NO);
+    let m = s.view().magnifier.expect("magnifier");
     assert_eq!(m.hex, "#ff0000");
     assert_eq!((m.pixels.width, m.pixels.height), (11, 11));
-    assert!(v.toolbar.is_none() && v.selection.is_none());
     s.pointer_move(p(150.0, 50.0), NO);
     assert_eq!(s.view().magnifier.unwrap().hex, "#0000ff");
+}
+
+#[test]
+fn the_toolbar_and_magnifier_stay_on_one_monitor() {
+    // Two 1000×800 monitors side by side; a zone ending at the right edge of the left one.
+    let base = RgbaImage::filled(2000, 800, Color::rgb(0, 0, 0));
+    let mut s = Session::new(base, Vec::new()).with_screens(vec![
+        Rect::new(0.0, 0.0, 1000.0, 800.0),
+        Rect::new(1000.0, 0.0, 1000.0, 800.0),
+    ]);
+    s.pointer_down(p(400.0, 100.0), NO);
+    s.pointer_move(p(990.0, 300.0), NO);
+    let m = s.view().magnifier.expect("magnifier");
+    assert!(m.position.x + m.size <= 1000.0, "{:?}", m.position);
+    s.pointer_up(p(990.0, 300.0), NO);
+    let bar = s.view().toolbar.expect("toolbar");
+    assert!(bar.x + TOOLBAR_SIZE.0 <= 1000.0, "{bar:?}");
 }
 
 #[test]

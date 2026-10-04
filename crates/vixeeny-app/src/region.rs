@@ -56,7 +56,6 @@ pub fn output_command(
     action: ActionId,
     command: Command,
     session: &Session,
-    window: &vixeeny_ui::EditorWindow,
 ) -> Option<bool> {
     match command {
         Command::Close => Some(true),
@@ -73,7 +72,7 @@ pub fn output_command(
         Command::Save | Command::SaveAs => {
             let img = session.export()?;
             let chosen = if command == Command::SaveAs {
-                match save_as_dialog(config, window) {
+                match save_as_dialog(config) {
                     Some(path) => Some(path),
                     None => return Some(false), // cancelled: stay in the editor
                 }
@@ -143,7 +142,7 @@ pub fn save_bgra(
     )?)
 }
 
-fn save_as_dialog(config: &Config, window: &vixeeny_ui::EditorWindow) -> Option<PathBuf> {
+fn save_as_dialog(config: &Config) -> Option<PathBuf> {
     let mut dialog = rfd::FileDialog::new().set_title("Vixeeny");
     if let Some(dir) = vixeeny_common::paths::expand_user_dir(&config.paths.images) {
         let _ = std::fs::create_dir_all(&dir);
@@ -160,11 +159,8 @@ fn save_as_dialog(config: &Config, window: &vixeeny_ui::EditorWindow) -> Option<
             dialog = dialog.add_filter(format.extension().to_uppercase(), &[format.extension()]);
         }
     }
-    // The overlay is always on top: let the dialog appear above it.
-    window.set_on_top(false);
-    let chosen = dialog.save_file();
-    window.set_on_top(true);
-    chosen
+    // The overlay lowers its windows for the time of the dialog.
+    dialog.save_file()
 }
 
 /// What the zone is for.
@@ -226,6 +222,20 @@ pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
         .collect();
     let scale = vixeeny_platform::monitor_at(&monitors, cursor.0, cursor.1)
         .map_or(1.0, |m| m.scale_factor() as f32);
+    // One overlay window per monitor, each showing its part of the frozen desktop.
+    let screens: Vec<vixeeny_ui::Screen> = monitors
+        .iter()
+        .map(|m| vixeeny_ui::Screen {
+            position: (m.rect.x, m.rect.y),
+            size: (m.rect.width, m.rect.height),
+            area: Rect::new(
+                (m.rect.x - bounds.x) as f32,
+                (m.rect.y - bounds.y) as f32,
+                m.rect.width as f32,
+                m.rect.height as f32,
+            ),
+        })
+        .collect();
     let scroll_snapshot = Snapshot {
         monitors: monitors.clone(),
         cursor,
@@ -245,48 +255,48 @@ pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
     let scroll_zone: std::rc::Rc<std::cell::Cell<Option<Rect>>> = std::rc::Rc::default();
     let scroll_slot = scroll_zone.clone();
 
-    #[allow(unused_mut)]
-    let mut session = Session::new(base, zones);
+    let mut session =
+        Session::new(base, zones).with_screens(screens.iter().map(|s| s.area).collect());
     match mode {
         Mode::Editor => {}
         Mode::Ocr => session = session.with_auto_command(Command::Ocr),
         Mode::Scroll => session = session.with_auto_command(Command::Scroll),
     }
     session.dim = f32::from(config.editor.dim_percent.min(90)) / 100.0;
-    let overlay = vixeeny_ui::Overlay::new(session, scale, move |command, session, window| {
-        if let Some(close) = output_command(
-            &config,
-            &snapshot,
-            ActionId::CaptureRegion,
-            command,
-            session,
-            window,
-        ) {
-            return close;
-        }
-        match command {
-            Command::Close | Command::Copy | Command::Save | Command::SaveAs => false,
-            Command::Scroll => match session.zone() {
-                Some(zone) => {
-                    scroll_slot.set(Some(zone));
-                    true
-                }
-                None => false,
-            },
-            Command::Ocr => match session.export() {
-                // The overlay closes first; the result window opens afterwards.
-                Some(img) => {
-                    *ocr_slot.borrow_mut() = Some(img);
-                    true
-                }
-                None => false,
-            },
-        }
-    })
-    .map_err(|e| anyhow::anyhow!("cannot create the editor window: {e}"))?;
+    let overlay =
+        vixeeny_ui::Overlay::on_screens(session, scale, &screens, move |command, session, _| {
+            if let Some(close) = output_command(
+                &config,
+                &snapshot,
+                ActionId::CaptureRegion,
+                command,
+                session,
+            ) {
+                return close;
+            }
+            match command {
+                Command::Close | Command::Copy | Command::Save | Command::SaveAs => false,
+                Command::Scroll => match session.zone() {
+                    Some(zone) => {
+                        scroll_slot.set(Some(zone));
+                        true
+                    }
+                    None => false,
+                },
+                Command::Ocr => match session.export() {
+                    // The overlay closes first; the result window opens afterwards.
+                    Some(img) => {
+                        *ocr_slot.borrow_mut() = Some(img);
+                        true
+                    }
+                    None => false,
+                },
+            }
+        })
+        .map_err(|e| anyhow::anyhow!("cannot create the editor window: {e}"))?;
     tracing::info!("editor ready after {:?}", started.elapsed());
     overlay
-        .run((bounds.x, bounds.y), (bounds.width, bounds.height))
+        .run(cursor)
         .map_err(|e| anyhow::anyhow!("editor window: {e}"))?;
     if let Some(zone) = scroll_zone.take() {
         let zone = vixeeny_platform::PhysicalRect::new(

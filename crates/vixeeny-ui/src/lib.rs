@@ -23,7 +23,7 @@ pub mod theme;
 pub mod toast_panel;
 pub mod widget_panel;
 pub mod wizard_panel;
-pub use overlay::Overlay;
+pub use overlay::{Overlay, Screen};
 pub use slint::ComponentHandle;
 pub use vixeeny_ocr::OcrPanel;
 

@@ -115,6 +115,8 @@ pub struct Session {
     auto_command: Option<Command>,
     /// Scale of the interface (the window's scale factor); the toolbar and magnifier grow with it.
     ui_scale: f32,
+    /// The monitors, in image pixels: the toolbar and the magnifier stay on one of them.
+    screens: Vec<Rect>,
 }
 
 impl Session {
@@ -132,7 +134,31 @@ impl Session {
             dim: 0.4,
             auto_command: None,
             ui_scale: 1.0,
+            screens: vec![bounds],
         }
+    }
+
+    /// The monitors the image spans (image pixels), so that the toolbar and the magnifier never
+    /// straddle two of them.
+    pub fn with_screens(mut self, screens: Vec<Rect>) -> Self {
+        if !screens.is_empty() {
+            self.screens = screens;
+        }
+        self
+    }
+
+    /// The monitor `p` is on (the nearest one when it is in none).
+    fn screen_at(&self, p: Point) -> Rect {
+        let distance = |r: &Rect| {
+            let dx = (r.x - p.x).max(p.x - r.right()).max(0.0);
+            let dy = (r.y - p.y).max(p.y - r.bottom()).max(0.0);
+            dx * dx + dy * dy
+        };
+        self.screens
+            .iter()
+            .copied()
+            .min_by(|a, b| distance(a).total_cmp(&distance(b)))
+            .unwrap_or_else(|| Rect::new(0.0, 0.0, self.base.width as f32, self.base.height as f32))
     }
 
     /// Issues `command` as soon as the first zone is validated (the OCR shortcut).
@@ -392,8 +418,9 @@ impl Session {
     }
 
     fn magnifier(&self) -> Option<MagnifierView> {
-        let bounds = Rect::new(0.0, 0.0, self.base.width as f32, self.base.height as f32);
-        let src = magnifier_source(self.cursor, MAGNIFIER_SIDE, &bounds);
+        let image = Rect::new(0.0, 0.0, self.base.width as f32, self.base.height as f32);
+        let bounds = self.screen_at(self.cursor);
+        let src = magnifier_source(self.cursor, MAGNIFIER_SIDE, &image);
         let pixels = render_region(&self.base, std::iter::empty(), &src)?;
         let (px, py) = (
             (self.cursor.x.max(0.0) as u32).min(self.base.width - 1),
@@ -417,7 +444,6 @@ impl Session {
     }
 
     pub fn view(&self) -> View {
-        let bounds = Rect::new(0.0, 0.0, self.base.width as f32, self.base.height as f32);
         let zone = self.selection.rect();
         let settled = self.selection.is_settled();
         let settings = &self.editor.settings;
@@ -431,12 +457,15 @@ impl Session {
                 let y = if z.y >= label { z.y - label } else { z.y + 4.0 };
                 (text, Point::new(z.x, y))
             }),
-            magnifier: if zone.is_none() || !settled {
+            // Only while a zone is being drawn: a calm frozen screen otherwise.
+            magnifier: if zone.is_some() && !settled {
                 self.magnifier()
             } else {
                 None
             },
             toolbar: zone.filter(|_| settled).map(|z| {
+                // On the monitor of the zone's bottom-right corner, where the bar goes.
+                let bounds = self.screen_at(Point::new(z.right() - 1.0, z.bottom() - 1.0));
                 place_beside(
                     &z,
                     (

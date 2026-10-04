@@ -7,7 +7,9 @@ use std::rc::Rc;
 use slint::platform::Key as SlintKey;
 use slint::{ComponentHandle, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
 use vixeeny_editor::selection::CursorHint;
-use vixeeny_editor::{Color, Command, Key, KeyInput, Modifiers, Point, RgbaImage, Session, Tool};
+use vixeeny_editor::{
+    Color, Command, Key, KeyInput, Modifiers, Point, Rect, RgbaImage, Session, Tool,
+};
 
 use crate::EditorWindow;
 
@@ -98,31 +100,128 @@ pub fn map_key(text: &str, ctrl: bool, shift: bool) -> Option<KeyInput> {
 /// Returns `true` when the overlay should close afterwards.
 type CommandHandler = dyn Fn(Command, &Session, &EditorWindow) -> bool;
 
+/// One window of the overlay: a monitor, and the part of the frozen image it shows.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Screen {
+    /// Where the window goes, physical pixels of the virtual desktop.
+    pub position: (i32, i32),
+    /// Its size, physical pixels.
+    pub size: (u32, u32),
+    /// The part of the image it shows (image pixels; the whole image for a scrolling one).
+    pub area: Rect,
+}
+
+/// The editor over the frozen screens: one window per monitor, all showing the same session.
+/// A window per monitor (rather than one window over the whole desktop) keeps every window on a
+/// single monitor, so Windows never rescales it when the monitors' DPI differ.
 pub struct Overlay {
-    window: EditorWindow,
+    windows: Vec<EditorWindow>,
     session: Rc<RefCell<Session>>,
 }
 
+/// Every window of the overlay, for the callbacks (weak: the windows own the callbacks).
+#[derive(Clone)]
+struct Windows(Rc<Vec<slint::Weak<EditorWindow>>>);
+
+impl Windows {
+    fn each(&self, mut f: impl FnMut(&EditorWindow)) {
+        for w in self.0.iter().filter_map(slint::Weak::upgrade) {
+            f(&w);
+        }
+    }
+
+    fn hide_all(&self) {
+        self.each(|w| {
+            let _ = w.hide();
+        });
+        let _ = slint::quit_event_loop();
+    }
+
+    fn refresh(&self, session: &Rc<RefCell<Session>>) {
+        let view = session.borrow().view();
+        self.each(|w| refresh_window(w, &view));
+    }
+
+    /// The text being typed, wherever its field is (only one window has it non-empty).
+    fn take_text(&self) -> String {
+        let mut text = String::new();
+        self.each(|w| {
+            let value = w.get_text_value();
+            if !value.is_empty() {
+                text = value.to_string();
+            }
+            w.set_text_value("".into());
+        });
+        text
+    }
+}
+
 impl Overlay {
-    /// `on_command` is called when the user asks to copy, save, run OCR or close; the host does
-    /// the work (it has the clipboard and the file system) and closes the window.
+    /// One window showing the whole image (tests, and the scrolling editor through
+    /// [`Overlay::on_screens`]). `on_command` is called when the user asks to copy, save, run OCR
+    /// or close; the host does the work (it has the clipboard and the file system).
     pub fn new(
-        mut session: Session,
+        session: Session,
         ui_scale: f32,
         on_command: impl Fn(Command, &Session, &EditorWindow) -> bool + 'static,
     ) -> Result<Self, slint::PlatformError> {
+        let (w, h) = (session.base().width, session.base().height);
+        let screen = Screen {
+            position: (0, 0),
+            size: (w, h),
+            area: Rect::new(0.0, 0.0, w as f32, h as f32),
+        };
+        Self::on_screens(session, ui_scale, &[screen], on_command)
+    }
+
+    /// A window per screen.
+    pub fn on_screens(
+        mut session: Session,
+        ui_scale: f32,
+        screens: &[Screen],
+        on_command: impl Fn(Command, &Session, &EditorWindow) -> bool + 'static,
+    ) -> Result<Self, slint::PlatformError> {
         session.set_ui_scale(ui_scale);
-        let window = EditorWindow::new()?;
-        crate::theme::apply(&window, crate::theme::default_look());
         let base = session.base().clone();
-        window.set_frozen(slint_image(&base));
-        window.set_image_width(i32::try_from(base.width).unwrap_or(i32::MAX));
-        window.set_image_height(i32::try_from(base.height).unwrap_or(i32::MAX));
-        window.set_ui_scale(ui_scale);
         let palette: Vec<slint::Color> = Color::PALETTE.iter().map(|c| slint_color(*c)).collect();
-        window.set_palette(ModelRc::from(Rc::new(VecModel::from(palette))));
+        let palette = ModelRc::from(Rc::new(VecModel::from(palette)));
+        let mut windows = Vec::with_capacity(screens.len());
+        for screen in screens {
+            let window = EditorWindow::new()?;
+            crate::theme::apply(&window, crate::theme::default_look());
+            let whole = screen.area.x <= 0.0
+                && screen.area.y <= 0.0
+                && screen.area.w >= base.width as f32
+                && screen.area.h >= base.height as f32;
+            // Each window uploads only its own part of the image.
+            let part = if whole {
+                Some(base.clone())
+            } else {
+                vixeeny_editor::render::render_region(&base, std::iter::empty(), &screen.area)
+            };
+            if let Some(part) = part {
+                window.set_frozen(slint_image(&part));
+            }
+            window.set_area_x(screen.area.x);
+            window.set_area_y(screen.area.y);
+            window.set_area_w(screen.area.w);
+            window.set_area_h(screen.area.h);
+            window.set_view_width(i32::try_from(screen.size.0).unwrap_or(i32::MAX));
+            window.set_view_height(i32::try_from(screen.size.1).unwrap_or(i32::MAX));
+            window.set_image_width(i32::try_from(base.width).unwrap_or(i32::MAX));
+            window.set_image_height(i32::try_from(base.height).unwrap_or(i32::MAX));
+            window.set_ui_scale(ui_scale);
+            window.set_palette(palette.clone());
+            let w = window.window();
+            w.set_position(slint::PhysicalPosition::new(
+                screen.position.0,
+                screen.position.1,
+            ));
+            w.set_size(slint::PhysicalSize::new(screen.size.0, screen.size.1));
+            windows.push(window);
+        }
         let overlay = Self {
-            window,
+            windows,
             session: Rc::new(RefCell::new(session)),
         };
         overlay.wire(Rc::new(on_command));
@@ -130,21 +229,37 @@ impl Overlay {
         Ok(overlay)
     }
 
+    /// The first window (the only one of a single-screen overlay).
     pub fn window(&self) -> &EditorWindow {
-        &self.window
+        &self.windows[0]
     }
 
-    /// Shows the overlay at `position` with `size` (physical pixels) and runs until it closes.
-    pub fn run(self, position: (i32, i32), size: (u32, u32)) -> Result<(), slint::PlatformError> {
-        let window = self.window.window();
-        window.set_position(slint::PhysicalPosition::new(position.0, position.1));
-        window.set_size(slint::PhysicalSize::new(size.0, size.1));
-        self.window.run()
+    /// Shows every window and runs until the overlay closes. The window under the cursor is
+    /// shown last so that it has the keyboard.
+    pub fn run(self, cursor: (i32, i32)) -> Result<(), slint::PlatformError> {
+        let under_cursor = |w: &EditorWindow| {
+            let (p, s) = (w.window().position(), w.window().size());
+            cursor.0 >= p.x
+                && cursor.1 >= p.y
+                && cursor.0 < p.x + s.width as i32
+                && cursor.1 < p.y + s.height as i32
+        };
+        let (front, others): (Vec<_>, Vec<_>) = self.windows.iter().partition(|w| under_cursor(w));
+        for w in others.iter().chain(&front) {
+            w.show()?;
+        }
+        slint::run_event_loop()?;
+        for w in &self.windows {
+            let _ = w.hide();
+        }
+        Ok(())
     }
 
     /// Image taller than the window: it scrolls (wheel, Page Up/Down) under a fixed toolbar.
     pub fn set_scrolling(&self, scrolling: bool) {
-        self.window.set_scrolling(scrolling);
+        for w in &self.windows {
+            w.set_scrolling(scrolling);
+        }
         self.refresh();
     }
 
@@ -153,147 +268,183 @@ impl Overlay {
     }
 
     fn wire(&self, on_command: Rc<CommandHandler>) {
-        let shift = Rc::new(Cell::new(false));
-        let w = &self.window;
-
-        let (session, weak) = (self.session.clone(), w.as_weak());
-        let sh = shift.clone();
-        w.on_pointer_pressed(move |x, y, s| {
-            sh.set(s);
-            // Clicking elsewhere validates the text being typed instead of dropping it.
-            if let Some(w) = weak.upgrade()
-                && session.borrow().is_typing()
-            {
-                session.borrow_mut().commit_text(&w.get_text_value());
-                w.set_text_value("".into());
-            }
-            session
-                .borrow_mut()
-                .pointer_down(Point::new(x, y), Modifiers { shift: s });
-            refresh_from(&weak, &session);
-        });
-        let (session, weak) = (self.session.clone(), w.as_weak());
-        let sh = shift.clone();
-        w.on_pointer_moved(move |x, y, _| {
-            session
-                .borrow_mut()
-                .pointer_move(Point::new(x, y), Modifiers { shift: sh.get() });
-            refresh_from(&weak, &session);
-        });
-        let (session, weak) = (self.session.clone(), w.as_weak());
-        let sh = shift.clone();
-        let handler = on_command.clone();
-        w.on_pointer_released(move |x, y, s| {
-            sh.set(s);
-            let command = session
-                .borrow_mut()
-                .pointer_up(Point::new(x, y), Modifiers { shift: s });
-            if let (Some(command), Some(window)) = (command, weak.upgrade())
-                && handler(command, &session.borrow(), &window)
-            {
-                let _ = window.hide();
-                return;
-            }
-            refresh_from(&weak, &session);
-        });
-
-        let sh = shift.clone();
-        w.on_key_released(move |text| {
-            if text.starts_with(char::from(SlintKey::Shift)) {
-                sh.set(false);
-            }
-        });
-        let (session, weak, handler) = (self.session.clone(), w.as_weak(), on_command.clone());
-        let sh = shift;
-        w.on_key_pressed(move |text, ctrl, shift_held| {
-            if text.starts_with(char::from(SlintKey::Shift)) {
-                sh.set(true);
-            }
-            let Some(input) = map_key(&text, ctrl, shift_held) else {
-                return;
-            };
-            // While the text field has the focus the field handles typing itself.
-            if session.borrow().is_typing() && !matches!(input.key, Key::Escape) {
-                return;
-            }
-            let command = session.borrow_mut().key(input);
-            if let (Some(command), Some(window)) = (command, weak.upgrade())
-                && handler(command, &session.borrow(), &window)
-            {
-                let _ = window.hide();
-                return;
-            }
-            refresh_from(&weak, &session);
-        });
-
-        let (session, weak) = (self.session.clone(), w.as_weak());
-        w.on_tool_chosen(move |i| {
-            let tool = usize::try_from(i)
-                .ok()
-                .and_then(|i| TOOLS.get(i).copied())
-                .flatten();
-            session.borrow_mut().choose_tool(tool);
-            refresh_from(&weak, &session);
-        });
-        let (session, weak) = (self.session.clone(), w.as_weak());
-        w.on_color_chosen(move |c| {
-            session.borrow_mut().set_color(editor_color(c));
-            refresh_from(&weak, &session);
-        });
-        let (session, weak) = (self.session.clone(), w.as_weak());
-        w.on_width_changed(move |v| {
-            session.borrow_mut().set_width(v);
-            refresh_from(&weak, &session);
-        });
-        let (session, weak) = (self.session.clone(), w.as_weak());
-        w.on_filled_toggled(move || {
-            let filled = session.borrow().view().filled;
-            session.borrow_mut().set_filled(!filled);
-            refresh_from(&weak, &session);
-        });
-        let (session, weak) = (self.session.clone(), w.as_weak());
-        w.on_text_committed(move |text| {
-            session.borrow_mut().commit_text(&text);
-            if let Some(w) = weak.upgrade() {
-                w.set_text_value("".into());
-            }
-            refresh_from(&weak, &session);
-        });
-        let (session, weak, handler) = (self.session.clone(), w.as_weak(), on_command);
-        w.on_action(move |name| {
-            match name.as_str() {
-                "undo" => session.borrow_mut().undo(),
-                "redo" => session.borrow_mut().redo(),
-                other => {
-                    let command = match other {
-                        "copy" => Command::Copy,
-                        "save" => Command::Save,
-                        "save-as" => Command::SaveAs,
-                        "ocr" => Command::Ocr,
-                        "scroll" => Command::Scroll,
-                        _ => Command::Close,
-                    };
-                    if let Some(window) = weak.upgrade()
-                        && handler(command, &session.borrow(), &window)
-                    {
-                        let _ = window.hide();
-                        return;
-                    }
-                }
-            }
-            refresh_from(&weak, &session);
-        });
+        let all = Windows(Rc::new(self.windows.iter().map(|w| w.as_weak()).collect()));
+        for w in &self.windows {
+            wire_window(w, &all, &self.session, &on_command);
+        }
     }
 
-    /// Pushes the session's view into the window.
+    /// Pushes the session's view into the windows.
     pub fn refresh(&self) {
-        refresh_from(&self.window.as_weak(), &self.session);
+        let view = self.session.borrow().view();
+        for w in &self.windows {
+            refresh_window(w, &view);
+        }
     }
 }
 
-fn refresh_from(weak: &slint::Weak<EditorWindow>, session: &Rc<RefCell<Session>>) {
-    let Some(w) = weak.upgrade() else { return };
-    let v = session.borrow().view();
+/// Runs `command` through the host; closes every window when it says so.
+fn run_command(
+    command: Command,
+    session: &Rc<RefCell<Session>>,
+    window: &EditorWindow,
+    all: &Windows,
+    handler: &CommandHandler,
+) -> bool {
+    // A system dialog (Save as) must be able to appear above every window of the overlay.
+    let dialog = matches!(command, Command::SaveAs);
+    if dialog {
+        all.each(|w| w.set_on_top(false));
+    }
+    let close = handler(command, &session.borrow(), window);
+    if dialog {
+        all.each(|w| w.set_on_top(true));
+    }
+    if close {
+        all.hide_all();
+    }
+    close
+}
+
+fn wire_window(
+    w: &EditorWindow,
+    all: &Windows,
+    session: &Rc<RefCell<Session>>,
+    on_command: &Rc<CommandHandler>,
+) {
+    let shift = Rc::new(Cell::new(false));
+
+    let (s, a) = (session.clone(), all.clone());
+    let sh = shift.clone();
+    w.on_pointer_pressed(move |x, y, held| {
+        sh.set(held);
+        // Clicking elsewhere validates the text being typed instead of dropping it.
+        if s.borrow().is_typing() {
+            let text = a.take_text();
+            s.borrow_mut().commit_text(&text);
+        }
+        s.borrow_mut()
+            .pointer_down(Point::new(x, y), Modifiers { shift: held });
+        a.refresh(&s);
+    });
+    let (s, a) = (session.clone(), all.clone());
+    let sh = shift.clone();
+    w.on_pointer_moved(move |x, y, _| {
+        s.borrow_mut()
+            .pointer_move(Point::new(x, y), Modifiers { shift: sh.get() });
+        a.refresh(&s);
+    });
+    let (s, a, weak) = (session.clone(), all.clone(), w.as_weak());
+    let sh = shift.clone();
+    let handler = on_command.clone();
+    w.on_pointer_released(move |x, y, held| {
+        sh.set(held);
+        let command = s
+            .borrow_mut()
+            .pointer_up(Point::new(x, y), Modifiers { shift: held });
+        if let (Some(command), Some(window)) = (command, weak.upgrade())
+            && run_command(command, &s, &window, &a, &*handler)
+        {
+            return;
+        }
+        a.refresh(&s);
+    });
+
+    let sh = shift.clone();
+    w.on_key_released(move |text| {
+        if text.starts_with(char::from(SlintKey::Shift)) {
+            sh.set(false);
+        }
+    });
+    let (s, a, weak, handler) = (
+        session.clone(),
+        all.clone(),
+        w.as_weak(),
+        on_command.clone(),
+    );
+    let sh = shift;
+    w.on_key_pressed(move |text, ctrl, shift_held| {
+        if text.starts_with(char::from(SlintKey::Shift)) {
+            sh.set(true);
+        }
+        let Some(input) = map_key(&text, ctrl, shift_held) else {
+            return;
+        };
+        // While the text field has the focus the field handles typing itself.
+        if s.borrow().is_typing() && !matches!(input.key, Key::Escape) {
+            return;
+        }
+        let command = s.borrow_mut().key(input);
+        if let (Some(command), Some(window)) = (command, weak.upgrade())
+            && run_command(command, &s, &window, &a, &*handler)
+        {
+            return;
+        }
+        a.refresh(&s);
+    });
+
+    let (s, a) = (session.clone(), all.clone());
+    w.on_tool_chosen(move |i| {
+        let tool = usize::try_from(i)
+            .ok()
+            .and_then(|i| TOOLS.get(i).copied())
+            .flatten();
+        s.borrow_mut().choose_tool(tool);
+        a.refresh(&s);
+    });
+    let (s, a) = (session.clone(), all.clone());
+    w.on_color_chosen(move |c| {
+        s.borrow_mut().set_color(editor_color(c));
+        a.refresh(&s);
+    });
+    let (s, a) = (session.clone(), all.clone());
+    w.on_width_changed(move |v| {
+        s.borrow_mut().set_width(v);
+        a.refresh(&s);
+    });
+    let (s, a) = (session.clone(), all.clone());
+    w.on_filled_toggled(move || {
+        let filled = s.borrow().view().filled;
+        s.borrow_mut().set_filled(!filled);
+        a.refresh(&s);
+    });
+    let (s, a) = (session.clone(), all.clone());
+    w.on_text_committed(move |text| {
+        s.borrow_mut().commit_text(&text);
+        a.take_text();
+        a.refresh(&s);
+    });
+    let (s, a, weak, handler) = (
+        session.clone(),
+        all.clone(),
+        w.as_weak(),
+        on_command.clone(),
+    );
+    w.on_action(move |name| {
+        match name.as_str() {
+            "undo" => s.borrow_mut().undo(),
+            "redo" => s.borrow_mut().redo(),
+            other => {
+                let command = match other {
+                    "copy" => Command::Copy,
+                    "save" => Command::Save,
+                    "save-as" => Command::SaveAs,
+                    "ocr" => Command::Ocr,
+                    "scroll" => Command::Scroll,
+                    _ => Command::Close,
+                };
+                if let Some(window) = weak.upgrade()
+                    && run_command(command, &s, &window, &a, &*handler)
+                {
+                    return;
+                }
+            }
+        }
+        a.refresh(&s);
+    });
+}
+
+fn refresh_window(w: &EditorWindow, v: &vixeeny_editor::View) {
     w.set_dim(v.dim);
     w.set_has_selection(v.selection.is_some());
     w.set_settled(v.settled);

@@ -277,23 +277,26 @@ fn annotate(
     session.select_all();
     session.dim = 0.0;
     let config = config.clone();
-    let overlay = vixeeny_ui::Overlay::new(session, scale, move |command, session, window| {
-        crate::region::output_command(
-            &config,
-            &snapshot,
-            ActionId::CaptureScrolling,
-            command,
-            session,
-            window,
-        )
-        .unwrap_or(false)
-    })
-    .map_err(|e| anyhow::anyhow!("cannot create the editor window: {e}"))?;
+    let screen = vixeeny_ui::Screen {
+        position: (monitor.rect.x, monitor.rect.y),
+        size: (monitor.rect.width, monitor.rect.height),
+        area: vixeeny_editor::Rect::new(0.0, 0.0, frame.width as f32, frame.height as f32),
+    };
+    let screens = [screen];
+    let overlay =
+        vixeeny_ui::Overlay::on_screens(session, scale, &screens, move |command, session, _| {
+            crate::region::output_command(
+                &config,
+                &snapshot,
+                ActionId::CaptureScrolling,
+                command,
+                session,
+            )
+            .unwrap_or(false)
+        })
+        .map_err(|e| anyhow::anyhow!("cannot create the editor window: {e}"))?;
     overlay.set_scrolling(true);
     overlay
-        .run(
-            (monitor.rect.x, monitor.rect.y),
-            (monitor.rect.width, monitor.rect.height),
-        )
+        .run((monitor.rect.x, monitor.rect.y))
         .map_err(|e| anyhow::anyhow!("editor window: {e}"))
 }

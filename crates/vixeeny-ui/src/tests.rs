@@ -83,7 +83,10 @@ fn overlay(w: u32, h: u32, scale: f32) -> Overlay {
         screen(w, h),
         vec![vixeeny_editor::Rect::new(60.0, 50.0, 240.0, 170.0)],
     );
-    Overlay::new(session, scale, |_, _, _| true).unwrap_or_else(|e| panic!("{e}"))
+    let o = Overlay::new(session, scale, |_, _, _| true).unwrap_or_else(|e| panic!("{e}"));
+    // Screenshots show the settled look, not the first frame of the fade.
+    o.window().set_fade_in(false);
+    o
 }
 
 const NO: Modifiers = Modifiers { shift: false };
@@ -93,17 +96,61 @@ fn p(x: f32, y: f32) -> Point {
 }
 
 #[test]
-fn before_selecting_the_magnifier_and_window_highlight_show() {
+fn before_selecting_only_the_window_under_the_cursor_stays_clear() {
     let o = overlay(640, 360, 1.0);
     o.session().borrow_mut().pointer_move(p(100.0, 100.0), NO);
     o.refresh();
     let buf = render(&o, 640, 360);
     save("1-hover", &buf);
-    assert!(o.window().get_has_magnifier());
+    assert!(
+        !o.window().get_has_magnifier(),
+        "no magnifier before drawing"
+    );
     assert!(o.window().get_has_hover());
-    // the veil darkens the area outside the window under the cursor
     let px = |x: usize, y: usize| buf.as_slice()[y * 640 + x];
-    assert!(px(500, 300).g < 140, "{:?}", px(500, 300));
+    let original = screen(640, 360);
+    let at = |x: usize, y: usize| original.data[(y * 640 + x) * 4 + 1];
+    // the veil darkens outside the window under the cursor, not inside it
+    assert!(px(500, 300).g < at(500, 300), "{:?}", px(500, 300));
+    assert_eq!(px(150, 120).g, at(150, 120), "{:?}", px(150, 120));
+}
+
+#[test]
+fn the_first_frame_is_the_screen_as_it_was() {
+    WINDOW.with(|_| ());
+    let session = Session::new(screen(320, 200), Vec::new());
+    let o = Overlay::new(session, 1.0, |_, _, _| true).unwrap_or_else(|e| panic!("{e}"));
+    let buf = render(&o, 320, 200);
+    let original = screen(320, 200);
+    let (x, y) = (200, 150);
+    let o_px = &original.data[(y * 320 + x) * 4..][..3];
+    let px = buf.as_slice()[y * 320 + x];
+    assert_eq!([px.r, px.g, px.b], o_px, "no veil before the fade");
+}
+
+#[test]
+fn a_window_shows_its_own_part_of_the_desktop() {
+    WINDOW.with(|_| ());
+    // The right half of a 640×360 desktop, as the second of two monitors.
+    let session = Session::new(screen(640, 360), Vec::new());
+    let right = Screen {
+        position: (320, 0),
+        size: (320, 360),
+        area: vixeeny_editor::Rect::new(320.0, 0.0, 320.0, 360.0),
+    };
+    let o = Overlay::on_screens(session, 1.0, &[right], |_, _, _| true)
+        .unwrap_or_else(|e| panic!("{e}"));
+    o.window().set_fade_in(false);
+    o.session().borrow_mut().dim = 0.0;
+    o.refresh();
+    let buf = render(&o, 320, 360);
+    save("0-right-monitor", &buf);
+    let original = screen(640, 360);
+    for (x, y) in [(0, 0), (100, 200), (319, 359)] {
+        let o_px = &original.data[(y * 640 + 320 + x) * 4..][..3];
+        let px = buf.as_slice()[y * 320 + x];
+        assert_eq!([px.r, px.g, px.b], o_px, "at {x},{y}");
+    }
 }
 
 #[test]

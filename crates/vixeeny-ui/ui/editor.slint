@@ -12,6 +12,9 @@ export { GalleryItem, LineItem, SettingRow, SettingsWindow, ShortcutRow, UiTexts
 
 // All geometry is in physical pixels (`phx`) so the frozen image is shown 1:1 on every DPI;
 // the toolbar scales with `ui-scale` (the window's scale factor).
+//
+// The overlay is one window per monitor. Each shows its `area` of the frozen image, and lays
+// everything out in the coordinates of the whole image: the window clips the rest.
 
 component IconButton inherits Rectangle {
     in property <string> icon;
@@ -64,10 +67,19 @@ component Swatch inherits Rectangle {
 }
 
 export component EditorWindow inherits Window {
+    // This window's part of the frozen image (image pixels) and its size (physical pixels).
     in property <image> frozen;
+    in property <float> area-x: 0;
+    in property <float> area-y: 0;
+    in property <float> area-w: 1;
+    in property <float> area-h: 1;
+    in property <int> view-width: 1;
+    in property <int> view-height: 1;
     in property <int> image-width: 1;
     in property <int> image-height: 1;
     in property <float> dim: 0.4;
+    // The veil fades in once the window is up, so the screen first looks exactly as it was.
+    in property <bool> fade-in: true;
     in property <float> ui-scale: 1;
 
     // The zone.
@@ -145,6 +157,15 @@ export component EditorWindow inherits Window {
     callback text-committed(string);
 
     property <length> u: 1phx * root.ui-scale;
+    property <bool> shown: !root.fade-in;
+    property <float> veil: root.shown ? root.dim : 0;
+    animate veil { duration: 160ms; easing: ease-out; }
+    // The hole in the veil: the zone, else the window under the cursor.
+    property <bool> has-hole: root.has-selection || root.has-hover;
+    property <float> hole-x: root.has-selection ? root.sel-x : root.hover-x;
+    property <float> hole-y: root.has-selection ? root.sel-y : root.hover-y;
+    property <float> hole-w: root.has-selection ? root.sel-w : root.hover-w;
+    property <float> hole-h: root.has-selection ? root.sel-h : root.hover-h;
     pure function clamp-scroll(v: float) -> float {
         return Math.max(0, Math.min(v, root.image-height - root.height / 1phx));
     }
@@ -154,8 +175,14 @@ export component EditorWindow inherits Window {
     background: black;
     icon: Theme.app-icon;
     default-font-family: Theme.font;
-    width: image-width * 1phx;
-    height: image-height * 1phx;
+    width: view-width * 1phx;
+    height: view-height * 1phx;
+
+    Timer {
+        interval: 30ms;
+        running: !root.shown;
+        triggered => { root.shown = true; }
+    }
 
     init => { focus.focus(); }
     changed has-text-input => {
@@ -179,35 +206,36 @@ export component EditorWindow inherits Window {
         }
 
         content := Rectangle {
-            x: 0phx;
-            y: -root.scroll-y * 1phx;
+            x: -root.area-x * 1phx;
+            y: (-root.area-y - root.scroll-y) * 1phx;
             width: root.image-width * 1phx;
             height: root.image-height * 1phx;
 
             Image {
-                x: 0phx;
-                y: 0phx;
-                width: root.image-width * 1phx;
-                height: root.image-height * 1phx;
+                x: root.area-x * 1phx;
+                y: root.area-y * 1phx;
+                width: root.area-w * 1phx;
+                height: root.area-h * 1phx;
                 source: root.frozen;
                 image-rendering: pixelated;
             }
 
-            // Veil around the zone (everywhere when there is none).
-            Rectangle { x: 0phx; y: 0phx; width: parent.width; height: root.has-selection ? root.sel-y * 1phx : parent.height; background: black.with-alpha(root.dim); }
-            Rectangle { visible: root.has-selection; x: 0phx; y: (root.sel-y + root.sel-h) * 1phx; width: parent.width; height: parent.height - (root.sel-y + root.sel-h) * 1phx; background: black.with-alpha(root.dim); }
-            Rectangle { visible: root.has-selection; x: 0phx; y: root.sel-y * 1phx; width: root.sel-x * 1phx; height: root.sel-h * 1phx; background: black.with-alpha(root.dim); }
-            Rectangle { visible: root.has-selection; x: (root.sel-x + root.sel-w) * 1phx; y: root.sel-y * 1phx; width: parent.width - (root.sel-x + root.sel-w) * 1phx; height: root.sel-h * 1phx; background: black.with-alpha(root.dim); }
+            // Veil around the hole (everywhere when there is none).
+            Rectangle { x: 0phx; y: 0phx; width: parent.width; height: root.has-hole ? root.hole-y * 1phx : parent.height; background: black.with-alpha(root.veil); }
+            Rectangle { visible: root.has-hole; x: 0phx; y: (root.hole-y + root.hole-h) * 1phx; width: parent.width; height: parent.height - (root.hole-y + root.hole-h) * 1phx; background: black.with-alpha(root.veil); }
+            Rectangle { visible: root.has-hole; x: 0phx; y: root.hole-y * 1phx; width: root.hole-x * 1phx; height: root.hole-h * 1phx; background: black.with-alpha(root.veil); }
+            Rectangle { visible: root.has-hole; x: (root.hole-x + root.hole-w) * 1phx; y: root.hole-y * 1phx; width: parent.width - (root.hole-x + root.hole-w) * 1phx; height: root.hole-h * 1phx; background: black.with-alpha(root.veil); }
 
-            // Window under the cursor, before any zone exists.
+            // Window under the cursor, before any zone exists: left clear, with a fine outline.
             if root.has-hover && !root.has-selection : Rectangle {
                 x: root.hover-x * 1phx;
                 y: root.hover-y * 1phx;
                 width: root.hover-w * 1phx;
                 height: root.hover-h * 1phx;
-                background: Theme.accent-soft;
                 border-width: 2phx;
                 border-color: Theme.accent;
+                opacity: root.shown ? 1 : 0;
+                animate opacity { duration: 160ms; easing: ease-out; }
             }
 
             if root.has-annotated : Image {
@@ -359,8 +387,8 @@ export component EditorWindow inherits Window {
 
         // Toolbar.
         if root.has-toolbar : Rectangle {
-            x: root.toolbar-x * 1phx;
-            y: root.toolbar-y * 1phx;
+            x: (root.toolbar-x - root.area-x) * 1phx;
+            y: (root.toolbar-y - root.area-y) * 1phx;
             width: 700 * root.u;
             height: 88 * root.u;
             background: Theme.dark ? #2c2c2cf5 : #fcfcfcf5;
@@ -435,7 +463,7 @@ export component EditorWindow inherits Window {
             }
             if root.picker-open : Rectangle {
                 x: 8 * root.u;
-                y: root.toolbar-y > 190 ? -176 * root.u : 96 * root.u;
+                y: root.toolbar-y - root.area-y > 190 ? -176 * root.u : 96 * root.u;
                 width: 280 * root.u;
                 height: 168 * root.u;
                 background: Theme.dark ? #2c2c2cf5 : #fcfcfcf5;
