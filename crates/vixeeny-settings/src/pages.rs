@@ -43,6 +43,17 @@ fn parse_app_names(text: &str) -> std::collections::BTreeMap<String, String> {
         .collect()
 }
 
+/// The frame rate offered closest to `fps` (a setting from before the shorter list).
+const fn fps_option(fps: u32, high: bool) -> u32 {
+    if fps >= 90 && high {
+        120
+    } else if fps >= 45 {
+        60
+    } else {
+        30
+    }
+}
+
 fn hdr_on(setting: &str) -> bool {
     matches!(setting, "keep_hdr" | "hdr")
 }
@@ -517,13 +528,16 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
     rows.push(choice(
         "container",
         t(Key::SetContainer),
+        // Fragmented MP4 only: a recording cut short (a crash, a full disk) still plays.
         vec![
-            opt("mp4_hybrid", t(Key::OptMp4)),
-            opt("mp4_fragmented", t(Key::OptMp4Fragmented)),
+            opt("mp4_fragmented", "MP4"),
             opt("mkv", "MKV"),
             opt("webm", "WebM"),
         ],
-        |c| c.cur().container,
+        |c| match c.cur().container.as_str() {
+            "mp4" | "mp4_hybrid" => "mp4_fragmented".to_owned(),
+            other => other.to_owned(),
+        },
         |c, v| c.cur_mut().container = v,
     ));
     rows.push(choice(
@@ -540,14 +554,17 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
         |c| c.cur().resolution,
         |c, v| c.cur_mut().resolution = v,
     ));
-    rows.push(choice(
+    // 120 fps only where a monitor shows that many.
+    let high = env.display.max_refresh >= 120;
+    let rates: &[u32] = if high { &[30, 60, 120] } else { &[30, 60] };
+    rows.push(segmented(
         "fps",
         t(Key::SetFps),
-        ["24", "30", "60", "90", "120", "144", "240"]
+        rates
             .iter()
-            .map(|f| opt(f, format!("{f} fps")))
+            .map(|f| opt(&f.to_string(), format!("{f} fps")))
             .collect(),
-        |c| c.cur().fps.to_string(),
+        move |c| fps_option(c.cur().fps, high).to_string(),
         |c, v| c.cur_mut().fps = v.parse().unwrap_or(60),
     ));
     let ten = current
@@ -566,20 +583,29 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
         // HDR needs 10 bits: the switch stays on, and cannot be turned off, while HDR is on.
         move |c| ten && !hdr_on(&c.cur().hdr),
     ));
-    rows.push(hinted(
-        toggle(
-            "hdr",
-            t(Key::SetHdrEnable),
-            |c| hdr_on(&c.cur().hdr),
-            |c, v| {
-                let profile = c.cur_mut();
-                profile.hdr = if v { "keep_hdr" } else { "tonemap_sdr" }.into();
-                if v {
-                    profile.depth = 10;
-                }
+    // HDR needs Windows to show it: without, the switch is off and greyed out.
+    let hdr_display = env.display.hdr;
+    rows.push(when_boxed(
+        hinted(
+            toggle(
+                "hdr",
+                t(Key::SetHdrEnable),
+                move |c| hdr_display && hdr_on(&c.cur().hdr),
+                |c, v| {
+                    let profile = c.cur_mut();
+                    profile.hdr = if v { "keep_hdr" } else { "tonemap_sdr" }.into();
+                    if v {
+                        profile.depth = 10;
+                    }
+                },
+            ),
+            if hdr_display {
+                t(Key::SetHdrEnableHint)
+            } else {
+                t(Key::SetHdrOffInWindows)
             },
         ),
-        t(Key::SetHdrEnableHint),
+        move |_| hdr_display,
     ));
     rows.push(toggle(
         "video_cursor",

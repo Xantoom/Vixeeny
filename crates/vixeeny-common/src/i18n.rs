@@ -279,8 +279,6 @@ pub enum Key {
     SetAppNamesHint,
     SetOcrLanguagesHint,
     SetIdleExitHint,
-    OptMp4,
-    OptMp4Fragmented,
     OptAuto,
     OptFlac,
     OptPcm16,
@@ -306,6 +304,7 @@ pub enum Key {
     UiNoFolder,
     UiConfirmDelete,
     UiConfirmDeleteHint,
+    SetHdrOffInWindows,
 }
 
 impl Key {
@@ -569,8 +568,6 @@ impl Key {
         Self::SetAppNamesHint,
         Self::SetOcrLanguagesHint,
         Self::SetIdleExitHint,
-        Self::OptMp4,
-        Self::OptMp4Fragmented,
         Self::OptAuto,
         Self::OptFlac,
         Self::OptPcm16,
@@ -596,6 +593,7 @@ impl Key {
         Self::UiNoFolder,
         Self::UiConfirmDelete,
         Self::UiConfirmDeleteHint,
+        Self::SetHdrOffInWindows,
     ];
 }
 
@@ -1235,10 +1233,6 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::SetIdleExitHint, Lang::Fr) => {
             "0 la ferme tout de suite (moins de mémoire, démarrage un peu plus lent)."
         }
-        (Key::OptMp4, Lang::En) => "MP4",
-        (Key::OptMp4, Lang::Fr) => "MP4",
-        (Key::OptMp4Fragmented, Lang::En) => "MP4 (fragmented)",
-        (Key::OptMp4Fragmented, Lang::Fr) => "MP4 (fragmenté)",
         (Key::OptAuto, Lang::En) => "Automatic",
         (Key::OptAuto, Lang::Fr) => "Automatique",
         (Key::OptFlac, Lang::En) => "FLAC (lossless)",
@@ -1292,6 +1286,12 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         }
         (Key::UiConfirmDeleteHint, Lang::Fr) => {
             "Le fichier part dans la Corbeille : vous pourrez encore le récupérer."
+        }
+        (Key::SetHdrOffInWindows, Lang::En) => {
+            "Turn on “Use HDR” in the Windows display settings to record in HDR."
+        }
+        (Key::SetHdrOffInWindows, Lang::Fr) => {
+            "Activez « Utiliser le HDR » dans les paramètres d’affichage de Windows pour enregistrer en HDR."
         }
     }
 }

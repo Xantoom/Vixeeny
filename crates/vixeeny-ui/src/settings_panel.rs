@@ -13,7 +13,7 @@ use vixeeny_common::ipc::ActionId;
 use vixeeny_encode::probe::ProbeResult;
 use vixeeny_settings::shortcuts::{self, Refusal};
 use vixeeny_settings::{
-    AudioDevices, Env, Kind, Row, Section, Value, profiles, reset, rows, video_problems,
+    AudioDevices, Display, Env, Kind, Row, Section, Value, profiles, reset, rows, video_problems,
 };
 
 use crate::theme::{self, Look};
@@ -126,6 +126,7 @@ struct State {
     /// The hardware probe, once known, and whether it is still running.
     probe: RefCell<(Option<ProbeResult>, bool)>,
     audio: RefCell<AudioDevices>,
+    display: Cell<Display>,
     /// The shortcut being recorded: `(row, slot)`.
     recording: Cell<Option<(usize, usize)>>,
     on_recording: RefCell<Box<dyn Fn(bool)>>,
@@ -628,6 +629,7 @@ impl SettingsPanel {
             rows: RefCell::default(),
             probe: RefCell::new((None, false)),
             audio: RefCell::default(),
+            display: Cell::default(),
             recording: Cell::new(None),
             on_recording: RefCell::new(Box::new(|_| {})),
             on_change: RefCell::new(Box::new(|_| {})),
@@ -679,6 +681,13 @@ impl SettingsPanel {
     }
 
     /// The programs, microphones and outputs the audio page offers (found by the host).
+    /// What the monitors can show (HDR, refresh rate): the video page offers what fits.
+    pub fn set_display(&self, display: Display) {
+        self.state.display.set(display);
+        self.rebuild_env();
+        self.refresh();
+    }
+
     pub fn set_audio(&self, audio: AudioDevices) {
         *self.state.audio.borrow_mut() = audio;
         self.rebuild_env();
@@ -789,7 +798,8 @@ impl SettingsPanel {
         let (probe, detecting) = state.probe.borrow().clone();
         *state.env.borrow_mut() = Env::new(state.lang(), &state.version)
             .with_probe(probe, detecting)
-            .with_audio(state.audio.borrow().clone());
+            .with_audio(state.audio.borrow().clone())
+            .with_display(state.display.get());
     }
 
     /// Rebuilds what the current page shows from the settings.

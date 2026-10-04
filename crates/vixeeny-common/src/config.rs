@@ -9,11 +9,31 @@ use serde::{Deserialize, Serialize};
 use crate::ipc::ActionId;
 
 /// Schema version written by this build. Bump it and add a migration to [`MIGRATIONS`].
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// `MIGRATIONS[n]` upgrades a table from schema `n + 1` to `n + 2`.
 pub type Migration = fn(&mut toml::Table);
-pub const MIGRATIONS: &[Migration] = &[];
+pub const MIGRATIONS: &[Migration] = &[v1_fragmented_mp4];
+
+/// 0.9 → 1.0: MP4 recordings are fragmented (a recording cut short still plays), and the cursor
+/// is left out of videos unless asked for again.
+fn v1_fragmented_mp4(table: &mut toml::Table) {
+    let Some(profiles) = table.get_mut("profiles").and_then(|p| p.as_table_mut()) else {
+        return;
+    };
+    for (_, profile) in profiles.iter_mut() {
+        let Some(profile) = profile.as_table_mut() else {
+            continue;
+        };
+        if matches!(
+            profile.get("container").and_then(|c| c.as_str()),
+            Some("mp4" | "mp4_hybrid")
+        ) {
+            profile.insert("container".into(), "mp4_fragmented".into());
+        }
+        profile.insert("show_cursor".into(), false.into());
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -317,7 +337,7 @@ impl Default for Profile {
         Self {
             encoder_kind: "hardware".into(),
             encoder: "auto".into(),
-            container: "mp4_hybrid".into(),
+            container: "mp4_fragmented".into(),
             resolution: "source".into(),
             fps: 60,
             depth: 8,
@@ -326,7 +346,7 @@ impl Default for Profile {
             mode: "simple".into(),
             preset: "quality".into(),
             params: BTreeMap::new(),
-            show_cursor: true,
+            show_cursor: false,
             vfr: false,
             split: Split::default(),
             audio: Audio::default(),
@@ -609,6 +629,17 @@ mod tests {
         assert_eq!(table["schema_version"].as_integer(), Some(3));
         assert_eq!(table["new_name"].as_integer(), Some(7));
         assert_eq!(table["added"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn older_files_record_fragmented_mp4_without_the_cursor() {
+        let text = "schema_version = 1\n[profiles.default]\ncontainer = \"mp4_hybrid\"\n\
+                    show_cursor = true\n[profiles.mkv]\ncontainer = \"mkv\"\n";
+        let cfg = Config::from_toml(text).unwrap();
+        assert_eq!(cfg.schema_version, SCHEMA_VERSION);
+        assert_eq!(cfg.profiles["default"].container, "mp4_fragmented");
+        assert_eq!(cfg.profiles["mkv"].container, "mkv");
+        assert!(!cfg.profiles["default"].show_cursor);
     }
 
     #[test]

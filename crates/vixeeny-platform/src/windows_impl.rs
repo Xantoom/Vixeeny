@@ -21,7 +21,8 @@ use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory1, DXGI_ADAPTER_FLAG_SOFTWARE, IDXGIDevice, IDXGIFactory1, IDXGIOutput6,
 };
 use windows::Win32::Graphics::Gdi::{
-    EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO, MONITORINFOEXW,
+    DEVMODEW, ENUM_CURRENT_SETTINGS, EnumDisplayMonitors, EnumDisplaySettingsW, GetMonitorInfoW,
+    HDC, HMONITOR, MONITORINFO, MONITORINFOEXW,
 };
 use windows::Win32::System::Threading::{
     GetCurrentThreadId, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -121,6 +122,36 @@ pub fn monitors() -> Result<Vec<MonitorInfo>> {
         });
     }
     Ok(out)
+}
+
+/// The highest refresh rate among the monitors, in Hz (60 when it cannot be read).
+pub fn max_refresh_hz() -> u32 {
+    let Ok(list) = monitors() else { return 60 };
+    list.iter()
+        .filter_map(|m| {
+            let name: Vec<u16> = m.name.encode_utf16().chain([0]).collect();
+            let mut mode = DEVMODEW {
+                dmSize: size_of::<DEVMODEW>() as u16,
+                ..Default::default()
+            };
+            // SAFETY: `name` is NUL-terminated and `mode` a DEVMODEW whose size field is set.
+            let ok = unsafe {
+                EnumDisplaySettingsW(
+                    windows::core::PCWSTR(name.as_ptr()),
+                    ENUM_CURRENT_SETTINGS,
+                    &raw mut mode,
+                )
+            };
+            // 0 and 1 mean "the hardware default".
+            (ok.as_bool() && mode.dmDisplayFrequency > 1).then_some(mode.dmDisplayFrequency)
+        })
+        .max()
+        .unwrap_or(60)
+}
+
+/// Whether Windows shows HDR ("Use HDR" on) on at least one monitor.
+pub fn hdr_active() -> bool {
+    monitors().is_ok_and(|list| list.iter().any(|m| m.hdr.is_some()))
 }
 
 pub fn cursor_position() -> Result<(i32, i32)> {

@@ -3,7 +3,7 @@ source: crates/vixeeny-common/src/config.rs
 assertion_line: 566
 expression: "Config::default().to_toml().unwrap()"
 ---
-schema_version = 1
+schema_version = 2
 
 [general]
 language = "auto"
@@ -68,7 +68,7 @@ profile = "default"
 [profiles.default]
 encoder_kind = "hardware"
 encoder = "auto"
-container = "mp4_hybrid"
+container = "mp4_fragmented"
 resolution = "source"
 fps = 60
 depth = 8
@@ -76,7 +76,7 @@ chroma = "420"
 hdr = "tonemap_sdr"
 mode = "simple"
 preset = "quality"
-show_cursor = true
+show_cursor = false
 vfr = false
 
 [profiles.default.params]

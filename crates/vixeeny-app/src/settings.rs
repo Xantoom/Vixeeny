@@ -482,6 +482,10 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     .map_err(|e| anyhow::anyhow!("{e}"))?;
     panel.capture_keys();
     panel.set_audio(audio_devices());
+    panel.set_display(vixeeny_settings::Display {
+        hdr: vixeeny_platform::hdr_active(),
+        max_refresh: vixeeny_platform::max_refresh_hz(),
+    });
     panel.on_recording(pause_hotkeys);
     start_probe_watch(&panel);
     let handle = panel.handle();

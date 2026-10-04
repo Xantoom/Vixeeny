@@ -689,7 +689,7 @@ fn the_video_page_edits_the_current_profile_and_reports_problems() {
     panel.select_section(Section::Video);
     settings_render(&panel, "9-settings-video");
     let w = panel.window();
-    w.invoke_row_chosen("fps".into(), 1); // 24, 30, …
+    w.invoke_row_chosen("fps".into(), 0); // 30, 60 (and 120 on a fast monitor)
     assert_eq!(panel.config().profiles["default"].fps, 30);
     w.invoke_row_chosen("split".into(), 1);
     assert_eq!(panel.config().profiles["default"].split.mode, "size:2048");

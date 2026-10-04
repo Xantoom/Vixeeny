@@ -197,6 +197,25 @@ pub struct Env {
     pub detecting: bool,
     pub audio: AudioDevices,
     pub version: String,
+    pub display: Display,
+}
+
+/// What the monitors can show.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Display {
+    /// Windows shows HDR ("Use HDR") on at least one monitor.
+    pub hdr: bool,
+    /// The highest refresh rate among the monitors, in Hz.
+    pub max_refresh: u32,
+}
+
+impl Default for Display {
+    fn default() -> Self {
+        Self {
+            hdr: false,
+            max_refresh: 60,
+        }
+    }
 }
 
 impl Env {
@@ -208,7 +227,13 @@ impl Env {
             detecting: false,
             audio: AudioDevices::default(),
             version: version.to_owned(),
+            display: Display::default(),
         }
+    }
+
+    pub const fn with_display(mut self, display: Display) -> Self {
+        self.display = display;
+        self
     }
 
     pub fn with_probe(mut self, probe: Option<ProbeResult>, detecting: bool) -> Self {
@@ -250,7 +275,12 @@ fn row(id: impl Into<String>, label: String, kind: Kind, get: Get, set: Set) -> 
     }
 }
 
-fn toggle(id: &str, label: String, get: fn(&Config) -> bool, set: fn(&mut Config, bool)) -> Row {
+fn toggle(
+    id: &str,
+    label: String,
+    get: impl Fn(&Config) -> bool + 'static,
+    set: fn(&mut Config, bool),
+) -> Row {
     row(
         id,
         label,
@@ -304,7 +334,7 @@ fn text_like(
     kind: Kind,
     id: &str,
     label: String,
-    get: fn(&Config) -> String,
+    get: impl Fn(&Config) -> String + 'static,
     set: fn(&mut Config, String),
 ) -> Row {
     row(
@@ -326,7 +356,7 @@ fn choice(
     id: &str,
     label: String,
     options: Vec<Opt>,
-    get: fn(&Config) -> String,
+    get: impl Fn(&Config) -> String + 'static,
     set: fn(&mut Config, String),
 ) -> Row {
     text_like(Kind::Choice(options), id, label, get, set)
@@ -336,7 +366,7 @@ fn segmented(
     id: &str,
     label: String,
     options: Vec<Opt>,
-    get: fn(&Config) -> String,
+    get: impl Fn(&Config) -> String + 'static,
     set: fn(&mut Config, String),
 ) -> Row {
     text_like(Kind::Segmented(options), id, label, get, set)
@@ -647,6 +677,40 @@ mod tests {
             .apply(&mut c, Value::Text("small".into()))
             .unwrap();
         assert_eq!(c.profiles["Nouveau"].preset, "small");
+    }
+
+    #[test]
+    fn the_video_page_offers_what_the_monitors_can_show() {
+        let rates = |e: &Env, c: &Config| match &row(&rows(Section::Video, e, c), "fps").kind {
+            Kind::Segmented(o) => o.iter().map(|o| o.value.clone()).collect::<Vec<_>>(),
+            _ => panic!("fps is a segmented row"),
+        };
+        let mut c = Config::default();
+        let slow = env();
+        assert_eq!(rates(&slow, &c), ["30", "60"]);
+        let fast = env().with_display(Display {
+            hdr: true,
+            max_refresh: 144,
+        });
+        assert_eq!(rates(&fast, &c), ["30", "60", "120"]);
+        // A rate from before the shorter list shows as the closest one offered.
+        c.cur_mut().fps = 144;
+        let fps = |e: &Env| row(&rows(Section::Video, e, &c), "fps").value(&c);
+        assert_eq!(fps(&fast), Value::Text("120".into()));
+        assert_eq!(fps(&slow), Value::Text("60".into()));
+        // HDR: greyed out and off while Windows does not show it.
+        c.cur_mut().hdr = "keep_hdr".into();
+        let off = rows(Section::Video, &slow, &c);
+        assert!(!row(&off, "hdr").enabled(&c));
+        assert_eq!(row(&off, "hdr").value(&c), Value::Bool(false));
+        let on = rows(Section::Video, &fast, &c);
+        assert!(row(&on, "hdr").enabled(&c));
+        assert_eq!(row(&on, "hdr").value(&c), Value::Bool(true));
+        // Only fragmented MP4, which older settings read as.
+        c.cur_mut().container = "mp4_hybrid".into();
+        let container = row(&on, "container");
+        assert_eq!(container.value(&c), Value::Text("mp4_fragmented".into()));
+        assert!(matches!(&container.kind, Kind::Choice(o) if o.len() == 3));
     }
 
     #[test]
