@@ -23,6 +23,7 @@ pub fn show(
 
 pub(crate) fn build(panel: &OcrPanel) -> Result<OcrWindow, slint::PlatformError> {
     let window = OcrWindow::new()?;
+    crate::theme::apply(&window, crate::theme::default_look());
     window.set_window_title(panel.title.as_str().into());
     window.set_text(panel.text.as_str().into());
     window.set_status(panel.status.as_str().into());

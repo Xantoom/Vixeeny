@@ -511,7 +511,7 @@ impl SettingsPanel {
     fn refresh_shortcuts(&self, errors: &[(usize, String)]) {
         let config = self.state.config.borrow();
         let lang = self.state.lang();
-        let table: Vec<ShortcutRow> = shortcuts::table(&config)
+        let table: Vec<ShortcutRow> = shortcuts::listed(&config)
             .into_iter()
             .enumerate()
             .map(|(i, (action, slots))| {
@@ -546,7 +546,8 @@ impl SettingsPanel {
     fn set_shortcut(&self, row: usize, slot: usize, text: &str) {
         let state = &self.state;
         let lang = state.lang();
-        let Some(action) = ActionId::ALL.get(row).copied() else {
+        let listed = shortcuts::listed(&state.config.borrow());
+        let Some(action) = listed.get(row).map(|(action, _)| *action) else {
             return;
         };
         let result = shortcuts::set(&mut state.config.borrow_mut(), action, slot, text);

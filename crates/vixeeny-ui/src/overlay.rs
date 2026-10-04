@@ -113,6 +113,7 @@ impl Overlay {
     ) -> Result<Self, slint::PlatformError> {
         session.set_ui_scale(ui_scale);
         let window = EditorWindow::new()?;
+        crate::theme::apply(&window, crate::theme::default_look());
         let base = session.base().clone();
         window.set_frozen(slint_image(&base));
         window.set_image_width(i32::try_from(base.width).unwrap_or(i32::MAX));

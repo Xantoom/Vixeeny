@@ -42,6 +42,26 @@ pub fn corner(
     )
 }
 
+/// The card's size in logical pixels: the width is fixed, the height follows the text so that
+/// none of it is cut (the estimate counts the characters a line holds).
+pub fn size_for(content: &ToastContent) -> (f64, f64) {
+    const WIDTH: f64 = 380.0;
+    // The card is 16 px narrower than the window (shadow), minus padding and the thumbnail/icon.
+    let text_width = WIDTH - 16.0 - 18.0 - 14.0 - 14.0 - if content.thumb.is_some() { 76.0 } else { 38.0 };
+    let lines = |text: &str, per_char: f64| -> f64 {
+        text.split('\n')
+            .map(|line| ((line.chars().count() as f64 * per_char) / text_width).ceil().max(1.0))
+            .sum()
+    };
+    let mut text = lines(&content.heading, 8.0) * 20.0 + lines(&content.body, 6.8) * 16.0 + 3.0;
+    if !content.action_label.is_empty() {
+        text += 36.0;
+    }
+    let thumb = if content.thumb.is_some() { 76.0 } else { 0.0 };
+    // Padding 14 + 14, then the shadow room (16 wide, 16 high with the offset).
+    (WIDTH, text.max(thumb).max(40.0) + 28.0 + 16.0)
+}
+
 pub struct ToastPanel {
     window: ToastWindow,
 }
@@ -52,7 +72,7 @@ impl ToastPanel {
         window.set_heading(SharedString::from(content.heading.as_str()));
         window.set_body(SharedString::from(content.body.as_str()));
         window.set_error(content.error);
-        window.set_dark(content.dark);
+        crate::theme::apply(&window, crate::theme::Look::new(content.dark, None, true));
         window.set_action_label(SharedString::from(content.action_label.as_str()));
         if let Some((w, h, rgba)) = &content.thumb {
             let buffer =

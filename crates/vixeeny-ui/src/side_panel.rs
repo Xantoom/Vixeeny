@@ -245,11 +245,11 @@ const PAD: f64 = 8.0;
 const GAP: f64 = 2.0;
 const SHADOW: f64 = 12.0;
 const ROW: f64 = 44.0;
-const HEADER_ROW: f64 = 30.0;
-const COLUMN_WIDTH: f64 = 264.0;
-const TILE: f64 = 92.0;
+const HEADER_ROW: f64 = 32.0;
+const COLUMN_WIDTH: f64 = 272.0;
+const TILE: f64 = 96.0;
 const TILE_HEIGHT: f64 = 84.0;
-const HEADER_TILE: f64 = 10.0;
+const HEADER_TILE: f64 = 12.0;
 
 /// The window's size in logical pixels: the strip plus the margin it slides in through.
 fn logical_size(entries: &[Entry], vertical: bool) -> (f64, f64) {
@@ -342,7 +342,7 @@ impl SidePanel {
         window.set_items(model.clone().into());
         window.set_vertical(state.edge.is_vertical());
         window.set_edge(state.edge.index());
-        window.set_dark(state.dark);
+        crate::theme::apply(&window, crate::theme::Look::new(state.dark, None, state.animate));
         window.set_backdrop(state.backdrop);
         let (enter, exit) = if state.animate {
             (ENTER, EXIT)

@@ -48,6 +48,19 @@ impl Look {
     }
 }
 
+static DEFAULT: std::sync::Mutex<Look> = std::sync::Mutex::new(Look::dark());
+
+/// The look every window uses when it is not given one: set once by the host at start-up.
+pub fn set_default(look: Look) {
+    if let Ok(mut d) = DEFAULT.lock() {
+        *d = look;
+    }
+}
+
+pub fn default_look() -> Look {
+    DEFAULT.lock().map_or(Look::dark(), |d| *d)
+}
+
 /// The font of the platform: Segoe UI on Windows (Inter, which ships with the program, elsewhere).
 pub const fn font() -> &'static str {
     if cfg!(windows) { "Segoe UI" } else { "Inter" }
@@ -97,7 +110,7 @@ pub fn when_native<C: ComponentHandle + 'static>(window: &C, f: impl Fn(u64) + '
 /// Sets the `Theme` of `window`.
 pub fn apply<'a, C>(window: &'a C, look: Look)
 where
-    C: ComponentHandle,
+    C: ComponentHandle + 'static,
     Theme<'a>: slint::Global<'a, C>,
 {
     let theme = window.global::<Theme>();
@@ -110,6 +123,19 @@ where
     theme.set_font(font().into());
     theme.set_motion(if look.animations { 1.0 } else { 0.0 });
     theme.set_app_icon(app_icon());
+    #[cfg(feature = "desktop")]
+    if let Some(dresser) = DRESSER.get() {
+        let dresser = *dresser;
+        when_native(window, move |handle| dresser(handle, look));
+    }
+}
+
+/// What the host does to a native window once it exists (the title bar of Windows 11 follows the
+/// theme). Set once at start-up; every window that gets a [`Look`] is dressed with it.
+static DRESSER: std::sync::OnceLock<fn(u64, Look)> = std::sync::OnceLock::new();
+
+pub fn set_dresser(f: fn(u64, Look)) {
+    let _ = DRESSER.set(f);
 }
 
 /// The program's icon (64 px), decoded from the PNG that ships inside the binary.

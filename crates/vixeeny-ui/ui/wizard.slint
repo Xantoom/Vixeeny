@@ -1,43 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { Theme, Icons, Icon, Button, Check } from "controls.slint";
 
 // The first-run assistant (plan 5.15): language, folders, start-up, hardware. The host owns the
 // state and the texts; this window shows one step and reports what was touched.
-component WizButton inherits Rectangle {
-    in property <bool> dark;
-    property <color> ink: root.dark ? #f9fafb : #111827;
-    property <color> dim: root.dark ? #9ca3af : #4b5563;
-    property <color> panel: root.dark ? #1f2937 : #ffffff;
-    property <color> line: root.dark ? #374151 : #d1d5db;
-    property <color> accent: #3b82f6;
-    in property <string> text;
-    in property <bool> primary: false;
-    callback clicked();
-    height: 34px;
-    width: max(86px, label.preferred-width + 28px);
-    border-radius: 6px;
-    background: root.primary ? (area.has-hover ? #2563eb : #3b82f6) : (area.has-hover ? root.line : transparent);
-    border-width: self.primary ? 0px : 1px;
-    border-color: root.line;
-    label := Text {
-        text: root.text;
-        color: root.primary ? #ffffff : root.ink;
-        font-size: 13px;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
-    area := TouchArea {
-        accessible-role: button;
-        accessible-label: root.text;
-        clicked => { root.clicked(); }
-    }
-}
 component PathRow inherits HorizontalLayout {
-    in property <bool> dark;
-    property <color> ink: root.dark ? #f9fafb : #111827;
-    property <color> dim: root.dark ? #9ca3af : #4b5563;
-    property <color> panel: root.dark ? #1f2937 : #ffffff;
-    property <color> line: root.dark ? #374151 : #d1d5db;
-    property <color> accent: #3b82f6;
     in property <string> caption;
     in property <string> path;
     in property <string> browse-text;
@@ -45,19 +11,19 @@ component PathRow inherits HorizontalLayout {
     spacing: 10px;
     VerticalLayout {
         spacing: 4px;
-        Text { text: root.caption; color: dim; font-size: 12px; }
+        Text { text: root.caption; color: Theme.text-2; font-size: 12px; }
         Rectangle {
-            height: 34px;
-            border-radius: 6px;
-            background: panel;
+            height: 32px;
+            border-radius: Theme.radius;
+            background: Theme.control;
             border-width: 1px;
-            border-color: line;
+            border-color: Theme.control-stroke;
             Text {
                 x: 10px;
                 width: parent.width - 20px;
                 text: root.path;
-                color: ink;
-                font-size: 13px;
+                color: Theme.text;
+                font-size: 14px;
                 overflow: elide;
                 vertical-alignment: center;
             }
@@ -65,47 +31,12 @@ component PathRow inherits HorizontalLayout {
     }
     VerticalLayout {
         alignment: end;
-        WizButton { dark: root.dark; text: root.browse-text; clicked => { root.browse(); } }
+        Button { text: root.browse-text; icon: Icons.folder-open; clicked => { root.browse(); } }
     }
 }
-
-component Check inherits Rectangle {
-    in property <bool> dark;
-    property <color> ink: root.dark ? #f9fafb : #111827;
-    property <color> dim: root.dark ? #9ca3af : #4b5563;
-    property <color> panel: root.dark ? #1f2937 : #ffffff;
-    property <color> line: root.dark ? #374151 : #d1d5db;
-    property <color> accent: #3b82f6;
-    in property <string> text;
-    in-out property <bool> on;
-    callback toggled(bool);
-    height: 34px;
-    HorizontalLayout {
-        spacing: 10px;
-        Rectangle {
-            width: 20px;
-            height: 20px;
-            y: (parent.height - self.height) / 2;
-            border-radius: 4px;
-            background: root.on ? accent : panel;
-            border-width: 1px;
-            border-color: root.on ? accent : line;
-            Text { text: root.on ? "✓" : ""; color: #ffffff; font-size: 14px; horizontal-alignment: center; vertical-alignment: center; }
-        }
-        Text { text: root.text; color: ink; font-size: 13px; vertical-alignment: center; }
-    }
-    TouchArea {
-        accessible-role: checkbox;
-        accessible-label: root.text;
-        accessible-checked: root.on;
-        clicked => { root.on = !root.on; root.toggled(root.on); }
-    }
-}
-
 
 export component WizardWindow inherits Window {
     in property <int> step: 0;
-    in property <bool> dark: true;
     in property <string> heading;
     in property <string> body;
     in property <string> step-text;
@@ -137,26 +68,21 @@ export component WizardWindow inherits Window {
     callback skip();
 
     title: root.heading;
-    default-font-family: "Inter";
-    preferred-width: 520px;
-    preferred-height: 380px;
-    min-width: 520px;
-    min-height: 380px;
-    background: root.dark ? #111827 : #f3f4f6;
-
-    property <color> ink: root.dark ? #f9fafb : #111827;
-    property <color> dim: root.dark ? #9ca3af : #4b5563;
-    property <color> panel: root.dark ? #1f2937 : #ffffff;
-    property <color> line: root.dark ? #374151 : #d1d5db;
-    property <color> accent: #3b82f6;
+    icon: Theme.app-icon;
+    default-font-family: Theme.font;
+    preferred-width: 560px;
+    preferred-height: 420px;
+    min-width: 560px;
+    min-height: 420px;
+    background: Theme.bg;
 
     VerticalLayout {
-        padding: 28px;
+        padding: 32px;
         spacing: 14px;
 
-        Text { text: root.step-text; color: dim; font-size: 12px; }
-        Text { text: root.heading; color: ink; font-size: 22px; font-weight: 700; wrap: word-wrap; }
-        if root.body != "": Text { text: root.body; color: dim; font-size: 13px; wrap: word-wrap; }
+        Text { text: root.step-text; color: Theme.text-3; font-size: 12px; }
+        Text { text: root.heading; color: Theme.text; font-size: 26px; font-weight: 600; wrap: word-wrap; }
+        if root.body != "": Text { text: root.body; color: Theme.text-2; font-size: 14px; wrap: word-wrap; }
 
         VerticalLayout {
             vertical-stretch: 1;
@@ -165,14 +91,16 @@ export component WizardWindow inherits Window {
 
             if root.step == 0: VerticalLayout {
                 spacing: 6px;
-                Text { text: root.language-label; color: dim; font-size: 12px; }
+                Text { text: root.language-label; color: Theme.text-2; font-size: 12px; }
                 for name[i] in root.languages: Rectangle {
-                    height: 36px;
-                    border-radius: 6px;
-                    background: i == root.language ? accent.with-alpha(0.2) : (lang-area.has-hover ? panel : transparent);
+                    height: 40px;
+                    border-radius: Theme.radius-card;
+                    background: i == root.language ? Theme.accent-soft : (lang-area.has-hover ? Theme.card-hover : Theme.card);
                     border-width: 1px;
-                    border-color: i == root.language ? accent : line;
-                    Text { x: 12px; text: name; color: ink; font-size: 13px; vertical-alignment: center; }
+                    border-color: i == root.language ? Theme.accent : Theme.stroke;
+                    animate background { duration: Theme.t-fast; }
+                    Text { x: 14px; text: name; color: Theme.text; font-size: 14px; vertical-alignment: center; }
+                    if i == root.language : Icon { x: parent.width - 34px; y: 12px; data: Icons.checkmark; tint: Theme.accent; size: 16px; }
                     lang-area := TouchArea {
                         accessible-role: radio-button;
                         accessible-label: name;
@@ -183,14 +111,12 @@ export component WizardWindow inherits Window {
             if root.step == 1: VerticalLayout {
                 spacing: 12px;
                 PathRow {
-                    dark: root.dark;
                     caption: root.images-label;
                     path: root.images-path;
                     browse-text: root.browse-label;
                     browse => { root.browse(0); }
                 }
                 PathRow {
-                    dark: root.dark;
                     caption: root.videos-label;
                     path: root.videos-path;
                     browse-text: root.browse-label;
@@ -199,26 +125,25 @@ export component WizardWindow inherits Window {
             }
             if root.step == 2: VerticalLayout {
                 spacing: 4px;
-                Check { dark: root.dark; text: root.autostart-label; on: root.autostart; toggled(v) => { root.autostart-toggled(v); } }
-                Check { dark: root.dark; text: root.notifications-label; on: root.notifications; toggled(v) => { root.notifications-toggled(v); } }
+                Check { text: root.autostart-label; on: root.autostart; toggled(v) => { root.autostart-toggled(v); } }
+                Check { text: root.notifications-label; on: root.notifications; toggled(v) => { root.notifications-toggled(v); } }
             }
             if root.step == 3: Text {
                 text: root.hardware-text;
-                color: ink;
-                font-size: 13px;
+                color: Theme.text;
+                font-size: 14px;
                 wrap: word-wrap;
             }
         }
 
         HorizontalLayout {
             spacing: 10px;
-            WizButton { dark: root.dark; text: root.skip-label; clicked => { root.skip(); } }
+            Button { subtle: true; text: root.skip-label; clicked => { root.skip(); } }
             Rectangle { }
-            if root.step > 0: WizButton { dark: root.dark; text: root.back-label; clicked => { root.back(); } }
-            WizButton {
-                dark: root.dark;
+            if root.step > 0: Button { text: root.back-label; clicked => { root.back(); } }
+            Button {
                 text: root.last ? root.finish-label : root.next-label;
-                primary: true;
+                accent: true;
                 clicked => { root.next(); }
             }
         }

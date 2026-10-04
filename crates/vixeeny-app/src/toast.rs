@@ -269,7 +269,8 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
         .or_else(|| monitors.first());
     if let Some(m) = monitor {
         let scale = m.scale_factor();
-        let size = ((360.0 * scale) as u32, (96.0 * scale) as u32);
+        let (w, h) = vixeeny_ui::toast_panel::size_for(&content);
+        let size = ((w * scale) as u32, (h * scale) as u32);
         let (x, y) = corner(
             (m.rect.x, m.rect.y, m.rect.width, m.rect.height),
             size,

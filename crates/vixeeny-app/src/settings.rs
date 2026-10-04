@@ -426,7 +426,6 @@ pub fn run_child() -> anyhow::Result<()> {
         look,
     )
     .map_err(|e| anyhow::anyhow!("{e}"))?;
-    dress_when_shown(panel.window(), look);
     panel.capture_keys();
     panel.set_audio(audio_devices());
     panel.on_recording(pause_hotkeys);
@@ -440,7 +439,6 @@ pub fn run_child() -> anyhow::Result<()> {
         let look = look_of(config);
         if let Some(w) = weak.upgrade() {
             vixeeny_ui::theme::apply(&w, look);
-            dress_when_shown(&w, look);
         }
     });
     panel.on_browse(|current| {
@@ -535,17 +533,6 @@ pub fn look_of(config: &Config) -> vixeeny_ui::theme::Look {
     vixeeny_ui::theme::Look::new(dark, vixeeny_platform::system_accent(), true)
 }
 
-/// Once the window exists: the title bar follows the theme (Windows 11).
-pub fn dress_when_shown<C: ComponentHandle + 'static>(window: &C, look: vixeeny_ui::theme::Look) {
-    vixeeny_ui::theme::when_native(window, move |handle| {
-        let _ = vixeeny_platform::style_window(
-            vixeeny_platform::WindowId(handle),
-            look.dark,
-            look.caption(),
-        );
-    });
-}
-
 /// The programs, microphones and outputs the audio page offers.
 fn audio_devices() -> vixeeny_settings::AudioDevices {
     #[cfg(windows)]
@@ -617,7 +604,7 @@ fn start_probe_watch(panel: &SettingsPanel) {
 fn first_run(config: &Config, lang: Lang) -> anyhow::Result<()> {
     use vixeeny_ui::wizard_panel::WizardPanel;
 
-    let dark = look_of(config).dark;
+    let look = look_of(config);
     let browse = |current: &str| {
         let mut dialog = rfd::FileDialog::new();
         if let Some(dir) = vixeeny_common::paths::expand_user_dir(current) {
@@ -628,7 +615,7 @@ fn first_run(config: &Config, lang: Lang) -> anyhow::Result<()> {
     let panel = WizardPanel::new(
         config.clone(),
         vixeeny_platform::user_locale(),
-        dark,
+        look,
         Box::new(browse),
     )
     .map_err(|e| anyhow::anyhow!("{e}"))?;

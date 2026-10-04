@@ -435,9 +435,26 @@ impl Recording {
     }
 }
 
+/// Light or dark, the system accent, the title-bar styling: what every window of this process
+/// starts from.
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+fn init_look() {
+    let config = vixeeny_common::paths::config_file()
+        .and_then(|path| Config::load(&path).ok())
+        .unwrap_or_default();
+    vixeeny_ui::theme::set_default(settings::look_of(&config));
+    vixeeny_ui::theme::set_dresser(|handle, look| {
+        let _ = vixeeny_platform::style_window(
+            vixeeny_platform::WindowId(handle),
+            look.dark,
+            look.caption(),
+        );
+    });
+}
+
 fn run() -> anyhow::Result<()> {
-    // `--convert <paths…>`: the conversion window on its own, no daemon needed (it is what the
-    // Explorer context-menu entry starts).
+    #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+    init_look();
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         // The probe child: prints TOML on stdout (see `vixeeny_encode::probe::run_child`).

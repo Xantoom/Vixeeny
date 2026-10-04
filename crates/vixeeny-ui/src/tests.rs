@@ -592,21 +592,21 @@ fn shortcuts_are_edited_in_place_and_conflicts_are_explained() {
     panel.select_section(Section::Shortcuts);
     settings_render(&panel, "9-settings-shortcuts");
     let w = panel.window();
-    // Row 8 is the replay toggle, row 9 the replay save (Ctrl+Shift+S). Keys are recorded, never typed.
+    // Row 7 is the replay toggle, row 8 the replay save (Ctrl+Shift+S). Keys are recorded, never typed.
     let record = |row: i32, slot: i32, keys: &str| {
         w.invoke_shortcut_record(row, slot);
         panel.captured(settings_panel::Captured::Combination(keys.into()));
     };
-    record(8, 0, "Ctrl+Shift+F9");
+    record(7, 0, "Ctrl+Shift+F9");
     assert_eq!(panel.config().hotkeys.replay_toggle, ["Ctrl+Shift+F9"]);
     assert_eq!(seen.borrow().len(), 1);
-    record(8, 1, "Ctrl+Shift+S");
+    record(7, 1, "Ctrl+Shift+S");
     assert_eq!(panel.config().hotkeys.replay_toggle.len(), 1, "refused");
-    let row = w.get_shortcuts().row_data(8).unwrap();
+    let row = w.get_shortcuts().row_data(7).unwrap();
     assert!(row.error.contains("Save the replay"), "{}", row.error);
     assert_eq!(seen.borrow().len(), 1, "a refusal is not a change");
     // Escape stops the recording without touching anything.
-    w.invoke_shortcut_record(8, 1);
+    w.invoke_shortcut_record(7, 1);
     assert!(panel.captured(settings_panel::Captured::Cancel));
     assert!(!panel.captured(settings_panel::Captured::Cancel), "nothing is recording any more");
     assert_eq!(seen.borrow().len(), 1);
@@ -700,13 +700,13 @@ fn the_toast_renders_with_a_thumbnail_and_an_error_variant() {
     use crate::toast_panel::{ToastContent, ToastPanel};
     WINDOW.with(|_| ());
     let window = WINDOW.with(Rc::clone);
-    window.set_size(PhysicalSize::new(360, 96));
+    window.set_size(PhysicalSize::new(380, 130));
     let draw = |content: &ToastContent| {
         let panel = ToastPanel::new(content).unwrap_or_else(|e| panic!("{e}"));
         panel.window().show().unwrap_or_else(|e| panic!("{e}"));
-        let mut buffer = SharedPixelBuffer::<Rgb8Pixel>::new(360, 96);
+        let mut buffer = SharedPixelBuffer::<Rgb8Pixel>::new(380, 130);
         window.draw_if_needed(|r| {
-            r.render(buffer.make_mut_slice(), 360);
+            r.render(buffer.make_mut_slice(), 380);
         });
         (panel, buffer)
     };
@@ -746,7 +746,7 @@ fn the_wizard_walks_its_steps_and_relabels_in_the_chosen_language() {
     let panel = WizardPanel::new(
         vixeeny_common::config::Config::default(),
         Some("en-US".into()),
-        true,
+        crate::theme::Look::dark(),
         Box::new(browse),
     )
     .unwrap_or_else(|e| panic!("{e}"));

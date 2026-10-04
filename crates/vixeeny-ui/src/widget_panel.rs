@@ -103,6 +103,7 @@ impl WidgetPanel {
         window.set_pause_label(SharedString::from(texts.pause.as_str()));
         window.set_resume_label(SharedString::from(texts.resume.as_str()));
         window.set_stop_label(SharedString::from(texts.stop.as_str()));
+        crate::theme::apply(&window, crate::theme::Look::dark());
         window.set_auto_hide(auto_hide);
         CLOCK.with(|c| *c.borrow_mut() = Some(Clock::new(Instant::now())));
         let ticker = slint::Timer::default();

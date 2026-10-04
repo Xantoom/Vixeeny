@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { PushButton } from "ocr.slint";
+import { Theme, Icons, Button } from "controls.slint";
 
 // Control window of a scrolling capture (plan 5.7): the live vertical preview of what has been
 // assembled, and the Start / Finish / Cancel buttons.
@@ -17,12 +17,13 @@ export component ScrollWindow inherits Window {
     callback cancel();
 
     title: root.window-title;
+    icon: Theme.app-icon;
     always-on-top: true;
-    min-width: 220px;
-    preferred-width: 260px;
-    preferred-height: 420px;
-    default-font-family: "Inter";
-    background: #1f2937;
+    min-width: 240px;
+    preferred-width: 280px;
+    preferred-height: 440px;
+    default-font-family: Theme.font;
+    background: Theme.bg;
 
     FocusScope {
         key-pressed(event) => {
@@ -38,15 +39,15 @@ export component ScrollWindow inherits Window {
         }
 
         VerticalLayout {
-            padding: 12px;
-            spacing: 10px;
+            padding: 16px;
+            spacing: 12px;
 
             Rectangle {
                 vertical-stretch: 1;
-                background: #111827;
-                border-radius: 6px;
+                background: Theme.card;
+                border-radius: Theme.radius-card;
                 border-width: 1px;
-                border-color: #374151;
+                border-color: Theme.stroke;
                 clip: true;
                 Image {
                     source: root.preview;
@@ -60,26 +61,28 @@ export component ScrollWindow inherits Window {
 
             Text {
                 text: root.status;
-                color: #d1d5db;
+                color: Theme.text-2;
                 font-size: 12px;
                 wrap: word-wrap;
             }
 
             HorizontalLayout {
                 spacing: 8px;
-                PushButton {
-                    label: root.cancel-label;
+                Button {
+                    text: root.cancel-label;
                     clicked => { root.cancel(); }
                 }
                 Rectangle { horizontal-stretch: 1; }
-                if !root.running : PushButton {
-                    label: root.start-label;
-                    primary: true;
+                if !root.running : Button {
+                    text: root.start-label;
+                    icon: Icons.play-filled;
+                    accent: true;
                     clicked => { root.start(); }
                 }
-                if root.running : PushButton {
-                    label: root.finish-label;
-                    primary: true;
+                if root.running : Button {
+                    text: root.finish-label;
+                    icon: Icons.checkmark;
+                    accent: true;
                     clicked => { root.finish(); }
                 }
             }

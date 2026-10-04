@@ -108,11 +108,11 @@ impl WizardPanel {
     pub fn new(
         config: Config,
         os_locale: Option<String>,
-        dark: bool,
+        look: crate::theme::Look,
         browse: Box<BrowseFn>,
     ) -> Result<Self, slint::PlatformError> {
         let window = WizardWindow::new()?;
-        window.set_dark(dark);
+        crate::theme::apply(&window, look);
         let state = Rc::new(RefCell::new(State {
             original: config.clone(),
             config,

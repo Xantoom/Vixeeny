@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import "../../../assets/fonts/Inter-Regular.ttf";
+import { Theme, Icons, Icon } from "controls.slint";
 export { Theme, Icons } from "controls.slint";
 export { OcrWindow } from "ocr.slint";
 export { ScrollWindow } from "scroll.slint";
@@ -13,35 +14,35 @@ export { GalleryItem, LineItem, SettingRow, SettingsWindow, ShortcutRow, UiTexts
 // the toolbar scales with `ui-scale` (the window's scale factor).
 
 component IconButton inherits Rectangle {
-    in property <string> commands;
+    in property <string> icon;
     in property <bool> active: false;
     in property <bool> enabled: true;
-    in property <bool> filled: false;
     in property <length> u: 1phx;
     callback clicked();
 
     width: 30 * u;
     height: 30 * u;
-    border-radius: 5 * u;
-    background: root.active ? #3b82f6 : touch.has-hover && root.enabled ? #ffffff33 : transparent;
+    border-radius: 4 * u;
+    background: root.active ? Theme.accent-soft
+        : (touch.pressed && root.enabled ? Theme.subtle-pressed : (touch.has-hover && root.enabled ? Theme.subtle-hover : transparent));
+    animate background { duration: Theme.t-fast; }
 
-    Path {
-        width: 20 * u;
-        height: 20 * u;
-        x: 5 * u;
-        y: 5 * u;
-        viewbox-width: 24;
-        viewbox-height: 24;
-        commands: root.commands;
-        stroke: root.enabled ? white : #ffffff55;
-        stroke-width: 2 * u;
-        stroke-line-cap: round;
-        stroke-line-join: round;
-        fill: root.filled ? (root.enabled ? white.with-alpha(0.35) : transparent) : transparent;
+    // The mark of the active tool, as the Windows 11 selected items have.
+    if root.active : Rectangle {
+        x: 8 * u; y: root.height - 3 * u; width: root.width - 16 * u; height: 2 * u; border-radius: 1 * u;
+        background: Theme.accent;
+    }
+    Icon {
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        data: root.icon;
+        size: 18 * u;
+        tint: root.enabled ? (root.active ? Theme.accent : Theme.text) : Theme.text-off;
     }
 
     touch := TouchArea {
         enabled: root.enabled;
+        mouse-cursor: pointer;
         clicked => { root.clicked(); }
     }
 }
@@ -54,12 +55,12 @@ component Swatch inherits Rectangle {
 
     width: 24 * u;
     height: 24 * u;
-    border-radius: 4 * u;
+    border-radius: 12 * u;
     background: root.swatch;
     border-width: root.chosen ? 2 * u : 1 * u;
-    border-color: root.chosen ? #3b82f6 : #ffffff66;
+    border-color: root.chosen ? Theme.accent : Theme.stroke-strong;
 
-    TouchArea { clicked => { root.clicked(); } }
+    TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
 }
 
 export component EditorWindow inherits Window {
@@ -151,7 +152,8 @@ export component EditorWindow inherits Window {
     no-frame: true;
     always-on-top: root.on-top;
     background: black;
-    default-font-family: "Inter";
+    icon: Theme.app-icon;
+    default-font-family: Theme.font;
     width: image-width * 1phx;
     height: image-height * 1phx;
 
@@ -203,9 +205,9 @@ export component EditorWindow inherits Window {
                 y: root.hover-y * 1phx;
                 width: root.hover-w * 1phx;
                 height: root.hover-h * 1phx;
-                background: #3b82f633;
+                background: Theme.accent-soft;
                 border-width: 2phx;
-                border-color: #3b82f6;
+                border-color: Theme.accent;
             }
 
             if root.has-annotated : Image {
@@ -248,20 +250,21 @@ export component EditorWindow inherits Window {
                 y: root.sel-y * 1phx;
                 width: root.sel-w * 1phx;
                 height: root.sel-h * 1phx;
-                border-width: 1phx;
-                border-color: #3b82f6;
+                border-width: 2phx;
+                border-color: Theme.accent;
             }
             if root.has-selection && root.settled : Rectangle {
                 x: 0phx; y: 0phx; width: 0phx; height: 0phx;
                 for hx[i] in [0.0, 0.5, 1.0, 1.0, 1.0, 0.5, 0.0, 0.0] : Rectangle {
                     property <float> hy: [0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 0.5][i];
-                    x: (root.sel-x + root.sel-w * hx) * 1phx - 4 * root.u;
-                    y: (root.sel-y + root.sel-h * hy) * 1phx - 4 * root.u;
-                    width: 8 * root.u;
-                    height: 8 * root.u;
+                    x: (root.sel-x + root.sel-w * hx) * 1phx - 5 * root.u;
+                    y: (root.sel-y + root.sel-h * hy) * 1phx - 5 * root.u;
+                    width: 10 * root.u;
+                    height: 10 * root.u;
+                    border-radius: 5 * root.u;
                     background: white;
-                    border-width: 1phx;
-                    border-color: #3b82f6;
+                    border-width: 2phx;
+                    border-color: Theme.accent;
                 }
             }
 
@@ -269,13 +272,15 @@ export component EditorWindow inherits Window {
             if root.has-selection : Rectangle {
                 x: root.size-x * 1phx;
                 y: root.size-y * 1phx;
-                height: 22 * root.u;
-                width: label.preferred-width + 14 * root.u;
-                background: #000000cc;
+                height: 24 * root.u;
+                width: label.preferred-width + 16 * root.u;
+                background: Theme.flyout;
                 border-radius: 4 * root.u;
+                border-width: 1phx;
+                border-color: Theme.stroke-strong;
                 label := Text {
                     text: root.size-text;
-                    color: white;
+                    color: Theme.text;
                     font-size: 12 * root.u;
                     horizontal-alignment: center;
                     vertical-alignment: center;
@@ -288,8 +293,10 @@ export component EditorWindow inherits Window {
                 y: root.mag-y * 1phx;
                 width: root.mag-size * 1phx;
                 height: root.mag-size * 1phx + 28 * root.u;
-                background: #000000cc;
-                border-radius: 6 * root.u;
+                background: Theme.flyout;
+                border-radius: 8 * root.u;
+                border-width: 1phx;
+                border-color: Theme.stroke-strong;
                 clip: true;
                 Image {
                     x: 0phx;
@@ -323,7 +330,7 @@ export component EditorWindow inherits Window {
                     y: root.mag-size * 1phx;
                     height: 28 * root.u;
                     text: root.mag-hex;
-                    color: white;
+                    color: Theme.text;
                     font-size: 13 * root.u;
                     vertical-alignment: center;
                 }
@@ -356,56 +363,47 @@ export component EditorWindow inherits Window {
             y: root.toolbar-y * 1phx;
             width: 700 * root.u;
             height: 88 * root.u;
-            background: #1f2937f2;
+            background: Theme.dark ? #2c2c2cf5 : #fcfcfcf5;
             border-radius: 8 * root.u;
             border-width: 1phx;
-            border-color: #ffffff22;
-            drop-shadow-blur: 12phx;
+            border-color: Theme.stroke-strong;
+            drop-shadow-blur: 16phx;
             drop-shadow-color: #00000066;
+            drop-shadow-offset-y: 4phx;
 
             TouchArea { } // swallows clicks on the bar itself
 
             // Row 1: tools, then actions.
-            for cmds[i] in [
-                "M5 3 L5 19 L9.5 15 L13 21 L15.5 19.8 L12 14 L18 14 Z",
-                "M4 20 L5 15 L16 4 L20 8 L9 19 Z",
-                "M5 19 L19 5",
-                "M5 19 L19 5 M10 5 L19 5 L19 14",
-                "M4 6 L20 6 L20 18 L4 18 Z",
-                "M2 12 A10 6 0 1 0 22 12 A10 6 0 1 0 2 12 Z",
-                "M5 5 L19 5 M12 5 L12 20",
-                "M4 20 L8 20 L20 8 L16 4 L4 16 Z",
-                "M4 8 Q8 4 12 8 T20 8 M4 13 Q8 9 12 13 T20 13 M4 18 Q8 14 12 18 T20 18",
-                "M4 4 L10 4 L10 10 L4 10 Z M14 4 L20 4 L20 10 L14 10 Z M9 10 L15 10 L15 16 L9 16 Z M4 16 L10 16 L10 22 L4 22 Z M14 16 L20 16 L20 22 L14 22 Z",
-                "M12 3 A9 9 0 1 0 12 21 A9 9 0 1 0 12 3 Z M12 8 L12 16",
-                "M15 4 L20 9 L10 19 L5 19 L5 14 Z",
-                "M7 3 L7 17 L21 17 M3 7 L17 7 L17 21",
+            for ico[i] in [
+                Icons.cursor, Icons.pen, Icons.line, Icons.arrow, Icons.square, Icons.circle, Icons.text,
+                Icons.highlight, Icons.blur, Icons.pixelate, Icons.marker, Icons.eyedropper, Icons.crop,
             ] : IconButton {
                 u: root.u;
                 x: 8 * root.u + i * 32 * root.u;
                 y: 8 * root.u;
-                commands: cmds;
+                icon: ico;
                 active: root.tool == i || (i == 12 && root.tool == -1);
-                filled: i == 7;
                 clicked => { root.tool-chosen(i); }
             }
 
-            // Row 1, right: undo/redo, then copy, save, save as, OCR, close.
-            for cmds[i] in [
-                "M9 5 L4 10 L9 15 M4 10 L14 10 A5 5 0 0 1 14 20 L10 20",
-                "M15 5 L20 10 L15 15 M20 10 L10 10 A5 5 0 0 0 10 20 L14 20",
-                "M8 8 L20 8 L20 20 L8 20 Z M4 16 L4 4 L16 4",
-                "M5 4 L17 4 L20 7 L20 20 L5 20 Z M8 4 L8 9 L15 9 L15 4 M8 20 L8 14 L17 14 L17 20",
-                "M5 4 L17 4 L20 7 L20 12 M5 4 L5 20 L12 20 M17 16 L17 22 M14 19 L20 19",
-                "M4 7 L4 4 L8 4 M16 4 L20 4 L20 7 M20 17 L20 20 L16 20 M8 20 L4 20 L4 17 M8 9 L16 9 M8 12 L16 12 M8 15 L13 15",
-                "M6 6 L18 18 M18 6 L6 18",
+            Rectangle {
+                x: 8 * root.u + 13 * 32 * root.u + 5 * root.u;
+                y: 12 * root.u;
+                width: 1phx;
+                height: 22 * root.u;
+                background: Theme.divider;
+            }
+
+            // Row 1, right: undo/redo, then copy, save, save as, scrolling capture, OCR, close.
+            for ico[i] in [
+                Icons.undo, Icons.redo, Icons.copy, Icons.save, Icons.save-as, Icons.scroll, Icons.scan-text, Icons.dismiss,
             ] : IconButton {
                 u: root.u;
                 x: 8 * root.u + 13 * 32 * root.u + 12 * root.u + i * 32 * root.u;
                 y: 8 * root.u;
-                commands: cmds;
+                icon: ico;
                 enabled: i == 0 ? root.can-undo : i == 1 ? root.can-redo : true;
-                clicked => { root.action(["undo", "redo", "copy", "save", "save-as", "ocr", "close"][i]); }
+                clicked => { root.action(["undo", "redo", "copy", "save", "save-as", "scroll", "ocr", "close"][i]); }
             }
 
             // Row 2: palette, recent colours, thickness, fill.
@@ -432,18 +430,7 @@ export component EditorWindow inherits Window {
                 y: 50 * root.u;
                 swatch: #00000000;
                 chosen: root.picker-open;
-                Path {
-                    x: 4 * root.u;
-                    y: 4 * root.u;
-                    width: 16 * root.u;
-                    height: 16 * root.u;
-                    viewbox-width: 24;
-                    viewbox-height: 24;
-                    commands: "M12 4 L12 20 M4 12 L20 12";
-                    stroke: white;
-                    stroke-width: 2 * root.u;
-                    stroke-line-cap: round;
-                }
+                Icon { x: 4 * root.u; y: 4 * root.u; data: Icons.add; tint: Theme.text; size: 16 * root.u; }
                 clicked => { root.picker-open = !root.picker-open; }
             }
             if root.picker-open : Rectangle {
@@ -451,10 +438,10 @@ export component EditorWindow inherits Window {
                 y: root.toolbar-y > 190 ? -176 * root.u : 96 * root.u;
                 width: 280 * root.u;
                 height: 168 * root.u;
-                background: #1f2937f2;
+                background: Theme.dark ? #2c2c2cf5 : #fcfcfcf5;
                 border-radius: 8 * root.u;
                 border-width: 1phx;
-                border-color: #ffffff22;
+                border-color: Theme.stroke-strong;
                 TouchArea { }
                 // saturation (x) / value (y) square for the current hue
                 sv := Rectangle {
@@ -517,15 +504,14 @@ export component EditorWindow inherits Window {
                     background: root.current-color;
                     border-radius: 4 * root.u;
                     border-width: 1phx;
-                    border-color: #ffffff66;
+                    border-color: Theme.stroke-strong;
                 }
             }
             IconButton {
                 u: root.u;
                 x: 700 * root.u - 8 * root.u - 30 * root.u;
                 y: 47 * root.u;
-                commands: "M4 6 L20 6 L20 18 L4 18 Z";
-                filled: true;
+                icon: Icons.square;
                 active: root.filled;
                 clicked => { root.filled-toggled(); }
             }
@@ -534,7 +520,7 @@ export component EditorWindow inherits Window {
                 u: root.u;
                 x: 700 * root.u - 8 * root.u - 30 * root.u - 4 * root.u - 30 * root.u - 40 * root.u - 30 * root.u;
                 y: 47 * root.u;
-                commands: "M6 12 L18 12";
+                icon: Icons.subtract;
                 clicked => { root.width-changed(root.stroke-width - 1); }
             }
             Text {
@@ -543,7 +529,7 @@ export component EditorWindow inherits Window {
                 width: 40 * root.u;
                 height: 30 * root.u;
                 text: round(root.stroke-width);
-                color: white;
+                color: Theme.text;
                 font-size: 13 * root.u;
                 horizontal-alignment: center;
                 vertical-alignment: center;
@@ -552,7 +538,7 @@ export component EditorWindow inherits Window {
                 u: root.u;
                 x: 700 * root.u - 8 * root.u - 30 * root.u - 4 * root.u - 30 * root.u;
                 y: 47 * root.u;
-                commands: "M6 12 L18 12 M12 6 L12 18";
+                icon: Icons.add;
                 clicked => { root.width-changed(root.stroke-width + 1); }
             }
         }

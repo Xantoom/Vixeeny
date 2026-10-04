@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { Theme, Icons, Icon } from "controls.slint";
 
-// The recording widget (plan 5.9): a small pill with a pulsing red dot, the elapsed time, and the
-// pause / stop buttons. In pause the dot is orange and still and the time frozen. With
+// The recording widget (plan 5.9): a small dark pill with a pulsing red dot, the elapsed time, and
+// the pause / stop buttons. In pause the dot is amber and still and the time frozen. With
 // `auto-hide` it fades after 3 s and comes back under the pointer.
 export component RecordingWidget inherits Window {
     in property <bool> paused: false;
@@ -17,9 +18,10 @@ export component RecordingWidget inherits Window {
     no-frame: true;
     always-on-top: true;
     background: transparent;
-    default-font-family: "Inter";
+    icon: Theme.app-icon;
+    default-font-family: Theme.font;
     preferred-width: 200px;
-    preferred-height: 40px;
+    preferred-height: 44px;
 
     property <bool> pulse: true;
     property <bool> faded: false;
@@ -40,11 +42,11 @@ export component RecordingWidget inherits Window {
         width: parent.width;
         height: parent.height;
         border-radius: self.height / 2;
-        background: #111827ee;
+        background: Theme.dark ? #2c2c2cf2 : #fcfcfcf2;
         border-width: 1px;
-        border-color: #ffffff22;
+        border-color: Theme.stroke-strong;
         opacity: (root.faded && !hover.has-hover) ? 0.12 : 1.0;
-        animate opacity { duration: 250ms; }
+        animate opacity { duration: Theme.t-slow; }
 
         hover := TouchArea {
             changed has-hover => {
@@ -54,7 +56,7 @@ export component RecordingWidget inherits Window {
         }
 
         HorizontalLayout {
-            padding-left: 16px;
+            padding-left: 18px;
             padding-right: 8px;
             spacing: 10px;
             alignment: start;
@@ -64,16 +66,17 @@ export component RecordingWidget inherits Window {
                 height: 12px;
                 y: (parent.height - self.height) / 2;
                 border-radius: 6px;
-                background: root.paused ? #f59e0b : #ef4444;
+                background: root.paused ? Theme.warning : Theme.record;
                 opacity: root.paused ? 1.0 : (root.pulse ? 1.0 : 0.35);
                 animate opacity { duration: 600ms; }
             }
 
             Text {
                 text: root.time;
-                color: white;
+                color: Theme.text;
                 font-size: 15px;
                 font-weight: 600;
+                font-italic: false;
                 vertical-alignment: center;
                 accessible-role: text;
             }
@@ -82,38 +85,35 @@ export component RecordingWidget inherits Window {
 
             // Pause / resume.
             Rectangle {
-                width: 28px;
-                height: 28px;
+                width: 30px;
+                height: 30px;
                 y: (parent.height - self.height) / 2;
-                border-radius: 14px;
-                background: pause-touch.has-hover ? #ffffff30 : transparent;
+                border-radius: 15px;
+                background: pause-touch.pressed ? Theme.subtle-pressed : (pause-touch.has-hover ? Theme.subtle-hover : transparent);
+                animate background { duration: Theme.t-fast; }
                 accessible-role: button;
                 accessible-label: root.paused ? root.resume-label : root.pause-label;
-                if !root.paused : Rectangle {
-                    x: 9px; y: 8px; width: 3.5px; height: 12px; background: white; border-radius: 1px;
+                Icon {
+                    x: 7px; y: 7px;
+                    data: root.paused ? Icons.play-filled : Icons.pause-filled;
+                    tint: Theme.text;
+                    size: 16px;
                 }
-                if !root.paused : Rectangle {
-                    x: 15.5px; y: 8px; width: 3.5px; height: 12px; background: white; border-radius: 1px;
-                }
-                if root.paused : Path {
-                    x: 9px; y: 7px; width: 12px; height: 14px;
-                    commands: "M 0 0 L 12 7 L 0 14 Z";
-                    fill: white;
-                }
-                pause-touch := TouchArea { clicked => { root.pause-clicked(); } }
+                pause-touch := TouchArea { mouse-cursor: pointer; clicked => { root.pause-clicked(); } }
             }
 
             // Stop.
             Rectangle {
-                width: 28px;
-                height: 28px;
+                width: 30px;
+                height: 30px;
                 y: (parent.height - self.height) / 2;
-                border-radius: 14px;
-                background: stop-touch.has-hover ? #ffffff30 : transparent;
+                border-radius: 15px;
+                background: stop-touch.pressed ? Theme.subtle-pressed : (stop-touch.has-hover ? Theme.subtle-hover : transparent);
+                animate background { duration: Theme.t-fast; }
                 accessible-role: button;
                 accessible-label: root.stop-label;
-                Rectangle { x: 9px; y: 9px; width: 10px; height: 10px; background: white; border-radius: 2px; }
-                stop-touch := TouchArea { clicked => { root.stop-clicked(); } }
+                Icon { x: 7px; y: 7px; data: Icons.stop-filled; tint: Theme.record; size: 16px; }
+                stop-touch := TouchArea { mouse-cursor: pointer; clicked => { root.stop-clicked(); } }
             }
         }
     }

@@ -4,6 +4,8 @@
 // screen. It slides and fades in, takes the arrow keys, Enter and Escape, and does nothing while
 // it is still (no timer runs once the animation is over).
 
+import { Theme, Icons, Icon } from "controls.slint";
+
 export struct SideItem {
     // Which action this is (the Rust side maps it back).
     id: int,
@@ -17,172 +19,92 @@ export struct SideItem {
     active: bool,
 }
 
-// A 20 px icon drawn with shapes, so it is sharp at any scale and needs no icon font.
-component Glyph inherits Rectangle {
-    in property <int> kind;
-    in property <color> tint;
-    in property <color> accent;
-    width: 20px;
-    height: 20px;
-
-    // 0 region: a frame with a corner mark
-    if root.kind == 0 : Rectangle {
-        x: 2px; y: 3px; width: 16px; height: 14px;
-        border-width: 1.5px; border-color: root.tint; border-radius: 2px;
-    }
-    if root.kind == 0 : Rectangle { x: 6px; y: 7px; width: 8px; height: 6px; background: root.tint.with-alpha(0.35); border-radius: 1px; }
-    // 1 window: a frame with a title bar
-    if root.kind == 1 : Rectangle {
-        x: 2px; y: 3px; width: 16px; height: 14px;
-        border-width: 1.5px; border-color: root.tint; border-radius: 2px;
-    }
-    if root.kind == 1 : Rectangle { x: 2px; y: 3px; width: 16px; height: 4px; background: root.tint; border-radius: 2px; }
-    // 2 screen: a frame on a stand
-    if root.kind == 2 : Rectangle {
-        x: 2px; y: 3px; width: 16px; height: 11px;
-        border-width: 1.5px; border-color: root.tint; border-radius: 2px;
-    }
-    if root.kind == 2 : Rectangle { x: 6px; y: 16px; width: 8px; height: 1.5px; background: root.tint; }
-    // 3 all screens: two frames
-    if root.kind == 3 : Rectangle {
-        x: 1px; y: 5px; width: 12px; height: 9px;
-        border-width: 1.5px; border-color: root.tint; border-radius: 2px;
-    }
-    if root.kind == 3 : Rectangle {
-        x: 7px; y: 8px; width: 12px; height: 9px;
-        border-width: 1.5px; border-color: root.tint; border-radius: 2px;
-        background: root.tint.with-alpha(0.2);
-    }
-    // 4 scrolling: a tall frame and a down arrow
-    if root.kind == 4 : Rectangle {
-        x: 4px; y: 1px; width: 12px; height: 18px;
-        border-width: 1.5px; border-color: root.tint; border-radius: 2px;
-    }
-    if root.kind == 4 : Path {
-        x: 7px; y: 5px; width: 6px; height: 10px;
-        commands: "M 3 0 L 3 9 M 0 6 L 3 9 L 6 6";
-        stroke: root.tint; stroke-width: 1.5px;
-    }
-    // 5 text capture: a T in a frame
-    if root.kind == 5 : Rectangle {
-        x: 2px; y: 2px; width: 16px; height: 16px;
-        border-width: 1.5px; border-color: root.tint; border-radius: 3px;
-    }
-    if root.kind == 5 : Path {
-        x: 6px; y: 6px; width: 8px; height: 9px;
-        commands: "M 0 1 L 8 1 M 4 1 L 4 9";
-        stroke: root.tint; stroke-width: 1.8px;
-    }
-    // 6 record: a dot
-    if root.kind == 6 : Rectangle {
-        x: 3px; y: 3px; width: 14px; height: 14px; border-radius: 7px;
-        background: root.accent;
-    }
-    // 7 stop recording: a square
-    if root.kind == 7 : Rectangle {
-        x: 4px; y: 4px; width: 12px; height: 12px; border-radius: 2px;
-        background: root.accent;
-    }
-    // 8 replay: a ring with a play mark
-    if root.kind == 8 : Rectangle {
-        x: 2px; y: 2px; width: 16px; height: 16px; border-radius: 8px;
-        border-width: 1.5px; border-color: root.tint;
-    }
-    if root.kind == 8 : Path {
-        x: 8px; y: 6px; width: 6px; height: 8px;
-        commands: "M 0 0 L 6 4 L 0 8 Z";
-        fill: root.tint;
-    }
-    // 9 save replay: an arrow into a tray
-    if root.kind == 9 : Path {
-        x: 3px; y: 2px; width: 14px; height: 16px;
-        commands: "M 7 0 L 7 10 M 3 6 L 7 10 L 11 6 M 0 13 L 0 15 L 14 15 L 14 13";
-        stroke: root.tint; stroke-width: 1.6px;
-    }
-    // 10 profile: three sliders
-    if root.kind == 10 : Path {
-        x: 2px; y: 3px; width: 16px; height: 14px;
-        commands: "M 0 1 L 16 1 M 0 7 L 16 7 M 0 13 L 16 13";
-        stroke: root.tint; stroke-width: 1.5px;
-    }
-    if root.kind == 10 : Rectangle { x: 5px; y: 2px; width: 4px; height: 4px; border-radius: 2px; background: root.tint; }
-    if root.kind == 10 : Rectangle { x: 12px; y: 8px; width: 4px; height: 4px; border-radius: 2px; background: root.tint; }
-    if root.kind == 10 : Rectangle { x: 7px; y: 14px; width: 4px; height: 4px; border-radius: 2px; background: root.tint; }
-    // 11 settings: a ring with a hub
-    if root.kind == 11 : Rectangle {
-        x: 2px; y: 2px; width: 16px; height: 16px; border-radius: 8px;
-        border-width: 3px; border-color: root.tint;
-    }
-    if root.kind == 11 : Rectangle { x: 8px; y: 8px; width: 4px; height: 4px; border-radius: 2px; background: root.tint; }
+// The Fluent icon of an action (see `Icons`).
+global Glyphs {
+  pure public function path(kind: int) -> string {
+    return kind == 0 ? Icons.screenshot
+        : kind == 1 ? Icons.window
+        : kind == 2 ? Icons.desktop
+        : kind == 3 ? Icons.dual-screen
+        : kind == 4 ? Icons.scroll
+        : kind == 5 ? Icons.scan-text
+        : kind == 6 ? Icons.record-filled
+        : kind == 7 ? Icons.stop-filled
+        : kind == 8 ? Icons.history
+        : kind == 9 ? Icons.save
+        : kind == 10 ? Icons.slider
+        : Icons.settings;
+  }
 }
 
 component ItemView inherits Rectangle {
     in property <SideItem> item;
     in property <bool> vertical;
     in property <bool> selected;
-    in property <bool> dark;
-    in property <color> fg;
-    in property <color> muted;
-    in property <color> hover-bg;
-    in property <color> accent;
     callback clicked();
     callback hovered();
 
     // Vertical: a row (icon and label); horizontal: a tile (icon over label).
-    width: root.item.header ? (root.vertical ? 0px : 10px) : (root.vertical ? 264px : 92px);
-    height: root.item.header ? (root.vertical ? 30px : 84px) : (root.vertical ? 44px : 84px);
-    border-radius: 10px;
-    background: (root.selected && !root.item.header) ? root.hover-bg : transparent;
+    width: root.item.header ? (root.vertical ? 0px : 12px) : (root.vertical ? 272px : 96px);
+    height: root.item.header ? (root.vertical ? 32px : 84px) : (root.vertical ? 44px : 84px);
+    border-radius: Theme.radius-card;
+    background: (root.selected && !root.item.header) ? Theme.selected : transparent;
+    animate background { duration: Theme.t-fast; }
     opacity: root.item.enabled || root.item.header ? 1.0 : 0.38;
     accessible-role: button;
     accessible-label: root.item.label;
 
+    // The marker of the keyboard selection, as in the Windows 11 navigation.
+    if root.selected && !root.item.header && root.vertical : Rectangle {
+        x: 0px; y: (parent.height - self.height) / 2; width: 3px; height: 16px; border-radius: 2px;
+        background: Theme.accent;
+    }
     if root.item.header && root.vertical : Text {
         x: 14px;
-        y: 10px;
+        y: 12px;
         text: root.item.label;
-        color: root.muted;
-        font-size: 11px;
-        font-weight: 700;
+        color: Theme.text-3;
+        font-size: 12px;
+        font-weight: 600;
     }
     if root.item.header && !root.vertical : Rectangle {
-        x: 4px; y: 14px; width: 1px; height: 56px; background: root.muted.with-alpha(0.4);
+        x: 5px; y: 16px; width: 1px; height: 52px; background: Theme.divider;
     }
     if !root.item.header && root.vertical : HorizontalLayout {
-        padding-left: 14px;
+        padding-left: 16px;
         padding-right: 14px;
         spacing: 14px;
         alignment: start;
-        Glyph {
+        Icon {
             y: (parent.height - self.height) / 2;
-            kind: root.item.glyph;
-            tint: root.item.active ? root.accent : root.fg;
-            accent: root.accent;
+            data: Glyphs.path(root.item.glyph);
+            tint: root.item.glyph == 6 || root.item.glyph == 7 ? Theme.record : (root.item.active ? Theme.accent : Theme.text);
+            size: 20px;
         }
         Text {
             text: root.item.label;
-            color: root.item.active ? root.accent : root.fg;
+            color: root.item.active ? Theme.accent : Theme.text;
             font-size: 14px;
             vertical-alignment: center;
             overflow: elide;
         }
     }
     if !root.item.header && !root.vertical : Rectangle {
-        Glyph {
+        Icon {
             x: (parent.width - self.width) / 2;
             y: 14px;
-            kind: root.item.glyph;
-            tint: root.item.active ? root.accent : root.fg;
-            accent: root.accent;
+            data: Glyphs.path(root.item.glyph);
+            tint: root.item.glyph == 6 || root.item.glyph == 7 ? Theme.record : (root.item.active ? Theme.accent : Theme.text);
+            size: 22px;
         }
         Text {
             x: 4px;
-            y: 42px;
+            y: 44px;
             width: parent.width - 8px;
             height: 36px;
             text: root.item.label;
-            color: root.item.active ? root.accent : root.fg;
-            font-size: 11px;
+            color: root.item.active ? Theme.accent : Theme.text-2;
+            font-size: 12px;
             horizontal-alignment: center;
             vertical-alignment: top;
             wrap: word-wrap;
@@ -204,10 +126,9 @@ export component SidePanelWindow inherits Window {
     in property <bool> vertical: true;
     // 0 left, 1 right, 2 top, 3 bottom: where it slides in from.
     in property <int> edge: 1;
-    in property <bool> dark: true;
     // The OS blurs what is behind the window: a lighter fill lets it show.
     in property <bool> backdrop: false;
-    in property <duration> enter: 220ms;
+    in property <duration> enter: 250ms;
     in property <duration> exit: 150ms;
     in-out property <bool> shown: false;
     in-out property <int> selected: -1;
@@ -220,7 +141,8 @@ export component SidePanelWindow inherits Window {
     no-frame: true;
     always-on-top: true;
     background: transparent;
-    default-font-family: "Inter";
+    icon: Theme.app-icon;
+    default-font-family: Theme.font;
     forward-focus: keys;
 
     property <float> progress: root.shown ? 1.0 : 0.0;
@@ -229,13 +151,9 @@ export component SidePanelWindow inherits Window {
         easing: root.shown ? cubic-bezier(0.16, 1, 0.3, 1) : ease-in;
     }
 
-    property <color> fg: root.dark ? #f3f4f6 : #111827;
-    property <color> muted: root.dark ? #9ca3af : #6b7280;
-    property <color> hover-bg: root.dark ? #ffffff1f : #00000014;
-    property <color> accent: root.dark ? #f87171 : #dc2626;
-    property <color> fill: root.dark
-        ? (root.backdrop ? #1c1f2ab8 : #1c1f2af2)
-        : (root.backdrop ? #f5f6f8b8 : #f5f6f8f2);
+    property <color> fill: Theme.dark
+        ? (root.backdrop ? #2c2c2cc8 : #2c2c2cf5)
+        : (root.backdrop ? #f9f9f9c8 : #f9f9f9f5);
 
     keys := FocusScope {
         key-pressed(event) => {
@@ -261,6 +179,17 @@ export component SidePanelWindow inherits Window {
         }
     }
 
+    // A soft shadow under the strip, as the Windows 11 flyouts have.
+    shadow := Rectangle {
+        x: strip.x - 2px; y: strip.y; width: strip.width + 4px; height: strip.height + 4px;
+        border-radius: 12px;
+        background: #00000000;
+        drop-shadow-blur: 14px;
+        drop-shadow-color: #00000050;
+        drop-shadow-offset-y: 4px;
+        opacity: strip.opacity;
+    }
+
     // The strip sits 12 px inside the window; the window touches the screen edge, so the strip
     // slides in from beyond it.
     strip := Rectangle {
@@ -269,10 +198,10 @@ export component SidePanelWindow inherits Window {
         width: root.width - 24px;
         height: root.height - 24px;
         opacity: root.progress;
-        border-radius: 16px;
+        border-radius: 12px;
         background: root.fill;
         border-width: 1px;
-        border-color: root.dark ? #ffffff26 : #00000020;
+        border-color: Theme.stroke-strong;
 
         if root.vertical : VerticalLayout {
             padding: 8px;
@@ -282,7 +211,6 @@ export component SidePanelWindow inherits Window {
                 item: item;
                 vertical: true;
                 selected: i == root.selected;
-                fg: root.fg; muted: root.muted; hover-bg: root.hover-bg; accent: root.accent;
                 hovered => { root.selected = i; }
                 clicked => { root.activate(item.id); }
             }
@@ -295,7 +223,6 @@ export component SidePanelWindow inherits Window {
                 item: item;
                 vertical: false;
                 selected: i == root.selected;
-                fg: root.fg; muted: root.muted; hover-bg: root.hover-bg; accent: root.accent;
                 hovered => { root.selected = i; }
                 clicked => { root.activate(item.id); }
             }

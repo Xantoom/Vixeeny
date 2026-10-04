@@ -1,24 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Plain Slint elements only: std-widgets would pull the SVG decoder in for its icons.
-export component PushButton inherits Rectangle {
-    in property <string> label;
-    in property <bool> primary: false;
-    in property <bool> enabled: true;
-    callback clicked();
-    height: 32px;
-    preferred-width: lbl.preferred-width + 28px;
-    border-radius: 6px;
-    opacity: root.enabled ? 1 : 0.4;
-    background: root.primary ? (touch.has-hover ? #2563eb : #3b82f6) : (touch.has-hover ? #4b5563 : #374151);
-    lbl := Text {
-        text: root.label;
-        color: white;
-        font-size: 13px;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
-    touch := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
-}
+import { Theme, Icons, Button, InfoBar } from "controls.slint";
+export { Button as PushButton } from "controls.slint";
 
 // The result of a text recognition: editable text, a status line and, when a language is
 // missing, how to install it (plan 5.6).
@@ -35,72 +17,65 @@ export component OcrWindow inherits Window {
     callback open-settings();
 
     title: root.window-title;
+    icon: Theme.app-icon;
     min-width: 420px;
     min-height: 260px;
-    preferred-width: 560px;
-    preferred-height: 380px;
-    default-font-family: "Inter";
-    background: #1f2937;
+    preferred-width: 580px;
+    preferred-height: 400px;
+    default-font-family: Theme.font;
+    background: Theme.bg;
 
     VerticalLayout {
-        padding: 12px;
-        spacing: 10px;
+        padding: 16px;
+        spacing: 12px;
 
         Rectangle {
             vertical-stretch: 1;
-            background: #111827;
-            border-radius: 6px;
+            background: Theme.card;
+            border-radius: Theme.radius-card;
             border-width: 1px;
-            border-color: #374151;
+            border-color: Theme.stroke;
             clip: true;
             Flickable {
-                content-height: max(self.height, input.preferred-height + 16px);
+                content-height: max(self.height, input.preferred-height + 24px);
                 input := TextInput {
-                    x: 8px;
-                    y: 8px;
-                    width: parent.width - 16px;
+                    x: 12px;
+                    y: 12px;
+                    width: parent.width - 24px;
                     text <=> root.text;
                     wrap: word-wrap;
                     single-line: false;
-                    color: white;
+                    color: Theme.text;
+                    selection-background-color: Theme.accent-soft;
+                    selection-foreground-color: Theme.text;
                     font-size: 14px;
                 }
             }
         }
 
-        if root.hint != "" : Rectangle {
-            background: #f59e0b22;
-            border-radius: 6px;
-            border-width: 1px;
-            border-color: #f59e0b;
-            HorizontalLayout {
-                padding: 8px;
-                Text {
-                    text: root.hint;
-                    wrap: word-wrap;
-                    color: #fcd34d;
-                    font-size: 12px;
-                }
-            }
+        if root.hint != "" : InfoBar {
+            kind: 1;
+            text: root.hint;
         }
 
         HorizontalLayout {
             spacing: 8px;
             Text {
                 text: root.status;
-                color: #d1d5db;
+                color: Theme.text-2;
                 vertical-alignment: center;
                 horizontal-stretch: 1;
-                overflow: elide;
+                wrap: word-wrap;
                 font-size: 12px;
             }
-            if root.show-settings : PushButton {
-                label: root.settings-label;
+            if root.show-settings : Button {
+                text: root.settings-label;
                 clicked => { root.open-settings(); }
             }
-            PushButton {
-                label: root.copy-label;
-                primary: true;
+            Button {
+                text: root.copy-label;
+                icon: Icons.copy;
+                accent: true;
                 clicked => { root.copy(root.text); }
             }
         }
