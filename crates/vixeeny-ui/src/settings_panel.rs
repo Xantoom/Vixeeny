@@ -18,8 +18,8 @@ use vixeeny_settings::{
 
 use crate::theme::{self, Look};
 use crate::{
-    GalleryItem, LineItem, SettingGroup, SettingRow, SettingsWindow, ShortcutKey, ShortcutRow,
-    UiTexts,
+    GalleryGroup, GalleryItem, LineItem, SettingGroup, SettingRow, SettingsWindow, ShortcutKey,
+    ShortcutRow, UiTexts,
 };
 
 /// One tile of the gallery.
@@ -29,6 +29,10 @@ pub struct GalleryEntry {
     /// Date and size, as text.
     pub detail: String,
     pub video: bool,
+    /// The sub-folder (application) it is grouped under; empty: none.
+    pub folder: String,
+    /// `PNG`, `MP4`…
+    pub format: String,
     /// RGBA thumbnail, `(width, height, bytes)`.
     pub thumb: Option<(u32, u32, Vec<u8>)>,
 }
@@ -105,7 +109,7 @@ pub enum GalleryRequest {
     Open(usize),
     /// `open`, `folder`, `copy`, `convert` or `delete`, on the selected tile.
     Action(String),
-    /// Kind (0 all, 1 images, 2 videos) and application text.
+    /// Folder (0 all, 1 images, 2 videos, 3 replays) and application text.
     Filter(i32, String),
 }
 
@@ -165,8 +169,7 @@ impl PanelHandle {
 
     pub fn set_gallery(&self, entries: Vec<GalleryEntry>, selected: Option<usize>) {
         let _ = self.0.upgrade_in_event_loop(move |w| {
-            w.set_gallery_selected(selected.map_or(-1, |i| i as i32));
-            w.set_gallery(gallery_model(entries, selected));
+            show_gallery(&w, entries, selected);
         });
     }
 
@@ -191,29 +194,78 @@ fn line_model(lines: Vec<Line>, selected: Option<usize>) -> ModelRc<LineItem> {
     ModelRc::from(Rc::new(VecModel::from(items)))
 }
 
-fn gallery_model(entries: Vec<GalleryEntry>, selected: Option<usize>) -> ModelRc<GalleryItem> {
-    let items: Vec<GalleryItem> = entries
-        .into_iter()
-        .enumerate()
-        .map(|(i, e)| {
-            let thumb = e.thumb.and_then(|(w, h, rgba)| {
-                (rgba.len() == w as usize * h as usize * 4).then(|| {
-                    let mut buffer = SharedPixelBuffer::<slint::Rgba8Pixel>::new(w, h);
-                    buffer.make_mut_bytes().copy_from_slice(&rgba);
-                    slint::Image::from_rgba8(buffer)
-                })
-            });
-            GalleryItem {
-                name: e.name.into(),
-                detail: e.detail.into(),
-                has_thumb: thumb.is_some(),
-                thumb: thumb.unwrap_or_default(),
-                video: e.video,
-                selected: selected == Some(i),
+fn gallery_item(index: usize, e: GalleryEntry, selected: Option<usize>) -> GalleryItem {
+    let thumb = e.thumb.and_then(|(w, h, rgba)| {
+        (rgba.len() == w as usize * h as usize * 4).then(|| {
+            let mut buffer = SharedPixelBuffer::<slint::Rgba8Pixel>::new(w, h);
+            buffer.make_mut_bytes().copy_from_slice(&rgba);
+            slint::Image::from_rgba8(buffer)
+        })
+    });
+    GalleryItem {
+        index: index as i32,
+        name: e.name.into(),
+        detail: e.detail.into(),
+        format: e.format.into(),
+        has_thumb: thumb.is_some(),
+        thumb: thumb.unwrap_or_default(),
+        video: e.video,
+        selected: selected == Some(index),
+    }
+}
+
+/// The tiles under their folders, the folders in the order of their newest capture.
+fn gallery_groups(
+    entries: Vec<GalleryEntry>,
+    selected: Option<usize>,
+) -> Vec<(String, Vec<GalleryItem>)> {
+    let mut groups: Vec<(String, Vec<GalleryItem>)> = Vec::new();
+    for (i, e) in entries.into_iter().enumerate() {
+        let folder = e.folder.clone();
+        let item = gallery_item(i, e, selected);
+        match groups.iter_mut().find(|(f, _)| *f == folder) {
+            Some((_, items)) => items.push(item),
+            None => groups.push((folder, vec![item])),
+        }
+    }
+    groups
+}
+
+/// Shows the tiles. When only their content changed (a selection, a thumbnail), the tiles are
+/// updated in place: rebuilding them would drop their hover and a menu open on one.
+fn show_gallery(w: &SettingsWindow, entries: Vec<GalleryEntry>, selected: Option<usize>) {
+    w.set_gallery_selected(selected.map_or(-1, |i| i as i32));
+    w.set_gallery_count(entries.len() as i32);
+    let groups = gallery_groups(entries, selected);
+    let current = w.get_gallery();
+    let same_shape = current.row_count() == groups.len()
+        && groups.iter().enumerate().all(|(i, (folder, items))| {
+            current
+                .row_data(i)
+                .is_some_and(|g| g.folder == folder.as_str() && g.items.row_count() == items.len())
+        });
+    if same_shape {
+        for (i, (_, items)) in groups.into_iter().enumerate() {
+            let Some(group) = current.row_data(i) else {
+                continue;
+            };
+            for (k, item) in items.into_iter().enumerate() {
+                if group.items.row_data(k).as_ref() != Some(&item) {
+                    group.items.set_row_data(k, item);
+                }
             }
+        }
+        return;
+    }
+    let model: Vec<GalleryGroup> = groups
+        .into_iter()
+        .map(|(folder, items)| GalleryGroup {
+            count: items.len() as i32,
+            folder: folder.into(),
+            items: ModelRc::from(Rc::new(VecModel::from(items))),
         })
         .collect();
-    ModelRc::from(Rc::new(VecModel::from(items)))
+    w.set_gallery(ModelRc::from(Rc::new(VecModel::from(model))));
 }
 
 pub struct SettingsPanel {
@@ -244,6 +296,10 @@ fn ui_texts(lang: Lang) -> UiTexts {
         copy: t(Key::UiCopy),
         all: t(Key::UiAll),
         images: t(Key::UiImages),
+        replays: t(Key::UiReplays),
+        no_folder: t(Key::UiNoFolder),
+        confirm_delete: t(Key::UiConfirmDelete),
+        confirm_delete_hint: t(Key::UiConfirmDeleteHint),
         videos: t(Key::UiVideos),
         app_filter: t(Key::UiAppFilter),
         redetect: t(Key::UiRedetect),
@@ -693,7 +749,7 @@ impl SettingsPanel {
     }
 
     pub fn set_gallery(&self, entries: Vec<GalleryEntry>, selected: Option<usize>) {
-        self.window.set_gallery(gallery_model(entries, selected));
+        show_gallery(&self.window, entries, selected);
     }
 
     pub fn set_lines(&self, lines: Vec<Line>) {

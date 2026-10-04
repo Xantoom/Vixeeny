@@ -22,6 +22,8 @@ pub struct Item {
     pub size: u64,
     /// The application the capture is named after (its sub-folder, or the start of its name).
     pub app: String,
+    /// Which of the scanned folders it is in (0 images, 1 videos, 2 replays).
+    pub source: usize,
 }
 
 const IMAGE_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "webp", "avif", "jxl"];
@@ -57,7 +59,15 @@ fn app_from_stem(stem: &str) -> String {
     String::new()
 }
 
-fn walk(root: &Path, dir: &Path, depth: usize, out: &mut Vec<Item>) {
+/// The capture folders, and the one being walked: a folder that is another root (the replays
+/// inside the videos) is left to its own walk.
+struct Walk<'a> {
+    roots: &'a [PathBuf],
+    source: usize,
+}
+
+fn walk(w: &Walk, dir: &Path, depth: usize, out: &mut Vec<Item>) {
+    let root = &w.roots[w.source];
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -65,8 +75,8 @@ fn walk(root: &Path, dir: &Path, depth: usize, out: &mut Vec<Item>) {
         let path = entry.path();
         let Ok(meta) = entry.metadata() else { continue };
         if meta.is_dir() {
-            if depth < MAX_DEPTH {
-                walk(root, &path, depth + 1, out);
+            if depth < MAX_DEPTH && !w.roots.contains(&path) {
+                walk(w, &path, depth + 1, out);
             }
             continue;
         }
@@ -77,7 +87,7 @@ fn walk(root: &Path, dir: &Path, depth: usize, out: &mut Vec<Item>) {
             .strip_prefix(root)
             .ok()
             .and_then(|p| p.components().next())
-            .filter(|_| path.parent() != Some(root))
+            .filter(|_| path.parent() != Some(root.as_path()))
             .map(|c| c.as_os_str().to_string_lossy().into_owned());
         out.push(Item {
             app: sub.unwrap_or_else(|| app_from_stem(stem)),
@@ -85,6 +95,7 @@ fn walk(root: &Path, dir: &Path, depth: usize, out: &mut Vec<Item>) {
             kind,
             modified: meta.modified().unwrap_or(SystemTime::UNIX_EPOCH),
             size: meta.len(),
+            source: w.source,
             path,
         });
     }
@@ -93,8 +104,8 @@ fn walk(root: &Path, dir: &Path, depth: usize, out: &mut Vec<Item>) {
 /// The `limit` newest captures of `roots`, newest first. A folder that does not exist is skipped.
 pub fn scan(roots: &[PathBuf], limit: usize) -> Vec<Item> {
     let mut items = Vec::new();
-    for root in roots {
-        walk(root, root, 1, &mut items);
+    for (source, root) in roots.iter().enumerate() {
+        walk(&Walk { roots, source }, root, 1, &mut items);
     }
     items.sort_by(|a, b| {
         b.modified
@@ -106,18 +117,14 @@ pub fn scan(roots: &[PathBuf], limit: usize) -> Vec<Item> {
     items
 }
 
-/// Indexes of the items that pass the filters: `kind` 0 all, 1 images, 2 videos; `app` is a
-/// case-insensitive part of the application name (empty = any).
+/// Indexes of the items that pass the filters: `kind` 0 all, else the folder `kind - 1` (images,
+/// videos, replays); `app` is a case-insensitive part of the application name (empty = any).
 pub fn filter(items: &[Item], kind: i32, app: &str) -> Vec<usize> {
     let app = app.trim().to_lowercase();
     items
         .iter()
         .enumerate()
-        .filter(|(_, i)| match kind {
-            1 => i.kind == Kind::Image,
-            2 => i.kind == Kind::Video,
-            _ => true,
-        })
+        .filter(|(_, i)| kind <= 0 || i.source + 1 == kind as usize)
         .filter(|(_, i)| app.is_empty() || i.app.to_lowercase().contains(&app))
         .map(|(n, _)| n)
         .collect()
@@ -293,16 +300,22 @@ mod tests {
     }
 
     #[test]
-    fn filters_by_kind_and_application() {
+    fn filters_by_folder_and_application() {
         let root = scratch("filter");
-        touch(&root.join("Game_2026-10-02_14-03-11.png"), 1, 1);
-        touch(&root.join("Game_2026-10-02_14-05-00.mp4"), 2, 1);
-        touch(&root.join("Browser_2026-10-02_14-06-00.png"), 3, 1);
-        let items = scan(std::slice::from_ref(&root), 10);
-        assert_eq!(filter(&items, 0, "").len(), 3);
+        let (images, videos) = (root.join("Images"), root.join("Videos"));
+        // The replays sit inside the videos, as by default: they are not counted twice.
+        let replays = videos.join("Replays");
+        touch(&images.join("Game_2026-10-02_14-03-11.png"), 1, 1);
+        touch(&videos.join("Game_2026-10-02_14-05-00.mp4"), 2, 1);
+        touch(&images.join("Browser_2026-10-02_14-06-00.png"), 3, 1);
+        touch(&replays.join("Game/Game_2026-10-02_14-07-00.mp4"), 4, 1);
+        let items = scan(&[images, videos, replays], 10);
+        assert_eq!(filter(&items, 0, "").len(), 4);
         assert_eq!(filter(&items, 1, "").len(), 2);
         assert_eq!(filter(&items, 2, "").len(), 1);
-        assert_eq!(filter(&items, 0, " GAM ").len(), 2);
+        assert_eq!(filter(&items, 3, "").len(), 1);
+        assert_eq!(items[filter(&items, 3, "")[0]].app, "Game");
+        assert_eq!(filter(&items, 0, " GAM ").len(), 3);
         assert_eq!(filter(&items, 1, "game").len(), 1);
         let _ = std::fs::remove_dir_all(root);
     }
@@ -320,6 +333,7 @@ mod tests {
             modified: SystemTime::UNIX_EPOCH + Duration::from_secs(1_790_942_580),
             size: 2_516_582,
             app: String::new(),
+            source: 0,
         };
         assert_eq!(detail(&item, 0), "2026-10-02 12:03 · 2.4 MB");
         assert_eq!(detail(&item, 2 * 3600), "2026-10-02 14:03 · 2.4 MB");

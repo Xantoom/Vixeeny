@@ -42,7 +42,9 @@ export component Button inherits Rectangle {
     border-color: Theme.control-stroke;
     opacity: root.enabled ? 1.0 : 0.45;
     animate opacity { duration: Theme.t-normal; }
-    background: root.accent
+    background: root.accent && root.danger
+        ? (touch.pressed ? #a52314 : (touch.has-hover ? #b42818 : #c42b1c))
+        : root.accent
         ? (touch.pressed ? Theme.accent-pressed : (touch.has-hover ? Theme.accent-hover : Theme.accent))
         : root.subtle
             ? (touch.pressed ? Theme.subtle-pressed : (touch.has-hover ? Theme.subtle-hover : transparent))
@@ -57,11 +59,11 @@ export component Button inherits Rectangle {
         if root.icon != "" : Icon {
             y: (parent.height - self.height) / 2;
             data: root.icon;
-            tint: root.accent ? Theme.on-accent : (root.danger ? Theme.danger : Theme.text);
+            tint: root.accent && root.danger ? white : root.accent ? Theme.on-accent : (root.danger ? Theme.danger : Theme.text);
         }
         if root.text != "" : Text {
             text: root.text;
-            color: root.accent ? Theme.on-accent : (root.danger ? Theme.danger : Theme.text);
+            color: root.accent && root.danger ? white : root.accent ? Theme.on-accent : (root.danger ? Theme.danger : Theme.text);
             font-size: 14px;
             vertical-alignment: center;
         }

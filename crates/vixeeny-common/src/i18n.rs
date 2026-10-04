@@ -302,6 +302,10 @@ pub enum Key {
     UpdateFailedShort,
     OvlPin,
     OvlClose,
+    UiReplays,
+    UiNoFolder,
+    UiConfirmDelete,
+    UiConfirmDeleteHint,
 }
 
 impl Key {
@@ -588,6 +592,10 @@ impl Key {
         Self::UpdateFailedShort,
         Self::OvlPin,
         Self::OvlClose,
+        Self::UiReplays,
+        Self::UiNoFolder,
+        Self::UiConfirmDelete,
+        Self::UiConfirmDeleteHint,
     ];
 }
 
@@ -977,14 +985,14 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::UiUse, Lang::Fr) => "Utiliser",
         (Key::UiOpen, Lang::En) => "Open",
         (Key::UiOpen, Lang::Fr) => "Ouvrir",
-        (Key::UiOpenFolder, Lang::En) => "Open folder",
-        (Key::UiOpenFolder, Lang::Fr) => "Ouvrir le dossier",
+        (Key::UiOpenFolder, Lang::En) => "Show in folder",
+        (Key::UiOpenFolder, Lang::Fr) => "Afficher dans le dossier",
         (Key::UiCopy, Lang::En) => "Copy",
         (Key::UiCopy, Lang::Fr) => "Copier",
         (Key::UiAll, Lang::En) => "All",
         (Key::UiAll, Lang::Fr) => "Tout",
-        (Key::UiImages, Lang::En) => "Images",
-        (Key::UiImages, Lang::Fr) => "Images",
+        (Key::UiImages, Lang::En) => "Screenshots",
+        (Key::UiImages, Lang::Fr) => "Captures",
         (Key::UiVideos, Lang::En) => "Videos",
         (Key::UiVideos, Lang::Fr) => "Vidéos",
         (Key::UiAppFilter, Lang::En) => "Filter by application",
@@ -1273,6 +1281,18 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::OvlPin, Lang::Fr) => "Garder ouvert",
         (Key::OvlClose, Lang::En) => "Close",
         (Key::OvlClose, Lang::Fr) => "Fermer",
+        (Key::UiReplays, Lang::En) => "Replays",
+        (Key::UiReplays, Lang::Fr) => "Replays",
+        (Key::UiNoFolder, Lang::En) => "Not in a folder",
+        (Key::UiNoFolder, Lang::Fr) => "Sans dossier",
+        (Key::UiConfirmDelete, Lang::En) => "Delete this file?",
+        (Key::UiConfirmDelete, Lang::Fr) => "Supprimer ce fichier ?",
+        (Key::UiConfirmDeleteHint, Lang::En) => {
+            "The file goes to the Recycle Bin: you can still get it back from there."
+        }
+        (Key::UiConfirmDeleteHint, Lang::Fr) => {
+            "Le fichier part dans la Corbeille : vous pourrez encore le récupérer."
+        }
     }
 }
 

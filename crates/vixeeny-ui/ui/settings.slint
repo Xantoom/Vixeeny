@@ -31,12 +31,22 @@ export struct SettingGroup {
 }
 
 export struct GalleryItem {
+    // Its position among all the tiles shown (what the callbacks take).
+    index: int,
     name: string,
     detail: string,
+    format: string,
     thumb: image,
     has-thumb: bool,
     video: bool,
     selected: bool,
+}
+
+// The tiles of one sub-folder (empty: none).
+export struct GalleryGroup {
+    folder: string,
+    count: int,
+    items: [GalleryItem],
 }
 
 export struct ShortcutKey {
@@ -74,6 +84,10 @@ export struct UiTexts {
     all: string,
     images: string,
     videos: string,
+    replays: string,
+    no-folder: string,
+    confirm-delete: string,
+    confirm-delete-hint: string,
     app-filter: string,
     redetect: string,
     check-now: string,
@@ -223,11 +237,17 @@ component Tile inherits Rectangle {
     in property <GalleryItem> item;
     callback clicked();
     callback opened();
+    // Right click, at this point of the tile.
+    callback menu(length, length);
     border-radius: Theme.radius-card;
     border-width: root.item.selected ? 2px : 1px;
     border-color: root.item.selected ? Theme.accent : (touch.has-hover ? Theme.stroke-strong : Theme.stroke);
-    background: Theme.card;
-    animate border-color { duration: Theme.t-fast; }
+    background: touch.has-hover ? Theme.control-hover : Theme.card;
+    animate border-color, background { duration: Theme.t-fast; }
+    drop-shadow-blur: touch.has-hover ? 12px : 0px;
+    drop-shadow-color: #00000030;
+    drop-shadow-offset-y: 2px;
+    animate drop-shadow-blur { duration: Theme.t-normal; }
     clip: true;
     Rectangle {
         y: 0px;
@@ -247,19 +267,50 @@ component Tile inherits Rectangle {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
         }
-        if root.item.video : Rectangle {
-            x: parent.width - 36px;
-            y: 8px;
-            width: 28px;
-            height: 28px;
-            border-radius: 14px;
+        // A video: a play button in the middle of its picture.
+        if root.item.video && root.item.has-thumb : Rectangle {
+            width: touch.has-hover ? 48px : 42px;
+            height: self.width;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            border-radius: self.width / 2;
             background: #000000a0;
+            border-width: 1.5px;
+            border-color: #ffffffc0;
+            animate width { duration: Theme.t-normal; easing: cubic-bezier(0.2, 0, 0, 1); }
             Icon {
                 data: Icons.play-filled;
                 tint: white;
-                size: 14px;
-                x: 8px;
-                y: 7px;
+                size: 18px;
+                x: (parent.width - self.width) / 2 + 1px;
+                y: (parent.height - self.height) / 2;
+            }
+        }
+        // The kind and the format, top left: a video stands out in the accent colour.
+        Rectangle {
+            x: 8px;
+            y: 8px;
+            height: 22px;
+            width: badge.preferred-width;
+            border-radius: 11px;
+            background: root.item.video ? Theme.accent : #000000a8;
+            badge := HorizontalLayout {
+                padding-left: 7px;
+                padding-right: 8px;
+                spacing: 4px;
+                Icon {
+                    y: (parent.height - self.height) / 2;
+                    data: root.item.video ? Icons.video : Icons.image;
+                    tint: root.item.video ? Theme.on-accent : white;
+                    size: 13px;
+                }
+                Text {
+                    text: root.item.format;
+                    color: root.item.video ? Theme.on-accent : white;
+                    font-size: 11px;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                }
             }
         }
     }
@@ -287,9 +338,46 @@ component Tile inherits Rectangle {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
         double-clicked => { root.opened(); }
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down && e.button == PointerEventButton.right {
+                root.menu(self.mouse-x, self.mouse-y);
+            }
+        }
     }
     accessible-role: button;
     accessible-label: root.item.name;
+}
+
+// A line of the menu of a tile.
+component MenuEntry inherits Rectangle {
+    in property <string> icon;
+    in property <string> text;
+    in property <bool> danger: false;
+    callback clicked();
+    height: 34px;
+    border-radius: Theme.radius;
+    background: touch.pressed ? Theme.subtle-pressed : (touch.has-hover ? (root.danger ? Theme.danger.with-alpha(0.12) : Theme.subtle-hover) : transparent);
+    animate background { duration: Theme.t-fast; }
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 12px;
+        spacing: 10px;
+        Icon {
+            y: (parent.height - self.height) / 2;
+            data: root.icon;
+            tint: root.danger ? Theme.danger : Theme.text-2;
+            size: 16px;
+        }
+        Text {
+            text: root.text;
+            color: root.danger ? Theme.danger : Theme.text;
+            font-size: 13px;
+            vertical-alignment: center;
+        }
+    }
+    touch := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+    accessible-role: button;
+    accessible-label: root.text;
 }
 
 component KeyChip inherits Rectangle {
@@ -362,7 +450,8 @@ export component SettingsWindow inherits Window {
     in property <[SettingGroup]> groups;
     // A message above the groups (problems with the video settings).
     in property <string> notice;
-    in property <[GalleryItem]> gallery;
+    in property <[GalleryGroup]> gallery;
+    in property <int> gallery-count: 0;
     in property <[ShortcutRow]> shortcuts;
     // The shortcut being recorded (-1: none).
     in property <int> recording-row: -1;
@@ -372,6 +461,11 @@ export component SettingsWindow inherits Window {
     in-out property <int> gallery-kind: 0;
     in property <int> gallery-selected: -1;
     in property <string> gallery-detail;
+    // The delete confirmation is open, for this file.
+    in-out property <bool> confirm-open: false;
+    in-out property <string> confirm-name;
+    // Off in the tests, where no time passes: what animates is shown at its end at once.
+    in property <bool> animated: true;
 
     // The about page: the version, and the state of the update.
     in property <string> version;
@@ -718,31 +812,31 @@ export component SettingsWindow inherits Window {
                 }
 
                 // ---- gallery
-                if root.section == 0 : VerticalLayout {
+                if root.section == 0 : gallery-page := VerticalLayout {
                     vertical-stretch: 1;
                     padding-left: 16px;
                     padding-right: 16px;
                     padding-bottom: 16px;
                     spacing: 12px;
+                    // The tile the menu is for, and where it opens.
+                    property <GalleryItem> menu-item;
+                    property <length> menu-x;
+                    property <length> menu-y;
                     HorizontalLayout {
                         spacing: 6px;
                         height: 32px;
                         Chip { text: root.t.all; selected: root.gallery-kind == 0; clicked => { root.gallery-kind = 0; root.gallery-filter(0, app-filter.text); } }
                         Chip { text: root.t.images; selected: root.gallery-kind == 1; clicked => { root.gallery-kind = 1; root.gallery-filter(1, app-filter.text); } }
                         Chip { text: root.t.videos; selected: root.gallery-kind == 2; clicked => { root.gallery-kind = 2; root.gallery-filter(2, app-filter.text); } }
-                        Rectangle { width: 6px; }
+                        Chip { text: root.t.replays; selected: root.gallery-kind == 3; clicked => { root.gallery-kind = 3; root.gallery-filter(3, app-filter.text); } }
+                        Rectangle { horizontal-stretch: 1; }
                         app-filter := TextBox {
-                            width: 200px;
+                            width: 220px;
                             placeholder: root.t.app-filter;
                             accepted(s) => { root.gallery-filter(root.gallery-kind, s); }
                         }
-                        Rectangle { horizontal-stretch: 1; }
-                        IconButton { icon: Icons.open; label: root.t.open; enabled: root.gallery-selected >= 0; clicked => { root.gallery-action("open"); } }
-                        IconButton { icon: Icons.folder-open; label: root.t.open-folder; enabled: root.gallery-selected >= 0; clicked => { root.gallery-action("folder"); } }
-                        IconButton { icon: Icons.copy; label: root.t.copy; enabled: root.gallery-selected >= 0; clicked => { root.gallery-action("copy"); } }
-                        IconButton { icon: Icons.delete; label: root.t.delete; tint: Theme.danger; enabled: root.gallery-selected >= 0; clicked => { root.gallery-action("delete"); } }
                     }
-                    if root.gallery.length == 0 : VerticalLayout {
+                    if root.gallery-count == 0 : VerticalLayout {
                         vertical-stretch: 1;
                         alignment: center;
                         spacing: 12px;
@@ -755,24 +849,72 @@ export component SettingsWindow inherits Window {
                             wrap: word-wrap;
                         }
                     }
-                    if root.gallery.length > 0 : grid := ScrollArea {
+                    if root.gallery-count > 0 : grid := ScrollArea {
                         vertical-stretch: 1;
-                        property <int> cols: max(1, floor((self.width - 12px) / 220px));
-                        property <length> tile-w: (self.width - 12px) / self.cols;
-                        property <length> tile-h: tile-w * 0.66 + 56px;
-                        Rectangle {
-                            x: 0px;
-                            y: 0px;
-                            width: parent.width;
-                            height: ceil(root.gallery.length / grid.cols) * grid.tile-h + 12px;
-                            for item[i] in root.gallery : Tile {
-                                x: mod(i, grid.cols) * grid.tile-w + 5px;
-                                y: floor(i / grid.cols) * grid.tile-h + 5px;
-                                width: grid.tile-w - 10px;
-                                height: grid.tile-h - 10px;
-                                item: item;
-                                clicked => { root.gallery-select(i); }
-                                opened => { root.gallery-open(i); }
+                        // Room on the right for the scroll bar.
+                        property <length> inner: self.width - 14px;
+                        property <int> cols: max(1, floor(self.inner / 220px));
+                        property <length> tile-w: self.inner / self.cols;
+                        property <length> tile-h: self.tile-w * 0.62 + 56px;
+                        VerticalLayout {
+                            width: grid.inner;
+                            padding-bottom: 8px;
+                            for group in root.gallery : VerticalLayout {
+                                // The folder: its name and how many captures it holds.
+                                HorizontalLayout {
+                                    height: 40px;
+                                    padding-left: 6px;
+                                    padding-top: 8px;
+                                    spacing: 8px;
+                                    alignment: start;
+                                    Icon {
+                                        y: (parent.height - self.height) / 2 + 4px;
+                                        data: Icons.folder-open;
+                                        tint: group.folder == "" ? Theme.text-3 : Theme.accent;
+                                        size: 18px;
+                                    }
+                                    Text {
+                                        text: group.folder == "" ? root.t.no-folder : group.folder;
+                                        color: Theme.text;
+                                        font-size: 15px;
+                                        font-weight: 600;
+                                        vertical-alignment: center;
+                                    }
+                                    Rectangle {
+                                        y: (parent.height - self.height) / 2 + 4px;
+                                        height: 20px;
+                                        width: max(20px, count.preferred-width + 12px);
+                                        border-radius: 10px;
+                                        background: Theme.subtle-hover;
+                                        count := Text {
+                                            text: group.count;
+                                            color: Theme.text-2;
+                                            font-size: 11px;
+                                            font-weight: 600;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                                Rectangle {
+                                    height: ceil(group.items.length / grid.cols) * grid.tile-h;
+                                    for item[i] in group.items : Tile {
+                                        x: mod(i, grid.cols) * grid.tile-w + 5px;
+                                        y: floor(i / grid.cols) * grid.tile-h + 5px;
+                                        width: grid.tile-w - 10px;
+                                        height: grid.tile-h - 10px;
+                                        item: item;
+                                        clicked => { root.gallery-select(item.index); }
+                                        opened => { root.gallery-open(item.index); }
+                                        menu(mx, my) => {
+                                            root.gallery-select(item.index);
+                                            gallery-page.menu-item = item;
+                                            gallery-page.menu-x = self.absolute-position.x + mx - gallery-page.absolute-position.x;
+                                            gallery-page.menu-y = self.absolute-position.y + my - gallery-page.absolute-position.y;
+                                            menu.show();
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -781,6 +923,44 @@ export component SettingsWindow inherits Window {
                         color: Theme.text-2;
                         font-size: 12px;
                         wrap: word-wrap;
+                    }
+
+                    // What can be done with a tile: a right click on it.
+                    menu := PopupWindow {
+                        x: min(gallery-page.menu-x, gallery-page.width - 236px);
+                        y: min(gallery-page.menu-y, gallery-page.height - 170px);
+                        width: 220px;
+                        Rectangle {
+                            property <bool> open: false;
+                            y: self.open ? 0px : -4px;
+                            opacity: self.open ? 1 : 0;
+                            animate y, opacity { duration: Theme.t-normal; easing: cubic-bezier(0.2, 0, 0, 1); }
+                            Timer { interval: 16ms; running: !parent.open; triggered => { parent.open = true; } }
+                            background: Theme.flyout;
+                            border-radius: Theme.radius-flyout;
+                            border-width: 1px;
+                            border-color: Theme.stroke-strong;
+                            drop-shadow-blur: 24px;
+                            drop-shadow-color: #00000050;
+                            drop-shadow-offset-y: 6px;
+                            VerticalLayout {
+                                padding: 4px;
+                                spacing: 2px;
+                                MenuEntry { icon: Icons.open; text: root.t.open; clicked => { root.gallery-action("open"); } }
+                                MenuEntry { icon: Icons.folder-open; text: root.t.open-folder; clicked => { root.gallery-action("folder"); } }
+                                if !gallery-page.menu-item.video : MenuEntry { icon: Icons.copy; text: root.t.copy; clicked => { root.gallery-action("copy"); } }
+                                Rectangle { height: 9px; Rectangle { y: 4px; height: 1px; background: Theme.divider; } }
+                                MenuEntry {
+                                    icon: Icons.delete;
+                                    text: root.t.delete;
+                                    danger: true;
+                                    clicked => {
+                                        root.confirm-name = gallery-page.menu-item.name;
+                                        root.confirm-open = true;
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -876,5 +1056,98 @@ export component SettingsWindow inherits Window {
         TouchArea { x: root.width - e; y: 0px; width: e; height: e; mouse-cursor: nesw-resize; pointer-event(ev) => { if ev.kind == PointerEventKind.down { root.resize-window(2); } } }
         TouchArea { x: 0px; y: root.height - 2 * e; width: 2 * e; height: 2 * e; mouse-cursor: nesw-resize; pointer-event(ev) => { if ev.kind == PointerEventKind.down { root.resize-window(6); } } }
         TouchArea { x: root.width - 2 * e; y: root.height - 2 * e; width: 2 * e; height: 2 * e; mouse-cursor: nwse-resize; pointer-event(ev) => { if ev.kind == PointerEventKind.down { root.resize-window(5); } } }
+    }
+
+    // ---- the delete confirmation, over everything
+    Rectangle {
+        width: root.width;
+        height: root.height;
+        visible: self.opacity > 0.01;
+        opacity: root.confirm-open ? 1 : 0;
+        animate opacity { duration: root.animated ? Theme.t-normal : 0ms; }
+        background: #0000006b;
+        // A click beside the dialog cancels.
+        TouchArea { clicked => { root.confirm-open = false; } }
+        keys := FocusScope {
+            enabled: root.confirm-open;
+            changed enabled => { if self.enabled { self.focus(); } }
+            key-pressed(e) => {
+                if e.text == Key.Escape { root.confirm-open = false; return accept; }
+                if e.text == Key.Return {
+                    root.confirm-open = false;
+                    root.gallery-action("delete");
+                    return accept;
+                }
+                reject
+            }
+        }
+        dialog := Rectangle {
+            width: min(420px, root.width - 48px);
+            height: body.preferred-height;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2 + (root.confirm-open ? 0px : 16px);
+            animate y { duration: root.animated ? Theme.t-normal : 0ms; easing: cubic-bezier(0.2, 0, 0, 1); }
+            background: Theme.flyout;
+            border-radius: Theme.radius-card;
+            border-width: 1px;
+            border-color: Theme.stroke-strong;
+            drop-shadow-blur: 32px;
+            drop-shadow-color: #00000060;
+            drop-shadow-offset-y: 8px;
+            // Clicks on the dialog stay on it.
+            TouchArea {}
+            body := VerticalLayout {
+                padding: 24px;
+                spacing: 10px;
+                HorizontalLayout {
+                    spacing: 12px;
+                    Rectangle {
+                        width: 36px;
+                        height: 36px;
+                        border-radius: 18px;
+                        background: Theme.danger.with-alpha(0.14);
+                        Icon { data: Icons.delete; tint: Theme.danger; size: 18px; x: 9px; y: 9px; }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 2px;
+                        Text {
+                            text: root.t.confirm-delete;
+                            color: Theme.text;
+                            font-size: 16px;
+                            font-weight: 600;
+                            wrap: word-wrap;
+                        }
+                        Text {
+                            text: root.confirm-name;
+                            color: Theme.text-2;
+                            font-size: 13px;
+                            overflow: elide;
+                        }
+                    }
+                }
+                Text {
+                    text: root.t.confirm-delete-hint;
+                    color: Theme.text-2;
+                    font-size: 13px;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    padding-top: 12px;
+                    spacing: 8px;
+                    alignment: end;
+                    Button { text: root.t.cancel; clicked => { root.confirm-open = false; } }
+                    Button {
+                        text: root.t.delete;
+                        danger: true;
+                        accent: true;
+                        clicked => {
+                            root.confirm-open = false;
+                            root.gallery-action("delete");
+                        }
+                    }
+                }
+            }
+        }
     }
 }

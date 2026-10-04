@@ -793,6 +793,7 @@ fn profiles_are_created_renamed_chosen_and_deleted_from_their_row() {
 #[test]
 fn the_gallery_and_the_other_pages_show_what_the_host_gives_them() {
     use settings_panel::{GalleryEntry, GalleryRequest, Line};
+    use slint::Model;
     use std::cell::RefCell;
     use vixeeny_settings::Section;
     let (panel, _) = settings_panel();
@@ -800,33 +801,65 @@ fn the_gallery_and_the_other_pages_show_what_the_host_gives_them() {
     let sink = requests.clone();
     panel.on_gallery(move |r| sink.borrow_mut().push(r));
     panel.select_section(Section::Gallery);
-    let tile = |name: &str, video: bool| GalleryEntry {
+    let tile = |name: &str, video: bool, folder: &str| GalleryEntry {
         name: name.into(),
         detail: "2026-10-02 14:03 · 2.4 MB".into(),
         video,
-        thumb: (!video).then(|| (4, 4, [200, 80, 40, 255].repeat(16))),
+        folder: folder.into(),
+        format: if video { "MP4" } else { "PNG" }.into(),
+        thumb: Some((4, 4, [200, 80, 40, 255].repeat(16))),
     };
-    panel.set_gallery(
+    let entries = || {
         vec![
-            tile("Minecraft_2026-10-02.png", false),
-            tile("Replay.mp4", true),
-            tile("a.png", false),
-        ],
-        Some(1),
-    );
-    settings_render(&panel, "9-settings-gallery");
+            tile("Minecraft_2026-10-02.png", false, "Minecraft"),
+            tile("Replay.mp4", true, "Minecraft"),
+            tile("a.png", false, ""),
+            tile("Minecraft_2026-10-01.png", false, "Minecraft"),
+            tile("Firefox_2026-10-01.mp4", true, "Firefox"),
+        ]
+    };
+    panel.set_gallery(entries(), Some(1));
     let w = panel.window();
+    w.set_animated(false);
+    settings_render(&panel, "9-settings-gallery");
+    // The tiles sit under their folders, in the order of the newest capture of each.
+    let groups = w.get_gallery();
+    let folders: Vec<String> = groups.iter().map(|g| g.folder.to_string()).collect();
+    assert_eq!(folders, ["Minecraft", "", "Firefox"]);
+    let minecraft = groups.row_data(0).unwrap();
+    assert_eq!(minecraft.count, 3);
+    let indexes: Vec<i32> = minecraft.items.iter().map(|i| i.index).collect();
+    assert_eq!(indexes, [0, 1, 3]);
+    assert!(minecraft.items.row_data(1).unwrap().selected);
+    // A new selection updates the same tiles rather than new ones.
+    panel.set_gallery(entries(), Some(3));
+    let again = w.get_gallery();
+    assert!(again == groups);
+    assert!(
+        again
+            .row_data(0)
+            .unwrap()
+            .items
+            .row_data(2)
+            .unwrap()
+            .selected
+    );
+    // Delete asks first.
+    w.set_confirm_name("Minecraft_2026-10-01.png".into());
+    w.set_confirm_open(true);
+    settings_render(&panel, "9-settings-gallery-delete");
+    w.set_confirm_open(false);
     w.invoke_gallery_select(2);
     w.invoke_gallery_open(2);
     w.invoke_gallery_action("open".into());
-    w.invoke_gallery_filter(1, "mine".into());
+    w.invoke_gallery_filter(3, "mine".into());
     assert_eq!(
         *requests.borrow(),
         [
             GalleryRequest::Select(2),
             GalleryRequest::Open(2),
             GalleryRequest::Action("open".into()),
-            GalleryRequest::Filter(1, "mine".into()),
+            GalleryRequest::Filter(3, "mine".into()),
         ]
     );
     panel.select_section(Section::About);

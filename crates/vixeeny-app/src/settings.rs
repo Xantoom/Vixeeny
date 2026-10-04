@@ -108,6 +108,12 @@ fn entries(g: &Gallery, offset: i64) -> Vec<GalleryEntry> {
             name: item.name.clone(),
             detail: gallery::detail(item, offset),
             video: item.kind == Kind::Video,
+            folder: item.app.clone(),
+            format: item
+                .path
+                .extension()
+                .map(|e| e.to_string_lossy().to_uppercase())
+                .unwrap_or_default(),
             thumb: g.thumbs.get(&item.path).cloned(),
         })
         .collect()
