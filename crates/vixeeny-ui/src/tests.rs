@@ -949,6 +949,7 @@ fn the_wizard_walks_its_steps_and_relabels_in_the_chosen_language() {
     )
     .unwrap_or_else(|e| panic!("{e}"));
     let w = panel.window();
+    w.set_animated(false);
     w.show().unwrap_or_else(|e| panic!("{e}"));
     let draw = |name: &str| {
         let mut buffer = SharedPixelBuffer::<Rgb8Pixel>::new(520, 380);

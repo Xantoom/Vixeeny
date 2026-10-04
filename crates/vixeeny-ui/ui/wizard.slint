@@ -39,6 +39,21 @@ component PathRow inherits HorizontalLayout {
 
 export component WizardWindow inherits Window {
     in property <int> step: 0;
+    // Off in the tests, where no time passes.
+    in property <bool> animated: true;
+    // A new step fades and slides in.
+    property <bool> step-shown: true;
+    changed step => {
+        if root.animated {
+            root.step-shown = false;
+            step-appear.running = true;
+        }
+    }
+    step-appear := Timer {
+        interval: 16ms;
+        running: false;
+        triggered => { self.running = false; root.step-shown = true; }
+    }
     in property <string> heading;
     in property <string> body;
     in property <string> step-text;
@@ -100,13 +115,23 @@ export component WizardWindow inherits Window {
             }
             Text { text: root.step-text; color: Theme.text-3; font-size: 12px; vertical-alignment: center; }
         }
-        Text { text: root.heading; color: Theme.text; font-size: 26px; font-weight: 600; wrap: word-wrap; }
-        if root.body != "": Text { text: root.body; color: Theme.text-2; font-size: 14px; wrap: word-wrap; }
+        Text {
+            text: root.heading; color: Theme.text; font-size: 26px; font-weight: 600; wrap: word-wrap;
+            opacity: root.step-shown ? 1 : 0;
+            animate opacity { duration: root.step-shown ? Theme.t-slow : 0ms; }
+        }
+        if root.body != "": Text {
+            text: root.body; color: Theme.text-2; font-size: 14px; wrap: word-wrap;
+            opacity: root.step-shown ? 1 : 0;
+            animate opacity { duration: root.step-shown ? Theme.t-slow : 0ms; }
+        }
 
         VerticalLayout {
             vertical-stretch: 1;
             spacing: 12px;
             alignment: start;
+            opacity: root.step-shown ? 1 : 0;
+            animate opacity { duration: root.step-shown ? Theme.t-slow : 0ms; easing: cubic-bezier(0.2, 0, 0, 1); }
 
             if root.step == 0: VerticalLayout {
                 spacing: 6px;
