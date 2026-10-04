@@ -406,6 +406,101 @@ impl State {
     }
 }
 
+/// The title bar drawn by the window itself: moving, minimizing, maximizing, closing and
+/// resizing go to the system through winit. Windows 11 still gives the frameless window its
+/// shadow and rounded corners.
+fn wire_chrome(window: &SettingsWindow) {
+    window.on_minimize_window({
+        let weak = window.as_weak();
+        move || {
+            if let Some(w) = weak.upgrade() {
+                w.window().set_minimized(true);
+            }
+        }
+    });
+    window.on_toggle_maximized({
+        let weak = window.as_weak();
+        move || {
+            if let Some(w) = weak.upgrade() {
+                let maximized = !w.window().is_maximized();
+                w.window().set_maximized(maximized);
+                w.set_zoomed(maximized);
+            }
+        }
+    });
+    window.on_close_window({
+        let weak = window.as_weak();
+        move || {
+            if let Some(w) = weak.upgrade() {
+                w.window()
+                    .dispatch_event(slint::platform::WindowEvent::CloseRequested);
+            }
+        }
+    });
+    #[cfg(feature = "desktop")]
+    {
+        use slint::winit_030::WinitWindowAccessor;
+        use slint::winit_030::winit::window::ResizeDirection;
+        window.on_drag_window({
+            let weak = window.as_weak();
+            move || {
+                if let Some(w) = weak.upgrade() {
+                    w.window().with_winit_window(|w| {
+                        let _ = w.drag_window();
+                    });
+                }
+            }
+        });
+        window.on_resize_window({
+            let weak = window.as_weak();
+            move |direction| {
+                let direction = match direction {
+                    0 => ResizeDirection::East,
+                    1 => ResizeDirection::North,
+                    2 => ResizeDirection::NorthEast,
+                    3 => ResizeDirection::NorthWest,
+                    4 => ResizeDirection::South,
+                    5 => ResizeDirection::SouthEast,
+                    6 => ResizeDirection::SouthWest,
+                    _ => ResizeDirection::West,
+                };
+                if let Some(w) = weak.upgrade() {
+                    w.window().with_winit_window(|w| {
+                        let _ = w.drag_resize_window(direction);
+                    });
+                }
+            }
+        });
+        // Maximized by the system too (double click, Win+Up, a drag to the top): follow it.
+        let weak = window.as_weak();
+        window.window().on_winit_window_event(move |_, event| {
+            use slint::winit_030::EventResult;
+            use slint::winit_030::winit::event::WindowEvent;
+            if matches!(event, WindowEvent::Resized(_))
+                && let Some(w) = weak.upgrade()
+            {
+                let maximized = w.window().is_maximized();
+                w.set_zoomed(maximized);
+            }
+            EventResult::Propagate
+        });
+        theme::when_native(window, {
+            let weak = window.as_weak();
+            move |_| {
+                use slint::winit_030::winit::platform::windows::{
+                    CornerPreference, WindowExtWindows,
+                };
+                if let Some(w) = weak.upgrade() {
+                    w.window().with_winit_window(|w| {
+                        w.set_undecorated_shadow(true);
+                        w.set_corner_preference(CornerPreference::Round);
+                    });
+                }
+            }
+        });
+    }
+}
+
 impl SettingsPanel {
     pub fn new(
         config: Config,
@@ -432,6 +527,7 @@ impl SettingsPanel {
             on_section: RefCell::new(Box::new(|_| {})),
         });
         theme::apply(&window, look);
+        wire_chrome(&window);
         let panel = Self { window, state };
         panel.wire();
         panel.relabel();
