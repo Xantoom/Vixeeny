@@ -1,6 +1,6 @@
 [package]
 name = "vixeeny-common"
-description = "Vixeny: shared types, config, IPC"
+description = "Vixeeny: shared types, config, IPC"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -17,8 +17,6 @@ toml.workspace = true
 tracing-appender.workspace = true
 tracing-subscriber.workspace = true
 tracing.workspace = true
-
-[target.'cfg(windows)'.dependencies]
 widestring = "1.2.1"
 
 [dev-dependencies]

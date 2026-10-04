@@ -20,8 +20,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::w;
 
 use super::Startup;
-use super::desktop::DesktopTray;
-use super::hotkeys::DesktopHotkeys;
+use super::hotkeys::Hotkeys;
+use super::tray::Tray;
 use crate::runtime::{Flow, Runtime};
 use crate::server::{self, EventTx, Waker};
 use crate::supervisor::ProcessSpawner;
@@ -29,7 +29,7 @@ use crate::supervisor::ProcessSpawner;
 const WM_WAKE: u32 = WM_APP;
 const LOCALE_NAME_MAX_LENGTH: usize = 85;
 
-type DaemonRuntime = Runtime<DesktopTray, ProcessSpawner>;
+type DaemonRuntime = Runtime<Tray, ProcessSpawner>;
 
 thread_local! {
     static RUNTIME: RefCell<Option<DaemonRuntime>> = const { RefCell::new(None) };
@@ -127,8 +127,8 @@ pub fn run(startup: Startup) -> anyhow::Result<()> {
 
     let os_locale = os_locale();
     let lang = vixeeny_common::i18n::Lang::resolve(&config.general.language, os_locale.as_deref());
-    let tray = DesktopTray::new(lang, &tx)?;
-    let hotkeys = DesktopHotkeys::new(&tx)?;
+    let tray = Tray::new(lang, &tx)?;
+    let hotkeys = Hotkeys::new(&tx)?;
     let spawner = ProcessSpawner::next_to_current_exe().context("locating vixeeny-app")?;
 
     let serve_tx = tx.clone();

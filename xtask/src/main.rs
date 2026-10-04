@@ -3,10 +3,6 @@
 
 mod bench;
 mod dist;
-#[cfg(target_os = "linux")]
-mod dist_linux;
-#[cfg(unix)]
-mod dist_mac;
 mod icons;
 mod native;
 
@@ -19,10 +15,6 @@ fn main() -> Result<()> {
         Some("bench-idle") => bench::run(&args.collect::<Vec<_>>()),
         Some("verify-registry") => verify_registry(),
         Some("dist") => dist::dist(&args.collect::<Vec<_>>()),
-        #[cfg(unix)]
-        Some("dist-mac") => dist_mac::dist(&args.collect::<Vec<_>>()),
-        #[cfg(target_os = "linux")]
-        Some("dist-linux") => dist_linux::dist(&args.collect::<Vec<_>>()),
         Some("icons") => icons::run(),
         Some("sums") => dist::sums(&args.collect::<Vec<_>>()),
         Some("bench-latency" | "test-hw") => {

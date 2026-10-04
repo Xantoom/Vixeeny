@@ -10,8 +10,6 @@ repository.workspace = true
 [dependencies]
 thiserror.workspace = true
 vixeeny-platform = { path = "../vixeeny-platform" }
-
-[target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
     "Foundation",
     "Graphics_Capture",
@@ -28,27 +26,6 @@ windows = { workspace = true, features = [
     "Win32_System_WinRT_Direct3D11",
     "Win32_System_WinRT_Graphics_Capture",
 ] }
-
-[target.'cfg(target_os = "macos")'.dependencies]
-objc2.workspace = true
-block2.workspace = true
-objc2-foundation.workspace = true
-objc2-core-graphics.workspace = true
-objc2-screen-capture-kit.workspace = true
-objc2-core-media.workspace = true
-objc2-core-video.workspace = true
-dispatch2.workspace = true
-
-[target.'cfg(target_os = "linux")'.dependencies]
-x11rb.workspace = true
-ashpd.workspace = true
-async-io.workspace = true
-png.workspace = true
-pipewire = { workspace = true, optional = true }
-
-[features]
-# Wayland video through the ScreenCast portal and PipeWire; needs libpipewire-0.3 and clang to build.
-pipewire = ["dep:pipewire"]
 
 [lints]
 workspace = true

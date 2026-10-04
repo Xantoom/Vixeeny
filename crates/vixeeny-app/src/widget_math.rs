@@ -2,7 +2,7 @@
 //! The pure parts of the recording widget: where it goes and how the two processes talk.
 //! (The widget is a process of its own, `vixeeny-app --widget …`, so the action loop of the app
 //! keeps answering the daemon while it is on screen.)
-#![cfg_attr(not(all(windows, feature = "ffmpeg")), allow(dead_code))]
+#![cfg_attr(not(feature = "ffmpeg"), allow(dead_code))]
 
 /// The pill's size at 96 DPI, in pixels.
 pub const WIDTH: u32 = 200;

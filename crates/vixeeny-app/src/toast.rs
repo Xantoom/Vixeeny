@@ -3,8 +3,6 @@
 //! and a clear message with a way out when something fails. Each card is a process of its own
 //! (`vixeeny-app --toast <kind> <text>`), so it never holds up the next hotkey.
 
-#![cfg_attr(not(windows), allow(dead_code))]
-
 use std::path::{Path, PathBuf};
 
 use vixeeny_common::config::Config;
@@ -132,7 +130,6 @@ pub fn notify(config: &Config, toast: &Toast) {
     if !config.general.notifications {
         return;
     }
-    #[cfg(windows)]
     {
         let [kind, text] = toast.to_args();
         let spawned = std::env::current_exe().and_then(|exe| {
@@ -144,67 +141,6 @@ pub fn notify(config: &Config, toast: &Toast) {
             tracing::warn!("cannot show the notification: {e}");
         }
     }
-    #[cfg(target_os = "macos")]
-    notify_mac(config, toast);
-    #[cfg(target_os = "linux")]
-    notify_linux(config, toast);
-    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
-    {
-        let _ = config;
-        tracing::info!("notification: {toast:?}");
-    }
-}
-
-/// Linux: a banner through the notification portal (sandbox) or `notify-send`.
-/// Clicking a banner is not handled: that needs D-Bus actions, a later refinement.
-#[cfg(target_os = "linux")]
-fn notify_linux(config: &Config, toast: &Toast) {
-    use vixeeny_common::i18n::tr;
-
-    let lang = crate::lang(&config.general.language);
-    let (title, body) = match toast {
-        Toast::Saved(kind, path) => (
-            tr(kind.title(), lang).to_owned(),
-            path.file_name()
-                .map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
-        ),
-        Toast::Failed(kind, message) => (tr(kind.title(), lang).to_owned(), message.clone()),
-        Toast::Update(text) => ("Vixeeny".to_owned(), text.clone()),
-    };
-    if let Err(e) = vixeeny_platform::notify::notify(&title, &body) {
-        tracing::warn!("cannot show the notification: {e}");
-    }
-}
-
-/// macOS: a notification-centre banner through `osascript` (no click action: that needs the app
-/// to be a bundle with a notification delegate, see the packaging step).
-#[cfg(target_os = "macos")]
-fn notify_mac(config: &Config, toast: &Toast) {
-    use vixeeny_common::i18n::tr;
-
-    let lang = crate::lang(&config.general.language);
-    let (title, body) = match toast {
-        Toast::Saved(kind, path) => (
-            tr(kind.title(), lang).to_owned(),
-            path.file_name()
-                .map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
-        ),
-        Toast::Failed(kind, message) => (tr(kind.title(), lang).to_owned(), message.clone()),
-        Toast::Update(text) => ("Vixeeny".to_owned(), text.clone()),
-    };
-    // AppleScript string literals: backslash and quote escaped.
-    let quote = |s: &str| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""));
-    let script = format!(
-        "display notification {} with title \"Vixeeny\" subtitle {}",
-        quote(&body),
-        quote(&title)
-    );
-    if let Err(e) = std::process::Command::new("osascript")
-        .args(["-e", &script])
-        .spawn()
-    {
-        tracing::warn!("cannot show the notification: {e}");
-    }
 }
 
 /// The folder that holds `path`.
@@ -214,7 +150,6 @@ fn folder_of(path: &Path) -> PathBuf {
 }
 
 /// `--toast <kind> <text>`: shows the card, then does what the user clicked.
-#[cfg(windows)]
 pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     use vixeeny_common::i18n::tr;
     use vixeeny_ui::toast_panel::{ToastContent, ToastEvent, ToastPanel, corner};

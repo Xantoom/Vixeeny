@@ -52,9 +52,7 @@ impl AudioCodec {
     /// FFmpeg encoder names to try, best first.
     fn encoder_names(self) -> &'static [&'static str] {
         match self {
-            Self::Aac if cfg!(windows) => &["aac_mf", "aac"],
-            Self::Aac if cfg!(target_os = "macos") => &["aac_at", "aac"],
-            Self::Aac => &["aac"],
+            Self::Aac => &["aac_mf", "aac"],
             Self::Opus => &["libopus"],
             Self::Flac => &["flac"],
             Self::Pcm16 => &["pcm_s16le"],

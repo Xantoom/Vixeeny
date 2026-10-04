@@ -41,7 +41,6 @@ pub fn dibv5(width: u32, height: u32, bgra: &[u8]) -> Vec<u8> {
 }
 
 /// Opens the clipboard, empties it, lets `fill` add formats, closes it.
-#[cfg(windows)]
 fn with_clipboard(
     fill: impl FnOnce(&dyn Fn(u32, &[u8]) -> crate::Result<()>) -> crate::Result<()>,
 ) -> crate::Result<()> {
@@ -100,7 +99,6 @@ fn with_clipboard(
     result
 }
 
-#[cfg(windows)]
 pub fn copy_image(width: u32, height: u32, bgra: &[u8], png: &[u8]) -> crate::Result<()> {
     use windows::Win32::System::DataExchange::RegisterClipboardFormatW;
     use windows::core::w;
@@ -123,134 +121,9 @@ pub fn copy_image(width: u32, height: u32, bgra: &[u8], png: &[u8]) -> crate::Re
 }
 
 /// Plain text, as `CF_UNICODETEXT`.
-#[cfg(windows)]
 pub fn copy_text(text: &str) -> crate::Result<()> {
     const CF_UNICODETEXT: u32 = 13;
     with_clipboard(|put| put(CF_UNICODETEXT, &utf16_z(text)))
-}
-
-#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
-pub fn copy_text(_text: &str) -> crate::Result<()> {
-    Err(crate::PlatformError::Unsupported)
-}
-
-#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
-pub fn copy_image(_width: u32, _height: u32, _bgra: &[u8], _png: &[u8]) -> crate::Result<()> {
-    Err(crate::PlatformError::Unsupported)
-}
-
-/// The general pasteboard gets the PNG (what Preview, browsers and chat apps paste).
-#[cfg(target_os = "macos")]
-pub fn copy_image(_width: u32, _height: u32, _bgra: &[u8], png: &[u8]) -> crate::Result<()> {
-    use objc2_app_kit::{NSPasteboard, NSPasteboardTypePNG};
-    use objc2_foundation::NSData;
-
-    let board = NSPasteboard::generalPasteboard();
-    board.clearContents();
-    // SAFETY: the constant is a valid pasteboard type for the lifetime of the program.
-    let kind = unsafe { NSPasteboardTypePNG };
-    if board.setData_forType(Some(&NSData::with_bytes(png)), kind) {
-        Ok(())
-    } else {
-        Err(crate::PlatformError::Os(
-            "clipboard: the pasteboard refused the image".into(),
-        ))
-    }
-}
-
-#[cfg(target_os = "macos")]
-pub fn copy_text(text: &str) -> crate::Result<()> {
-    use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
-    use objc2_foundation::NSString;
-
-    let board = NSPasteboard::generalPasteboard();
-    board.clearContents();
-    // SAFETY: the constant is a valid pasteboard type for the lifetime of the program.
-    let kind = unsafe { NSPasteboardTypeString };
-    if board.setString_forType(&NSString::from_str(text), kind) {
-        Ok(())
-    } else {
-        Err(crate::PlatformError::Os(
-            "clipboard: the pasteboard refused the text".into(),
-        ))
-    }
-}
-
-/// Linux: the clipboard belongs to the process that set it and Vixeeny's app exits right after
-/// a capture, so the data is handed to a helper that stays behind as the owner: `wl-copy`
-/// (wl-clipboard) on Wayland, `xclip` or `xsel` on X11.
-#[cfg(target_os = "linux")]
-mod linux {
-    use std::io::Write;
-    use std::process::{Command, Stdio};
-
-    use crate::PlatformError;
-
-    fn on_wayland() -> bool {
-        std::env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty())
-    }
-
-    /// Candidate helper commands for `mime`, most suitable first.
-    pub(super) fn helpers(mime: &str, wayland: bool) -> Vec<Vec<String>> {
-        let wl = vec!["wl-copy".into(), "--type".into(), mime.into()];
-        let xclip: Vec<String> = ["xclip", "-selection", "clipboard", "-t", mime, "-i"]
-            .map(String::from)
-            .to_vec();
-        let mut out = if wayland {
-            vec![wl, xclip]
-        } else {
-            vec![xclip]
-        };
-        if mime.starts_with("text/") {
-            out.push(
-                ["xsel", "--clipboard", "--input"]
-                    .map(String::from)
-                    .to_vec(),
-            );
-        }
-        out
-    }
-
-    pub(super) fn copy(mime: &str, data: &[u8]) -> crate::Result<()> {
-        let mut last = None;
-        for argv in helpers(mime, on_wayland()) {
-            let spawned = Command::new(&argv[0])
-                .args(&argv[1..])
-                .stdin(Stdio::piped())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn();
-            let mut child = match spawned {
-                Ok(child) => child,
-                Err(e) => {
-                    last = Some(format!("{}: {e}", argv[0]));
-                    continue;
-                }
-            };
-            if let Some(mut stdin) = child.stdin.take() {
-                let _ = stdin.write_all(data);
-            }
-            match child.wait() {
-                Ok(status) if status.success() => return Ok(()),
-                Ok(status) => last = Some(format!("{} exited with {status}", argv[0])),
-                Err(e) => last = Some(format!("{}: {e}", argv[0])),
-            }
-        }
-        Err(PlatformError::Os(format!(
-            "clipboard: install wl-clipboard (Wayland) or xclip (X11) ({})",
-            last.unwrap_or_default()
-        )))
-    }
-}
-
-#[cfg(target_os = "linux")]
-pub fn copy_image(_width: u32, _height: u32, _bgra: &[u8], png: &[u8]) -> crate::Result<()> {
-    linux::copy("image/png", png)
-}
-
-#[cfg(target_os = "linux")]
-pub fn copy_text(text: &str) -> crate::Result<()> {
-    linux::copy("text/plain;charset=utf-8", text.as_bytes())
 }
 
 #[cfg(test)]
@@ -286,16 +159,5 @@ mod tests {
         // the bottom row comes first
         assert_eq!(&d[124..128], &[7, 8, 9, 255]);
         assert_eq!(&d[132..136], &[1, 2, 3, 255]);
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn linux_helpers_follow_the_session() {
-        let wl = super::linux::helpers("image/png", true);
-        assert_eq!(wl[0][0], "wl-copy");
-        assert_eq!(wl[1][0], "xclip");
-        let x11 = super::linux::helpers("image/png", false);
-        assert_eq!(x11.len(), 1);
-        assert_eq!(super::linux::helpers("text/plain", false).len(), 2);
     }
 }

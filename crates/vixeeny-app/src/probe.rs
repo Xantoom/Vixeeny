@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use vixeeny_encode::probe::{Adapter, ProbeResult, cached_or_probe, run_child, vendor_from_pci};
-use vixeeny_encode::registry::{Platform, Registry};
+use vixeeny_encode::registry::Registry;
 
 /// How long the child may take before it is killed (the target is under 5 s).
 const TIMEOUT: Duration = Duration::from_secs(60);
@@ -41,19 +41,14 @@ pub fn child() -> anyhow::Result<()> {
     use vixeeny_encode::ffmpeg_probe::FfmpegProber;
     let registry = Registry::builtin()?;
     let prober = FfmpegProber::new(adapters());
-    let result = vixeeny_encode::probe::probe(
-        &registry,
-        Platform::current(),
-        &prober,
-        env!("CARGO_PKG_VERSION"),
-    );
+    let result = vixeeny_encode::probe::probe(&registry, &prober, env!("CARGO_PKG_VERSION"));
     print!("{}", vixeeny_encode::probe::to_toml(&result)?);
     Ok(())
 }
 
 #[cfg(not(feature = "ffmpeg"))]
 pub fn child() -> anyhow::Result<()> {
-    let _ = (Registry::builtin(), Platform::current());
+    let _ = Registry::builtin();
     anyhow::bail!("this build has no FFmpeg (build with `--features ffmpeg`)")
 }
 

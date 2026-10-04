@@ -16,9 +16,6 @@ vixeeny-common = { path = "../vixeeny-common" }
 vixeeny-encode = { path = "../vixeeny-encode" }
 vixeeny-image = { path = "../vixeeny-image" }
 vixeeny-platform = { path = "../vixeeny-platform" }
-
-# The Print Screen editor (plan 5.3) and the settings window.
-[target.'cfg(any(windows, target_os = "macos", target_os = "linux"))'.dependencies]
 vixeeny-audio = { path = "../vixeeny-audio" }
 vixeeny-editor = { path = "../vixeeny-editor" }
 vixeeny-ocr = { path = "../vixeeny-ocr" }
@@ -28,14 +25,7 @@ vixeeny-updater = { path = "../vixeeny-updater", default-features = false }
 vixeeny-ui = { path = "../vixeeny-ui", features = ["desktop"] }
 rfd = { version = "0.17.2", default-features = false }
 
-# File dialogs go through the xdg-desktop-portal (no GTK).
-[target.'cfg(target_os = "linux")'.dependencies]
-rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }
-
-
 [features]
-# Wayland recording (ScreenCast portal + PipeWire) and PipeWire audio; needs libpipewire to build.
-pipewire = ["vixeeny-capture/pipewire", "vixeeny-audio/pipewire"]
 # The FFmpeg-backed hardware probe (`--probe`); needs the native FFmpeg build.
 ffmpeg = ["vixeeny-encode/ffmpeg-next"]
 # AVIF and JPEG XL output; needs the natively built libraries (see vixeeny-image).
@@ -45,7 +35,7 @@ native-codecs = ["vixeeny-image/native-codecs"]
 png.workspace = true
 
 # The Windows resource (icon, version information) of the executable.
-[target.'cfg(windows)'.build-dependencies]
+[build-dependencies]
 winresource = "0.1.31"
 
 [lints]

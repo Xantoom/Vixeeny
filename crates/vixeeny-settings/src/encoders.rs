@@ -6,9 +6,7 @@ use std::sync::LazyLock;
 
 use vixeeny_common::config::Profile;
 use vixeeny_common::i18n::Lang;
-use vixeeny_encode::registry::{
-    Chroma, Encoder, Family, Kind, ParamType, Platform, Registry, Vendor,
-};
+use vixeeny_encode::registry::{Chroma, Encoder, Family, Kind, ParamType, Registry, Vendor};
 
 use crate::Env;
 
@@ -27,8 +25,8 @@ pub fn registry() -> Option<&'static Registry> {
     REGISTRY.as_ref()
 }
 
-/// The encoders of `platform`, hardware before software, best first.
-pub fn for_platform(platform: Platform) -> Vec<EncoderInfo> {
+/// The encoders, hardware before software, best first.
+pub fn all() -> Vec<EncoderInfo> {
     let Some(registry) = registry() else {
         return Vec::new();
     };
@@ -42,13 +40,10 @@ pub fn for_platform(platform: Platform) -> Vec<EncoderInfo> {
         Vendor::Nvidia => 0,
         Vendor::Amd => 1,
         Vendor::Intel => 2,
-        Vendor::Apple => 3,
-        Vendor::Vaapi => 4,
-        Vendor::Vulkan => 5,
-        Vendor::None => 6,
+        Vendor::None => 3,
     };
     let mut list: Vec<EncoderInfo> = registry
-        .for_platform(platform)
+        .encoders()
         .map(|e| EncoderInfo {
             id: e.id.clone(),
             name: e.display_name.clone(),

@@ -53,7 +53,7 @@ pub fn log_dir() -> Option<PathBuf> {
     if let Some(dir) = portable_dir() {
         return Some(dir.join("logs"));
     }
-    // Windows: %LOCALAPPDATA%\Vixeeny\data\logs ; Linux: ~/.local/state or share ; macOS: Logs.
+    // %LOCALAPPDATA%\Vixeeny\data\logs
     dirs().map(|d| {
         d.state_dir()
             .unwrap_or_else(|| d.data_local_dir())

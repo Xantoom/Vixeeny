@@ -48,7 +48,6 @@ impl LocalTime {
     }
 }
 
-#[cfg(windows)]
 pub fn local_time() -> LocalTime {
     use windows::Win32::System::SystemInformation::GetLocalTime;
     // SAFETY: no arguments; returns the current local time by value.
@@ -62,15 +61,6 @@ pub fn local_time() -> LocalTime {
         second: t.wSecond as u8,
         millisecond: t.wMilliseconds,
     }
-}
-
-/// UTC on the platforms whose integration comes later.
-#[cfg(not(windows))]
-pub fn local_time() -> LocalTime {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    LocalTime::from_unix_utc(now.as_secs(), now.subsec_millis() as u16)
 }
 
 #[cfg(test)]

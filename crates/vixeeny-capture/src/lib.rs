@@ -8,41 +8,13 @@
 
 mod fake;
 mod frame;
-
-#[cfg(windows)]
 mod wgc;
-#[cfg(windows)]
-pub use wgc::WgcBackend;
-#[cfg(windows)]
 mod wgc_stream;
-#[cfg(windows)]
-pub use wgc_stream::{CapturedFrame, GpuCapture, StreamTarget, TextureSink, VideoStream};
-
-#[cfg(target_os = "macos")]
-mod sck;
-#[cfg(target_os = "macos")]
-pub use sck::SckBackend;
-#[cfg(target_os = "macos")]
-mod sck_stream;
-#[cfg(target_os = "macos")]
-pub use sck_stream::{SckVideoStream, StreamFrame};
-
-#[cfg(all(target_os = "linux", feature = "pipewire"))]
-mod pipewire_video;
-#[cfg(target_os = "linux")]
-mod portal;
-#[cfg(target_os = "linux")]
-mod x11;
-#[cfg(all(target_os = "linux", feature = "pipewire"))]
-pub use pipewire_video::PipeWireVideoStream;
-#[cfg(target_os = "linux")]
-pub use portal::{LinuxBackend, PortalBackend, is_wayland_session};
-#[cfg(target_os = "linux")]
-pub use x11::{StreamFrame, X11Backend, X11VideoStream};
-
 pub use fake::FakeBackend;
 pub use frame::{BYTES_PER_PIXEL, CpuFrame};
 use vixeeny_platform::{HdrInfo, MonitorId, MonitorInfo, PhysicalRect, WindowId, virtual_bounds};
+pub use wgc::WgcBackend;
+pub use wgc_stream::{CapturedFrame, GpuCapture, StreamTarget, TextureSink, VideoStream};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum CaptureTarget {

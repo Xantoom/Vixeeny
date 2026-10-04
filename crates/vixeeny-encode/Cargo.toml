@@ -16,13 +16,7 @@ thiserror.workspace = true
 tracing.workspace = true
 toml.workspace = true
 vixeeny-common = { path = "../vixeeny-common" }
-
-# Unix: FFmpeg built by `cargo xtask build-native`, linked statically (found via pkg-config).
-[target.'cfg(not(windows))'.dependencies]
-ffmpeg-next = { version = "9.0.0", default-features = false, features = ["codec", "format", "software-scaling", "software-resampling", "filter", "static"], optional = true }
-
-# Windows: prebuilt shared FFmpeg (FFMPEG_DIR); its DLLs must be next to the executable.
-[target.'cfg(windows)'.dependencies]
+# Prebuilt shared FFmpeg (FFMPEG_DIR); its DLLs must be next to the executable.
 ffmpeg-next = { version = "9.0.0", default-features = false, features = ["codec", "format", "software-scaling", "software-resampling", "filter"], optional = true }
 # The D3D11 video processor that converts captured frames on the GPU.
 windows = { workspace = true, features = [
@@ -41,6 +35,3 @@ vixeeny-audio = { path = "../vixeeny-audio" }
 vixeeny-capture = { path = "../vixeeny-capture" }
 vixeeny-platform = { path = "../vixeeny-platform" }
 
-[[example]]
-name = "record_mac"
-required-features = ["ffmpeg-next"]

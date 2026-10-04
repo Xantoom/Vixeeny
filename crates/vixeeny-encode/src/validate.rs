@@ -5,9 +5,7 @@
 use vixeeny_common::config::Profile;
 
 use crate::probe::ProbeResult;
-use crate::registry::{
-    Chroma, Container, Encoder, Family, Kind, Platform, PresetName, Registry, Vendor,
-};
+use crate::registry::{Chroma, Container, Encoder, Family, Kind, PresetName, Registry, Vendor};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Severity {
@@ -20,7 +18,6 @@ pub enum Severity {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IssueKind {
     UnknownEncoder(String),
-    NotOnThisPlatform,
     /// The probe did not find this encoder / format on any GPU.
     NotAvailable,
     UnknownContainer(String),
@@ -78,7 +75,6 @@ fn warning(kind: IssueKind) -> Issue {
 /// Everything besides the profile itself that the verdict depends on.
 pub struct Context<'a> {
     pub registry: &'a Registry,
-    pub platform: Platform,
     /// Size of the captured source, for `source` resolution and the frame-rate limit.
     pub source: (u32, u32),
     /// `None` = no probe yet: availability is not checked.
@@ -197,9 +193,6 @@ pub fn validate(profile: &Profile, ctx: &Context<'_>) -> Vec<Issue> {
         issues.push(error(IssueKind::UnknownEncoder(profile.encoder.clone())));
         return issues;
     };
-    if !encoder.on(ctx.platform) {
-        issues.push(error(IssueKind::NotOnThisPlatform));
-    }
     if let Some(c) = container
         && !encoder.containers.contains(&c)
     {
@@ -249,19 +242,12 @@ pub fn is_valid(issues: &[Issue]) -> bool {
 
 /// The encoder `auto` stands for: the best hardware encoder the probe validated for 8-bit 4:2:0,
 /// else libx264. Order: H.264 first (plays everywhere), then HEVC, then AV1; NVIDIA, AMD, Intel…
-pub fn pick_auto<'a>(
-    registry: &'a Registry,
-    platform: Platform,
-    probe: Option<&ProbeResult>,
-) -> Option<&'a Encoder> {
+pub fn pick_auto<'a>(registry: &'a Registry, probe: Option<&ProbeResult>) -> Option<&'a Encoder> {
     let vendor_rank = |v: Vendor| match v {
         Vendor::Nvidia => 0,
         Vendor::Amd => 1,
         Vendor::Intel => 2,
-        Vendor::Apple => 3,
-        Vendor::Vaapi => 4,
-        Vendor::Vulkan => 5,
-        Vendor::None => 6,
+        Vendor::None => 3,
     };
     let family_rank = |f: Family| match f {
         Family::H264 => 0,
@@ -271,7 +257,7 @@ pub fn pick_auto<'a>(
     };
     let best = probe.and_then(|probe| {
         registry
-            .for_platform(platform)
+            .encoders()
             .filter(|e| e.kind == Kind::Hardware && probe.supports(&e.id, 8, Chroma::C420, false))
             .min_by_key(|e| (family_rank(e.family), vendor_rank(e.vendor)))
     });

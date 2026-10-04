@@ -42,7 +42,6 @@ pub fn warm_probe() {
     };
     let mut command = Command::new(&spawner.app_path);
     command.arg("--warm-probe");
-    #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         command.creation_flags(0x0800_0000);

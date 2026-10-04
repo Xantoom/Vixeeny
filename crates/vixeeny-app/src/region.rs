@@ -195,19 +195,11 @@ pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
     let bounds = vixeeny_platform::virtual_bounds(monitors.iter().map(|m| &m.rect))
         .context("no monitor found")?;
 
-    #[cfg(windows)]
     let backend = vixeeny_capture::WgcBackend::new()?;
-    #[cfg(target_os = "macos")]
-    let backend = vixeeny_capture::SckBackend::new()?;
-    #[cfg(target_os = "linux")]
-    let backend = vixeeny_capture::LinuxBackend::new(&monitors)?;
     let options = CaptureOptions {
         show_cursor: false,
-        #[cfg(windows)]
         tonemap: (config.image.hdr == "tonemap_sdr")
             .then_some(crate::tonemap_hdr as vixeeny_capture::ToneMapFn),
-        #[cfg(not(windows))]
-        tonemap: None,
     };
     let mut capturer = Capturer::new(backend, monitors.clone());
     let frame = capturer.grab(&CaptureTarget::AllMonitors, options)?;

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The tray (menu bar) icon with its menu, shared by Windows and macOS. The crate hides the OS
-//! differences; only the event loop and the wake-up differ (see `windows.rs`, `macos.rs`).
+//! The notification-area icon and its menu.
 
 use anyhow::Context;
 use tray_icon::menu::{Menu, MenuEvent, MenuId, MenuItem};
@@ -10,16 +9,15 @@ use vixeeny_common::ipc::{ActionId, RecState};
 
 use crate::core::Event;
 use crate::icon;
-use crate::runtime::Tray;
 use crate::server::EventTx;
 
-pub struct DesktopTray {
+pub struct Tray {
     tray: TrayIcon,
     settings: MenuItem,
     quit: MenuItem,
 }
 
-impl DesktopTray {
+impl Tray {
     pub fn new(lang: Lang, tx: &EventTx) -> anyhow::Result<Self> {
         let settings = MenuItem::new(tr(Key::MenuSettings, lang), true, None);
         let quit = MenuItem::new(tr(Key::MenuQuit, lang), true, None);
@@ -68,7 +66,7 @@ fn tray_image(recording: bool) -> anyhow::Result<Icon> {
     Icon::from_rgba(icon::render(recording), icon::SIZE, icon::SIZE).context("building the icon")
 }
 
-impl Tray for DesktopTray {
+impl crate::runtime::Tray for Tray {
     fn set_recording(&mut self, state: RecState, lang: Lang) {
         let recording = state == RecState::Recording;
         let key = if state == RecState::Idle {

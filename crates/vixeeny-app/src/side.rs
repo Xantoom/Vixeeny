@@ -56,7 +56,6 @@ fn texts(lang: Lang) -> SideTexts {
 }
 
 /// Shows the overlay until the user picks, dismisses it, or clicks elsewhere.
-#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 pub fn run(config: &Config, recording: bool, replay: bool) -> anyhow::Result<Outcome> {
     use std::cell::RefCell;
     use std::rc::Rc;

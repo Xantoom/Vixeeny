@@ -9,7 +9,7 @@ use crate::probe::{
     probe, to_toml, vendor_from_pci,
 };
 use crate::registry::{
-    Chroma, Container, Encoder, Family, Kind, PixelFormatSpec, Platform, Registry, Vendor,
+    Chroma, Container, Encoder, Family, Kind, PixelFormatSpec, Registry, Vendor,
 };
 use crate::validate::{Context, IssueKind, Severity, is_valid, output_size, pick_auto, validate};
 
@@ -36,30 +36,10 @@ fn the_builtin_registry_covers_plan_6_2() {
         "qsv_hevc",
         "qsv_av1",
         "qsv_vp9",
-        "videotoolbox_h264",
-        "videotoolbox_hevc",
-        "vaapi_h264",
-        "vaapi_hevc",
-        "vaapi_av1",
-        "vaapi_vp9",
-        "vulkan_h264",
-        "vulkan_hevc",
-        "vulkan_av1",
     ] {
         assert!(r.get(id).is_some(), "{id} missing");
     }
-    assert_eq!(r.encoders.len(), 23);
-    // AMF is Windows only, VAAPI/Vulkan Linux only, VideoToolbox macOS only.
-    for e in &r.encoders {
-        match e.vendor {
-            Vendor::Amd => assert_eq!(e.platforms, [Platform::Windows], "{}", e.id),
-            Vendor::Vaapi | Vendor::Vulkan => {
-                assert_eq!(e.platforms, [Platform::Linux], "{}", e.id)
-            }
-            Vendor::Apple => assert_eq!(e.platforms, [Platform::Macos], "{}", e.id),
-            _ => {}
-        }
-    }
+    assert_eq!(r.encoders.len(), 14);
 }
 
 #[test]
@@ -135,7 +115,6 @@ fn check(profile: &Profile, probe: Option<&ProbeResult>) -> Vec<IssueKind> {
         profile,
         &Context {
             registry: &r,
-            platform: Platform::Windows,
             source: (3840, 2160),
             probe,
         },
@@ -152,7 +131,6 @@ fn the_default_profile_is_valid() {
         &Profile::default(),
         &Context {
             registry: &r,
-            platform: Platform::Windows,
             source: (1920, 1080),
             probe: None,
         },
@@ -176,7 +154,6 @@ fn encoder_and_container_must_agree() {
         check(&profile("libx264", "avi"), None)
             .contains(&IssueKind::UnknownContainer("avi".into()))
     );
-    assert!(check(&profile("vaapi_h264", "mkv"), None).contains(&IssueKind::NotOnThisPlatform));
 }
 
 #[test]
@@ -231,7 +208,6 @@ fn frame_rate_is_checked_against_the_codec_level() {
         &p,
         &Context {
             registry: &r,
-            platform: Platform::Windows,
             source: (3840, 2160),
             probe: None,
         },
@@ -286,7 +262,7 @@ fn resolution_settings() {
 fn validation_agrees_with_the_data_exhaustively() {
     let r = registry();
     let containers = ["mkv", "mp4_hybrid", "mp4_fragmented", "webm"];
-    for e in r.for_platform(Platform::Windows) {
+    for e in r.encoders() {
         for container in containers {
             for depth in [8u8, 10] {
                 for chroma in ["420", "422", "444"] {
@@ -401,7 +377,7 @@ fn find<'a>(r: &'a ProbeResult, id: &str, adapter: Option<u32>) -> Option<&'a En
 #[test]
 fn probing_associates_each_encoder_with_its_gpu() {
     let fake = multi_gpu();
-    let result = probe(&registry(), Platform::Windows, &fake, "0.1");
+    let result = probe(&registry(), &fake, "0.1");
 
     // NVIDIA: both cards listed, with their own capabilities.
     let new = find(&result, "nvenc_hevc", Some(0)).unwrap_or_else(|| panic!("RTX missing"));
@@ -465,26 +441,23 @@ fn a_system_without_a_gpu_only_offers_software() {
         adapters: vec![],
         calls: RefCell::default(),
     };
-    let result = probe(&registry(), Platform::Windows, &fake, "0.1");
+    let result = probe(&registry(), &fake, "0.1");
     assert!(result.encoders.iter().all(|e| e.id.starts_with("lib")));
     assert!(result.supports("libx264", 8, Chroma::C420, false));
     let r = registry();
     assert_eq!(
-        pick_auto(&r, Platform::Windows, Some(&result)).map(|e| e.id.as_str()),
+        pick_auto(&r, Some(&result)).map(|e| e.id.as_str()),
         Some("libx264")
     );
-    assert_eq!(
-        pick_auto(&r, Platform::Windows, None).map(|e| e.id.as_str()),
-        Some("libx264")
-    );
+    assert_eq!(pick_auto(&r, None).map(|e| e.id.as_str()), Some("libx264"));
 }
 
 #[test]
 fn auto_prefers_h264_on_the_best_vendor_then_other_codecs() {
     let r = registry();
-    let result = probe(&r, Platform::Windows, &multi_gpu(), "0.1");
+    let result = probe(&r, &multi_gpu(), "0.1");
     assert_eq!(
-        pick_auto(&r, Platform::Windows, Some(&result)).map(|e| e.id.as_str()),
+        pick_auto(&r, Some(&result)).map(|e| e.id.as_str()),
         Some("nvenc_h264")
     );
     // Without NVIDIA H.264, Intel H.264 would come next; with only HEVC, HEVC wins.
@@ -493,7 +466,7 @@ fn auto_prefers_h264_on_the_best_vendor_then_other_codecs() {
         .encoders
         .retain(|e| e.id == "nvenc_hevc" || e.id.starts_with("lib"));
     assert_eq!(
-        pick_auto(&r, Platform::Windows, Some(&only_hevc)).map(|e| e.id.as_str()),
+        pick_auto(&r, Some(&only_hevc)).map(|e| e.id.as_str()),
         Some("nvenc_hevc")
     );
     let intel = ProbeResult {
@@ -510,7 +483,7 @@ fn auto_prefers_h264_on_the_best_vendor_then_other_codecs() {
         ..ProbeResult::default()
     };
     assert_eq!(
-        pick_auto(&r, Platform::Windows, Some(&intel)).map(|e| e.id.as_str()),
+        pick_auto(&r, Some(&intel)).map(|e| e.id.as_str()),
         Some("qsv_h264")
     );
 }
@@ -518,7 +491,7 @@ fn auto_prefers_h264_on_the_best_vendor_then_other_codecs() {
 #[test]
 fn availability_drives_validation() {
     let r = registry();
-    let result = probe(&r, Platform::Windows, &multi_gpu(), "0.1");
+    let result = probe(&r, &multi_gpu(), "0.1");
     // AMF was not found: choosing it is reported.
     assert!(check(&profile("amf_h264", "mkv"), Some(&result)).contains(&IssueKind::NotAvailable));
     assert!(check(&profile("nvenc_h264", "mkv"), Some(&result)).is_empty());
@@ -531,7 +504,7 @@ fn availability_drives_validation() {
 
 #[test]
 fn results_round_trip_through_toml_and_the_cache_key_tracks_drivers() {
-    let result = probe(&registry(), Platform::Windows, &multi_gpu(), "0.1");
+    let result = probe(&registry(), &multi_gpu(), "0.1");
     let text = to_toml(&result).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(from_toml(&text).unwrap_or_else(|e| panic!("{e}")), result);
 
@@ -564,7 +537,7 @@ fn the_cache_is_reused_until_the_key_changes() {
     let runs = RefCell::new(0);
     let run = || {
         *runs.borrow_mut() += 1;
-        Ok(probe(&registry(), Platform::Windows, &multi_gpu(), "0.1"))
+        Ok(probe(&registry(), &multi_gpu(), "0.1"))
     };
     let first = cached_or_probe(&path, &adapters, "0.1", run).unwrap_or_else(|e| panic!("{e}"));
     let second = cached_or_probe(&path, &adapters, "0.1", run).unwrap_or_else(|e| panic!("{e}"));
@@ -584,52 +557,45 @@ fn the_cache_is_reused_until_the_key_changes() {
 
 #[test]
 fn a_probe_that_hangs_or_crashes_is_contained() {
-    #[cfg(unix)]
-    {
-        use crate::probe::{ProbeError, run_child};
-        use std::os::unix::fs::PermissionsExt;
-        let dir = scratch("child");
-        std::fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("{e}"));
-        let script = |name: &str, body: &str| {
-            let path = dir.join(name);
-            std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap_or_else(|e| panic!("{e}"));
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
-                .unwrap_or_else(|e| panic!("{e}"));
-            path
-        };
-        let hang = script("hang", "sleep 30");
-        let started = std::time::Instant::now();
-        assert!(matches!(
-            run_child(&hang, std::time::Duration::from_millis(200)),
-            Err(ProbeError::Timeout)
-        ));
-        assert!(
-            started.elapsed() < std::time::Duration::from_secs(10),
-            "the child was killed"
-        );
-        let crash = script("crash", "exit 3");
-        assert!(matches!(
-            run_child(&crash, std::time::Duration::from_secs(10)),
-            Err(ProbeError::Failed(_))
-        ));
-        let junk = script("junk", "echo 'not toml {{{'");
-        assert!(matches!(
-            run_child(&junk, std::time::Duration::from_secs(10)),
-            Err(ProbeError::Output(_))
-        ));
-        let fine = script("fine", "echo 'key = \"k\"'");
-        let ok =
-            run_child(&fine, std::time::Duration::from_secs(10)).unwrap_or_else(|e| panic!("{e}"));
-        assert_eq!(ok.key, "k");
-        assert!(matches!(
-            run_child(
-                std::path::Path::new("/nonexistent/vixeeny"),
-                std::time::Duration::from_secs(1)
-            ),
-            Err(ProbeError::Spawn(_))
-        ));
-        let _ = std::fs::remove_dir_all(dir);
-    }
+    use crate::probe::{ProbeError, run_child};
+    let dir = scratch("child");
+    std::fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("{e}"));
+    let script = |name: &str, body: &str| {
+        let path = dir.join(format!("{name}.cmd"));
+        std::fs::write(&path, format!("@echo off\r\n{body}\r\n")).unwrap_or_else(|e| panic!("{e}"));
+        path
+    };
+    let hang = script("hang", "ping -n 30 127.0.0.1 >nul");
+    let started = std::time::Instant::now();
+    assert!(matches!(
+        run_child(&hang, std::time::Duration::from_millis(200)),
+        Err(ProbeError::Timeout)
+    ));
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(10),
+        "the child was killed"
+    );
+    let crash = script("crash", "exit /b 3");
+    assert!(matches!(
+        run_child(&crash, std::time::Duration::from_secs(10)),
+        Err(ProbeError::Failed(_))
+    ));
+    let junk = script("junk", "echo not toml {{{");
+    assert!(matches!(
+        run_child(&junk, std::time::Duration::from_secs(10)),
+        Err(ProbeError::Output(_))
+    ));
+    let fine = script("fine", "echo key = \"k\"");
+    let ok = run_child(&fine, std::time::Duration::from_secs(10)).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(ok.key, "k");
+    assert!(matches!(
+        run_child(
+            std::path::Path::new("C:\\nonexistent\\vixeeny.exe"),
+            std::time::Duration::from_secs(1)
+        ),
+        Err(ProbeError::Spawn(_))
+    ));
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -649,7 +615,6 @@ fn variable_frame_rate_needs_matroska_or_webm() {
     let registry = Registry::builtin().unwrap();
     let ctx = Context {
         registry: &registry,
-        platform: Platform::Windows,
         source: (1920, 1080),
         probe: None,
     };

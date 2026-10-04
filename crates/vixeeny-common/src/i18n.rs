@@ -25,8 +25,6 @@ pub enum Key {
     OcrLanguageUsed,
     /// `{languages}`, `{command}`
     OcrMissingLanguages,
-    /// Same, for Linux (Tesseract data packages): `{languages}`, `{command}`
-    OcrMissingLanguagesLinux,
     /// `{languages}`
     OcrNoLanguage,
     /// `{error}`
@@ -314,7 +312,6 @@ impl Key {
         Self::OcrNoText,
         Self::OcrLanguageUsed,
         Self::OcrMissingLanguages,
-        Self::OcrMissingLanguagesLinux,
         Self::OcrNoLanguage,
         Self::OcrFailed,
         Self::ScrollTitle,
@@ -638,12 +635,6 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::OcrNoText, Lang::Fr) => "Aucun texte trouvé",
         (Key::OcrLanguageUsed, Lang::En) => "Language: {language} — copied to the clipboard",
         (Key::OcrLanguageUsed, Lang::Fr) => "Langue : {language} — copié dans le presse-papier",
-        (Key::OcrMissingLanguagesLinux, Lang::En) => {
-            "Missing recognition language: {languages}. Install its Tesseract data with your package manager: {command}"
-        }
-        (Key::OcrMissingLanguagesLinux, Lang::Fr) => {
-            "Langue de reconnaissance manquante : {languages}. Installez ses données Tesseract avec votre gestionnaire de paquets : {command}"
-        }
         (Key::OcrMissingLanguages, Lang::En) => {
             "Missing recognition language: {languages}. In Windows Settings → Time & language → Language & region, add the language with “Optical character recognition”, or run in an administrator PowerShell: Add-WindowsCapability -Online -Name {command}"
         }

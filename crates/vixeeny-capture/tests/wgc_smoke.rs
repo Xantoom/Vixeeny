@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Real capture on Windows. CI runners may have no usable display, so an unavailable backend
 //! is reported and skipped; when it works, the frame must match the monitor's physical size.
-#![cfg(windows)]
 
 use std::time::Instant;
 

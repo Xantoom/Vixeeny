@@ -1,6 +1,6 @@
 [package]
 name = "vixeeny-daemon"
-description = "Vixeny: daemon"
+description = "Vixeeny: daemon"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -13,21 +13,8 @@ auto-launch.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 vixeeny-common = { path = "../vixeeny-common" }
-
-[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
 global-hotkey.workspace = true
 tray-icon.workspace = true
-
-# Linux: StatusNotifierItem tray, X11 shortcuts, GlobalShortcuts portal (Wayland).
-[target.'cfg(target_os = "linux")'.dependencies]
-ashpd.workspace = true
-async-io.workspace = true
-futures-lite.workspace = true
-global-hotkey.workspace = true
-ksni.workspace = true
-vixeeny-platform = { path = "../vixeeny-platform" }
-
-[target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
     "Win32_Foundation",
     "Win32_Globalization",
@@ -36,15 +23,8 @@ windows = { workspace = true, features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 
-[target.'cfg(target_os = "macos")'.dependencies]
-dispatch2.workspace = true
-objc2.workspace = true
-objc2-app-kit = "0.3.2"
-objc2-foundation.workspace = true
-vixeeny-platform = { path = "../vixeeny-platform" }
-
 # The Windows resource (icon, version information) of the executable.
-[target.'cfg(windows)'.build-dependencies]
+[build-dependencies]
 winresource = "0.1.31"
 
 [lints]

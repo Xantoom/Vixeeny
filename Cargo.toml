@@ -27,24 +27,6 @@ tray-icon = { version = "0.26.0", default-features = false }
 global-hotkey = { version = "0.8.0", default-features = false }
 auto-launch = "0.6.0"
 windows = "0.62.2"
-objc2 = "0.6.4"
-block2 = "0.6.2"
-objc2-foundation = "0.3.2"
-objc2-core-graphics = "0.3.2"
-objc2-screen-capture-kit = "0.3.2"
-objc2-core-media = "0.3.2"
-objc2-core-video = "0.3.2"
-dispatch2 = "0.3.1"
-objc2-core-audio-types = "0.3.2"
-objc2-core-foundation = "0.3.2"
-objc2-vision = "0.3.2"
-ashpd = { version = "0.13.13", default-features = false, features = ["async-io", "screenshot", "screencast", "global_shortcuts", "background", "notification"] }
-futures-lite = "2"
-# StatusNotifierItem tray over D-Bus: no GTK.
-ksni = { version = "0.3.6", default-features = false, features = ["async-io", "blocking"] }
-async-io = "2"
-pipewire = "0.10.1"
-x11rb = { version = "0.14.0", features = ["randr"] }
 tiny-skia = "0.12.0"
 fontdue = "0.9.4"
 

@@ -13,7 +13,6 @@ pub mod shortcuts;
 use vixeeny_common::config::{Config, Profile};
 use vixeeny_common::i18n::{Key, Lang, tr};
 use vixeeny_encode::probe::ProbeResult;
-use vixeeny_encode::registry::Platform;
 
 pub use encoders::{EncoderInfo, param_label};
 
@@ -215,7 +214,7 @@ impl Env {
     pub fn new(lang: Lang, version: &str) -> Self {
         Self {
             lang,
-            encoders: encoders::for_platform(Platform::current()),
+            encoders: encoders::all(),
             probe: None,
             detecting: false,
             audio: AudioDevices::default(),
@@ -494,7 +493,6 @@ pub fn video_problems(config: &Config, source: (u32, u32)) -> Vec<String> {
     };
     let ctx = Context {
         registry,
-        platform: Platform::current(),
         source,
         probe: None,
     };
@@ -712,7 +710,7 @@ mod tests {
         let en = env();
         assert_eq!(rows(Section::General, &fr, &c)[1].label, "Langue");
         assert_eq!(rows(Section::General, &en, &c)[1].label, "Language");
-        assert!(!fr.encoders.is_empty() || cfg!(not(any(windows, unix))));
+        assert!(!fr.encoders.is_empty());
     }
 
     fn with_nvenc() -> Env {
@@ -743,9 +741,6 @@ mod tests {
 
     #[test]
     fn the_encoders_listed_are_the_ones_of_the_chosen_kind_that_exist_here() {
-        if !cfg!(any(windows, target_os = "linux")) {
-            return; // NVENC is not an encoder of this platform
-        }
         let mut c = Config::default();
         // Hardware by default; nothing listed before the probe has run.
         assert!(encoder_options(&rows(Section::Video, &env(), &c)).is_empty());
@@ -778,13 +773,10 @@ mod tests {
             .apply(&mut c, Value::Bool(true))
             .unwrap();
         assert_eq!(c.cur().depth, 10);
-        if cfg!(any(windows, target_os = "linux")) {
-            // The only probed hardware encoder does 8-bit only.
-            let mut hw = Config::default();
-            let video = rows(Section::Video, &with_nvenc(), &hw);
-            assert!(!row(&video, "ten_bit").enabled(&hw));
-            hw.cur_mut().depth = 8;
-        }
+        // The only probed hardware encoder does 8-bit only.
+        let hw = Config::default();
+        let video = rows(Section::Video, &with_nvenc(), &hw);
+        assert!(!row(&video, "ten_bit").enabled(&hw));
     }
 
     #[test]

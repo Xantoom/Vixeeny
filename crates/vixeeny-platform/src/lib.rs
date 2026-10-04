@@ -6,47 +6,17 @@
 
 pub mod clipboard;
 mod geometry;
-#[cfg(target_os = "linux")]
-pub mod notify;
 mod time;
 pub use geometry::{PhysicalRect, virtual_bounds};
 pub use time::{LocalTime, local_time};
 
-#[cfg(windows)]
 mod windows_impl;
-#[cfg(windows)]
-use windows_impl as os;
-
-#[cfg(target_os = "macos")]
-mod macos_impl;
-#[cfg(target_os = "macos")]
-use macos_impl as os;
-
-#[cfg(target_os = "linux")]
-mod linux_impl;
-#[cfg(target_os = "linux")]
-use linux_impl as os;
-
-#[cfg(not(windows))]
-mod unsupported;
-#[cfg(all(not(windows), not(target_os = "macos"), not(target_os = "linux")))]
-use unsupported as os;
-
-pub use os::{
+pub use windows_impl::{
     InstanceGuard, animations_enabled, apply_acrylic, attach_console, cursor_position,
     ensure_dpi_aware, exclude_from_capture, exe_metadata, focus_window_titled, foreground_window,
     gpu_adapters, hdr_info, monitors, monotonic_ns, open_path, recycle, set_noactivate_tool_window,
-    single_instance, system_prefers_dark, top_level_windows, user_locale, window_info,
-};
-
-#[cfg(windows)]
-pub use os::{style_window, system_accent};
-#[cfg(not(windows))]
-pub use unsupported::{style_window, system_accent};
-
-#[cfg(target_os = "macos")]
-pub use os::{
-    microphone_via_screen_capture_kit, request_screen_capture_access, screen_capture_allowed,
+    single_instance, style_window, system_accent, system_prefers_dark, top_level_windows,
+    user_locale, window_info,
 };
 
 /// A graphics adapter as the OS reports it (the encoder probe derives its own view from it).
@@ -130,8 +100,6 @@ pub struct WindowInfo {
 
 #[derive(Debug, thiserror::Error)]
 pub enum PlatformError {
-    #[error("not supported on this platform yet")]
-    Unsupported,
     #[error("{0}")]
     Os(String),
 }
@@ -162,7 +130,10 @@ pub fn monitor_for_rect<'a>(
 mod tests {
     #[test]
     fn driver_versions() {
-        // 32.0.15.7283\n        assert_eq!(super::format_driver_version(((32i64) << 48) | (15 << 16) | 7283), "32.0.15.7283");
+        assert_eq!(
+            super::format_driver_version((32i64 << 48) | (15 << 16) | 7283),
+            "32.0.15.7283"
+        );
     }
 
     use super::*;

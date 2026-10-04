@@ -42,29 +42,6 @@ pub enum Vendor {
     Nvidia,
     Amd,
     Intel,
-    Apple,
-    Vaapi,
-    Vulkan,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Platform {
-    Windows,
-    Linux,
-    Macos,
-}
-
-impl Platform {
-    pub const fn current() -> Self {
-        if cfg!(windows) {
-            Self::Windows
-        } else if cfg!(target_os = "macos") {
-            Self::Macos
-        } else {
-            Self::Linux
-        }
-    }
 }
 
 /// Registry container names: `mp4` covers the hybrid and the classic MP4.
@@ -235,7 +212,6 @@ pub struct Encoder {
     pub kind: Kind,
     pub vendor: Vendor,
     pub ffmpeg_encoder: String,
-    pub platforms: Vec<Platform>,
     /// Zero-copy surface types the encoder accepts.
     #[serde(default)]
     pub hw_frames: Vec<String>,
@@ -288,10 +264,6 @@ impl Encoder {
             .iter()
             .any(|p| p.depth == depth && p.chroma == chroma)
     }
-
-    pub fn on(&self, platform: Platform) -> bool {
-        self.platforms.contains(&platform)
-    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -328,9 +300,9 @@ impl Registry {
             if !seen.insert(e.id.as_str()) {
                 return bad(format!("duplicate id `{}`", e.id));
             }
-            if e.pixel_formats.is_empty() || e.containers.is_empty() || e.platforms.is_empty() {
+            if e.pixel_formats.is_empty() || e.containers.is_empty() {
                 return bad(format!(
-                    "`{}`: pixel_formats, containers and platforms must not be empty",
+                    "`{}`: pixel_formats and containers must not be empty",
                     e.id
                 ));
             }
@@ -361,8 +333,7 @@ impl Registry {
         self.encoders.iter().find(|e| e.id == id)
     }
 
-    /// Encoders usable on `platform`.
-    pub fn for_platform(&self, platform: Platform) -> impl Iterator<Item = &Encoder> {
-        self.encoders.iter().filter(move |e| e.on(platform))
+    pub fn encoders(&self) -> impl Iterator<Item = &Encoder> {
+        self.encoders.iter()
     }
 }

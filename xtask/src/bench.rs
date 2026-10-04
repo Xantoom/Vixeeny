@@ -131,7 +131,6 @@ fn default_daemon() -> Result<PathBuf> {
     Ok(path)
 }
 
-#[cfg(windows)]
 fn sample(pid: u32) -> Result<Sample> {
     // WMI raw counters are locale-independent, unlike `Get-Counter` paths. The thread counters
     // are cumulative, so summing them gives the process's total context switches.
@@ -162,31 +161,5 @@ fn sample(pid: u32) -> Result<Sample> {
         private_bytes: private.parse()?,
         threads: threads.parse()?,
         context_switches: switches.parse()?,
-    })
-}
-
-#[cfg(not(windows))]
-fn sample(pid: u32) -> Result<Sample> {
-    // Linux (development aid): /proc.
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat"))?;
-    // Fields after the parenthesised command name; utime and stime are fields 14 and 15.
-    let after = stat.rsplit_once(')').context("bad /proc stat")?.1;
-    let fields: Vec<&str> = after.split_whitespace().collect();
-    let ticks =
-        |i: usize| -> Result<f64> { Ok(fields.get(i).context("short /proc stat")?.parse()?) };
-    let cpu_seconds = (ticks(11)? + ticks(12)?) / 100.0;
-    let status = std::fs::read_to_string(format!("/proc/{pid}/status"))?;
-    let kb = |key: &str| -> u64 {
-        status
-            .lines()
-            .find_map(|l| l.strip_prefix(key))
-            .and_then(|v| v.split_whitespace().next()?.parse().ok())
-            .unwrap_or(0)
-    };
-    Ok(Sample {
-        cpu_seconds,
-        private_bytes: (kb("RssAnon:") * 1024) as f64,
-        threads: kb("Threads:"),
-        context_switches: kb("voluntary_ctxt_switches:") + kb("nonvoluntary_ctxt_switches:"),
     })
 }

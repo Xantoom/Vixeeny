@@ -1,64 +1,134 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! `cargo xtask icons`: draws the application icon (the tray icon's violet rounded square with a
-//! white play triangle, see `crates/vixeeny-daemon/src/icon.rs`) at every size the packages need
-//! and writes `packaging/icons/`: PNGs, `vixeeny.ico` (Windows) and `vixeeny.icns` (macOS).
+//! `cargo xtask icons`: draws the application icon (a near-black rounded tile with a white V
+//! framed by the corners of a capture zone, after the Vixely logo) at every size and writes
+//! `packaging/icons/`: PNGs and `vixeeny.ico`.
 //! The files are committed; run this again only when the drawing changes.
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use tiny_skia::{Color, FillRule, Paint, PathBuilder, Pixmap, Transform};
+use tiny_skia::{
+    Color, FillRule, LineCap, LineJoin, Paint, PathBuilder, Pixmap, Stroke, Transform,
+};
 
-const VIOLET: (u8, u8, u8) = (0x7c, 0x5c, 0xff);
+/// The ink of the tile, the same near-black as the Vixely logo.
+const INK: (u8, u8, u8) = (0x13, 0x14, 0x16);
 const SIZES: [u32; 9] = [16, 24, 32, 48, 64, 128, 256, 512, 1024];
+/// Below this size the capture corners would blur into the letter: the small icons show the V
+/// alone, larger.
+const DETAILED_FROM: u32 = 32;
 
 fn out_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../packaging/icons")
 }
 
-fn draw(size: u32) -> Result<Vec<u8>> {
-    let mut pixmap = Pixmap::new(size, size).context("pixmap")?;
-    let s = size as f32 / 32.0;
-    let mut violet = Paint::default();
-    violet.set_color(Color::from_rgba8(VIOLET.0, VIOLET.1, VIOLET.2, 255));
-    violet.anti_alias = true;
-    // Rounded square: 1 px margin and a 7 px radius on a 32 px grid.
-    let (min, max, r) = (1.0 * s, 31.0 * s, 7.0 * s);
+fn paint(r: u8, g: u8, b: u8, a: u8) -> Paint<'static> {
+    let mut paint = Paint::default();
+    paint.set_color(Color::from_rgba8(r, g, b, a));
+    paint.anti_alias = true;
+    paint
+}
+
+/// The rounded tile on a 32-unit grid.
+fn tile() -> Option<tiny_skia::Path> {
+    let (min, max, r) = (1.0, 31.0, 7.5);
     let k = 0.552_284_8 * r;
-    let mut square = PathBuilder::new();
-    square.move_to(min + r, min);
-    square.line_to(max - r, min);
-    square.cubic_to(max - r + k, min, max, min + r - k, max, min + r);
-    square.line_to(max, max - r);
-    square.cubic_to(max, max - r + k, max - r + k, max, max - r, max);
-    square.line_to(min + r, max);
-    square.cubic_to(min + r - k, max, min, max - r + k, min, max - r);
-    square.line_to(min, min + r);
-    square.cubic_to(min, min + r - k, min + r - k, min, min + r, min);
-    square.close();
+    let mut p = PathBuilder::new();
+    p.move_to(min + r, min);
+    p.line_to(max - r, min);
+    p.cubic_to(max - r + k, min, max, min + r - k, max, min + r);
+    p.line_to(max, max - r);
+    p.cubic_to(max, max - r + k, max - r + k, max, max - r, max);
+    p.line_to(min + r, max);
+    p.cubic_to(min + r - k, max, min, max - r + k, min, max - r);
+    p.line_to(min, min + r);
+    p.cubic_to(min, min + r - k, min + r - k, min, min + r, min);
+    p.close();
+    p.finish()
+}
+
+/// The V, a heavy geometric letter with flat terminals, centred on (16, 16) and `scale` times
+/// its size in the detailed icon.
+fn letter(scale: f32) -> Option<tiny_skia::Path> {
+    const POINTS: [(f32, f32); 7] = [
+        (10.2, 10.6),
+        (13.5, 10.6),
+        (16.0, 17.05),
+        (18.5, 10.6),
+        (21.8, 10.6),
+        (17.6, 21.4),
+        (14.4, 21.4),
+    ];
+    let at = |(x, y): (f32, f32)| (16.0 + (x - 16.0) * scale, 16.0 + (y - 16.0) * scale);
+    let mut p = PathBuilder::new();
+    let (x, y) = at(POINTS[0]);
+    p.move_to(x, y);
+    for point in &POINTS[1..] {
+        let (x, y) = at(*point);
+        p.line_to(x, y);
+    }
+    p.close();
+    p.finish()
+}
+
+/// The four corners of a capture zone around the letter.
+fn corners() -> Option<tiny_skia::Path> {
+    let (lo, hi, arm) = (6.6, 25.4, 4.6);
+    let mut p = PathBuilder::new();
+    for (x, y, dx, dy) in [
+        (lo, lo, 1.0, 1.0),
+        (hi, lo, -1.0, 1.0),
+        (lo, hi, 1.0, -1.0),
+        (hi, hi, -1.0, -1.0),
+    ] {
+        p.move_to(x, y + dy * arm);
+        p.line_to(x, y);
+        p.line_to(x + dx * arm, y);
+    }
+    p.finish()
+}
+
+/// The icon at `size` pixels, as RGBA.
+pub fn pixmap(size: u32) -> Result<Pixmap> {
+    let mut pixmap = Pixmap::new(size, size).context("pixmap")?;
+    let scale = Transform::from_scale(size as f32 / 32.0, size as f32 / 32.0);
     pixmap.fill_path(
-        &square.finish().context("square")?,
-        &violet,
+        &tile().context("tile")?,
+        &paint(INK.0, INK.1, INK.2, 255),
         FillRule::Winding,
-        Transform::identity(),
+        scale,
         None,
     );
-    let mut white = Paint::default();
-    white.set_color(Color::WHITE);
-    white.anti_alias = true;
-    let mut triangle = PathBuilder::new();
-    triangle.move_to(12.0 * s, 9.5 * s);
-    triangle.line_to(12.0 * s, 22.5 * s);
-    triangle.line_to(23.0 * s, 16.0 * s);
-    triangle.close();
-    pixmap.fill_path(
-        &triangle.finish().context("triangle")?,
-        &white,
-        FillRule::Winding,
-        Transform::identity(),
-        None,
-    );
-    pixmap.encode_png().context("png")
+    let white = paint(255, 255, 255, 255);
+    if size >= DETAILED_FROM {
+        let stroke = Stroke {
+            width: 2.0,
+            line_cap: LineCap::Round,
+            line_join: LineJoin::Round,
+            ..Stroke::default()
+        };
+        pixmap.stroke_path(&corners().context("corners")?, &white, &stroke, scale, None);
+        pixmap.fill_path(
+            &letter(1.0).context("letter")?,
+            &white,
+            FillRule::Winding,
+            scale,
+            None,
+        );
+    } else {
+        pixmap.fill_path(
+            &letter(1.55).context("letter")?,
+            &white,
+            FillRule::Winding,
+            scale,
+            None,
+        );
+    }
+    Ok(pixmap)
+}
+
+fn draw(size: u32) -> Result<Vec<u8>> {
+    pixmap(size)?.encode_png().context("png")
 }
 
 /// A Windows icon holding PNG images (supported since Vista); 256 is written as 0.

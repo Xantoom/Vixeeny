@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Global shortcuts through `global-hotkey` (RegisterHotKey, Carbon, X11 key grabs).
+//! Global shortcuts through `global-hotkey` (RegisterHotKey).
 
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -18,13 +18,13 @@ use crate::server::EventTx;
 /// RegisterHotKey-based shortcuts: they fire while a game has the focus (CA-HK-2), except for
 /// games that grab the keyboard exclusively. No hook, no polling: the shortcut arrives as a
 /// message on the daemon's own loop.
-pub struct DesktopHotkeys {
+pub struct Hotkeys {
     manager: GlobalHotKeyManager,
     registered: Vec<HotKey>,
     actions: Arc<Mutex<HashMap<u32, ActionId>>>,
 }
 
-impl DesktopHotkeys {
+impl Hotkeys {
     pub fn new(tx: &EventTx) -> anyhow::Result<Self> {
         let manager = GlobalHotKeyManager::new().context("creating the hotkey manager")?;
         let actions: Arc<Mutex<HashMap<u32, ActionId>>> = Arc::default();
@@ -60,7 +60,7 @@ fn to_global(hotkey: &Hotkey) -> Result<HotKey, String> {
     Ok(HotKey::new(Some(mods), code))
 }
 
-impl HotkeyBackend for DesktopHotkeys {
+impl HotkeyBackend for Hotkeys {
     fn apply(&mut self, bindings: &[(ActionId, Hotkey)]) -> Vec<String> {
         // Forget the previous set first; a failure here only means it was not registered.
         let _ = self.manager.unregister_all(&self.registered);

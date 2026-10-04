@@ -8,11 +8,6 @@ use anyhow::Context;
 use vixeeny_common::config::Config;
 use vixeeny_common::i18n::{Key, Lang, tr};
 use vixeeny_editor::RgbaImage;
-#[cfg(target_os = "linux")]
-use vixeeny_ocr::TesseractEngine as OsEngine;
-#[cfg(target_os = "macos")]
-use vixeeny_ocr::VisionEngine as OsEngine;
-#[cfg(windows)]
 use vixeeny_ocr::WindowsEngine as OsEngine;
 use vixeeny_ocr::{Engine, OcrImage, Texts};
 
@@ -23,15 +18,7 @@ fn texts(lang: Lang) -> Texts {
         open_settings: tr(Key::OcrOpenSettings, lang).into(),
         no_text: tr(Key::OcrNoText, lang).into(),
         language_used: tr(Key::OcrLanguageUsed, lang).into(),
-        missing_languages: tr(
-            if cfg!(target_os = "linux") {
-                Key::OcrMissingLanguagesLinux
-            } else {
-                Key::OcrMissingLanguages
-            },
-            lang,
-        )
-        .into(),
+        missing_languages: tr(Key::OcrMissingLanguages, lang).into(),
         no_language: tr(Key::OcrNoLanguage, lang).into(),
         failed: tr(Key::OcrFailed, lang).into(),
     }
@@ -92,13 +79,8 @@ pub fn run(image: &RgbaImage, config: &Config) -> anyhow::Result<()> {
             }
         },
         || {
-            #[cfg(windows)]
             let _ = std::process::Command::new("explorer.exe")
                 .arg("ms-settings:regionlanguage")
-                .spawn();
-            #[cfg(target_os = "macos")]
-            let _ = std::process::Command::new("open")
-                .arg("x-apple.systempreferences:com.apple.Localization-Settings.extension")
                 .spawn();
         },
     )

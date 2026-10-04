@@ -41,12 +41,6 @@ pub fn extract(zip_bytes: &[u8], dest: &Path) -> io::Result<()> {
         let mut data = Vec::new();
         entry.read_to_end(&mut data)?;
         std::fs::write(&out, data)?;
-        // The executables of a macOS bundle must stay executable.
-        #[cfg(unix)]
-        if let Some(mode) = entry.unix_mode() {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&out, std::fs::Permissions::from_mode(mode & 0o777))?;
-        }
     }
     Ok(())
 }
@@ -247,28 +241,5 @@ mod tests {
         extract(&build("bin/a.exe"), dir.path()).unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(read(dir.path(), "bin/a.exe").as_deref(), Some("data"));
         assert!(extract(&build("../evil.exe"), dir.path()).is_err());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn executables_stay_executable() {
-        use std::os::unix::fs::PermissionsExt;
-        let mut out = Vec::new();
-        {
-            let mut zip = zip::ZipWriter::new(io::Cursor::new(&mut out));
-            let options = zip::write::SimpleFileOptions::default().unix_permissions(0o755);
-            zip.start_file("run", options)
-                .unwrap_or_else(|e| panic!("{e}"));
-            zip.write_all(b"#!/bin/sh")
-                .unwrap_or_else(|e| panic!("{e}"));
-            zip.finish().unwrap_or_else(|e| panic!("{e}"));
-        }
-        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
-        extract(&out, dir.path()).unwrap_or_else(|e| panic!("{e}"));
-        let mode = std::fs::metadata(dir.path().join("run"))
-            .unwrap_or_else(|e| panic!("{e}"))
-            .permissions()
-            .mode();
-        assert_eq!(mode & 0o111, 0o111);
     }
 }

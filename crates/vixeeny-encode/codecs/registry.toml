@@ -8,7 +8,6 @@ family = "h264"
 kind = "software"
 vendor = "none"
 ffmpeg_encoder = "libx264"
-platforms = ["windows", "linux", "macos"]
 hw_frames = []
 pixel_formats = [
   { depth = 8, chroma = "420", ffmpeg = "yuv420p" },
@@ -96,7 +95,6 @@ family = "hevc"
 kind = "software"
 vendor = "none"
 ffmpeg_encoder = "libx265"
-platforms = ["windows", "linux", "macos"]
 hw_frames = []
 pixel_formats = [
   { depth = 8, chroma = "420", ffmpeg = "yuv420p" },
@@ -167,7 +165,6 @@ family = "av1"
 kind = "software"
 vendor = "none"
 ffmpeg_encoder = "libsvtav1"
-platforms = ["windows", "linux", "macos"]
 hw_frames = []
 pixel_formats = [
   { depth = 8, chroma = "420", ffmpeg = "yuv420p" },
@@ -218,7 +215,6 @@ family = "vp9"
 kind = "software"
 vendor = "none"
 ffmpeg_encoder = "libvpx-vp9"
-platforms = ["windows", "linux", "macos"]
 hw_frames = []
 pixel_formats = [
   { depth = 8, chroma = "420", ffmpeg = "yuv420p" },
@@ -288,7 +284,6 @@ family = "h264"
 kind = "hardware"
 vendor = "nvidia"
 ffmpeg_encoder = "h264_nvenc"
-platforms = ["windows", "linux"]
 hw_frames = ["d3d11", "cuda"]
 pixel_formats = [
   { depth = 8, chroma = "420", ffmpeg = "nv12" },
@@ -387,7 +382,6 @@ family = "hevc"
 kind = "hardware"
 vendor = "nvidia"
 ffmpeg_encoder = "hevc_nvenc"
-platforms = ["windows", "linux"]
 hw_frames = ["d3d11", "cuda"]
 pixel_formats = [
   { depth = 8, chroma = "420", ffmpeg = "nv12" },
@@ -488,7 +482,6 @@ family = "av1"
 kind = "hardware"
 vendor = "nvidia"
 ffmpeg_encoder = "av1_nvenc"
-platforms = ["windows", "linux"]
 hw_frames = ["d3d11", "cuda"]
 pixel_formats = [
   { depth = 8, chroma = "420", ffmpeg = "nv12" },
@@ -587,7 +580,6 @@ family = "h264"
 kind = "hardware"
 vendor = "amd"
 ffmpeg_encoder = "h264_amf"
-platforms = ["windows"]
 hw_frames = ["d3d11"]
 pixel_formats = [
   { depth = 8, chroma = "420", ffmpeg = "nv12" },
@@ -670,7 +662,6 @@ family = "hevc"
 kind = "hardware"
 vendor = "amd"
 ffmpeg_encoder = "hevc_amf"
-platforms = ["windows"]
 hw_frames = ["d3d11"]
 pixel_formats = [
   { depth = 8, chroma = "420", ffmpeg = "nv12" },
@@ -754,7 +745,6 @@ family = "av1"
 kind = "hardware"
 vendor = "amd"
 ffmpeg_encoder = "av1_amf"
-platforms = ["windows"]
 hw_frames = ["d3d11"]
 pixel_formats = [
   { depth = 8, chroma = "420", ffmpeg = "nv12" },
@@ -838,8 +828,7 @@ family = "h264"
 kind = "hardware"
 vendor = "intel"
 ffmpeg_encoder = "h264_qsv"
-platforms = ["windows", "linux"]
-hw_frames = ["d3d11", "vaapi"]
+hw_frames = ["d3d11"]
 pixel_formats = [
   { depth = 8, chroma = "420", ffmpeg = "nv12" },
 ]
@@ -903,8 +892,7 @@ family = "hevc"
 kind = "hardware"
 vendor = "intel"
 ffmpeg_encoder = "hevc_qsv"
-platforms = ["windows", "linux"]
-hw_frames = ["d3d11", "vaapi"]
+hw_frames = ["d3d11"]
 pixel_formats = [
   { depth = 8, chroma = "420", ffmpeg = "nv12" },
   { depth = 10, chroma = "420", ffmpeg = "p010le" },
@@ -962,8 +950,7 @@ family = "av1"
 kind = "hardware"
 vendor = "intel"
 ffmpeg_encoder = "av1_qsv"
-platforms = ["windows", "linux"]
-hw_frames = ["d3d11", "vaapi"]
+hw_frames = ["d3d11"]
 pixel_formats = [
   { depth = 8, chroma = "420", ffmpeg = "nv12" },
   { depth = 10, chroma = "420", ffmpeg = "p010le" },
@@ -1021,8 +1008,7 @@ family = "vp9"
 kind = "hardware"
 vendor = "intel"
 ffmpeg_encoder = "vp9_qsv"
-platforms = ["windows", "linux"]
-hw_frames = ["d3d11", "vaapi"]
+hw_frames = ["d3d11"]
 pixel_formats = [
   { depth = 8, chroma = "420", ffmpeg = "nv12" },
   { depth = 10, chroma = "420", ffmpeg = "p010le" },
@@ -1072,581 +1058,4 @@ max = 16
 default = 2
 label = "encoder.param.bframes"
 
-
-[[encoder]]
-id = "videotoolbox_h264"
-display_name = "Apple VideoToolbox H.264"
-family = "h264"
-kind = "hardware"
-vendor = "apple"
-ffmpeg_encoder = "h264_videotoolbox"
-platforms = ["macos"]
-hw_frames = ["videotoolbox"]
-pixel_formats = [
-  { depth = 8, chroma = "420", ffmpeg = "nv12" },
-]
-hdr = false
-containers = ["mkv", "mp4", "fmp4"]
-rate_control = ["vbr", "cbr"]
-
-[encoder.presets]
-quality = { global_quality = 75, realtime = false }
-balanced = { global_quality = 65, realtime = false }
-performance = { global_quality = 55, realtime = true }
-small = { global_quality = 45, realtime = false }
-
-[[encoder.params]]
-key = "global_quality"
-ffmpeg_option = "global_quality"
-type = "int"
-min = 1
-max = 100
-default = 65
-label = "encoder.param.global_quality"
-
-[[encoder.params]]
-key = "realtime"
-ffmpeg_option = "realtime"
-type = "bool"
-default = false
-label = "encoder.param.realtime"
-
-[[encoder.params]]
-key = "keyint"
-ffmpeg_option = "g"
-type = "int"
-min = 1
-max = 10000
-default = 250
-label = "encoder.param.keyint"
-
-[[encoder.params]]
-key = "bframes"
-ffmpeg_option = "bf"
-type = "int"
-min = 0
-max = 16
-default = 2
-label = "encoder.param.bframes"
-
-
-[[encoder]]
-id = "videotoolbox_hevc"
-display_name = "Apple VideoToolbox HEVC"
-family = "hevc"
-kind = "hardware"
-vendor = "apple"
-ffmpeg_encoder = "hevc_videotoolbox"
-platforms = ["macos"]
-hw_frames = ["videotoolbox"]
-pixel_formats = [
-  { depth = 8, chroma = "420", ffmpeg = "nv12" },
-  { depth = 10, chroma = "420", ffmpeg = "p010le" },
-]
-hdr = true
-containers = ["mkv", "mp4", "fmp4"]
-rate_control = ["vbr", "cbr"]
-
-[encoder.presets]
-quality = { global_quality = 75, realtime = false }
-balanced = { global_quality = 65, realtime = false }
-performance = { global_quality = 55, realtime = true }
-small = { global_quality = 45, realtime = false }
-
-[[encoder.params]]
-key = "global_quality"
-ffmpeg_option = "global_quality"
-type = "int"
-min = 1
-max = 100
-default = 65
-label = "encoder.param.global_quality"
-
-[[encoder.params]]
-key = "realtime"
-ffmpeg_option = "realtime"
-type = "bool"
-default = false
-label = "encoder.param.realtime"
-
-[[encoder.params]]
-key = "keyint"
-ffmpeg_option = "g"
-type = "int"
-min = 1
-max = 10000
-default = 250
-label = "encoder.param.keyint"
-
-[[encoder.params]]
-key = "bframes"
-ffmpeg_option = "bf"
-type = "int"
-min = 0
-max = 16
-default = 2
-label = "encoder.param.bframes"
-
-
-[[encoder]]
-id = "vaapi_h264"
-display_name = "VAAPI H.264"
-family = "h264"
-kind = "hardware"
-vendor = "vaapi"
-ffmpeg_encoder = "h264_vaapi"
-platforms = ["linux"]
-hw_frames = ["vaapi"]
-pixel_formats = [
-  { depth = 8, chroma = "420", ffmpeg = "nv12" },
-]
-hdr = false
-containers = ["mkv", "mp4", "fmp4"]
-rate_control = ["cqp", "vbr", "cbr"]
-
-[encoder.presets]
-quality = { rc_mode = "CQP", qp = 20 }
-balanced = { rc_mode = "CQP", qp = 24 }
-performance = { rc_mode = "CQP", qp = 28 }
-small = { rc_mode = "CQP", qp = 32 }
-
-[[encoder.params]]
-key = "rc_mode"
-ffmpeg_option = "rc_mode"
-type = "enum"
-values = ["CQP", "CBR", "VBR", "ICQ"]
-default = "CQP"
-label = "encoder.param.rc_mode"
-
-[[encoder.params]]
-key = "qp"
-ffmpeg_option = "qp"
-type = "int"
-min = 0
-max = 52
-default = 24
-label = "encoder.param.qp"
-
-[[encoder.params]]
-key = "low_power"
-ffmpeg_option = "low_power"
-type = "bool"
-default = false
-label = "encoder.param.low_power"
-
-[[encoder.params]]
-key = "keyint"
-ffmpeg_option = "g"
-type = "int"
-min = 1
-max = 10000
-default = 250
-label = "encoder.param.keyint"
-
-[[encoder.params]]
-key = "bframes"
-ffmpeg_option = "bf"
-type = "int"
-min = 0
-max = 16
-default = 2
-label = "encoder.param.bframes"
-
-
-[[encoder]]
-id = "vaapi_hevc"
-display_name = "VAAPI HEVC"
-family = "hevc"
-kind = "hardware"
-vendor = "vaapi"
-ffmpeg_encoder = "hevc_vaapi"
-platforms = ["linux"]
-hw_frames = ["vaapi"]
-pixel_formats = [
-  { depth = 8, chroma = "420", ffmpeg = "nv12" },
-  { depth = 10, chroma = "420", ffmpeg = "p010le" },
-]
-hdr = true
-containers = ["mkv", "mp4", "fmp4"]
-rate_control = ["cqp", "vbr", "cbr"]
-
-[encoder.presets]
-quality = { rc_mode = "CQP", qp = 20 }
-balanced = { rc_mode = "CQP", qp = 24 }
-performance = { rc_mode = "CQP", qp = 28 }
-small = { rc_mode = "CQP", qp = 32 }
-
-[[encoder.params]]
-key = "rc_mode"
-ffmpeg_option = "rc_mode"
-type = "enum"
-values = ["CQP", "CBR", "VBR", "ICQ"]
-default = "CQP"
-label = "encoder.param.rc_mode"
-
-[[encoder.params]]
-key = "qp"
-ffmpeg_option = "qp"
-type = "int"
-min = 0
-max = 52
-default = 24
-label = "encoder.param.qp"
-
-[[encoder.params]]
-key = "low_power"
-ffmpeg_option = "low_power"
-type = "bool"
-default = false
-label = "encoder.param.low_power"
-
-[[encoder.params]]
-key = "keyint"
-ffmpeg_option = "g"
-type = "int"
-min = 1
-max = 10000
-default = 250
-label = "encoder.param.keyint"
-
-[[encoder.params]]
-key = "bframes"
-ffmpeg_option = "bf"
-type = "int"
-min = 0
-max = 16
-default = 2
-label = "encoder.param.bframes"
-
-
-[[encoder]]
-id = "vaapi_av1"
-display_name = "VAAPI AV1"
-family = "av1"
-kind = "hardware"
-vendor = "vaapi"
-ffmpeg_encoder = "av1_vaapi"
-platforms = ["linux"]
-hw_frames = ["vaapi"]
-pixel_formats = [
-  { depth = 8, chroma = "420", ffmpeg = "nv12" },
-  { depth = 10, chroma = "420", ffmpeg = "p010le" },
-]
-hdr = true
-containers = ["mkv", "mp4", "fmp4", "webm"]
-rate_control = ["cqp", "vbr", "cbr"]
-
-[encoder.presets]
-quality = { rc_mode = "CQP", qp = 20 }
-balanced = { rc_mode = "CQP", qp = 24 }
-performance = { rc_mode = "CQP", qp = 28 }
-small = { rc_mode = "CQP", qp = 32 }
-
-[[encoder.params]]
-key = "rc_mode"
-ffmpeg_option = "rc_mode"
-type = "enum"
-values = ["CQP", "CBR", "VBR", "ICQ"]
-default = "CQP"
-label = "encoder.param.rc_mode"
-
-[[encoder.params]]
-key = "qp"
-ffmpeg_option = "qp"
-type = "int"
-min = 0
-max = 52
-default = 24
-label = "encoder.param.qp"
-
-[[encoder.params]]
-key = "low_power"
-ffmpeg_option = "low_power"
-type = "bool"
-default = false
-label = "encoder.param.low_power"
-
-[[encoder.params]]
-key = "keyint"
-ffmpeg_option = "g"
-type = "int"
-min = 1
-max = 10000
-default = 250
-label = "encoder.param.keyint"
-
-[[encoder.params]]
-key = "bframes"
-ffmpeg_option = "bf"
-type = "int"
-min = 0
-max = 16
-default = 2
-label = "encoder.param.bframes"
-
-
-[[encoder]]
-id = "vaapi_vp9"
-display_name = "VAAPI VP9"
-family = "vp9"
-kind = "hardware"
-vendor = "vaapi"
-ffmpeg_encoder = "vp9_vaapi"
-platforms = ["linux"]
-hw_frames = ["vaapi"]
-pixel_formats = [
-  { depth = 8, chroma = "420", ffmpeg = "nv12" },
-  { depth = 10, chroma = "420", ffmpeg = "p010le" },
-]
-hdr = false
-containers = ["mkv", "mp4", "fmp4", "webm"]
-rate_control = ["cqp", "vbr", "cbr"]
-
-[encoder.presets]
-quality = { rc_mode = "CQP", qp = 20 }
-balanced = { rc_mode = "CQP", qp = 24 }
-performance = { rc_mode = "CQP", qp = 28 }
-small = { rc_mode = "CQP", qp = 32 }
-
-[[encoder.params]]
-key = "rc_mode"
-ffmpeg_option = "rc_mode"
-type = "enum"
-values = ["CQP", "CBR", "VBR", "ICQ"]
-default = "CQP"
-label = "encoder.param.rc_mode"
-
-[[encoder.params]]
-key = "qp"
-ffmpeg_option = "qp"
-type = "int"
-min = 0
-max = 52
-default = 24
-label = "encoder.param.qp"
-
-[[encoder.params]]
-key = "low_power"
-ffmpeg_option = "low_power"
-type = "bool"
-default = false
-label = "encoder.param.low_power"
-
-[[encoder.params]]
-key = "keyint"
-ffmpeg_option = "g"
-type = "int"
-min = 1
-max = 10000
-default = 250
-label = "encoder.param.keyint"
-
-[[encoder.params]]
-key = "bframes"
-ffmpeg_option = "bf"
-type = "int"
-min = 0
-max = 16
-default = 2
-label = "encoder.param.bframes"
-
-
-[[encoder]]
-id = "vulkan_h264"
-display_name = "Vulkan Video H.264"
-family = "h264"
-kind = "hardware"
-vendor = "vulkan"
-ffmpeg_encoder = "h264_vulkan"
-platforms = ["linux"]
-hw_frames = ["vulkan"]
-pixel_formats = [
-  { depth = 8, chroma = "420", ffmpeg = "nv12" },
-]
-hdr = false
-containers = ["mkv", "mp4", "fmp4"]
-rate_control = ["cqp", "vbr", "cbr"]
-
-[encoder.presets]
-quality = { rc_mode = "disabled", qp = 20 }
-balanced = { rc_mode = "disabled", qp = 24 }
-performance = { rc_mode = "disabled", qp = 28 }
-small = { rc_mode = "disabled", qp = 32 }
-
-[[encoder.params]]
-key = "rc_mode"
-ffmpeg_option = "rc_mode"
-type = "enum"
-values = ["default", "disabled", "cbr", "vbr"]
-default = "disabled"
-label = "encoder.param.rc_mode"
-
-[[encoder.params]]
-key = "qp"
-ffmpeg_option = "qp"
-type = "int"
-min = 0
-max = 51
-default = 24
-label = "encoder.param.qp"
-
-[[encoder.params]]
-key = "usage"
-ffmpeg_option = "usage"
-type = "enum"
-values = ["default", "transcode", "stream", "record", "conference"]
-default = "default"
-label = "encoder.param.usage"
-
-[[encoder.params]]
-key = "keyint"
-ffmpeg_option = "g"
-type = "int"
-min = 1
-max = 10000
-default = 250
-label = "encoder.param.keyint"
-
-[[encoder.params]]
-key = "bframes"
-ffmpeg_option = "bf"
-type = "int"
-min = 0
-max = 16
-default = 2
-label = "encoder.param.bframes"
-
-
-[[encoder]]
-id = "vulkan_hevc"
-display_name = "Vulkan Video HEVC"
-family = "hevc"
-kind = "hardware"
-vendor = "vulkan"
-ffmpeg_encoder = "hevc_vulkan"
-platforms = ["linux"]
-hw_frames = ["vulkan"]
-pixel_formats = [
-  { depth = 8, chroma = "420", ffmpeg = "nv12" },
-  { depth = 10, chroma = "420", ffmpeg = "p010le" },
-]
-hdr = true
-containers = ["mkv", "mp4", "fmp4"]
-rate_control = ["cqp", "vbr", "cbr"]
-
-[encoder.presets]
-quality = { rc_mode = "disabled", qp = 20 }
-balanced = { rc_mode = "disabled", qp = 24 }
-performance = { rc_mode = "disabled", qp = 28 }
-small = { rc_mode = "disabled", qp = 32 }
-
-[[encoder.params]]
-key = "rc_mode"
-ffmpeg_option = "rc_mode"
-type = "enum"
-values = ["default", "disabled", "cbr", "vbr"]
-default = "disabled"
-label = "encoder.param.rc_mode"
-
-[[encoder.params]]
-key = "qp"
-ffmpeg_option = "qp"
-type = "int"
-min = 0
-max = 51
-default = 24
-label = "encoder.param.qp"
-
-[[encoder.params]]
-key = "usage"
-ffmpeg_option = "usage"
-type = "enum"
-values = ["default", "transcode", "stream", "record", "conference"]
-default = "default"
-label = "encoder.param.usage"
-
-[[encoder.params]]
-key = "keyint"
-ffmpeg_option = "g"
-type = "int"
-min = 1
-max = 10000
-default = 250
-label = "encoder.param.keyint"
-
-[[encoder.params]]
-key = "bframes"
-ffmpeg_option = "bf"
-type = "int"
-min = 0
-max = 16
-default = 2
-label = "encoder.param.bframes"
-
-
-[[encoder]]
-id = "vulkan_av1"
-display_name = "Vulkan Video AV1"
-family = "av1"
-kind = "hardware"
-vendor = "vulkan"
-ffmpeg_encoder = "av1_vulkan"
-platforms = ["linux"]
-hw_frames = ["vulkan"]
-pixel_formats = [
-  { depth = 8, chroma = "420", ffmpeg = "nv12" },
-  { depth = 10, chroma = "420", ffmpeg = "p010le" },
-]
-hdr = true
-containers = ["mkv", "mp4", "fmp4", "webm"]
-rate_control = ["cqp", "vbr", "cbr"]
-
-[encoder.presets]
-quality = { rc_mode = "disabled", qp = 20 }
-balanced = { rc_mode = "disabled", qp = 24 }
-performance = { rc_mode = "disabled", qp = 28 }
-small = { rc_mode = "disabled", qp = 32 }
-
-[[encoder.params]]
-key = "rc_mode"
-ffmpeg_option = "rc_mode"
-type = "enum"
-values = ["default", "disabled", "cbr", "vbr"]
-default = "disabled"
-label = "encoder.param.rc_mode"
-
-[[encoder.params]]
-key = "qp"
-ffmpeg_option = "qp"
-type = "int"
-min = 0
-max = 51
-default = 24
-label = "encoder.param.qp"
-
-[[encoder.params]]
-key = "usage"
-ffmpeg_option = "usage"
-type = "enum"
-values = ["default", "transcode", "stream", "record", "conference"]
-default = "default"
-label = "encoder.param.usage"
-
-[[encoder.params]]
-key = "keyint"
-ffmpeg_option = "g"
-type = "int"
-min = 1
-max = 10000
-default = 250
-label = "encoder.param.keyint"
-
-[[encoder.params]]
-key = "bframes"
-ffmpeg_option = "bf"
-type = "int"
-min = 0
-max = 16
-default = 2
-label = "encoder.param.bframes"
 

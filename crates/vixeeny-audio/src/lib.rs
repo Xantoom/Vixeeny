@@ -10,25 +10,15 @@
 mod fake;
 mod layout;
 mod mixer;
-#[cfg(all(target_os = "linux", feature = "pipewire"))]
-mod pipewire_audio;
 mod routing;
-#[cfg(target_os = "macos")]
-mod sck_audio;
 mod spec;
-#[cfg(windows)]
 mod wasapi;
 
 pub use fake::FakeAudioSource;
 pub use layout::{convert as convert_layout, track_channels};
 pub use mixer::{Block, Mixer};
-#[cfg(all(target_os = "linux", feature = "pipewire"))]
-pub use pipewire_audio::PipeWireAudioSource;
 pub use routing::{TrackMember, TrackPlan, assign_channels, plan_tracks};
-#[cfg(target_os = "macos")]
-pub use sck_audio::SckAudioSource;
 pub use spec::{SourceKind, SourceSpec, parse_sources};
-#[cfg(windows)]
 pub use wasapi::{
     AppInfo, DeviceInfo, WasapiSource, list_applications, list_microphones, list_outputs,
     source_channels,
@@ -40,12 +30,6 @@ pub const SAMPLE_RATE: u32 = 48_000;
 pub const CHANNELS: usize = 2;
 /// The most channels a track can have (7.1).
 pub const MAX_CHANNELS: usize = 8;
-
-/// Without WASAPI every source is stereo.
-#[cfg(not(windows))]
-pub fn source_channels(_kind: &SourceKind, _max: usize) -> usize {
-    CHANNELS
-}
 
 /// A run of interleaved samples.
 #[derive(Debug, Clone, PartialEq)]

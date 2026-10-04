@@ -8,7 +8,7 @@ use ffmpeg_next::format::Pixel;
 use ffmpeg_next::{Dictionary, Packet, Rational, codec, color, encoder, ffi, frame};
 
 use crate::probe::{Adapter, Prober};
-use crate::registry::{Encoder, Kind, ParamType, PixelFormatSpec, Platform, Registry};
+use crate::registry::{Encoder, Kind, ParamType, PixelFormatSpec, Registry};
 
 /// Opens trial sessions with the encoders of the linked FFmpeg.
 pub struct FfmpegProber {
@@ -65,30 +65,10 @@ impl Prober for FfmpegProber {
         {
             options.set("gpu", &adapter.index.to_string());
         }
-        // VAAPI and Vulkan encoders read GPU surfaces: they get a device and an upload.
-        let upload = if crate::hwupload::needed(encoder.vendor) {
-            let upload = crate::hwupload::Upload::new(encoder.vendor, pix, size, None)?;
-            upload.attach(&mut ctx)?;
-            Some(upload)
-        } else {
-            None
-        };
         let mut opened = ctx.open_with(options).map_err(|e| e.to_string())?;
         let mut frame = frame::Video::new(pix, size.0, size.1);
         frame.set_pts(Some(0));
-        match &upload {
-            Some(upload) => {
-                let hw = upload.upload(&frame)?;
-                // SAFETY: a live frame from the upload; the encoder takes its own reference.
-                let code = unsafe {
-                    ffmpeg_next::ffi::avcodec_send_frame(opened.as_mut_ptr(), hw.as_ptr())
-                };
-                if code < 0 {
-                    return Err(format!("avcodec_send_frame: {code}"));
-                }
-            }
-            None => opened.send_frame(&frame).map_err(|e| e.to_string())?,
-        }
+        opened.send_frame(&frame).map_err(|e| e.to_string())?;
         opened.send_eof().map_err(|e| e.to_string())?;
         let mut packet = Packet::empty();
         opened
@@ -143,10 +123,10 @@ fn find_option(
 /// option, enum value, preset option and pixel format must exist. Software encoders must be
 /// built in; hardware ones must be when `require_hardware` (the Windows build ships them all),
 /// otherwise they are skipped when absent.
-pub fn verify(registry: &Registry, platform: Platform, require_hardware: bool) -> Vec<Mismatch> {
+pub fn verify(registry: &Registry, require_hardware: bool) -> Vec<Mismatch> {
     let _ = ffmpeg_next::init();
     let mut out = Vec::new();
-    for e in registry.for_platform(platform) {
+    for e in registry.encoders() {
         let mut bad = |what: String| {
             out.push(Mismatch {
                 encoder: e.id.clone(),

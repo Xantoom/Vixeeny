@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The OS-specific part: message loop, tray icon, wake-up of the loop from other threads.
+//! The Windows part: message loop, tray icon, global shortcuts, wake-up of the loop from other
+//! threads.
 
 use std::path::PathBuf;
 
@@ -16,29 +17,7 @@ pub struct Startup {
     pub link: AppLink,
 }
 
-#[cfg(any(windows, target_os = "macos"))]
-mod desktop;
-#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 mod hotkeys;
-
-#[cfg(windows)]
+mod tray;
 mod windows;
-#[cfg(windows)]
 pub use windows::run;
-
-#[cfg(target_os = "macos")]
-mod macos;
-#[cfg(target_os = "macos")]
-pub use macos::run;
-
-#[cfg(target_os = "linux")]
-mod linux;
-#[cfg(target_os = "linux")]
-mod portal_shortcuts;
-#[cfg(target_os = "linux")]
-pub use linux::run;
-
-#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
-mod stub;
-#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
-pub use stub::run;

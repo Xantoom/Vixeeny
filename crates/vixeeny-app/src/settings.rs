@@ -302,16 +302,10 @@ fn detect_hardware(handle: PanelHandle, lang: Lang, force: bool) {
 }
 
 /// The updater is a console program: started from here it must not flash a terminal.
-#[cfg(windows)]
 fn quiet(command: &mut std::process::Command) -> &mut std::process::Command {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     command.creation_flags(CREATE_NO_WINDOW)
-}
-
-#[cfg(not(windows))]
-fn quiet(command: &mut std::process::Command) -> &mut std::process::Command {
-    command
 }
 
 fn updater_exe() -> Option<PathBuf> {
@@ -535,7 +529,6 @@ pub fn look_of(config: &Config) -> vixeeny_ui::theme::Look {
 
 /// The programs, microphones and outputs the audio page offers.
 fn audio_devices() -> vixeeny_settings::AudioDevices {
-    #[cfg(windows)]
     {
         use vixeeny_settings::{AudioDevices, AudioEntry};
         let devices = |list: Vec<vixeeny_audio::DeviceInfo>| {
@@ -557,10 +550,6 @@ fn audio_devices() -> vixeeny_settings::AudioDevices {
                 })
                 .collect(),
         }
-    }
-    #[cfg(not(windows))]
-    {
-        vixeeny_settings::AudioDevices::default()
     }
 }
 

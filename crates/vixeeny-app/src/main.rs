@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-#![cfg_attr(windows, windows_subsystem = "windows")]
+#![windows_subsystem = "windows"]
 //! On-demand Vixeeny app. M2: only the IPC client side exists; the UI arrives with M3+.
 //! The app connects to the daemon, announces itself and exits after
 //! `general.app_idle_exit_seconds` without activity (plan section 1.2).
@@ -7,43 +7,22 @@
 use std::sync::mpsc::{RecvTimeoutError, channel};
 use std::time::Duration;
 
-#[cfg(all(
-    any(windows, target_os = "macos", target_os = "linux"),
-    feature = "ffmpeg"
-))]
+#[cfg(feature = "ffmpeg")]
 mod audio_rig;
-#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 mod clipboard;
-#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
-#[cfg(any(windows, target_os = "macos", target_os = "linux", test))]
 mod gallery;
-#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 mod ocr;
 mod probe;
-#[cfg(all(
-    any(windows, target_os = "macos", target_os = "linux"),
-    feature = "ffmpeg"
-))]
+#[cfg(feature = "ffmpeg")]
 mod record;
-#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 mod region;
-#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 mod scroll;
-#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 mod settings;
-#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 mod side;
-#[cfg(any(windows, target_os = "macos", target_os = "linux", test))]
 mod still;
-#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 mod sysinfo;
 mod toast;
-#[cfg(any(windows, target_os = "macos"))]
 mod widget;
-#[cfg(target_os = "linux")]
-#[path = "widget_stub.rs"]
-mod widget;
-#[cfg(any(windows, target_os = "macos", target_os = "linux", test))]
 mod widget_math;
 
 use anyhow::Context;
@@ -68,19 +47,16 @@ fn lang(setting: &str) -> vixeeny_common::i18n::Lang {
 fn perform(action: ActionId, config: &Config) {
     use ActionId::{CaptureAllMonitors, CaptureFullscreen, CaptureWindow};
     match action {
-        #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
         ActionId::CaptureRegion => {
             if let Err(e) = region::run(config, region::Mode::Editor) {
                 tracing::error!("editor failed: {e:#}");
             }
         }
-        #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
         ActionId::CaptureScrolling => {
             if let Err(e) = region::run(config, region::Mode::Scroll) {
                 tracing::error!("scrolling capture failed: {e:#}");
             }
         }
-        #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
         ActionId::OcrRegion => {
             if let Err(e) = region::run(config, region::Mode::Ocr) {
                 tracing::error!("OCR failed: {e:#}");
@@ -104,7 +80,6 @@ fn perform(action: ActionId, config: &Config) {
     }
 }
 
-#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 fn direct_capture(action: ActionId, config: &Config) -> anyhow::Result<std::path::PathBuf> {
     use vixeeny_capture::{CaptureOptions, Capturer};
 
@@ -127,21 +102,12 @@ fn direct_capture(action: ActionId, config: &Config) -> anyhow::Result<std::path
         now: &now,
         after_save: None,
     };
-    #[cfg(windows)]
     let backend = vixeeny_capture::WgcBackend::new()?;
-    #[cfg(target_os = "macos")]
-    let backend = vixeeny_capture::SckBackend::new()?;
-    #[cfg(target_os = "linux")]
-    let backend = vixeeny_capture::LinuxBackend::new(&snapshot.monitors)?;
     let mut capturer = Capturer::new(backend, snapshot.monitors.clone());
     let options = CaptureOptions {
         show_cursor: false,
-        // macOS captures are SDR for now.
-        #[cfg(windows)]
         tonemap: (config.image.hdr == "tonemap_sdr")
             .then_some(tonemap_hdr as vixeeny_capture::ToneMapFn),
-        #[cfg(not(windows))]
-        tonemap: None,
     };
     let (format, settings) = image_output(config);
     let copy = |image: &vixeeny_image::Bgra<'_>| {
@@ -167,7 +133,6 @@ fn direct_capture(action: ActionId, config: &Config) -> anyhow::Result<std::path
 }
 
 /// HDR monitors become SDR through the documented tone mapper (`vixeeny_image::tonemap`).
-#[cfg(windows)]
 fn tonemap_hdr(rgba: &[f32], info: &vixeeny_platform::HdrInfo) -> Vec<u8> {
     vixeeny_image::tonemap::tonemap_frame(
         rgba,
@@ -180,7 +145,6 @@ fn tonemap_hdr(rgba: &[f32], info: &vixeeny_platform::HdrInfo) -> Vec<u8> {
 
 /// Output format and settings from `[image]`. An unknown value falls back to the default (PNG,
 /// 4:4:4), never to a failed capture.
-#[cfg(any(windows, target_os = "macos", target_os = "linux", test))]
 fn image_output(config: &Config) -> (vixeeny_image::ImageFormat, vixeeny_image::Settings) {
     use vixeeny_image::{Chroma, ImageFormat, Settings};
     let mut settings = Settings::default();
@@ -203,11 +167,6 @@ fn image_output(config: &Config) -> (vixeeny_image::ImageFormat, vixeeny_image::
             ImageFormat::Png
         });
     (format, settings)
-}
-
-#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
-fn direct_capture(_: ActionId, _: &Config) -> anyhow::Result<std::path::PathBuf> {
-    anyhow::bail!("screen capture is not supported on this platform yet")
 }
 
 /// `--action <name>` (default: open the settings).
@@ -246,15 +205,11 @@ fn run_action(
 
 /// The settings window is a process of its own: the hotkeys keep working while it is open.
 fn open_settings() {
-    #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
     if let Err(e) = settings::spawn() {
         tracing::error!("{e:#}");
     }
-    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
-    tracing::info!("the settings window needs Windows or macOS");
 }
 
-#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 fn overlay(
     config: &mut Config,
     recording: &Recording,
@@ -286,72 +241,41 @@ fn overlay(
     Ok(outcome.action)
 }
 
-#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
-fn overlay(
-    _: &mut Config,
-    _: &Recording,
-    _: &mut impl std::io::Write,
-) -> anyhow::Result<Option<ActionId>> {
-    tracing::info!("the overlay needs Windows");
-    Ok(None)
-}
-
 /// The recording started by `RecordToggle`, if any (Windows with FFmpeg only).
 #[derive(Default)]
 struct Recording {
-    #[cfg(all(
-        any(windows, target_os = "macos", target_os = "linux"),
-        feature = "ffmpeg"
-    ))]
+    #[cfg(feature = "ffmpeg")]
     handle: Option<record::Handle>,
     /// The replay buffer (`ReplayToggle`), which runs alongside a recording.
-    #[cfg(all(
-        any(windows, target_os = "macos", target_os = "linux"),
-        feature = "ffmpeg"
-    ))]
+    #[cfg(feature = "ffmpeg")]
     replay: Option<record::Handle>,
 }
 
 impl Recording {
     /// `(recording, replay buffer)` is running.
-    #[cfg(all(
-        any(windows, target_os = "macos", target_os = "linux"),
-        feature = "ffmpeg"
-    ))]
+    #[cfg(feature = "ffmpeg")]
     fn flags(&self) -> (bool, bool) {
         (self.handle.is_some(), self.replay.is_some())
     }
 
-    #[cfg(not(all(
-        any(windows, target_os = "macos", target_os = "linux"),
-        feature = "ffmpeg"
-    )))]
+    #[cfg(not(feature = "ffmpeg"))]
     #[allow(clippy::unused_self, dead_code)]
     fn flags(&self) -> (bool, bool) {
         (false, false)
     }
 
-    #[cfg(all(
-        any(windows, target_os = "macos", target_os = "linux"),
-        feature = "ffmpeg"
-    ))]
+    #[cfg(feature = "ffmpeg")]
     fn active(&self) -> bool {
         self.handle.is_some() || self.replay.is_some()
     }
 
-    #[cfg(not(all(
-        any(windows, target_os = "macos", target_os = "linux"),
-        feature = "ffmpeg"
-    )))]
+    #[cfg(not(feature = "ffmpeg"))]
     #[allow(clippy::unused_self)]
     fn active(&self) -> bool {
         false
     }
 
-    #[cfg(all(
-        any(windows, target_os = "macos", target_os = "linux"),
-        feature = "ffmpeg"
-    ))]
+    #[cfg(feature = "ffmpeg")]
     fn handle(&mut self, action: ActionId, config: &Config) {
         match action {
             ActionId::ReplayToggle => {
@@ -392,20 +316,14 @@ impl Recording {
         }
     }
 
-    #[cfg(not(all(
-        any(windows, target_os = "macos", target_os = "linux"),
-        feature = "ffmpeg"
-    )))]
+    #[cfg(not(feature = "ffmpeg"))]
     #[allow(clippy::unused_self)]
     fn handle(&mut self, action: ActionId, _: &Config) {
         tracing::info!("action {action:?}: recording needs Windows and the `ffmpeg` feature");
     }
 
     /// Tells the daemon (tray icon) when the state changed, and forgets a finished recording.
-    #[cfg(all(
-        any(windows, target_os = "macos", target_os = "linux"),
-        feature = "ffmpeg"
-    ))]
+    #[cfg(feature = "ffmpeg")]
     fn report(&mut self, send: &mut impl std::io::Write) -> anyhow::Result<()> {
         let Some(handle) = self.handle.as_mut() else {
             return Ok(());
@@ -425,10 +343,7 @@ impl Recording {
         Ok(())
     }
 
-    #[cfg(not(all(
-        any(windows, target_os = "macos", target_os = "linux"),
-        feature = "ffmpeg"
-    )))]
+    #[cfg(not(feature = "ffmpeg"))]
     #[allow(clippy::unused_self)]
     fn report(&mut self, _: &mut impl std::io::Write) -> anyhow::Result<()> {
         Ok(())
@@ -437,7 +352,6 @@ impl Recording {
 
 /// Light or dark, the system accent, the title-bar styling: what every window of this process
 /// starts from.
-#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 fn init_look() {
     let config = vixeeny_common::paths::config_file()
         .and_then(|path| Config::load(&path).ok())
@@ -453,7 +367,6 @@ fn init_look() {
 }
 
 fn run() -> anyhow::Result<()> {
-    #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
     init_look();
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
@@ -461,15 +374,11 @@ fn run() -> anyhow::Result<()> {
         Some("--probe") => return probe::child(),
         Some("--warm-probe") => return probe::warm(),
         // The recording widget, a process of its own (see `widget`).
-        #[cfg(any(windows, target_os = "macos"))]
         Some("--widget") => return widget::run_child(&args[1..]),
         // The settings window and gallery, a process of its own (see `settings`).
-        #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
         Some("--settings") => return settings::run_child(),
         // A notification card (see `toast`).
-        #[cfg(windows)]
         Some("--toast") => return toast::run_child(&args[1..]),
-        #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
         Some("--system-info") => {
             vixeeny_platform::attach_console();
             let config = vixeeny_common::paths::config_file()

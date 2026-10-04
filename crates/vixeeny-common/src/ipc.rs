@@ -9,9 +9,7 @@ use std::io::{self, Read, Write};
 
 /// Transport types, re-exported so that users of this module need no `interprocess` dependency.
 pub use interprocess::local_socket::traits::{Listener as ListenerTrait, Stream as StreamTrait};
-use interprocess::local_socket::{
-    GenericFilePath, GenericNamespaced, ListenerOptions, Name, ToFsName, ToNsName, prelude::*,
-};
+use interprocess::local_socket::{GenericNamespaced, ListenerOptions, Name, ToNsName};
 pub use interprocess::local_socket::{Listener, RecvHalf, SendHalf, Stream};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
@@ -193,7 +191,6 @@ pub fn read_msg<R: Read, T: DeserializeOwned>(r: &mut R) -> Result<Option<T>, Ip
 }
 
 /// Who may open the daemon's named pipe (SDDL): not network logons, the system and the owner.
-#[cfg(windows)]
 const PIPE_SDDL: &str = "D:P(D;;GA;;;NU)(A;;GA;;;SY)(A;;GA;;;OW)";
 
 /// A named local-socket endpoint.
@@ -230,14 +227,7 @@ impl Endpoint {
     }
 
     fn name(&self) -> io::Result<Name<'static>> {
-        if GenericNamespaced::is_supported() {
-            self.base.clone().to_ns_name::<GenericNamespaced>()
-        } else {
-            // macOS: no namespace; use a socket file in the temp directory.
-            std::env::temp_dir()
-                .join(format!("{}.sock", self.base))
-                .to_fs_name::<GenericFilePath>()
-        }
+        self.base.clone().to_ns_name::<GenericNamespaced>()
     }
 
     /// Connects to the running daemon.
@@ -245,21 +235,18 @@ impl Endpoint {
         Stream::connect(self.name()?)
     }
 
-    /// Listener options. On Windows the pipe is closed to everyone but the current user and the
-    /// system: the default access control would let any local account connect and, for instance,
-    /// make the daemon quit or run actions.
+    /// Listener options. The pipe is closed to everyone but the current user and the system: the
+    /// default access control would let any local account connect and, for instance, make the
+    /// daemon quit or run actions.
     fn options(&self) -> io::Result<ListenerOptions<'static>> {
-        let options = ListenerOptions::new().name(self.name()?);
-        #[cfg(windows)]
-        let options = {
-            use interprocess::os::windows::local_socket::ListenerOptionsExt;
-            use interprocess::os::windows::security_descriptor::SecurityDescriptor;
-            // Protected DACL: deny network logons, allow the system and the owner (the user
-            // who started the daemon); nobody else.
-            let sddl = widestring::U16CString::from_str(PIPE_SDDL).map_err(io::Error::other)?;
-            options.security_descriptor(SecurityDescriptor::deserialize(&sddl)?)
-        };
-        Ok(options)
+        use interprocess::os::windows::local_socket::ListenerOptionsExt;
+        use interprocess::os::windows::security_descriptor::SecurityDescriptor;
+        // Protected DACL: deny network logons, allow the system and the owner (the user who
+        // started the daemon); nobody else.
+        let sddl = widestring::U16CString::from_str(PIPE_SDDL).map_err(io::Error::other)?;
+        Ok(ListenerOptions::new()
+            .name(self.name()?)
+            .security_descriptor(SecurityDescriptor::deserialize(&sddl)?))
     }
 
     /// Creates the daemon's listener, doubling as the single-instance lock.
@@ -267,16 +254,12 @@ impl Endpoint {
         match self.options()?.create_sync() {
             Ok(listener) => Ok(listener),
             Err(first) => {
-                // Something owns the name: a live daemon, or a corpse socket file left behind
-                // by a crashed one (Unix). A successful connection means it is alive.
+                // Something owns the name. A successful connection means a live daemon; a named
+                // pipe cannot be stale, so failing to connect means it is busy.
                 if self.connect().is_ok() {
                     return Err(BindError::AlreadyRunning);
                 }
-                if cfg!(windows) {
-                    // A named pipe cannot be stale; failing to connect means it is busy.
-                    return Err(BindError::Io(first));
-                }
-                Ok(self.options()?.try_overwrite(true).create_sync()?)
+                Err(BindError::Io(first))
             }
         }
     }

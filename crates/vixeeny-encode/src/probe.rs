@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-use crate::registry::{Chroma, Encoder, Kind, PixelFormatSpec, Platform, Registry, Vendor};
+use crate::registry::{Chroma, Encoder, Kind, PixelFormatSpec, Registry, Vendor};
 
 pub const SMALL: (u32, u32) = (256, 256);
 pub const UHD: (u32, u32) = (3840, 2160);
@@ -39,7 +39,6 @@ pub fn vendor_from_pci(id: u32) -> Vendor {
         0x10DE => Vendor::Nvidia,
         0x1002 | 0x1022 => Vendor::Amd,
         0x8086 => Vendor::Intel,
-        0x106B => Vendor::Apple,
         _ => Vendor::None,
     }
 }
@@ -57,7 +56,7 @@ pub struct FormatProbe {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EncoderProbe {
     pub id: String,
-    /// The GPU it runs on (`None` for software and Apple encoders).
+    /// The GPU it runs on (`None` for software encoders).
     pub adapter: Option<u32>,
     pub formats: Vec<FormatProbe>,
 }
@@ -105,15 +104,12 @@ pub trait Prober {
 /// The GPUs an encoder can run on.
 fn candidate_adapters<'a>(encoder: &Encoder, adapters: &'a [Adapter]) -> Vec<Option<&'a Adapter>> {
     match encoder.vendor {
-        Vendor::None | Vendor::Apple => vec![None],
+        Vendor::None => vec![None],
         Vendor::Nvidia | Vendor::Amd | Vendor::Intel => adapters
             .iter()
             .filter(|a| !a.software && a.vendor == encoder.vendor)
             .map(Some)
             .collect(),
-        Vendor::Vaapi | Vendor::Vulkan => {
-            adapters.iter().filter(|a| !a.software).map(Some).collect()
-        }
     }
 }
 
@@ -157,16 +153,11 @@ fn probe_formats(
     out
 }
 
-/// Probes every encoder of `platform`. `version` is Vixeeny's, part of the cache key.
-pub fn probe(
-    registry: &Registry,
-    platform: Platform,
-    prober: &dyn Prober,
-    version: &str,
-) -> ProbeResult {
+/// Probes every encoder. `version` is Vixeeny's, part of the cache key.
+pub fn probe(registry: &Registry, prober: &dyn Prober, version: &str) -> ProbeResult {
     let adapters = prober.adapters();
     let mut encoders = Vec::new();
-    for encoder in registry.for_platform(platform) {
+    for encoder in registry.encoders() {
         for adapter in candidate_adapters(encoder, &adapters) {
             let formats = probe_formats(encoder, adapter, prober);
             if !formats.is_empty() {
