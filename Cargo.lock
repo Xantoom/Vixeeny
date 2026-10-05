@@ -5703,7 +5703,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vixeeny-app"
-version = "0.9.6"
+version = "0.9.7"
 dependencies = [
  "anyhow",
  "png",
@@ -5727,7 +5727,7 @@ dependencies = [
 
 [[package]]
 name = "vixeeny-audio"
-version = "0.9.6"
+version = "0.9.7"
 dependencies = [
  "thiserror 2.0.21",
  "tracing",
@@ -5738,7 +5738,7 @@ dependencies = [
 
 [[package]]
 name = "vixeeny-capture"
-version = "0.9.6"
+version = "0.9.7"
 dependencies = [
  "thiserror 2.0.21",
  "vixeeny-common",
@@ -5748,7 +5748,7 @@ dependencies = [
 
 [[package]]
 name = "vixeeny-common"
-version = "0.9.6"
+version = "0.9.7"
 dependencies = [
  "directories",
  "insta",
@@ -5765,7 +5765,7 @@ dependencies = [
 
 [[package]]
 name = "vixeeny-daemon"
-version = "0.9.6"
+version = "0.9.7"
 dependencies = [
  "anyhow",
  "auto-launch",
@@ -5782,7 +5782,7 @@ dependencies = [
 
 [[package]]
 name = "vixeeny-editor"
-version = "0.9.6"
+version = "0.9.7"
 dependencies = [
  "fontdue",
  "insta",
@@ -5791,7 +5791,7 @@ dependencies = [
 
 [[package]]
 name = "vixeeny-encode"
-version = "0.9.6"
+version = "0.9.7"
 dependencies = [
  "ffmpeg-next",
  "serde",
@@ -5807,7 +5807,7 @@ dependencies = [
 
 [[package]]
 name = "vixeeny-image"
-version = "0.9.6"
+version = "0.9.7"
 dependencies = [
  "bindgen 0.73.2",
  "image",
@@ -5822,7 +5822,7 @@ dependencies = [
 
 [[package]]
 name = "vixeeny-ocr"
-version = "0.9.6"
+version = "0.9.7"
 dependencies = [
  "thiserror 2.0.21",
  "tracing",
@@ -5831,7 +5831,7 @@ dependencies = [
 
 [[package]]
 name = "vixeeny-platform"
-version = "0.9.6"
+version = "0.9.7"
 dependencies = [
  "thiserror 2.0.21",
  "windows",
@@ -5839,7 +5839,7 @@ dependencies = [
 
 [[package]]
 name = "vixeeny-settings"
-version = "0.9.6"
+version = "0.9.7"
 dependencies = [
  "vixeeny-common",
  "vixeeny-encode",
@@ -5847,14 +5847,14 @@ dependencies = [
 
 [[package]]
 name = "vixeeny-stitch"
-version = "0.9.6"
+version = "0.9.7"
 dependencies = [
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "vixeeny-ui"
-version = "0.9.6"
+version = "0.9.7"
 dependencies = [
  "png",
  "slint",
@@ -5868,7 +5868,7 @@ dependencies = [
 
 [[package]]
 name = "vixeeny-updater"
-version = "0.9.6"
+version = "0.9.7"
 dependencies = [
  "anyhow",
  "minisign-verify",
@@ -6792,7 +6792,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.9.6"
+version = "0.9.7"
 dependencies = [
  "anyhow",
  "serde",
