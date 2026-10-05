@@ -42,7 +42,8 @@ fn files_under(dir: &Path) -> Result<Vec<PathBuf>> {
 fn write_zip(stage: &Path, extra: &[(&str, &[u8])], out: &Path) -> Result<()> {
     let mut zip = zip::ZipWriter::new(std::fs::File::create(out)?);
     let options = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
+        .compression_method(zip::CompressionMethod::Deflated)
+        .compression_level(Some(9));
     for relative in files_under(stage)? {
         let name = relative.to_string_lossy().replace('\\', "/");
         zip.start_file(name, options)?;

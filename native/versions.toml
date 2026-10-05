@@ -4,12 +4,13 @@
 # `cargo xtask build-native` reads this file, so keep the keys stable.
 
 [ffmpeg]
-# Prebuilt shared GPL build (FFmpeg n9.0.2 + 22 commits) with x264, x265, SVT-AV1, libvpx,
-# dav1d, opus, NVENC, AMF and QSV, checked by SHA-256 (maintainer decision 2026-10-01).
-url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-01-13-06/ffmpeg-n9.0.2-22-g46d8f462ee-win64-gpl-shared-9.0.zip"
-sha256 = "64f7d1460ce986804386582eeec3bd95117a4e84f7567ad416dd33f434fe8286"
+# Built by packaging/ffmpeg/build.sh (.github/workflows/ffmpeg.yml) from the BtbN GPL image:
+# FFmpeg n9.0.2-22-g46d8f462ee with only what Vixeeny uses (its encoders, decoders, containers and
+# filters), x264, x265, SVT-AV1, libvpx, dav1d, opus, NVENC, AMF and QSV. Checked by SHA-256.
+url = "https://github.com/Xantoom/Vixeeny/releases/download/ffmpeg-n9.0.2-1/ffmpeg-vixeeny-n9.0.2-1-win64.zip"
+sha256 = "6065ae9424f455d867225e73decc1866267fb8b1cc8da828efc51fb8df682e4b"
 tag = "n9.0.2"
-license = "GPL-3.0-or-later (BtbN build, --enable-gpl --enable-version3, no nonfree); bundles x264 and x265 (GPL-2.0-or-later), libvpx and opus (BSD-3-Clause), SVT-AV1 and dav1d"
+license = "GPL-3.0-or-later (--enable-gpl --enable-version3, no nonfree); bundles x264 and x265 (GPL-2.0-or-later), libvpx and opus (BSD-3-Clause), SVT-AV1 (BSD-3-Clause-Clear) and dav1d (BSD-2-Clause)"
 
 [svt-av1]
 # Official SVT-AV1 (maintainer decision 2026-10-01: Tritium not used).
