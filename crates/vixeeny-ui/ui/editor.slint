@@ -149,6 +149,7 @@ export component EditorWindow inherits Window {
 
     callback pointer-pressed(float, float, bool);
     callback pointer-moved(float, float, bool);
+    callback pointer-entered();
     callback pointer-released(float, float, bool);
     callback key-pressed(string, bool, bool);
     callback key-released(string);
@@ -256,8 +257,13 @@ export component EditorWindow inherits Window {
                     : root.cursor-kind == 4 ? MouseCursor.nesw-resize
                     : root.cursor-kind == 5 ? MouseCursor.nwse-resize
                     : MouseCursor.default;
+                changed has-hover => { if self.has-hover { root.pointer-entered(); } }
+                // Every move, pressed or not (`moved` only reports drags): the cursor shape,
+                // the window under the pointer and the gestures all follow it.
                 pointer-event(event) => {
-                    if event.button == PointerEventButton.left {
+                    if event.kind == PointerEventKind.move {
+                        root.pointer-moved(self.mouse-x / 1phx, self.mouse-y / 1phx, false);
+                    } else if event.button == PointerEventButton.left {
                         if event.kind == PointerEventKind.down {
                             root.pointer-pressed(self.mouse-x / 1phx, self.mouse-y / 1phx, event.modifiers.shift);
                         } else if event.kind == PointerEventKind.up {
@@ -265,7 +271,6 @@ export component EditorWindow inherits Window {
                         }
                     }
                 }
-                moved => { root.pointer-moved(self.mouse-x / 1phx, self.mouse-y / 1phx, false); }
             scroll-event(event) => {
                 if root.scrolling {
                     root.scroll-y = clamp-scroll(root.scroll-y - event.delta-y / 1phx);

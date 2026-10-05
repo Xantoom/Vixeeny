@@ -19,6 +19,52 @@ pub struct RgbaImage {
     pub data: Vec<u8>,
 }
 
+/// Converts `rows` rows of BGRA pixels (`src_stride` bytes apart) to opaque RGBA rows
+/// (`dst_stride` apart), `width` pixels each. Several threads share the rows: two 4K screens
+/// are 66 MB.
+pub fn bgra_to_rgba(
+    src: &[u8],
+    src_stride: usize,
+    dst: &mut [u8],
+    dst_stride: usize,
+    (width, rows): (usize, usize),
+) {
+    if rows == 0 || width == 0 {
+        return;
+    }
+    let dst_len = (rows - 1) * dst_stride + width * 4;
+    let Some(dst) = dst.get_mut(..dst_len) else {
+        return;
+    };
+    let threads = std::thread::available_parallelism()
+        .map_or(1, std::num::NonZero::get)
+        .min(8)
+        .min(rows.max(1));
+    let per = rows.div_ceil(threads);
+    std::thread::scope(|scope| {
+        for (i, chunk) in dst.chunks_mut(per * dst_stride).enumerate() {
+            let first = i * per;
+            scope.spawn(move || {
+                for (y, out) in chunk.chunks_mut(dst_stride).enumerate() {
+                    let at = (first + y) * src_stride;
+                    let Some(input) = src.get(at..at + width * 4) else {
+                        return;
+                    };
+                    let out = &mut out[..width * 4];
+                    for (o, i) in out
+                        .as_chunks_mut::<4>()
+                        .0
+                        .iter_mut()
+                        .zip(input.as_chunks::<4>().0)
+                    {
+                        *o = [i[2], i[1], i[0], 255];
+                    }
+                }
+            });
+        }
+    });
+}
+
 impl RgbaImage {
     pub fn new(width: u32, height: u32, data: Vec<u8>) -> Option<Self> {
         (data.len() == width as usize * height as usize * 4).then_some(Self {
@@ -44,12 +90,14 @@ impl RgbaImage {
         if stride < row || bgra.len() < stride * height as usize {
             return None;
         }
-        let mut data = Vec::with_capacity(row * height as usize);
-        for y in 0..height as usize {
-            for px in bgra[y * stride..y * stride + row].as_chunks::<4>().0.iter() {
-                data.extend_from_slice(&[px[2], px[1], px[0], 255]);
-            }
-        }
+        let mut data = vec![0; row * height as usize];
+        bgra_to_rgba(
+            bgra,
+            stride,
+            &mut data,
+            row,
+            (width as usize, height as usize),
+        );
         Some(Self {
             width,
             height,

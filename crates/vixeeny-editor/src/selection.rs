@@ -89,6 +89,9 @@ pub struct Selection {
     windows: Vec<Rect>,
     press: Option<Point>,
     pub hover_window: Option<Rect>,
+    /// Where the zone was just drawn (the pointer still rests on its corner): there the zone
+    /// moves rather than resizes, until the pointer goes away.
+    fresh: Option<Point>,
 }
 
 impl Selection {
@@ -100,6 +103,7 @@ impl Selection {
             windows,
             press: None,
             hover_window: None,
+            fresh: None,
         }
     }
 
@@ -110,6 +114,18 @@ impl Selection {
 
     pub fn is_dragging(&self) -> bool {
         !matches!(self.mode, Mode::Idle)
+    }
+
+    /// The zone is being drawn or resized: the magnifier helps place its edge. Not while it
+    /// moves.
+    pub fn is_placing_an_edge(&self) -> bool {
+        matches!(self.mode, Mode::Drawing { .. } | Mode::Resizing { .. })
+    }
+
+    /// The pointer still rests where the zone was just drawn.
+    fn rests_on_fresh_zone(&self, p: Point) -> bool {
+        self.fresh
+            .is_some_and(|at| at.distance(p) <= HANDLE_RADIUS * 2.0)
     }
 
     /// A zone exists and no gesture is running: the toolbar can show.
@@ -162,6 +178,9 @@ impl Selection {
     }
 
     pub fn cursor_at(&self, p: Point) -> CursorHint {
+        if self.rect.is_some() && self.rests_on_fresh_zone(p) {
+            return CursorHint::Move;
+        }
         if let Some(h) = self.handle_at(p) {
             return match h {
                 Handle::N | Handle::S => CursorHint::ResizeNs,
@@ -179,7 +198,11 @@ impl Selection {
     pub fn pointer_down(&mut self, p: Point) {
         let p = self.clamp(p);
         self.press = Some(p);
-        self.mode = if let (Some(handle), Some(original)) = (self.handle_at(p), self.rect) {
+        let fresh = self.rests_on_fresh_zone(p);
+        self.fresh = None;
+        self.mode = if let (true, Some(original)) = (fresh, self.rect) {
+            Mode::Moving { grab: p, original }
+        } else if let (Some(handle), Some(original)) = (self.handle_at(p), self.rect) {
             Mode::Resizing { handle, original }
         } else if let Some(original) = self.rect.filter(|r| r.contains(p)) {
             Mode::Moving { grab: p, original }
@@ -193,6 +216,9 @@ impl Selection {
         let p = self.clamp(p);
         match self.mode {
             Mode::Idle => {
+                if !self.rests_on_fresh_zone(p) {
+                    self.fresh = None;
+                }
                 self.hover_window = if self.rect.is_none() {
                     self.window_at(p)
                 } else {
@@ -223,6 +249,7 @@ impl Selection {
             } else {
                 self.rect.filter(|r| r.w >= MIN_SIDE && r.h >= MIN_SIDE)
             };
+            self.fresh = self.rect.map(|_| p);
         } else if let Some(r) = self.rect {
             self.rect = Some(self.keep_min(r));
         }
@@ -238,6 +265,7 @@ impl Selection {
     /// Forgets the zone (to start over).
     pub fn reset(&mut self) {
         self.rect = None;
+        self.fresh = None;
         self.mode = Mode::Idle;
     }
 
@@ -446,6 +474,7 @@ mod tests {
             let mut s = sel();
             draw(&mut s, p(100.0, 100.0), p(300.0, 200.0));
             assert_eq!(s.rect(), Some(base));
+            s.pointer_move(p(200.0, 150.0)); // away from where the zone was drawn
             let start = handle.position(&base);
             assert_eq!(s.handle_at(start), Some(handle), "{handle:?}");
             s.pointer_down(start);
@@ -486,6 +515,33 @@ mod tests {
         assert_eq!(s.cursor_at(p(200.0, 100.0)), CursorHint::ResizeNs);
         assert_eq!(s.cursor_at(p(100.0, 200.0)), CursorHint::ResizeEw);
         assert_eq!(s.cursor_at(p(500.0, 500.0)), CursorHint::Crosshair);
+    }
+
+    #[test]
+    fn a_zone_just_drawn_moves_from_where_the_pointer_rests() {
+        let mut s = sel();
+        draw(&mut s, p(100.0, 100.0), p(300.0, 300.0));
+        // The pointer is on the bottom-right handle, yet the zone moves from there.
+        assert_eq!(s.cursor_at(p(300.0, 300.0)), CursorHint::Move);
+        assert!(!s.is_placing_an_edge());
+        s.pointer_down(p(300.0, 300.0));
+        s.pointer_move(p(350.0, 320.0));
+        assert!(!s.is_placing_an_edge());
+        s.pointer_up(p(350.0, 320.0));
+        assert_eq!(s.rect(), Some(Rect::new(150.0, 120.0, 200.0, 200.0)));
+        // Once the pointer has gone away, the handle resizes again.
+        assert_eq!(s.cursor_at(p(350.0, 320.0)), CursorHint::ResizeNwSe);
+        s.pointer_down(p(350.0, 320.0));
+        assert!(s.is_placing_an_edge());
+    }
+
+    #[test]
+    fn leaving_the_corner_of_a_fresh_zone_brings_the_handle_back() {
+        let mut s = sel();
+        draw(&mut s, p(100.0, 100.0), p(300.0, 300.0));
+        s.pointer_move(p(200.0, 200.0));
+        s.pointer_move(p(300.0, 300.0));
+        assert_eq!(s.cursor_at(p(300.0, 300.0)), CursorHint::ResizeNwSe);
     }
 
     #[test]

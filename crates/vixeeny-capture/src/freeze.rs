@@ -18,8 +18,9 @@ use windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;
 use windows::Graphics::DirectX::DirectXPixelFormat;
 use windows::Win32::Foundation::{HANDLE, HWND, LPARAM, LRESULT, LUID, WPARAM};
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_RESOURCE_MISC_SHARED,
-    D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
+    D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_CPU_ACCESS_READ, D3D11_MAP_READ,
+    D3D11_MAPPED_SUBRESOURCE, D3D11_RESOURCE_MISC_SHARED, D3D11_TEXTURE2D_DESC,
+    D3D11_USAGE_DEFAULT, D3D11_USAGE_STAGING, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
 };
 use windows::Win32::Graphics::Dwm::{
     DWMWA_CLOAK, DWMWA_TRANSITIONS_FORCEDISABLED, DwmFlush, DwmSetWindowAttribute,
@@ -29,9 +30,10 @@ use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_SAMPLE_DESC,
 };
 use windows::Win32::Graphics::Dxgi::{
-    CreateDXGIFactory1, DXGI_PRESENT, DXGI_SCALING_NONE, DXGI_SWAP_CHAIN_DESC1,
-    DXGI_SWAP_EFFECT_FLIP_DISCARD, DXGI_USAGE_RENDER_TARGET_OUTPUT, IDXGIAdapter, IDXGIDevice,
-    IDXGIFactory2, IDXGIFactory4, IDXGIResource, IDXGISwapChain1, IDXGISwapChain3,
+    CreateDXGIFactory1, DXGI_PRESENT, DXGI_SCALING_NONE, DXGI_SCALING_STRETCH,
+    DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_EFFECT_DISCARD, DXGI_SWAP_EFFECT_FLIP_DISCARD,
+    DXGI_USAGE_RENDER_TARGET_OUTPUT, IDXGIAdapter, IDXGIDevice, IDXGIFactory2, IDXGIFactory4,
+    IDXGIResource, IDXGISwapChain1, IDXGISwapChain3,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::WinRT::Direct3D11::IDirect3DDxgiInterfaceAccess;
@@ -44,8 +46,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{BOOL, Interface, w};
 
 use crate::wgc::{
-    FRAME_TIMEOUT, RawFrame, d3d_device, f16_to_f32, frame_handler, monitor_item, os, read_back,
-    winrt_device,
+    FRAME_TIMEOUT, d3d_device, f16_to_f32, frame_handler, monitor_item, os, winrt_device,
 };
 use crate::{BYTES_PER_PIXEL, CaptureError, CpuFrame};
 
@@ -276,24 +277,45 @@ fn finish(
 }
 
 /// A hidden (cloaked) top-most window over `monitor`, showing `texture`.
+///
+/// The window must stay an ordinary window for the compositor. One that covers a monitor
+/// exactly with a flip-model swap chain is taken for a full-screen game: the screen switches to
+/// "independent flip" (a flash, and variable refresh that follows our single frame). So an SDR
+/// screen uses a "blt" swap chain, which the compositor always composes, and the window is one
+/// pixel taller than the monitor when no monitor lies below. HDR content needs the flip model.
 fn show_screen(
     gpu: &Gpu,
     monitor: &MonitorInfo,
+    monitors: &[MonitorInfo],
     texture: ID3D11Texture2D,
 ) -> Result<(Screen, FrozenScreen), CaptureError> {
     let r = monitor.rect;
     let hdr = monitor.hdr.is_some();
+    let bottom = r.y + r.height as i32;
+    let below_is_free = !monitors.iter().any(|m| {
+        m.rect.y <= bottom
+            && bottom < m.rect.y + m.rect.height as i32
+            && m.rect.x < r.x + r.width as i32
+            && r.x < m.rect.x + m.rect.width as i32
+    });
+    let extra = u32::from(below_is_free);
+    let ex_style = WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
+    let ex_style = if hdr {
+        ex_style | WS_EX_NOREDIRECTIONBITMAP
+    } else {
+        ex_style
+    };
     // SAFETY: a registered class and plain arguments.
     let window = unsafe {
         CreateWindowExW(
-            WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP,
+            ex_style,
             CLASS,
             w!("Vixeeny"),
             WS_POPUP,
             r.x,
             r.y,
             r.width as i32,
-            r.height as i32,
+            (r.height + extra) as i32,
             None,
             None,
             Some(
@@ -319,7 +341,7 @@ fn show_screen(
     unsafe { texture.GetDesc(&mut desc) };
     let chain_desc = DXGI_SWAP_CHAIN_DESC1 {
         Width: desc.Width,
-        Height: desc.Height,
+        Height: desc.Height + extra,
         Format: if hdr {
             DXGI_FORMAT_R16G16B16A16_FLOAT
         } else {
@@ -330,9 +352,17 @@ fn show_screen(
             Quality: 0,
         },
         BufferUsage: DXGI_USAGE_RENDER_TARGET_OUTPUT,
-        BufferCount: 2,
-        Scaling: DXGI_SCALING_NONE,
-        SwapEffect: DXGI_SWAP_EFFECT_FLIP_DISCARD,
+        BufferCount: if hdr { 2 } else { 1 },
+        Scaling: if hdr {
+            DXGI_SCALING_NONE
+        } else {
+            DXGI_SCALING_STRETCH
+        },
+        SwapEffect: if hdr {
+            DXGI_SWAP_EFFECT_FLIP_DISCARD
+        } else {
+            DXGI_SWAP_EFFECT_DISCARD
+        },
         AlphaMode: DXGI_ALPHA_MODE_IGNORE,
         ..Default::default()
     };
@@ -349,15 +379,17 @@ fn show_screen(
             let _ = unsafe { chain3.SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709) };
         }
     }
-    // SAFETY: the back buffer has the texture's size and format.
+    // SAFETY: the back buffer has the texture's format and holds it (plus the extra row).
+    // Shown (still cloaked) first: a hidden window's frames are dropped.
     unsafe {
+        let _ = ShowWindow(window, SW_SHOWNOACTIVATE);
         let back: ID3D11Texture2D = chain.GetBuffer(0).map_err(os("GetBuffer"))?;
-        gpu.context.CopyResource(&back, &texture);
+        gpu.context
+            .CopySubresourceRegion(&back, 0, 0, 0, 0, &texture, 0, None);
         chain
             .Present(0, DXGI_PRESENT(0))
             .ok()
             .map_err(os("Present"))?;
-        let _ = ShowWindow(window, SW_SHOWNOACTIVATE);
     }
     screen.swap_chain = Some(chain);
     let resource: IDXGIResource = texture.cast().map_err(os("IDXGIResource"))?;
@@ -395,7 +427,7 @@ pub fn freeze(gpu: &Gpu, monitors: &[MonitorInfo]) -> Result<Frozen, CaptureErro
     let mut screens = Vec::with_capacity(monitors.len());
     let mut shared = Vec::with_capacity(monitors.len());
     for (monitor, texture) in monitors.iter().zip(textures) {
-        let (screen, frozen) = show_screen(gpu, monitor, texture)?;
+        let (screen, frozen) = show_screen(gpu, monitor, monitors, texture)?;
         screens.push(screen);
         shared.push(frozen);
     }
@@ -471,39 +503,122 @@ impl FrozenPixels {
     }
 }
 
-/// Reads the shared textures (in the app).
-pub fn read(frozen: &Frozen) -> Result<Vec<FrozenPixels>, CaptureError> {
+thread_local! {
+    /// The app's device on the daemon's adapter, kept for the next captures.
+    static READER: RefCell<Option<(i64, ID3D11Device, ID3D11DeviceContext)>> =
+        const { RefCell::new(None) };
+}
+
+fn reader(adapter: i64) -> Result<(ID3D11Device, ID3D11DeviceContext), CaptureError> {
+    if let Some((_, device, context)) = READER
+        .with(|r| r.borrow().clone())
+        .filter(|r| r.0 == adapter)
+    {
+        return Ok((device, context));
+    }
     let luid = LUID {
-        LowPart: frozen.adapter as u32,
-        HighPart: (frozen.adapter >> 32) as i32,
+        LowPart: adapter as u32,
+        HighPart: (adapter >> 32) as i32,
     };
     // SAFETY: plain factory calls.
-    let adapter: IDXGIAdapter = unsafe {
+    let dxgi_adapter: IDXGIAdapter = unsafe {
         let factory: IDXGIFactory4 = CreateDXGIFactory1().map_err(os("CreateDXGIFactory1"))?;
         factory.EnumAdapterByLuid(luid)
     }
     .map_err(os("EnumAdapterByLuid"))?;
-    let (device, context) = d3d_device(Some(&adapter))?;
-    frozen
-        .screens
-        .iter()
-        .map(|screen| {
-            let mut texture: Option<ID3D11Texture2D> = None;
-            // SAFETY: a handle the daemon got from `GetSharedHandle`; a stale one fails.
-            unsafe {
-                device
-                    .OpenSharedResource(HANDLE(screen.texture as usize as *mut _), &raw mut texture)
-            }
-            .map_err(os("OpenSharedResource"))?;
-            let texture = texture.ok_or_else(|| CaptureError::Os("no shared texture".into()))?;
-            let RawFrame { stride, data, .. } = read_back(&device, &context, &texture)?;
-            Ok(FrozenPixels {
-                screen: *screen,
-                stride,
-                data,
+    let (device, context) = d3d_device(Some(&dxgi_adapter))?;
+    READER.with(|r| *r.borrow_mut() = Some((adapter, device.clone(), context.clone())));
+    Ok((device, context))
+}
+
+/// Reads the shared textures (in the app): `each` gets every screen's rows (`stride` bytes
+/// apart) while they are mapped, so it can convert them straight to where they go. The GPU
+/// copies of all screens are queued before the first is waited for.
+pub fn read_with(
+    frozen: &Frozen,
+    mut each: impl FnMut(&FrozenScreen, &[u8], usize),
+) -> Result<(), CaptureError> {
+    let result = (|| {
+        let (device, context) = reader(frozen.adapter)?;
+        let staged = frozen
+            .screens
+            .iter()
+            .map(|screen| {
+                let mut texture: Option<ID3D11Texture2D> = None;
+                // SAFETY: a handle the daemon got from `GetSharedHandle`; a stale one fails.
+                unsafe {
+                    device.OpenSharedResource(
+                        HANDLE(screen.texture as usize as *mut _),
+                        &raw mut texture,
+                    )
+                }
+                .map_err(os("OpenSharedResource"))?;
+                let texture =
+                    texture.ok_or_else(|| CaptureError::Os("no shared texture".into()))?;
+                let staging = stage(&device, &context, &texture)?;
+                Ok((screen, staging))
             })
-        })
-        .collect()
+            .collect::<Result<Vec<_>, CaptureError>>()?;
+        for (screen, staging) in staged {
+            let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+            // SAFETY: a staging texture with CPU read access; `mapped` is a valid out-pointer.
+            unsafe { context.Map(&staging, 0, D3D11_MAP_READ, 0, Some(&raw mut mapped)) }
+                .map_err(os("Map"))?;
+            let stride = mapped.RowPitch as usize;
+            // SAFETY: a mapped texture exposes `RowPitch * Height` readable bytes until `Unmap`.
+            let rows = unsafe {
+                std::slice::from_raw_parts(
+                    mapped.pData.cast::<u8>(),
+                    stride * screen.height as usize,
+                )
+            };
+            each(screen, rows, stride);
+            // SAFETY: matches the successful Map above.
+            unsafe { context.Unmap(&staging, 0) };
+        }
+        Ok(())
+    })();
+    if result.is_err() {
+        // The device may be lost: the next capture starts with a new one.
+        READER.with(|r| *r.borrow_mut() = None);
+    }
+    result
+}
+
+/// A staging copy of `texture`, queued on the GPU.
+fn stage(
+    device: &ID3D11Device,
+    context: &ID3D11DeviceContext,
+    texture: &ID3D11Texture2D,
+) -> Result<ID3D11Texture2D, CaptureError> {
+    let mut desc = D3D11_TEXTURE2D_DESC::default();
+    // SAFETY: `desc` is a valid out-pointer.
+    unsafe { texture.GetDesc(&mut desc) };
+    desc.Usage = D3D11_USAGE_STAGING;
+    desc.BindFlags = 0;
+    desc.MiscFlags = 0;
+    desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
+    let mut staging = None;
+    // SAFETY: a staging copy of an existing texture; the out-pointer is valid.
+    unsafe { device.CreateTexture2D(&desc, None, Some(&raw mut staging)) }
+        .map_err(os("CreateTexture2D"))?;
+    let staging = staging.ok_or_else(|| CaptureError::Os("no staging texture".into()))?;
+    // SAFETY: same device, size and format.
+    unsafe { context.CopyResource(&staging, texture) };
+    Ok(staging)
+}
+
+/// Reads the shared textures into memory (see [`read_with`]).
+pub fn read(frozen: &Frozen) -> Result<Vec<FrozenPixels>, CaptureError> {
+    let mut out = Vec::with_capacity(frozen.screens.len());
+    read_with(frozen, |screen, rows, stride| {
+        out.push(FrozenPixels {
+            screen: *screen,
+            stride,
+            data: rows.to_vec(),
+        });
+    })?;
+    Ok(out)
 }
 
 /// Asks the daemon to remove the frozen screens (in the app, once its windows cover them).

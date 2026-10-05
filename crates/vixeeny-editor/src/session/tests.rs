@@ -135,6 +135,7 @@ fn pressing_on_a_handle_resizes_even_with_a_tool() {
     let mut s = session();
     drag(&mut s, p(20.0, 20.0), p(120.0, 80.0));
     s.choose_tool(Some(Tool::Rect));
+    s.pointer_move(p(60.0, 50.0), NO); // away from where the zone was drawn
     drag(&mut s, p(120.0, 80.0), p(150.0, 90.0)); // SE handle
     assert_eq!(s.view().selection, Some(Rect::new(20.0, 20.0, 130.0, 70.0)));
     assert!(s.editor().doc.items.is_empty());

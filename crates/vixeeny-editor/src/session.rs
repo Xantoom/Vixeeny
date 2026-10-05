@@ -200,6 +200,16 @@ impl Session {
         &self.editor
     }
 
+    /// A press is being dragged (drawing, moving, resizing, annotating).
+    pub fn in_gesture(&self) -> bool {
+        self.target.is_some()
+    }
+
+    /// What a mere hover can change on screen: the cursor shape and the window under it.
+    pub fn hover_state(&self) -> (CursorHint, Option<Rect>) {
+        (self.cursor_hint(), self.selection.hover_window)
+    }
+
     pub fn tool(&self) -> Option<Tool> {
         self.tool
     }
@@ -495,8 +505,8 @@ impl Session {
                 let y = if z.y >= label { z.y - label } else { z.y + 4.0 };
                 (text, Point::new(z.x, y))
             }),
-            // Only while a zone is being drawn: a calm frozen screen otherwise.
-            magnifier: if zone.is_some() && !settled {
+            // Only while an edge of the zone is being placed: a calm frozen screen otherwise.
+            magnifier: if zone.is_some() && self.selection.is_placing_an_edge() {
                 self.magnifier()
             } else {
                 None

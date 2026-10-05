@@ -370,3 +370,22 @@ fn reference_scene() {
     );
     insta::assert_snapshot!(ascii(&render(&white(96, 48), &doc), 2));
 }
+
+#[test]
+fn a_bgra_screen_lands_at_its_place_in_the_desktop() {
+    // A 2x2 screen (rows 12 bytes apart) written at (1, 1) of a 4x3 desktop.
+    let src = [
+        1, 2, 3, 0, 4, 5, 6, 0, 99, 99, 99, 99, //
+        7, 8, 9, 0, 10, 11, 12, 0, 99, 99, 99, 99,
+    ];
+    let mut dst = vec![0u8; 4 * 3 * 4];
+    let row = 4 * 4;
+    super::bgra_to_rgba(&src, 12, &mut dst[row + 4..], row, (2, 2));
+    assert_eq!(&dst[row + 4..row + 12], &[3, 2, 1, 255, 6, 5, 4, 255]);
+    assert_eq!(
+        &dst[2 * row + 4..2 * row + 12],
+        &[9, 8, 7, 255, 12, 11, 10, 255]
+    );
+    assert!(dst[..row + 4].iter().all(|&b| b == 0));
+    assert!(dst[2 * row + 12..].iter().all(|&b| b == 0));
+}

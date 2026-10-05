@@ -12,7 +12,7 @@ pub use history::{Edit, History};
 pub use model::{Annotation, AnnotationId, Color, Document, Item, Style};
 pub mod effects;
 pub mod render;
-pub use render::{RgbaImage, render};
+pub use render::{RgbaImage, bgra_to_rgba, render};
 pub mod editor;
 pub use editor::{Editor, Modifiers, Outcome, Tool, ToolSettings};
 pub mod selection;

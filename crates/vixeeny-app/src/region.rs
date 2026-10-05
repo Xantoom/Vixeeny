@@ -198,33 +198,66 @@ impl Drop for Thaw {
     }
 }
 
-/// The desktop from the frozen screens, laid out like the monitors.
+/// The desktop from the frozen screens, laid out like the monitors, converted straight from
+/// the GPU's memory into the editor's image.
 fn frozen_desktop(
     frozen: &Frozen,
     monitors: &[vixeeny_platform::MonitorInfo],
     bounds: vixeeny_platform::PhysicalRect,
     config: &Config,
-) -> anyhow::Result<CpuFrame> {
-    let screens = vixeeny_capture::freeze::read(frozen)?;
-    let mut canvas = CpuFrame::new(bounds.width, bounds.height);
-    for pixels in screens {
-        let s = pixels.screen;
-        let monitor = monitors
-            .iter()
-            .find(|m| {
-                (m.rect.x, m.rect.y, m.rect.width, m.rect.height) == (s.x, s.y, s.width, s.height)
-            })
-            .context("the monitors changed since the screens were frozen")?;
-        let frame = match monitor.hdr {
-            Some(info) if s.hdr && config.image.hdr == "tonemap_sdr" => {
-                let bgra = crate::tonemap_hdr(&pixels.to_scrgb(), &info);
-                CpuFrame::from_raw(s.width, s.height, s.width as usize * 4, bgra)?
-            }
-            info => pixels.to_bgra(info.map_or(80.0, |i| i.sdr_white_nits))?,
+) -> anyhow::Result<RgbaImage> {
+    let monitor_of = |s: &vixeeny_common::ipc::FrozenScreen| {
+        monitors.iter().find(|m| {
+            (m.rect.x, m.rect.y, m.rect.width, m.rect.height) == (s.x, s.y, s.width, s.height)
+        })
+    };
+    anyhow::ensure!(
+        frozen.screens.iter().all(|s| monitor_of(s).is_some()),
+        "the monitors changed since the screens were frozen"
+    );
+    let row = bounds.width as usize * 4;
+    let covered: u64 = monitors
+        .iter()
+        .map(|m| u64::from(m.rect.width) * u64::from(m.rect.height))
+        .sum();
+    let mut data = if covered == u64::from(bounds.width) * u64::from(bounds.height) {
+        vec![0; row * bounds.height as usize]
+    } else {
+        // Between monitors of different sizes: opaque black, as a capture shows it.
+        [0, 0, 0, 255].repeat(bounds.width as usize * bounds.height as usize)
+    };
+    let mut failure = None;
+    vixeeny_capture::freeze::read_with(frozen, |s, rows, stride| {
+        let at = (s.y - bounds.y) as usize * row + (s.x - bounds.x) as usize * 4;
+        let size = (s.width as usize, s.height as usize);
+        if !s.hdr {
+            vixeeny_editor::bgra_to_rgba(rows, stride, &mut data[at..], row, size);
+            return;
+        }
+        let info = monitor_of(s).and_then(|m| m.hdr);
+        let pixels = vixeeny_capture::freeze::FrozenPixels {
+            screen: *s,
+            stride,
+            data: rows.to_vec(),
         };
-        canvas.blit(&frame, s.x - bounds.x, s.y - bounds.y);
+        let frame = match info {
+            Some(info) if config.image.hdr == "tonemap_sdr" => {
+                let bgra = crate::tonemap_hdr(&pixels.to_scrgb(), &info);
+                CpuFrame::from_raw(s.width, s.height, s.width as usize * 4, bgra)
+            }
+            info => pixels.to_bgra(info.map_or(80.0, |i| i.sdr_white_nits)),
+        };
+        match frame {
+            Ok(frame) => {
+                vixeeny_editor::bgra_to_rgba(&frame.data, frame.stride, &mut data[at..], row, size)
+            }
+            Err(e) => failure = Some(e),
+        }
+    })?;
+    if let Some(e) = failure {
+        return Err(e.into());
     }
-    Ok(canvas)
+    RgbaImage::new(bounds.width, bounds.height, data).context("unexpected image size")
 }
 
 pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Result<()> {
@@ -257,8 +290,8 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
             .map_err(|e| tracing::warn!("frozen screens not used: {e:#}"))
             .ok()
     });
-    let frame = match from_daemon {
-        Some(frame) => frame,
+    let base = match from_daemon {
+        Some(base) => base,
         None => {
             let backend = vixeeny_capture::WgcBackend::new()?;
             let options = CaptureOptions {
@@ -267,18 +300,17 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
                     .then_some(crate::tonemap_hdr as vixeeny_capture::ToneMapFn),
             };
             let mut capturer = Capturer::new(backend, monitors.clone());
-            capturer.grab(&CaptureTarget::AllMonitors, options)?
+            let frame = capturer.grab(&CaptureTarget::AllMonitors, options)?;
+            RgbaImage::from_bgra(frame.width, frame.height, frame.stride, &frame.data)
+                .context("unexpected capture buffer")?
         }
     };
     tracing::info!(
         "screen read ({}x{}) after {:?}",
-        frame.width,
-        frame.height,
+        base.width,
+        base.height,
         started.elapsed()
     );
-    let base = RgbaImage::from_bgra(frame.width, frame.height, frame.stride, &frame.data)
-        .context("unexpected capture buffer")?;
-    drop(frame);
 
     let zones: Vec<Rect> = windows
         .iter()
@@ -294,17 +326,37 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
     let scale = vixeeny_platform::monitor_at(&monitors, cursor.0, cursor.1)
         .map_or(1.0, |m| m.scale_factor() as f32);
     // One overlay window per monitor, each showing its part of the frozen desktop.
-    let screens: Vec<vixeeny_ui::Screen> = monitors
+    // The monitors in image pixels: the toolbar and the magnifier stay on one of them.
+    let monitor_areas: Vec<Rect> = monitors
         .iter()
-        .map(|m| vixeeny_ui::Screen {
-            position: (m.rect.x, m.rect.y),
-            size: (m.rect.width, m.rect.height),
-            area: Rect::new(
+        .map(|m| {
+            Rect::new(
                 (m.rect.x - bounds.x) as f32,
                 (m.rect.y - bounds.y) as f32,
                 m.rect.width as f32,
                 m.rect.height as f32,
-            ),
+            )
+        })
+        .collect();
+    // Each window is one pixel taller than its monitor. A window that covers a monitor exactly
+    // is taken for a full-screen game: Windows and the graphics driver then switch the screen to
+    // that mode (a flash, and variable refresh following our frames). The extra row lies below
+    // the monitor, where it shows the desktop row below, if any.
+    let screens: Vec<vixeeny_ui::Screen> = monitors
+        .iter()
+        .map(|m| {
+            let below = m.rect.y + (m.rect.height as i32) < bounds.y + bounds.height as i32;
+            let area_height = m.rect.height + u32::from(below);
+            vixeeny_ui::Screen {
+                position: (m.rect.x, m.rect.y),
+                size: (m.rect.width, m.rect.height + 1),
+                area: Rect::new(
+                    (m.rect.x - bounds.x) as f32,
+                    (m.rect.y - bounds.y) as f32,
+                    m.rect.width as f32,
+                    area_height as f32,
+                ),
+            }
         })
         .collect();
     let scroll_snapshot = Snapshot {
@@ -326,8 +378,7 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
     let scroll_zone: std::rc::Rc<std::cell::Cell<Option<Rect>>> = std::rc::Rc::default();
     let scroll_slot = scroll_zone.clone();
 
-    let mut session =
-        Session::new(base, zones).with_screens(screens.iter().map(|s| s.area).collect());
+    let mut session = Session::new(base, zones).with_screens(monitor_areas);
     match mode {
         Mode::Editor => {}
         Mode::Ocr => session = session.with_auto_command(Command::Ocr),

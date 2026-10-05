@@ -66,6 +66,25 @@ fn slint_image(img: &RgbaImage) -> Image {
     ))
 }
 
+/// The part of `img` inside `area` (clipped to the image), copied once.
+fn slint_part(img: &RgbaImage, area: &Rect) -> Option<Image> {
+    let x0 = area.x.max(0.0).round() as usize;
+    let y0 = area.y.max(0.0).round() as usize;
+    let x1 = (area.right().round() as usize).min(img.width as usize);
+    let y1 = (area.bottom().round() as usize).min(img.height as usize);
+    if x1 <= x0 || y1 <= y0 {
+        return None;
+    }
+    let (w, h) = (x1 - x0, y1 - y0);
+    let mut buf = SharedPixelBuffer::<Rgba8Pixel>::new(w as u32, h as u32);
+    let row = img.width as usize * 4;
+    for (y, out) in buf.make_mut_bytes().chunks_exact_mut(w * 4).enumerate() {
+        let at = (y0 + y) * row + x0 * 4;
+        out.copy_from_slice(&img.data[at..at + w * 4]);
+    }
+    Some(Image::from_rgba8(buf))
+}
+
 fn cursor_kind(c: CursorHint) -> i32 {
     match c {
         CursorHint::Crosshair => 0,
@@ -127,6 +146,28 @@ pub struct Screen {
 pub struct Overlay {
     windows: Vec<EditorWindow>,
     session: Rc<RefCell<Session>>,
+    /// The window under the pointer (it draws continuously, see `install_notifiers`).
+    active: Rc<Cell<usize>>,
+    first_frame: RefCell<Option<FirstFrame>>,
+}
+
+/// Called with the native window handles once the windows have drawn (see `on_first_frame`).
+type FirstFrame = Box<dyn FnOnce(Vec<u64>)>;
+
+/// Turns the v-sync of the window being drawn on or off (OpenGL on Windows; nothing elsewhere).
+fn set_swap_interval(api: &slint::GraphicsAPI<'_>, interval: i32) {
+    #[cfg(windows)]
+    if let slint::GraphicsAPI::NativeOpenGL { get_proc_address } = api {
+        let f = get_proc_address(c"wglSwapIntervalEXT");
+        if !f.is_null() {
+            // SAFETY: `wglSwapIntervalEXT` has this signature (WGL_EXT_swap_control) and applies
+            // to the current context, which is this window's while it is drawn.
+            let f: extern "system" fn(i32) -> i32 = unsafe { std::mem::transmute(f) };
+            f(interval);
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = (api, interval);
 }
 
 /// Every window of the overlay, for the callbacks (weak: the windows own the callbacks).
@@ -192,7 +233,7 @@ impl Overlay {
         on_command: impl Fn(Command, &Session, &EditorWindow) -> bool + 'static,
     ) -> Result<Self, slint::PlatformError> {
         session.set_ui_scale(ui_scale);
-        let base = session.base().clone();
+        let base = session.base();
         let palette: Vec<slint::Color> = Color::PALETTE.iter().map(|c| slint_color(*c)).collect();
         let palette = ModelRc::from(Rc::new(VecModel::from(palette)));
         let mut windows = Vec::with_capacity(screens.len());
@@ -205,12 +246,12 @@ impl Overlay {
                 && screen.area.h >= base.height as f32;
             // Each window uploads only its own part of the image.
             let part = if whole {
-                Some(base.clone())
+                Some(slint_image(base))
             } else {
-                vixeeny_editor::render::render_region(&base, std::iter::empty(), &screen.area)
+                slint_part(base, &screen.area)
             };
             if let Some(part) = part {
-                window.set_frozen(slint_image(&part));
+                window.set_frozen(part);
             }
             window.set_area_x(screen.area.x);
             window.set_area_y(screen.area.y);
@@ -233,6 +274,8 @@ impl Overlay {
         let overlay = Self {
             windows,
             session: Rc::new(RefCell::new(session)),
+            active: Rc::default(),
+            first_frame: RefCell::new(None),
         };
         overlay.wire(Rc::new(on_command));
         overlay.refresh();
@@ -254,6 +297,10 @@ impl Overlay {
                 && cursor.0 < p.x + s.width as i32
                 && cursor.1 < p.y + s.height as i32
         };
+        if let Some(i) = self.windows.iter().position(under_cursor) {
+            self.active.set(i);
+        }
+        self.install_notifiers();
         let (front, others): (Vec<_>, Vec<_>) = self.windows.iter().partition(|w| under_cursor(w));
         for w in others.iter().chain(&front) {
             w.show()?;
@@ -270,40 +317,73 @@ impl Overlay {
     /// (or after a second, for a renderer that does not tell). The screen stays undimmed until
     /// then: the windows may be hidden (cloaked) until `f` shows them.
     pub fn on_first_frame(&self, f: impl FnOnce(Vec<u64>) + 'static) {
-        type Callback = Box<dyn FnOnce(Vec<u64>)>;
-        let weak: Rc<Vec<_>> = Rc::new(self.windows.iter().map(|w| w.as_weak()).collect());
-        let pending: Rc<RefCell<Option<Callback>>> = Rc::new(RefCell::new(Some(Box::new(f))));
-        let fire = Rc::new(move || {
-            let Some(f) = pending.borrow_mut().take() else {
-                return;
-            };
-            let windows: Vec<EditorWindow> = weak.iter().filter_map(|w| w.upgrade()).collect();
-            #[cfg(feature = "desktop")]
-            let handles = windows
-                .iter()
-                .filter_map(|w| crate::theme::native_handle(w.window()))
-                .collect();
-            #[cfg(not(feature = "desktop"))]
-            let handles = Vec::new();
-            f(handles);
-            for w in &windows {
-                w.set_hold(false);
-            }
-        });
-        let left = Rc::new(Cell::new(self.windows.len()));
         for w in &self.windows {
             w.set_hold(true);
-            let (left, fire, drawn) = (left.clone(), fire.clone(), Cell::new(false));
-            let _ = w.window().set_rendering_notifier(move |state, _| {
-                if matches!(state, slint::RenderingState::AfterRendering) && !drawn.replace(true) {
-                    left.set(left.get() - 1);
-                    if left.get() == 0 {
-                        // The frame is presented right after this notification.
-                        let fire = fire.clone();
-                        slint::Timer::single_shot(std::time::Duration::ZERO, move || fire());
-                    }
+        }
+        *self.first_frame.borrow_mut() = Some(Box::new(f));
+    }
+
+    /// Paces the windows: the one under the pointer redraws at the screen's refresh rate
+    /// (v-sync), which keeps a variable-refresh (VRR) screen at its top rate and steady, while
+    /// the others draw only when something changes, without waiting for the v-sync (two windows
+    /// waiting in turn would halve the rate). Also reports the first frame.
+    fn install_notifiers(&self) {
+        let pending = self.first_frame.borrow_mut().take();
+        let weak: Rc<Vec<_>> = Rc::new(self.windows.iter().map(|w| w.as_weak()).collect());
+        let pending = Rc::new(RefCell::new(pending));
+        let fire = {
+            let weak = weak.clone();
+            Rc::new(move || {
+                let Some(f) = pending.borrow_mut().take() else {
+                    return;
+                };
+                let windows: Vec<EditorWindow> = weak.iter().filter_map(|w| w.upgrade()).collect();
+                #[cfg(feature = "desktop")]
+                let handles = windows
+                    .iter()
+                    .filter_map(|w| crate::theme::native_handle(w.window()))
+                    .collect();
+                #[cfg(not(feature = "desktop"))]
+                let handles = Vec::new();
+                f(handles);
+                for w in &windows {
+                    w.set_hold(false);
                 }
-            });
+            })
+        };
+        let left = Rc::new(Cell::new(self.windows.len()));
+        for (i, w) in self.windows.iter().enumerate() {
+            let (left, fire, drawn) = (left.clone(), fire.clone(), Cell::new(false));
+            let (active, me) = (self.active.clone(), w.as_weak());
+            let interval = Cell::new(-1);
+            let _ = w
+                .window()
+                .set_rendering_notifier(move |state, api| match state {
+                    slint::RenderingState::BeforeRendering => {
+                        let want = i32::from(active.get() == i);
+                        if interval.replace(want) != want {
+                            set_swap_interval(api, want);
+                        }
+                    }
+                    slint::RenderingState::AfterRendering => {
+                        if !drawn.replace(true) {
+                            left.set(left.get() - 1);
+                            if left.get() == 0 {
+                                // The frame is presented right after this notification.
+                                let fire = fire.clone();
+                                slint::Timer::single_shot(std::time::Duration::ZERO, move || {
+                                    fire()
+                                });
+                            }
+                        }
+                        if active.get() == i
+                            && let Some(w) = me.upgrade()
+                        {
+                            w.window().request_redraw();
+                        }
+                    }
+                    _ => {}
+                });
         }
         slint::Timer::single_shot(std::time::Duration::from_secs(1), move || fire());
     }
@@ -322,8 +402,17 @@ impl Overlay {
 
     fn wire(&self, on_command: Rc<CommandHandler>) {
         let all = Windows(Rc::new(self.windows.iter().map(|w| w.as_weak()).collect()));
-        for w in &self.windows {
+        for (i, w) in self.windows.iter().enumerate() {
             wire_window(w, &all, &self.session, &on_command);
+            // The pointer entering a window makes it the one that draws continuously.
+            let (active, me) = (self.active.clone(), w.as_weak());
+            w.on_pointer_entered(move || {
+                if active.replace(i) != i
+                    && let Some(w) = me.upgrade()
+                {
+                    w.window().request_redraw();
+                }
+            });
         }
     }
 
@@ -383,9 +472,16 @@ fn wire_window(
     let (s, a) = (session.clone(), all.clone());
     let sh = shift.clone();
     w.on_pointer_moved(move |x, y, _| {
-        s.borrow_mut()
-            .pointer_move(Point::new(x, y), Modifiers { shift: sh.get() });
-        a.refresh(&s);
+        let mut session = s.borrow_mut();
+        let hovering = !session.in_gesture();
+        let before = session.hover_state();
+        session.pointer_move(Point::new(x, y), Modifiers { shift: sh.get() });
+        // A hover that changes nothing on screen costs nothing.
+        let changed = !hovering || session.hover_state() != before;
+        drop(session);
+        if changed {
+            a.refresh(&s);
+        }
     });
     let (s, a, weak) = (session.clone(), all.clone(), w.as_weak());
     let sh = shift.clone();
