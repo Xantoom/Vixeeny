@@ -106,7 +106,7 @@ impl Core {
         if self.connected && self.ready && !self.exit_expected {
             fx.push(Effect::SendToApp(DaemonToApp::RunAction {
                 action,
-                frozen_frame: None,
+                frozen: None,
             }));
         } else if self.current.is_some() && !self.exit_expected {
             // Starting up: deliver once `Ready` arrives.
@@ -131,7 +131,7 @@ impl Core {
                 for action in self.queued.drain(..) {
                     fx.push(Effect::SendToApp(DaemonToApp::RunAction {
                         action,
-                        frozen_frame: None,
+                        frozen: None,
                     }));
                 }
             }
@@ -191,7 +191,7 @@ mod tests {
     fn run(action: ActionId) -> Effect {
         Effect::SendToApp(DaemonToApp::RunAction {
             action,
-            frozen_frame: None,
+            frozen: None,
         })
     }
 

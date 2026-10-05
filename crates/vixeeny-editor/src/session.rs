@@ -13,7 +13,7 @@ use crate::render::{RgbaImage, render_region};
 use crate::selection::{CursorHint, Selection, magnifier_position, magnifier_source, place_beside};
 
 /// Size of the toolbar, in image pixels (the UI lays out its content to fit).
-pub const TOOLBAR_SIZE: (f32, f32) = (722.0, 46.0);
+pub const TOOLBAR_SIZE: (f32, f32) = (756.0, 46.0);
 /// Source pixels shown by the magnifier, per side, and the on-screen zoom factor.
 pub const MAGNIFIER_SIDE: u32 = 11;
 pub const MAGNIFIER_ZOOM: f32 = 10.0;

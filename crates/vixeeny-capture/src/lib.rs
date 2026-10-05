@@ -8,6 +8,7 @@
 
 mod fake;
 mod frame;
+pub mod freeze;
 mod wgc;
 mod wgc_stream;
 pub use fake::FakeBackend;

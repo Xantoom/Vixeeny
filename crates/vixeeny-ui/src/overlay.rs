@@ -23,7 +23,7 @@ fn window_id(w: &EditorWindow) -> usize {
 
 use crate::EditorWindow;
 
-/// Toolbar button index → tool. Index 12 is "crop", i.e. adjusting the zone itself.
+/// Toolbar button index → tool. Index 12 moves and resizes the zone itself (the default).
 pub const TOOLS: [Option<Tool>; 13] = [
     Some(Tool::Select),
     Some(Tool::Pen),
@@ -264,6 +264,48 @@ impl Overlay {
         }
         UPLOADED.with(|u| u.borrow_mut().clear());
         Ok(())
+    }
+
+    /// Calls `f` with the native window handles once every window has drawn its first frame
+    /// (or after a second, for a renderer that does not tell). The screen stays undimmed until
+    /// then: the windows may be hidden (cloaked) until `f` shows them.
+    pub fn on_first_frame(&self, f: impl FnOnce(Vec<u64>) + 'static) {
+        type Callback = Box<dyn FnOnce(Vec<u64>)>;
+        let weak: Rc<Vec<_>> = Rc::new(self.windows.iter().map(|w| w.as_weak()).collect());
+        let pending: Rc<RefCell<Option<Callback>>> = Rc::new(RefCell::new(Some(Box::new(f))));
+        let fire = Rc::new(move || {
+            let Some(f) = pending.borrow_mut().take() else {
+                return;
+            };
+            let windows: Vec<EditorWindow> = weak.iter().filter_map(|w| w.upgrade()).collect();
+            #[cfg(feature = "desktop")]
+            let handles = windows
+                .iter()
+                .filter_map(|w| crate::theme::native_handle(w.window()))
+                .collect();
+            #[cfg(not(feature = "desktop"))]
+            let handles = Vec::new();
+            f(handles);
+            for w in &windows {
+                w.set_hold(false);
+            }
+        });
+        let left = Rc::new(Cell::new(self.windows.len()));
+        for w in &self.windows {
+            w.set_hold(true);
+            let (left, fire, drawn) = (left.clone(), fire.clone(), Cell::new(false));
+            let _ = w.window().set_rendering_notifier(move |state, _| {
+                if matches!(state, slint::RenderingState::AfterRendering) && !drawn.replace(true) {
+                    left.set(left.get() - 1);
+                    if left.get() == 0 {
+                        // The frame is presented right after this notification.
+                        let fire = fire.clone();
+                        slint::Timer::single_shot(std::time::Duration::ZERO, move || fire());
+                    }
+                }
+            });
+        }
+        slint::Timer::single_shot(std::time::Duration::from_secs(1), move || fire());
     }
 
     /// Image taller than the window: it scrolls (wheel, Page Up/Down) under a fixed toolbar.
@@ -561,7 +603,7 @@ fn refresh_window(w: &EditorWindow, v: &vixeeny_editor::View) {
             // The zone is the whole long image: keep the bar in view, top right.
             let u = w.get_ui_scale();
             let width = w.window().size().width as f32;
-            w.set_toolbar_x((width - 738.0 * u).max(0.0));
+            w.set_toolbar_x((width - 772.0 * u).max(0.0));
             w.set_toolbar_y(16.0 * u);
         }
     }

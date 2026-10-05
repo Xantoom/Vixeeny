@@ -16,6 +16,8 @@ fn main() {
 }
 
 fn real_main() -> anyhow::Result<()> {
+    // The frozen screens are placed in physical pixels.
+    vixeeny_platform::ensure_dpi_aware();
     let endpoint = Endpoint::current_user();
     // Binding the endpoint is the single-instance lock.
     let listener = match endpoint.bind() {

@@ -20,6 +20,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::w;
 
 use super::Startup;
+use super::freezer::GpuFreezer;
 use super::hotkeys::Hotkeys;
 use super::tray::Tray;
 use crate::runtime::{Flow, Runtime};
@@ -150,7 +151,8 @@ pub fn run(startup: Startup) -> anyhow::Result<()> {
         link,
         tx,
         receiver,
-    );
+    )
+    .with_freezer(Box::new(GpuFreezer::new()));
     runtime.apply_config();
     runtime.start_replay_if_configured();
     runtime.open_wizard_if_first_run();

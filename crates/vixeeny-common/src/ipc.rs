@@ -68,18 +68,88 @@ impl ActionId {
         }
     }
 
+    /// Actions that start on the frozen screen (a zone is picked on it).
+    pub const fn freezes_screen(self) -> bool {
+        matches!(
+            self,
+            Self::CaptureRegion | Self::CaptureScrolling | Self::OcrRegion
+        )
+    }
+
     pub fn from_cli_name(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|a| a.cli_name() == name)
     }
 }
 
-/// Shared-memory frozen frame handed over by the daemon (filled in at M7).
+/// The screens the daemon froze the moment a zone capture was asked for: one GPU texture per
+/// monitor, shared with the app, and the window that shows it until the editor is up.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SharedMemHandle {
-    pub name: String,
-    pub len: u64,
+pub struct Frozen {
+    /// LUID of the graphics adapter that holds the textures (the app must open them there).
+    pub adapter: i64,
+    pub screens: Vec<FrozenScreen>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FrozenScreen {
+    /// The monitor, physical pixels of the virtual desktop.
+    pub x: i32,
+    pub y: i32,
     pub width: u32,
     pub height: u32,
+    /// Shared handle of the texture: BGRA 8-bit, or RGBA half floats (scRGB) when `hdr`.
+    pub texture: u64,
+    pub hdr: bool,
+    /// The window showing the frozen screen; the app posts it [`THAW_MESSAGE`] once its own
+    /// windows cover the screens.
+    pub window: u64,
+}
+
+/// `WM_APP + 0x76` (`WM_APP` = `0x8000`): removes the frozen screens (any of their windows).
+pub const THAW_MESSAGE: u32 = 0x8076;
+
+impl Frozen {
+    /// Command-line form (`--frozen`), for an app started by the press itself:
+    /// `adapter;x,y,w,h,texture,hdr,window;…`.
+    pub fn to_arg(&self) -> String {
+        let mut out = self.adapter.to_string();
+        for s in &self.screens {
+            out.push_str(&format!(
+                ";{},{},{},{},{},{},{}",
+                s.x,
+                s.y,
+                s.width,
+                s.height,
+                s.texture,
+                u8::from(s.hdr),
+                s.window
+            ));
+        }
+        out
+    }
+
+    pub fn from_arg(arg: &str) -> Option<Self> {
+        let mut parts = arg.split(';');
+        let adapter = parts.next()?.parse().ok()?;
+        let screens = parts
+            .map(|part| {
+                let f: Vec<&str> = part.split(',').collect();
+                let [x, y, width, height, texture, hdr, window] = f.as_slice() else {
+                    return None;
+                };
+                Some(FrozenScreen {
+                    x: x.parse().ok()?,
+                    y: y.parse().ok()?,
+                    width: width.parse().ok()?,
+                    height: height.parse().ok()?,
+                    texture: texture.parse().ok()?,
+                    hdr: *hdr == "1",
+                    window: window.parse().ok()?,
+                })
+            })
+            .collect::<Option<Vec<_>>>()?;
+        (!screens.is_empty()).then_some(Self { adapter, screens })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,7 +163,7 @@ pub enum RecState {
 pub enum DaemonToApp {
     RunAction {
         action: ActionId,
-        frozen_frame: Option<SharedMemHandle>,
+        frozen: Option<Frozen>,
     },
     ConfigChanged,
     Shutdown,
@@ -276,17 +346,45 @@ mod tests {
         assert_eq!(ActionId::from_cli_name("nope"), None);
     }
 
+    fn frozen() -> Frozen {
+        let screen = FrozenScreen {
+            x: -1920,
+            y: 0,
+            width: 1920,
+            height: 1080,
+            texture: 0x4000_0c42,
+            hdr: false,
+            window: 0x0012_04ae,
+        };
+        Frozen {
+            adapter: -42,
+            screens: vec![
+                screen,
+                FrozenScreen {
+                    x: 0,
+                    width: 3840,
+                    height: 2160,
+                    hdr: true,
+                    ..screen
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn frozen_screens_go_through_the_command_line() {
+        let frozen = frozen();
+        assert_eq!(Frozen::from_arg(&frozen.to_arg()), Some(frozen));
+        assert_eq!(Frozen::from_arg("12"), None);
+        assert_eq!(Frozen::from_arg("12;1,2,3"), None);
+    }
+
     #[test]
     fn framing_roundtrip() {
         let mut buf = Vec::new();
         let msg = DaemonToApp::RunAction {
             action: ActionId::CaptureRegion,
-            frozen_frame: Some(SharedMemHandle {
-                name: "vx-frame".into(),
-                len: 1024,
-                width: 16,
-                height: 16,
-            }),
+            frozen: Some(frozen()),
         };
         write_msg(&mut buf, &msg).unwrap();
         write_msg(&mut buf, &DaemonToApp::Shutdown).unwrap();

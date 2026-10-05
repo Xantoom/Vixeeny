@@ -5741,6 +5741,7 @@ name = "vixeeny-capture"
 version = "0.9.4"
 dependencies = [
  "thiserror 2.0.21",
+ "vixeeny-common",
  "vixeeny-platform",
  "windows",
 ]
@@ -5772,7 +5773,9 @@ dependencies = [
  "thiserror 2.0.21",
  "tracing",
  "tray-icon",
+ "vixeeny-capture",
  "vixeeny-common",
+ "vixeeny-platform",
  "windows",
  "winresource",
 ]

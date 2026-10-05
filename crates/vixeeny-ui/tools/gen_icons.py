@@ -48,7 +48,7 @@ ICONS = {
     "arrow-right": ("Arrow Right", "regular"), "alert": ("Alert", "regular"), "slider": ("Options", "regular"),
     "pin": ("Pin", "regular"), "pin-filled": ("Pin", "filled"),
     "minimize": ("Line Horizontal 1", "regular"), "maximize": ("Maximize", "regular"),
-    "restore": ("Square Multiple", "regular"),
+    "restore": ("Square Multiple", "regular"), "move": ("Arrow Move", "regular"),
 }
 
 def fetch(folder, style):

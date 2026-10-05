@@ -13,7 +13,7 @@ use windows::Win32::Foundation::{
     CloseHandle, HANDLE, HWND, LPARAM, LRESULT, POINT, RECT, TRUE, WPARAM,
 };
 use windows::Win32::Graphics::Dwm::{
-    DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DWMWA_TRANSITIONS_FORCEDISABLED,
+    DWMWA_CLOAK, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DWMWA_TRANSITIONS_FORCEDISABLED,
     DWMWINDOWATTRIBUTE, DwmGetWindowAttribute, DwmSetWindowAttribute,
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
@@ -356,6 +356,42 @@ impl Drop for NoOpenAnimation {
     }
 }
 
+thread_local! {
+    /// Windows created by this thread start cloaked (see [`cloak_new_windows`]).
+    static CLOAK_NEW: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// While on (and a [`without_open_animation`] guard lives), the windows this thread creates are
+/// "cloaked": they exist and draw, but the screen shows them only after [`uncloak`]. A window
+/// thus appears with its first frame, never blank.
+pub fn cloak_new_windows(on: bool) {
+    CLOAK_NEW.set(on);
+}
+
+fn set_cloak(hwnd: HWND, on: bool) {
+    let value = windows::core::BOOL::from(on);
+    // SAFETY: `value` is a live BOOL, the size the attribute wants.
+    let _ = unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_CLOAK,
+            (&raw const value).cast(),
+            std::mem::size_of_val(&value) as u32,
+        )
+    };
+}
+
+/// Shows a window created cloaked.
+pub fn uncloak(id: WindowId) {
+    set_cloak(hwnd_of(id), false);
+}
+
+/// Waits until the compositor has drawn the next frame of the screen.
+pub fn wait_for_composition() {
+    // SAFETY: plain call.
+    let _ = unsafe { windows::Win32::Graphics::Dwm::DwmFlush() };
+}
+
 /// Turns the DWM transitions off for every window this thread creates while the guard lives.
 pub fn without_open_animation() -> Option<NoOpenAnimation> {
     unsafe extern "system" fn hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -373,6 +409,9 @@ pub fn without_open_animation() -> Option<NoOpenAnimation> {
                         std::mem::size_of_val(&off) as u32,
                     )
                 };
+                if CLOAK_NEW.get() {
+                    set_cloak(msg.hwnd, true);
+                }
             }
         }
         // SAFETY: passes the message on, as every hook must.

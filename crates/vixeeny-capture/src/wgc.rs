@@ -16,13 +16,13 @@ use windows::Graphics::Capture::{
 use windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;
 use windows::Graphics::DirectX::DirectXPixelFormat;
 use windows::Win32::Foundation::{HMODULE, HWND};
-use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
+use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_UNKNOWN};
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAP_READ,
     D3D11_MAPPED_SUBRESOURCE, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
     D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
 };
-use windows::Win32::Graphics::Dxgi::IDXGIDevice;
+use windows::Win32::Graphics::Dxgi::{IDXGIAdapter, IDXGIDevice};
 use windows::Win32::Graphics::Gdi::HMONITOR;
 use windows::Win32::System::WinRT::Direct3D11::{
     CreateDirect3D11DeviceFromDXGIDevice, IDirect3DDxgiInterfaceAccess,
@@ -32,9 +32,9 @@ use windows::core::{Interface, factory};
 
 use crate::{CaptureError, CpuFrame, HdrFrame, StillBackend};
 
-const FRAME_TIMEOUT: Duration = Duration::from_secs(2);
+pub(crate) const FRAME_TIMEOUT: Duration = Duration::from_secs(2);
 
-fn os<E: std::fmt::Display>(what: &str) -> impl FnOnce(E) -> CaptureError + '_ {
+pub(crate) fn os<E: std::fmt::Display>(what: &str) -> impl FnOnce(E) -> CaptureError + '_ {
     move |e| CaptureError::Os(format!("{what}: {e}"))
 }
 
@@ -51,30 +51,8 @@ impl WgcBackend {
                 "Windows Graphics Capture is not available".into(),
             ));
         }
-        let mut device = None;
-        let mut context = None;
-        // SAFETY: out-pointers are valid; no feature-level list, software flags or adapter.
-        unsafe {
-            D3D11CreateDevice(
-                None,
-                D3D_DRIVER_TYPE_HARDWARE,
-                HMODULE::default(),
-                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-                None,
-                D3D11_SDK_VERSION,
-                Some(&raw mut device),
-                None,
-                Some(&raw mut context),
-            )
-        }
-        .map_err(os("D3D11CreateDevice"))?;
-        let device = device.ok_or_else(|| CaptureError::Os("no D3D11 device".into()))?;
-        let context = context.ok_or_else(|| CaptureError::Os("no D3D11 context".into()))?;
-        let dxgi: IDXGIDevice = device.cast().map_err(os("IDXGIDevice"))?;
-        // SAFETY: `dxgi` is a live DXGI device.
-        let winrt_device: IDirect3DDevice = unsafe { CreateDirect3D11DeviceFromDXGIDevice(&dxgi) }
-            .and_then(|inspectable| inspectable.cast())
-            .map_err(os("CreateDirect3D11DeviceFromDXGIDevice"))?;
+        let (device, context) = d3d_device(None)?;
+        let winrt_device = winrt_device(&device)?;
         Ok(Self {
             device,
             context,
@@ -116,68 +94,65 @@ impl WgcBackend {
             // SAFETY: the surface is backed by a D3D11 texture on our device.
             let texture: ID3D11Texture2D =
                 unsafe { access.GetInterface() }.map_err(os("GetInterface"))?;
-            self.read_back(&texture)
+            read_back(&self.device, &self.context, &texture)
         })();
         let _ = pool.RemoveFrameArrived(token);
         let _ = session.Close();
         let _ = pool.Close();
         result
     }
+}
 
-    /// GPU → CPU through a staging texture.
-    fn read_back(&self, texture: &ID3D11Texture2D) -> Result<RawFrame, CaptureError> {
-        let mut desc = D3D11_TEXTURE2D_DESC::default();
-        // SAFETY: `desc` is a valid out-pointer.
-        unsafe { texture.GetDesc(&mut desc) };
-        desc.Usage = D3D11_USAGE_STAGING;
-        desc.BindFlags = 0;
-        desc.MiscFlags = 0;
-        desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
-        let mut staging = None;
-        // SAFETY: `desc` describes a staging copy of an existing texture; the out-pointer is valid.
-        unsafe {
-            self.device
-                .CreateTexture2D(&desc, None, Some(&raw mut staging))
-        }
+/// GPU → CPU through a staging texture.
+pub(crate) fn read_back(
+    device: &ID3D11Device,
+    context: &ID3D11DeviceContext,
+    texture: &ID3D11Texture2D,
+) -> Result<RawFrame, CaptureError> {
+    let mut desc = D3D11_TEXTURE2D_DESC::default();
+    // SAFETY: `desc` is a valid out-pointer.
+    unsafe { texture.GetDesc(&mut desc) };
+    desc.Usage = D3D11_USAGE_STAGING;
+    desc.BindFlags = 0;
+    desc.MiscFlags = 0;
+    desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
+    let mut staging = None;
+    // SAFETY: `desc` describes a staging copy of an existing texture; the out-pointer is valid.
+    unsafe { device.CreateTexture2D(&desc, None, Some(&raw mut staging)) }
         .map_err(os("CreateTexture2D"))?;
-        let staging = staging.ok_or_else(|| CaptureError::Os("no staging texture".into()))?;
-        // SAFETY: both textures belong to this device and have identical size and format.
-        unsafe { self.context.CopyResource(&staging, texture) };
-        let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-        // SAFETY: the staging texture has CPU read access; `mapped` is a valid out-pointer.
-        unsafe {
-            self.context
-                .Map(&staging, 0, D3D11_MAP_READ, 0, Some(&raw mut mapped))
-        }
+    let staging = staging.ok_or_else(|| CaptureError::Os("no staging texture".into()))?;
+    // SAFETY: both textures belong to this device and have identical size and format.
+    unsafe { context.CopyResource(&staging, texture) };
+    let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+    // SAFETY: the staging texture has CPU read access; `mapped` is a valid out-pointer.
+    unsafe { context.Map(&staging, 0, D3D11_MAP_READ, 0, Some(&raw mut mapped)) }
         .map_err(os("Map"))?;
-        let (width, height) = (desc.Width, desc.Height);
-        let stride = mapped.RowPitch as usize;
-        // SAFETY: a mapped texture exposes `RowPitch * Height` readable bytes until `Unmap`.
-        let bytes = unsafe {
-            std::slice::from_raw_parts(mapped.pData.cast::<u8>(), stride * height as usize)
-        };
-        let data = bytes.to_vec();
-        // SAFETY: matches the successful Map above.
-        unsafe { self.context.Unmap(&staging, 0) };
-        Ok(RawFrame {
-            width,
-            height,
-            stride,
-            data,
-        })
-    }
+    let (width, height) = (desc.Width, desc.Height);
+    let stride = mapped.RowPitch as usize;
+    // SAFETY: a mapped texture exposes `RowPitch * Height` readable bytes until `Unmap`.
+    let bytes =
+        unsafe { std::slice::from_raw_parts(mapped.pData.cast::<u8>(), stride * height as usize) };
+    let data = bytes.to_vec();
+    // SAFETY: matches the successful Map above.
+    unsafe { context.Unmap(&staging, 0) };
+    Ok(RawFrame {
+        width,
+        height,
+        stride,
+        data,
+    })
 }
 
 /// Bytes of a mapped texture, rows `stride` apart.
-struct RawFrame {
-    width: u32,
-    height: u32,
-    stride: usize,
-    data: Vec<u8>,
+pub(crate) struct RawFrame {
+    pub width: u32,
+    pub height: u32,
+    pub stride: usize,
+    pub data: Vec<u8>,
 }
 
 /// IEEE 754 half → single precision.
-fn f16_to_f32(h: u16) -> f32 {
+pub(crate) fn f16_to_f32(h: u16) -> f32 {
     let sign = if h & 0x8000 != 0 { -1.0 } else { 1.0 };
     let exp = i32::from((h >> 10) & 0x1F);
     let frac = f32::from(h & 0x3FF);
@@ -191,11 +166,61 @@ fn f16_to_f32(h: u16) -> f32 {
 
 type FrameHandler = TypedEventHandler<Direct3D11CaptureFramePool, windows::core::IInspectable>;
 
-fn frame_handler(tx: Sender<()>) -> FrameHandler {
+pub(crate) fn frame_handler(tx: Sender<()>) -> FrameHandler {
     TypedEventHandler::new(move |_, _| {
         let _ = tx.send(());
         Ok(())
     })
+}
+
+/// A hardware Direct3D 11 device, on `adapter` or the default one.
+pub(crate) fn d3d_device(
+    adapter: Option<&IDXGIAdapter>,
+) -> Result<(ID3D11Device, ID3D11DeviceContext), CaptureError> {
+    let mut device = None;
+    let mut context = None;
+    // An explicit adapter needs the "unknown" driver type.
+    let driver = if adapter.is_some() {
+        D3D_DRIVER_TYPE_UNKNOWN
+    } else {
+        D3D_DRIVER_TYPE_HARDWARE
+    };
+    // SAFETY: out-pointers are valid; no feature-level list or software module.
+    unsafe {
+        D3D11CreateDevice(
+            adapter,
+            driver,
+            HMODULE::default(),
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+            None,
+            D3D11_SDK_VERSION,
+            Some(&raw mut device),
+            None,
+            Some(&raw mut context),
+        )
+    }
+    .map_err(os("D3D11CreateDevice"))?;
+    let device = device.ok_or_else(|| CaptureError::Os("no D3D11 device".into()))?;
+    let context = context.ok_or_else(|| CaptureError::Os("no D3D11 context".into()))?;
+    Ok((device, context))
+}
+
+/// The WinRT wrapper Windows Graphics Capture wants.
+pub(crate) fn winrt_device(device: &ID3D11Device) -> Result<IDirect3DDevice, CaptureError> {
+    let dxgi: IDXGIDevice = device.cast().map_err(os("IDXGIDevice"))?;
+    // SAFETY: `dxgi` is a live DXGI device.
+    unsafe { CreateDirect3D11DeviceFromDXGIDevice(&dxgi) }
+        .and_then(|inspectable| inspectable.cast())
+        .map_err(os("CreateDirect3D11DeviceFromDXGIDevice"))
+}
+
+/// The capture item of a monitor.
+pub(crate) fn monitor_item(monitor: &MonitorInfo) -> Result<GraphicsCaptureItem, CaptureError> {
+    let interop =
+        factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>().map_err(os("interop"))?;
+    let hmonitor = HMONITOR(monitor.id.0 as usize as *mut _);
+    // SAFETY: `hmonitor` came from `EnumDisplayMonitors`; a stale one makes the call fail.
+    unsafe { interop.CreateForMonitor(hmonitor) }.map_err(os("CreateForMonitor"))
 }
 
 impl StillBackend for WgcBackend {
@@ -204,12 +229,7 @@ impl StillBackend for WgcBackend {
         monitor: &MonitorInfo,
         cursor: bool,
     ) -> Result<CpuFrame, CaptureError> {
-        let interop =
-            factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>().map_err(os("interop"))?;
-        let hmonitor = HMONITOR(monitor.id.0 as usize as *mut _);
-        // SAFETY: `hmonitor` came from `EnumDisplayMonitors`; a stale one makes the call fail.
-        let item: GraphicsCaptureItem =
-            unsafe { interop.CreateForMonitor(hmonitor) }.map_err(os("CreateForMonitor"))?;
+        let item = monitor_item(monitor)?;
         let raw = self.grab_item(&item, cursor, DirectXPixelFormat::B8G8R8A8UIntNormalized)?;
         CpuFrame::from_raw(raw.width, raw.height, raw.stride, raw.data)
     }
@@ -219,12 +239,7 @@ impl StillBackend for WgcBackend {
         monitor: &MonitorInfo,
         cursor: bool,
     ) -> Result<HdrFrame, CaptureError> {
-        let interop =
-            factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>().map_err(os("interop"))?;
-        let hmonitor = HMONITOR(monitor.id.0 as usize as *mut _);
-        // SAFETY: as in `grab_monitor`.
-        let item: GraphicsCaptureItem =
-            unsafe { interop.CreateForMonitor(hmonitor) }.map_err(os("CreateForMonitor"))?;
+        let item = monitor_item(monitor)?;
         let raw = self.grab_item(&item, cursor, DirectXPixelFormat::R16G16B16A16Float)?;
         let row_bytes = raw.width as usize * 8;
         let mut rgba = Vec::with_capacity(raw.width as usize * raw.height as usize * 4);

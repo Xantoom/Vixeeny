@@ -46,21 +46,21 @@ fn lang(setting: &str) -> vixeeny_common::i18n::Lang {
 }
 
 /// Runs one action. Failures are logged, not fatal: the app stays available for the next one.
-fn perform(action: ActionId, config: &Config) {
+fn perform(action: ActionId, config: &Config, frozen: Option<ipc::Frozen>) {
     use ActionId::{CaptureAllMonitors, CaptureFullscreen, CaptureWindow};
     match action {
         ActionId::CaptureRegion => {
-            if let Err(e) = region::run(config, region::Mode::Editor) {
+            if let Err(e) = region::run(config, region::Mode::Editor, frozen) {
                 tracing::error!("editor failed: {e:#}");
             }
         }
         ActionId::CaptureScrolling => {
-            if let Err(e) = region::run(config, region::Mode::Scroll) {
+            if let Err(e) = region::run(config, region::Mode::Scroll, frozen) {
                 tracing::error!("scrolling capture failed: {e:#}");
             }
         }
         ActionId::OcrRegion => {
-            if let Err(e) = region::run(config, region::Mode::Ocr) {
+            if let Err(e) = region::run(config, region::Mode::Ocr, frozen) {
                 tracing::error!("OCR failed: {e:#}");
             }
         }
@@ -171,24 +171,33 @@ fn image_output(config: &Config) -> (vixeeny_image::ImageFormat, vixeeny_image::
     (format, settings)
 }
 
-/// `--action <name>` (default: open the settings).
-fn parse_action() -> anyhow::Result<ActionId> {
+/// `--action <name>` (default: open the settings), and the screens the daemon froze for it
+/// (`--frozen`).
+fn parse_action() -> anyhow::Result<(ActionId, Option<ipc::Frozen>)> {
     let mut args = std::env::args().skip(1);
     let mut action = ActionId::OpenSettings;
+    let mut frozen = None;
     while let Some(arg) = args.next() {
         if arg == "--action" {
             let name = args.next().context("--action needs a value")?;
             action = ActionId::from_cli_name(&name)
                 .with_context(|| format!("unknown action `{name}`"))?;
+        } else if arg == "--frozen" {
+            let value = args.next().context("--frozen needs a value")?;
+            frozen = ipc::Frozen::from_arg(&value);
         }
     }
-    Ok(action)
+    Ok((action, frozen))
 }
+
+/// An action is running (the next ones wait for it).
+static BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Runs one action. Returns a follow-up action when the action was the overlay and the user
 /// picked something in it.
 fn run_action(
     action: ActionId,
+    frozen: Option<ipc::Frozen>,
     config: &mut Config,
     recording: &mut Recording,
     send: &mut impl std::io::Write,
@@ -200,9 +209,34 @@ fn run_action(
         | ActionId::ReplaySave => recording.handle(action, config),
         ActionId::OverlayToggle => return overlay(config, recording, send),
         ActionId::OpenSettings => open_settings(),
-        _ => perform(action, config),
+        _ => perform(action, config, frozen),
     }
     Ok(REOPEN_STRIP.take().then_some(ActionId::OverlayToggle))
+}
+
+struct Actions<'a, W: std::io::Write> {
+    config: &'a mut Config,
+    recording: &'a mut Recording,
+    send: &'a mut W,
+}
+
+impl<W: std::io::Write> Actions<'_, W> {
+    /// Runs `action`, then the one the user picked in the overlay, if any.
+    fn run(&mut self, action: ActionId, frozen: Option<ipc::Frozen>) -> anyhow::Result<()> {
+        use std::sync::atomic::Ordering;
+        BUSY.store(true, Ordering::Release);
+        let mut next = Some((action, frozen));
+        let mut result = Ok(());
+        while let Some((action, frozen)) = next.take() {
+            match run_action(action, frozen, self.config, self.recording, self.send) {
+                Ok(then) => next = then.map(|a| (a, None)),
+                Err(e) => result = Err(e),
+            }
+        }
+        BUSY.store(false, Ordering::Release);
+        result?;
+        self.recording.report(self.send)
+    }
 }
 
 thread_local! {
@@ -411,7 +445,7 @@ fn run() -> anyhow::Result<()> {
         Some("--probe-report") => return probe::report(args.iter().any(|a| a == "--force")),
         _ => {}
     }
-    let first_action = parse_action()?;
+    let (first_action, first_frozen) = parse_action()?;
     let mut config = vixeeny_common::paths::config_file()
         .and_then(|path| Config::load(&path).ok())
         .unwrap_or_default();
@@ -437,7 +471,15 @@ fn run() -> anyhow::Result<()> {
     std::thread::Builder::new()
         .name("ipc-read".into())
         .spawn(move || {
-            while let Ok(Some(msg)) = ipc::read_msg::<_, DaemonToApp>(&mut recv) {
+            while let Ok(Some(mut msg)) = ipc::read_msg::<_, DaemonToApp>(&mut recv) {
+                // Frozen while another action runs: they would hide it, and the action that
+                // waits for its turn captures the screen itself.
+                if let DaemonToApp::RunAction { frozen, .. } = &mut msg
+                    && BUSY.load(std::sync::atomic::Ordering::Acquire)
+                    && let Some(frozen) = frozen.take()
+                {
+                    vixeeny_capture::freeze::release(&frozen);
+                }
                 if tx.send(msg).is_err() {
                     break;
                 }
@@ -451,11 +493,12 @@ fn run() -> anyhow::Result<()> {
     let mut recording = Recording::default();
     // The daemon started this process for an action: it comes on the command line, not over the
     // connection (it is not queued on the daemon's side).
-    let mut next = Some(first_action);
-    while let Some(action) = next.take() {
-        next = run_action(action, &mut config, &mut recording, &mut send)?;
-    }
-    recording.report(&mut send)?;
+    let mut actions = Actions {
+        config: &mut config,
+        recording: &mut recording,
+        send: &mut send,
+    };
+    actions.run(first_action, first_frozen)?;
     loop {
         // While recording the app must not exit as idle; it polls the recording state instead.
         let wait = if recording.active() {
@@ -464,13 +507,13 @@ fn run() -> anyhow::Result<()> {
             idle
         };
         match rx.recv_timeout(wait) {
-            Ok(DaemonToApp::RunAction { action, .. }) => {
-                // The overlay hands back the action the user picked in it.
-                let mut next = Some(action);
-                while let Some(action) = next.take() {
-                    next = run_action(action, &mut config, &mut recording, &mut send)?;
+            Ok(DaemonToApp::RunAction { action, frozen }) => {
+                Actions {
+                    config: &mut config,
+                    recording: &mut recording,
+                    send: &mut send,
                 }
-                recording.report(&mut send)?;
+                .run(action, frozen)?;
             }
             Err(RecvTimeoutError::Timeout) if recording.active() => {
                 recording.report(&mut send)?;

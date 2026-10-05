@@ -6,15 +6,21 @@ use std::io;
 use std::path::PathBuf;
 use std::process::Command;
 
-use vixeeny_common::ipc::ActionId;
+use vixeeny_common::ipc::{ActionId, Frozen};
 
 use crate::core::{Event, SpawnId};
 use crate::server::EventTx;
 
 pub trait Spawner {
-    /// Starts the app so that it runs `action`; its exit must later be reported as
-    /// [`Event::AppExited`] with the same `id`.
-    fn spawn(&mut self, id: SpawnId, action: ActionId, tx: EventTx) -> io::Result<()>;
+    /// Starts the app so that it runs `action` (on the `frozen` screens, if any); its exit must
+    /// later be reported as [`Event::AppExited`] with the same `id`.
+    fn spawn(
+        &mut self,
+        id: SpawnId,
+        action: ActionId,
+        frozen: Option<&Frozen>,
+        tx: EventTx,
+    ) -> io::Result<()>;
 }
 
 /// Launches the `vixeeny-app` executable installed next to the daemon.
@@ -57,11 +63,19 @@ pub fn warm_probe() {
 }
 
 impl Spawner for ProcessSpawner {
-    fn spawn(&mut self, id: SpawnId, action: ActionId, tx: EventTx) -> io::Result<()> {
-        let mut child = Command::new(&self.app_path)
-            .arg("--action")
-            .arg(action.cli_name())
-            .spawn()?;
+    fn spawn(
+        &mut self,
+        id: SpawnId,
+        action: ActionId,
+        frozen: Option<&Frozen>,
+        tx: EventTx,
+    ) -> io::Result<()> {
+        let mut command = Command::new(&self.app_path);
+        command.arg("--action").arg(action.cli_name());
+        if let Some(frozen) = frozen {
+            command.arg("--frozen").arg(frozen.to_arg());
+        }
+        let mut child = command.spawn()?;
         tracing::info!(
             "started {} (pid {}, launch {id})",
             self.app_path.display(),

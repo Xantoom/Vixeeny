@@ -6,7 +6,7 @@ use std::rc::Rc;
 use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
 use slint::platform::{Platform, WindowAdapter};
 use slint::{ComponentHandle, PhysicalSize, Rgb8Pixel, SharedPixelBuffer};
-use vixeeny_editor::{Color, Modifiers, Point, RgbaImage, Session, Tool};
+use vixeeny_editor::{Color, Modifiers, Point, Rect, RgbaImage, Session, Tool};
 
 use super::*;
 
@@ -234,6 +234,20 @@ fn the_toolbar_scales_with_the_ui_scale() {
     let buf = render(&o, 1400, 800);
     save("3-toolbar-2x", &buf);
     assert!(o.window().get_toolbar_y() > 300.0);
+    // A new zone starts in "move the zone" mode, its button lit.
+    assert_eq!(o.window().get_tool(), 12);
+    // Back to it after a tool: dragging inside the zone moves it again.
+    o.window().invoke_tool_chosen(1);
+    o.window().invoke_tool_chosen(12);
+    {
+        let s = o.session();
+        let mut s = s.borrow_mut();
+        assert_eq!(s.tool(), None);
+        s.pointer_down(p(200.0, 200.0), NO);
+        s.pointer_move(p(250.0, 220.0), NO);
+        s.pointer_up(p(250.0, 220.0), NO);
+        assert_eq!(s.zone(), Some(Rect::new(150.0, 100.0, 400.0, 220.0)));
+    }
 }
 
 #[test]

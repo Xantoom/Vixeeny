@@ -7,9 +7,9 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use anyhow::Context;
-use vixeeny_capture::{CaptureOptions, CaptureTarget, Capturer};
+use vixeeny_capture::{CaptureOptions, CaptureTarget, Capturer, CpuFrame};
 use vixeeny_common::config::Config;
-use vixeeny_common::ipc::ActionId;
+use vixeeny_common::ipc::{ActionId, Frozen};
 use vixeeny_editor::{Command, Rect, RgbaImage, Session};
 use vixeeny_image::{Bgra, ImageFormat};
 
@@ -174,9 +174,70 @@ pub enum Mode {
     Scroll,
 }
 
-pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
+/// The screens the daemon froze for this capture. They go once the editor covers them, or when
+/// this is dropped (whatever happened).
+struct Thaw(std::cell::RefCell<Option<Frozen>>);
+
+impl Thaw {
+    /// Removes the frozen screens once the compositor has shown what now covers them.
+    fn release(&self) {
+        if let Some(frozen) = self.0.borrow_mut().take() {
+            std::thread::spawn(move || {
+                vixeeny_platform::wait_for_composition();
+                vixeeny_capture::freeze::release(&frozen);
+            });
+        }
+    }
+}
+
+impl Drop for Thaw {
+    fn drop(&mut self) {
+        if let Some(frozen) = self.0.get_mut().take() {
+            vixeeny_capture::freeze::release(&frozen);
+        }
+    }
+}
+
+/// The desktop from the frozen screens, laid out like the monitors.
+fn frozen_desktop(
+    frozen: &Frozen,
+    monitors: &[vixeeny_platform::MonitorInfo],
+    bounds: vixeeny_platform::PhysicalRect,
+    config: &Config,
+) -> anyhow::Result<CpuFrame> {
+    let screens = vixeeny_capture::freeze::read(frozen)?;
+    let mut canvas = CpuFrame::new(bounds.width, bounds.height);
+    for pixels in screens {
+        let s = pixels.screen;
+        let monitor = monitors
+            .iter()
+            .find(|m| {
+                (m.rect.x, m.rect.y, m.rect.width, m.rect.height) == (s.x, s.y, s.width, s.height)
+            })
+            .context("the monitors changed since the screens were frozen")?;
+        let frame = match monitor.hdr {
+            Some(info) if s.hdr && config.image.hdr == "tonemap_sdr" => {
+                let bgra = crate::tonemap_hdr(&pixels.to_scrgb(), &info);
+                CpuFrame::from_raw(s.width, s.height, s.width as usize * 4, bgra)?
+            }
+            info => pixels.to_bgra(info.map_or(80.0, |i| i.sdr_white_nits))?,
+        };
+        canvas.blit(&frame, s.x - bounds.x, s.y - bounds.y);
+    }
+    Ok(canvas)
+}
+
+pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Result<()> {
     let started = Instant::now();
-    tracing::info!("zone capture ({mode:?}) starting");
+    tracing::info!(
+        "zone capture ({mode:?}) starting{}",
+        if frozen.is_some() {
+            " on the frozen screens"
+        } else {
+            ""
+        }
+    );
+    let thaw = std::rc::Rc::new(Thaw(std::cell::RefCell::new(frozen)));
     vixeeny_platform::ensure_dpi_aware();
     let monitors = vixeeny_platform::monitors()?;
     let cursor = vixeeny_platform::cursor_position()?;
@@ -191,16 +252,26 @@ pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
     let bounds = vixeeny_platform::virtual_bounds(monitors.iter().map(|m| &m.rect))
         .context("no monitor found")?;
 
-    let backend = vixeeny_capture::WgcBackend::new()?;
-    let options = CaptureOptions {
-        show_cursor: false,
-        tonemap: (config.image.hdr == "tonemap_sdr")
-            .then_some(crate::tonemap_hdr as vixeeny_capture::ToneMapFn),
+    let from_daemon = thaw.0.borrow().as_ref().and_then(|frozen| {
+        frozen_desktop(frozen, &monitors, bounds, config)
+            .map_err(|e| tracing::warn!("frozen screens not used: {e:#}"))
+            .ok()
+    });
+    let frame = match from_daemon {
+        Some(frame) => frame,
+        None => {
+            let backend = vixeeny_capture::WgcBackend::new()?;
+            let options = CaptureOptions {
+                show_cursor: false,
+                tonemap: (config.image.hdr == "tonemap_sdr")
+                    .then_some(crate::tonemap_hdr as vixeeny_capture::ToneMapFn),
+            };
+            let mut capturer = Capturer::new(backend, monitors.clone());
+            capturer.grab(&CaptureTarget::AllMonitors, options)?
+        }
     };
-    let mut capturer = Capturer::new(backend, monitors.clone());
-    let frame = capturer.grab(&CaptureTarget::AllMonitors, options)?;
     tracing::info!(
-        "screen frozen ({}x{}) after {:?}",
+        "screen read ({}x{}) after {:?}",
         frame.width,
         frame.height,
         started.elapsed()
@@ -295,11 +366,24 @@ pub fn run(config: &Config, mode: Mode) -> anyhow::Result<()> {
         })
         .map_err(|e| anyhow::anyhow!("cannot create the editor window: {e}"))?;
     tracing::info!("editor ready after {:?}", started.elapsed());
-    // The windows show the screen as it is: they must not zoom or fade in.
-    let _instant = vixeeny_platform::without_open_animation();
-    overlay
-        .run(cursor)
-        .map_err(|e| anyhow::anyhow!("editor window: {e}"))?;
+    // The windows show the screen as it is: they must not zoom or fade in, and they appear with
+    // their first frame (cloaked until then), over the frozen screens, which then go.
+    let instant = vixeeny_platform::without_open_animation();
+    vixeeny_platform::cloak_new_windows(true);
+    let shown = thaw.clone();
+    overlay.on_first_frame(move |windows| {
+        for window in windows {
+            vixeeny_platform::uncloak(vixeeny_platform::WindowId(window));
+        }
+        vixeeny_platform::cloak_new_windows(false);
+        tracing::info!("editor on screen after {:?}", started.elapsed());
+        shown.release();
+    });
+    let result = overlay.run(cursor);
+    vixeeny_platform::cloak_new_windows(false);
+    drop(instant);
+    drop(thaw);
+    result.map_err(|e| anyhow::anyhow!("editor window: {e}"))?;
     if let Some(zone) = scroll_zone.take() {
         let zone = vixeeny_platform::PhysicalRect::new(
             bounds.x + zone.x.round() as i32,

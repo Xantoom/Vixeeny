@@ -7,10 +7,10 @@ use std::sync::mpsc::Receiver;
 use vixeeny_common::config::Config;
 use vixeeny_common::hotkey::{self, Hotkey, ProblemKind};
 use vixeeny_common::i18n::{Key, Lang, tr};
-use vixeeny_common::ipc::{ActionId, RecState};
+use vixeeny_common::ipc::{ActionId, ControlRequest, DaemonToApp, Frozen, RecState};
 
 use crate::autostart;
-use crate::core::{Core, Effect, Event};
+use crate::core::{Core, Effect, Event, SpawnId};
 use crate::server::{AppLink, EventTx};
 use crate::supervisor::Spawner;
 
@@ -28,6 +28,33 @@ pub trait HotkeyBackend {
     /// Replaces the registered shortcuts by `bindings`. Returns one message per shortcut the
     /// OS refused (typically because another application owns it).
     fn apply(&mut self, bindings: &[(ActionId, Hotkey)]) -> Vec<String>;
+}
+
+/// Freezes the screens the moment a zone capture is asked for (see
+/// `vixeeny_capture::freeze`); the app takes over from the frozen screens.
+pub trait Freezer {
+    /// `None` when the screens cannot be frozen, or already are.
+    fn freeze(&mut self) -> Option<Frozen>;
+    fn thaw(&mut self);
+}
+
+/// No freezing: the app captures the screens itself.
+pub struct NoFreeze;
+
+impl Freezer for NoFreeze {
+    fn freeze(&mut self) -> Option<Frozen> {
+        None
+    }
+    fn thaw(&mut self) {}
+}
+
+/// Who received the frozen screens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FrozenFor {
+    /// The connected app, over IPC.
+    Link,
+    /// An app started for the press.
+    Spawn(SpawnId),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,6 +75,10 @@ pub struct Runtime<T: Tray, S: Spawner> {
     config_path: Option<PathBuf>,
     os_locale: Option<String>,
     lang: Lang,
+    freezer: Box<dyn Freezer>,
+    /// Frozen screens not handed to the app yet.
+    frozen: Option<Frozen>,
+    frozen_for: Option<FrozenFor>,
 }
 
 impl<T: Tray, S: Spawner> Runtime<T, S> {
@@ -76,7 +107,16 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
             config_path,
             os_locale,
             lang,
+            freezer: Box::new(NoFreeze),
+            frozen: None,
+            frozen_for: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_freezer(mut self, freezer: Box<dyn Freezer>) -> Self {
+        self.freezer = freezer;
+        self
     }
 
     pub fn lang(&self) -> Lang {
@@ -147,6 +187,7 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
 
     fn dispatch(&mut self, event: Event) -> Flow {
         tracing::debug!("event: {event:?}");
+        self.freeze_or_thaw(&event);
         let mut flow = Flow::Continue;
         for effect in self.core.handle(event) {
             if self.execute(effect) == Flow::Quit {
@@ -156,13 +197,71 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
         flow
     }
 
+    /// The screens freeze before anything else happens for a zone capture; they go when the
+    /// app that should take over from them is gone (the app itself removes them otherwise).
+    fn freeze_or_thaw(&mut self, event: &Event) {
+        match *event {
+            Event::Action(action) | Event::Control(ControlRequest::Action(action))
+                if action.freezes_screen() =>
+            {
+                // `None` while earlier frozen screens are still up: they serve this press.
+                if let Some(frozen) = self.freezer.freeze() {
+                    self.frozen = Some(frozen);
+                    self.frozen_for = None;
+                }
+            }
+            Event::AppDisconnected if self.frozen_for == Some(FrozenFor::Link) => self.thaw(),
+            Event::AppExited { id, .. } if self.frozen_for == Some(FrozenFor::Spawn(id)) => {
+                self.thaw();
+            }
+            _ => {}
+        }
+    }
+
+    fn thaw(&mut self) {
+        self.freezer.thaw();
+        self.frozen = None;
+        self.frozen_for = None;
+    }
+
+    /// The frozen screens, for the app that runs `action`.
+    fn take_frozen(&mut self, action: ActionId, receiver: FrozenFor) -> Option<Frozen> {
+        let frozen = self.frozen.take().filter(|_| action.freezes_screen());
+        if frozen.is_some() {
+            self.frozen_for = Some(receiver);
+        }
+        frozen
+    }
+
     fn execute(&mut self, effect: Effect) -> Flow {
         match effect {
             Effect::SpawnApp { id, action } => {
-                if let Err(e) = self.spawner.spawn(id, action, self.tx.clone()) {
+                let frozen = self.take_frozen(action, FrozenFor::Spawn(id));
+                if let Err(e) = self
+                    .spawner
+                    .spawn(id, action, frozen.as_ref(), self.tx.clone())
+                {
                     tracing::error!("cannot start the app: {e}");
                     // Feed the failure back so the state machine can recover.
                     self.tx.send(Event::AppExited { id, success: false });
+                }
+            }
+            Effect::SendToApp(DaemonToApp::RunAction { action, frozen }) => {
+                let frozen = frozen.or_else(|| self.take_frozen(action, FrozenFor::Link));
+                let carries_frozen = frozen.is_some();
+                let msg = DaemonToApp::RunAction { action, frozen };
+                let sent = match self.link.send(&msg) {
+                    Ok(sent) => sent,
+                    Err(e) => {
+                        tracing::warn!("cannot send {msg:?}: {e}");
+                        false
+                    }
+                };
+                if !sent {
+                    tracing::warn!("{action:?} not delivered");
+                }
+                if !sent && carries_frozen {
+                    self.thaw();
                 }
             }
             Effect::SendToApp(msg) => match self.link.send(&msg) {
@@ -224,7 +323,6 @@ mod tests {
     use std::sync::mpsc::channel;
     use std::sync::{Arc, Mutex};
 
-    use crate::core::SpawnId;
     use crate::server::Waker;
 
     struct NoWake;
@@ -270,7 +368,13 @@ mod tests {
         spawned: Arc<Mutex<Vec<(SpawnId, ActionId)>>>,
     }
     impl Spawner for FakeSpawner {
-        fn spawn(&mut self, id: SpawnId, action: ActionId, _: EventTx) -> io::Result<()> {
+        fn spawn(
+            &mut self,
+            id: SpawnId,
+            action: ActionId,
+            _: Option<&Frozen>,
+            _: EventTx,
+        ) -> io::Result<()> {
             if self.fail {
                 return Err(io::Error::other("boom"));
             }
@@ -355,6 +459,59 @@ mod tests {
             *log.lock().unwrap(),
             vec!["notify Vixeeny s'est arrêté de façon inattendue".to_owned()]
         );
+    }
+
+    #[derive(Default, Clone)]
+    struct FakeFreezer {
+        log: Arc<Mutex<Vec<&'static str>>>,
+    }
+    impl Freezer for FakeFreezer {
+        fn freeze(&mut self) -> Option<Frozen> {
+            self.log.lock().unwrap().push("freeze");
+            Some(Frozen {
+                adapter: 1,
+                screens: Vec::new(),
+            })
+        }
+        fn thaw(&mut self) {
+            self.log.lock().unwrap().push("thaw");
+        }
+    }
+
+    #[test]
+    fn a_zone_capture_freezes_first_and_thaws_if_its_app_dies() {
+        let (rt, tx, _, spawned) = runtime(false, Config::default());
+        let freezer = FakeFreezer::default();
+        let mut rt = rt.with_freezer(Box::new(freezer.clone()));
+        tx.send(Event::Action(ActionId::OpenSettings));
+        rt.pump();
+        assert!(freezer.log.lock().unwrap().is_empty());
+        // The settings app exits; a zone capture starts a new app with the frozen screens.
+        tx.send(Event::AppExited {
+            id: 1,
+            success: true,
+        });
+        tx.send(Event::Action(ActionId::CaptureRegion));
+        rt.pump();
+        assert_eq!(*freezer.log.lock().unwrap(), vec!["freeze"]);
+        assert_eq!(
+            spawned.lock().unwrap().last(),
+            Some(&(2, ActionId::CaptureRegion))
+        );
+        assert!(rt.frozen.is_none());
+        // Another app's exit leaves them; the exit of the one that has them removes them.
+        tx.send(Event::AppExited {
+            id: 1,
+            success: true,
+        });
+        rt.pump();
+        assert_eq!(*freezer.log.lock().unwrap(), vec!["freeze"]);
+        tx.send(Event::AppExited {
+            id: 2,
+            success: false,
+        });
+        rt.pump();
+        assert_eq!(*freezer.log.lock().unwrap(), vec!["freeze", "thaw"]);
     }
 
     #[test]

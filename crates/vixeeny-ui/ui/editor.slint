@@ -79,6 +79,8 @@ export component EditorWindow inherits Window {
     in property <float> dim: 0.4;
     // The veil fades in once the window is up, so the screen first looks exactly as it was.
     in property <bool> fade-in: true;
+    // The dimming waits while this is set (the window is not on screen yet).
+    in property <bool> hold: false;
     in property <float> ui-scale: 1;
 
     // The zone.
@@ -181,7 +183,7 @@ export component EditorWindow inherits Window {
 
     Timer {
         interval: 30ms;
-        running: !root.shown;
+        running: !root.shown && !root.hold;
         triggered => { root.shown = true; }
     }
 
@@ -395,7 +397,7 @@ export component EditorWindow inherits Window {
             property <length> pop-h: (root.picker-open ? 250 : 110) * root.u;
             x: (root.toolbar-x - root.area-x) * 1phx;
             y: (root.toolbar-y - root.area-y) * 1phx + (self.shown ? 0 : 6 * root.u);
-            width: 722 * root.u;
+            width: 756 * root.u;
             height: 46 * root.u;
             opacity: self.shown ? 1 : 0;
             animate opacity, y { duration: Theme.t-normal; easing: cubic-bezier(0.2, 0, 0, 1); }
@@ -416,7 +418,7 @@ export component EditorWindow inherits Window {
 
             // Tools (the index is the session's tool number).
             for t[k] in [
-                { i: 0, icon: Icons.cursor }, { i: 1, icon: Icons.pen }, { i: 7, icon: Icons.highlight },
+                { i: 12, icon: Icons.move }, { i: 0, icon: Icons.cursor }, { i: 1, icon: Icons.pen }, { i: 7, icon: Icons.highlight },
                 { i: 2, icon: Icons.line }, { i: 3, icon: Icons.arrow }, { i: 4, icon: Icons.square },
                 { i: 5, icon: Icons.circle }, { i: 6, icon: Icons.text }, { i: 10, icon: Icons.marker },
                 { i: 8, icon: Icons.blur }, { i: 9, icon: Icons.pixelate },
@@ -428,7 +430,7 @@ export component EditorWindow inherits Window {
                 active: root.tool == t.i;
                 clicked => { root.tool-chosen(t.i); }
             }
-            for sx in [383, 425, 501, 679] : Rectangle {
+            for sx in [417, 459, 535, 713] : Rectangle {
                 x: sx * root.u;
                 y: 14 * root.u;
                 width: 1phx;
@@ -438,7 +440,7 @@ export component EditorWindow inherits Window {
 
             // Style: the current colour; opens the panel.
             Rectangle {
-                x: 388 * root.u;
+                x: 422 * root.u;
                 y: 8 * root.u;
                 width: 30 * root.u;
                 height: 30 * root.u;
@@ -464,10 +466,10 @@ export component EditorWindow inherits Window {
 
             // Undo, redo, then copy, save, save as, scrolling capture, OCR; then close.
             for a[k] in [
-                { x: 430, icon: Icons.undo, name: "undo" }, { x: 464, icon: Icons.redo, name: "redo" },
-                { x: 506, icon: Icons.copy, name: "copy" }, { x: 540, icon: Icons.save, name: "save" },
-                { x: 574, icon: Icons.save-as, name: "save-as" }, { x: 608, icon: Icons.scroll, name: "scroll" },
-                { x: 642, icon: Icons.scan-text, name: "ocr" }, { x: 684, icon: Icons.dismiss, name: "close" },
+                { x: 464, icon: Icons.undo, name: "undo" }, { x: 498, icon: Icons.redo, name: "redo" },
+                { x: 540, icon: Icons.copy, name: "copy" }, { x: 574, icon: Icons.save, name: "save" },
+                { x: 608, icon: Icons.save-as, name: "save-as" }, { x: 642, icon: Icons.scroll, name: "scroll" },
+                { x: 676, icon: Icons.scan-text, name: "ocr" }, { x: 718, icon: Icons.dismiss, name: "close" },
             ] : IconButton {
                 u: root.u;
                 x: a.x * root.u;
@@ -481,7 +483,7 @@ export component EditorWindow inherits Window {
             if root.style-open : Rectangle {
                 property <bool> above: (root.toolbar-y - root.area-y) * 1phx > parent.pop-h + 8 * root.u;
                 property <bool> open: !root.fade-in;
-                x: 403 * root.u - parent.pop-w / 2;
+                x: 437 * root.u - parent.pop-w / 2;
                 y: (self.above ? -parent.pop-h - 8 * root.u : 54 * root.u) + (self.open ? 0 : (self.above ? 4 : -4) * root.u);
                 width: parent.pop-w;
                 height: parent.pop-h;

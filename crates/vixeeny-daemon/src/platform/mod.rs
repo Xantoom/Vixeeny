@@ -17,6 +17,7 @@ pub struct Startup {
     pub link: AppLink,
 }
 
+mod freezer;
 mod hotkeys;
 mod tray;
 mod windows;
