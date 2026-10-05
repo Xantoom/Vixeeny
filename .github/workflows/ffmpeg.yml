@@ -1,0 +1,29 @@
+name: FFmpeg
+# Run by hand when the FFmpeg that Vixeeny ships must change (`packaging/ffmpeg/build.sh`): builds
+# it and publishes the zip as the pre-release `ffmpeg-<name>`. Then point `native/versions.toml`
+# at the zip and its SHA-256 (printed at the end of the build and in the release notes).
+# Pre-releases are never offered as updates.
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: Release name, e.g. n9.0.2-1 (published as ffmpeg-<name>)
+        required: true
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: packaging/ffmpeg/build.sh "dist/ffmpeg-vixeeny-${{ inputs.name }}-win64.zip"
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          zip="dist/ffmpeg-vixeeny-${{ inputs.name }}-win64.zip"
+          sum=$(sha256sum "$zip" | cut -d' ' -f1)
+          gh release create "ffmpeg-${{ inputs.name }}" "$zip" --prerelease --latest=false \
+            --target "${{ github.sha }}" --title "FFmpeg for Vixeeny (${{ inputs.name }})" \
+            --notes "The FFmpeg DLLs Vixeeny ships, built by packaging/ffmpeg/build.sh. Not a Vixeeny release. SHA-256: $sum"
