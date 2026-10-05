@@ -1,11 +1,13 @@
 name: Release
-# Run by hand on the release branch (`gh workflow run release.yml --ref 1.0`): builds the Windows
-# packages (installer, update archive, portable archive), signs them and prepares a draft GitHub
-# release `v<version of Cargo.toml>`, whose tag is made when the draft is published.
-# It runs on the branch rather than on a tag: a tag cannot read the caches of the branch, and
-# every release would build FFmpeg's libraries and the whole app from nothing (~25 min).
-# With `release: false` it only builds the files (to check the packaging).
+# Builds the Windows packages (installer, update archive, portable archive), signs them and
+# prepares the draft GitHub release `v<version of Cargo.toml>`, whose tag is made when the draft
+# is published. It runs on the release branch when the version changes (and by hand), not on a
+# tag: a tag cannot read the caches of the branch, and every release would build everything from
+# nothing (~25 min). A version that already has a release is not built again.
 on:
+  push:
+    branches: ["1.0"]
+    paths: ["Cargo.toml"]
   workflow_dispatch:
     inputs:
       release:
@@ -15,7 +17,26 @@ on:
 permissions:
   contents: write
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.check.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          if [ "${{ github.event_name }}" = workflow_dispatch ] || ! gh release view "v$version" >/dev/null 2>&1; then
+            echo build=true >> "$GITHUB_OUTPUT"
+          else
+            echo "v$version already has a release: nothing to build."
+            echo build=false >> "$GITHUB_OUTPUT"
+          fi
   windows:
+    needs: version
+    if: needs.version.outputs.build == 'true'
     runs-on: windows-latest
     env:
       FFMPEG_DIR: ${{ github.workspace }}\native\build\work\ffmpeg-prebuilt
@@ -85,7 +106,7 @@ jobs:
             dist/*.minisig
             dist/SHA256SUMS
       - name: Draft release
-        if: inputs.release
+        if: github.event_name == 'push' || inputs.release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}

@@ -5,7 +5,7 @@
   (the library of `vixeeny-app` that downloads and installs updates). While it contains the
   word `unconfigured`, every update is refused.
 - `icons/` — the logo at every size and the `.ico` files (`cargo xtask icons` draws them).
-- `.github/workflows/release.yml` — builds, packages, signs and drafts the release `v<version>`; run it by hand on the release branch (`gh workflow run release.yml --ref 1.0`)
+- `.github/workflows/release.yml` — builds, packages, signs and drafts the release `v<version>`; built when the version of `Cargo.toml` changes on the release branch
   (or builds without publishing on a manual run).
 
 ## One-time setup by the maintainer (signing key)

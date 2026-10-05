@@ -1,14 +1,13 @@
 name: FFmpeg
-# Run by hand when the FFmpeg that Vixeeny ships must change (`packaging/ffmpeg/build.sh`): builds
-# it and publishes the zip as the pre-release `ffmpeg-<name>`. Then point `native/versions.toml`
-# at the zip and its SHA-256 (printed at the end of the build and in the release notes).
-# Pre-releases are never offered as updates.
+# Builds the FFmpeg that Vixeeny ships (`packaging/ffmpeg/build.sh`) and publishes the zip as the
+# pre-release `ffmpeg-<packaging/ffmpeg/release>`, when the build changes and that name has no
+# release yet (raise the name to publish a new build). Then point `native/versions.toml` at the
+# zip and its SHA-256 (in the release notes). Pre-releases are never offered as updates.
 on:
+  push:
+    branches: ["1.0"]
+    paths: ["packaging/ffmpeg/**"]
   workflow_dispatch:
-    inputs:
-      name:
-        description: Release name, e.g. n9.0.2-1 (published as ffmpeg-<name>)
-        required: true
 permissions:
   contents: write
 jobs:
@@ -16,14 +15,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build
-        run: packaging/ffmpeg/build.sh "dist/ffmpeg-vixeeny-${{ inputs.name }}-win64.zip"
-      - name: Publish
+      - id: name
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          zip="dist/ffmpeg-vixeeny-${{ inputs.name }}-win64.zip"
+          name=$(tr -d '[:space:]' < packaging/ffmpeg/release)
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          if gh release view "ffmpeg-$name" >/dev/null 2>&1; then
+            echo "ffmpeg-$name is already published: raise packaging/ffmpeg/release for a new build."
+            echo build=false >> "$GITHUB_OUTPUT"
+          else
+            echo build=true >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build
+        if: steps.name.outputs.build == 'true'
+        run: packaging/ffmpeg/build.sh "dist/ffmpeg-vixeeny-${{ steps.name.outputs.name }}-win64.zip"
+      - name: Publish
+        if: steps.name.outputs.build == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          name="${{ steps.name.outputs.name }}"
+          zip="dist/ffmpeg-vixeeny-$name-win64.zip"
           sum=$(sha256sum "$zip" | cut -d' ' -f1)
-          gh release create "ffmpeg-${{ inputs.name }}" "$zip" --prerelease --latest=false \
-            --target "${{ github.sha }}" --title "FFmpeg for Vixeeny (${{ inputs.name }})" \
+          gh release create "ffmpeg-$name" "$zip" --prerelease --latest=false \
+            --target "${{ github.sha }}" --title "FFmpeg for Vixeeny ($name)" \
             --notes "The FFmpeg DLLs Vixeeny ships, built by packaging/ffmpeg/build.sh. Not a Vixeeny release. SHA-256: $sum"
