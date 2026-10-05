@@ -965,8 +965,12 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::SetSubVideos, Lang::Fr) => "Vidéos",
         (Key::SetSubReplays, Lang::En) => "Replays",
         (Key::SetSubReplays, Lang::Fr) => "Replays",
-        (Key::SetForegroundApp, Lang::En) => "Name captures after the active application",
-        (Key::SetForegroundApp, Lang::Fr) => "Nommer les captures d'après l'application active",
+        (Key::SetForegroundApp, Lang::En) => {
+            "Name captures after a full-screen application (a game), else \"Desktop\""
+        }
+        (Key::SetForegroundApp, Lang::Fr) => {
+            "Nommer les captures d'après l'application en plein écran (un jeu), sinon « Desktop »"
+        }
         (Key::SetAppNames, Lang::En) => "Application names",
         (Key::SetAppNames, Lang::Fr) => "Noms des applications",
         (Key::SetOcrLanguages, Lang::En) => "Languages",

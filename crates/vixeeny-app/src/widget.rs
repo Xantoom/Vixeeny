@@ -135,6 +135,10 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
         let _ = out.write_all(press.to_line().as_bytes());
         let _ = out.flush();
     });
+    // Out of the captures from its creation: excluded only once shown, its first frames (a black
+    // block) would be in the video. The guard lives as long as the event loop that creates it.
+    let _creation = vixeeny_platform::without_open_animation();
+    vixeeny_platform::exclude_new_windows(true);
     panel.show().map_err(|e| anyhow::anyhow!("{e}"))?;
     // Never in the video, never stealing the keyboard. If the exclusion fails the widget could
     // end up in the recording: that is logged loudly and the recording goes on.

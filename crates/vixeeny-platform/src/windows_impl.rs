@@ -359,6 +359,15 @@ impl Drop for NoOpenAnimation {
 thread_local! {
     /// Windows created by this thread start cloaked (see [`cloak_new_windows`]).
     static CLOAK_NEW: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Windows created by this thread are kept out of captures (see [`exclude_new_windows`]).
+    static EXCLUDE_NEW: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// While on (and a [`without_open_animation`] guard lives), the windows this thread creates are
+/// kept out of screen captures from their creation, before their first frame: a recording never
+/// shows them, not even for a moment.
+pub fn exclude_new_windows(on: bool) {
+    EXCLUDE_NEW.set(on);
 }
 
 /// While on (and a [`without_open_animation`] guard lives), the windows this thread creates are
@@ -411,6 +420,10 @@ pub fn without_open_animation() -> Option<NoOpenAnimation> {
                 };
                 if CLOAK_NEW.get() {
                     set_cloak(msg.hwnd, true);
+                }
+                if EXCLUDE_NEW.get() {
+                    // SAFETY: plain call on the window being created.
+                    let _ = unsafe { SetWindowDisplayAffinity(msg.hwnd, WDA_EXCLUDEFROMCAPTURE) };
                 }
             }
         }

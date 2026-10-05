@@ -76,7 +76,8 @@ pub struct Destination<'a> {
     pub dir: &'a Path,
     pub template: &'a str,
     pub per_app_subfolder: bool,
-    /// `{app}` of a desktop capture is the application with the focus, not `Vixeeny`.
+    /// `{app}` of a desktop capture is the full-screen application with the focus (a game),
+    /// not `Desktop`.
     pub use_foreground_app: bool,
     pub app_names: &'a BTreeMap<String, String>,
     pub now: &'a LocalTime,
@@ -93,7 +94,10 @@ pub(crate) fn app_name(
 ) -> String {
     let window = match action {
         ActionId::CaptureWindow => snap.foreground.as_ref(),
-        _ => snap.foreground.as_ref().filter(|_| dest.use_foreground_app),
+        _ => snap
+            .foreground
+            .as_ref()
+            .filter(|w| dest.use_foreground_app && is_full_screen(w, &snap.monitors)),
     };
     let resolved = window.and_then(|w| {
         let meta = w.exe_path.as_deref().map(metadata).unwrap_or_default();
@@ -107,7 +111,25 @@ pub(crate) fn app_name(
             dest.app_names,
         )
     });
-    resolved.unwrap_or_else(|| naming::DEFAULT_APP_NAME.to_owned())
+    resolved.unwrap_or_else(|| {
+        if action == ActionId::CaptureWindow {
+            naming::DEFAULT_APP_NAME.to_owned()
+        } else {
+            naming::DESKTOP_APP_NAME.to_owned()
+        }
+    })
+}
+
+/// A window covering a whole monitor: a game or a video, not a window among others.
+fn is_full_screen(window: &WindowInfo, monitors: &[MonitorInfo]) -> bool {
+    let w = &window.rect;
+    monitors.iter().any(|m| {
+        let m = &m.rect;
+        w.x <= m.x
+            && w.y <= m.y
+            && w.x + w.width as i32 >= m.x + m.width as i32
+            && w.y + w.height as i32 >= m.y + m.height as i32
+    })
 }
 
 fn template_vars(
@@ -328,18 +350,18 @@ mod tests {
         );
         assert_eq!(
             first.file_name().unwrap(),
-            "Vixeeny_2026-10-01_17-12-00.png"
+            "Desktop_2026-10-01_17-12-00.png"
         );
         assert_eq!(
             second.file_name().unwrap(),
-            "Vixeeny_2026-10-01_17-12-00_2.png"
+            "Desktop_2026-10-01_17-12-00_2.png"
         );
         let decoder = png::Decoder::new(std::io::BufReader::new(
             std::fs::File::open(&first).unwrap(),
         ));
         let reader = decoder.read_info().unwrap();
         assert_eq!((reader.info().width, reader.info().height), (160, 100));
-        assert!(!dir.join("Vixeeny_2026-10-01_17-12-00.png.part").exists());
+        assert!(!dir.join("Desktop_2026-10-01_17-12-00.png.part").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -394,8 +416,23 @@ mod tests {
     #[test]
     fn desktop_captures_follow_the_foreground_app_setting() {
         let dir = temp_dir("fg");
-        let snap = snapshot(); // foreground window titled "Game", unknown exe
+        // A window among others: the capture is the desktop's.
         let names = BTreeMap::new();
+        let windowed = run_with(
+            ActionId::CaptureFullscreen,
+            &snapshot(),
+            &dir,
+            "{app}",
+            false,
+            true,
+            &names,
+            &no_metadata,
+        );
+        assert_eq!(windowed.file_name().unwrap(), "Desktop.png");
+        let _ = std::fs::remove_file(&windowed);
+        // A full-screen game (titled "Game", unknown exe) names it.
+        let mut snap = snapshot();
+        snap.foreground.as_mut().unwrap().rect = PhysicalRect::new(200, 0, 160, 100);
         let on = run_with(
             ActionId::CaptureFullscreen,
             &snap,
@@ -417,7 +454,7 @@ mod tests {
             &names,
             &no_metadata,
         );
-        assert_eq!(off.file_name().unwrap(), "Vixeeny.png");
+        assert_eq!(off.file_name().unwrap(), "Desktop.png");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

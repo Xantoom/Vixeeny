@@ -1031,3 +1031,34 @@ fn a_long_image_scrolls_under_a_fixed_toolbar() {
     );
     assert!(o.window().get_toolbar_y() < 40.0);
 }
+
+#[test]
+fn a_drag_over_a_window_draws_a_zone() {
+    use slint::platform::{PointerEventButton, WindowEvent};
+    let o = overlay(640, 360, 1.0);
+    render(&o, 640, 360);
+    let window = WINDOW.with(Rc::clone);
+    let at = |x: f32, y: f32| slint::LogicalPosition::new(x, y);
+    window.dispatch_event(WindowEvent::PointerMoved {
+        position: at(100.0, 100.0),
+    });
+    window.dispatch_event(WindowEvent::PointerPressed {
+        position: at(100.0, 100.0),
+        button: PointerEventButton::Left,
+    });
+    for i in 1..=10 {
+        let d = i as f32 * 10.0;
+        window.dispatch_event(WindowEvent::PointerMoved {
+            position: at(100.0 + d, 100.0 + d),
+        });
+    }
+    window.dispatch_event(WindowEvent::PointerReleased {
+        position: at(200.0, 200.0),
+        button: PointerEventButton::Left,
+    });
+    let rect = o.session().borrow().zone();
+    assert_eq!(
+        rect,
+        Some(vixeeny_editor::Rect::new(100.0, 100.0, 100.0, 100.0))
+    );
+}

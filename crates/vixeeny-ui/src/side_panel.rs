@@ -519,7 +519,26 @@ impl SidePanel {
         }
         #[cfg(not(feature = "desktop"))]
         let _ = dress;
-        self.window.set_shown(true);
+        // The slide starts once the window is on screen: started at `show`, it would be over
+        // before the first frame (creating the window takes longer than the animation).
+        let weak = self.window.as_weak();
+        let once = Rc::new(Cell::new(false));
+        let notified = self
+            .window
+            .window()
+            .set_rendering_notifier(move |state, _| {
+                if matches!(state, slint::RenderingState::AfterRendering) && !once.replace(true) {
+                    let weak = weak.clone();
+                    slint::Timer::single_shot(Duration::ZERO, move || {
+                        if let Some(w) = weak.upgrade() {
+                            w.set_shown(true);
+                        }
+                    });
+                }
+            });
+        if notified.is_err() {
+            self.window.set_shown(true);
+        }
         slint::run_event_loop()?;
         self.window.hide()?;
         Ok(self.chosen.get())

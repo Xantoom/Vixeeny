@@ -275,11 +275,9 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
     let monitors = vixeeny_platform::monitors()?;
     let cursor = vixeeny_platform::cursor_position()?;
     let foreground = vixeeny_platform::foreground_window()?;
-    let windows = vixeeny_platform::top_level_windows().unwrap_or_default();
     tracing::info!(
-        "{} monitor(s), {} window(s) after {:?}",
+        "{} monitor(s) after {:?}",
         monitors.len(),
-        windows.len(),
         started.elapsed()
     );
     let bounds = vixeeny_platform::virtual_bounds(monitors.iter().map(|m| &m.rect))
@@ -312,17 +310,6 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
         started.elapsed()
     );
 
-    let zones: Vec<Rect> = windows
-        .iter()
-        .map(|w| {
-            Rect::new(
-                (w.rect.x - bounds.x) as f32,
-                (w.rect.y - bounds.y) as f32,
-                w.rect.width as f32,
-                w.rect.height as f32,
-            )
-        })
-        .collect();
     let scale = vixeeny_platform::monitor_at(&monitors, cursor.0, cursor.1)
         .map_or(1.0, |m| m.scale_factor() as f32);
     // One overlay window per monitor, each showing its part of the frozen desktop.
@@ -378,7 +365,8 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
     let scroll_zone: std::rc::Rc<std::cell::Cell<Option<Rect>>> = std::rc::Rc::default();
     let scroll_slot = scroll_zone.clone();
 
-    let mut session = Session::new(base, zones).with_screens(monitor_areas);
+    // No window detection: the zone is always drawn freely.
+    let mut session = Session::new(base, Vec::new()).with_screens(monitor_areas);
     match mode {
         Mode::Editor => {}
         Mode::Ocr => session = session.with_auto_command(Command::Ocr),

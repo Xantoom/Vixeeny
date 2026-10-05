@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 
 /// Names used when nothing better is known.
 pub const DEFAULT_APP_NAME: &str = "Vixeeny";
+/// `{app}` of a desktop capture when no full-screen application has the focus.
+pub const DESKTOP_APP_NAME: &str = "Desktop";
 /// Longest file or folder name, in characters.
 pub const MAX_NAME_CHARS: usize = 100;
 
