@@ -216,6 +216,20 @@ fn a_settled_zone_shows_handles_and_the_toolbar() {
     o.refresh();
     let buf = render(&o, 900, 500);
     save("2-toolbar", &buf);
+    // A moment of hover over the pen says what it is.
+    o.set_tips(&["Move".into(), "Select".into(), "Pen".into()]);
+    let (bx, by) = (o.window().get_toolbar_x(), o.window().get_toolbar_y());
+    let window = WINDOW.with(Rc::clone);
+    window.dispatch_event(slint::platform::WindowEvent::PointerMoved {
+        position: slint::LogicalPosition::new(bx + 102.0, by + 23.0),
+    });
+    slint::platform::update_timers_and_animations();
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    slint::platform::update_timers_and_animations();
+    window.request_redraw();
+    let tipped = render(&o, 900, 500);
+    save("2-toolbar-tip", &tipped);
+    assert_ne!(buf.as_slice(), tipped.as_slice(), "the tip shows");
     assert!(o.window().get_has_toolbar());
     assert!(o.window().get_has_annotated());
     assert_eq!(o.window().get_tool(), 4);
