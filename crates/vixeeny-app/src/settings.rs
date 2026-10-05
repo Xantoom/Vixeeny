@@ -7,6 +7,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use anyhow::Context;
@@ -23,10 +24,9 @@ use vixeeny_ui::settings_panel::{
 use vixeeny_updater::client;
 use vixeeny_updater::state::State as UpdateState;
 
-use crate::gallery::{self, Item, Kind};
+use crate::gallery::{self, Item, Kind, THUMB_SIDE};
 
 const REPO: &str = "https://github.com/Xantoom/Vixeeny";
-const THUMB_SIDE: u32 = 256;
 /// Marks the settings window so that a second launch can bring it forward.
 const SETTINGS_TAG: &str = "Vixeeny.Settings";
 /// How many captures the gallery shows.
@@ -123,12 +123,12 @@ fn entries(g: &Gallery, offset: i64) -> Vec<GalleryEntry> {
 fn show_gallery(shared: &SharedGallery, handle: &PanelHandle, offset: i64) {
     let (shown, selected, missing) = {
         let Ok(g) = shared.lock() else { return };
-        let missing: Vec<PathBuf> = g
+        let missing: Vec<gallery::Item> = g
             .shown
             .iter()
             .filter_map(|i| g.items.get(*i))
             .filter(|i| !g.thumbs.contains_key(&i.path))
-            .map(|i| i.path.clone())
+            .cloned()
             .collect();
         (entries(&g, offset), g.selected, missing)
     };
@@ -138,16 +138,41 @@ fn show_gallery(shared: &SharedGallery, handle: &PanelHandle, offset: i64) {
     }
     let (shared, handle) = (Arc::clone(shared), handle.clone());
     std::thread::spawn(move || {
-        for (n, path) in missing.iter().enumerate() {
-            let thumb = gallery::thumbnail(path, THUMB_SIDE);
-            let Ok(mut g) = shared.lock() else { return };
-            if let Some(thumb) = thumb {
-                g.thumbs.insert(path.clone(), thumb);
+        let cache = vixeeny_common::paths::cache_dir()
+            .map(|dir| gallery::ThumbCache::new(dir.join("thumbnails")));
+        // Several cores decode at once, the visible tiles first; the tiles are redrawn every
+        // few thumbnails, not for each one.
+        let next = AtomicUsize::new(0);
+        let done = AtomicUsize::new(0);
+        let workers = std::thread::available_parallelism()
+            .map_or(2, std::num::NonZero::get)
+            .clamp(1, 6)
+            .min(missing.len());
+        std::thread::scope(|scope| {
+            for _ in 0..workers {
+                scope.spawn(|| {
+                    loop {
+                        let n = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(item) = missing.get(n) else { break };
+                        let thumb = match &cache {
+                            Some(cache) => cache.thumbnail(item, THUMB_SIDE),
+                            None => gallery::thumbnail(&item.path, THUMB_SIDE),
+                        };
+                        let finished = done.fetch_add(1, Ordering::Relaxed) + 1;
+                        let Ok(mut g) = shared.lock() else { return };
+                        if let Some(thumb) = thumb {
+                            g.thumbs.insert(item.path.clone(), thumb);
+                        }
+                        if finished.is_multiple_of(6) || finished == missing.len() {
+                            handle.set_gallery(entries(&g, offset), g.selected);
+                        }
+                    }
+                });
             }
-            // The tiles are redrawn every few thumbnails, not for each one.
-            if n % 6 == 5 || n + 1 == missing.len() {
-                handle.set_gallery(entries(&g, offset), g.selected);
-            }
+        });
+        if let Some(cache) = cache {
+            let items = shared.lock().map(|g| g.items.clone()).unwrap_or_default();
+            cache.prune(&items, THUMB_SIDE);
         }
     });
 }

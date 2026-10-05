@@ -127,7 +127,11 @@ impl WidgetPanel {
                 if let Some(w) = weak.upgrade() {
                     let elapsed = CLOCK.with(|c| c.borrow().map(|c| c.elapsed(Instant::now())));
                     if let Some(elapsed) = elapsed {
-                        w.set_time(format_elapsed(elapsed).into());
+                        // Only a new second redraws the widget.
+                        let text = format_elapsed(elapsed);
+                        if w.get_time() != text.as_str() {
+                            w.set_time(text.into());
+                        }
                     }
                 }
             },

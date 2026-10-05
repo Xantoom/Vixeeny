@@ -378,7 +378,7 @@ fn a_bgra_screen_lands_at_its_place_in_the_desktop() {
         1, 2, 3, 0, 4, 5, 6, 0, 99, 99, 99, 99, //
         7, 8, 9, 0, 10, 11, 12, 0, 99, 99, 99, 99,
     ];
-    let mut dst = vec![0u8; 4 * 3 * 4];
+    let mut dst = [0u8; 4 * 3 * 4];
     let row = 4 * 4;
     super::bgra_to_rgba(&src, 12, &mut dst[row + 4..], row, (2, 2));
     assert_eq!(&dst[row + 4..row + 12], &[3, 2, 1, 255, 6, 5, 4, 255]);

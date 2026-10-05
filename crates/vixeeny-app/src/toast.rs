@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Notifications (plan 5.14): a card with the thumbnail after a capture, a recording or a replay,
-//! and a clear message with a way out when something fails. Each card is a process of its own
-//! (`vixeeny-app --toast <kind> <text>`), so it never holds up the next hotkey.
+//! and a clear message with a way out when something fails. The cards are shown by a process of
+//! their own (`vixeeny-app --toast-host`), so they never hold up the next hotkey. It is started
+//! once and reads the next cards on its standard input: a card costs no new process. It ends with
+//! the process that started it (its input closes), once its card is gone.
 
 use std::path::{Path, PathBuf};
 
@@ -130,17 +132,77 @@ pub fn notify(config: &Config, toast: &Toast) {
     if !config.general.notifications {
         return;
     }
+    let line = encode_line(&toast.to_args());
+    if let Err(e) = send_to_host(&line) {
+        tracing::warn!("cannot show the notification: {e}");
+    }
+}
+
+/// The card process of this process, if started.
+static HOST: std::sync::Mutex<Option<std::process::Child>> = std::sync::Mutex::new(None);
+
+fn send_to_host(line: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut host = HOST
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(child) = host.as_mut()
+        && matches!(child.try_wait(), Ok(None))
+        && let Some(stdin) = child.stdin.as_mut()
+        && stdin
+            .write_all(line.as_bytes())
+            .and_then(|()| stdin.flush())
+            .is_ok()
     {
-        let [kind, text] = toast.to_args();
-        let spawned = std::env::current_exe().and_then(|exe| {
-            std::process::Command::new(exe)
-                .args(["--toast", &kind, &text])
-                .spawn()
-        });
-        if let Err(e) = spawned {
-            tracing::warn!("cannot show the notification: {e}");
+        return Ok(());
+    }
+    let mut child = std::process::Command::new(std::env::current_exe()?)
+        .arg("--toast-host")
+        .stdin(std::process::Stdio::piped())
+        .spawn()?;
+    if let Some(stdin) = child.stdin.as_mut() {
+        stdin.write_all(line.as_bytes())?;
+        stdin.flush()?;
+    }
+    *host = Some(child);
+    Ok(())
+}
+
+/// `kind<TAB>text<LF>`, the text with `\`, tabs and line breaks escaped.
+fn encode_line([kind, text]: &[String; 2]) -> String {
+    let mut out = String::with_capacity(kind.len() + text.len() + 2);
+    out.push_str(kind);
+    out.push('\t');
+    for c in text.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c => out.push(c),
         }
     }
+    out.push('\n');
+    out
+}
+
+fn decode_line(line: &str) -> Option<Toast> {
+    let (kind, escaped) = line.split_once('\t')?;
+    let mut text = String::with_capacity(escaped.len());
+    let mut chars = escaped.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next()? {
+                'n' => text.push('\n'),
+                'r' => text.push('\r'),
+                't' => text.push('\t'),
+                other => text.push(other),
+            }
+        } else {
+            text.push(c);
+        }
+    }
+    Toast::from_args(kind, &text)
 }
 
 /// The folder that holds `path`.
@@ -149,17 +211,11 @@ fn folder_of(path: &Path) -> PathBuf {
         .map_or_else(|| path.to_owned(), Path::to_owned)
 }
 
-/// `--toast <kind> <text>`: shows the card, then does what the user clicked.
-pub fn run_child(args: &[String]) -> anyhow::Result<()> {
+/// What the card shows, in the current language and theme.
+fn content_of(toast: &Toast) -> vixeeny_ui::toast_panel::ToastContent {
     use vixeeny_common::i18n::tr;
-    use vixeeny_ui::toast_panel::{ToastContent, ToastEvent, ToastPanel, corner};
+    use vixeeny_ui::toast_panel::ToastContent;
 
-    let [kind, text] = args else {
-        anyhow::bail!("usage: --toast <kind> <text>");
-    };
-    let toast =
-        Toast::from_args(kind, text).ok_or_else(|| anyhow::anyhow!("unknown toast `{kind}`"))?;
-    vixeeny_platform::ensure_dpi_aware();
     let config = vixeeny_common::paths::config_file()
         .and_then(|p| Config::load(&p).ok())
         .unwrap_or_default();
@@ -168,13 +224,18 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
         &config.general.theme,
         vixeeny_platform::system_prefers_dark(),
     );
-    let content = match &toast {
+    match toast {
         Toast::Saved(kind, path) => ToastContent {
             heading: tr(kind.title(), lang).into(),
             body: path
                 .file_name()
                 .map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
-            thumb: crate::gallery::thumbnail(path, 160),
+            // The gallery's thumbnail: made once, the gallery then finds it ready.
+            thumb: match vixeeny_common::paths::cache_dir() {
+                Some(dir) => crate::gallery::ThumbCache::new(dir.join("thumbnails"))
+                    .thumbnail_of(path, crate::gallery::THUMB_SIDE),
+                None => crate::gallery::thumbnail(path, 160),
+            },
             error: false,
             dark,
             action_label: tr(Key::ToastOpenFolder, lang).into(),
@@ -195,7 +256,14 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
             dark,
             action_label: tr(Key::UpdateView, lang).into(),
         },
-    };
+    }
+}
+
+/// A card for `toast`, in the bottom-right corner of the main monitor.
+fn panel_for(toast: &Toast) -> anyhow::Result<vixeeny_ui::toast_panel::ToastPanel> {
+    use vixeeny_ui::toast_panel::{ToastPanel, corner};
+
+    let content = content_of(toast);
     let panel = ToastPanel::new(&content).map_err(|e| anyhow::anyhow!("{e}"))?;
     let monitors = vixeeny_platform::monitors()?;
     let monitor = monitors
@@ -214,8 +282,13 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
         );
         panel.set_geometry(x, y, size.0, size.1);
     }
-    let event = panel.run().map_err(|e| anyhow::anyhow!("{e}"))?;
-    match (event, &toast) {
+    Ok(panel)
+}
+
+/// Does what the user clicked on the card.
+fn act(event: Option<vixeeny_ui::toast_panel::ToastEvent>, toast: &Toast) {
+    use vixeeny_ui::toast_panel::ToastEvent;
+    match (event, toast) {
         (Some(ToastEvent::Activated), Toast::Saved(_, path)) => {
             let _ = vixeeny_platform::open_path(&path.display().to_string());
         }
@@ -233,7 +306,102 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
         }
         (None, _) => {}
     }
+}
+
+/// `--toast <kind> <text>`: shows one card, then does what the user clicked.
+pub fn run_child(args: &[String]) -> anyhow::Result<()> {
+    let [kind, text] = args else {
+        anyhow::bail!("usage: --toast <kind> <text>");
+    };
+    let toast =
+        Toast::from_args(kind, text).ok_or_else(|| anyhow::anyhow!("unknown toast `{kind}`"))?;
+    vixeeny_platform::ensure_dpi_aware();
+    let event = panel_for(&toast)?
+        .run()
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    act(event, &toast);
     Ok(())
+}
+
+/// `--toast-host`: shows the cards read on standard input, a new one replacing the one on
+/// screen. Ends once the input is closed and no card is left.
+pub fn run_host() -> anyhow::Result<()> {
+    use std::cell::{Cell, RefCell};
+    use std::io::BufRead;
+    use std::rc::Rc;
+
+    thread_local! {
+        /// The card on screen, numbered.
+        static SHOWN: RefCell<Option<(u64, vixeeny_ui::toast_panel::ToastPanel)>> =
+            const { RefCell::new(None) };
+        static COUNT: Cell<u64> = const { Cell::new(0) };
+        static INPUT_CLOSED: Cell<bool> = const { Cell::new(false) };
+    }
+    fn quit_if_done() {
+        if INPUT_CLOSED.get() && SHOWN.with(|s| s.borrow().is_none()) {
+            let _ = vixeeny_ui::slint::quit_event_loop();
+        }
+    }
+    fn show(toast: Toast) {
+        let panel = match panel_for(&toast) {
+            Ok(panel) => panel,
+            Err(e) => {
+                tracing::error!("notification: {e:#}");
+                return;
+            }
+        };
+        let id = COUNT.get() + 1;
+        COUNT.set(id);
+        let toast = Rc::new(toast);
+        let result = panel.show(move |event| {
+            act(event, &toast);
+            // Forget the card unless a newer one took its place; it is dropped after its own
+            // callback has returned.
+            let gone = SHOWN.with(|s| {
+                let mut s = s.borrow_mut();
+                if s.as_ref().is_some_and(|(shown, _)| *shown == id) {
+                    s.take()
+                } else {
+                    None
+                }
+            });
+            vixeeny_ui::slint::Timer::single_shot(std::time::Duration::ZERO, move || {
+                drop(gone);
+                quit_if_done();
+            });
+        });
+        if let Err(e) = result {
+            tracing::error!("notification: {e}");
+            return;
+        }
+        // The previous card goes: the new one has its place.
+        if let Some((_, old)) = SHOWN.with(|s| s.borrow_mut().replace((id, panel))) {
+            let _ = vixeeny_ui::ComponentHandle::hide(old.window());
+        }
+    }
+
+    vixeeny_platform::ensure_dpi_aware();
+    // The input is read once the event loop runs: before, the cards it posts would be lost.
+    vixeeny_ui::slint::Timer::single_shot(std::time::Duration::ZERO, || {
+        let reader = std::thread::Builder::new()
+            .name("toast-input".into())
+            .spawn(|| {
+                for line in std::io::stdin().lock().lines().map_while(Result::ok) {
+                    if let Some(toast) = decode_line(&line) {
+                        let _ = vixeeny_ui::slint::invoke_from_event_loop(move || show(toast));
+                    }
+                }
+                let _ = vixeeny_ui::slint::invoke_from_event_loop(|| {
+                    INPUT_CLOSED.set(true);
+                    quit_if_done();
+                });
+            });
+        if let Err(e) = reader {
+            tracing::error!("notifications: {e}");
+            let _ = vixeeny_ui::slint::quit_event_loop();
+        }
+    });
+    vixeeny_ui::slint::run_event_loop_until_quit().map_err(|e| anyhow::anyhow!("{e}"))
 }
 
 #[cfg(test)]
@@ -253,6 +421,21 @@ mod tests {
             assert_eq!(Toast::from_args(&kind, &text), Some(toast));
         }
         assert_eq!(Toast::from_args("nonsense", "x"), None);
+    }
+
+    #[test]
+    fn a_toast_survives_the_line_to_the_card_process() {
+        for toast in [
+            Toast::Saved(Saved::Image, PathBuf::from(r"C:\Users\x\a\tb.png")),
+            Toast::Failed(Failed::Recording, "line one\nline two\\n\r".into()),
+            Toast::Update("Version 1.2".into()),
+        ] {
+            let line = encode_line(&toast.to_args());
+            assert_eq!(line.matches('\n').count(), 1);
+            assert!(line.ends_with('\n'));
+            assert_eq!(decode_line(line.trim_end_matches('\n')), Some(toast));
+        }
+        assert_eq!(decode_line("no tab"), None);
     }
 
     #[test]

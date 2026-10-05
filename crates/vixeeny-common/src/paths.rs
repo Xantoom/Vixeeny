@@ -45,6 +45,15 @@ pub fn hw_cache_file() -> Option<PathBuf> {
     config_dir().map(|d| d.join("hw_cache.toml"))
 }
 
+/// Directory for data that can be rebuilt (gallery thumbnails).
+pub fn cache_dir() -> Option<PathBuf> {
+    if let Some(dir) = portable_dir() {
+        return Some(dir.join("cache"));
+    }
+    // %LOCALAPPDATA%\Vixeeny\cache
+    dirs().map(|d| d.cache_dir().to_path_buf())
+}
+
 /// Directory for rotating log files.
 pub fn log_dir() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os("VIXEENY_LOG_DIR") {

@@ -233,6 +233,117 @@ pub fn thumbnail(path: &Path, max_side: u32) -> Option<(u32, u32, Vec<u8>)> {
     Some((w, h, out))
 }
 
+/// Long side of the gallery's thumbnails (notifications use them too).
+pub const THUMB_SIDE: u32 = 256;
+
+/// Thumbnails kept on disk (small PNG files), so the gallery opens with them instead of decoding
+/// every capture again. A file is named after the capture's path, size, date and the thumbnail
+/// size: a changed capture gets a new one.
+pub struct ThumbCache {
+    dir: PathBuf,
+}
+
+/// FNV-1a: stable across builds (the std hasher is not), enough to name cache files.
+fn fnv1a(bytes: &[u8], mut hash: u64) -> u64 {
+    for b in bytes {
+        hash ^= u64::from(*b);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    hash
+}
+
+impl ThumbCache {
+    pub fn new(dir: PathBuf) -> Self {
+        Self { dir }
+    }
+
+    /// The cache file of `item`'s thumbnail.
+    pub fn file(&self, item: &Item, max_side: u32) -> PathBuf {
+        self.file_of(&item.path, item.size, item.modified, max_side)
+    }
+
+    fn file_of(&self, path: &Path, size: u64, modified: SystemTime, max_side: u32) -> PathBuf {
+        let modified = modified
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let mut hash = fnv1a(path.to_string_lossy().as_bytes(), 0xcbf2_9ce4_8422_2325);
+        hash = fnv1a(&size.to_le_bytes(), hash);
+        hash = fnv1a(&modified.to_le_bytes(), hash);
+        hash = fnv1a(&max_side.to_le_bytes(), hash);
+        self.dir.join(format!("{hash:016x}.png"))
+    }
+
+    /// The thumbnail from the cache, else made from the capture and stored.
+    pub fn thumbnail(&self, item: &Item, max_side: u32) -> Option<(u32, u32, Vec<u8>)> {
+        self.cached(&self.file(item, max_side), &item.path, max_side)
+    }
+
+    /// The same for any file (a notification's): the gallery then finds it ready.
+    pub fn thumbnail_of(&self, path: &Path, max_side: u32) -> Option<(u32, u32, Vec<u8>)> {
+        let meta = std::fs::metadata(path).ok()?;
+        let file = self.file_of(path, meta.len(), meta.modified().ok()?, max_side);
+        self.cached(&file, path, max_side)
+    }
+
+    fn cached(&self, file: &Path, path: &Path, max_side: u32) -> Option<(u32, u32, Vec<u8>)> {
+        if let Some(thumb) = read_png(file) {
+            return Some(thumb);
+        }
+        let thumb = thumbnail(path, max_side)?;
+        if let Err(e) = write_png(file, &thumb) {
+            tracing::debug!("thumbnail not cached: {e}");
+        }
+        Some(thumb)
+    }
+
+    /// Removes the thumbnails of captures that are gone (or changed).
+    pub fn prune(&self, items: &[Item], max_side: u32) {
+        let keep: std::collections::HashSet<PathBuf> =
+            items.iter().map(|i| self.file(i, max_side)).collect();
+        let Ok(entries) = std::fs::read_dir(&self.dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "png") && !keep.contains(&path) {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+    }
+}
+
+fn read_png(path: &Path) -> Option<(u32, u32, Vec<u8>)> {
+    let file = std::fs::File::open(path).ok()?;
+    let mut reader = png::Decoder::new(std::io::BufReader::new(file))
+        .read_info()
+        .ok()?;
+    let mut data = vec![0; reader.output_buffer_size()?];
+    let info = reader.next_frame(&mut data).ok()?;
+    (info.color_type == png::ColorType::Rgba && info.bit_depth == png::BitDepth::Eight).then(|| {
+        data.truncate(info.buffer_size());
+        (info.width, info.height, data)
+    })
+}
+
+fn write_png(path: &Path, (w, h, rgba): &(u32, u32, Vec<u8>)) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let partial = path.with_extension("part");
+    {
+        let file = std::io::BufWriter::new(std::fs::File::create(&partial)?);
+        let mut encoder = png::Encoder::new(file, *w, *h);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.set_compression(png::Compression::Fast);
+        encoder
+            .write_header()
+            .and_then(|mut writer| writer.write_image_data(rgba))
+            .map_err(std::io::Error::other)?;
+    }
+    std::fs::rename(&partial, path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -380,6 +491,46 @@ mod tests {
         // A small picture is not enlarged.
         assert_eq!(thumbnail(&path, 1000).map(|t| (t.0, t.1)), Some((400, 100)));
         assert!(thumbnail(&root.join("a.mp4"), 100).is_none());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn thumbnails_come_back_from_the_cache_and_go_with_their_capture() {
+        let root = scratch("cache");
+        let path = root.join("shot.png");
+        let mut data = Vec::new();
+        {
+            let mut enc = png::Encoder::new(&mut data, 8, 4);
+            enc.set_color(png::ColorType::Rgba);
+            enc.set_depth(png::BitDepth::Eight);
+            let mut w = enc.write_header().unwrap();
+            w.write_image_data(&[10, 20, 30, 255].repeat(32)).unwrap();
+        }
+        std::fs::write(&path, data).unwrap();
+        let item = Item {
+            path: path.clone(),
+            name: "shot.png".into(),
+            kind: Kind::Image,
+            modified: SystemTime::UNIX_EPOCH + Duration::from_secs(1000),
+            size: 123,
+            app: String::new(),
+            source: 0,
+        };
+        let cache = ThumbCache::new(root.join("cache"));
+        let first = cache.thumbnail(&item, 4).unwrap();
+        assert_eq!((first.0, first.1), (4, 2));
+        assert!(cache.file(&item, 4).exists());
+        // The capture is gone: the thumbnail still comes, from the cache.
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(cache.thumbnail(&item, 4), Some(first));
+        // A changed capture has another cache file; pruning drops the old one.
+        let changed = Item {
+            size: 124,
+            ..item.clone()
+        };
+        assert_ne!(cache.file(&changed, 4), cache.file(&item, 4));
+        cache.prune(&[changed], 4);
+        assert!(!cache.file(&item, 4).exists());
         let _ = std::fs::remove_dir_all(root);
     }
 }

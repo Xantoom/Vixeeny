@@ -24,15 +24,13 @@ vixeeny-stitch = { path = "../vixeeny-stitch" }
 vixeeny-updater = { path = "../vixeeny-updater" }
 vixeeny-ui = { path = "../vixeeny-ui", features = ["desktop"] }
 rfd = { version = "0.17.2", default-features = false }
+png.workspace = true
 
 [features]
 # The FFmpeg-backed hardware probe (`--probe`); needs the native FFmpeg build.
 ffmpeg = ["vixeeny-encode/ffmpeg-next"]
 # AVIF and JPEG XL output; needs the natively built libraries (see vixeeny-image).
 native-codecs = ["vixeeny-image/native-codecs"]
-
-[dev-dependencies]
-png.workspace = true
 
 # The Windows resource (icon, version information) of the executable.
 [build-dependencies]

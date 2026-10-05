@@ -64,9 +64,10 @@ export component RecordingWidget inherits Window {
         running: root.auto-hide && !hover.has-hover;
         triggered => { root.faded = true; fade-timer.running = false; }
     }
-    // The dot breathes: a slow ease between full and dim.
+    // The halo blinks once a second, without animation: the widget draws two frames a second
+    // while recording, not one per screen refresh.
     Timer {
-        interval: 900ms;
+        interval: 1s;
         running: !root.paused;
         triggered => { root.pulse = !root.pulse; }
     }
@@ -133,18 +134,17 @@ export component RecordingWidget inherits Window {
                 }
             }
 
-            // The dot, with a soft halo while recording.
+            // The dot, with a halo that blinks while recording.
             Rectangle {
                 width: 16px;
                 Rectangle {
                     x: (parent.width - self.width) / 2;
                     y: (parent.height - self.height) / 2;
-                    width: root.paused ? 10px : (root.pulse ? 16px : 10px);
+                    width: 16px;
                     height: self.width;
                     border-radius: self.width / 2;
                     background: Theme.record.with-alpha(root.paused ? 0 : 0.25);
-                    opacity: root.pulse ? 1 : 0;
-                    animate width, opacity { duration: 850ms; easing: ease-in-out; }
+                    visible: root.pulse;
                 }
                 Rectangle {
                     x: (parent.width - self.width) / 2;

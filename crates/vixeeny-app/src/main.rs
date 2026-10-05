@@ -428,6 +428,7 @@ fn run() -> anyhow::Result<()> {
         Some("--settings") => return settings::run_child(&args[1..]),
         // A notification card (see `toast`).
         Some("--toast") => return toast::run_child(&args[1..]),
+        Some("--toast-host") => return toast::run_host(),
         // The daily update check, and the installation (see `update`).
         Some("--update") => return update::run_child(&args[1..]),
         Some("--system-info") => {

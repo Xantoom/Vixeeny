@@ -103,28 +103,39 @@ impl ToastPanel {
     /// the user did, if anything.
     pub fn run(&self) -> Result<Option<ToastEvent>, slint::PlatformError> {
         let event = std::rc::Rc::new(std::cell::Cell::new(None));
-        let (e, w) = (event.clone(), self.window.as_weak());
-        self.window.on_activated(move || {
-            e.set(Some(ToastEvent::Activated));
-            if let Some(w) = w.upgrade() {
-                let _ = w.hide();
-            }
-        });
-        let (e, w) = (event.clone(), self.window.as_weak());
-        self.window.on_action(move || {
-            e.set(Some(ToastEvent::Action));
-            if let Some(w) = w.upgrade() {
-                let _ = w.hide();
-            }
-        });
-        let w = self.window.as_weak();
-        self.window.on_dismissed(move || {
-            if let Some(w) = w.upgrade() {
-                let _ = w.hide();
-            }
-        });
-        self.window.run()?;
+        let e = event.clone();
+        self.show(move |what| e.set(what))?;
+        slint::run_event_loop()?;
         Ok(event.get())
+    }
+
+    /// Shows the card and returns at once; `done` gets what the user did (`None`: the card went
+    /// by itself or was closed) once the card is gone. For a process that shows several cards.
+    pub fn show(
+        &self,
+        done: impl FnOnce(Option<ToastEvent>) + 'static,
+    ) -> Result<(), slint::PlatformError> {
+        type Done = Box<dyn FnOnce(Option<ToastEvent>)>;
+        let done: std::rc::Rc<std::cell::RefCell<Option<Done>>> =
+            std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new(done))));
+        let finish = move |w: &slint::Weak<ToastWindow>, what: Option<ToastEvent>| {
+            if let Some(w) = w.upgrade() {
+                let _ = w.hide();
+            }
+            if let Some(done) = done.borrow_mut().take() {
+                done(what);
+            }
+        };
+        let finish = std::rc::Rc::new(finish);
+        let (f, w) = (finish.clone(), self.window.as_weak());
+        self.window
+            .on_activated(move || f(&w, Some(ToastEvent::Activated)));
+        let (f, w) = (finish.clone(), self.window.as_weak());
+        self.window
+            .on_action(move || f(&w, Some(ToastEvent::Action)));
+        let w = self.window.as_weak();
+        self.window.on_dismissed(move || finish(&w, None));
+        self.window.show()
     }
 }
 
