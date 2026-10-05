@@ -15,9 +15,6 @@ use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
 
 const PROGRAMS: [&str; 2] = ["Vixeeny.exe", "vixeeny-app.exe"];
-/// The name of `Vixeeny.exe` before 0.9.2: the updater of those versions restarts the program by
-/// that name, and their Start menu entry points at it. This copy hands over to `Vixeeny.exe`.
-const LEGACY_DAEMON: &str = "vixeeny-daemon.exe";
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..")
@@ -131,15 +128,13 @@ pub fn dist(args: &[String]) -> Result<()> {
         std::fs::copy(release.join(program), stage.join(program))
             .with_context(|| format!("{program} is missing: run `cargo build --release` first"))?;
     }
-    std::fs::copy(release.join(PROGRAMS[0]), stage.join(LEGACY_DAEMON))?;
     let ffmpeg_bin = root.join("native/build/work/ffmpeg-prebuilt/bin");
     if let Ok(entries) = std::fs::read_dir(&ffmpeg_bin) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path
-                .extension()
-                .is_some_and(|e| e.eq_ignore_ascii_case("dll"))
-            {
+            let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+            // libavdevice (cameras, screen grabbers) is used by no program of Vixeeny.
+            if name.ends_with(".dll") && !name.starts_with("avdevice") {
                 std::fs::copy(&path, stage.join(entry.file_name()))?;
             }
         }

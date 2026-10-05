@@ -101,7 +101,7 @@ fn ffmpeg_prebuilt(ctx: &Ctx, pre: &Prebuilt) -> Result<()> {
     let stamp = dest.join(".sha256");
     if std::fs::read_to_string(&stamp).is_ok_and(|s| s == pre.sha256) {
         println!("== ffmpeg (prebuilt): up to date");
-        return Ok(());
+        return msvc_import_libs(&dest);
     }
     println!("== ffmpeg (prebuilt): downloading {}", pre.url);
     let zip_path = ctx.work.join("ffmpeg-prebuilt.zip");
@@ -153,6 +153,48 @@ fn ffmpeg_prebuilt(ctx: &Ctx, pre: &Prebuilt) -> Result<()> {
         }
     }
     std::fs::write(&stamp, &pre.sha256)?;
+    msvc_import_libs(&dest)
+}
+
+/// Rewrites the import libraries `lib/<name>.lib` from the `.def` files, in the MSVC format.
+/// The build's own are MinGW import libraries, which the linker cannot delay-load: with these,
+/// `vixeeny-app` loads FFmpeg only when a video needs it (see its build script).
+fn msvc_import_libs(ffmpeg: &Path) -> Result<()> {
+    let lib = ffmpeg.join("lib");
+    // `lib.exe` from the MSVC environment, else LLVM's (cross builds).
+    let tool = if Command::new("lib").arg("/?").output().is_ok() {
+        "lib"
+    } else {
+        "llvm-lib"
+    };
+    for entry in std::fs::read_dir(&lib)?.flatten() {
+        let def = entry.file_name().to_string_lossy().into_owned();
+        // `avcodec-63.def` describes `avcodec-63.dll`; the library is `avcodec.lib`.
+        let Some(stem) = def.strip_suffix(".def") else {
+            continue;
+        };
+        let Some((name, _)) = stem.rsplit_once('-') else {
+            continue;
+        };
+        // The `.def` files only list the exports: the DLL's name is added for the library.
+        let named = lib.join(format!("{stem}.def.msvc"));
+        let exports = std::fs::read_to_string(entry.path())?;
+        std::fs::write(&named, format!("LIBRARY \"{stem}.dll\"\n{exports}"))?;
+        let result = run(
+            &lib,
+            tool,
+            &[
+                &format!("/def:{stem}.def.msvc"),
+                "/machine:x64",
+                &format!("/out:{name}.lib"),
+                "/nologo",
+            ],
+            &[],
+        );
+        let _ = std::fs::remove_file(&named);
+        result?;
+    }
+    println!("== ffmpeg: MSVC import libraries written ({tool})");
     Ok(())
 }
 

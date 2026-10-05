@@ -20,8 +20,7 @@ pub fn apply(enabled: bool) -> anyhow::Result<()> {
     let launcher = builder.build()?;
     let current = launcher.is_enabled()?;
     if enabled {
-        // Rewritten every time: the entry follows the program when its path or name changes
-        // (`vixeeny-daemon.exe` before 0.9.2).
+        // Rewritten every time: the entry follows the program when its path or name changes.
         launcher.enable()?;
         if !current {
             tracing::info!("autostart enabled");

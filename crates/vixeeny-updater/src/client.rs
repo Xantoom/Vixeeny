@@ -257,6 +257,14 @@ pub fn clean_up() {
         if backup.exists() {
             let _ = swap::commit(&backup);
         }
-        let _ = std::fs::remove_file(dir.join("vixeeny-updater.exe"));
+        // Files of older versions: the console updater (before 0.9.2), the daemon under its old
+        // name and FFmpeg's device library (before 0.9.4).
+        for old in [
+            "vixeeny-updater.exe",
+            "vixeeny-daemon.exe",
+            "avdevice-63.dll",
+        ] {
+            let _ = std::fs::remove_file(dir.join(old));
+        }
     }
 }

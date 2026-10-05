@@ -71,8 +71,11 @@ Filename: "{app}\Vixeeny.exe"; Description: "Vixeeny"; Flags: nowait postinstall
 Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM Vixeeny.exe /IM vixeeny-daemon.exe /IM vixeeny-app.exe"; RunOnceId: "StopVixeeny"; Flags: runhidden
 
 [InstallDelete]
-; The console updater of the versions before 0.9.2.
+; Files of older versions: the console updater (before 0.9.2), the daemon under its old name
+; and FFmpeg's device library (before 0.9.4).
 Type: files; Name: "{app}\vixeeny-updater.exe"
+Type: files; Name: "{app}\vixeeny-daemon.exe"
+Type: files; Name: "{app}\avdevice-*.dll"
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\.update-staged"

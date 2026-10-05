@@ -32,7 +32,3 @@ Updates replace the files of the install folder with those of the update archive
 installed and the portable layout alike, while Vixeeny runs (Windows lets a running program be
 renamed); only `Vixeeny.exe` restarts. The previous files are kept in `.update-backup` until the
 new `Vixeeny.exe` answers, and put back if it does not.
-
-The archive also holds `vixeeny-daemon.exe`, a copy of `Vixeeny.exe` under its name before 0.9.2:
-the updater of those versions restarts the program by that name, and the copy hands over to
-`Vixeeny.exe`.
