@@ -388,6 +388,15 @@ impl Overlay {
         slint::Timer::single_shot(std::time::Duration::from_secs(1), move || fire());
     }
 
+    /// What each toolbar button does, said on hover (see `tips` in `editor.slint` for the order).
+    pub fn set_tips(&self, tips: &[String]) {
+        let model: Vec<slint::SharedString> = tips.iter().map(|t| t.as_str().into()).collect();
+        let model = slint::ModelRc::from(Rc::new(slint::VecModel::from(model)));
+        for w in &self.windows {
+            w.set_tips(model.clone());
+        }
+    }
+
     /// Image taller than the window: it scrolls (wheel, Page Up/Down) under a fixed toolbar.
     pub fn set_scrolling(&self, scrolling: bool) {
         for w in &self.windows {
@@ -699,7 +708,9 @@ fn refresh_window(w: &EditorWindow, v: &vixeeny_editor::View) {
             // The zone is the whole long image: keep the bar in view, top right.
             let u = w.get_ui_scale();
             let width = w.window().size().width as f32;
-            w.set_toolbar_x((width - 772.0 * u).max(0.0));
+            w.set_toolbar_x(
+                (width - (vixeeny_editor::session::TOOLBAR_SIZE.0 + 16.0) * u).max(0.0),
+            );
             w.set_toolbar_y(16.0 * u);
         }
     }

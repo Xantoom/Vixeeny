@@ -357,6 +357,7 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
         foreground,
     };
     let config = config.clone();
+    let tips = toolbar_tips(crate::lang(&config.general.language));
     let ocr_image: std::rc::Rc<std::cell::RefCell<Option<RgbaImage>>> = std::rc::Rc::default();
     let ocr_slot = ocr_image.clone();
     let ocr_config = config.clone();
@@ -404,6 +405,7 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
             }
         })
         .map_err(|e| anyhow::anyhow!("cannot create the editor window: {e}"))?;
+    overlay.set_tips(&tips);
     tracing::info!("editor ready after {:?}", started.elapsed());
     // The windows show the screen as it is: they must not zoom or fade in, and they appear with
     // their first frame (cloaked until then), over the frozen screens, which then go.
@@ -437,4 +439,35 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
         crate::ocr::run(&img, &ocr_config)?;
     }
     Ok(())
+}
+
+/// What the toolbar's buttons do, in their order (see `tips` in `editor.slint`).
+pub(crate) fn toolbar_tips(lang: vixeeny_common::i18n::Lang) -> Vec<String> {
+    use vixeeny_common::i18n::{Key, tr};
+    [
+        Key::TipMove,
+        Key::TipSelect,
+        Key::TipPen,
+        Key::TipHighlight,
+        Key::TipLine,
+        Key::TipArrow,
+        Key::TipRectangle,
+        Key::TipEllipse,
+        Key::TipText,
+        Key::TipCounter,
+        Key::TipBlur,
+        Key::TipPixelate,
+        Key::TipStyle,
+        Key::TipUndo,
+        Key::TipRedo,
+        Key::TipCopy,
+        Key::TipSave,
+        Key::TipSaveAs,
+        Key::TipScroll,
+        Key::TipOcr,
+        Key::TipClose,
+    ]
+    .into_iter()
+    .map(|k| tr(k, lang).to_owned())
+    .collect()
 }

@@ -277,6 +277,7 @@ fn annotate(
     session.select_all();
     session.dim = 0.0;
     let config = config.clone();
+    let tips = crate::region::toolbar_tips(crate::lang(&config.general.language));
     let screen = vixeeny_ui::Screen {
         position: (monitor.rect.x, monitor.rect.y),
         size: (monitor.rect.width, monitor.rect.height),
@@ -295,6 +296,7 @@ fn annotate(
             .unwrap_or(false)
         })
         .map_err(|e| anyhow::anyhow!("cannot create the editor window: {e}"))?;
+    overlay.set_tips(&tips);
     overlay.set_scrolling(true);
     overlay
         .run((monitor.rect.x, monitor.rect.y))

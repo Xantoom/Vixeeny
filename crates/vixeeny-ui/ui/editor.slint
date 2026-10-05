@@ -20,8 +20,15 @@ component IconButton inherits Rectangle {
     in property <bool> active: false;
     in property <bool> enabled: true;
     in property <length> u: 1phx;
+    // Said after a moment of hover, above the button (below when `tip-below`).
+    in property <string> tip;
+    in property <bool> tip-below: false;
+    // A colour dot instead of an icon (the style button).
+    in property <bool> has-dot: false;
+    in property <color> dot;
     callback clicked();
 
+    property <bool> tip-on: false;
     width: 30 * u;
     height: 30 * u;
     border-radius: 6 * u;
@@ -30,23 +37,61 @@ component IconButton inherits Rectangle {
     animate background { duration: Theme.t-fast; }
 
     // The mark of the active tool, as the Windows 11 selected items have.
-    if root.active : Rectangle {
+    if root.active && !root.has-dot : Rectangle {
         x: 8 * u; y: root.height - 3 * u; width: root.width - 16 * u; height: 2 * u; border-radius: 1 * u;
         background: Theme.accent;
     }
-    Icon {
+    if !root.has-dot : Icon {
         x: (root.width - self.width) / 2;
         y: (root.height - self.height) / 2;
         data: root.icon;
         size: 18 * u;
         tint: root.enabled ? (root.active ? Theme.accent : Theme.text) : Theme.text-off;
     }
+    if root.has-dot : Rectangle {
+        x: 6 * u;
+        y: 6 * u;
+        width: 18 * u;
+        height: 18 * u;
+        border-radius: 9 * u;
+        background: root.dot;
+        animate background { duration: Theme.t-fast; }
+        border-width: 1phx;
+        border-color: Theme.stroke-strong;
+    }
 
     touch := TouchArea {
         enabled: root.enabled;
         mouse-cursor: pointer;
-        clicked => { root.clicked(); }
+        clicked => { root.tip-on = false; root.clicked(); }
+        changed has-hover => { if !self.has-hover { root.tip-on = false; } }
     }
+    Timer {
+        interval: 450ms;
+        running: touch.has-hover && !root.tip-on && root.tip != "";
+        triggered => { root.tip-on = true; }
+    }
+    if root.tip-on : Rectangle {
+        width: label.preferred-width + 16 * u;
+        height: 26 * u;
+        x: (root.width - self.width) / 2;
+        y: root.tip-below ? root.height + 14 * u : -self.height - 14 * u;
+        background: Theme.flyout;
+        border-radius: 6 * u;
+        border-width: 1phx;
+        border-color: Theme.stroke-strong;
+        drop-shadow-blur: 8phx;
+        drop-shadow-color: #00000040;
+        label := Text {
+            text: root.tip;
+            color: Theme.text;
+            font-size: 12 * u;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+        }
+    }
+    accessible-role: button;
+    accessible-label: root.tip;
 }
 
 component Swatch inherits Rectangle {
@@ -126,6 +171,9 @@ export component EditorWindow inherits Window {
     in property <bool> filled: false;
     in property <bool> can-undo: false;
     in property <bool> can-redo: false;
+    // What each button of the toolbar does, in its order: the 12 tools, style, undo, redo, copy,
+    // save, save as, scrolling capture, OCR, close.
+    in property <[string]> tips;
 
     // Text tool field.
     in property <bool> has-text-input: false;
@@ -393,8 +441,9 @@ export component EditorWindow inherits Window {
             border-radius: 2 * root.u;
         }
 
-        // Toolbar: one row (tools · style · undo/redo · outputs · close). Colours, thickness and
-        // fill are in a small panel that opens from the style button.
+        // Toolbar: one row of groups (zone · drawing · shapes and text · masks · style · history ·
+        // outputs · close). Colours, thickness and fill are in a small panel that opens from the
+        // style button.
         if root.has-toolbar : Rectangle {
             // Rises into place when the zone is settled.
             property <bool> shown: !root.fade-in;
@@ -402,7 +451,7 @@ export component EditorWindow inherits Window {
             property <length> pop-h: (root.picker-open ? 250 : 110) * root.u;
             x: (root.toolbar-x - root.area-x) * 1phx;
             y: (root.toolbar-y - root.area-y) * 1phx + (self.shown ? 0 : 6 * root.u);
-            width: 756 * root.u;
+            width: 813 * root.u;
             height: 46 * root.u;
             opacity: self.shown ? 1 : 0;
             animate opacity, y { duration: Theme.t-normal; easing: cubic-bezier(0.2, 0, 0, 1); }
@@ -421,66 +470,63 @@ export component EditorWindow inherits Window {
 
             TouchArea { } // swallows clicks on the bar itself
 
-            // Tools (the index is the session's tool number).
+            // Near the top of the screen the tips go under the bar.
+            property <bool> tip-below: (root.toolbar-y - root.area-y) * 1phx < 48 * root.u;
+            // Tools (the index is the session's tool number), in groups: the zone, drawing,
+            // shapes and text, masks.
             for t[k] in [
-                { i: 12, icon: Icons.move }, { i: 0, icon: Icons.cursor }, { i: 1, icon: Icons.pen }, { i: 7, icon: Icons.highlight },
-                { i: 2, icon: Icons.line }, { i: 3, icon: Icons.arrow }, { i: 4, icon: Icons.square },
-                { i: 5, icon: Icons.circle }, { i: 6, icon: Icons.text }, { i: 10, icon: Icons.marker },
-                { i: 8, icon: Icons.blur }, { i: 9, icon: Icons.pixelate },
+                { i: 12, icon: Icons.move, x: 6 }, { i: 0, icon: Icons.cursor, x: 40 },
+                { i: 1, icon: Icons.pen, x: 87 }, { i: 7, icon: Icons.highlight, x: 121 },
+                { i: 2, icon: Icons.line, x: 155 }, { i: 3, icon: Icons.arrow, x: 189 },
+                { i: 4, icon: Icons.square, x: 236 }, { i: 5, icon: Icons.circle, x: 270 },
+                { i: 6, icon: Icons.text, x: 304 }, { i: 10, icon: Icons.marker, x: 338 },
+                { i: 8, icon: Icons.blur, x: 385 }, { i: 9, icon: Icons.pixelate, x: 419 },
             ] : IconButton {
                 u: root.u;
-                x: (6 + k * 34) * root.u;
+                x: t.x * root.u;
                 y: 8 * root.u;
                 icon: t.icon;
                 active: root.tool == t.i;
+                tip: k < root.tips.length ? root.tips[k] : "";
+                tip-below: parent.tip-below;
                 clicked => { root.tool-chosen(t.i); }
             }
-            for sx in [417, 459, 535, 713] : Rectangle {
+            // Between the groups.
+            for sx in [78, 227, 376, 457, 504, 585, 768] : Rectangle {
                 x: sx * root.u;
-                y: 14 * root.u;
+                y: 11 * root.u;
                 width: 1phx;
-                height: 18 * root.u;
+                height: 24 * root.u;
                 background: Theme.divider;
             }
 
             // Style: the current colour; opens the panel.
-            Rectangle {
-                x: 422 * root.u;
+            IconButton {
+                u: root.u;
+                x: 466 * root.u;
                 y: 8 * root.u;
-                width: 30 * root.u;
-                height: 30 * root.u;
-                border-radius: 6 * root.u;
-                background: root.style-open ? Theme.accent-soft : (style-touch.has-hover ? Theme.subtle-hover : transparent);
-                animate background { duration: Theme.t-fast; }
-                Rectangle {
-                    x: 6 * root.u;
-                    y: 6 * root.u;
-                    width: 18 * root.u;
-                    height: 18 * root.u;
-                    border-radius: 9 * root.u;
-                    background: root.current-color;
-                    animate background { duration: Theme.t-fast; }
-                    border-width: 1phx;
-                    border-color: Theme.stroke-strong;
-                }
-                style-touch := TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => { root.style-open = !root.style-open; root.picker-open = false; }
-                }
+                has-dot: true;
+                dot: root.current-color;
+                active: root.style-open;
+                tip: 12 < root.tips.length ? root.tips[12] : "";
+                tip-below: parent.tip-below;
+                clicked => { root.style-open = !root.style-open; root.picker-open = false; }
             }
 
-            // Undo, redo, then copy, save, save as, scrolling capture, OCR; then close.
+            // Undo, redo; copy, save, save as, scrolling capture, OCR; close.
             for a[k] in [
-                { x: 464, icon: Icons.undo, name: "undo" }, { x: 498, icon: Icons.redo, name: "redo" },
-                { x: 540, icon: Icons.copy, name: "copy" }, { x: 574, icon: Icons.save, name: "save" },
-                { x: 608, icon: Icons.save-as, name: "save-as" }, { x: 642, icon: Icons.scroll, name: "scroll" },
-                { x: 676, icon: Icons.scan-text, name: "ocr" }, { x: 718, icon: Icons.dismiss, name: "close" },
+                { x: 513, icon: Icons.undo, name: "undo" }, { x: 547, icon: Icons.redo, name: "redo" },
+                { x: 594, icon: Icons.copy, name: "copy" }, { x: 628, icon: Icons.save, name: "save" },
+                { x: 662, icon: Icons.save-as, name: "save-as" }, { x: 696, icon: Icons.scroll, name: "scroll" },
+                { x: 730, icon: Icons.scan-text, name: "ocr" }, { x: 777, icon: Icons.dismiss, name: "close" },
             ] : IconButton {
                 u: root.u;
                 x: a.x * root.u;
                 y: 8 * root.u;
                 icon: a.icon;
                 enabled: k == 0 ? root.can-undo : k == 1 ? root.can-redo : true;
+                tip: 13 + k < root.tips.length ? root.tips[13 + k] : "";
+                tip-below: parent.tip-below;
                 clicked => { root.action(a.name); }
             }
 
@@ -488,7 +534,7 @@ export component EditorWindow inherits Window {
             if root.style-open : Rectangle {
                 property <bool> above: (root.toolbar-y - root.area-y) * 1phx > parent.pop-h + 8 * root.u;
                 property <bool> open: !root.fade-in;
-                x: 437 * root.u - parent.pop-w / 2;
+                x: 481 * root.u - parent.pop-w / 2;
                 y: (self.above ? -parent.pop-h - 8 * root.u : 54 * root.u) + (self.open ? 0 : (self.above ? 4 : -4) * root.u);
                 width: parent.pop-w;
                 height: parent.pop-h;
