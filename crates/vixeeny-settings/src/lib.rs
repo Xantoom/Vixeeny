@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The settings model (plan 5.13): every setting is a [`Row`] with a way to read it from a
 //! [`Config`] and a validated way to write it. The settings window only draws rows; a change is
-//! applied the moment it is made, and each section can be reset to its defaults.
+//! applied the moment it is made.
 //!
 //! No UI and no OS code here, so all of it is tested on any machine.
 
@@ -24,20 +24,23 @@ pub enum Section {
     Shortcuts,
     /// Screenshots: format, capture options, folder, text recognition.
     Capture,
-    /// Recording: profile, encoder, video, file splitting, folder, replay.
+    /// Recording: profile, picture, encoder, file.
     Video,
+    /// The replay buffer.
+    Replay,
     Audio,
     /// Version, updates, links.
     About,
 }
 
 impl Section {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Gallery,
         Self::General,
         Self::Shortcuts,
         Self::Capture,
         Self::Video,
+        Self::Replay,
         Self::Audio,
         Self::About,
     ];
@@ -49,6 +52,7 @@ impl Section {
             Self::Shortcuts => Key::SecShortcuts,
             Self::Capture => Key::SecCapture,
             Self::Video => Key::SecVideo,
+            Self::Replay => Key::SecReplay,
             Self::Audio => Key::SecAudio,
             Self::About => Key::SecAbout,
         }
@@ -58,11 +62,6 @@ impl Section {
     /// their own).
     pub const fn is_rows(self) -> bool {
         !matches!(self, Self::Gallery | Self::Shortcuts)
-    }
-
-    /// Whether "Reset" makes sense on the page.
-    pub const fn can_reset(self) -> bool {
-        !matches!(self, Self::Gallery | Self::About)
     }
 }
 
@@ -123,6 +122,8 @@ pub struct Row {
     pub label: String,
     /// A line of explanation under the label (empty = none).
     pub hint: String,
+    /// A picture before the label (a program's icon).
+    pub icon: Option<Icon>,
     pub kind: Kind,
     get: Get,
     set: Set,
@@ -169,12 +170,28 @@ impl Row {
     }
 }
 
+/// A small picture, RGBA rows with straight alpha.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Icon {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: std::sync::Arc<[u8]>,
+}
+
+impl std::fmt::Debug for Icon {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Icon({}x{})", self.width, self.height)
+    }
+}
+
 /// An output device, microphone or program that can be recorded.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AudioEntry {
     /// The device id, or the executable name of a program.
     pub id: String,
     pub name: String,
+    /// A program's icon.
+    pub icon: Option<Icon>,
 }
 
 /// What the audio page offers to record (filled by the host, which asks the OS).
@@ -268,6 +285,7 @@ fn row(id: impl Into<String>, label: String, kind: Kind, get: Get, set: Set) -> 
         id: id.into(),
         label,
         hint: String::new(),
+        icon: None,
         kind,
         get,
         set,
@@ -459,34 +477,10 @@ pub fn rows(section: Section, env: &Env, config: &Config) -> Vec<Row> {
         Section::General => pages::general(env, config),
         Section::Capture => pages::capture(env, config),
         Section::Video => pages::video(env, config),
+        Section::Replay => pages::replay(env, config),
         Section::Audio => pages::audio(env, config),
         Section::About => pages::about(env),
         Section::Gallery | Section::Shortcuts => Vec::new(),
-    }
-}
-
-/// Sets every row of `section` back to its defaults. The shortcuts and profile pages reset
-/// through their own modules.
-pub fn reset(section: Section, env: &Env, config: &mut Config) {
-    let defaults = Config::default();
-    // The rows of the defaults: a row hidden now (a JPEG quality while PNG is chosen) is reset too.
-    for row in rows(section, env, &defaults) {
-        if matches!(row.kind, Kind::Info | Kind::Header | Kind::Profile(_)) {
-            continue;
-        }
-        let value = row.value(&defaults);
-        let _ = row.apply(config, value);
-    }
-    if section == Section::Video {
-        // The options of the custom preset are not rows of the defaults.
-        config.cur_mut().params.clear();
-    }
-    if section == Section::Audio {
-        // The sources depend on the devices: the whole audio part goes back to the defaults.
-        config.cur_mut().audio = Profile::default().audio;
-    }
-    if section == Section::Shortcuts {
-        config.hotkeys = defaults.hotkeys;
     }
 }
 
@@ -504,7 +498,12 @@ pub fn video_problems(config: &Config, source: (u32, u32), lang: Lang) -> Vec<St
         source,
         probe: None,
     };
-    validate(&config.cur(), &ctx)
+    // The variable frame rate of older settings is not used any more.
+    let profile = Profile {
+        vfr: false,
+        ..config.cur()
+    };
+    validate(&profile, &ctx)
         .into_iter()
         .filter(|i| i.severity == Severity::Error)
         .map(|i| problem_text(&i.kind, lang))
@@ -621,13 +620,14 @@ mod tests {
         assert_eq!(theme.apply(&mut c, Value::Bool(true)), Err(Invalid));
         assert_eq!(c.general.theme, "dark");
         // Numbers are clamped and put on the step.
-        let idle = row(&rows_, "idle_exit");
-        idle.apply(&mut c, Value::Int(47)).unwrap();
-        assert_eq!(c.general.app_idle_exit_seconds, 45);
-        idle.apply(&mut c, Value::Int(100_000)).unwrap();
-        assert_eq!(c.general.app_idle_exit_seconds, 600);
-        idle.apply(&mut c, Value::Int(-5)).unwrap();
-        assert_eq!(c.general.app_idle_exit_seconds, 0);
+        let replay = rows(Section::Replay, &env(), &c);
+        let duration = row(&replay, "replay_duration");
+        duration.apply(&mut c, Value::Int(47)).unwrap();
+        assert_eq!(c.replay.duration_seconds, 45);
+        duration.apply(&mut c, Value::Int(100_000)).unwrap();
+        assert_eq!(c.replay.duration_seconds, 1_200);
+        duration.apply(&mut c, Value::Int(-5)).unwrap();
+        assert_eq!(c.replay.duration_seconds, 5);
     }
 
     fn has(section: Section, c: &Config, id: &str) -> bool {
@@ -682,27 +682,27 @@ mod tests {
     #[test]
     fn the_video_page_offers_what_the_monitors_can_show() {
         let rates = |e: &Env, c: &Config| match &row(&rows(Section::Video, e, c), "fps").kind {
-            Kind::Segmented(o) => o.iter().map(|o| o.value.clone()).collect::<Vec<_>>(),
-            _ => panic!("fps is a segmented row"),
+            Kind::Choice(o) => o.iter().map(|o| o.value.clone()).collect::<Vec<_>>(),
+            _ => panic!("fps is a list"),
         };
         let mut c = Config::default();
         let slow = env();
-        assert_eq!(rates(&slow, &c), ["30", "60"]);
+        assert_eq!(rates(&slow, &c), ["24", "30", "60"]);
         let fast = env().with_display(Display {
             hdr: true,
             max_refresh: 144,
         });
-        assert_eq!(rates(&fast, &c), ["30", "60", "120"]);
-        // A rate from before the shorter list shows as the closest one offered.
+        assert_eq!(rates(&fast, &c), ["24", "30", "60", "90", "120", "144"]);
+        let fps = |e: &Env, c: &Config| row(&rows(Section::Video, e, c), "fps").value(c);
+        assert_eq!(fps(&slow, &c), Value::Text("60".into()));
+        // A rate this machine does not offer shows as the closest one offered.
         c.cur_mut().fps = 144;
-        let fps = |e: &Env| row(&rows(Section::Video, e, &c), "fps").value(&c);
-        assert_eq!(fps(&fast), Value::Text("120".into()));
-        assert_eq!(fps(&slow), Value::Text("60".into()));
-        // HDR: greyed out and off while Windows does not show it.
+        assert_eq!(fps(&fast, &c), Value::Text("144".into()));
+        assert_eq!(fps(&slow, &c), Value::Text("60".into()));
+        // HDR: offered only while Windows shows it.
         c.cur_mut().hdr = "keep_hdr".into();
-        let off = rows(Section::Video, &slow, &c);
-        assert!(!row(&off, "hdr").enabled(&c));
-        assert_eq!(row(&off, "hdr").value(&c), Value::Bool(false));
+        assert!(!has(Section::Video, &c, "hdr"));
+        assert!(!has(Section::Capture, &c, "image_hdr"));
         let on = rows(Section::Video, &fast, &c);
         assert!(row(&on, "hdr").enabled(&c));
         assert_eq!(row(&on, "hdr").value(&c), Value::Bool(true));
@@ -768,7 +768,7 @@ mod tests {
     fn the_replay_can_follow_any_profile() {
         let mut c = Config::default();
         c.profiles.insert("Jeu".into(), Profile::default());
-        let replay = rows(Section::Video, &env(), &c);
+        let replay = rows(Section::Replay, &env(), &c);
         let r = row(&replay, "replay_profile");
         let Kind::Choice(options) = &r.kind else {
             panic!()
@@ -785,22 +785,6 @@ mod tests {
             .apply(&mut c, Value::Text("disk".into()))
             .unwrap();
         assert_eq!(c.replay.storage, "disk");
-    }
-
-    #[test]
-    fn a_section_resets_to_its_defaults_and_leaves_the_others_alone() {
-        let mut c = Config::default();
-        c.general.theme = "dark".into();
-        c.general.sounds = false;
-        c.overlay.edge = "left".into();
-        c.image.format = "jpeg".into();
-        c.hotkeys.capture_region = vec!["F8".into()];
-        reset(Section::General, &env(), &mut c);
-        assert_eq!(c.general, Config::default().general);
-        assert_eq!(c.overlay.edge, "right");
-        assert_eq!(c.image.format, "jpeg");
-        reset(Section::Shortcuts, &env(), &mut c);
-        assert_eq!(c.hotkeys, Config::default().hotkeys);
     }
 
     #[test]
@@ -883,13 +867,17 @@ mod tests {
     #[test]
     fn hdr_is_one_switch() {
         let mut c = Config::default();
-        let images = rows(Section::Capture, &env(), &c);
+        let env = env().with_display(Display {
+            hdr: true,
+            max_refresh: 60,
+        });
+        let images = rows(Section::Capture, &env, &c);
         let hdr = row(&images, "image_hdr");
         assert_eq!(hdr.value(&c), Value::Bool(false));
         assert_eq!(c.image.hdr, "tonemap_sdr");
         hdr.apply(&mut c, Value::Bool(true)).unwrap();
         assert_eq!(c.image.hdr, "keep_hdr");
-        let video = rows(Section::Video, &env(), &c);
+        let video = rows(Section::Video, &env, &c);
         row(&video, "hdr").apply(&mut c, Value::Bool(true)).unwrap();
         assert_eq!(c.cur().hdr, "keep_hdr");
         row(&video, "hdr")
@@ -925,9 +913,6 @@ mod tests {
         crf.apply(&mut c, Value::Int(18)).unwrap();
         assert_eq!(c.cur().params["crf"], "18");
         assert_eq!(crf.value(&c), Value::Int(18));
-        // Resetting the page forgets them.
-        reset(Section::Video, &env(), &mut c);
-        assert!(c.cur().params.is_empty());
     }
 
     #[test]
@@ -937,14 +922,17 @@ mod tests {
             outputs: vec![AudioEntry {
                 id: "{out-1}".into(),
                 name: "Headset".into(),
+                icon: None,
             }],
             inputs: vec![AudioEntry {
                 id: "{in-1}".into(),
                 name: "Blue Yeti".into(),
+                icon: None,
             }],
             programs: vec![AudioEntry {
                 id: "spotify.exe".into(),
                 name: "Spotify".into(),
+                icon: None,
             }],
         });
         let audio = rows(Section::Audio, &e, &c);

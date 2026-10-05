@@ -185,49 +185,50 @@ fn exe_of(pid: u32) -> Option<String> {
     }
 }
 
-/// The applications that have an audio session on the default output device.
+/// The applications that have an audio session on any output device.
 pub fn list_applications() -> Vec<AppInfo> {
     let _com = ComGuard::new();
     let Ok(enumerator) = enumerator() else {
         return Vec::new();
     };
+    let mut apps: Vec<AppInfo> = Vec::new();
     // SAFETY: plain COM calls on live interfaces; each result is checked.
     unsafe {
-        let Ok(device) = enumerator.GetDefaultAudioEndpoint(eRender, eConsole) else {
+        let Ok(devices) = enumerator.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE) else {
             return Vec::new();
         };
-        let Ok(manager) = device.Activate::<IAudioSessionManager2>(CLSCTX_ALL, None) else {
-            return Vec::new();
-        };
-        let Ok(sessions) = manager.GetSessionEnumerator() else {
-            return Vec::new();
-        };
-        let count = sessions.GetCount().unwrap_or(0);
-        let mut apps: Vec<AppInfo> = Vec::new();
-        for i in 0..count {
-            let Ok(control) = sessions.GetSession(i) else {
+        for device in (0..devices.GetCount().unwrap_or(0)).filter_map(|i| devices.Item(i).ok()) {
+            let Ok(manager) = device.Activate::<IAudioSessionManager2>(CLSCTX_ALL, None) else {
                 continue;
             };
-            let Ok(control2) = control.cast::<IAudioSessionControl2>() else {
+            let Ok(sessions) = manager.GetSessionEnumerator() else {
                 continue;
             };
-            if control2.IsSystemSoundsSession().0 == 0 {
-                continue; // S_OK: the system sounds session
-            }
-            let Ok(pid) = control2.GetProcessId() else {
-                continue;
-            };
-            let Some(exe) = exe_of(pid) else { continue };
-            let active = control
-                .GetState()
-                .is_ok_and(|s| s == windows::Win32::Media::Audio::AudioSessionStateActive);
-            match apps.iter_mut().find(|a| a.exe.eq_ignore_ascii_case(&exe)) {
-                Some(a) => a.active |= active,
-                None => apps.push(AppInfo { pid, exe, active }),
+            for i in 0..sessions.GetCount().unwrap_or(0) {
+                let Ok(control) = sessions.GetSession(i) else {
+                    continue;
+                };
+                let Ok(control2) = control.cast::<IAudioSessionControl2>() else {
+                    continue;
+                };
+                if control2.IsSystemSoundsSession().0 == 0 {
+                    continue; // S_OK: the system sounds session
+                }
+                let Ok(pid) = control2.GetProcessId() else {
+                    continue;
+                };
+                let Some(exe) = exe_of(pid) else { continue };
+                let active = control
+                    .GetState()
+                    .is_ok_and(|s| s == windows::Win32::Media::Audio::AudioSessionStateActive);
+                match apps.iter_mut().find(|a| a.exe.eq_ignore_ascii_case(&exe)) {
+                    Some(a) => a.active |= active,
+                    None => apps.push(AppInfo { pid, exe, active }),
+                }
             }
         }
-        apps
     }
+    apps
 }
 
 /// The root process of `exe` (the one whose parent is not the same program): its tree is what

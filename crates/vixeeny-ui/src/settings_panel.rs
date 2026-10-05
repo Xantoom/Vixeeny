@@ -13,7 +13,7 @@ use vixeeny_common::ipc::ActionId;
 use vixeeny_encode::probe::ProbeResult;
 use vixeeny_settings::shortcuts::{self, Refusal};
 use vixeeny_settings::{
-    AudioDevices, Display, Env, Kind, Row, Section, Value, profiles, reset, rows, video_problems,
+    AudioDevices, Display, Env, Kind, Row, Section, Value, profiles, rows, video_problems,
 };
 
 use crate::theme::{self, Look};
@@ -116,6 +116,7 @@ pub enum GalleryRequest {
 type ChangeFn = Box<dyn Fn(&Config)>;
 type BrowseFn = Box<dyn Fn(&str) -> Option<String>>;
 type PageFn = Box<dyn Fn(Section, &str, &str)>;
+type AudioFn = std::sync::Arc<dyn Fn() -> AudioDevices + Send + Sync>;
 
 struct State {
     config: RefCell<Config>,
@@ -126,6 +127,8 @@ struct State {
     /// The hardware probe, once known, and whether it is still running.
     probe: RefCell<(Option<ProbeResult>, bool)>,
     audio: RefCell<AudioDevices>,
+    /// Lists the devices and programs (slow: the programs' icons); run on another thread.
+    audio_source: RefCell<Option<AudioFn>>,
     display: Cell<Display>,
     /// The shortcut being recorded: `(row, slot)`.
     recording: Cell<Option<(usize, usize)>>,
@@ -286,7 +289,6 @@ fn strings(items: impl IntoIterator<Item = String>) -> ModelRc<SharedString> {
 fn ui_texts(lang: Lang) -> UiTexts {
     let t = |k| SharedString::from(tr(k, lang));
     UiTexts {
-        reset: t(Key::SetReset),
         new_label: t(Key::UiNew),
         duplicate: t(Key::UiDuplicate),
         rename: t(Key::UiRename),
@@ -314,7 +316,8 @@ fn ui_texts(lang: Lang) -> UiTexts {
         choose: t(Key::WizBrowse),
         press_keys: t(Key::UiPressKeys),
         keys_help: t(Key::UiKeysHelp),
-        add_shortcut: t(Key::UiAddShortcut),
+        action_column: t(Key::UiActionColumn),
+        shortcut_column: t(Key::UiShortcutColumn),
         details: t(Key::GrpLinks),
         restart: t(Key::UpdateRestart),
         retry: t(Key::UiRetry),
@@ -454,6 +457,17 @@ fn row_model(row: &Row, config: &Config) -> SettingRow {
         step: 1,
         options: ModelRc::default(),
         selected: -1,
+        has_icon: row.icon.is_some(),
+        icon: row
+            .icon
+            .as_ref()
+            .map_or_else(slint::Image::default, |icon| {
+                slint::Image::from_rgba8(slint::SharedPixelBuffer::clone_from_slice(
+                    &icon.rgba,
+                    icon.width,
+                    icon.height,
+                ))
+            }),
     };
     match (&row.kind, value) {
         (Kind::Toggle, Value::Bool(b)) => {
@@ -629,6 +643,7 @@ impl SettingsPanel {
             rows: RefCell::default(),
             probe: RefCell::new((None, false)),
             audio: RefCell::default(),
+            audio_source: RefCell::default(),
             display: Cell::default(),
             recording: Cell::new(None),
             on_recording: RefCell::new(Box::new(|_| {})),
@@ -692,6 +707,47 @@ impl SettingsPanel {
         *self.state.audio.borrow_mut() = audio;
         self.rebuild_env();
         self.refresh();
+    }
+
+    /// Where the audio page's devices and programs come from: asked on another thread now,
+    /// and again each time the page is opened (programs come and go).
+    pub fn set_audio_source(&self, source: impl Fn() -> AudioDevices + Send + Sync + 'static) {
+        *self.state.audio_source.borrow_mut() = Some(std::sync::Arc::new(source));
+        self.load_audio();
+    }
+
+    fn load_audio(&self) {
+        let Some(source) = self.state.audio_source.borrow().clone() else {
+            return;
+        };
+        type Slot = std::sync::Arc<std::sync::Mutex<Option<AudioDevices>>>;
+        let slot: Slot = std::sync::Arc::default();
+        let filled = slot.clone();
+        let started = std::thread::Builder::new()
+            .name("audio-list".into())
+            .spawn(move || {
+                let audio = source();
+                if let Ok(mut s) = filled.lock() {
+                    *s = Some(audio);
+                }
+            });
+        if started.is_err() {
+            return;
+        }
+        // Looked at a few times a second until the list is there, then not any more.
+        fn poll(slot: Slot, weak: slint::Weak<SettingsWindow>, state: Rc<State>) {
+            let ready = slot.lock().ok().and_then(|mut s| s.take());
+            match (ready, weak.upgrade()) {
+                (Some(audio), Some(window)) => SettingsPanel { window, state }.set_audio(audio),
+                (None, Some(_)) => {
+                    slint::Timer::single_shot(std::time::Duration::from_millis(40), move || {
+                        poll(slot, weak, state);
+                    });
+                }
+                (_, None) => {}
+            }
+        }
+        poll(slot, self.window.as_weak(), self.state.clone());
     }
 
     /// The hardware probe: its result once it exists, and whether it is still running.
@@ -808,7 +864,6 @@ impl SettingsPanel {
         let section = self.current_section();
         let config = state.config.borrow();
         let env = state.env.borrow();
-        self.window.set_can_reset(section.can_reset());
         if section.is_rows() {
             let built = rows(section, &env, &config);
             show_groups(&self.window, grouped(&built, &config));
@@ -845,7 +900,6 @@ impl SettingsPanel {
                 let keys: Vec<ShortcutKey> = slots
                     .iter()
                     .enumerate()
-                    .filter(|(_, text)| !text.is_empty())
                     .map(|(slot, text)| ShortcutKey {
                         text: text.as_str().into(),
                         slot: slot as i32,
@@ -855,10 +909,6 @@ impl SettingsPanel {
                     group: shortcut_group(action)
                         .map_or_else(SharedString::new, |k| tr(k, lang).into()),
                     label: action_label(action, lang).into(),
-                    free_slot: slots
-                        .iter()
-                        .position(String::is_empty)
-                        .map_or(-1, |slot| slot as i32),
                     keys: ModelRc::from(Rc::new(VecModel::from(keys))),
                     error: errors
                         .iter()
@@ -1005,28 +1055,14 @@ impl SettingsPanel {
                 if let Some(p) = panel(&weak, &state) {
                     p.refresh();
                     if let Some(section) = Section::ALL.get(i as usize) {
+                        if *section == Section::Audio {
+                            p.load_audio();
+                        }
                         (state.on_section.borrow())(*section);
                     }
                 }
             }
         });
-        w.on_reset({
-            let (weak, state) = (weak.clone(), self.state.clone());
-            move || {
-                let Some(p) = panel(&weak, &state) else {
-                    return;
-                };
-                let section = p.current_section();
-                {
-                    let env = state.env.borrow();
-                    reset(section, &env, &mut state.config.borrow_mut());
-                }
-                state.changed();
-                p.relabel();
-                p.refresh();
-            }
-        });
-
         // Rows: write, tell the host, redraw (other rows may change state).
         let edit = {
             let (weak, state) = (weak.clone(), self.state.clone());

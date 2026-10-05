@@ -506,7 +506,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     )
     .map_err(|e| anyhow::anyhow!("{e}"))?;
     panel.capture_keys();
-    panel.set_audio(audio_devices());
+    panel.set_audio_source(audio_devices);
     panel.set_display(vixeeny_settings::Display {
         hdr: vixeeny_platform::hdr_active(),
         max_refresh: vixeeny_platform::max_refresh_hz(),
@@ -662,6 +662,7 @@ fn audio_devices() -> vixeeny_settings::AudioDevices {
                 .map(|d| AudioEntry {
                     id: d.id,
                     name: d.name,
+                    icon: None,
                 })
                 .collect()
         };
@@ -673,29 +674,79 @@ fn audio_devices() -> vixeeny_settings::AudioDevices {
     }
 }
 
-/// The programs with sound, once each (a browser has many sessions), named as their
-/// executable describes itself ("Spotify" rather than "Spotify.exe"); those playing first.
-fn programs(mut apps: Vec<vixeeny_audio::AppInfo>) -> Vec<vixeeny_settings::AudioEntry> {
-    apps.sort_by_key(|a| !a.active);
+/// Windows' own programs that have windows but nothing to record.
+const SHELL_PROGRAMS: &[&str] = &[
+    "applicationframehost.exe",
+    "explorer.exe",
+    "lockapp.exe",
+    "searchhost.exe",
+    "shellexperiencehost.exe",
+    "startmenuexperiencehost.exe",
+    "systemsettings.exe",
+    "textinputhost.exe",
+];
+
+/// The programs that can be recorded, once each (a browser has many processes): those with an
+/// audio session, and those with a window (a browser closes its audio process while silent).
+/// Named as their executable describes itself ("Spotify" rather than "Spotify.exe"), with
+/// their icon; those playing first, then by name.
+fn programs(apps: Vec<vixeeny_audio::AppInfo>) -> Vec<vixeeny_settings::AudioEntry> {
+    let windowed = vixeeny_platform::top_level_windows()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|w| {
+            let path = w.exe_path?;
+            let exe = path.rsplit(['\\', '/']).next()?.to_owned();
+            Some(vixeeny_audio::AppInfo {
+                pid: w.pid,
+                exe,
+                active: false,
+            })
+        });
     let mut seen = std::collections::HashSet::new();
-    apps.into_iter()
-        .filter(|a| !a.exe.is_empty() && !a.exe.to_ascii_lowercase().starts_with("vixeeny"))
+    let mut entries: Vec<(bool, vixeeny_settings::AudioEntry)> = apps
+        .into_iter()
+        .chain(windowed)
+        .filter(|a| {
+            let exe = a.exe.to_ascii_lowercase();
+            !exe.is_empty()
+                && !exe.starts_with("vixeeny")
+                && !SHELL_PROGRAMS.contains(&exe.as_str())
+        })
         .filter(|a| seen.insert(a.exe.to_ascii_lowercase()))
         .map(|a| {
-            let meta = vixeeny_platform::process_path(a.pid)
-                .map(|p| vixeeny_platform::exe_metadata(&p))
+            let path = vixeeny_platform::process_path(a.pid);
+            let meta = path
+                .as_deref()
+                .map(vixeeny_platform::exe_metadata)
                 .unwrap_or_default();
             let name = meta
                 .file_description
                 .or(meta.product_name)
                 .filter(|n| !n.trim().is_empty())
                 .unwrap_or_else(|| a.exe.trim_end_matches(".exe").to_owned());
-            vixeeny_settings::AudioEntry {
+            // Drawn at 22 px: 48 stays sharp up to 200 %.
+            let icon = path
+                .as_deref()
+                .and_then(|p| vixeeny_platform::exe_icon(p, 48))
+                .map(|(width, height, rgba)| vixeeny_settings::Icon {
+                    width,
+                    height,
+                    rgba: rgba.into(),
+                });
+            let entry = vixeeny_settings::AudioEntry {
                 id: a.exe,
                 name: name.trim().to_owned(),
-            }
+                icon,
+            };
+            (a.active, entry)
         })
-        .collect()
+        .collect();
+    entries.sort_by(|(a_on, a), (b_on, b)| {
+        b_on.cmp(a_on)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+    entries.into_iter().map(|(_, e)| e).collect()
 }
 
 /// Releases (or gives back) the global shortcuts of the daemon while a shortcut is recorded.

@@ -638,7 +638,7 @@ fn settings_render_at(
 }
 
 #[test]
-fn settings_apply_immediately_and_each_section_resets() {
+fn settings_apply_immediately() {
     use vixeeny_settings::Section;
     let (panel, seen) = settings_panel();
     panel.select_section(Section::General);
@@ -649,24 +649,16 @@ fn settings_apply_immediately_and_each_section_resets() {
     // The page keeps its rows (and their controls, which then animate): only the row changed.
     assert!(w.get_groups() == groups, "the rows were rebuilt");
     w.invoke_row_chosen("theme".into(), 2); // system, light, dark
-    w.invoke_row_number("idle_exit".into(), 62);
+    w.invoke_row_chosen("overlay_edge".into(), 0); // left, right, top, bottom
     assert_eq!(seen.borrow().len(), 3, "one notification per change");
     let c = panel.config();
     assert!(!c.general.sounds);
     assert_eq!(c.general.theme, "dark");
-    assert_eq!(c.general.app_idle_exit_seconds, 60);
+    assert_eq!(c.overlay.edge, "left");
     // The same value again is not a change.
     w.invoke_row_toggled("sounds".into(), false);
     assert_eq!(seen.borrow().len(), 3);
 
-    // Another section's change survives this section's reset.
-    panel.select_section(Section::Capture);
-    w.invoke_row_chosen("image_format".into(), 1);
-    panel.select_section(Section::General);
-    w.invoke_reset();
-    let c = panel.config();
-    assert!(c.general.sounds && c.general.theme == "system");
-    assert_eq!(c.image.format, "jpeg");
     // Unknown ids and out-of-range choices are ignored.
     let before = seen.borrow().len();
     w.invoke_row_chosen("theme".into(), 99);
@@ -703,13 +695,15 @@ fn the_video_page_edits_the_current_profile_and_reports_problems() {
     panel.select_section(Section::Video);
     settings_render(&panel, "9-settings-video");
     let w = panel.window();
-    w.invoke_row_chosen("fps".into(), 0); // 30, 60 (and 120 on a fast monitor)
+    w.invoke_row_chosen("fps".into(), 1); // 24, 30, 60 (and more on a fast monitor)
     assert_eq!(panel.config().profiles["default"].fps, 30);
     w.invoke_row_chosen("split".into(), 1);
     assert_eq!(panel.config().profiles["default"].split.mode, "size:2048");
     assert_eq!(w.get_notice(), "");
-    // MKV is not an MP4: a variable frame rate in MP4 is a problem the page says out loud.
-    w.invoke_row_toggled("vfr".into(), true);
+    // HEVC does not go in WebM: a problem the page says out loud.
+    w.invoke_row_chosen("encoder_kind".into(), 1);
+    w.invoke_row_chosen("encoder".into(), 1); // x264, x265, …
+    w.invoke_row_chosen("container".into(), 2);
     assert!(!w.get_notice().is_empty(), "{}", w.get_notice());
 }
 
@@ -751,7 +745,19 @@ fn every_page_of_the_settings_renders() {
     let entry = |id: &str, name: &str| AudioEntry {
         id: id.into(),
         name: name.into(),
+        icon: None,
     };
+    // A program's icon: a blue disc on a transparent ground.
+    let disc: Vec<u8> = (0..32 * 32)
+        .flat_map(|i| {
+            let (x, y) = ((i % 32) as f32 - 15.5, (i / 32) as f32 - 15.5);
+            if x * x + y * y < 15.0 * 15.0 {
+                [30, 120, 230, 255]
+            } else {
+                [0, 0, 0, 0]
+            }
+        })
+        .collect();
     panel.set_audio(AudioDevices {
         outputs: vec![
             entry("o1", "Speakers (Realtek Audio)"),
@@ -759,8 +765,15 @@ fn every_page_of_the_settings_renders() {
         ],
         inputs: vec![entry("i1", "Microphone (Blue Yeti)")],
         programs: vec![
-            entry("Spotify.exe", "Spotify.exe"),
-            entry("chrome.exe", "chrome.exe"),
+            AudioEntry {
+                icon: Some(vixeeny_settings::Icon {
+                    width: 32,
+                    height: 32,
+                    rgba: disc.into(),
+                }),
+                ..entry("Spotify.exe", "Spotify")
+            },
+            entry("chrome.exe", "Google Chrome"),
         ],
     });
     for section in Section::ALL {

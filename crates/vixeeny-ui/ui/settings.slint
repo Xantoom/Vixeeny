@@ -22,6 +22,9 @@ export struct SettingRow {
     step: int,
     options: [string],
     selected: int,
+    // A picture before the label (a program's icon).
+    icon: image,
+    has-icon: bool,
 }
 
 // The rows under one title.
@@ -58,9 +61,8 @@ export struct ShortcutRow {
     // The title of the group this row starts (empty: same group as the row above).
     group: string,
     label: string,
+    // Always the three slots, an empty text for a free one.
     keys: [ShortcutKey],
-    // The slot a new shortcut would take (-1: all three are used).
-    free-slot: int,
     error: string,
 }
 
@@ -72,7 +74,6 @@ export struct LineItem {
 }
 
 export struct UiTexts {
-    reset: string,
     new-label: string,
     duplicate: string,
     rename: string,
@@ -100,7 +101,8 @@ export struct UiTexts {
     choose: string,
     press-keys: string,
     keys-help: string,
-    add-shortcut: string,
+    action-column: string,
+    shortcut-column: string,
     details: string,
     restart: string,
     retry: string,
@@ -125,6 +127,8 @@ component SettingLine inherits GroupRow {
     property <bool> renaming: false;
     title: root.entry.label;
     description: root.entry.hint;
+    icon: root.entry.icon;
+    has-icon: root.entry.has-icon;
     dimmed: !root.entry.enabled && root.entry.kind != 5;
     stack-under: root.entry.kind == 4 || root.entry.kind == 3 || root.entry.kind == 9 ? 620px : 500px;
     clickable: root.entry.kind == 0 && root.entry.enabled;
@@ -380,27 +384,45 @@ component MenuEntry inherits Rectangle {
     accessible-label: root.text;
 }
 
-component KeyChip inherits Rectangle {
+// One cell of the shortcuts table: a shortcut (a click changes it, the cross removes it), or an
+// empty slot (a click records one).
+component KeySlot inherits Rectangle {
     in property <string> text;
     in property <bool> recording: false;
+    in property <string> press-label;
     callback clicked();
     callback cleared();
+    property <bool> empty: root.text == "" && !root.recording;
     height: 32px;
-    preferred-width: row.preferred-width + 8px;
     border-radius: Theme.radius;
     border-width: 1px;
-    border-color: root.recording ? Theme.accent : Theme.control-stroke;
-    background: root.recording ? Theme.accent-soft : (touch.has-hover ? Theme.control-hover : Theme.control);
-    animate background { duration: Theme.t-fast; }
-    row := HorizontalLayout {
-        padding-left: 12px;
+    border-color: root.recording ? Theme.accent : (root.empty ? (touch.has-hover ? Theme.control-stroke : Theme.divider) : Theme.control-stroke);
+    background: root.recording ? Theme.accent-soft
+        : root.empty ? (touch.has-hover ? Theme.subtle-hover : transparent)
+        : (touch.has-hover ? Theme.control-hover : Theme.control);
+    animate background, border-color { duration: Theme.t-fast; }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    if root.empty && touch.has-hover : Icon {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        data: Icons.add;
+        tint: Theme.text-3;
+        size: 14px;
+    }
+    if !root.empty : HorizontalLayout {
+        padding-left: 10px;
         padding-right: 4px;
         spacing: 4px;
         Text {
-            text: root.text;
-            color: Theme.text;
-            font-size: 14px;
+            horizontal-stretch: 1;
+            text: root.recording ? root.press-label : root.text;
+            color: root.recording ? Theme.accent : Theme.text;
+            font-size: 13px;
             vertical-alignment: center;
+            overflow: elide;
         }
         if !root.recording : IconButton {
             icon: Icons.dismiss;
@@ -409,11 +431,8 @@ component KeyChip inherits Rectangle {
             clicked => { root.cleared(); }
         }
     }
-    touch := TouchArea {
-        z: -1;
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
-    }
+    accessible-role: button;
+    accessible-label: root.text;
 }
 
 // A button of the window's corner (minimize, maximize, close), as Windows draws them.
@@ -444,9 +463,8 @@ component CaptionButton inherits Rectangle {
 export component SettingsWindow inherits Window {
     in property <UiTexts> t;
     in property <[string]> section-titles;
-    // 0 gallery, 1 general, 2 shortcuts, 3 captures, 4 video, 5 audio, 6 about
+    // 0 gallery, 1 general, 2 shortcuts, 3 captures, 4 video, 5 replay, 6 audio, 7 about
     in-out property <int> section: 1;
-    in property <bool> can-reset: true;
     in property <[SettingGroup]> groups;
     // A message above the groups (problems with the video settings).
     in property <string> notice;
@@ -479,7 +497,6 @@ export component SettingsWindow inherits Window {
     in property <string> update-action;
 
     callback section-changed(int);
-    callback reset();
     callback row-toggled(string, bool);
     callback row-chosen(string, int);
     callback row-number(string, int);
@@ -514,6 +531,8 @@ export component SettingsWindow inherits Window {
     default-font-family: Theme.font;
 
     property <bool> compact: root.width < 820px;
+    // The width of a column of the shortcuts table.
+    property <length> slot-w: root.compact ? 120px : 150px;
     property <bool> is-rows: root.section != 0 && root.section != 2;
     // The page fades and rises in when it changes.
     property <bool> page-shown: true;
@@ -524,7 +543,8 @@ export component SettingsWindow inherits Window {
             : i == 2 ? Icons.keyboard
             : i == 3 ? Icons.image
             : i == 4 ? Icons.video
-            : i == 5 ? Icons.speaker
+            : i == 5 ? Icons.history
+            : i == 6 ? Icons.speaker
             : Icons.info;
     }
     function go(i: int) {
@@ -551,28 +571,29 @@ export component SettingsWindow inherits Window {
         VerticalLayout {
             padding-left: 12px;
             padding-right: 12px;
-            padding-top: 16px;
             padding-bottom: 16px;
             spacing: 2px;
+            // In the title bar, on the line of the window's buttons.
             HorizontalLayout {
-                height: 48px;
-                padding-left: root.compact ? 6px : 10px;
-                spacing: 10px;
+                height: 36px;
+                padding-left: root.compact ? 10px : 8px;
+                spacing: 8px;
                 Image {
                     source: Theme.app-icon;
-                    width: 28px;
-                    height: 28px;
+                    width: 20px;
+                    height: 20px;
                     y: (parent.height - self.height) / 2;
                 }
                 if !root.compact : Text {
                     text: "Vixeeny";
                     color: Theme.text;
-                    font-size: 17px;
-                    font-weight: 700;
+                    font-size: 14px;
+                    font-weight: 600;
                     vertical-alignment: center;
                 }
             }
-            Rectangle { height: 12px; }
+            // The first entry level with the title of the page.
+            Rectangle { height: 40px; }
             items := Rectangle {
                 height: root.section-titles.length * 38px;
                 // The highlight of the current entry slides to the new one.
@@ -626,7 +647,7 @@ export component SettingsWindow inherits Window {
                         overflow: elide;
                     }
                 }
-                pill := TouchArea { mouse-cursor: pointer; clicked => { root.go(6); } }
+                pill := TouchArea { mouse-cursor: pointer; clicked => { root.go(7); } }
             }
         }
     }
@@ -663,14 +684,6 @@ export component SettingsWindow inherits Window {
                         vertical-alignment: center;
                         overflow: elide;
                     }
-                    Rectangle { horizontal-stretch: 1; }
-                    if root.can-reset : Button {
-                        y: (parent.height - self.height) / 2;
-                        subtle: true;
-                        icon: Icons.sync;
-                        text: root.t.reset;
-                        clicked => { root.reset(); }
-                    }
                 }
 
                 // ---- pages made of groups of rows (and the about page)
@@ -690,7 +703,7 @@ export component SettingsWindow inherits Window {
                                 kind: 1;
                                 text: root.notice;
                             }
-                            if root.section == 6 : about := VerticalLayout {
+                            if root.section == 7 : about := VerticalLayout {
                                 spacing: 8px;
                                 // Who we are.
                                 Group {
@@ -782,7 +795,7 @@ export component SettingsWindow inherits Window {
                                 }
                                 Rectangle { height: 12px; }
                             }
-                            if root.section == 6 : VerticalLayout {
+                            if root.section == 7 : VerticalLayout {
                                 spacing: 8px;
                                 SectionLabel { text: root.t.details; }
                                 Group {
@@ -977,16 +990,37 @@ export component SettingsWindow inherits Window {
                             alignment: start;
                             spacing: 0px;
                             padding-bottom: 32px;
+                            // The column titles: the action, then its three shortcuts.
+                            HorizontalLayout {
+                                padding-left: 16px;
+                                padding-right: 16px;
+                                padding-bottom: 6px;
+                                spacing: 8px;
+                                Text {
+                                    horizontal-stretch: 1;
+                                    text: root.t.action-column;
+                                    color: Theme.text-3;
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                }
+                                for k in 3 : Text {
+                                    width: root.slot-w;
+                                    text: root.t.shortcut-column + " " + (k + 1);
+                                    color: Theme.text-3;
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                }
+                            }
                             for sc[i] in root.shortcuts : VerticalLayout {
                                 if sc.group != "" : VerticalLayout {
-                                    padding-top: i == 0 ? 0px : 20px;
+                                    padding-top: i == 0 ? 4px : 20px;
                                     padding-bottom: 8px;
                                     SectionLabel { text: sc.group; }
                                 }
                                 Rectangle {
                                     // One card per group: the rows of a group touch, their corners
                                     // are rounded only at the ends.
-                                    height: line.height;
+                                    height: line.preferred-height;
                                     background: Theme.card;
                                     border-width: 1px;
                                     border-color: Theme.stroke;
@@ -994,25 +1028,44 @@ export component SettingsWindow inherits Window {
                                     border-top-right-radius: sc.group != "" ? Theme.radius-card : 0px;
                                     border-bottom-left-radius: i + 1 >= root.shortcuts.length || root.shortcuts[i + 1].group != "" ? Theme.radius-card : 0px;
                                     border-bottom-right-radius: i + 1 >= root.shortcuts.length || root.shortcuts[i + 1].group != "" ? Theme.radius-card : 0px;
-                                    line := GroupRow {
-                                        first: sc.group != "";
-                                        title: sc.label;
-                                        description: sc.error != "" ? sc.error : (root.recording-row == i ? root.t.keys-help : "");
-                                        HorizontalLayout {
-                                            spacing: 6px;
-                                            for key in sc.keys : KeyChip {
-                                                text: root.recording-row == i && root.recording-slot == key.slot ? root.t.press-keys : key.text;
-                                                recording: root.recording-row == i && root.recording-slot == key.slot;
-                                                clicked => { root.shortcut-record(i, key.slot); }
-                                                cleared => { root.shortcut-clear(i, key.slot); }
+                                    if sc.group == "" : Rectangle {
+                                        x: 16px;
+                                        y: 0px;
+                                        width: parent.width - 32px;
+                                        height: 1px;
+                                        background: Theme.divider;
+                                    }
+                                    line := HorizontalLayout {
+                                        padding-left: 16px;
+                                        padding-right: 16px;
+                                        padding-top: 10px;
+                                        padding-bottom: 10px;
+                                        spacing: 8px;
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 2px;
+                                            Text {
+                                                text: sc.label;
+                                                color: Theme.text;
+                                                font-size: 14px;
+                                                wrap: word-wrap;
                                             }
-                                            if sc.free-slot >= 0 : Button {
-                                                subtle: !(root.recording-row == i && root.recording-slot == sc.free-slot);
-                                                icon: Icons.add;
-                                                text: root.recording-row == i && root.recording-slot == sc.free-slot ? root.t.press-keys : root.t.add-shortcut;
-                                                accent: root.recording-row == i && root.recording-slot == sc.free-slot;
-                                                clicked => { root.shortcut-record(i, sc.free-slot); }
+                                            if sc.error != "" || root.recording-row == i : Text {
+                                                text: sc.error != "" ? sc.error : root.t.keys-help;
+                                                color: sc.error != "" ? Theme.danger : Theme.text-3;
+                                                font-size: 12px;
+                                                wrap: word-wrap;
                                             }
+                                        }
+                                        for key in sc.keys : KeySlot {
+                                            width: root.slot-w;
+                                            y: (parent.height - self.height) / 2;
+                                            text: key.text;
+                                            recording: root.recording-row == i && root.recording-slot == key.slot;
+                                            press-label: root.t.press-keys;
+                                            clicked => { root.shortcut-record(i, key.slot); }
+                                            cleared => { root.shortcut-clear(i, key.slot); }
                                         }
                                     }
                                 }

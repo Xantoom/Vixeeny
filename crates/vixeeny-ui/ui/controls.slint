@@ -587,12 +587,16 @@ export component GroupRow inherits Rectangle {
     in property <bool> first: false;
     in property <bool> clickable: false;
     in property <length> stack-under: 500px;
+    // A picture before the title (a program's icon).
+    in property <image> icon;
+    in property <bool> has-icon: false;
     callback clicked();
 
     property <bool> stacked: root.width < root.stack-under;
     property <length> pad: 16px;
-    property <length> text-w: root.stacked ? root.width - 2 * root.pad
-        : max(120px, root.width - 2 * root.pad - ctl.preferred-width - 24px);
+    property <length> lead: root.has-icon ? 32px : 0px;
+    property <length> text-w: root.stacked ? root.width - 2 * root.pad - root.lead
+        : max(120px, root.width - 2 * root.pad - root.lead - ctl.preferred-width - 24px);
     property <length> body: root.stacked ? txt.preferred-height + 10px + ctl.preferred-height
         : max(txt.preferred-height, ctl.preferred-height);
     height: max(56px, root.body + 24px);
@@ -611,8 +615,16 @@ export component GroupRow inherits Rectangle {
         mouse-cursor: root.clickable ? pointer : default;
         clicked => { root.clicked(); }
     }
-    txt := VerticalLayout {
+    if root.has-icon : Image {
         x: root.pad;
+        y: txt.y + (txt.height - self.height) / 2;
+        width: 22px;
+        height: 22px;
+        source: root.icon;
+        opacity: root.dimmed ? 0.45 : 1.0;
+    }
+    txt := VerticalLayout {
+        x: root.pad + root.lead;
         y: root.stacked ? 12px : (parent.height - self.preferred-height) / 2;
         width: root.text-w;
         height: self.preferred-height;

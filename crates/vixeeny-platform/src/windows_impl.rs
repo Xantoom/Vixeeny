@@ -894,3 +894,123 @@ pub fn monotonic_ns() -> i64 {
     let frequency = i128::from(frequency.max(1));
     (i128::from(counter) * 1_000_000_000 / frequency) as i64
 }
+
+/// The icon of an executable, `size` pixels square, as RGBA rows (straight alpha). `None` when
+/// the file has no icon or cannot be read.
+pub fn exe_icon(path: &str, size: u32) -> Option<(u32, u32, Vec<u8>)> {
+    use windows::Win32::Graphics::Gdi::{
+        BI_RGB, BITMAP, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, DeleteObject, GetDC,
+        GetDIBits, GetObjectW, ReleaseDC,
+    };
+    use windows::Win32::UI::Shell::SHDefExtractIconW;
+    use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, HICON, ICONINFO};
+    let wide: Vec<u16> = path.encode_utf16().chain(Some(0)).collect();
+    let mut icon = HICON::default();
+    // SAFETY: `wide` is a NUL-terminated path; the icon handle is destroyed below.
+    unsafe {
+        SHDefExtractIconW(
+            windows::core::PCWSTR(wide.as_ptr()),
+            0,
+            0,
+            Some(&raw mut icon),
+            None,
+            size,
+        )
+    }
+    .ok()
+    .ok()?;
+    if icon.is_invalid() {
+        return None;
+    }
+    let mut info = ICONINFO::default();
+    // SAFETY: a live icon; its bitmaps are deleted below.
+    let got = unsafe { GetIconInfo(icon, &raw mut info) };
+    // SAFETY: the icon is ours and no longer used after this.
+    let _ = unsafe { DestroyIcon(icon) };
+    got.ok()?;
+    let color = info.hbmColor;
+    let pixels = (|| {
+        if color.is_invalid() {
+            return None; // a monochrome icon: not worth showing
+        }
+        let mut bitmap = BITMAP::default();
+        // SAFETY: reads the size of a live bitmap into a buffer of the right size.
+        let n = unsafe {
+            GetObjectW(
+                color.into(),
+                size_of::<BITMAP>() as i32,
+                Some((&raw mut bitmap).cast()),
+            )
+        };
+        if n == 0 || bitmap.bmWidth <= 0 || bitmap.bmHeight <= 0 {
+            return None;
+        }
+        let (w, h) = (bitmap.bmWidth as u32, bitmap.bmHeight as u32);
+        let mut header = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: w as i32,
+                biHeight: -(h as i32), // top-down
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut bgra = vec![0u8; (w * h * 4) as usize];
+        // SAFETY: the screen DC is released; the buffer holds `h` rows of `w` 32-bit pixels.
+        let rows = unsafe {
+            let dc = GetDC(None);
+            let rows = GetDIBits(
+                dc,
+                color,
+                0,
+                h,
+                Some(bgra.as_mut_ptr().cast()),
+                &raw mut header,
+                DIB_RGB_COLORS,
+            );
+            ReleaseDC(None, dc);
+            rows
+        };
+        if rows != h as i32 {
+            return None;
+        }
+        // Old icons have no alpha: their mask says what is transparent; shown opaque instead.
+        let opaque = bgra.as_chunks::<4>().0.iter().all(|p| p[3] == 0);
+        for p in bgra.as_chunks_mut::<4>().0 {
+            p.swap(0, 2);
+            if opaque {
+                p[3] = 255;
+            }
+        }
+        Some((w, h, bgra))
+    })();
+    // SAFETY: the bitmaps GetIconInfo created are ours to delete.
+    unsafe {
+        if !info.hbmColor.is_invalid() {
+            let _ = DeleteObject(info.hbmColor.into());
+        }
+        if !info.hbmMask.is_invalid() {
+            let _ = DeleteObject(info.hbmMask.into());
+        }
+    }
+    pixels
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_program_icon_is_read_with_its_transparency() {
+        let windir = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+        let (w, h, rgba) = super::exe_icon(&format!(r"{windir}\explorer.exe"), 48)
+            .expect("explorer.exe has an icon");
+        assert_eq!((w, h), (48, 48));
+        assert_eq!(rgba.len(), 48 * 48 * 4);
+        // Drawn on a transparent ground: some pixels clear, some solid.
+        assert!(rgba.as_chunks::<4>().0.iter().any(|p| p[3] == 0));
+        assert!(rgba.as_chunks::<4>().0.iter().any(|p| p[3] == 255));
+        assert!(super::exe_icon(r"C:\nowhere\nothing.exe", 48).is_none());
+    }
+}

@@ -43,15 +43,16 @@ fn parse_app_names(text: &str) -> std::collections::BTreeMap<String, String> {
         .collect()
 }
 
-/// The frame rate offered closest to `fps` (a setting from before the shorter list).
-const fn fps_option(fps: u32, high: bool) -> u32 {
-    if fps >= 90 && high {
-        120
-    } else if fps >= 45 {
-        60
-    } else {
-        30
-    }
+/// The frame rates a recording can have (those above the fastest monitor are not offered).
+const FRAME_RATES: [u32; 8] = [24, 30, 60, 90, 120, 144, 165, 240];
+
+/// The offered frame rate closest to `fps` (a setting from another machine or an older list).
+fn fps_option(fps: u32, offered: &[u32]) -> u32 {
+    offered
+        .iter()
+        .copied()
+        .min_by_key(|f| f.abs_diff(fps))
+        .unwrap_or(60)
 }
 
 fn hdr_on(setting: &str) -> bool {
@@ -143,6 +144,25 @@ pub fn general(env: &Env, config: &Config) -> Vec<Row> {
         ));
     }
     rows.extend([
+        header("h_folders", t(Key::GrpFolders)),
+        folder(
+            "dir_images",
+            t(Key::SetDirImages),
+            |c| c.paths.images.clone(),
+            |c, v| c.paths.images = v,
+        ),
+        folder(
+            "dir_videos",
+            t(Key::SetDirVideos),
+            |c| c.paths.videos.clone(),
+            |c, v| c.paths.videos = v,
+        ),
+        folder(
+            "dir_replays",
+            t(Key::SetDirReplays),
+            |c| c.paths.replays.clone(),
+            |c, v| c.paths.replays = v,
+        ),
         header("h_naming", t(Key::GrpNaming)),
         hinted(
             text(
@@ -187,17 +207,6 @@ pub fn general(env: &Env, config: &Config) -> Vec<Row> {
             t(Key::SetSubReplays),
             |c| c.paths.per_app_subfolder.replays,
             |c, v| c.paths.per_app_subfolder.replays = v,
-        ),
-        header("h_advanced", t(Key::GrpAdvanced)),
-        hinted(
-            number(
-                "idle_exit",
-                t(Key::SetIdleExit),
-                (0, 600, 5),
-                |c| i64::from(c.general.app_idle_exit_seconds),
-                |c, v| c.general.app_idle_exit_seconds = v as u32,
-            ),
-            t(Key::SetIdleExitHint),
         ),
     ]);
     rows
@@ -274,7 +283,10 @@ pub fn capture(env: &Env, config: &Config) -> Vec<Row> {
             |c| c.image.show_cursor,
             |c, v| c.image.show_cursor = v,
         ),
-        hinted(
+    ]);
+    // Only when Windows shows HDR: there is nothing to keep otherwise.
+    if env.display.hdr {
+        rows.push(hinted(
             toggle(
                 "image_hdr",
                 t(Key::SetHdrEnable),
@@ -282,21 +294,9 @@ pub fn capture(env: &Env, config: &Config) -> Vec<Row> {
                 |c, v| c.image.hdr = if v { "keep_hdr" } else { "tonemap_sdr" }.into(),
             ),
             t(Key::SetHdrEnableHint),
-        ),
-        slider(
-            "dim",
-            t(Key::SetDim),
-            (0, 90, 5),
-            |c| i64::from(c.editor.dim_percent),
-            |c, v| c.editor.dim_percent = v as u8,
-        ),
-        header("h_location", t(Key::GrpLocation)),
-        folder(
-            "dir_images",
-            t(Key::SetDirImages),
-            |c| c.paths.images.clone(),
-            |c, v| c.paths.images = v,
-        ),
+        ));
+    }
+    rows.extend([
         header("h_ocr", t(Key::GrpOcr)),
         hinted(
             text(
@@ -411,6 +411,8 @@ fn custom_rows(env: &Env, encoder: &str) -> Vec<Row> {
         .collect()
 }
 
+/// The recording, in the order of OBS: the profile, the picture, the encoder, the file, then
+/// the encoder's own options when they are set by hand.
 pub fn video(env: &Env, config: &Config) -> Vec<Row> {
     let t = |k| env.t(k);
     let profile = config.cur();
@@ -439,6 +441,49 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
         ),
     ];
 
+    // ---- the picture
+    rows.push(header("h_video", t(Key::GrpVideo)));
+    rows.push(choice(
+        "resolution",
+        t(Key::SetResolution),
+        vec![
+            opt("source", t(Key::SetResSource)),
+            opt("2160p", "2160p"),
+            opt("1440p", "1440p"),
+            opt("1080p", "1080p"),
+            opt("720p", "720p"),
+            opt("480p", "480p"),
+        ],
+        |c| c.cur().resolution,
+        |c, v| c.cur_mut().resolution = v,
+    ));
+    // Above 60 fps only what a monitor shows.
+    let max = env.display.max_refresh.max(60);
+    // (A 239.76 Hz monitor reads 239: one more lets 240 through.)
+    let rates: Vec<u32> = FRAME_RATES
+        .iter()
+        .copied()
+        .filter(|f| *f <= max + 1)
+        .collect();
+    let offered = rates.clone();
+    rows.push(choice(
+        "fps",
+        t(Key::SetFps),
+        rates
+            .iter()
+            .map(|f| opt(&f.to_string(), format!("{f} fps")))
+            .collect(),
+        move |c| fps_option(c.cur().fps, &offered).to_string(),
+        |c, v| c.cur_mut().fps = v.parse().unwrap_or(60),
+    ));
+    rows.push(toggle(
+        "video_cursor",
+        t(Key::SetShowCursor),
+        |c| c.cur().show_cursor,
+        |c, v| c.cur_mut().show_cursor = v,
+    ));
+
+    // ---- the encoder
     rows.push(header("h_encoder", t(Key::GrpEncoder)));
     rows.push(hinted(
         segmented(
@@ -494,17 +539,6 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
             t(Key::SetEncoderHint),
         ));
     }
-    if hardware && let Some(probe) = &env.probe {
-        let cards: Vec<&str> = probe
-            .adapters
-            .iter()
-            .filter(|a| !a.software)
-            .map(|a| a.name.as_str())
-            .collect();
-        if !cards.is_empty() {
-            rows.push(info("gpu", t(Key::SetGpu), cards.join("\n")));
-        }
-    }
     rows.push(hinted(
         segmented(
             "preset",
@@ -523,50 +557,6 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
         ),
         t(Key::SetPresetHint),
     ));
-
-    rows.push(header("h_video", t(Key::GrpVideo)));
-    rows.push(choice(
-        "container",
-        t(Key::SetContainer),
-        // Fragmented MP4 only: a recording cut short (a crash, a full disk) still plays.
-        vec![
-            opt("mp4_fragmented", "MP4"),
-            opt("mkv", "MKV"),
-            opt("webm", "WebM"),
-        ],
-        |c| match c.cur().container.as_str() {
-            "mp4" | "mp4_hybrid" => "mp4_fragmented".to_owned(),
-            other => other.to_owned(),
-        },
-        |c, v| c.cur_mut().container = v,
-    ));
-    rows.push(choice(
-        "resolution",
-        t(Key::SetResolution),
-        vec![
-            opt("source", t(Key::SetResSource)),
-            opt("2160p", "2160p"),
-            opt("1440p", "1440p"),
-            opt("1080p", "1080p"),
-            opt("720p", "720p"),
-            opt("480p", "480p"),
-        ],
-        |c| c.cur().resolution,
-        |c, v| c.cur_mut().resolution = v,
-    ));
-    // 120 fps only where a monitor shows that many.
-    let high = env.display.max_refresh >= 120;
-    let rates: &[u32] = if high { &[30, 60, 120] } else { &[30, 60] };
-    rows.push(segmented(
-        "fps",
-        t(Key::SetFps),
-        rates
-            .iter()
-            .map(|f| opt(&f.to_string(), format!("{f} fps")))
-            .collect(),
-        move |c| fps_option(c.cur().fps, high).to_string(),
-        |c, v| c.cur_mut().fps = v.parse().unwrap_or(60),
-    ));
     let ten = current
         .as_deref()
         .is_some_and(|id| encoders::ten_bit(env, id));
@@ -583,14 +573,13 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
         // HDR needs 10 bits: the switch stays on, and cannot be turned off, while HDR is on.
         move |c| ten && !hdr_on(&c.cur().hdr),
     ));
-    // HDR needs Windows to show it: without, the switch is off and greyed out.
-    let hdr_display = env.display.hdr;
-    rows.push(when_boxed(
-        hinted(
+    // Only when Windows shows HDR: there is nothing to keep otherwise.
+    if env.display.hdr {
+        rows.push(hinted(
             toggle(
                 "hdr",
                 t(Key::SetHdrEnable),
-                move |c| hdr_display && hdr_on(&c.cur().hdr),
+                |c| hdr_on(&c.cur().hdr),
                 |c, v| {
                     let profile = c.cur_mut();
                     profile.hdr = if v { "keep_hdr" } else { "tonemap_sdr" }.into();
@@ -599,49 +588,27 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
                     }
                 },
             ),
-            if hdr_display {
-                t(Key::SetHdrEnableHint)
-            } else {
-                t(Key::SetHdrOffInWindows)
-            },
-        ),
-        move |_| hdr_display,
-    ));
-    rows.push(toggle(
-        "video_cursor",
-        t(Key::SetShowCursor),
-        |c| c.cur().show_cursor,
-        |c, v| c.cur_mut().show_cursor = v,
-    ));
-    rows.push(toggle(
-        "vfr",
-        t(Key::SetVfr),
-        |c| c.cur().vfr,
-        |c, v| c.cur_mut().vfr = v,
-    ));
-
-    if profile.preset == "custom" || !matches!(profile.preset.as_str(), "quality" | "small") {
-        if let Some(id) = &current {
-            let custom = custom_rows(env, id);
-            if !custom.is_empty() {
-                rows.push(header("h_custom", t(Key::GrpCustom)));
-                rows.extend(custom);
-            }
-        }
-        rows.push(choice(
-            "chroma",
-            t(Key::SetChroma),
-            vec![
-                opt("420", "4:2:0"),
-                opt("422", "4:2:2"),
-                opt("444", "4:4:4"),
-            ],
-            |c| c.cur().chroma,
-            |c, v| c.cur_mut().chroma = v,
+            t(Key::SetHdrEnableHint),
         ));
     }
 
-    rows.push(header("h_split", t(Key::GrpSplit)));
+    // ---- the file
+    rows.push(header("h_file", t(Key::GrpFile)));
+    rows.push(choice(
+        "container",
+        t(Key::SetContainer),
+        // Fragmented MP4 only: a recording cut short (a crash, a full disk) still plays.
+        vec![
+            opt("mp4_fragmented", "MP4"),
+            opt("mkv", "MKV"),
+            opt("webm", "WebM"),
+        ],
+        |c| match c.cur().container.as_str() {
+            "mp4" | "mp4_hybrid" => "mp4_fragmented".to_owned(),
+            other => other.to_owned(),
+        },
+        |c, v| c.cur_mut().container = v,
+    ));
     rows.push(choice(
         "split",
         t(Key::SetSplit),
@@ -682,14 +649,24 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
         ));
     }
 
-    rows.push(header("h_location", t(Key::GrpLocation)));
-    rows.push(folder(
-        "dir_videos",
-        t(Key::SetDirVideos),
-        |c| c.paths.videos.clone(),
-        |c, v| c.paths.videos = v,
-    ));
-    rows.extend(replay(env, config));
+    // ---- the encoder's options, set by hand
+    if profile.preset == "custom" || !matches!(profile.preset.as_str(), "quality" | "small") {
+        rows.push(header("h_custom", t(Key::GrpCustom)));
+        if let Some(id) = &current {
+            rows.extend(custom_rows(env, id));
+        }
+        rows.push(choice(
+            "chroma",
+            t(Key::SetChroma),
+            vec![
+                opt("420", "4:2:0"),
+                opt("422", "4:2:2"),
+                opt("444", "4:4:4"),
+            ],
+            |c| c.cur().chroma,
+            |c, v| c.cur_mut().chroma = v,
+        ));
+    }
     rows
 }
 
@@ -825,11 +802,18 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
     ));
 
     // ---- the programs open now that have sound, and those the profile records
-    let programs: Vec<(String, String, String)> = env
+    let programs: Vec<(String, String, String, Option<crate::Icon>)> = env
         .audio
         .programs
         .iter()
-        .map(|p| (format!("app:{}", p.id), p.name.clone(), String::new()))
+        .map(|p| {
+            (
+                format!("app:{}", p.id),
+                p.name.clone(),
+                String::new(),
+                p.icon.clone(),
+            )
+        })
         .chain(
             chosen
                 .iter()
@@ -840,7 +824,7 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
                         .iter()
                         .any(|p| format!("app:{}", p.id) == **s)
                 })
-                .map(|s| (s.clone(), absent_label(s), t(Key::SrcAbsent))),
+                .map(|s| (s.clone(), absent_label(s), t(Key::SrcAbsent), None)),
         )
         .collect();
     rows.push(header("h_programs", t(Key::GrpPrograms)));
@@ -853,8 +837,10 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
         },
         String::new(),
     ));
-    for (spec, label, hint) in programs {
-        rows.push(source_row(spec, label, hint));
+    for (spec, label, hint, icon) in programs {
+        let mut row = source_row(spec, label, hint);
+        row.icon = icon;
+        rows.push(row);
     }
 
     rows.push(header("h_tracks", t(Key::GrpTracks)));
@@ -883,19 +869,22 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
         |c| c.cur().audio.codec,
         |c, v| c.cur_mut().audio.codec = v,
     ));
-    rows.push(slider(
-        "audio_bitrate",
-        t(Key::SetAudioBitrate),
-        (32, 512, 16),
-        |c| i64::from(c.cur().audio.bitrate_kbps),
-        |c, v| c.cur_mut().audio.bitrate_kbps = v as u32,
-    ));
-    rows.push(toggle(
-        "audio_vbr",
-        t(Key::SetAudioVbr),
-        |c| c.cur().audio.vbr,
-        |c, v| c.cur_mut().audio.vbr = v,
-    ));
+    // A bitrate only means something for the compressed codecs (not FLAC or PCM).
+    if matches!(config.cur().audio.codec.as_str(), "auto" | "aac" | "opus") {
+        rows.push(slider(
+            "audio_bitrate",
+            t(Key::SetAudioBitrate),
+            (32, 512, 16),
+            |c| i64::from(c.cur().audio.bitrate_kbps),
+            |c, v| c.cur_mut().audio.bitrate_kbps = v as u32,
+        ));
+        rows.push(toggle(
+            "audio_vbr",
+            t(Key::SetAudioVbr),
+            |c| c.cur().audio.vbr,
+            |c, v| c.cur_mut().audio.vbr = v,
+        ));
+    }
     rows.push(toggle(
         "audio_surround",
         t(Key::SetAudioSurround),
@@ -905,8 +894,8 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
     rows
 }
 
-/// The replay buffer, at the end of the video page.
-fn replay(env: &Env, config: &Config) -> Vec<Row> {
+/// The replay buffer: the last moments, kept to be saved on demand.
+pub fn replay(env: &Env, config: &Config) -> Vec<Row> {
     let t = |k| env.t(k);
     let mut profiles = vec![opt("", t(Key::SetSameAsRecording))];
     profiles.extend(config.profiles.keys().map(|name| opt(name, name.as_str())));
@@ -941,12 +930,6 @@ fn replay(env: &Env, config: &Config) -> Vec<Row> {
             profiles,
             |c| c.replay.profile.clone(),
             |c, v| c.replay.profile = v,
-        ),
-        folder(
-            "dir_replays",
-            t(Key::SetDirReplays),
-            |c| c.paths.replays.clone(),
-            |c, v| c.paths.replays = v,
         ),
     ]
 }

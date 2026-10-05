@@ -307,7 +307,9 @@ fn plan(config: &Config, allow_gpu: bool, replay: bool) -> anyhow::Result<Plan> 
         } else {
             parse_split(&profile.split.mode)
         },
-        vfr: profile.vfr,
+        // Constant frame rate: what every editor and player expects (the variable rate of older
+        // settings is no longer offered).
+        vfr: false,
         // A replay starts on a key frame: one every second keeps the cut within a second.
         keyframe_seconds: if replay { 1.0 } else { 2.0 },
         queue: 8,

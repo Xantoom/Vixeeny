@@ -67,7 +67,6 @@ pub enum Key {
     SecVideo,
     SecAudio,
     SecAbout,
-    SetReset,
     SetLanguage,
     SetLangAuto,
     SetTheme,
@@ -75,7 +74,6 @@ pub enum Key {
     SetThemeLight,
     SetThemeDark,
     SetAutostart,
-    SetIdleExit,
     SetSounds,
     SetNotifications,
     SetOverlayEdge,
@@ -90,7 +88,6 @@ pub enum Key {
     SetJpegChroma,
     SetAvifQuality,
     SetAvifDepth,
-    SetDim,
     SetEncoder,
     SetContainer,
     SetResolution,
@@ -98,7 +95,6 @@ pub enum Key {
     SetFps,
     SetChroma,
     SetPreset,
-    SetVfr,
     SetSplit,
     SetSplitOff,
     SetSplitSize,
@@ -143,7 +139,6 @@ pub enum Key {
     GrpEncoder,
     GrpVideo,
     GrpCustom,
-    GrpSplit,
     GrpPrograms,
     GrpTracks,
     GrpNaming,
@@ -154,7 +149,6 @@ pub enum Key {
     SrcAbsent,
     UiPressKeys,
     UiKeysHelp,
-    UiAddShortcut,
     SetReplayStart,
     SetReplayDuration,
     SetReplayProfile,
@@ -265,18 +259,14 @@ pub enum Key {
     SetAutoUpdateHint,
     SecCapture,
     GrpOcr,
-    GrpAdvanced,
-    GrpLocation,
     GrpSubfolders,
     GrpProfile,
     GrpLinks,
     SetProfile,
     SetProfileHint,
-    SetGpu,
     SetTemplateHint,
     SetAppNamesHint,
     SetOcrLanguagesHint,
-    SetIdleExitHint,
     OptAuto,
     OptFlac,
     OptPcm16,
@@ -302,7 +292,6 @@ pub enum Key {
     UiNoFolder,
     UiConfirmDelete,
     UiConfirmDeleteHint,
-    SetHdrOffInWindows,
     GrpPcSound,
     GrpMic,
     SetMicOn,
@@ -310,6 +299,11 @@ pub enum Key {
     SrcSystemHint,
     SrcProgramsHint,
     SrcNoPrograms,
+    SecReplay,
+    GrpFolders,
+    GrpFile,
+    UiActionColumn,
+    UiShortcutColumn,
 }
 
 impl Key {
@@ -361,7 +355,6 @@ impl Key {
         Self::SecVideo,
         Self::SecAudio,
         Self::SecAbout,
-        Self::SetReset,
         Self::SetLanguage,
         Self::SetLangAuto,
         Self::SetTheme,
@@ -369,7 +362,6 @@ impl Key {
         Self::SetThemeLight,
         Self::SetThemeDark,
         Self::SetAutostart,
-        Self::SetIdleExit,
         Self::SetSounds,
         Self::SetNotifications,
         Self::SetOverlayEdge,
@@ -384,7 +376,6 @@ impl Key {
         Self::SetJpegChroma,
         Self::SetAvifQuality,
         Self::SetAvifDepth,
-        Self::SetDim,
         Self::SetEncoder,
         Self::SetContainer,
         Self::SetResolution,
@@ -392,7 +383,6 @@ impl Key {
         Self::SetFps,
         Self::SetChroma,
         Self::SetPreset,
-        Self::SetVfr,
         Self::SetSplit,
         Self::SetSplitOff,
         Self::SetSplitSize,
@@ -437,7 +427,6 @@ impl Key {
         Self::GrpEncoder,
         Self::GrpVideo,
         Self::GrpCustom,
-        Self::GrpSplit,
         Self::GrpPrograms,
         Self::GrpTracks,
         Self::GrpNaming,
@@ -448,7 +437,6 @@ impl Key {
         Self::SrcAbsent,
         Self::UiPressKeys,
         Self::UiKeysHelp,
-        Self::UiAddShortcut,
         Self::SetReplayStart,
         Self::SetReplayDuration,
         Self::SetReplayProfile,
@@ -559,18 +547,14 @@ impl Key {
         Self::SetAutoUpdateHint,
         Self::SecCapture,
         Self::GrpOcr,
-        Self::GrpAdvanced,
-        Self::GrpLocation,
         Self::GrpSubfolders,
         Self::GrpProfile,
         Self::GrpLinks,
         Self::SetProfile,
         Self::SetProfileHint,
-        Self::SetGpu,
         Self::SetTemplateHint,
         Self::SetAppNamesHint,
         Self::SetOcrLanguagesHint,
-        Self::SetIdleExitHint,
         Self::OptAuto,
         Self::OptFlac,
         Self::OptPcm16,
@@ -596,7 +580,6 @@ impl Key {
         Self::UiNoFolder,
         Self::UiConfirmDelete,
         Self::UiConfirmDeleteHint,
-        Self::SetHdrOffInWindows,
         Self::GrpPcSound,
         Self::GrpMic,
         Self::SetMicOn,
@@ -604,6 +587,11 @@ impl Key {
         Self::SrcSystemHint,
         Self::SrcProgramsHint,
         Self::SrcNoPrograms,
+        Self::SecReplay,
+        Self::GrpFolders,
+        Self::GrpFile,
+        Self::UiActionColumn,
+        Self::UiShortcutColumn,
     ];
 }
 
@@ -741,8 +729,6 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::SecAudio, Lang::Fr) => "Audio",
         (Key::SecAbout, Lang::En) => "About",
         (Key::SecAbout, Lang::Fr) => "À propos",
-        (Key::SetReset, Lang::En) => "Reset this section",
-        (Key::SetReset, Lang::Fr) => "Réinitialiser la section",
         (Key::SetLanguage, Lang::En) => "Language",
         (Key::SetLanguage, Lang::Fr) => "Langue",
         (Key::SetLangAuto, Lang::En) => "Automatic",
@@ -757,8 +743,6 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::SetThemeDark, Lang::Fr) => "Sombre",
         (Key::SetAutostart, Lang::En) => "Start with Windows",
         (Key::SetAutostart, Lang::Fr) => "Démarrer avec Windows",
-        (Key::SetIdleExit, Lang::En) => "Keep the app ready after a capture (seconds)",
-        (Key::SetIdleExit, Lang::Fr) => "Garder l'app prête après une capture (secondes)",
         (Key::SetSounds, Lang::En) => "Sounds",
         (Key::SetSounds, Lang::Fr) => "Sons",
         (Key::SetNotifications, Lang::En) => "Notifications",
@@ -787,8 +771,6 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::SetAvifQuality, Lang::Fr) => "Qualité AVIF",
         (Key::SetAvifDepth, Lang::En) => "AVIF bit depth",
         (Key::SetAvifDepth, Lang::Fr) => "Profondeur AVIF",
-        (Key::SetDim, Lang::En) => "Dim the frozen screen (%)",
-        (Key::SetDim, Lang::Fr) => "Assombrir l'écran figé (%)",
         (Key::SetEncoder, Lang::En) => "Encoder",
         (Key::SetEncoder, Lang::Fr) => "Encodeur",
         (Key::SetContainer, Lang::En) => "Container",
@@ -803,8 +785,6 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::SetChroma, Lang::Fr) => "Chroma",
         (Key::SetPreset, Lang::En) => "Preset",
         (Key::SetPreset, Lang::Fr) => "Préréglage",
-        (Key::SetVfr, Lang::En) => "Variable frame rate (MKV and WebM)",
-        (Key::SetVfr, Lang::Fr) => "Fréquence d'images variable (MKV et WebM)",
         (Key::SetSplit, Lang::En) => "Split the file",
         (Key::SetSplit, Lang::Fr) => "Découper le fichier",
         (Key::SetSplitOff, Lang::En) => "Never",
@@ -919,8 +899,6 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::GrpVideo, Lang::Fr) => "Vidéo",
         (Key::GrpCustom, Lang::En) => "Encoder options",
         (Key::GrpCustom, Lang::Fr) => "Options de l'encodeur",
-        (Key::GrpSplit, Lang::En) => "File splitting",
-        (Key::GrpSplit, Lang::Fr) => "Découpage des fichiers",
         (Key::GrpPrograms, Lang::En) => "Programs",
         (Key::GrpPrograms, Lang::Fr) => "Programmes",
         (Key::GrpTracks, Lang::En) => "Tracks and encoding",
@@ -941,8 +919,6 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::UiPressKeys, Lang::Fr) => "Appuyez sur le raccourci…",
         (Key::UiKeysHelp, Lang::En) => "Esc cancels, Backspace clears.",
         (Key::UiKeysHelp, Lang::Fr) => "Échap annule, Retour arrière efface.",
-        (Key::UiAddShortcut, Lang::En) => "Add",
-        (Key::UiAddShortcut, Lang::Fr) => "Ajouter",
         (Key::SetReplayStart, Lang::En) => "Start the replay buffer with the system",
         (Key::SetReplayStart, Lang::Fr) => "Activer le replay au démarrage",
         (Key::SetReplayDuration, Lang::En) => "Replay duration (seconds)",
@@ -1209,10 +1185,6 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::SecCapture, Lang::Fr) => "Captures",
         (Key::GrpOcr, Lang::En) => "Text recognition (OCR)",
         (Key::GrpOcr, Lang::Fr) => "Reconnaissance de texte (OCR)",
-        (Key::GrpAdvanced, Lang::En) => "Advanced",
-        (Key::GrpAdvanced, Lang::Fr) => "Avancé",
-        (Key::GrpLocation, Lang::En) => "Location",
-        (Key::GrpLocation, Lang::Fr) => "Emplacement",
         (Key::GrpSubfolders, Lang::En) => "A sub-folder per application",
         (Key::GrpSubfolders, Lang::Fr) => "Un sous-dossier par application",
         (Key::GrpProfile, Lang::En) => "Profile",
@@ -1225,8 +1197,6 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::SetProfileHint, Lang::Fr) => {
             "Chaque profil garde ses propres réglages vidéo et audio."
         }
-        (Key::SetGpu, Lang::En) => "Graphics card",
-        (Key::SetGpu, Lang::Fr) => "Carte graphique",
         (Key::SetTemplateHint, Lang::En) => "{app}, {date}, {time} are replaced when saving.",
         (Key::SetTemplateHint, Lang::Fr) => {
             "{app}, {date}, {time} sont remplacés à l'enregistrement."
@@ -1236,12 +1206,6 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::SetOcrLanguagesHint, Lang::En) => "auto, or codes separated by commas (fr, en, ja…).",
         (Key::SetOcrLanguagesHint, Lang::Fr) => {
             "auto, ou des codes séparés par des virgules (fr, en, ja…)."
-        }
-        (Key::SetIdleExitHint, Lang::En) => {
-            "0 closes it right away (uses less memory, starts a little slower)."
-        }
-        (Key::SetIdleExitHint, Lang::Fr) => {
-            "0 la ferme tout de suite (moins de mémoire, démarrage un peu plus lent)."
         }
         (Key::OptAuto, Lang::En) => "Automatic",
         (Key::OptAuto, Lang::Fr) => "Automatique",
@@ -1297,12 +1261,6 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::UiConfirmDeleteHint, Lang::Fr) => {
             "Le fichier part dans la Corbeille : vous pourrez encore le récupérer."
         }
-        (Key::SetHdrOffInWindows, Lang::En) => {
-            "Turn on “Use HDR” in the Windows display settings to record in HDR."
-        }
-        (Key::SetHdrOffInWindows, Lang::Fr) => {
-            "Activez « Utiliser le HDR » dans les paramètres d’affichage de Windows pour enregistrer en HDR."
-        }
         (Key::GrpPcSound, Lang::En) => "PC sound",
         (Key::GrpPcSound, Lang::Fr) => "Son du PC",
         (Key::GrpMic, Lang::En) => "Microphone",
@@ -1323,6 +1281,16 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         }
         (Key::SrcNoPrograms, Lang::En) => "No program is playing sound right now.",
         (Key::SrcNoPrograms, Lang::Fr) => "Aucun programme ne joue de son pour le moment.",
+        (Key::SecReplay, Lang::En) => "Replay",
+        (Key::SecReplay, Lang::Fr) => "Replay",
+        (Key::GrpFolders, Lang::En) => "Folders",
+        (Key::GrpFolders, Lang::Fr) => "Dossiers",
+        (Key::GrpFile, Lang::En) => "File",
+        (Key::GrpFile, Lang::Fr) => "Fichier",
+        (Key::UiActionColumn, Lang::En) => "Action",
+        (Key::UiActionColumn, Lang::Fr) => "Action",
+        (Key::UiShortcutColumn, Lang::En) => "Shortcut",
+        (Key::UiShortcutColumn, Lang::Fr) => "Raccourci",
     }
 }
 
