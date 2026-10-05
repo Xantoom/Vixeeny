@@ -1,11 +1,17 @@
 name: Release
-# A tag `v*` builds the Windows packages (installer, update archive, portable archive), signs them
-# and prepares a draft GitHub release.
-# A tag `v*-test` builds the same files without drafting a release (to check the packaging).
+# Run by hand on the release branch (`gh workflow run release.yml --ref 1.0`): builds the Windows
+# packages (installer, update archive, portable archive), signs them and prepares a draft GitHub
+# release `v<version of Cargo.toml>`, whose tag is made when the draft is published.
+# It runs on the branch rather than on a tag: a tag cannot read the caches of the branch, and
+# every release would build FFmpeg's libraries and the whole app from nothing (~25 min).
+# With `release: false` it only builds the files (to check the packaging).
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      release:
+        description: Prepare the draft release (off = build the files only)
+        type: boolean
+        default: true
 permissions:
   contents: write
 jobs:
@@ -79,10 +85,11 @@ jobs:
             dist/*.minisig
             dist/SHA256SUMS
       - name: Draft release
-        if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-test')
+        if: inputs.release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"').Matches[0].Groups[1].Value
           $files = Get-ChildItem dist -File | Where-Object { $_.Extension -in ".zip", ".exe", ".minisig" -or $_.Name -eq "SHA256SUMS" } | ForEach-Object { $_.FullName }
-          gh release create "${{ github.ref_name }}" --draft --generate-notes @files
+          gh release create "v$version" --target "${{ github.sha }}" --draft --generate-notes @files
