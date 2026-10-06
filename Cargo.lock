@@ -5717,6 +5717,7 @@ dependencies = [
  "vixeeny-encode",
  "vixeeny-image",
  "vixeeny-ocr",
+ "vixeeny-overlay",
  "vixeeny-platform",
  "vixeeny-settings",
  "vixeeny-stitch",
@@ -5830,6 +5831,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "vixeeny-overlay"
+version = "0.9.7"
+dependencies = [
+ "png",
+ "thiserror 2.0.21",
+ "tracing",
+ "vixeeny-editor",
+ "windows",
+ "windows-numerics",
+]
+
+[[package]]
 name = "vixeeny-platform"
 version = "0.9.7"
 dependencies = [
@@ -5860,7 +5873,6 @@ dependencies = [
  "slint",
  "slint-build",
  "vixeeny-common",
- "vixeeny-editor",
  "vixeeny-encode",
  "vixeeny-ocr",
  "vixeeny-settings",

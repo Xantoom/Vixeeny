@@ -325,25 +325,19 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
             )
         })
         .collect();
-    // Each window is one pixel taller than its monitor. A window that covers a monitor exactly
-    // is taken for a full-screen game: Windows and the graphics driver then switch the screen to
-    // that mode (a flash, and variable refresh following our frames). The extra row lies below
-    // the monitor, where it shows the desktop row below, if any.
-    let screens: Vec<vixeeny_ui::Screen> = monitors
+    // One window per monitor, exactly over it. Its content is a DirectComposition tree (no swap
+    // chain), so Windows never takes it for a full-screen game.
+    let screens: Vec<vixeeny_overlay::Screen> = monitors
         .iter()
-        .map(|m| {
-            let below = m.rect.y + (m.rect.height as i32) < bounds.y + bounds.height as i32;
-            let area_height = m.rect.height + u32::from(below);
-            vixeeny_ui::Screen {
-                position: (m.rect.x, m.rect.y),
-                size: (m.rect.width, m.rect.height + 1),
-                area: Rect::new(
-                    (m.rect.x - bounds.x) as f32,
-                    (m.rect.y - bounds.y) as f32,
-                    m.rect.width as f32,
-                    area_height as f32,
-                ),
-            }
+        .map(|m| vixeeny_overlay::Screen {
+            position: (m.rect.x, m.rect.y),
+            size: (m.rect.width, m.rect.height),
+            area: Rect::new(
+                (m.rect.x - bounds.x) as f32,
+                (m.rect.y - bounds.y) as f32,
+                m.rect.width as f32,
+                m.rect.height as f32,
+            ),
         })
         .collect();
     let scroll_snapshot = Snapshot {
@@ -374,8 +368,12 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
         Mode::Scroll => session = session.with_auto_command(Command::Scroll),
     }
     session.dim = f32::from(config.editor.dim_percent.min(90)) / 100.0;
-    let overlay =
-        vixeeny_ui::Overlay::on_screens(session, scale, &screens, move |command, session, _| {
+    let mut overlay = vixeeny_overlay::Overlay::on_screens(
+        session,
+        scale,
+        &screens,
+        crate::overlay_look(),
+        move |command, session| {
             if let Some(close) = output_command(
                 &config,
                 &snapshot,
@@ -403,26 +401,18 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
                     None => false,
                 },
             }
-        })
-        .map_err(|e| anyhow::anyhow!("cannot create the editor window: {e}"))?;
+        },
+    )
+    .map_err(|e| anyhow::anyhow!("cannot create the editor window: {e}"))?;
     overlay.set_tips(&tips);
     tracing::info!("editor ready after {:?}", started.elapsed());
-    // The windows show the screen as it is: they must not zoom or fade in, and they appear with
-    // their first frame (cloaked until then), over the frozen screens, which then go.
-    let instant = vixeeny_platform::without_open_animation();
-    vixeeny_platform::cloak_new_windows(true);
+    // The windows appear with their content, over the frozen screens, which then go.
     let shown = thaw.clone();
-    overlay.on_first_frame(move |windows| {
-        for window in windows {
-            vixeeny_platform::uncloak(vixeeny_platform::WindowId(window));
-        }
-        vixeeny_platform::cloak_new_windows(false);
+    overlay.on_first_frame(move |_| {
         tracing::info!("editor on screen after {:?}", started.elapsed());
         shown.release();
     });
     let result = overlay.run(cursor);
-    vixeeny_platform::cloak_new_windows(false);
-    drop(instant);
     drop(thaw);
     result.map_err(|e| anyhow::anyhow!("editor window: {e}"))?;
     if let Some(zone) = scroll_zone.take() {
@@ -441,7 +431,7 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
     Ok(())
 }
 
-/// What the toolbar's buttons do, in their order (see `tips` in `editor.slint`).
+/// What the toolbar's buttons do, in their order (see `vixeeny_overlay::layout::BUTTONS`).
 pub(crate) fn toolbar_tips(lang: vixeeny_common::i18n::Lang) -> Vec<String> {
     use vixeeny_common::i18n::{Key, tr};
     [

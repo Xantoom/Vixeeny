@@ -2,5 +2,5 @@
 #![allow(clippy::expect_used)]
 
 fn main() {
-    slint_build::compile("ui/editor.slint").expect("slint compilation");
+    slint_build::compile("ui/app.slint").expect("slint compilation");
 }

@@ -278,14 +278,18 @@ fn annotate(
     session.dim = 0.0;
     let config = config.clone();
     let tips = crate::region::toolbar_tips(crate::lang(&config.general.language));
-    let screen = vixeeny_ui::Screen {
+    let screen = vixeeny_overlay::Screen {
         position: (monitor.rect.x, monitor.rect.y),
         size: (monitor.rect.width, monitor.rect.height),
         area: vixeeny_editor::Rect::new(0.0, 0.0, frame.width as f32, frame.height as f32),
     };
     let screens = [screen];
-    let overlay =
-        vixeeny_ui::Overlay::on_screens(session, scale, &screens, move |command, session, _| {
+    let overlay = vixeeny_overlay::Overlay::on_screens(
+        session,
+        scale,
+        &screens,
+        crate::overlay_look(),
+        move |command, session| {
             crate::region::output_command(
                 &config,
                 &snapshot,
@@ -294,8 +298,9 @@ fn annotate(
                 session,
             )
             .unwrap_or(false)
-        })
-        .map_err(|e| anyhow::anyhow!("cannot create the editor window: {e}"))?;
+        },
+    )
+    .map_err(|e| anyhow::anyhow!("cannot create the editor window: {e}"))?;
     overlay.set_tips(&tips);
     overlay.set_scrolling(true);
     overlay

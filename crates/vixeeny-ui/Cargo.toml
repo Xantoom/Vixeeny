@@ -13,7 +13,6 @@ workspace = true
 [dependencies]
 slint = { version = "1.18.1", default-features = false, features = ["std", "compat-1-2"] }
 vixeeny-common = { path = "../vixeeny-common" }
-vixeeny-editor = { path = "../vixeeny-editor" }
 vixeeny-encode = { path = "../vixeeny-encode" }
 png.workspace = true
 vixeeny-ocr = { path = "../vixeeny-ocr" }
