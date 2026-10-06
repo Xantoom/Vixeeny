@@ -220,9 +220,28 @@ pub fn install(reopen: Option<ControlRequest>) -> anyhow::Result<()> {
     result
 }
 
+/// The downloaded version is this one: an older Vixeeny window, still open after an update,
+/// downloaded it again and started the installation with the program now on disk.
+fn already_installed(state: &State) -> bool {
+    state
+        .ready
+        .as_deref()
+        .is_some_and(|v| !is_newer(CURRENT, v))
+}
+
 fn install_inner(reopen: Option<ControlRequest>) -> anyhow::Result<()> {
-    let version = ready().context("no update is ready")?;
     let dir = install_dir()?;
+    let Some(version) = ready() else {
+        if already_installed(&State::load(&state_path()?)) {
+            log(&format!("{CURRENT} is already installed"));
+            let _ = std::fs::remove_dir_all(dir.join(STAGED));
+            if let Some(request) = reopen {
+                let _ = control(request);
+            }
+            return Ok(());
+        }
+        bail!("no update is ready");
+    };
     let (staged, backup) = (dir.join(STAGED), dir.join(BACKUP));
     // A backup left by an earlier update (its files were still in use then).
     let _ = std::fs::remove_dir_all(&backup);
@@ -266,5 +285,22 @@ pub fn clean_up() {
         ] {
             let _ = std::fs::remove_file(dir.join(old));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_download_of_this_version_is_already_installed() {
+        let with = |ready: &str| State {
+            ready: Some(ready.into()),
+            ..State::default()
+        };
+        assert!(already_installed(&with(CURRENT)));
+        assert!(already_installed(&with("0.0.1")));
+        assert!(!already_installed(&with("999.0.0")));
+        assert!(!already_installed(&State::default()));
     }
 }

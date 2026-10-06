@@ -345,7 +345,13 @@ fn update_view(lang: Lang) -> UpdateView {
             action: tr(Key::UpdateRestart, lang).into(),
         };
     }
-    if let Some(error) = &state.error {
+    // An error only matters while its version is still to be installed (a newer Vixeeny,
+    // installed since, by hand for instance, forgets it).
+    if let Some(error) = state
+        .error
+        .as_ref()
+        .filter(|_| state.newer_than(current).is_some())
+    {
         return UpdateView {
             stage: UpdateStage::Failed,
             title: tr(Key::UpdateFailedShort, lang).into(),
