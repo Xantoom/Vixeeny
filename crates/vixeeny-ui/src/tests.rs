@@ -563,6 +563,39 @@ fn the_gallery_and_the_other_pages_show_what_the_host_gives_them() {
     let w = panel.window();
     w.set_animated(false);
     settings_render(&panel, "9-settings-gallery");
+    // A right click on a tile opens its menu where the pointer is.
+    {
+        use slint::platform::{PointerEventButton, WindowEvent};
+        let window = WINDOW.with(Rc::clone);
+        for (x, y) in [(480.0, 220.0), (480.0, 600.0)] {
+            let position = slint::LogicalPosition::new(x, y);
+            window.dispatch_event(WindowEvent::PointerMoved { position });
+            window.dispatch_event(WindowEvent::PointerPressed {
+                position,
+                button: PointerEventButton::Right,
+            });
+            window.dispatch_event(WindowEvent::PointerReleased {
+                position,
+                button: PointerEventButton::Right,
+            });
+            for _ in 0..3 {
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                slint::platform::update_timers_and_animations();
+            }
+            settings_render(&panel, &format!("9-settings-gallery-menu-{y}"));
+            window.dispatch_event(WindowEvent::KeyPressed {
+                text: slint::platform::Key::Escape.into(),
+            });
+            window.dispatch_event(WindowEvent::KeyReleased {
+                text: slint::platform::Key::Escape.into(),
+            });
+        }
+        // The tile under the pointer is selected first: Minecraft_2026-10-02, then a.png.
+        assert_eq!(
+            requests.borrow_mut().drain(..).collect::<Vec<_>>(),
+            [GalleryRequest::Select(0), GalleryRequest::Select(2)]
+        );
+    }
     // The tiles sit under their folders, in the order of the newest capture of each.
     let groups = w.get_gallery();
     let folders: Vec<String> = groups.iter().map(|g| g.folder.to_string()).collect();

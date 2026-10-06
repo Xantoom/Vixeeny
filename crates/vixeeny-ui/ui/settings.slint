@@ -940,10 +940,14 @@ export component SettingsWindow inherits Window {
 
                     // What can be done with a tile: a right click on it.
                     menu := PopupWindow {
-                        x: min(gallery-page.menu-x, gallery-page.width - 236px);
-                        y: min(gallery-page.menu-y, gallery-page.height - 170px);
+                        // Kept inside the page, next to the pointer.
+                        x: min(gallery-page.menu-x, gallery-page.width - self.width - 16px);
+                        y: min(gallery-page.menu-y, gallery-page.height - self.height - 8px);
                         width: 220px;
+                        height: entries.preferred-height;
                         Rectangle {
+                            width: parent.width;
+                            height: parent.height;
                             property <bool> open: false;
                             y: self.open ? 0px : -4px;
                             opacity: self.open ? 1 : 0;
@@ -956,7 +960,7 @@ export component SettingsWindow inherits Window {
                             drop-shadow-blur: 24px;
                             drop-shadow-color: #00000050;
                             drop-shadow-offset-y: 6px;
-                            VerticalLayout {
+                            entries := VerticalLayout {
                                 padding: 4px;
                                 spacing: 2px;
                                 MenuEntry { icon: Icons.open; text: root.t.open; clicked => { root.gallery-action("open"); } }
