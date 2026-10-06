@@ -251,7 +251,7 @@ pub fn run(
         frame.height
     );
     if config.image.copy_to_clipboard
-        && let Err(e) = crate::region::copy_bgra(&bitmap)
+        && let Err(e) = crate::region::copy_bgra(config, &bitmap)
     {
         tracing::warn!("clipboard: {e:#}");
     }

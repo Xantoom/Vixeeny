@@ -24,14 +24,12 @@ fn to_bgra(img: &RgbaImage) -> Vec<u8> {
     out
 }
 
-fn copy_to_clipboard(img: &RgbaImage) -> anyhow::Result<()> {
+fn copy_to_clipboard(config: &Config, img: &RgbaImage) -> anyhow::Result<()> {
     let bgra = to_bgra(img);
-    copy_bgra(&Bgra::new(
-        img.width,
-        img.height,
-        img.width as usize * 4,
-        &bgra,
-    ))
+    copy_bgra(
+        config,
+        &Bgra::new(img.width, img.height, img.width as usize * 4, &bgra),
+    )
 }
 
 pub use crate::clipboard::copy_bgra;
@@ -61,7 +59,7 @@ pub fn output_command(
         Command::Close => Some(true),
         Command::Copy => {
             let img = session.export()?;
-            Some(match copy_to_clipboard(&img) {
+            Some(match copy_to_clipboard(config, &img) {
                 Ok(()) => true,
                 Err(e) => {
                     tracing::error!("clipboard: {e:#}");
@@ -83,7 +81,7 @@ pub fn output_command(
                 Ok(path) => {
                     tracing::info!("saved {}", path.display());
                     if config.image.copy_to_clipboard
-                        && let Err(e) = copy_to_clipboard(&img)
+                        && let Err(e) = copy_to_clipboard(config, &img)
                     {
                         tracing::warn!("clipboard: {e:#}");
                     }

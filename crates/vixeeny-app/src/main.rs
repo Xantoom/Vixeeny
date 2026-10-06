@@ -123,7 +123,7 @@ fn direct_capture(action: ActionId, config: &Config) -> anyhow::Result<std::path
     };
     let (format, settings) = image_output(config);
     let copy = |image: &vixeeny_image::Bgra<'_>| {
-        if let Err(e) = clipboard::copy_bgra(image) {
+        if let Err(e) = clipboard::copy_bgra(config, image) {
             tracing::warn!("clipboard: {e:#}");
         }
     };

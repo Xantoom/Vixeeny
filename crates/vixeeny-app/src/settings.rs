@@ -197,18 +197,6 @@ fn selected_item(shared: &SharedGallery) -> Option<Item> {
     g.items.get(*g.shown.get(position)?).cloned()
 }
 
-fn copy_to_clipboard(path: &std::path::Path) -> anyhow::Result<()> {
-    let bytes = std::fs::read(path)?;
-    let decoded = vixeeny_image::decode(&bytes)?;
-    let png = vixeeny_image::encode(
-        vixeeny_image::ImageFormat::Png,
-        &decoded.as_bgra(),
-        &vixeeny_image::Settings::default(),
-    )?;
-    vixeeny_platform::clipboard::copy_image(decoded.width, decoded.height, &decoded.bgra, &png)
-        .map_err(|e| anyhow::anyhow!("{e}"))
-}
-
 fn gallery_request(
     request: GalleryRequest,
     shared: &SharedGallery,
@@ -253,7 +241,7 @@ fn gallery_request(
                     .spawn()
                     .map(|_| ())
                     .map_err(Into::into),
-                "copy" => copy_to_clipboard(&item.path),
+                "copy" => crate::clipboard::copy_file(&item.path),
                 "delete" => {
                     let done = vixeeny_platform::recycle(&path).map_err(|e| anyhow::anyhow!("{e}"));
                     if done.is_ok()
