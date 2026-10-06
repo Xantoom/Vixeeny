@@ -109,7 +109,7 @@ pub enum GalleryRequest {
     Open(usize),
     /// `open`, `folder`, `copy`, `convert` or `delete`, on the selected tile.
     Action(String),
-    /// Folder (0 all, 1 images, 2 videos, 3 replays) and application text.
+    /// Folder (0 all, 1 images, 2 videos) and application text.
     Filter(i32, String),
 }
 
@@ -299,7 +299,6 @@ fn ui_texts(lang: Lang) -> UiTexts {
         copy: t(Key::UiCopy),
         all: t(Key::UiAll),
         images: t(Key::UiImages),
-        replays: t(Key::UiReplays),
         no_folder: t(Key::UiNoFolder),
         confirm_delete: t(Key::UiConfirmDelete),
         confirm_delete_hint: t(Key::UiConfirmDeleteHint),

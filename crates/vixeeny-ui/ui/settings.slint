@@ -85,7 +85,6 @@ export struct UiTexts {
     all: string,
     images: string,
     videos: string,
-    replays: string,
     no-folder: string,
     confirm-delete: string,
     confirm-delete-hint: string,
@@ -841,7 +840,6 @@ export component SettingsWindow inherits Window {
                         Chip { text: root.t.all; selected: root.gallery-kind == 0; clicked => { root.gallery-kind = 0; root.gallery-filter(0, app-filter.text); } }
                         Chip { text: root.t.images; selected: root.gallery-kind == 1; clicked => { root.gallery-kind = 1; root.gallery-filter(1, app-filter.text); } }
                         Chip { text: root.t.videos; selected: root.gallery-kind == 2; clicked => { root.gallery-kind = 2; root.gallery-filter(2, app-filter.text); } }
-                        Chip { text: root.t.replays; selected: root.gallery-kind == 3; clicked => { root.gallery-kind = 3; root.gallery-filter(3, app-filter.text); } }
                         Rectangle { horizontal-stretch: 1; }
                         app-filter := TextBox {
                             width: 220px;

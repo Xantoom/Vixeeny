@@ -22,8 +22,6 @@ pub struct Item {
     pub size: u64,
     /// The application the capture is named after (its sub-folder, or the start of its name).
     pub app: String,
-    /// Which of the scanned folders it is in (0 images, 1 videos, 2 replays).
-    pub source: usize,
 }
 
 const IMAGE_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "webp", "avif", "jxl"];
@@ -95,7 +93,6 @@ fn walk(w: &Walk, dir: &Path, depth: usize, out: &mut Vec<Item>) {
             kind,
             modified: meta.modified().unwrap_or(SystemTime::UNIX_EPOCH),
             size: meta.len(),
-            source: w.source,
             path,
         });
     }
@@ -117,14 +114,18 @@ pub fn scan(roots: &[PathBuf], limit: usize) -> Vec<Item> {
     items
 }
 
-/// Indexes of the items that pass the filters: `kind` 0 all, else the folder `kind - 1` (images,
-/// videos, replays); `app` is a case-insensitive part of the application name (empty = any).
+/// Indexes of the items that pass the filters: `kind` 0 all, 1 images, 2 videos (the replays
+/// with them); `app` is a case-insensitive part of the application name (empty = any).
 pub fn filter(items: &[Item], kind: i32, app: &str) -> Vec<usize> {
     let app = app.trim().to_lowercase();
     items
         .iter()
         .enumerate()
-        .filter(|(_, i)| kind <= 0 || i.source + 1 == kind as usize)
+        .filter(|(_, i)| match kind {
+            1 => i.kind == Kind::Image,
+            2 => i.kind == Kind::Video,
+            _ => true,
+        })
         .filter(|(_, i)| app.is_empty() || i.app.to_lowercase().contains(&app))
         .map(|(n, _)| n)
         .collect()
@@ -423,9 +424,8 @@ mod tests {
         let items = scan(&[images, videos, replays], 10);
         assert_eq!(filter(&items, 0, "").len(), 4);
         assert_eq!(filter(&items, 1, "").len(), 2);
-        assert_eq!(filter(&items, 2, "").len(), 1);
-        assert_eq!(filter(&items, 3, "").len(), 1);
-        assert_eq!(items[filter(&items, 3, "")[0]].app, "Game");
+        assert_eq!(filter(&items, 2, "").len(), 2);
+        assert_eq!(filter(&items, 2, "game").len(), 2);
         assert_eq!(filter(&items, 0, " GAM ").len(), 3);
         assert_eq!(filter(&items, 1, "game").len(), 1);
         let _ = std::fs::remove_dir_all(root);
@@ -444,7 +444,6 @@ mod tests {
             modified: SystemTime::UNIX_EPOCH + Duration::from_secs(1_790_942_580),
             size: 2_516_582,
             app: String::new(),
-            source: 0,
         };
         assert_eq!(detail(&item, 0), "2026-10-02 12:03 · 2.4 MB");
         assert_eq!(detail(&item, 2 * 3600), "2026-10-02 14:03 · 2.4 MB");
@@ -514,7 +513,6 @@ mod tests {
             modified: SystemTime::UNIX_EPOCH + Duration::from_secs(1000),
             size: 123,
             app: String::new(),
-            source: 0,
         };
         let cache = ThumbCache::new(root.join("cache"));
         let first = cache.thumbnail(&item, 4).unwrap();

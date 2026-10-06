@@ -626,14 +626,14 @@ fn the_gallery_and_the_other_pages_show_what_the_host_gives_them() {
     w.invoke_gallery_select(2);
     w.invoke_gallery_open(2);
     w.invoke_gallery_action("open".into());
-    w.invoke_gallery_filter(3, "mine".into());
+    w.invoke_gallery_filter(2, "mine".into());
     assert_eq!(
         *requests.borrow(),
         [
             GalleryRequest::Select(2),
             GalleryRequest::Open(2),
             GalleryRequest::Action("open".into()),
-            GalleryRequest::Filter(3, "mine".into()),
+            GalleryRequest::Filter(2, "mine".into()),
         ]
     );
     panel.select_section(Section::About);
