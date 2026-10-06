@@ -132,10 +132,11 @@ pub fn visual(gfx: &Gfx) -> Result<IDCompositionVisual2> {
     unsafe { gfx.dcomp.CreateVisual() }
 }
 
-/// Adds `child` on top of `parent`'s children.
+/// Adds `child` on top of `parent`'s children. (Without a reference visual, `insertAbove`
+/// false is what puts it above its siblings.)
 pub fn add(parent: &IDCompositionVisual2, child: &IDCompositionVisual2) -> Result<()> {
     // SAFETY: both visuals belong to the same device.
-    unsafe { parent.AddVisual(child, true, None::<&IDCompositionVisual>) }
+    unsafe { parent.AddVisual(child, false, None::<&IDCompositionVisual>) }
 }
 
 pub fn set_offset(v: &IDCompositionVisual2, x: f32, y: f32) -> Result<()> {

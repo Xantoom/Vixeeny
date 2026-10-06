@@ -574,6 +574,15 @@ pub fn tag_window(id: WindowId, tag: &str) -> Result<()> {
     .map_err(|e| os_err("SetPropW", e))
 }
 
+/// Lets another process (the app) take the foreground. Called by the daemon when a shortcut
+/// hands an action over: the shortcut gave the daemon the right to, and the editor needs the
+/// keyboard as soon as it appears.
+pub fn allow_foreground_handoff() {
+    use windows::Win32::UI::WindowsAndMessaging::{ASFW_ANY, AllowSetForegroundWindow};
+    // SAFETY: plain call; fails harmlessly when this process may not give the foreground away.
+    let _ = unsafe { AllowSetForegroundWindow(ASFW_ANY) };
+}
+
 /// Brings the top-level window marked with `tag` (see [`tag_window`]) to the front. `true` when
 /// there was one.
 pub fn focus_tagged_window(tag: &str) -> bool {

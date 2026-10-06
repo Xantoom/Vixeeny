@@ -9,4 +9,8 @@ idles while the pointer rests.
 
 Entry point: `Overlay` (same flow as the editor `Session` of `vixeeny-editor`).
 
+`cargo run --example smoke -- out.png` shows the editor in a small window for about two
+seconds, draws a zone, opens the style panel and saves what the screen shows: the check that
+the visual tree really composes (the tests run with hidden windows).
+
 Part of the [Vixeeny](../../VIXEENY_PLAN.md) workspace.

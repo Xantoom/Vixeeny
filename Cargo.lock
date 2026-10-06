@@ -5837,7 +5837,10 @@ dependencies = [
  "png",
  "thiserror 2.0.21",
  "tracing",
+ "tracing-subscriber",
+ "vixeeny-capture",
  "vixeeny-editor",
+ "vixeeny-platform",
  "windows",
  "windows-numerics",
 ]
