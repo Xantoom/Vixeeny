@@ -565,51 +565,42 @@ export component NavItem inherits Rectangle {
     accessible-label: root.text;
 }
 
-// A white (or dark) card that groups rows; the rows draw hairlines between themselves.
-export component Group inherits Rectangle {
-    border-radius: Theme.radius-card;
-    background: Theme.card;
-    border-width: 1px;
-    border-color: Theme.stroke;
-    clip: true;
-    VerticalLayout {
-        @children
-    }
+// Rows that belong together: each is a card of its own, a few pixels apart.
+export component Group inherits VerticalLayout {
+    spacing: 4px;
 }
 
-// A line of a group: a title (and a line of explanation) on the left, the control on the right;
-// narrower than `stack-under`, the control goes under the text. The text wraps, and the height
-// follows it.
+// A setting, as a card: a title (and a line of explanation) on the left, the control on the
+// right; narrower than `stack-under`, the control goes under the text. The text wraps, and the
+// height follows it.
 export component GroupRow inherits Rectangle {
     in property <string> title;
     in property <string> description;
     in property <bool> dimmed: false;
-    in property <bool> first: false;
     in property <bool> clickable: false;
     in property <length> stack-under: 500px;
-    // A picture before the title (a program's icon).
+    // A picture before the title (a program's icon), or a glyph (see `Icons`).
     in property <image> icon;
     in property <bool> has-icon: false;
+    in property <string> glyph;
     callback clicked();
 
     property <bool> stacked: root.width < root.stack-under;
     property <length> pad: 16px;
-    property <length> lead: root.has-icon ? 32px : 0px;
+    property <bool> lead-on: root.has-icon || root.glyph != "";
+    property <length> lead: root.lead-on ? 36px : 0px;
     property <length> text-w: root.stacked ? root.width - 2 * root.pad - root.lead
         : max(120px, root.width - 2 * root.pad - root.lead - ctl.preferred-width - 24px);
     property <length> body: root.stacked ? txt.preferred-height + 10px + ctl.preferred-height
         : max(txt.preferred-height, ctl.preferred-height);
-    height: max(56px, root.body + 24px);
-    background: root.clickable && touch.has-hover ? Theme.card-hover : transparent;
+    height: max(60px, root.body + 26px);
+    border-radius: Theme.radius-card;
+    border-width: 1px;
+    border-color: Theme.stroke;
+    background: root.clickable && touch.pressed ? Theme.card-pressed
+        : (root.clickable && touch.has-hover ? Theme.card-hover : Theme.card);
     animate background { duration: Theme.t-fast; }
 
-    if !root.first : Rectangle {
-        x: root.pad;
-        y: 0px;
-        width: parent.width - 2 * root.pad;
-        height: 1px;
-        background: Theme.divider;
-    }
     touch := TouchArea {
         enabled: root.clickable;
         mouse-cursor: root.clickable ? pointer : default;
@@ -617,15 +608,23 @@ export component GroupRow inherits Rectangle {
     }
     if root.has-icon : Image {
         x: root.pad;
-        y: txt.y + (txt.height - self.height) / 2;
+        y: (parent.height - self.height) / 2;
         width: 22px;
         height: 22px;
         source: root.icon;
         opacity: root.dimmed ? 0.45 : 1.0;
     }
+    if !root.has-icon && root.glyph != "" : Icon {
+        x: root.pad + 1px;
+        y: (parent.height - self.height) / 2;
+        data: root.glyph;
+        size: 20px;
+        tint: Theme.text;
+        opacity: root.dimmed ? 0.45 : 1.0;
+    }
     txt := VerticalLayout {
         x: root.pad + root.lead;
-        y: root.stacked ? 12px : (parent.height - self.preferred-height) / 2;
+        y: root.stacked ? 13px : (parent.height - self.preferred-height) / 2;
         width: root.text-w;
         height: self.preferred-height;
         spacing: 2px;
@@ -646,21 +645,13 @@ export component GroupRow inherits Rectangle {
     }
     ctl := HorizontalLayout {
         x: root.stacked ? root.pad : parent.width - root.pad - self.preferred-width;
-        y: root.stacked ? 12px + txt.preferred-height + 10px : (parent.height - self.preferred-height) / 2;
+        y: root.stacked ? 13px + txt.preferred-height + 10px : (parent.height - self.preferred-height) / 2;
         width: min(self.preferred-width, parent.width - 2 * root.pad);
         height: self.preferred-height;
         opacity: root.dimmed ? 0.6 : 1.0;
         animate opacity { duration: Theme.t-normal; }
         @children
     }
-}
-
-// The title of a group of rows.
-export component SectionLabel inherits Text {
-    color: Theme.text-2;
-    font-size: 13px;
-    font-weight: 600;
-    wrap: word-wrap;
 }
 
 // A message in a coloured band. kind: 0 information, 1 warning, 2 error.
@@ -703,37 +694,6 @@ export component ProgressBar inherits Rectangle {
         background: Theme.accent;
         animate width { duration: Theme.t-slow; easing: ease-out; }
     }
-}
-
-// A small rounded label that can be selected (formats, filters).
-export component Chip inherits Rectangle {
-    in property <string> text;
-    in property <bool> selected: false;
-    in property <bool> enabled: true;
-    callback clicked();
-    height: 32px;
-    preferred-width: label.preferred-width + 28px;
-    border-radius: 16px;
-    border-width: root.selected ? 0px : 1px;
-    border-color: Theme.control-stroke;
-    opacity: root.enabled ? 1.0 : 0.45;
-    background: root.selected ? Theme.accent : (touch.has-hover ? Theme.control-hover : Theme.control);
-    animate background { duration: Theme.t-fast; }
-    label := Text {
-        text: root.text;
-        color: root.selected ? Theme.on-accent : Theme.text;
-        animate color { duration: Theme.t-fast; }
-        font-size: 13px;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
-    touch := TouchArea {
-        enabled: root.enabled;
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
-    }
-    accessible-role: button;
-    accessible-label: root.text;
 }
 
 // A scrollable area with a thin scroll bar that appears on hover.

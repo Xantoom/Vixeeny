@@ -1,17 +1,24 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// The settings window (plan 5.13): a quiet navigation on the left, the page on the right, its
-// settings in groups (cards with hairlines between the rows). Rows are generic (a toggle, a
-// choice, a number…); the gallery, the shortcuts and the about page have their own layouts.
-// Plain Slint elements only (std-widgets would pull the SVG decoder in for its icons).
-import { Theme, Icons, Icon, Button, IconButton, Toggle, TextBox, ComboBox, NumberBox, Slider, Segmented, NavItem, Group, GroupRow, SectionLabel, InfoBar, Chip, ScrollArea, ProgressBar } from "controls.slint";
+// The settings window (plan 5.13): the tabs on the left, under the name of the program; the page
+// on the right, its settings as cards, a group of cards apart from the next. Rows are generic (a
+// toggle, a choice, a folder…); the shortcuts, the updates and the about page have their own
+// layouts. Plain Slint elements only (std-widgets would pull the SVG decoder in for its icons).
+import { Theme, Icons, Icon, Button, IconButton, Toggle, TextBox, ComboBox, NumberBox, Slider, Segmented, NavItem, Group, GroupRow, InfoBar, ScrollArea, ProgressBar } from "controls.slint";
+
+// A choice of a list with pictures (a program to record).
+export struct MenuOption {
+    label: string,
+    icon: image,
+    has-icon: bool,
+}
 
 export struct SettingRow {
     id: string,
     label: string,
     hint: string,
-    // 0 toggle, 1 choice, 2 number, 3 text, 4 folder, 5 info, 6 header, 7 segmented, 8 slider,
-    // 9 profile
+    // 0 toggle, 1 choice, 2 number, 3 text, 4 folder, 5 info, 7 segmented, 8 slider,
+    // 10 add (a list to pick from), 11 removable
     kind: int,
     enabled: bool,
     on: bool,
@@ -22,47 +29,33 @@ export struct SettingRow {
     step: int,
     options: [string],
     selected: int,
+    // The choices of an "add" row.
+    items: [MenuOption],
     // A picture before the label (a program's icon).
     icon: image,
     has-icon: bool,
 }
 
-// The rows under one title.
+// Rows shown together; the next group stands apart.
 export struct SettingGroup {
-    title: string,
     rows: [SettingRow],
 }
 
-export struct GalleryItem {
-    // Its position among all the tiles shown (what the callbacks take).
-    index: int,
-    name: string,
-    detail: string,
-    format: string,
-    thumb: image,
-    has-thumb: bool,
-    video: bool,
-    selected: bool,
-}
-
-// The tiles of one sub-folder (empty: none).
-export struct GalleryGroup {
-    folder: string,
-    count: int,
-    items: [GalleryItem],
-}
-
 export struct ShortcutKey {
+    // `Ctrl+Shift+R`, and its keys one by one (empty: a free slot).
     text: string,
+    parts: [string],
     slot: int,
 }
 
 export struct ShortcutRow {
-    // The title of the group this row starts (empty: same group as the row above).
-    group: string,
+    // Starts a new group of actions (shown apart from the one above).
+    group: bool,
     label: string,
-    // Always the three slots, an empty text for a free one.
+    // Always the three slots.
     keys: [ShortcutKey],
+    // The first free slot (-1: all three are used).
+    free-slot: int,
     error: string,
 }
 
@@ -74,64 +67,43 @@ export struct LineItem {
 }
 
 export struct UiTexts {
-    new-label: string,
-    duplicate: string,
-    rename: string,
-    delete: string,
-    use-label: string,
-    open: string,
-    open-folder: string,
-    copy: string,
-    all: string,
-    images: string,
-    videos: string,
-    no-folder: string,
-    confirm-delete: string,
-    confirm-delete-hint: string,
-    app-filter: string,
-    redetect: string,
-    check-now: string,
-    update-now: string,
     github: string,
     logs: string,
     copy-info: string,
-    empty: string,
-    name-hint: string,
-    choose: string,
+    change: string,
+    show: string,
+    remove: string,
+    add-shortcut: string,
+    no-programs: string,
     press-keys: string,
     keys-help: string,
-    action-column: string,
-    shortcut-column: string,
-    details: string,
     restart: string,
-    retry: string,
-    profile-new: string,
-    profile-duplicate: string,
-    profile-rename: string,
-    profile-delete: string,
-    ok: string,
-    cancel: string,
 }
 
 component SettingLine inherits GroupRow {
     in property <SettingRow> entry;
     in property <UiTexts> t;
+    // The height of the window: a list opens upwards when it has no room below.
+    in property <length> view-h;
     callback toggled(bool);
     callback chosen(int);
     callback number(int);
     callback text-edited(string);
     callback browse();
-    callback action(string, string);
+    callback action(string);
 
-    property <bool> renaming: false;
     title: root.entry.label;
-    description: root.entry.hint;
+    description: root.entry.kind == 4 ? root.entry.text : root.entry.hint;
     icon: root.entry.icon;
     has-icon: root.entry.has-icon;
+    glyph: root.entry.kind == 10 ? Icons.add : (root.entry.kind == 4 ? Icons.folder : "");
     dimmed: !root.entry.enabled && root.entry.kind != 5;
-    stack-under: root.entry.kind == 4 || root.entry.kind == 3 || root.entry.kind == 9 ? 620px : 500px;
-    clickable: root.entry.kind == 0 && root.entry.enabled;
-    clicked => { root.toggled(!root.entry.on); }
+    stack-under: root.entry.kind == 3 ? 620px : 500px;
+    clickable: (root.entry.kind == 0 || root.entry.kind == 10) && root.entry.enabled;
+    clicked => {
+        if root.entry.kind == 0 { root.toggled(!root.entry.on); }
+        if root.entry.kind == 10 { list.show(); }
+    }
 
     if root.entry.kind == 0 : Toggle {
         on: root.entry.on;
@@ -187,17 +159,8 @@ component SettingLine inherits GroupRow {
     }
     if root.entry.kind == 4 : HorizontalLayout {
         spacing: 8px;
-        TextBox {
-            width: 280px;
-            text: root.entry.text;
-            enabled: root.entry.enabled;
-            accepted(s) => { root.text-edited(s); }
-        }
-        IconButton {
-            icon: Icons.folder-open;
-            label: root.t.choose;
-            clicked => { root.browse(); }
-        }
+        Button { text: root.t.show; clicked => { root.action("open"); } }
+        Button { text: root.t.change; clicked => { root.browse(); } }
     }
     if root.entry.kind == 5 : Text {
         max-width: 300px;
@@ -208,230 +171,152 @@ component SettingLine inherits GroupRow {
         vertical-alignment: center;
         wrap: word-wrap;
     }
-    // The profile: the list and its four buttons, or the field of its new name.
-    if root.entry.kind == 9 && !root.renaming : HorizontalLayout {
-        spacing: 4px;
-        ComboBox {
-            width: 200px;
-            options: root.entry.options;
-            current: root.entry.selected;
-            selected(i) => { root.chosen(i); }
-        }
-        Rectangle { width: 4px; }
-        IconButton { icon: Icons.add; label: root.t.profile-new; clicked => { root.action("profile-new", ""); } }
-        IconButton { icon: Icons.copy; label: root.t.profile-duplicate; clicked => { root.action("profile-duplicate", ""); } }
-        IconButton { icon: Icons.rename; label: root.t.profile-rename; clicked => { root.renaming = true; } }
-        IconButton { icon: Icons.delete; label: root.t.profile-delete; enabled: root.entry.options.length > 1; clicked => { root.action("profile-delete", ""); } }
+    if root.entry.kind == 10 : Icon {
+        data: Icons.chevron-down;
+        tint: Theme.text-2;
+        size: 12px;
     }
-    if root.entry.kind == 9 && root.renaming : HorizontalLayout {
-        spacing: 8px;
-        name := TextBox {
-            width: 200px;
-            text: root.entry.text;
-            accepted(s) => { root.renaming = false; root.action("profile-rename", s); }
-            init => { self.take-focus(); }
-        }
-        Button { text: root.t.ok; accent: true; clicked => { root.renaming = false; root.action("profile-rename", name.text); } }
-        Button { text: root.t.cancel; subtle: true; clicked => { root.renaming = false; } }
+    if root.entry.kind == 11 : IconButton {
+        icon: Icons.dismiss;
+        label: root.t.remove;
+        clicked => { root.toggled(false); }
     }
-}
 
-component Tile inherits Rectangle {
-    in property <GalleryItem> item;
-    callback clicked();
-    callback opened();
-    // Right click, at this point of the tile.
-    callback menu(length, length);
-    border-radius: Theme.radius-card;
-    border-width: root.item.selected ? 2px : 1px;
-    border-color: root.item.selected ? Theme.accent : (touch.has-hover ? Theme.stroke-strong : Theme.stroke);
-    background: touch.has-hover ? Theme.control-hover : Theme.card;
-    animate border-color, background { duration: Theme.t-fast; }
-    drop-shadow-blur: touch.has-hover ? 12px : 0px;
-    drop-shadow-color: #00000030;
-    drop-shadow-offset-y: 2px;
-    animate drop-shadow-blur { duration: Theme.t-normal; }
-    clip: true;
-    Rectangle {
-        y: 0px;
-        height: parent.height - 52px;
-        background: Theme.bg-deep;
-        clip: true;
-        if root.item.has-thumb : Image {
-            source: root.item.thumb;
-            image-fit: cover;
+    // The list of an "add" row: under the row, or above it near the bottom of the window.
+    property <length> list-h: min(max(1, root.entry.items.length) * 40px + 8px, 328px);
+    list := PopupWindow {
+        x: root.width - self.width;
+        y: root.absolute-position.y + root.height + 4px + self.height > root.view-h
+            ? -self.height - 4px : root.height + 4px;
+        width: min(320px, root.width);
+        height: root.list-h;
+        Rectangle {
             width: parent.width;
             height: parent.height;
-        }
-        if !root.item.has-thumb : Icon {
-            data: root.item.video ? Icons.video : Icons.image;
-            tint: Theme.text-3;
-            size: 32px;
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-        }
-        // A video: a play button in the middle of its picture.
-        if root.item.video && root.item.has-thumb : Rectangle {
-            width: touch.has-hover ? 48px : 42px;
-            height: self.width;
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            border-radius: self.width / 2;
-            background: #000000a0;
-            border-width: 1.5px;
-            border-color: #ffffffc0;
-            animate width { duration: Theme.t-normal; easing: cubic-bezier(0.2, 0, 0, 1); }
-            Icon {
-                data: Icons.play-filled;
-                tint: white;
-                size: 18px;
-                x: (parent.width - self.width) / 2 + 1px;
-                y: (parent.height - self.height) / 2;
+            property <bool> open: false;
+            opacity: self.open ? 1 : 0;
+            animate opacity { duration: Theme.t-normal; easing: cubic-bezier(0.2, 0, 0, 1); }
+            Timer { interval: 16ms; running: !parent.open; triggered => { parent.open = true; } }
+            background: Theme.flyout;
+            border-radius: Theme.radius-flyout;
+            border-width: 1px;
+            border-color: Theme.stroke-strong;
+            drop-shadow-blur: 24px;
+            drop-shadow-color: #00000050;
+            drop-shadow-offset-y: 6px;
+            if root.entry.items.length == 0 : Text {
+                x: 16px;
+                width: parent.width - 32px;
+                text: root.t.no-programs;
+                color: Theme.text-2;
+                font-size: 13px;
+                vertical-alignment: center;
             }
-        }
-        // The kind and the format, top left: a video stands out in the accent colour.
-        Rectangle {
-            x: 8px;
-            y: 8px;
-            height: 22px;
-            width: badge.preferred-width;
-            border-radius: 11px;
-            background: root.item.video ? Theme.accent : #000000a8;
-            badge := HorizontalLayout {
-                padding-left: 7px;
-                padding-right: 8px;
-                spacing: 4px;
-                Icon {
-                    y: (parent.height - self.height) / 2;
-                    data: root.item.video ? Icons.video : Icons.image;
-                    tint: root.item.video ? Theme.on-accent : white;
-                    size: 13px;
-                }
-                Text {
-                    text: root.item.format;
-                    color: root.item.video ? Theme.on-accent : white;
-                    font-size: 11px;
-                    font-weight: 600;
-                    vertical-alignment: center;
+            Flickable {
+                content-height: root.entry.items.length * 40px + 8px;
+                for item[i] in root.entry.items : Rectangle {
+                    x: 4px;
+                    y: 4px + i * 40px;
+                    width: parent.width - 8px;
+                    height: 38px;
+                    border-radius: Theme.radius;
+                    background: pick.pressed ? Theme.subtle-pressed : (pick.has-hover ? Theme.subtle-hover : transparent);
+                    animate background { duration: Theme.t-fast; }
+                    if item.has-icon : Image {
+                        x: 10px;
+                        y: (parent.height - self.height) / 2;
+                        width: 20px;
+                        height: 20px;
+                        source: item.icon;
+                    }
+                    Text {
+                        x: 40px;
+                        width: parent.width - 48px;
+                        text: item.label;
+                        color: Theme.text;
+                        font-size: 14px;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    pick := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.chosen(i); list.close(); }
+                    }
                 }
             }
         }
     }
-    VerticalLayout {
-        y: parent.height - 52px;
-        height: 52px;
-        padding-left: 12px;
-        padding-right: 12px;
-        alignment: center;
-        spacing: 1px;
-        Text {
-            text: root.item.name;
-            color: Theme.text;
-            font-size: 13px;
-            overflow: elide;
-        }
-        Text {
-            text: root.item.detail;
-            color: Theme.text-2;
-            font-size: 12px;
-            overflow: elide;
-        }
-    }
-    touch := TouchArea {
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
-        double-clicked => { root.opened(); }
-        pointer-event(e) => {
-            if e.kind == PointerEventKind.down && e.button == PointerEventButton.right {
-                root.menu(self.mouse-x, self.mouse-y);
-            }
-        }
-    }
-    accessible-role: button;
-    accessible-label: root.item.name;
 }
 
-// A line of the menu of a tile.
-component MenuEntry inherits Rectangle {
-    in property <string> icon;
+// A key of a shortcut, drawn as a keycap.
+component Keycap inherits Rectangle {
     in property <string> text;
-    in property <bool> danger: false;
-    callback clicked();
-    height: 34px;
-    border-radius: Theme.radius;
-    background: touch.pressed ? Theme.subtle-pressed : (touch.has-hover ? (root.danger ? Theme.danger.with-alpha(0.12) : Theme.subtle-hover) : transparent);
-    animate background { duration: Theme.t-fast; }
-    HorizontalLayout {
-        padding-left: 10px;
-        padding-right: 12px;
-        spacing: 10px;
-        Icon {
-            y: (parent.height - self.height) / 2;
-            data: root.icon;
-            tint: root.danger ? Theme.danger : Theme.text-2;
-            size: 16px;
-        }
-        Text {
-            text: root.text;
-            color: root.danger ? Theme.danger : Theme.text;
-            font-size: 13px;
-            vertical-alignment: center;
-        }
+    min-width: 26px;
+    height: 24px;
+    preferred-width: label.preferred-width + 14px;
+    border-radius: 5px;
+    background: Theme.control-hover;
+    border-width: 1px;
+    border-color: Theme.stroke-strong;
+    label := Text {
+        text: root.text;
+        color: Theme.text;
+        font-size: 12px;
+        font-weight: 600;
+        horizontal-alignment: center;
+        vertical-alignment: center;
     }
-    touch := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
-    accessible-role: button;
-    accessible-label: root.text;
 }
 
-// One cell of the shortcuts table: a shortcut (a click changes it, the cross removes it), or an
-// empty slot (a click records one).
-component KeySlot inherits Rectangle {
-    in property <string> text;
+// A shortcut of an action: its keys (a click records new ones, the cross removes it), or the
+// invitation to press keys while it is recorded.
+component KeyChip inherits Rectangle {
+    in property <[string]> parts;
     in property <bool> recording: false;
     in property <string> press-label;
+    in property <string> remove-label;
     callback clicked();
     callback cleared();
-    property <bool> empty: root.text == "" && !root.recording;
+
     height: 32px;
+    preferred-width: line.preferred-width;
     border-radius: Theme.radius;
     border-width: 1px;
-    border-color: root.recording ? Theme.accent : (root.empty ? (touch.has-hover ? Theme.control-stroke : Theme.divider) : Theme.control-stroke);
-    background: root.recording ? Theme.accent-soft
-        : root.empty ? (touch.has-hover ? Theme.subtle-hover : transparent)
-        : (touch.has-hover ? Theme.control-hover : Theme.control);
+    border-color: root.recording ? Theme.accent : (touch.has-hover ? Theme.control-stroke : transparent);
+    background: root.recording ? Theme.accent-soft : (touch.has-hover ? Theme.subtle-hover : transparent);
     animate background, border-color { duration: Theme.t-fast; }
     touch := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
     }
-    if root.empty && touch.has-hover : Icon {
-        x: (parent.width - self.width) / 2;
-        y: (parent.height - self.height) / 2;
-        data: Icons.add;
-        tint: Theme.text-3;
-        size: 14px;
-    }
-    if !root.empty : HorizontalLayout {
-        padding-left: 10px;
-        padding-right: 4px;
+    line := HorizontalLayout {
+        padding-left: 4px;
+        padding-right: root.recording ? 10px : 2px;
         spacing: 4px;
-        Text {
-            horizontal-stretch: 1;
-            text: root.recording ? root.press-label : root.text;
-            color: root.recording ? Theme.accent : Theme.text;
+        alignment: start;
+        if root.recording : Text {
+            text: root.press-label;
+            color: Theme.accent;
             font-size: 13px;
             vertical-alignment: center;
-            overflow: elide;
+        }
+        if !root.recording : HorizontalLayout {
+            spacing: 4px;
+            for part in root.parts : Keycap {
+                y: (parent.height - self.height) / 2;
+                text: part;
+            }
         }
         if !root.recording : IconButton {
             icon: Icons.dismiss;
+            label: root.remove-label;
             size: 24px;
             y: (parent.height - self.height) / 2;
+            tint: Theme.text-3;
             clicked => { root.cleared(); }
         }
     }
     accessible-role: button;
-    accessible-label: root.text;
 }
 
 // A button of the window's corner (minimize, maximize, close), as Windows draws them.
@@ -462,33 +347,25 @@ component CaptionButton inherits Rectangle {
 export component SettingsWindow inherits Window {
     in property <UiTexts> t;
     in property <[string]> section-titles;
-    // 0 gallery, 1 general, 2 shortcuts, 3 captures, 4 video, 5 replay, 6 audio, 7 about
-    in-out property <int> section: 1;
+    // 0 general, 1 overlay, 2 image, 3 video, 4 sound, 5 replay, 6 shortcuts, 7 updates, 8 about
+    in-out property <int> section: 0;
     in property <[SettingGroup]> groups;
     // A message above the groups (problems with the video settings).
     in property <string> notice;
-    in property <[GalleryGroup]> gallery;
-    in property <int> gallery-count: 0;
     in property <[ShortcutRow]> shortcuts;
     // The shortcut being recorded (-1: none).
     in property <int> recording-row: -1;
     in property <int> recording-slot: -1;
     in property <[LineItem]> lines;
     in property <string> extra;
-    in-out property <int> gallery-kind: 0;
-    in property <int> gallery-selected: -1;
-    in property <string> gallery-detail;
-    // The delete confirmation is open, for this file.
-    in-out property <bool> confirm-open: false;
-    in-out property <string> confirm-name;
     // Off in the tests, where no time passes: what animates is shown at its end at once.
     in property <bool> animated: true;
 
-    // The about page: the version, and the state of the update.
+    // The about page: the version.
     in property <string> version;
     in property <string> tagline;
-    // 0 up to date (or not checked), 1 checking, 2 available, 3 downloading, 4 ready,
-    // 5 failed, 6 restarting
+    // The updates page: 0 up to date (or not checked), 1 checking, 2 available, 3 downloading,
+    // 4 ready, 5 failed, 6 restarting
     in property <int> update-state: 0;
     in property <string> update-title;
     in property <string> update-detail;
@@ -501,11 +378,7 @@ export component SettingsWindow inherits Window {
     callback row-number(string, int);
     callback row-text(string, string);
     callback row-browse(string);
-    callback row-action(string, string, string);
-    callback gallery-select(int);
-    callback gallery-open(int);
-    callback gallery-action(string);
-    callback gallery-filter(int, string);
+    callback row-action(string, string);
     callback shortcut-record(int, int);
     callback shortcut-clear(int, int);
     callback page-action(string, string);
@@ -530,34 +403,36 @@ export component SettingsWindow inherits Window {
     default-font-family: Theme.font;
 
     property <bool> compact: root.width < 820px;
-    // The width of a column of the shortcuts table.
-    property <length> slot-w: root.compact ? 120px : 150px;
-    property <bool> is-rows: root.section != 0 && root.section != 2;
-    // The page fades and rises in when it changes.
-    property <bool> page-shown: true;
+    property <bool> is-rows: root.section != 6 && root.section != 8;
+    // The first tab and the title of the page share this line.
+    property <length> top: 52px;
+    property <length> tab-h: 38px;
+    // The page rises into place when it changes (it never disappears: no flash).
+    property <bool> page-settled: true;
 
     pure function nav-icon(i: int) -> string {
-        return i == 0 ? Icons.images
-            : i == 1 ? Icons.settings
-            : i == 2 ? Icons.keyboard
-            : i == 3 ? Icons.image
-            : i == 4 ? Icons.video
+        return i == 0 ? Icons.settings
+            : i == 1 ? Icons.apps
+            : i == 2 ? Icons.image
+            : i == 3 ? Icons.video
+            : i == 4 ? Icons.speaker
             : i == 5 ? Icons.history
-            : i == 6 ? Icons.speaker
+            : i == 6 ? Icons.keyboard
+            : i == 7 ? Icons.download
             : Icons.info;
     }
     function go(i: int) {
         if i == root.section { return; }
         root.section = i;
-        root.page-shown = false;
-        appear.running = true;
+        root.page-settled = false;
+        settle.running = true;
         root.section-changed(i);
     }
 
-    appear := Timer {
+    settle := Timer {
         interval: 16ms;
         running: false;
-        triggered => { self.running = false; root.page-shown = true; }
+        triggered => { self.running = false; root.page-settled = true; }
     }
 
     // Placed by hand rather than by a layout: the width of the navigation follows the width of
@@ -566,512 +441,264 @@ export component SettingsWindow inherits Window {
         x: 0px;
         y: 0px;
         height: root.height;
-        width: root.compact ? 64px : 232px;
-        VerticalLayout {
-            padding-left: 12px;
-            padding-right: 12px;
-            padding-bottom: 16px;
-            spacing: 2px;
-            // In the title bar, on the line of the window's buttons.
-            HorizontalLayout {
-                height: 36px;
-                padding-left: root.compact ? 10px : 8px;
-                spacing: 8px;
-                Image {
-                    source: Theme.app-icon;
-                    width: 20px;
-                    height: 20px;
-                    y: (parent.height - self.height) / 2;
-                }
-                if !root.compact : Text {
-                    text: "Vixeeny";
-                    color: Theme.text;
-                    font-size: 14px;
-                    font-weight: 600;
-                    vertical-alignment: center;
-                }
+        width: root.compact ? 64px : 220px;
+        // The name of the program, in the title bar.
+        HorizontalLayout {
+            x: root.compact ? 22px : 24px;
+            y: 0px;
+            height: 44px;
+            spacing: 10px;
+            Image {
+                source: Theme.app-icon;
+                width: 20px;
+                height: 20px;
+                y: (parent.height - self.height) / 2;
             }
-            // The first entry level with the title of the page.
-            Rectangle { height: 40px; }
-            items := Rectangle {
-                height: root.section-titles.length * 38px;
-                // The highlight of the current entry slides to the new one.
+            if !root.compact : Text {
+                text: "Vixeeny";
+                color: Theme.text;
+                font-size: 15px;
+                font-weight: 600;
+                vertical-alignment: center;
+            }
+        }
+        // The tabs, right under the name; the highlight slides from one to the next.
+        items := Rectangle {
+            x: 12px;
+            y: root.top;
+            width: parent.width - 24px;
+            height: root.section-titles.length * root.tab-h;
+            Rectangle {
+                x: 0px;
+                y: root.section * root.tab-h;
+                width: parent.width;
+                height: root.tab-h - 2px;
+                border-radius: Theme.radius;
+                background: Theme.selected;
+                animate y { duration: Theme.t-normal; easing: cubic-bezier(0.2, 0, 0, 1); }
                 Rectangle {
                     x: 0px;
-                    y: root.section * 38px;
-                    width: parent.width;
-                    height: 36px;
-                    border-radius: Theme.radius + 2px;
-                    background: Theme.selected;
-                    animate y { duration: Theme.t-normal; easing: cubic-bezier(0.2, 0, 0, 1); }
-                    Rectangle {
-                        x: 0px;
-                        y: 10px;
-                        width: 3px;
-                        height: 16px;
-                        border-radius: 1.5px;
-                        background: Theme.accent;
-                    }
-                }
-                for title[i] in root.section-titles : NavItem {
-                    x: 0px;
-                    y: i * 38px;
-                    width: parent.width;
-                    text: title;
-                    icon: root.nav-icon(i);
-                    current: i == root.section;
-                    compact: root.compact;
-                    clicked => { root.go(i); }
+                    y: (parent.height - self.height) / 2;
+                    width: 3px;
+                    height: 16px;
+                    border-radius: 1.5px;
+                    background: Theme.accent;
                 }
             }
-            Rectangle { vertical-stretch: 1; }
-            // An update waits: a discreet way to it.
-            if root.update-state == 4 : Rectangle {
-                height: 36px;
-                border-radius: 18px;
-                background: pill.has-hover ? Theme.accent-hover : Theme.accent;
-                animate background { duration: Theme.t-fast; }
-                HorizontalLayout {
-                    padding-left: 12px;
-                    padding-right: 12px;
-                    spacing: 8px;
-                    alignment: center;
-                    Icon { y: (parent.height - self.height) / 2; data: Icons.download; tint: Theme.on-accent; size: 16px; }
-                    if !root.compact : Text {
-                        text: root.t.restart;
-                        color: Theme.on-accent;
-                        font-size: 13px;
-                        font-weight: 600;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
-                }
-                pill := TouchArea { mouse-cursor: pointer; clicked => { root.go(7); } }
+            for title[i] in root.section-titles : NavItem {
+                x: 0px;
+                y: i * root.tab-h;
+                width: parent.width;
+                height: root.tab-h - 2px;
+                text: title;
+                icon: root.nav-icon(i);
+                current: i == root.section;
+                compact: root.compact;
+                clicked => { root.go(i); }
             }
+        }
+        // An update waits: a discreet way to it.
+        if root.update-state == 4 : Rectangle {
+            x: 12px;
+            y: parent.height - 16px - self.height;
+            width: parent.width - 24px;
+            height: 36px;
+            border-radius: 18px;
+            background: pill.has-hover ? Theme.accent-hover : Theme.accent;
+            animate background { duration: Theme.t-fast; }
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                spacing: 8px;
+                alignment: center;
+                Icon { y: (parent.height - self.height) / 2; data: Icons.download; tint: Theme.on-accent; size: 16px; }
+                if !root.compact : Text {
+                    text: root.t.restart;
+                    color: Theme.on-accent;
+                    font-size: 13px;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+            }
+            pill := TouchArea { mouse-cursor: pointer; clicked => { root.go(7); } }
         }
     }
 
     // ---- the page
-    page-host := Rectangle {
+    page := Rectangle {
         x: nav.width;
-        y: 0px;
+        y: root.page-settled ? 0px : 8px;
+        animate y { duration: root.page-settled && root.animated ? Theme.t-slow : 0ms; easing: cubic-bezier(0.1, 0.9, 0.2, 1); }
         width: root.width - nav.width;
         height: root.height;
-        page := Rectangle {
+        // The column of the page: as wide as the window allows, up to a comfortable width.
+        property <length> column: min(self.width - 56px, 860px);
+
+        // ---- the title of the page, on the line of the first tab
+        Text {
+            x: 24px;
+            y: root.top;
+            width: page.column;
+            height: root.tab-h - 2px;
+            text: root.section >= 0 && root.section < root.section-titles.length ? root.section-titles[root.section] : "";
+            color: Theme.text;
+            font-size: 24px;
+            font-weight: 700;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+
+        body := Rectangle {
             x: 0px;
-            y: root.page-shown ? 0px : 10px;
+            y: root.top + root.tab-h + 14px;
             width: parent.width;
-            height: parent.height;
-            opacity: root.page-shown ? 1 : 0;
-            animate y, opacity { duration: root.page-shown ? Theme.t-slow : 0ms; easing: cubic-bezier(0.2, 0, 0, 1); }
+            height: parent.height - self.y;
 
-            VerticalLayout {
-                // Below the window's title bar (its buttons are at the top right).
-                padding-top: 36px;
-                padding-right: 8px;
-                spacing: 8px;
-                // ---- title of the page, as wide as the column of the page
-                HorizontalLayout {
-                    height: 48px;
-                    padding-left: 16px;
-                    padding-right: max(24px, parent.width - 8px - 16px - 820px);
-                    Text {
-                        text: root.section >= 0 && root.section < root.section-titles.length ? root.section-titles[root.section] : "";
-                        color: Theme.text;
-                        font-size: 26px;
-                        font-weight: 700;
-                        vertical-alignment: center;
-                        overflow: elide;
+            // ---- pages made of rows (and the updates page)
+            if root.is-rows : ScrollArea {
+                width: parent.width - 8px;
+                height: parent.height;
+                VerticalLayout {
+                    x: 24px;
+                    width: page.column;
+                    alignment: start;
+                    spacing: 24px;
+                    padding-bottom: 32px;
+                    if root.notice != "" : InfoBar {
+                        kind: 1;
+                        text: root.notice;
                     }
-                }
-
-                // ---- pages made of groups of rows (and the about page)
-                if root.is-rows : ScrollArea {
-                    vertical-stretch: 1;
-                    HorizontalLayout {
-                        width: parent.width - 8px;
-                        alignment: start;
-                        padding-left: 16px;
-                        padding-right: 16px;
-                        VerticalLayout {
-                            width: min(parent.width - 32px, 820px);
-                            alignment: start;
-                            spacing: 8px;
-                            padding-bottom: 32px;
-                            if root.notice != "" : InfoBar {
-                                kind: 1;
-                                text: root.notice;
+                    if root.section == 7 : Group {
+                        GroupRow {
+                            title: root.update-title;
+                            description: root.update-detail;
+                            glyph: root.update-state == 5 ? Icons.error
+                                : (root.update-state == 0 ? Icons.checkmark-circle : Icons.download);
+                            if root.update-state == 3 || root.update-state == 6 : ProgressBar {
+                                width: 160px;
+                                value: root.update-state == 6 ? 1 : root.update-progress;
                             }
-                            if root.section == 7 : about := VerticalLayout {
-                                spacing: 8px;
-                                // Who we are.
-                                Group {
-                                    HorizontalLayout {
-                                        padding: 20px;
-                                        spacing: 16px;
-                                        Image {
-                                            source: Theme.app-icon;
-                                            width: 56px;
-                                            height: 56px;
-                                            y: (parent.height - self.height) / 2;
-                                        }
-                                        VerticalLayout {
-                                            alignment: center;
-                                            spacing: 2px;
-                                            Text { text: "Vixeeny"; color: Theme.text; font-size: 20px; font-weight: 700; }
-                                            Text { text: root.version; color: Theme.text-2; font-size: 13px; }
-                                            Text { text: root.tagline; color: Theme.text-3; font-size: 12px; wrap: word-wrap; }
-                                        }
-                                    }
-                                }
-                                // The update.
-                                Group {
-                                    VerticalLayout {
-                                        padding: 16px;
-                                        spacing: 12px;
-                                        HorizontalLayout {
-                                            spacing: 12px;
-                                            Rectangle {
-                                                width: 36px;
-                                                height: 36px;
-                                                y: (parent.height - self.height) / 2;
-                                                border-radius: 18px;
-                                                background: root.update-state == 5 ? Theme.danger-fill
-                                                    : (root.update-state == 0 ? Theme.control : Theme.accent-soft);
-                                                Icon {
-                                                    x: (parent.width - self.width) / 2;
-                                                    y: (parent.height - self.height) / 2;
-                                                    size: 18px;
-                                                    data: root.update-state == 5 ? Icons.error
-                                                        : (root.update-state == 0 ? Icons.checkmark : Icons.download);
-                                                    tint: root.update-state == 5 ? Theme.danger
-                                                        : (root.update-state == 0 ? Theme.success : Theme.accent);
-                                                }
-                                            }
-                                            VerticalLayout {
-                                                horizontal-stretch: 1;
-                                                alignment: center;
-                                                spacing: 2px;
-                                                Text { text: root.update-title; color: Theme.text; font-size: 14px; font-weight: 600; wrap: word-wrap; }
-                                                if root.update-detail != "" : Text { text: root.update-detail; color: Theme.text-3; font-size: 12px; wrap: word-wrap; }
-                                            }
-                                            if root.update-action != "" && root.update-state != 3 && root.update-state != 1 && root.update-state != 6 : Button {
-                                                y: (parent.height - self.height) / 2;
-                                                accent: root.update-state == 2 || root.update-state == 4;
-                                                icon: root.update-state == 4 ? Icons.sync : (root.update-state == 2 ? Icons.download : Icons.sync);
-                                                text: root.update-action;
-                                                clicked => {
-                                                    root.page-action(root.update-state == 2 ? "update-download"
-                                                        : root.update-state == 4 ? "update-restart" : "update-check", "");
-                                                }
-                                            }
-                                        }
-                                        if root.update-state == 3 || root.update-state == 6 : ProgressBar {
-                                            value: root.update-state == 6 ? 1 : root.update-progress;
-                                        }
-                                    }
-                                }
-                                Rectangle { height: 12px; }
-                            }
-                            for g in root.groups : VerticalLayout {
-                                spacing: 8px;
-                                if g.title != "" : SectionLabel {
-                                    text: g.title;
-                                }
-                                if g.title != "" : Rectangle { height: 0px; }
-                                Group {
-                                    for r[i] in g.rows : SettingLine {
-                                        entry: r;
-                                        t: root.t;
-                                        first: i == 0;
-                                        toggled(v) => { root.row-toggled(r.id, v); }
-                                        chosen(k) => { root.row-chosen(r.id, k); }
-                                        number(v) => { root.row-number(r.id, v); }
-                                        text-edited(s) => { root.row-text(r.id, s); }
-                                        browse => { root.row-browse(r.id); }
-                                        action(a, arg) => { root.row-action(r.id, a, arg); }
-                                    }
-                                }
-                                Rectangle { height: 12px; }
-                            }
-                            if root.section == 7 : VerticalLayout {
-                                spacing: 8px;
-                                SectionLabel { text: root.t.details; }
-                                Group {
-                                    for line[i] in root.lines : GroupRow {
-                                        first: i == 0;
-                                        title: line.text;
-                                        description: line.detail;
-                                    }
-                                }
-                                HorizontalLayout {
-                                    padding-top: 4px;
-                                    spacing: 8px;
-                                    alignment: start;
-                                    Button { icon: Icons.globe; text: root.t.github; clicked => { root.page-action("github", ""); } }
-                                    Button { icon: Icons.document; text: root.t.logs; clicked => { root.page-action("logs", ""); } }
-                                    Button { icon: Icons.copy; text: root.t.copy-info; clicked => { root.page-action("copy-info", ""); } }
-                                }
-                                if root.extra != "" : Text {
-                                    text: root.extra;
-                                    color: Theme.text-2;
-                                    font-size: 12px;
-                                    wrap: word-wrap;
+                            if root.update-action != "" && root.update-state != 1 && root.update-state != 3 && root.update-state != 6 : Button {
+                                accent: root.update-state == 2 || root.update-state == 4;
+                                text: root.update-action;
+                                clicked => {
+                                    root.page-action(root.update-state == 2 ? "update-download"
+                                        : root.update-state == 4 ? "update-restart" : "update-check", "");
                                 }
                             }
+                        }
+                    }
+                    for g in root.groups : Group {
+                        for r in g.rows : SettingLine {
+                            entry: r;
+                            t: root.t;
+                            view-h: root.height;
+                            toggled(v) => { root.row-toggled(r.id, v); }
+                            chosen(k) => { root.row-chosen(r.id, k); }
+                            number(v) => { root.row-number(r.id, v); }
+                            text-edited(s) => { root.row-text(r.id, s); }
+                            browse => { root.row-browse(r.id); }
+                            action(a) => { root.row-action(r.id, a); }
                         }
                     }
                 }
+            }
 
-                // ---- gallery
-                if root.section == 0 : gallery-page := VerticalLayout {
-                    vertical-stretch: 1;
-                    padding-left: 16px;
-                    padding-right: 16px;
-                    padding-bottom: 16px;
-                    spacing: 12px;
-                    // The tile the menu is for, and where it opens.
-                    property <GalleryItem> menu-item;
-                    property <length> menu-x;
-                    property <length> menu-y;
-                    HorizontalLayout {
-                        spacing: 6px;
-                        height: 32px;
-                        Chip { text: root.t.all; selected: root.gallery-kind == 0; clicked => { root.gallery-kind = 0; root.gallery-filter(0, app-filter.text); } }
-                        Chip { text: root.t.images; selected: root.gallery-kind == 1; clicked => { root.gallery-kind = 1; root.gallery-filter(1, app-filter.text); } }
-                        Chip { text: root.t.videos; selected: root.gallery-kind == 2; clicked => { root.gallery-kind = 2; root.gallery-filter(2, app-filter.text); } }
-                        Rectangle { horizontal-stretch: 1; }
-                        app-filter := TextBox {
-                            width: 220px;
-                            placeholder: root.t.app-filter;
-                            accepted(s) => { root.gallery-filter(root.gallery-kind, s); }
-                        }
-                    }
-                    if root.gallery-count == 0 : VerticalLayout {
-                        vertical-stretch: 1;
-                        alignment: center;
-                        spacing: 12px;
-                        Icon { data: Icons.images; tint: Theme.text-3; size: 40px; x: (parent.width - self.width) / 2; }
-                        Text {
-                            text: root.t.empty;
-                            color: Theme.text-2;
-                            font-size: 14px;
-                            horizontal-alignment: center;
-                            wrap: word-wrap;
-                        }
-                    }
-                    if root.gallery-count > 0 : grid := ScrollArea {
-                        vertical-stretch: 1;
-                        // Room on the right for the scroll bar.
-                        property <length> inner: self.width - 14px;
-                        property <int> cols: max(1, floor(self.inner / 220px));
-                        property <length> tile-w: self.inner / self.cols;
-                        property <length> tile-h: self.tile-w * 0.62 + 56px;
-                        VerticalLayout {
-                            width: grid.inner;
-                            padding-bottom: 8px;
-                            for group in root.gallery : VerticalLayout {
-                                // The folder: its name and how many captures it holds.
-                                HorizontalLayout {
-                                    height: 40px;
-                                    padding-left: 6px;
-                                    padding-top: 8px;
-                                    spacing: 8px;
-                                    alignment: start;
-                                    Icon {
-                                        y: (parent.height - self.height) / 2 + 4px;
-                                        data: Icons.folder-open;
-                                        tint: group.folder == "" ? Theme.text-3 : Theme.accent;
-                                        size: 18px;
-                                    }
-                                    Text {
-                                        text: group.folder == "" ? root.t.no-folder : group.folder;
-                                        color: Theme.text;
-                                        font-size: 15px;
-                                        font-weight: 600;
-                                        vertical-alignment: center;
-                                    }
-                                    Rectangle {
-                                        y: (parent.height - self.height) / 2 + 4px;
-                                        height: 20px;
-                                        width: max(20px, count.preferred-width + 12px);
-                                        border-radius: 10px;
-                                        background: Theme.subtle-hover;
-                                        count := Text {
-                                            text: group.count;
-                                            color: Theme.text-2;
-                                            font-size: 11px;
-                                            font-weight: 600;
-                                            horizontal-alignment: center;
-                                            vertical-alignment: center;
-                                        }
-                                    }
-                                }
-                                Rectangle {
-                                    height: ceil(group.items.length / grid.cols) * grid.tile-h;
-                                    for item[i] in group.items : Tile {
-                                        x: mod(i, grid.cols) * grid.tile-w + 5px;
-                                        y: floor(i / grid.cols) * grid.tile-h + 5px;
-                                        width: grid.tile-w - 10px;
-                                        height: grid.tile-h - 10px;
-                                        item: item;
-                                        clicked => { root.gallery-select(item.index); }
-                                        opened => { root.gallery-open(item.index); }
-                                        menu(mx, my) => {
-                                            root.gallery-select(item.index);
-                                            gallery-page.menu-item = item;
-                                            gallery-page.menu-x = self.absolute-position.x + mx - gallery-page.absolute-position.x;
-                                            gallery-page.menu-y = self.absolute-position.y + my - gallery-page.absolute-position.y;
-                                            menu.show();
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if root.gallery-detail != "" : Text {
-                        text: root.gallery-detail;
-                        color: Theme.text-2;
-                        font-size: 12px;
-                        wrap: word-wrap;
-                    }
-
-                    // What can be done with a tile: a right click on it.
-                    menu := PopupWindow {
-                        // Kept inside the page, next to the pointer.
-                        x: min(gallery-page.menu-x, gallery-page.width - self.width - 16px);
-                        y: min(gallery-page.menu-y, gallery-page.height - self.height - 8px);
-                        width: 220px;
-                        height: entries.preferred-height;
-                        Rectangle {
-                            width: parent.width;
-                            height: parent.height;
-                            property <bool> open: false;
-                            y: self.open ? 0px : -4px;
-                            opacity: self.open ? 1 : 0;
-                            animate y, opacity { duration: Theme.t-normal; easing: cubic-bezier(0.2, 0, 0, 1); }
-                            Timer { interval: 16ms; running: !parent.open; triggered => { parent.open = true; } }
-                            background: Theme.flyout;
-                            border-radius: Theme.radius-flyout;
-                            border-width: 1px;
-                            border-color: Theme.stroke-strong;
-                            drop-shadow-blur: 24px;
-                            drop-shadow-color: #00000050;
-                            drop-shadow-offset-y: 6px;
-                            entries := VerticalLayout {
-                                padding: 4px;
-                                spacing: 2px;
-                                MenuEntry { icon: Icons.open; text: root.t.open; clicked => { root.gallery-action("open"); } }
-                                MenuEntry { icon: Icons.folder-open; text: root.t.open-folder; clicked => { root.gallery-action("folder"); } }
-                                if !gallery-page.menu-item.video : MenuEntry { icon: Icons.copy; text: root.t.copy; clicked => { root.gallery-action("copy"); } }
-                                Rectangle { height: 9px; Rectangle { y: 4px; height: 1px; background: Theme.divider; } }
-                                MenuEntry {
-                                    icon: Icons.delete;
-                                    text: root.t.delete;
-                                    danger: true;
-                                    clicked => {
-                                        root.confirm-name = gallery-page.menu-item.name;
-                                        root.confirm-open = true;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // ---- shortcuts
-                if root.section == 2 : ScrollArea {
-                    vertical-stretch: 1;
-                    HorizontalLayout {
-                        width: parent.width - 8px;
-                        alignment: start;
-                        padding-left: 16px;
-                        padding-right: 16px;
-                        VerticalLayout {
-                            width: min(parent.width - 32px, 820px);
-                            alignment: start;
-                            spacing: 0px;
-                            padding-bottom: 32px;
-                            // The column titles: the action, then its three shortcuts.
+            // ---- shortcuts: one card per action, its keys on the right
+            if root.section == 6 : ScrollArea {
+                width: parent.width - 8px;
+                height: parent.height;
+                VerticalLayout {
+                    x: 24px;
+                    width: page.column;
+                    alignment: start;
+                    spacing: 4px;
+                    padding-bottom: 32px;
+                    for sc[i] in root.shortcuts : VerticalLayout {
+                        padding-top: sc.group && i > 0 ? 20px : 0px;
+                        GroupRow {
+                            title: sc.label;
+                            description: sc.error != "" ? sc.error : (root.recording-row == i ? root.t.keys-help : "");
+                            stack-under: 560px;
                             HorizontalLayout {
-                                padding-left: 16px;
-                                padding-right: 16px;
-                                padding-bottom: 6px;
-                                spacing: 8px;
-                                Text {
-                                    horizontal-stretch: 1;
-                                    text: root.t.action-column;
-                                    color: Theme.text-3;
-                                    font-size: 12px;
-                                    font-weight: 600;
-                                }
-                                for k in 3 : Text {
-                                    width: root.slot-w;
-                                    text: root.t.shortcut-column + " " + (k + 1);
-                                    color: Theme.text-3;
-                                    font-size: 12px;
-                                    font-weight: 600;
-                                }
-                            }
-                            for sc[i] in root.shortcuts : VerticalLayout {
-                                if sc.group != "" : VerticalLayout {
-                                    padding-top: i == 0 ? 4px : 20px;
-                                    padding-bottom: 8px;
-                                    SectionLabel { text: sc.group; }
-                                }
-                                Rectangle {
-                                    // One card per group: the rows of a group touch, their corners
-                                    // are rounded only at the ends.
-                                    height: line.preferred-height;
-                                    background: Theme.card;
-                                    border-width: 1px;
-                                    border-color: Theme.stroke;
-                                    border-top-left-radius: sc.group != "" ? Theme.radius-card : 0px;
-                                    border-top-right-radius: sc.group != "" ? Theme.radius-card : 0px;
-                                    border-bottom-left-radius: i + 1 >= root.shortcuts.length || root.shortcuts[i + 1].group != "" ? Theme.radius-card : 0px;
-                                    border-bottom-right-radius: i + 1 >= root.shortcuts.length || root.shortcuts[i + 1].group != "" ? Theme.radius-card : 0px;
-                                    if sc.group == "" : Rectangle {
-                                        x: 16px;
-                                        y: 0px;
-                                        width: parent.width - 32px;
-                                        height: 1px;
-                                        background: Theme.divider;
-                                    }
-                                    line := HorizontalLayout {
-                                        padding-left: 16px;
-                                        padding-right: 16px;
-                                        padding-top: 10px;
-                                        padding-bottom: 10px;
-                                        spacing: 8px;
-                                        VerticalLayout {
-                                            horizontal-stretch: 1;
-                                            alignment: center;
-                                            spacing: 2px;
-                                            Text {
-                                                text: sc.label;
-                                                color: Theme.text;
-                                                font-size: 14px;
-                                                wrap: word-wrap;
-                                            }
-                                            if sc.error != "" || root.recording-row == i : Text {
-                                                text: sc.error != "" ? sc.error : root.t.keys-help;
-                                                color: sc.error != "" ? Theme.danger : Theme.text-3;
-                                                font-size: 12px;
-                                                wrap: word-wrap;
-                                            }
-                                        }
-                                        for key in sc.keys : KeySlot {
-                                            width: root.slot-w;
-                                            y: (parent.height - self.height) / 2;
-                                            text: key.text;
-                                            recording: root.recording-row == i && root.recording-slot == key.slot;
-                                            press-label: root.t.press-keys;
-                                            clicked => { root.shortcut-record(i, key.slot); }
-                                            cleared => { root.shortcut-clear(i, key.slot); }
-                                        }
+                                spacing: 6px;
+                                for key in sc.keys : HorizontalLayout {
+                                    if key.text != "" || (root.recording-row == i && root.recording-slot == key.slot) : KeyChip {
+                                        y: (parent.height - self.height) / 2;
+                                        parts: key.parts;
+                                        recording: root.recording-row == i && root.recording-slot == key.slot;
+                                        press-label: root.t.press-keys;
+                                        remove-label: root.t.remove;
+                                        clicked => { root.shortcut-record(i, key.slot); }
+                                        cleared => { root.shortcut-clear(i, key.slot); }
                                     }
                                 }
+                                if sc.free-slot >= 0 && !(root.recording-row == i && root.recording-slot == sc.free-slot) : IconButton {
+                                    y: (parent.height - self.height) / 2;
+                                    icon: Icons.add;
+                                    label: root.t.add-shortcut;
+                                    clicked => { root.shortcut-record(i, sc.free-slot); }
+                                }
                             }
+                        }
+                    }
+                }
+            }
+
+            // ---- about: who we are, this machine, the links
+            if root.section == 8 : ScrollArea {
+                width: parent.width - 8px;
+                height: parent.height;
+                VerticalLayout {
+                    x: 24px;
+                    width: page.column;
+                    alignment: start;
+                    spacing: 24px;
+                    padding-bottom: 32px;
+                    Rectangle {
+                        height: who.preferred-height;
+                        border-radius: Theme.radius-card;
+                        border-width: 1px;
+                        border-color: Theme.stroke;
+                        background: Theme.card;
+                        who := HorizontalLayout {
+                            padding: 20px;
+                            spacing: 16px;
+                            Image {
+                                source: Theme.app-icon;
+                                width: 48px;
+                                height: 48px;
+                                y: (parent.height - self.height) / 2;
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 2px;
+                                Text { text: "Vixeeny"; color: Theme.text; font-size: 18px; font-weight: 700; }
+                                Text { text: root.version + " · " + root.tagline; color: Theme.text-2; font-size: 13px; wrap: word-wrap; }
+                            }
+                        }
+                    }
+                    Group {
+                        for line in root.lines : GroupRow {
+                            title: line.text;
+                            description: line.detail;
+                        }
+                    }
+                    VerticalLayout {
+                        spacing: 8px;
+                        HorizontalLayout {
+                            spacing: 8px;
+                            alignment: start;
+                            Button { icon: Icons.globe; text: root.t.github; clicked => { root.page-action("github", ""); } }
+                            Button { icon: Icons.document; text: root.t.logs; clicked => { root.page-action("logs", ""); } }
+                            Button { icon: Icons.copy; text: root.t.copy-info; clicked => { root.page-action("copy-info", ""); } }
+                        }
+                        if root.extra != "" : Text {
+                            text: root.extra;
+                            color: Theme.text-2;
+                            font-size: 12px;
+                            wrap: word-wrap;
                         }
                     }
                 }
@@ -1111,98 +738,5 @@ export component SettingsWindow inherits Window {
         TouchArea { x: root.width - e; y: 0px; width: e; height: e; mouse-cursor: nesw-resize; pointer-event(ev) => { if ev.kind == PointerEventKind.down { root.resize-window(2); } } }
         TouchArea { x: 0px; y: root.height - 2 * e; width: 2 * e; height: 2 * e; mouse-cursor: nesw-resize; pointer-event(ev) => { if ev.kind == PointerEventKind.down { root.resize-window(6); } } }
         TouchArea { x: root.width - 2 * e; y: root.height - 2 * e; width: 2 * e; height: 2 * e; mouse-cursor: nwse-resize; pointer-event(ev) => { if ev.kind == PointerEventKind.down { root.resize-window(5); } } }
-    }
-
-    // ---- the delete confirmation, over everything
-    Rectangle {
-        width: root.width;
-        height: root.height;
-        visible: self.opacity > 0.01;
-        opacity: root.confirm-open ? 1 : 0;
-        animate opacity { duration: root.animated ? Theme.t-normal : 0ms; }
-        background: #0000006b;
-        // A click beside the dialog cancels.
-        TouchArea { clicked => { root.confirm-open = false; } }
-        keys := FocusScope {
-            enabled: root.confirm-open;
-            changed enabled => { if self.enabled { self.focus(); } }
-            key-pressed(e) => {
-                if e.text == Key.Escape { root.confirm-open = false; return accept; }
-                if e.text == Key.Return {
-                    root.confirm-open = false;
-                    root.gallery-action("delete");
-                    return accept;
-                }
-                reject
-            }
-        }
-        dialog := Rectangle {
-            width: min(420px, root.width - 48px);
-            height: body.preferred-height;
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2 + (root.confirm-open ? 0px : 16px);
-            animate y { duration: root.animated ? Theme.t-normal : 0ms; easing: cubic-bezier(0.2, 0, 0, 1); }
-            background: Theme.flyout;
-            border-radius: Theme.radius-card;
-            border-width: 1px;
-            border-color: Theme.stroke-strong;
-            drop-shadow-blur: 32px;
-            drop-shadow-color: #00000060;
-            drop-shadow-offset-y: 8px;
-            // Clicks on the dialog stay on it.
-            TouchArea {}
-            body := VerticalLayout {
-                padding: 24px;
-                spacing: 10px;
-                HorizontalLayout {
-                    spacing: 12px;
-                    Rectangle {
-                        width: 36px;
-                        height: 36px;
-                        border-radius: 18px;
-                        background: Theme.danger.with-alpha(0.14);
-                        Icon { data: Icons.delete; tint: Theme.danger; size: 18px; x: 9px; y: 9px; }
-                    }
-                    VerticalLayout {
-                        alignment: center;
-                        spacing: 2px;
-                        Text {
-                            text: root.t.confirm-delete;
-                            color: Theme.text;
-                            font-size: 16px;
-                            font-weight: 600;
-                            wrap: word-wrap;
-                        }
-                        Text {
-                            text: root.confirm-name;
-                            color: Theme.text-2;
-                            font-size: 13px;
-                            overflow: elide;
-                        }
-                    }
-                }
-                Text {
-                    text: root.t.confirm-delete-hint;
-                    color: Theme.text-2;
-                    font-size: 13px;
-                    wrap: word-wrap;
-                }
-                HorizontalLayout {
-                    padding-top: 12px;
-                    spacing: 8px;
-                    alignment: end;
-                    Button { text: root.t.cancel; clicked => { root.confirm-open = false; } }
-                    Button {
-                        text: root.t.delete;
-                        danger: true;
-                        accent: true;
-                        clicked => {
-                            root.confirm-open = false;
-                            root.gallery-action("delete");
-                        }
-                    }
-                }
-            }
-        }
     }
 }

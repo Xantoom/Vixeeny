@@ -636,30 +636,6 @@ pub fn open_path(path: &str) -> Result<()> {
     }
 }
 
-/// Moves a file to the Recycle Bin (never deletes it for good).
-pub fn recycle(path: &str) -> Result<()> {
-    use windows::Win32::UI::Shell::{
-        FO_DELETE, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, SHFILEOPSTRUCTW,
-        SHFileOperationW,
-    };
-    // The list of names ends with two NULs.
-    let mut wide: Vec<u16> = path.encode_utf16().collect();
-    wide.extend([0, 0]);
-    let mut op = SHFILEOPSTRUCTW {
-        wFunc: FO_DELETE,
-        pFrom: windows::core::PCWSTR(wide.as_ptr()),
-        fFlags: (FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT).0 as u16,
-        ..Default::default()
-    };
-    // SAFETY: `op` points at `wide`, which outlives the call.
-    let code = unsafe { SHFileOperationW(&mut op) };
-    if code == 0 && !op.fAnyOperationsAborted.as_bool() {
-        Ok(())
-    } else {
-        Err(PlatformError::Os(format!("cannot recycle {path} ({code})")))
-    }
-}
-
 /// Looks up the DXGI output of `monitor`: `(is HDR, peak nits, GDI device name)`.
 fn dxgi_output(monitor: MonitorId) -> Option<(bool, f32, [u16; 32])> {
     // SAFETY: plain DXGI enumeration; every interface is reference counted by the bindings.

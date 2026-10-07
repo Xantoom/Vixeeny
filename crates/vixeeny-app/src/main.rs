@@ -11,7 +11,6 @@ use std::time::Duration;
 #[cfg(feature = "ffmpeg")]
 mod audio_rig;
 mod clipboard;
-mod gallery;
 mod probe;
 #[cfg(feature = "ffmpeg")]
 mod record;
@@ -21,6 +20,7 @@ mod settings;
 mod side;
 mod still;
 mod sysinfo;
+mod thumbnail;
 mod toast;
 mod update;
 mod widget;

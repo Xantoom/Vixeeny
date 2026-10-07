@@ -1,41 +1,26 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The settings window (plan 5.13). It owns a copy of the [`Config`], applies every change the
 //! moment it is made (the host is told through [`SettingsPanel::on_change`]), and leaves what
-//! needs the OS (folders to browse, the gallery's files, the hardware list) to the host.
+//! needs the OS (folders to browse and open, the hardware list) to the host.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use slint::{ComponentHandle, Model, ModelRc, SharedPixelBuffer, SharedString, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use vixeeny_common::config::Config;
 use vixeeny_common::i18n::{Key, Lang, tr};
 use vixeeny_common::ipc::ActionId;
 use vixeeny_encode::probe::ProbeResult;
 use vixeeny_settings::shortcuts::{self, Refusal};
 use vixeeny_settings::{
-    AudioDevices, Display, Env, Kind, Row, Section, Value, profiles, rows, video_problems,
+    AudioDevices, Display, Env, Kind, Row, Section, Value, rows, video_problems,
 };
 
 use crate::theme::{self, Look};
 use crate::{
-    GalleryGroup, GalleryItem, LineItem, SettingGroup, SettingRow, SettingsWindow, ShortcutKey,
-    ShortcutRow, UiTexts,
+    LineItem, MenuOption, SettingGroup, SettingRow, SettingsWindow, ShortcutKey, ShortcutRow,
+    UiTexts,
 };
-
-/// One tile of the gallery.
-#[derive(Debug, Clone, Default)]
-pub struct GalleryEntry {
-    pub name: String,
-    /// Date and size, as text.
-    pub detail: String,
-    pub video: bool,
-    /// The sub-folder (application) it is grouped under; empty: none.
-    pub folder: String,
-    /// `PNG`, `MP4`…
-    pub format: String,
-    /// RGBA thumbnail, `(width, height, bytes)`.
-    pub thumb: Option<(u32, u32, Vec<u8>)>,
-}
 
 /// One line of the about page.
 #[derive(Debug, Clone, Default)]
@@ -45,7 +30,7 @@ pub struct Line {
     pub strong: bool,
 }
 
-/// Where the update stands, for the card of the about page.
+/// Where the update stands, for the card of the updates page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum UpdateStage {
     /// Up to date, or not checked yet.
@@ -101,18 +86,6 @@ pub enum Captured {
     Combination(String),
 }
 
-/// What the gallery asks of the host.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum GalleryRequest {
-    Select(usize),
-    /// Double click: open this tile.
-    Open(usize),
-    /// `open`, `folder`, `copy`, `convert` or `delete`, on the selected tile.
-    Action(String),
-    /// Folder (0 all, 1 images, 2 videos) and application text.
-    Filter(i32, String),
-}
-
 type ChangeFn = Box<dyn Fn(&Config)>;
 type BrowseFn = Box<dyn Fn(&str) -> Option<String>>;
 type PageFn = Box<dyn Fn(Section, &str, &str)>;
@@ -136,12 +109,10 @@ struct State {
     on_change: RefCell<ChangeFn>,
     on_browse: RefCell<BrowseFn>,
     on_page_action: RefCell<PageFn>,
-    on_gallery: RefCell<Box<dyn Fn(GalleryRequest)>>,
     on_section: RefCell<Box<dyn Fn(Section)>>,
 }
 
-/// A way to update the window from another thread (a detection that takes a while, thumbnails
-/// that arrive one by one).
+/// A way to update the window from another thread (a detection, a download that takes a while).
 #[derive(Clone)]
 pub struct PanelHandle(slint::Weak<SettingsWindow>);
 
@@ -170,18 +141,6 @@ impl PanelHandle {
             let _ = w.hide();
         });
     }
-
-    pub fn set_gallery(&self, entries: Vec<GalleryEntry>, selected: Option<usize>) {
-        let _ = self.0.upgrade_in_event_loop(move |w| {
-            show_gallery(&w, entries, selected);
-        });
-    }
-
-    pub fn set_gallery_detail(&self, text: String) {
-        let _ = self
-            .0
-            .upgrade_in_event_loop(move |w| w.set_gallery_detail(text.into()));
-    }
 }
 
 fn line_model(lines: Vec<Line>, selected: Option<usize>) -> ModelRc<LineItem> {
@@ -196,80 +155,6 @@ fn line_model(lines: Vec<Line>, selected: Option<usize>) -> ModelRc<LineItem> {
         })
         .collect();
     ModelRc::from(Rc::new(VecModel::from(items)))
-}
-
-fn gallery_item(index: usize, e: GalleryEntry, selected: Option<usize>) -> GalleryItem {
-    let thumb = e.thumb.and_then(|(w, h, rgba)| {
-        (rgba.len() == w as usize * h as usize * 4).then(|| {
-            let mut buffer = SharedPixelBuffer::<slint::Rgba8Pixel>::new(w, h);
-            buffer.make_mut_bytes().copy_from_slice(&rgba);
-            slint::Image::from_rgba8(buffer)
-        })
-    });
-    GalleryItem {
-        index: index as i32,
-        name: e.name.into(),
-        detail: e.detail.into(),
-        format: e.format.into(),
-        has_thumb: thumb.is_some(),
-        thumb: thumb.unwrap_or_default(),
-        video: e.video,
-        selected: selected == Some(index),
-    }
-}
-
-/// The tiles under their folders, the folders in the order of their newest capture.
-fn gallery_groups(
-    entries: Vec<GalleryEntry>,
-    selected: Option<usize>,
-) -> Vec<(String, Vec<GalleryItem>)> {
-    let mut groups: Vec<(String, Vec<GalleryItem>)> = Vec::new();
-    for (i, e) in entries.into_iter().enumerate() {
-        let folder = e.folder.clone();
-        let item = gallery_item(i, e, selected);
-        match groups.iter_mut().find(|(f, _)| *f == folder) {
-            Some((_, items)) => items.push(item),
-            None => groups.push((folder, vec![item])),
-        }
-    }
-    groups
-}
-
-/// Shows the tiles. When only their content changed (a selection, a thumbnail), the tiles are
-/// updated in place: rebuilding them would drop their hover and a menu open on one.
-fn show_gallery(w: &SettingsWindow, entries: Vec<GalleryEntry>, selected: Option<usize>) {
-    w.set_gallery_selected(selected.map_or(-1, |i| i as i32));
-    w.set_gallery_count(entries.len() as i32);
-    let groups = gallery_groups(entries, selected);
-    let current = w.get_gallery();
-    let same_shape = current.row_count() == groups.len()
-        && groups.iter().enumerate().all(|(i, (folder, items))| {
-            current
-                .row_data(i)
-                .is_some_and(|g| g.folder == folder.as_str() && g.items.row_count() == items.len())
-        });
-    if same_shape {
-        for (i, (_, items)) in groups.into_iter().enumerate() {
-            let Some(group) = current.row_data(i) else {
-                continue;
-            };
-            for (k, item) in items.into_iter().enumerate() {
-                if group.items.row_data(k).as_ref() != Some(&item) {
-                    group.items.set_row_data(k, item);
-                }
-            }
-        }
-        return;
-    }
-    let model: Vec<GalleryGroup> = groups
-        .into_iter()
-        .map(|(folder, items)| GalleryGroup {
-            count: items.len() as i32,
-            folder: folder.into(),
-            items: ModelRc::from(Rc::new(VecModel::from(items))),
-        })
-        .collect();
-    w.set_gallery(ModelRc::from(Rc::new(VecModel::from(model))));
 }
 
 pub struct SettingsPanel {
@@ -289,43 +174,17 @@ fn strings(items: impl IntoIterator<Item = String>) -> ModelRc<SharedString> {
 fn ui_texts(lang: Lang) -> UiTexts {
     let t = |k| SharedString::from(tr(k, lang));
     UiTexts {
-        new_label: t(Key::UiNew),
-        duplicate: t(Key::UiDuplicate),
-        rename: t(Key::UiRename),
-        delete: t(Key::UiDelete),
-        use_label: t(Key::UiUse),
-        open: t(Key::UiOpen),
-        open_folder: t(Key::UiOpenFolder),
-        copy: t(Key::UiCopy),
-        all: t(Key::UiAll),
-        images: t(Key::UiImages),
-        no_folder: t(Key::UiNoFolder),
-        confirm_delete: t(Key::UiConfirmDelete),
-        confirm_delete_hint: t(Key::UiConfirmDeleteHint),
-        videos: t(Key::UiVideos),
-        app_filter: t(Key::UiAppFilter),
-        redetect: t(Key::UiRedetect),
-        check_now: t(Key::SetCheckNow),
-        update_now: t(Key::UpdateNow),
         github: t(Key::UiGithub),
         logs: t(Key::UiLogs),
         copy_info: t(Key::UiCopyInfo),
-        empty: t(Key::UiGalleryEmpty),
-        name_hint: t(Key::UiNameHint),
-        choose: t(Key::WizBrowse),
+        change: t(Key::UiChange),
+        show: t(Key::UiShow),
+        remove: t(Key::UiRemove),
+        add_shortcut: t(Key::UiAddShortcut),
+        no_programs: t(Key::SrcNoPrograms),
         press_keys: t(Key::UiPressKeys),
         keys_help: t(Key::UiKeysHelp),
-        action_column: t(Key::UiActionColumn),
-        shortcut_column: t(Key::UiShortcutColumn),
-        details: t(Key::GrpLinks),
         restart: t(Key::UpdateRestart),
-        retry: t(Key::UiRetry),
-        profile_new: t(Key::ProfileNew),
-        profile_duplicate: t(Key::ProfileDuplicate),
-        profile_rename: t(Key::ProfileRename),
-        profile_delete: t(Key::ProfileDelete),
-        ok: t(Key::UiOk),
-        cancel: t(Key::UiCancel),
     }
 }
 
@@ -350,27 +209,23 @@ pub fn action_label(action: ActionId, lang: Lang) -> &'static str {
 }
 
 /// The rows as groups: each header starts one.
-fn grouped(rows: &[Row], config: &Config) -> Vec<(String, Vec<SettingRow>)> {
-    let mut groups: Vec<(String, Vec<SettingRow>)> = Vec::new();
+fn grouped(rows: &[Row], config: &Config) -> Vec<Vec<SettingRow>> {
+    let mut groups: Vec<Vec<SettingRow>> = vec![Vec::new()];
     for row in rows {
         if matches!(row.kind, Kind::Header) {
-            groups.push((row.label.clone(), Vec::new()));
-            continue;
-        }
-        if groups.is_empty() {
-            groups.push((String::new(), Vec::new()));
-        }
-        if let Some((_, list)) = groups.last_mut() {
+            groups.push(Vec::new());
+        } else if let Some(list) = groups.last_mut() {
             list.push(row_model(row, config));
         }
     }
-    groups.retain(|(_, rows)| !rows.is_empty());
+    groups.retain(|rows| !rows.is_empty());
     groups
 }
 
 /// The same row as far as the eye can tell (the option lists compared by content).
 fn same_row(a: &SettingRow, b: &SettingRow) -> bool {
     let options = |r: &SettingRow| r.options.iter().collect::<Vec<_>>();
+    let items = |r: &SettingRow| r.items.iter().map(|i| i.label).collect::<Vec<_>>();
     a.id == b.id
         && a.label == b.label
         && a.hint == b.hint
@@ -383,19 +238,20 @@ fn same_row(a: &SettingRow, b: &SettingRow) -> bool {
         && a.max == b.max
         && a.step == b.step
         && a.selected == b.selected
+        && a.has_icon == b.has_icon
         && options(a) == options(b)
+        && items(a) == items(b)
 }
 
 /// Shows `groups`. When the page keeps its shape (same groups, same rows) only the rows that
 /// changed are updated, in place: their controls stay, so a toggle slides instead of being
 /// redrawn in its new state, and nothing flickers.
-fn show_groups(window: &SettingsWindow, groups: Vec<(String, Vec<SettingRow>)>) {
+fn show_groups(window: &SettingsWindow, groups: Vec<Vec<SettingRow>>) {
     let current = window.get_groups();
     let same_shape = current.row_count() == groups.len()
-        && groups.iter().enumerate().all(|(i, (title, rows))| {
+        && groups.iter().enumerate().all(|(i, rows)| {
             current.row_data(i).is_some_and(|g| {
-                g.title == title.as_str()
-                    && g.rows.row_count() == rows.len()
+                g.rows.row_count() == rows.len()
                     && rows
                         .iter()
                         .enumerate()
@@ -403,7 +259,7 @@ fn show_groups(window: &SettingsWindow, groups: Vec<(String, Vec<SettingRow>)>) 
             })
         });
     if same_shape {
-        for (i, (_, rows)) in groups.into_iter().enumerate() {
+        for (i, rows) in groups.into_iter().enumerate() {
             let Some(group) = current.row_data(i) else {
                 continue;
             };
@@ -421,22 +277,29 @@ fn show_groups(window: &SettingsWindow, groups: Vec<(String, Vec<SettingRow>)>) 
     }
     let model: Vec<SettingGroup> = groups
         .into_iter()
-        .map(|(title, rows)| SettingGroup {
-            title: title.into(),
+        .map(|rows| SettingGroup {
             rows: ModelRc::from(Rc::new(VecModel::from(rows))),
         })
         .collect();
     window.set_groups(ModelRc::from(Rc::new(VecModel::from(model))));
 }
 
-/// The group a shortcut belongs to, when it is the first of it.
-fn shortcut_group(action: ActionId) -> Option<Key> {
-    match action {
-        ActionId::CaptureRegion => Some(Key::SecCapture),
-        ActionId::RecordToggle => Some(Key::GrpRecording),
-        ActionId::OverlayToggle => Some(Key::GrpApplication),
-        _ => None,
-    }
+/// Whether a shortcut starts a group of actions (captures, recording, the program).
+const fn starts_group(action: ActionId) -> bool {
+    matches!(
+        action,
+        ActionId::CaptureRegion | ActionId::RecordToggle | ActionId::OverlayToggle
+    )
+}
+
+fn picture(icon: Option<&vixeeny_settings::Icon>) -> slint::Image {
+    icon.map_or_else(slint::Image::default, |icon| {
+        slint::Image::from_rgba8(slint::SharedPixelBuffer::clone_from_slice(
+            &icon.rgba,
+            icon.width,
+            icon.height,
+        ))
+    })
 }
 
 fn row_model(row: &Row, config: &Config) -> SettingRow {
@@ -455,30 +318,28 @@ fn row_model(row: &Row, config: &Config) -> SettingRow {
         step: 1,
         options: ModelRc::default(),
         selected: -1,
+        items: ModelRc::default(),
         has_icon: row.icon.is_some(),
-        icon: row
-            .icon
-            .as_ref()
-            .map_or_else(slint::Image::default, |icon| {
-                slint::Image::from_rgba8(slint::SharedPixelBuffer::clone_from_slice(
-                    &icon.rgba,
-                    icon.width,
-                    icon.height,
-                ))
-            }),
+        icon: picture(row.icon.as_ref()),
     };
     match (&row.kind, value) {
         (Kind::Toggle, Value::Bool(b)) => {
             out.kind = 0;
             out.on = b;
         }
-        (Kind::Header, _) => out.kind = 6,
-        (Kind::Profile(names), Value::Text(t)) => {
-            out.kind = 9;
-            out.selected = names.iter().position(|n| *n == t).map_or(-1, |i| i as i32);
-            out.options = strings(names.iter().cloned());
-            out.text = t.into();
+        (Kind::Add(options), _) => {
+            out.kind = 10;
+            let items: Vec<MenuOption> = options
+                .iter()
+                .map(|o| MenuOption {
+                    label: o.label.as_str().into(),
+                    has_icon: o.icon.is_some(),
+                    icon: picture(o.icon.as_ref()),
+                })
+                .collect();
+            out.items = ModelRc::from(Rc::new(VecModel::from(items)));
         }
+        (Kind::Removable, _) => out.kind = 11,
         (Kind::Choice(options) | Kind::Segmented(options), Value::Text(t)) => {
             out.kind = if matches!(row.kind, Kind::Segmented(_)) {
                 7
@@ -648,7 +509,6 @@ impl SettingsPanel {
             on_change: RefCell::new(Box::new(|_| {})),
             on_browse: RefCell::new(Box::new(|_| None)),
             on_page_action: RefCell::new(Box::new(|_, _, _| {})),
-            on_gallery: RefCell::new(Box::new(|_| {})),
             on_section: RefCell::new(Box::new(|_| {})),
         });
         theme::apply(&window, look);
@@ -682,10 +542,6 @@ impl SettingsPanel {
     /// A button of the hardware, integration, updates or about pages was pressed.
     pub fn on_page_action(&self, f: impl Fn(Section, &str, &str) + 'static) {
         *self.state.on_page_action.borrow_mut() = Box::new(f);
-    }
-
-    pub fn on_gallery(&self, f: impl Fn(GalleryRequest) + 'static) {
-        *self.state.on_gallery.borrow_mut() = Box::new(f);
     }
 
     /// The user opened a section: the host fills the pages that show live data.
@@ -811,10 +667,6 @@ impl SettingsPanel {
             .unwrap_or(Section::General)
     }
 
-    pub fn set_gallery(&self, entries: Vec<GalleryEntry>, selected: Option<usize>) {
-        show_gallery(&self.window, entries, selected);
-    }
-
     pub fn set_lines(&self, lines: Vec<Line>) {
         self.window.set_lines(line_model(lines, None));
     }
@@ -900,14 +752,16 @@ impl SettingsPanel {
                     .enumerate()
                     .map(|(slot, text)| ShortcutKey {
                         text: text.as_str().into(),
+                        parts: strings(key_names(text, lang)),
                         slot: slot as i32,
                     })
                     .collect();
+                let free_slot = slots.iter().position(String::is_empty);
                 ShortcutRow {
-                    group: shortcut_group(action)
-                        .map_or_else(SharedString::new, |k| tr(k, lang).into()),
+                    group: starts_group(action),
                     label: action_label(action, lang).into(),
                     keys: ModelRc::from(Rc::new(VecModel::from(keys))),
+                    free_slot: free_slot.map_or(-1, |i| i as i32),
                     error: errors
                         .iter()
                         .find(|(row, _)| *row == i)
@@ -1113,7 +967,7 @@ impl SettingsPanel {
                         Kind::Choice(options) | Kind::Segmented(options) => {
                             options.get(index as usize).map(|o| o.value.clone())
                         }
-                        Kind::Profile(names) => names.get(index as usize).cloned(),
+                        Kind::Add(options) => options.get(index as usize).map(|o| o.value.clone()),
                         _ => None,
                     });
                 if let Some(value) = value {
@@ -1141,25 +995,6 @@ impl SettingsPanel {
             }
         });
 
-        w.on_gallery_select({
-            let state = self.state.clone();
-            move |i| (state.on_gallery.borrow())(GalleryRequest::Select(i.max(0) as usize))
-        });
-        w.on_gallery_open({
-            let state = self.state.clone();
-            move |i| (state.on_gallery.borrow())(GalleryRequest::Open(i.max(0) as usize))
-        });
-        w.on_gallery_action({
-            let state = self.state.clone();
-            move |action| (state.on_gallery.borrow())(GalleryRequest::Action(action.to_string()))
-        });
-        w.on_gallery_filter({
-            let state = self.state.clone();
-            move |kind, app| {
-                (state.on_gallery.borrow())(GalleryRequest::Filter(kind, app.to_string()));
-            }
-        });
-
         w.on_shortcut_record({
             let (weak, state) = (weak.clone(), self.state.clone());
             move |row, slot| {
@@ -1178,11 +1013,21 @@ impl SettingsPanel {
             }
         });
 
+        // The button that opens a folder row's folder: the host opens it.
         w.on_row_action({
             let (weak, state) = (weak.clone(), self.state.clone());
-            move |_, action, arg| {
-                if let Some(p) = panel(&weak, &state) {
-                    p.profile_action(&action, &arg);
+            move |id, action| {
+                let Some(p) = panel(&weak, &state) else {
+                    return;
+                };
+                let folder = state
+                    .rows
+                    .borrow()
+                    .iter()
+                    .find(|r| r.id == id.as_str())
+                    .map(|r| r.value(&state.config.borrow()));
+                if let (Some(Value::Text(folder)), "open") = (folder, action.as_str()) {
+                    (state.on_page_action.borrow())(p.current_section(), "open-folder", &folder);
                 }
             }
         });
@@ -1197,50 +1042,24 @@ impl SettingsPanel {
             }
         });
     }
+}
 
-    /// The buttons of the profile row: a new profile, a copy, a new name, or deleting it.
-    fn profile_action(&self, action: &str, arg: &str) {
-        let state = &self.state;
-        let lang = state.lang();
-        let result = {
-            let mut config = state.config.borrow_mut();
-            profiles::materialize(&mut config);
-            let current = config.video.profile.clone();
-            match action {
-                "profile-new" => {
-                    let name = profiles::free_name(&config, tr(Key::ProfileNewName, lang));
-                    profiles::create(&mut config, &name)
-                }
-                "profile-duplicate" => {
-                    let base = tr(Key::ProfileCopyName, lang).replace("{name}", &current);
-                    let name = profiles::free_name(&config, &base);
-                    profiles::duplicate(&mut config, &current, &name)
-                }
-                "profile-rename" => profiles::rename(&mut config, &current, arg),
-                "profile-delete" => profiles::delete(&mut config, &current),
-                _ => Ok(()),
-            }
-        };
-        let notice = match result {
-            Ok(()) => {
-                state.changed();
-                String::new()
-            }
-            Err(e) => tr(
-                match e {
-                    profiles::ProfileError::EmptyName | profiles::ProfileError::NotFound => {
-                        Key::ProfileEmpty
-                    }
-                    profiles::ProfileError::Taken => Key::ProfileTaken,
-                    profiles::ProfileError::LastOne => Key::ProfileLast,
-                },
-                lang,
-            )
-            .to_owned(),
-        };
-        self.refresh();
-        if !notice.is_empty() {
-            self.window.set_notice(notice.into());
-        }
+/// The keys of a shortcut as the user reads them: `Ctrl+Shift+KeyR` → Ctrl, Shift, R.
+pub fn key_names(text: &str, lang: Lang) -> Vec<String> {
+    if text.is_empty() {
+        return Vec::new();
     }
+    text.split('+')
+        .map(|part| {
+            let name = part
+                .strip_prefix("Key")
+                .or_else(|| part.strip_prefix("Digit"))
+                .unwrap_or(part);
+            match name {
+                "PrintScreen" if lang == Lang::Fr => "Impr. écran".to_owned(),
+                "PrintScreen" => "Print Screen".to_owned(),
+                other => other.to_owned(),
+            }
+        })
+        .collect()
 }

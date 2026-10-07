@@ -1,13 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The settings window and gallery (plan 5.13), a process of its own (`vixeeny-app --settings`)
+//! The settings window (plan 5.13), a process of its own (`vixeeny-app --settings`)
 //! so the recording hotkeys keep working while it is open. Every change is saved at once and the
 //! daemon is asked to reload.
 
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::rc::Rc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use anyhow::Context;
@@ -18,26 +13,20 @@ use vixeeny_encode::probe::ProbeResult;
 use vixeeny_encode::registry::Registry;
 use vixeeny_settings::Section;
 use vixeeny_ui::ComponentHandle;
-use vixeeny_ui::settings_panel::{
-    GalleryEntry, GalleryRequest, Line, PanelHandle, SettingsPanel, UpdateStage, UpdateView,
-};
+use vixeeny_ui::settings_panel::{Line, PanelHandle, SettingsPanel, UpdateStage, UpdateView};
 use vixeeny_updater::client;
 use vixeeny_updater::state::State as UpdateState;
-
-use crate::gallery::{self, Item, Kind, THUMB_SIDE};
 
 const REPO: &str = "https://github.com/Xantoom/Vixeeny";
 /// Marks the settings window so that a second launch can bring it forward.
 const SETTINGS_TAG: &str = "Vixeeny.Settings";
-/// How many captures the gallery shows.
-const GALLERY_LIMIT: usize = 80;
 
-/// Starts the settings window in its own process (on the about page with `about`).
-pub fn spawn(about: bool) -> anyhow::Result<()> {
+/// Starts the settings window in its own process (on the updates page with `updates`).
+pub fn spawn(updates: bool) -> anyhow::Result<()> {
     let mut command = std::process::Command::new(std::env::current_exe()?);
     command.arg("--settings");
-    if about {
-        command.arg("--about");
+    if updates {
+        command.arg("--updates");
     }
     command
         .spawn()
@@ -73,193 +62,6 @@ pub fn save(config: &Config) {
             tracing::debug!("the daemon was not told about the new settings: {e}");
         }
     });
-}
-
-fn user_dirs(config: &Config) -> Vec<PathBuf> {
-    [
-        &config.paths.images,
-        &config.paths.videos,
-        &config.paths.replays,
-    ]
-    .into_iter()
-    .filter_map(|template| vixeeny_common::paths::expand_user_dir(template))
-    .collect()
-}
-
-#[derive(Default)]
-struct Gallery {
-    items: Vec<Item>,
-    /// Indexes into `items` that pass the filters.
-    shown: Vec<usize>,
-    /// Position in `shown`.
-    selected: Option<usize>,
-    kind: i32,
-    app: String,
-    thumbs: HashMap<PathBuf, (u32, u32, Vec<u8>)>,
-}
-
-type SharedGallery = Arc<Mutex<Gallery>>;
-
-fn entries(g: &Gallery, offset: i64) -> Vec<GalleryEntry> {
-    g.shown
-        .iter()
-        .filter_map(|i| g.items.get(*i))
-        .map(|item| GalleryEntry {
-            name: item.name.clone(),
-            detail: gallery::detail(item, offset),
-            video: item.kind == Kind::Video,
-            folder: item.app.clone(),
-            format: item
-                .path
-                .extension()
-                .map(|e| e.to_string_lossy().to_uppercase())
-                .unwrap_or_default(),
-            thumb: g.thumbs.get(&item.path).cloned(),
-        })
-        .collect()
-}
-
-/// Shows the gallery now, then fills in the thumbnails that are missing on a thread.
-fn show_gallery(shared: &SharedGallery, handle: &PanelHandle, offset: i64) {
-    let (shown, selected, missing) = {
-        let Ok(g) = shared.lock() else { return };
-        let missing: Vec<gallery::Item> = g
-            .shown
-            .iter()
-            .filter_map(|i| g.items.get(*i))
-            .filter(|i| !g.thumbs.contains_key(&i.path))
-            .cloned()
-            .collect();
-        (entries(&g, offset), g.selected, missing)
-    };
-    handle.set_gallery(shown, selected);
-    if missing.is_empty() {
-        return;
-    }
-    let (shared, handle) = (Arc::clone(shared), handle.clone());
-    std::thread::spawn(move || {
-        let cache = vixeeny_common::paths::cache_dir()
-            .map(|dir| gallery::ThumbCache::new(dir.join("thumbnails")));
-        // Several cores decode at once, the visible tiles first; the tiles are redrawn every
-        // few thumbnails, not for each one.
-        let next = AtomicUsize::new(0);
-        let done = AtomicUsize::new(0);
-        let workers = std::thread::available_parallelism()
-            .map_or(2, std::num::NonZero::get)
-            .clamp(1, 6)
-            .min(missing.len());
-        std::thread::scope(|scope| {
-            for _ in 0..workers {
-                scope.spawn(|| {
-                    loop {
-                        let n = next.fetch_add(1, Ordering::Relaxed);
-                        let Some(item) = missing.get(n) else { break };
-                        let thumb = match &cache {
-                            Some(cache) => cache.thumbnail(item, THUMB_SIDE),
-                            None => gallery::thumbnail(&item.path, THUMB_SIDE),
-                        };
-                        let finished = done.fetch_add(1, Ordering::Relaxed) + 1;
-                        let Ok(mut g) = shared.lock() else { return };
-                        if let Some(thumb) = thumb {
-                            g.thumbs.insert(item.path.clone(), thumb);
-                        }
-                        if finished.is_multiple_of(6) || finished == missing.len() {
-                            handle.set_gallery(entries(&g, offset), g.selected);
-                        }
-                    }
-                });
-            }
-        });
-        if let Some(cache) = cache {
-            let items = shared.lock().map(|g| g.items.clone()).unwrap_or_default();
-            cache.prune(&items, THUMB_SIDE);
-        }
-    });
-}
-
-/// The selection changed: the tiles keep their thumbnails, only the detail line moves.
-fn show_selection(shared: &SharedGallery, handle: &PanelHandle, offset: i64) {
-    let detail = selected_item(shared).map_or_else(String::new, |item| {
-        format!("{}\n{}", item.name, gallery::detail(&item, offset))
-    });
-    handle.set_gallery_detail(detail);
-    show_gallery(shared, handle, offset);
-}
-
-fn refilter(g: &mut Gallery) {
-    g.shown = gallery::filter(&g.items, g.kind, &g.app);
-    g.selected = None;
-}
-
-fn selected_item(shared: &SharedGallery) -> Option<Item> {
-    let g = shared.lock().ok()?;
-    let position = g.selected?;
-    g.items.get(*g.shown.get(position)?).cloned()
-}
-
-fn gallery_request(
-    request: GalleryRequest,
-    shared: &SharedGallery,
-    handle: &PanelHandle,
-    offset: i64,
-) {
-    match request {
-        GalleryRequest::Select(position) => {
-            if let Ok(mut g) = shared.lock() {
-                g.selected = (position < g.shown.len()).then_some(position);
-            }
-            show_selection(shared, handle, offset);
-        }
-        GalleryRequest::Open(position) => {
-            if let Ok(mut g) = shared.lock() {
-                g.selected = (position < g.shown.len()).then_some(position);
-            }
-            show_selection(shared, handle, offset);
-            if let Some(item) = selected_item(shared)
-                && let Err(e) = vixeeny_platform::open_path(&item.path.display().to_string())
-            {
-                tracing::error!("gallery open: {e}");
-            }
-        }
-        GalleryRequest::Filter(kind, app) => {
-            if let Ok(mut g) = shared.lock() {
-                g.kind = kind;
-                g.app = app;
-                refilter(&mut g);
-            }
-            show_gallery(shared, handle, offset);
-        }
-        GalleryRequest::Action(action) => {
-            let Some(item) = selected_item(shared) else {
-                return;
-            };
-            let path = item.path.display().to_string();
-            let result = match action.as_str() {
-                "open" => vixeeny_platform::open_path(&path).map_err(|e| anyhow::anyhow!("{e}")),
-                "folder" => std::process::Command::new("explorer.exe")
-                    .arg(format!("/select,{path}"))
-                    .spawn()
-                    .map(|_| ())
-                    .map_err(Into::into),
-                "copy" => crate::clipboard::copy_file(&item.path),
-                "delete" => {
-                    let done = vixeeny_platform::recycle(&path).map_err(|e| anyhow::anyhow!("{e}"));
-                    if done.is_ok()
-                        && let Ok(mut g) = shared.lock()
-                    {
-                        g.items.retain(|i| i.path != item.path);
-                        refilter(&mut g);
-                    }
-                    show_gallery(shared, handle, offset);
-                    done
-                }
-                _ => Ok(()),
-            };
-            if let Err(e) = result {
-                tracing::error!("gallery {action}: {e:#}");
-            }
-        }
-    }
 }
 
 pub fn hardware_lines(lang: Lang, result: &ProbeResult) -> Vec<Line> {
@@ -458,8 +260,6 @@ fn restart_for_update(handle: &PanelHandle, lang: Lang) {
 }
 
 fn about_lines(lang: Lang) -> Vec<Line> {
-    let logs =
-        vixeeny_common::paths::log_dir().map_or_else(String::new, |p| p.display().to_string());
     vec![
         Line {
             text: tr(Key::AboutLicense, lang).into(),
@@ -470,16 +270,13 @@ fn about_lines(lang: Lang) -> Vec<Line> {
             text: tr(Key::AboutThirdParty, lang).into(),
             ..Line::default()
         },
-        Line {
-            text: tr(Key::AboutLogs, lang).replace("{path}", &logs),
-            ..Line::default()
-        },
     ]
 }
 
-/// `--settings [--about]`: the window, until it is closed.
+/// `--settings [--updates]`: the window, until it is closed.
 pub fn run_child(args: &[String]) -> anyhow::Result<()> {
-    let open_about = args.iter().any(|a| a == "--about");
+    // `--about` came from versions before 0.9.11.
+    let open_updates = args.iter().any(|a| a == "--updates" || a == "--about");
     vixeeny_platform::ensure_dpi_aware();
     let config = load_config();
     let lang = crate::lang(&config.general.language);
@@ -508,7 +305,6 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     panel.on_recording(pause_hotkeys);
     start_probe_watch(&panel);
     let handle = panel.handle();
-    let offset = gallery::local_offset_secs();
 
     let weak = panel.window().as_weak();
     panel.on_change(move |config| {
@@ -526,32 +322,19 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
         dialog.pick_folder().map(|p| p.display().to_string())
     });
 
-    let gallery_state: SharedGallery = Arc::default();
     {
-        let (shared, handle) = (Arc::clone(&gallery_state), handle.clone());
-        panel.on_gallery(move |request| gallery_request(request, &shared, &handle, offset));
-    }
-    {
-        let (shared, handle) = (Arc::clone(&gallery_state), handle.clone());
-        let config_now = Rc::new(RefCell::new(config));
+        let handle = handle.clone();
         let weak = panel.window().as_weak();
         panel.on_section(move |section| {
             let lang = weak
                 .upgrade()
                 .map_or(lang, |_| crate::lang(&load_config().general.language));
             match section {
-                Section::Gallery => {
-                    *config_now.borrow_mut() = load_config();
-                    let items = gallery::scan(&user_dirs(&config_now.borrow()), GALLERY_LIMIT);
-                    if let Ok(mut g) = shared.lock() {
-                        g.items = items;
-                        refilter(&mut g);
-                    }
-                    show_gallery(&shared, &handle, offset);
-                }
                 Section::About => {
                     handle.set_lines(about_lines(lang));
                     handle.set_extra(String::new());
+                }
+                Section::Updates => {
                     let checked = update_state().checked_at;
                     let due = UpdateState {
                         checked_at: checked,
@@ -570,11 +353,11 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     }
     {
         let handle = handle.clone();
-        panel.on_page_action(move |section, action, _| {
+        panel.on_page_action(move |section, action, value| {
             let lang = crate::lang(&load_config().general.language);
             match (section, action) {
-                (Section::About, "update-check") => check_for_update(handle.clone(), lang),
-                (Section::About, "update-download") => {
+                (Section::Updates, "update-check") => check_for_update(handle.clone(), lang),
+                (Section::Updates, "update-download") => {
                     // A failed attempt is forgotten when the user tries again.
                     if let Some(path) = vixeeny_updater::state::file() {
                         let mut state = UpdateState::load(&path);
@@ -583,7 +366,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
                     }
                     download_update(handle.clone(), lang);
                 }
-                (Section::About, "update-restart") => restart_for_update(&handle, lang),
+                (Section::Updates, "update-restart") => restart_for_update(&handle, lang),
                 (Section::About, "github") => {
                     let _ = vixeeny_platform::open_path(REPO);
                 }
@@ -609,6 +392,14 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
                         let _ = vixeeny_platform::open_path(&dir.display().to_string());
                     }
                 }
+                (_, "open-folder") => {
+                    if let Some(dir) = vixeeny_common::paths::expand_user_dir(value) {
+                        let _ = std::fs::create_dir_all(&dir);
+                        if let Err(e) = vixeeny_platform::open_path(&dir.display().to_string()) {
+                            tracing::error!("{e}");
+                        }
+                    }
+                }
                 _ => {}
             }
         });
@@ -616,8 +407,8 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
 
     // The sidebar shows when an update waits for a restart.
     panel.set_update(&update_view(lang));
-    panel.select_section(if open_about {
-        Section::About
+    panel.select_section(if open_updates {
+        Section::Updates
     } else {
         Section::General
     });

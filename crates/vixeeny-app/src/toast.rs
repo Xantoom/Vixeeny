@@ -230,12 +230,7 @@ fn content_of(toast: &Toast) -> vixeeny_ui::toast_panel::ToastContent {
             body: path
                 .file_name()
                 .map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
-            // The gallery's thumbnail: made once, the gallery then finds it ready.
-            thumb: match vixeeny_common::paths::cache_dir() {
-                Some(dir) => crate::gallery::ThumbCache::new(dir.join("thumbnails"))
-                    .thumbnail_of(path, crate::gallery::THUMB_SIDE),
-                None => crate::gallery::thumbnail(path, 160),
-            },
+            thumb: crate::thumbnail::thumbnail(path, 256),
             error: false,
             dark,
             action_label: tr(Key::ToastOpenFolder, lang).into(),

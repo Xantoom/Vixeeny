@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Images onto the system clipboard, in the format chosen for images.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use vixeeny_common::config::Config;
 use vixeeny_image::{Bgra, ImageFormat};
@@ -40,24 +40,6 @@ pub fn copy_bgra(config: &Config, image: &Bgra<'_>) -> anyhow::Result<()> {
     };
     vixeeny_platform::clipboard::copy_image(image.width, image.height, pixels, clip)
         .map_err(|e: PlatformError| anyhow::anyhow!("{e}"))
-}
-
-/// Copies an image file as it is (the gallery): the file, its bitmap, and its bytes when the
-/// format has a clipboard entry of its own.
-pub fn copy_file(path: &Path) -> anyhow::Result<()> {
-    let bytes = std::fs::read(path)?;
-    let decoded = vixeeny_image::decode(&bytes)?;
-    let format = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .and_then(ImageFormat::from_name);
-    let clip = ImageClip {
-        png: (format == Some(ImageFormat::Png)).then_some(&bytes[..]),
-        jpeg: (format == Some(ImageFormat::Jpeg)).then_some(&bytes[..]),
-        file: Some(path),
-    };
-    vixeeny_platform::clipboard::copy_image(decoded.width, decoded.height, &decoded.bgra, clip)
-        .map_err(|e| anyhow::anyhow!("{e}"))
 }
 
 /// Writes the copied image where the clipboard can point to it. Only the latest copy is kept:

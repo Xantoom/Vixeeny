@@ -26,23 +26,6 @@ fn split_join(kind: &str, amount: i64) -> String {
     }
 }
 
-fn app_names_text(c: &Config) -> String {
-    c.paths
-        .app_names
-        .iter()
-        .map(|(exe, name)| format!("{exe}={name}"))
-        .collect::<Vec<_>>()
-        .join("; ")
-}
-
-fn parse_app_names(text: &str) -> std::collections::BTreeMap<String, String> {
-    text.split(';')
-        .filter_map(|pair| pair.split_once('='))
-        .map(|(exe, name)| (exe.trim().to_owned(), name.trim().to_owned()))
-        .filter(|(exe, name)| !exe.is_empty() && !name.is_empty())
-        .collect()
-}
-
 /// The frame rates a recording can have (those above the fastest monitor are not offered).
 const FRAME_RATES: [u32; 8] = [24, 30, 60, 90, 120, 144, 165, 240];
 
@@ -59,10 +42,9 @@ fn hdr_on(setting: &str) -> bool {
     matches!(setting, "keep_hdr" | "hdr")
 }
 
-pub fn general(env: &Env, config: &Config) -> Vec<Row> {
+pub fn general(env: &Env) -> Vec<Row> {
     let t = |k| env.t(k);
-    let mut rows = vec![
-        header("h_app", t(Key::GrpApplication)),
+    vec![
         choice(
             "language",
             t(Key::SetLanguage),
@@ -103,7 +85,33 @@ pub fn general(env: &Env, config: &Config) -> Vec<Row> {
             |c| c.general.sounds,
             |c, v| c.general.sounds = v,
         ),
-        header("h_overlay", t(Key::GrpOverlay)),
+        header("h_naming"),
+        hinted(
+            text(
+                "template",
+                t(Key::SetTemplate),
+                |c| c.paths.filename_template.clone(),
+                |c, v| {
+                    if !v.is_empty() {
+                        c.paths.filename_template = v;
+                    }
+                },
+            ),
+            t(Key::SetTemplateHint),
+        ),
+        toggle(
+            "foreground_app",
+            t(Key::SetForegroundApp),
+            |c| c.paths.use_foreground_app,
+            |c, v| c.paths.use_foreground_app = v,
+        ),
+    ]
+}
+
+/// The side strip and the recording widget.
+pub fn overlay(env: &Env, config: &Config) -> Vec<Row> {
+    let t = |k| env.t(k);
+    let mut rows = vec![
         choice(
             "overlay_edge",
             t(Key::SetOverlayEdge),
@@ -116,6 +124,7 @@ pub fn general(env: &Env, config: &Config) -> Vec<Row> {
             |c| c.overlay.edge.clone(),
             |c, v| c.overlay.edge = v,
         ),
+        header("h_widget"),
         toggle(
             "widget",
             t(Key::SetWidget),
@@ -143,80 +152,26 @@ pub fn general(env: &Env, config: &Config) -> Vec<Row> {
             |c, v| c.recording_widget.auto_hide = v,
         ));
     }
-    rows.extend([
-        header("h_folders", t(Key::GrpFolders)),
-        folder(
-            "dir_images",
-            t(Key::SetDirImages),
-            |c| c.paths.images.clone(),
-            |c, v| c.paths.images = v,
-        ),
-        folder(
-            "dir_videos",
-            t(Key::SetDirVideos),
-            |c| c.paths.videos.clone(),
-            |c, v| c.paths.videos = v,
-        ),
-        folder(
-            "dir_replays",
-            t(Key::SetDirReplays),
-            |c| c.paths.replays.clone(),
-            |c, v| c.paths.replays = v,
-        ),
-        header("h_naming", t(Key::GrpNaming)),
-        hinted(
-            text(
-                "template",
-                t(Key::SetTemplate),
-                |c| c.paths.filename_template.clone(),
-                |c, v| {
-                    if !v.is_empty() {
-                        c.paths.filename_template = v;
-                    }
-                },
-            ),
-            t(Key::SetTemplateHint),
-        ),
-        toggle(
-            "foreground_app",
-            t(Key::SetForegroundApp),
-            |c| c.paths.use_foreground_app,
-            |c, v| c.paths.use_foreground_app = v,
-        ),
-        hinted(
-            text("app_names", t(Key::SetAppNames), app_names_text, |c, v| {
-                c.paths.app_names = parse_app_names(&v);
-            }),
-            t(Key::SetAppNamesHint),
-        ),
-        header("h_subfolders", t(Key::GrpSubfolders)),
-        toggle(
-            "sub_images",
-            t(Key::SetSubImages),
-            |c| c.paths.per_app_subfolder.images,
-            |c, v| c.paths.per_app_subfolder.images = v,
-        ),
-        toggle(
-            "sub_videos",
-            t(Key::SetSubVideos),
-            |c| c.paths.per_app_subfolder.videos,
-            |c, v| c.paths.per_app_subfolder.videos = v,
-        ),
-        toggle(
-            "sub_replays",
-            t(Key::SetSubReplays),
-            |c| c.paths.per_app_subfolder.replays,
-            |c, v| c.paths.per_app_subfolder.replays = v,
-        ),
-    ]);
     rows
 }
 
-/// Screenshots: format and its options, capture, folder, text recognition.
-pub fn capture(env: &Env, config: &Config) -> Vec<Row> {
+/// Screenshots: where they go, their format, what they show.
+pub fn image(env: &Env, config: &Config) -> Vec<Row> {
     let t = |k| env.t(k);
     let mut rows = vec![
-        header("h_format", t(Key::GrpFormat)),
+        folder(
+            "dir_images",
+            t(Key::SetFolder),
+            |c| c.paths.images.clone(),
+            |c, v| c.paths.images = v,
+        ),
+        toggle(
+            "sub_images",
+            t(Key::SetSubfolder),
+            |c| c.paths.per_app_subfolder.images,
+            |c, v| c.paths.per_app_subfolder.images = v,
+        ),
+        header("h_format"),
         segmented(
             "image_format",
             t(Key::SetImageFormat),
@@ -270,7 +225,7 @@ pub fn capture(env: &Env, config: &Config) -> Vec<Row> {
         _ => {}
     }
     rows.extend([
-        header("h_capture", t(Key::GrpCapture)),
+        header("h_capture"),
         toggle(
             "clipboard",
             t(Key::SetCopyClipboard),
@@ -286,14 +241,11 @@ pub fn capture(env: &Env, config: &Config) -> Vec<Row> {
     ]);
     // Only when Windows shows HDR: there is nothing to keep otherwise.
     if env.display.hdr {
-        rows.push(hinted(
-            toggle(
-                "image_hdr",
-                t(Key::SetHdrEnable),
-                |c| matches!(c.image.hdr.as_str(), "keep_hdr" | "hdr"),
-                |c, v| c.image.hdr = if v { "keep_hdr" } else { "tonemap_sdr" }.into(),
-            ),
-            t(Key::SetHdrEnableHint),
+        rows.push(toggle(
+            "image_hdr",
+            t(Key::SetHdrEnable),
+            |c| matches!(c.image.hdr.as_str(), "keep_hdr" | "hdr"),
+            |c, v| c.image.hdr = if v { "keep_hdr" } else { "tonemap_sdr" }.into(),
         ));
     }
     rows
@@ -392,7 +344,7 @@ fn custom_rows(env: &Env, encoder: &str) -> Vec<Row> {
         .collect()
 }
 
-/// The recording, in the order of OBS: the profile, the picture, the encoder, the file, then
+/// The recording, in the order of OBS: the folder, the picture, the encoder, the file, then
 /// the encoder's own options when they are set by hand.
 pub fn video(env: &Env, config: &Config) -> Vec<Row> {
     let t = |k| env.t(k);
@@ -401,29 +353,23 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
     let list = encoders::choices(env, hardware);
     let current = encoders::resolved(env, &profile).map(|e| e.id.clone());
 
-    let names = crate::profiles::names(config);
     let mut rows = vec![
-        header("h_profile", t(Key::GrpProfile)),
-        hinted(
-            row(
-                "profile",
-                t(Key::SetProfile),
-                Kind::Profile(names),
-                Box::new(|c| Value::Text(c.video.profile.clone())),
-                Box::new(|c, v| match v {
-                    Value::Text(name) => {
-                        c.video.profile = name;
-                        Ok(())
-                    }
-                    _ => Err(Invalid),
-                }),
-            ),
-            t(Key::SetProfileHint),
+        folder(
+            "dir_videos",
+            t(Key::SetFolder),
+            |c| c.paths.videos.clone(),
+            |c, v| c.paths.videos = v,
+        ),
+        toggle(
+            "sub_videos",
+            t(Key::SetSubfolder),
+            |c| c.paths.per_app_subfolder.videos,
+            |c, v| c.paths.per_app_subfolder.videos = v,
         ),
     ];
 
     // ---- the picture
-    rows.push(header("h_video", t(Key::GrpVideo)));
+    rows.push(header("h_video"));
     rows.push(choice(
         "resolution",
         t(Key::SetResolution),
@@ -465,24 +411,21 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
     ));
 
     // ---- the encoder
-    rows.push(header("h_encoder", t(Key::GrpEncoder)));
-    rows.push(hinted(
-        segmented(
-            "encoder_kind",
-            t(Key::SetEncoderKind),
-            vec![
-                opt("hardware", t(Key::SetKindHardware)),
-                opt("software", t(Key::SetKindSoftware)),
-            ],
-            |c| c.cur().encoder_kind,
-            |c, v| {
-                let profile = c.cur_mut();
-                profile.encoder_kind = v;
-                // The best encoder of the new kind, resolved when it is read.
-                profile.encoder = "auto".into();
-            },
-        ),
-        t(Key::SetEncoderKindHint),
+    rows.push(header("h_encoder"));
+    rows.push(segmented(
+        "encoder_kind",
+        t(Key::SetEncoderKind),
+        vec![
+            opt("hardware", t(Key::SetKindHardware)),
+            opt("software", t(Key::SetKindSoftware)),
+        ],
+        |c| c.cur().encoder_kind,
+        |c, v| {
+            let profile = c.cur_mut();
+            profile.encoder_kind = v;
+            // The best encoder of the new kind, resolved when it is read.
+            profile.encoder = "auto".into();
+        },
     ));
     let options: Vec<Opt> = list.iter().map(|e| opt(&e.id, e.name.as_str())).collect();
     let shown = current.clone();
@@ -495,86 +438,74 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
         };
         rows.push(info("encoder", t(Key::SetEncoder), why));
     } else {
-        rows.push(hinted(
-            row(
-                "encoder",
-                t(Key::SetEncoder),
-                Kind::Choice(options),
-                Box::new(move |c| {
-                    // `auto` (older files) shows the encoder it resolves to.
-                    let own = c.cur().encoder;
-                    Value::Text(if own == "auto" {
-                        shown.clone().unwrap_or_default()
-                    } else {
-                        own
-                    })
-                }),
-                Box::new(|c, v| match v {
-                    Value::Text(id) => {
-                        c.cur_mut().encoder = id;
-                        Ok(())
-                    }
-                    _ => Err(Invalid),
-                }),
-            ),
-            t(Key::SetEncoderHint),
+        rows.push(row(
+            "encoder",
+            t(Key::SetEncoder),
+            Kind::Choice(options),
+            Box::new(move |c| {
+                // `auto` (older files) shows the encoder it resolves to.
+                let own = c.cur().encoder;
+                Value::Text(if own == "auto" {
+                    shown.clone().unwrap_or_default()
+                } else {
+                    own
+                })
+            }),
+            Box::new(|c, v| match v {
+                Value::Text(id) => {
+                    c.cur_mut().encoder = id;
+                    Ok(())
+                }
+                _ => Err(Invalid),
+            }),
         ));
     }
-    rows.push(hinted(
-        segmented(
-            "preset",
-            t(Key::SetPreset),
-            vec![
-                opt("quality", t(Key::SetPresetBest)),
-                opt("small", t(Key::SetPresetLight)),
-                opt("custom", t(Key::SetPresetCustom)),
-            ],
-            |c| match c.cur().preset.as_str() {
-                "quality" | "small" => c.cur().preset,
-                // The older presets were tuned by hand: they are the custom one now.
-                _ => "custom".to_owned(),
-            },
-            |c, v| c.cur_mut().preset = v,
-        ),
-        t(Key::SetPresetHint),
+    rows.push(segmented(
+        "preset",
+        t(Key::SetPreset),
+        vec![
+            opt("quality", t(Key::SetPresetBest)),
+            opt("small", t(Key::SetPresetLight)),
+            opt("custom", t(Key::SetPresetCustom)),
+        ],
+        |c| match c.cur().preset.as_str() {
+            "quality" | "small" => c.cur().preset,
+            // The older presets were tuned by hand: they are the custom one now.
+            _ => "custom".to_owned(),
+        },
+        |c, v| c.cur_mut().preset = v,
     ));
     let ten = current
         .as_deref()
         .is_some_and(|id| encoders::ten_bit(env, id));
     rows.push(when_boxed(
-        hinted(
-            toggle(
-                "ten_bit",
-                t(Key::SetTenBit),
-                |c| c.cur().depth == 10,
-                |c, v| c.cur_mut().depth = if v { 10 } else { 8 },
-            ),
-            t(Key::SetTenBitHint),
+        toggle(
+            "ten_bit",
+            t(Key::SetTenBit),
+            |c| c.cur().depth == 10,
+            |c, v| c.cur_mut().depth = if v { 10 } else { 8 },
         ),
         // HDR needs 10 bits: the switch stays on, and cannot be turned off, while HDR is on.
         move |c| ten && !hdr_on(&c.cur().hdr),
     ));
     // Only when Windows shows HDR: there is nothing to keep otherwise.
     if env.display.hdr {
-        rows.push(hinted(
-            toggle(
-                "hdr",
-                t(Key::SetHdrEnable),
-                |c| hdr_on(&c.cur().hdr),
-                |c, v| {
-                    let profile = c.cur_mut();
-                    profile.hdr = if v { "keep_hdr" } else { "tonemap_sdr" }.into();
-                    if v {
-                        profile.depth = 10;
-                    }
-                },
-            ),
-            t(Key::SetHdrEnableHint),
+        rows.push(toggle(
+            "hdr",
+            t(Key::SetHdrEnable),
+            |c| hdr_on(&c.cur().hdr),
+            |c, v| {
+                let profile = c.cur_mut();
+                profile.hdr = if v { "keep_hdr" } else { "tonemap_sdr" }.into();
+                if v {
+                    profile.depth = 10;
+                }
+            },
         ));
     }
 
     // ---- the file
-    rows.push(header("h_file", t(Key::GrpFile)));
+    rows.push(header("h_file"));
     rows.push(choice(
         "container",
         t(Key::SetContainer),
@@ -632,7 +563,7 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
 
     // ---- the encoder's options, set by hand
     if profile.preset == "custom" || !matches!(profile.preset.as_str(), "quality" | "small") {
-        rows.push(header("h_custom", t(Key::GrpCustom)));
+        rows.push(header("h_custom"));
         if let Some(id) = &current {
             rows.extend(custom_rows(env, id));
         }
@@ -652,28 +583,25 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
 }
 
 /// A switch that adds or removes `spec` from the sources of the profile.
-fn source_row(spec: String, label: String, hint: String) -> Row {
+fn source_row(spec: String, label: String) -> Row {
     let read = spec.clone();
     let write = spec.clone();
-    hinted(
-        row(
-            format!("src:{spec}"),
-            label,
-            Kind::Toggle,
-            Box::new(move |c| Value::Bool(c.cur().audio.sources.contains(&read))),
-            Box::new(move |c, v| match v {
-                Value::Bool(on) => {
-                    let sources = &mut c.cur_mut().audio.sources;
-                    sources.retain(|s| *s != write);
-                    if on {
-                        sources.push(write.clone());
-                    }
-                    Ok(())
+    row(
+        format!("src:{spec}"),
+        label,
+        Kind::Toggle,
+        Box::new(move |c| Value::Bool(c.cur().audio.sources.contains(&read))),
+        Box::new(move |c, v| match v {
+            Value::Bool(on) => {
+                let sources = &mut c.cur_mut().audio.sources;
+                sources.retain(|s| *s != write);
+                if on {
+                    sources.push(write.clone());
                 }
-                _ => Err(Invalid),
-            }),
-        ),
-        hint,
+                Ok(())
+            }
+            _ => Err(Invalid),
+        }),
     )
 }
 
@@ -689,18 +617,30 @@ fn absent_label(spec: &str) -> String {
         .to_owned()
 }
 
+/// A program the profile records, with a button to stop recording it.
+fn program_row(spec: String, label: String, icon: Option<crate::Icon>) -> Row {
+    let write = spec.clone();
+    let mut r = row(
+        format!("src:{spec}"),
+        label,
+        Kind::Removable,
+        Box::new(|_| Value::Bool(true)),
+        Box::new(move |c, v| match v {
+            Value::Bool(false) => {
+                c.cur_mut().audio.sources.retain(|s| *s != write);
+                Ok(())
+            }
+            _ => Err(Invalid),
+        }),
+    );
+    r.icon = icon;
+    r
+}
+
 pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
     let t = |k| env.t(k);
     let chosen = config.cur().audio.sources;
-    let mut rows = Vec::new();
-
-    // ---- what the PC plays
-    rows.push(header("h_pc", t(Key::GrpPcSound)));
-    rows.push(source_row(
-        "system".into(),
-        t(Key::SrcSystem),
-        t(Key::SrcSystemHint),
-    ));
+    let mut rows = vec![source_row("system".into(), t(Key::SrcSystem))];
     // A particular output, from older settings: it stays visible so it can be turned off.
     for spec in chosen.iter().filter(|s| s.starts_with("out:")) {
         let label = env
@@ -709,11 +649,11 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
             .iter()
             .find(|d| format!("out:{}", d.id) == *spec)
             .map_or_else(|| absent_label(spec), |d| d.name.clone());
-        rows.push(source_row(spec.clone(), label, String::new()));
+        rows.push(source_row(spec.clone(), label));
     }
 
     // ---- the microphone: a switch, then which one
-    rows.push(header("h_mic", t(Key::GrpMic)));
+    rows.push(header("h_mic"));
     rows.push(row(
         "mic_on",
         t(Key::SetMicOn),
@@ -782,49 +722,8 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
         |c| c.cur().audio.sources.iter().any(|s| is_mic(s)),
     ));
 
-    // ---- the programs open now that have sound, and those the profile records
-    let programs: Vec<(String, String, String, Option<crate::Icon>)> = env
-        .audio
-        .programs
-        .iter()
-        .map(|p| {
-            (
-                format!("app:{}", p.id),
-                p.name.clone(),
-                String::new(),
-                p.icon.clone(),
-            )
-        })
-        .chain(
-            chosen
-                .iter()
-                .filter(|s| s.starts_with("app:"))
-                .filter(|s| {
-                    !env.audio
-                        .programs
-                        .iter()
-                        .any(|p| format!("app:{}", p.id) == **s)
-                })
-                .map(|s| (s.clone(), absent_label(s), t(Key::SrcAbsent), None)),
-        )
-        .collect();
-    rows.push(header("h_programs", t(Key::GrpPrograms)));
-    rows.push(info(
-        "programs_hint",
-        if programs.is_empty() {
-            t(Key::SrcNoPrograms)
-        } else {
-            t(Key::SrcProgramsHint)
-        },
-        String::new(),
-    ));
-    for (spec, label, hint, icon) in programs {
-        let mut row = source_row(spec, label, hint);
-        row.icon = icon;
-        rows.push(row);
-    }
-
-    rows.push(header("h_tracks", t(Key::GrpTracks)));
+    // ---- the tracks and their codec
+    rows.push(header("h_tracks"));
     rows.push(choice(
         "audio_routing",
         t(Key::SetAudioRouting),
@@ -872,16 +771,56 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
         |c| c.cur().audio.surround,
         |c, v| c.cur_mut().audio.surround = v,
     ));
+
+    // ---- the programs recorded on their own, then a button to add one of those open now
+    rows.push(header("h_programs"));
+    let program_of = |spec: &str| {
+        env.audio
+            .programs
+            .iter()
+            .find(|p| format!("app:{}", p.id) == spec)
+    };
+    for spec in chosen.iter().filter(|s| s.starts_with("app:")) {
+        let (label, icon) = program_of(spec).map_or_else(
+            || (absent_label(spec), None),
+            |p| (p.name.clone(), p.icon.clone()),
+        );
+        rows.push(program_row(spec.clone(), label, icon));
+    }
+    let offered: Vec<Opt> = env
+        .audio
+        .programs
+        .iter()
+        .map(|p| Opt {
+            value: format!("app:{}", p.id),
+            label: p.name.clone(),
+            icon: p.icon.clone(),
+        })
+        .filter(|o| !chosen.contains(&o.value))
+        .collect();
+    rows.push(row(
+        "add_program",
+        t(Key::SetAddProgram),
+        Kind::Add(offered),
+        Box::new(|_| Value::Text(String::new())),
+        Box::new(|c, v| match v {
+            Value::Text(spec) => {
+                let sources = &mut c.cur_mut().audio.sources;
+                if !sources.contains(&spec) {
+                    sources.push(spec);
+                }
+                Ok(())
+            }
+            _ => Err(Invalid),
+        }),
+    ));
     rows
 }
 
 /// The replay buffer: the last moments, kept to be saved on demand.
-pub fn replay(env: &Env, config: &Config) -> Vec<Row> {
+pub fn replay(env: &Env) -> Vec<Row> {
     let t = |k| env.t(k);
-    let mut profiles = vec![opt("", t(Key::SetSameAsRecording))];
-    profiles.extend(config.profiles.keys().map(|name| opt(name, name.as_str())));
     vec![
-        header("h_replay", t(Key::GrpReplay)),
         toggle(
             "replay_start",
             t(Key::SetReplayStart),
@@ -905,20 +844,25 @@ pub fn replay(env: &Env, config: &Config) -> Vec<Row> {
             |c| c.replay.storage.clone(),
             |c, v| c.replay.storage = v,
         ),
-        choice(
-            "replay_profile",
-            t(Key::SetReplayProfile),
-            profiles,
-            |c| c.replay.profile.clone(),
-            |c, v| c.replay.profile = v,
+        header("h_folder"),
+        folder(
+            "dir_replays",
+            t(Key::SetFolder),
+            |c| c.paths.replays.clone(),
+            |c, v| c.paths.replays = v,
+        ),
+        toggle(
+            "sub_replays",
+            t(Key::SetSubfolder),
+            |c| c.paths.per_app_subfolder.replays,
+            |c, v| c.paths.per_app_subfolder.replays = v,
         ),
     ]
 }
 
-/// The settings of the about page (the version and the update card are drawn by the page).
-pub fn about(env: &Env) -> Vec<Row> {
+/// The settings of the updates page (the state of the update is drawn by the page).
+pub fn updates(env: &Env) -> Vec<Row> {
     vec![
-        header("h_updates", env.t(Key::GrpUpdates)),
         toggle(
             "check_updates",
             env.t(Key::SetCheckUpdates),
@@ -926,14 +870,11 @@ pub fn about(env: &Env) -> Vec<Row> {
             |c, v| c.general.check_updates = v,
         ),
         when(
-            hinted(
-                toggle(
-                    "auto_update",
-                    env.t(Key::SetAutoUpdate),
-                    |c| c.general.auto_update,
-                    |c, v| c.general.auto_update = v,
-                ),
-                env.t(Key::SetAutoUpdateHint),
+            toggle(
+                "auto_update",
+                env.t(Key::SetAutoUpdate),
+                |c| c.general.auto_update,
+                |c, v| c.general.auto_update = v,
             ),
             |c| c.general.check_updates,
         ),

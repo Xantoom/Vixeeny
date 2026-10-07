@@ -7,7 +7,6 @@
 
 pub mod encoders;
 mod pages;
-pub mod profiles;
 pub mod shortcuts;
 
 use vixeeny_common::config::{Config, Profile};
@@ -19,49 +18,53 @@ pub use encoders::{EncoderInfo, param_label};
 /// The sections of the settings window, in the order of the sidebar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Section {
-    Gallery,
     General,
-    Shortcuts,
-    /// Screenshots: format, capture options, folder, text recognition.
-    Capture,
-    /// Recording: profile, picture, encoder, file.
+    /// The side strip and the recording widget.
+    Overlay,
+    /// Screenshots: folder, format, capture options.
+    Image,
+    /// Recording: folder, picture, encoder, file.
     Video,
+    Audio,
     /// The replay buffer.
     Replay,
-    Audio,
-    /// Version, updates, links.
+    Shortcuts,
+    Updates,
+    /// Version, system, links.
     About,
 }
 
 impl Section {
-    pub const ALL: [Self; 8] = [
-        Self::Gallery,
+    pub const ALL: [Self; 9] = [
         Self::General,
-        Self::Shortcuts,
-        Self::Capture,
+        Self::Overlay,
+        Self::Image,
         Self::Video,
-        Self::Replay,
         Self::Audio,
+        Self::Replay,
+        Self::Shortcuts,
+        Self::Updates,
         Self::About,
     ];
 
     pub const fn title(self) -> Key {
         match self {
-            Self::Gallery => Key::SecGallery,
             Self::General => Key::SecGeneral,
-            Self::Shortcuts => Key::SecShortcuts,
-            Self::Capture => Key::SecCapture,
+            Self::Overlay => Key::SecOverlay,
+            Self::Image => Key::SecImage,
             Self::Video => Key::SecVideo,
-            Self::Replay => Key::SecReplay,
             Self::Audio => Key::SecAudio,
+            Self::Replay => Key::SecReplay,
+            Self::Shortcuts => Key::SecShortcuts,
+            Self::Updates => Key::SecUpdates,
             Self::About => Key::SecAbout,
         }
     }
 
-    /// Whether the section is made of [`Row`]s (the gallery and the shortcuts have a page of
-    /// their own).
+    /// Whether the section is made of [`Row`]s (the shortcuts and the about page have a page
+    /// of their own).
     pub const fn is_rows(self) -> bool {
-        !matches!(self, Self::Gallery | Self::Shortcuts)
+        !matches!(self, Self::Shortcuts | Self::About)
     }
 }
 
@@ -79,6 +82,8 @@ pub struct Opt {
     pub value: String,
     /// What the user reads.
     pub label: String,
+    /// A picture before the label (a program's icon).
+    pub icon: Option<Icon>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -88,8 +93,12 @@ pub enum Kind {
     Choice(Vec<Opt>),
     /// Two or three choices side by side.
     Segmented(Vec<Opt>),
-    /// The recording profile: a choice among the profiles, with buttons to manage them.
-    Profile(Vec<String>),
+    /// A button that opens a list to pick from (a program to record); picking writes the
+    /// value of the option.
+    Add(Vec<Opt>),
+    /// Something that was added (a program to record), with a button to remove it: writing
+    /// `false` removes it.
+    Removable,
     Number {
         min: i64,
         max: i64,
@@ -102,10 +111,11 @@ pub enum Kind {
         step: i64,
     },
     Text,
+    /// A folder: the path, a button to choose another one, a button to open it.
     Folder,
     /// Read-only.
     Info,
-    /// A title that groups the rows under it; nothing to edit.
+    /// Starts a new group of rows (shown apart from the one above); nothing to edit.
     Header,
 }
 
@@ -152,12 +162,13 @@ impl Row {
                 }
                 Value::Text(t)
             }
-            (Kind::Profile(names), Value::Text(t)) => {
-                if !names.contains(&t) {
+            (Kind::Add(options), Value::Text(t)) => {
+                if !options.iter().any(|o| o.value == t) {
                     return Err(Invalid);
                 }
                 Value::Text(t)
             }
+            (Kind::Removable, Value::Bool(false)) => Value::Bool(false),
             (Kind::Number { min, max, step } | Kind::Slider { min, max, step }, Value::Int(n)) => {
                 let step = (*step).max(1);
                 let snapped = (n.clamp(*min, *max) - min + step / 2) / step * step + min;
@@ -273,6 +284,7 @@ fn opt(value: &str, label: impl Into<String>) -> Opt {
     Opt {
         value: value.to_owned(),
         label: label.into(),
+        icon: None,
     }
 }
 
@@ -418,10 +430,11 @@ fn hinted(mut row: Row, hint: String) -> Row {
     row
 }
 
-fn header(id: &str, label: String) -> Row {
+/// Starts a new group: the rows below it are shown apart.
+fn header(id: &str) -> Row {
     row(
         id,
-        label,
+        String::new(),
         Kind::Header,
         Box::new(|_| Value::Text(String::new())),
         Box::new(|_, _| Err(Invalid)),
@@ -438,7 +451,8 @@ fn info(id: &str, label: String, value: String) -> Row {
     )
 }
 
-/// The profile the video and audio rows edit: `video.profile`, created on first write.
+/// The settings the video and audio rows edit: those of `video.profile`, created on first
+/// write. (Profiles are not offered any more; older settings may name another one.)
 pub(crate) trait Current {
     fn cur(&self) -> Profile;
     fn cur_mut(&mut self) -> &mut Profile;
@@ -462,13 +476,14 @@ impl Current for Config {
 /// not apply with the current settings are left out, so a page only shows what matters.
 pub fn rows(section: Section, env: &Env, config: &Config) -> Vec<Row> {
     match section {
-        Section::General => pages::general(env, config),
-        Section::Capture => pages::capture(env, config),
+        Section::General => pages::general(env),
+        Section::Overlay => pages::overlay(env, config),
+        Section::Image => pages::image(env, config),
         Section::Video => pages::video(env, config),
-        Section::Replay => pages::replay(env, config),
         Section::Audio => pages::audio(env, config),
-        Section::About => pages::about(env),
-        Section::Gallery | Section::Shortcuts => Vec::new(),
+        Section::Replay => pages::replay(env),
+        Section::Updates => pages::updates(env),
+        Section::Shortcuts | Section::About => Vec::new(),
     }
 }
 
@@ -583,7 +598,7 @@ mod tests {
             assert_eq!(ids.len(), rows.len(), "{section:?}");
             for row in rows
                 .iter()
-                .filter(|r| !matches!(r.kind, Kind::Info | Kind::Header))
+                .filter(|r| !matches!(r.kind, Kind::Info | Kind::Header | Kind::Add(_)))
             {
                 let mut copy = config.clone();
                 let value = row.value(&config);
@@ -625,17 +640,17 @@ mod tests {
     #[test]
     fn rows_that_do_not_apply_are_left_out() {
         let mut c = Config::default();
-        assert!(!has(Section::Capture, &c, "jpeg_quality"));
+        assert!(!has(Section::Image, &c, "jpeg_quality"));
         c.image.format = "jpeg".into();
-        assert!(has(Section::Capture, &c, "jpeg_quality"));
-        assert!(!has(Section::Capture, &c, "avif_depth"));
-        assert!(has(Section::General, &c, "widget_corner"));
+        assert!(has(Section::Image, &c, "jpeg_quality"));
+        assert!(!has(Section::Image, &c, "avif_depth"));
+        assert!(has(Section::Overlay, &c, "widget_corner"));
         c.recording_widget.enabled = false;
-        assert!(!has(Section::General, &c, "widget_corner"));
-        let about = rows(Section::About, &env(), &c);
-        assert!(row(&about, "auto_update").enabled(&c));
+        assert!(!has(Section::Overlay, &c, "widget_corner"));
+        let updates = rows(Section::Updates, &env(), &c);
+        assert!(row(&updates, "auto_update").enabled(&c));
         c.general.check_updates = false;
-        assert!(!row(&about, "auto_update").enabled(&c));
+        assert!(!row(&updates, "auto_update").enabled(&c));
     }
 
     #[test]
@@ -690,7 +705,7 @@ mod tests {
         // HDR: offered only while Windows shows it.
         c.cur_mut().hdr = "keep_hdr".into();
         assert!(!has(Section::Video, &c, "hdr"));
-        assert!(!has(Section::Capture, &c, "image_hdr"));
+        assert!(!has(Section::Image, &c, "image_hdr"));
         let on = rows(Section::Video, &fast, &c);
         assert!(row(&on, "hdr").enabled(&c));
         assert_eq!(row(&on, "hdr").value(&c), Value::Bool(true));
@@ -721,21 +736,22 @@ mod tests {
     }
 
     #[test]
-    fn lists_and_tables_are_typed_as_text() {
+    fn every_folder_sits_on_its_own_page() {
         let mut c = Config::default();
-        let folders = rows(Section::General, &env(), &c);
-        row(&folders, "app_names")
-            .apply(
-                &mut c,
-                Value::Text(" game.exe = Mon Jeu ;bad; x.exe=X ;=nothing".into()),
-            )
+        for (section, id) in [
+            (Section::Image, "dir_images"),
+            (Section::Video, "dir_videos"),
+            (Section::Replay, "dir_replays"),
+        ] {
+            let page = rows(section, &env(), &c);
+            assert!(matches!(row(&page, id).kind, Kind::Folder), "{id}");
+        }
+        let video = rows(Section::Video, &env(), &c);
+        row(&video, "dir_videos")
+            .apply(&mut c, Value::Text(" D:\\Clips ".into()))
             .unwrap();
-        assert_eq!(c.paths.app_names.len(), 2);
-        assert_eq!(c.paths.app_names["game.exe"], "Mon Jeu");
-        assert_eq!(
-            row(&folders, "app_names").value(&c),
-            Value::Text("game.exe=Mon Jeu; x.exe=X".into())
-        );
+        assert_eq!(c.paths.videos, "D:\\Clips");
+        let folders = rows(Section::General, &env(), &c);
         // The template cannot be emptied.
         row(&folders, "template")
             .apply(&mut c, Value::Text(String::new()))
@@ -744,18 +760,9 @@ mod tests {
     }
 
     #[test]
-    fn the_replay_can_follow_any_profile() {
+    fn the_replay_keeps_its_duration_and_storage() {
         let mut c = Config::default();
-        c.profiles.insert("Jeu".into(), Profile::default());
         let replay = rows(Section::Replay, &env(), &c);
-        let r = row(&replay, "replay_profile");
-        let Kind::Choice(options) = &r.kind else {
-            panic!()
-        };
-        assert_eq!(options[0].value, "");
-        assert!(options.iter().any(|o| o.value == "Jeu"));
-        r.apply(&mut c, Value::Text("Jeu".into())).unwrap();
-        assert_eq!(c.replay.profile, "Jeu");
         row(&replay, "replay_duration")
             .apply(&mut c, Value::Int(33))
             .unwrap();
@@ -771,8 +778,8 @@ mod tests {
         let c = Config::default();
         let fr = Env::new(Lang::Fr, "1");
         let en = env();
-        assert_eq!(rows(Section::General, &fr, &c)[1].label, "Langue");
-        assert_eq!(rows(Section::General, &en, &c)[1].label, "Language");
+        assert_eq!(rows(Section::General, &fr, &c)[0].label, "Langue");
+        assert_eq!(rows(Section::General, &en, &c)[0].label, "Language");
         assert!(!fr.encoders.is_empty());
     }
 
@@ -850,7 +857,7 @@ mod tests {
             hdr: true,
             max_refresh: 60,
         });
-        let images = rows(Section::Capture, &env, &c);
+        let images = rows(Section::Image, &env, &c);
         let hdr = row(&images, "image_hdr");
         assert_eq!(hdr.value(&c), Value::Bool(false));
         assert_eq!(c.image.hdr, "tonemap_sdr");
@@ -935,9 +942,23 @@ mod tests {
         row(&audio, "mic_device")
             .apply(&mut c, Value::Text("mic:{in-1}".into()))
             .unwrap();
-        row(&audio, "src:app:spotify.exe")
-            .apply(&mut c, Value::Bool(true))
+        // A program is added from the list of those open, then shown with a remove button.
+        let Kind::Add(offered) = &row(&audio, "add_program").kind else {
+            panic!("add_program is a list to pick from")
+        };
+        assert_eq!(offered[0].label, "Spotify");
+        row(&audio, "add_program")
+            .apply(&mut c, Value::Text("app:spotify.exe".into()))
             .unwrap();
+        let audio = rows(Section::Audio, &e, &c);
+        assert!(matches!(
+            row(&audio, "src:app:spotify.exe").kind,
+            Kind::Removable
+        ));
+        assert!(
+            matches!(&row(&audio, "add_program").kind, Kind::Add(o) if o.is_empty()),
+            "an added program is not offered again"
+        );
         row(&audio, "src:system")
             .apply(&mut c, Value::Bool(false))
             .unwrap();
@@ -947,14 +968,15 @@ mod tests {
             .apply(&mut c, Value::Bool(false))
             .unwrap();
         assert_eq!(c.cur().audio.sources, ["app:spotify.exe"]);
-        // A source that is not available now stays listed, so it can be unticked.
+        // A program that is not open now stays listed, so it can be removed.
         c.cur_mut().audio.sources.push("app:closed.exe".into());
         c.cur_mut().audio.sources.push("out:{out-1}".into());
         let audio = rows(Section::Audio, &e, &c);
-        assert_eq!(
-            row(&audio, "src:app:closed.exe").value(&c),
-            Value::Bool(true)
-        );
+        assert_eq!(row(&audio, "src:app:closed.exe").label, "closed.exe");
+        row(&audio, "src:app:closed.exe")
+            .apply(&mut c, Value::Bool(false))
+            .unwrap();
+        assert!(!c.cur().audio.sources.contains(&"app:closed.exe".into()));
         assert_eq!(row(&audio, "src:out:{out-1}").label, "Headset");
     }
 

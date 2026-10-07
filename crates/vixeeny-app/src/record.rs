@@ -221,15 +221,10 @@ fn plan(config: &Config, allow_gpu: bool, replay: bool) -> anyhow::Result<Plan> 
         .clone();
     let source = (monitor.rect.width, monitor.rect.height);
 
-    // The replay has its own profile, by default the recording's.
-    let profile_name = if replay && !config.replay.profile.is_empty() {
-        &config.replay.profile
-    } else {
-        &config.video.profile
-    };
+    // The replay records with the video settings, like a recording.
     let profile = config
         .profiles
-        .get(profile_name)
+        .get(&config.video.profile)
         .cloned()
         .unwrap_or_default();
     let registry = Registry::builtin().context("codec registry")?;

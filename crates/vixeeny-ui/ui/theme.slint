@@ -17,6 +17,7 @@ export global Theme {
     out property <color> bg-deep: dark ? #0f0f11 : #ededef;
     out property <color> card: dark ? #1c1c1f : #ffffff;
     out property <color> card-hover: dark ? #222226 : #fafafb;
+    out property <color> card-pressed: dark ? #19191c : #f3f3f4;
     out property <color> flyout: dark ? #232327 : #ffffff;
     out property <color> stroke: dark ? #ffffff0f : #0000000f;
     out property <color> stroke-strong: dark ? #ffffff24 : #00000024;
@@ -54,7 +55,7 @@ export global Theme {
 
     // ---- shape and motion
     out property <length> radius: 6px;
-    out property <length> radius-card: 12px;
+    out property <length> radius-card: 8px;
     out property <length> radius-flyout: 10px;
     out property <duration> t-fast: motion > 0.5 ? 100ms : 0ms;
     out property <duration> t-normal: motion > 0.5 ? 180ms : 0ms;

@@ -304,15 +304,16 @@ fn settings_apply_immediately() {
     // The page keeps its rows (and their controls, which then animate): only the row changed.
     assert!(w.get_groups() == groups, "the rows were rebuilt");
     w.invoke_row_chosen("theme".into(), 2); // system, light, dark
-    w.invoke_row_chosen("overlay_edge".into(), 0); // left, right, top, bottom
-    assert_eq!(seen.borrow().len(), 3, "one notification per change");
+    assert_eq!(seen.borrow().len(), 2, "one notification per change");
     let c = panel.config();
     assert!(!c.general.sounds);
     assert_eq!(c.general.theme, "dark");
-    assert_eq!(c.overlay.edge, "left");
     // The same value again is not a change.
     w.invoke_row_toggled("sounds".into(), false);
-    assert_eq!(seen.borrow().len(), 3);
+    assert_eq!(seen.borrow().len(), 2);
+    panel.select_section(Section::Overlay);
+    w.invoke_row_chosen("overlay_edge".into(), 0); // left, right, top, bottom
+    assert_eq!(panel.config().overlay.edge, "left");
 
     // Unknown ids and out-of-range choices are ignored.
     let before = seen.borrow().len();
@@ -334,12 +335,13 @@ fn changing_the_language_relabels_the_window_at_once() {
             .map(|s| s.to_string())
             .collect::<Vec<_>>()
     };
-    assert_eq!(titles(&panel)[1], "General");
+    assert_eq!(titles(&panel)[0], "General");
+    assert_eq!(titles(&panel)[4], "Sound");
     panel.window().invoke_row_chosen("language".into(), 1); // auto, fr, en
     assert_eq!(panel.config().general.language, "fr");
-    assert_eq!(titles(&panel)[1], "Général");
+    assert_eq!(titles(&panel)[0], "Général");
+    assert_eq!(titles(&panel)[4], "Son");
     let first = panel.window().get_groups().row_data(0).unwrap();
-    assert_eq!(first.title, "Application");
     assert_eq!(first.rows.row_data(0).unwrap().label, "Langue");
 }
 
@@ -432,9 +434,6 @@ fn every_page_of_the_settings_renders() {
         ],
     });
     for section in Section::ALL {
-        if matches!(section, Section::Gallery) {
-            continue;
-        }
         panel.select_section(section);
         let name = format!("9-page-{section:?}").to_lowercase();
         settings_render(&panel, &name);
@@ -445,138 +444,11 @@ fn every_page_of_the_settings_renders() {
 }
 
 #[test]
-fn profiles_are_created_renamed_chosen_and_deleted_from_their_row() {
+fn the_updates_and_about_pages_show_what_the_host_gives_them() {
+    use settings_panel::Line;
     use vixeeny_settings::Section;
     let (panel, _) = settings_panel();
-    panel.select_section(Section::Video);
-    let w = panel.window();
-    let action = |a: &str, arg: &str| w.invoke_row_action("profile".into(), a.into(), arg.into());
-    action("profile-new", "");
-    assert_eq!(panel.config().video.profile, "Profile");
-    action("profile-duplicate", "");
-    assert_eq!(panel.config().video.profile, "Profile (copy)");
-    assert_eq!(panel.config().profiles.len(), 3);
-    action("profile-rename", "Jeu 4K");
-    assert!(panel.config().profiles.contains_key("Jeu 4K"));
-    assert_eq!(panel.config().video.profile, "Jeu 4K");
-    // Listed by name: Jeu 4K, Profile, default.
-    w.invoke_row_chosen("profile".into(), 1);
-    assert_eq!(panel.config().video.profile, "Profile");
-    action("profile-rename", "Jeu 4K");
-    assert!(!w.get_notice().is_empty(), "the name is taken");
-    action("profile-delete", "");
-    action("profile-delete", "");
-    assert_eq!(panel.config().profiles.len(), 1);
-    action("profile-delete", "");
-    assert_eq!(panel.config().profiles.len(), 1, "the last one stays");
-    settings_render(&panel, "9-settings-profile");
-}
-
-#[test]
-fn the_gallery_and_the_other_pages_show_what_the_host_gives_them() {
-    use settings_panel::{GalleryEntry, GalleryRequest, Line};
-    use slint::Model;
-    use std::cell::RefCell;
-    use vixeeny_settings::Section;
-    let (panel, _) = settings_panel();
-    let requests = Rc::new(RefCell::new(Vec::new()));
-    let sink = requests.clone();
-    panel.on_gallery(move |r| sink.borrow_mut().push(r));
-    panel.select_section(Section::Gallery);
-    let tile = |name: &str, video: bool, folder: &str| GalleryEntry {
-        name: name.into(),
-        detail: "2026-10-02 14:03 · 2.4 MB".into(),
-        video,
-        folder: folder.into(),
-        format: if video { "MP4" } else { "PNG" }.into(),
-        thumb: Some((4, 4, [200, 80, 40, 255].repeat(16))),
-    };
-    let entries = || {
-        vec![
-            tile("Minecraft_2026-10-02.png", false, "Minecraft"),
-            tile("Replay.mp4", true, "Minecraft"),
-            tile("a.png", false, ""),
-            tile("Minecraft_2026-10-01.png", false, "Minecraft"),
-            tile("Firefox_2026-10-01.mp4", true, "Firefox"),
-        ]
-    };
-    panel.set_gallery(entries(), Some(1));
-    let w = panel.window();
-    w.set_animated(false);
-    settings_render(&panel, "9-settings-gallery");
-    // A right click on a tile opens its menu where the pointer is.
-    {
-        use slint::platform::{PointerEventButton, WindowEvent};
-        let window = WINDOW.with(Rc::clone);
-        for (x, y) in [(480.0, 220.0), (480.0, 600.0)] {
-            let position = slint::LogicalPosition::new(x, y);
-            window.dispatch_event(WindowEvent::PointerMoved { position });
-            window.dispatch_event(WindowEvent::PointerPressed {
-                position,
-                button: PointerEventButton::Right,
-            });
-            window.dispatch_event(WindowEvent::PointerReleased {
-                position,
-                button: PointerEventButton::Right,
-            });
-            for _ in 0..3 {
-                std::thread::sleep(std::time::Duration::from_millis(200));
-                slint::platform::update_timers_and_animations();
-            }
-            settings_render(&panel, &format!("9-settings-gallery-menu-{y}"));
-            window.dispatch_event(WindowEvent::KeyPressed {
-                text: slint::platform::Key::Escape.into(),
-            });
-            window.dispatch_event(WindowEvent::KeyReleased {
-                text: slint::platform::Key::Escape.into(),
-            });
-        }
-        // The tile under the pointer is selected first: Minecraft_2026-10-02, then a.png.
-        assert_eq!(
-            requests.borrow_mut().drain(..).collect::<Vec<_>>(),
-            [GalleryRequest::Select(0), GalleryRequest::Select(2)]
-        );
-    }
-    // The tiles sit under their folders, in the order of the newest capture of each.
-    let groups = w.get_gallery();
-    let folders: Vec<String> = groups.iter().map(|g| g.folder.to_string()).collect();
-    assert_eq!(folders, ["Minecraft", "", "Firefox"]);
-    let minecraft = groups.row_data(0).unwrap();
-    assert_eq!(minecraft.count, 3);
-    let indexes: Vec<i32> = minecraft.items.iter().map(|i| i.index).collect();
-    assert_eq!(indexes, [0, 1, 3]);
-    assert!(minecraft.items.row_data(1).unwrap().selected);
-    // A new selection updates the same tiles rather than new ones.
-    panel.set_gallery(entries(), Some(3));
-    let again = w.get_gallery();
-    assert!(again == groups);
-    assert!(
-        again
-            .row_data(0)
-            .unwrap()
-            .items
-            .row_data(2)
-            .unwrap()
-            .selected
-    );
-    // Delete asks first.
-    w.set_confirm_name("Minecraft_2026-10-01.png".into());
-    w.set_confirm_open(true);
-    settings_render(&panel, "9-settings-gallery-delete");
-    w.set_confirm_open(false);
-    w.invoke_gallery_select(2);
-    w.invoke_gallery_open(2);
-    w.invoke_gallery_action("open".into());
-    w.invoke_gallery_filter(2, "mine".into());
-    assert_eq!(
-        *requests.borrow(),
-        [
-            GalleryRequest::Select(2),
-            GalleryRequest::Open(2),
-            GalleryRequest::Action("open".into()),
-            GalleryRequest::Filter(2, "mine".into()),
-        ]
-    );
+    panel.window().set_animated(false);
     panel.select_section(Section::About);
     panel.set_lines(vec![
         Line {
@@ -598,6 +470,8 @@ fn the_gallery_and_the_other_pages_show_what_the_host_gives_them() {
         action: String::new(),
     });
     settings_render(&panel, "9-settings-about");
+    panel.select_section(Section::Updates);
+    settings_render(&panel, "9-settings-updates");
     panel.set_update(&settings_panel::UpdateView {
         stage: settings_panel::UpdateStage::Ready,
         title: "Version 1.3.0 is ready".into(),
@@ -605,7 +479,7 @@ fn the_gallery_and_the_other_pages_show_what_the_host_gives_them() {
         progress: 1.0,
         action: "Restart".into(),
     });
-    settings_render(&panel, "9-settings-about-ready");
+    settings_render(&panel, "9-settings-updates-ready");
 }
 
 #[test]
