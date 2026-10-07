@@ -101,7 +101,7 @@ mod tests {
     fn the_table_has_three_slots_per_action_with_the_defaults_filled_in() {
         let config = Config::default();
         let table = table(&config);
-        assert_eq!(table.len(), 12);
+        assert_eq!(table.len(), 11);
         let save = table
             .iter()
             .find(|(a, _)| *a == ActionId::ReplaySave)
