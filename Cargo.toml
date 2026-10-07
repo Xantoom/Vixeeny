@@ -43,6 +43,10 @@ undocumented_unsafe_blocks = "deny"
 [profile.dev]
 debug = "line-tables-only"
 
+# The dependencies need no debug info: much smaller and faster to link.
+[profile.dev.package."*"]
+debug = false
+
 [profile.release]
 lto = "thin"
 codegen-units = 1
