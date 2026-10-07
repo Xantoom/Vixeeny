@@ -13,7 +13,7 @@ use crate::render::{RgbaImage, render_region};
 use crate::selection::{CursorHint, Selection, magnifier_position, magnifier_source, place_beside};
 
 /// Size of the toolbar, in image pixels (the UI lays out its content to fit).
-pub const TOOLBAR_SIZE: (f32, f32) = (813.0, 46.0);
+pub const TOOLBAR_SIZE: (f32, f32) = (779.0, 46.0);
 /// Source pixels shown by the magnifier, per side, and the on-screen zoom factor.
 pub const MAGNIFIER_SIDE: u32 = 11;
 pub const MAGNIFIER_ZOOM: f32 = 10.0;
@@ -32,8 +32,6 @@ pub enum Command {
     Save,
     /// Ask for a folder and a format.
     SaveAs,
-    /// Run OCR on the zone.
-    Ocr,
     /// Capture the zone while the user scrolls it.
     Scroll,
     /// Close without saving.
@@ -117,7 +115,7 @@ pub struct Session {
     text_input: Option<Point>,
     /// Veil opacity over the image outside the zone (0.0–1.0).
     pub dim: f32,
-    /// Command issued once, as soon as the first zone is settled (OCR mode: no toolbar step).
+    /// Command issued once, as soon as the first zone is settled (the scrolling capture: no toolbar step).
     auto_command: Option<Command>,
     /// Scale of the interface (the window's scale factor); the toolbar and magnifier grow with it.
     ui_scale: f32,
@@ -178,7 +176,7 @@ impl Session {
             .unwrap_or_else(|| Rect::new(0.0, 0.0, self.base.width as f32, self.base.height as f32))
     }
 
-    /// Issues `command` as soon as the first zone is validated (the OCR shortcut).
+    /// Issues `command` as soon as the first zone is validated (the scrolling capture).
     pub fn with_auto_command(mut self, command: Command) -> Self {
         self.auto_command = Some(command);
         self
@@ -338,7 +336,6 @@ impl Session {
                 'c' => Some(Command::Copy),
                 's' if shift => Some(Command::SaveAs),
                 's' => Some(Command::Save),
-                't' => Some(Command::Ocr),
                 'z' if shift => {
                     self.editor.redo();
                     None

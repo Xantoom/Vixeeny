@@ -14,7 +14,6 @@ mod generated {
 }
 pub use generated::*;
 
-pub mod ocr_panel;
 pub mod scroll_panel;
 pub mod settings_panel;
 pub mod side_panel;
@@ -24,7 +23,6 @@ pub mod widget_panel;
 pub mod wizard_panel;
 pub use slint;
 pub use slint::ComponentHandle;
-pub use vixeeny_ocr::OcrPanel;
 
 #[cfg(test)]
 mod tests;

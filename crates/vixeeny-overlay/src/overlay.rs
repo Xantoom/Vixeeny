@@ -742,7 +742,6 @@ impl Shared {
             Button::Save => return self.run_command(Command::Save),
             Button::SaveAs => return self.run_command(Command::SaveAs),
             Button::Scroll => return self.run_command(Command::Scroll),
-            Button::Ocr => return self.run_command(Command::Ocr),
             Button::Close => return self.run_command(Command::Close),
         }
         false

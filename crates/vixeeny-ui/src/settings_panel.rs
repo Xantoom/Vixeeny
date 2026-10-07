@@ -338,7 +338,6 @@ pub fn action_label(action: ActionId, lang: Lang) -> &'static str {
             ActionId::CaptureFullscreen => Key::ActCaptureFullscreen,
             ActionId::CaptureAllMonitors => Key::ActCaptureAll,
             ActionId::CaptureScrolling => Key::ActCaptureScrolling,
-            ActionId::OcrRegion => Key::ActOcr,
             ActionId::RecordToggle => Key::ActRecordToggle,
             ActionId::RecordPause => Key::ActRecordPause,
             ActionId::ReplayToggle => Key::ActReplayToggle,

@@ -1,6 +1,6 @@
 ---
 source: crates/vixeeny-common/src/config.rs
-assertion_line: 566
+assertion_line: 567
 expression: "Config::default().to_toml().unwrap()"
 ---
 schema_version = 2
@@ -22,7 +22,6 @@ capture_window = ["Alt+PrintScreen"]
 capture_fullscreen = ["Shift+PrintScreen"]
 capture_all_monitors = []
 capture_scrolling = []
-ocr_region = []
 record_toggle = ["Ctrl+Shift+R"]
 record_pause = ["Ctrl+Shift+P"]
 replay_toggle = []
@@ -109,9 +108,6 @@ profile = ""
 
 [overlay]
 edge = "right"
-
-[ocr]
-languages = ["auto"]
 
 [scrolling]
 max_height = 30000

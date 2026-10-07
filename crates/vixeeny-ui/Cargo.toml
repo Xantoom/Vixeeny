@@ -15,7 +15,6 @@ slint = { version = "1.18.1", default-features = false, features = ["std", "comp
 vixeeny-common = { path = "../vixeeny-common" }
 vixeeny-encode = { path = "../vixeeny-encode" }
 png.workspace = true
-vixeeny-ocr = { path = "../vixeeny-ocr" }
 vixeeny-settings = { path = "../vixeeny-settings" }
 
 [build-dependencies]

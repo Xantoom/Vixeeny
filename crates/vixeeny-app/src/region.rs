@@ -93,7 +93,7 @@ pub fn output_command(
                 }
             })
         }
-        Command::Ocr | Command::Scroll => None,
+        Command::Scroll => None,
     }
 }
 
@@ -166,8 +166,6 @@ fn save_as_dialog(config: &Config) -> Option<PathBuf> {
 pub enum Mode {
     /// Annotate, then copy or save (Print Screen).
     Editor,
-    /// Recognise the text of the zone as soon as it is drawn.
-    Ocr,
     /// Pick the zone of a scrolling capture.
     Scroll,
 }
@@ -350,9 +348,6 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
     };
     let config = config.clone();
     let tips = toolbar_tips(crate::lang(&config.general.language));
-    let ocr_image: std::rc::Rc<std::cell::RefCell<Option<RgbaImage>>> = std::rc::Rc::default();
-    let ocr_slot = ocr_image.clone();
-    let ocr_config = config.clone();
     let config_for_scroll = config.clone();
 
     let scroll_zone: std::rc::Rc<std::cell::Cell<Option<Rect>>> = std::rc::Rc::default();
@@ -362,7 +357,6 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
     let mut session = Session::new(base, Vec::new()).with_screens(monitor_areas);
     match mode {
         Mode::Editor => {}
-        Mode::Ocr => session = session.with_auto_command(Command::Ocr),
         Mode::Scroll => session = session.with_auto_command(Command::Scroll),
     }
     session.dim = f32::from(config.editor.dim_percent.min(90)) / 100.0;
@@ -386,14 +380,6 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
                 Command::Scroll => match session.zone() {
                     Some(zone) => {
                         scroll_slot.set(Some(zone));
-                        true
-                    }
-                    None => false,
-                },
-                Command::Ocr => match session.export() {
-                    // The overlay closes first; the result window opens afterwards.
-                    Some(img) => {
-                        *ocr_slot.borrow_mut() = Some(img);
                         true
                     }
                     None => false,
@@ -422,10 +408,6 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
         );
         return crate::scroll::run(&config_for_scroll, scroll_snapshot, zone, scale);
     }
-    let recognised = ocr_image.borrow_mut().take();
-    if let Some(img) = recognised {
-        crate::ocr::run(&img, &ocr_config)?;
-    }
     Ok(())
 }
 
@@ -452,7 +434,6 @@ pub(crate) fn toolbar_tips(lang: vixeeny_common::i18n::Lang) -> Vec<String> {
         Key::TipSave,
         Key::TipSaveAs,
         Key::TipScroll,
-        Key::TipOcr,
         Key::TipClose,
     ]
     .into_iter()

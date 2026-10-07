@@ -24,7 +24,6 @@ pub enum ActionId {
     CaptureFullscreen,
     CaptureAllMonitors,
     CaptureScrolling,
-    OcrRegion,
     RecordToggle,
     RecordPause,
     ReplayToggle,
@@ -35,13 +34,12 @@ pub enum ActionId {
 
 impl ActionId {
     /// All actions, in a stable order.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 11] = [
         Self::CaptureRegion,
         Self::CaptureWindow,
         Self::CaptureFullscreen,
         Self::CaptureAllMonitors,
         Self::CaptureScrolling,
-        Self::OcrRegion,
         Self::RecordToggle,
         Self::RecordPause,
         Self::ReplayToggle,
@@ -58,7 +56,6 @@ impl ActionId {
             Self::CaptureFullscreen => "capture-fullscreen",
             Self::CaptureAllMonitors => "capture-all-monitors",
             Self::CaptureScrolling => "capture-scrolling",
-            Self::OcrRegion => "ocr-region",
             Self::RecordToggle => "record-toggle",
             Self::RecordPause => "record-pause",
             Self::ReplayToggle => "replay-toggle",
@@ -70,10 +67,7 @@ impl ActionId {
 
     /// Actions that start on the frozen screen (a zone is picked on it).
     pub const fn freezes_screen(self) -> bool {
-        matches!(
-            self,
-            Self::CaptureRegion | Self::CaptureScrolling | Self::OcrRegion
-        )
+        matches!(self, Self::CaptureRegion | Self::CaptureScrolling)
     }
 
     pub fn from_cli_name(name: &str) -> Option<Self> {

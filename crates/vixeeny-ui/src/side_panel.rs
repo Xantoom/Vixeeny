@@ -4,7 +4,7 @@
 //! The pure parts (the entries, the keyboard order, where the window goes) are plain functions;
 //! [`SidePanel`] puts them on a Slint window.
 
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -55,24 +55,21 @@ pub enum Choice {
     Screen,
     AllMonitors,
     Scrolling,
-    Ocr,
     RecordToggle,
     ReplayToggle,
     ReplaySave,
     Settings,
 }
 
-const PROFILE_ID: i32 = 100;
 const HEADER_ID: i32 = 200;
 
 impl Choice {
-    const ALL: [Self; 10] = [
+    const ALL: [Self; 9] = [
         Self::Region,
         Self::Window,
         Self::Screen,
         Self::AllMonitors,
         Self::Scrolling,
-        Self::Ocr,
         Self::RecordToggle,
         Self::ReplayToggle,
         Self::ReplaySave,
@@ -97,15 +94,12 @@ pub struct SideTexts {
     pub screen: String,
     pub all_monitors: String,
     pub scrolling: String,
-    pub ocr: String,
     pub video: String,
     pub record: String,
     pub stop_recording: String,
     pub replay_start: String,
     pub replay_stop: String,
     pub replay_save: String,
-    /// With a `{name}` placeholder.
-    pub profile: String,
     pub settings: String,
     /// The buttons of the strip's corner.
     pub pin: String,
@@ -117,8 +111,6 @@ pub struct SideTexts {
 pub struct SideState {
     pub recording: bool,
     pub replay: bool,
-    pub profiles: Vec<String>,
-    pub profile: usize,
     pub dark: bool,
     pub edge: Edge,
     /// `false` when the OS asks for fewer animations: the strip just appears.
@@ -168,11 +160,6 @@ impl Entry {
     }
 }
 
-fn profile_label(texts: &SideTexts, state: &SideState, index: usize) -> String {
-    let name = state.profiles.get(index).map_or("", String::as_str);
-    texts.profile.replace("{name}", name)
-}
-
 /// The entries, in display order.
 pub fn entries(texts: &SideTexts, state: &SideState) -> Vec<Entry> {
     let mut list = vec![
@@ -182,7 +169,6 @@ pub fn entries(texts: &SideTexts, state: &SideState) -> Vec<Entry> {
         Entry::action(Choice::Screen, 2, &texts.screen),
         Entry::action(Choice::AllMonitors, 3, &texts.all_monitors),
         Entry::action(Choice::Scrolling, 4, &texts.scrolling),
-        Entry::action(Choice::Ocr, 5, &texts.ocr),
         Entry::header(1, &texts.video),
     ];
     let mut record = if state.recording {
@@ -206,16 +192,6 @@ pub fn entries(texts: &SideTexts, state: &SideState) -> Vec<Entry> {
     let mut save = Entry::action(Choice::ReplaySave, 9, &texts.replay_save);
     save.enabled = state.replay;
     list.push(save);
-    if !state.profiles.is_empty() {
-        list.push(Entry {
-            id: PROFILE_ID,
-            glyph: 10,
-            label: profile_label(texts, state, state.profile),
-            enabled: state.profiles.len() > 1,
-            header: false,
-            active: false,
-        });
-    }
     list.push(Entry::action(Choice::Settings, 11, &texts.settings));
     list
 }
@@ -319,13 +295,10 @@ fn to_item(entry: &Entry) -> SideItem {
     }
 }
 
-type ProfileHandler = Rc<RefCell<Option<Box<dyn Fn(usize)>>>>;
-
 pub struct SidePanel {
     window: SidePanelWindow,
     entries: Rc<Vec<Entry>>,
     chosen: Rc<Cell<Option<Choice>>>,
-    on_profile: ProfileHandler,
     animate: bool,
 }
 
@@ -357,12 +330,10 @@ impl SidePanel {
         window.set_close_label(texts.close.as_str().into());
 
         let chosen = Rc::new(Cell::new(None));
-        let on_profile: ProfileHandler = Rc::default();
         let panel = Self {
             window,
             entries: entries.clone(),
             chosen: chosen.clone(),
-            on_profile: on_profile.clone(),
             animate: state.animate,
         };
 
@@ -375,33 +346,9 @@ impl SidePanel {
             }
         });
 
-        let profiles = state.profiles.len();
-        let current = Rc::new(Cell::new(state.profile));
-        let texts = texts.clone();
-        let names = state.profiles.clone();
         let weak = panel.window.as_weak();
         let closing = panel.closer();
         panel.window.on_activate(move |id| {
-            if id == PROFILE_ID {
-                if profiles < 2 {
-                    return;
-                }
-                let next = (current.get() + 1) % profiles;
-                current.set(next);
-                let name = names.get(next).map_or("", String::as_str);
-                let label = texts.profile.replace("{name}", name);
-                if let Some(i) = (0..model.row_count())
-                    .find(|i| model.row_data(*i).is_some_and(|row| row.id == PROFILE_ID))
-                    && let Some(mut row) = model.row_data(i)
-                {
-                    row.label = label.into();
-                    model.set_row_data(i, row);
-                }
-                if let Some(handler) = &*on_profile.borrow() {
-                    handler(next);
-                }
-                return;
-            }
             let Some(choice) = Choice::from_id(id) else {
                 return;
             };
@@ -455,11 +402,6 @@ impl SidePanel {
     /// The user pinned the strip: it comes back after the action it was closed for.
     pub fn pinned(&self) -> bool {
         self.window.get_pinned()
-    }
-
-    /// Called with the new index into the profile list each time the user cycles the profile.
-    pub fn on_profile(&self, handler: impl Fn(usize) + 'static) {
-        *self.on_profile.borrow_mut() = Some(Box::new(handler));
     }
 
     /// Physical pixels.
@@ -557,14 +499,12 @@ mod tests {
             screen: "Screen".into(),
             all_monitors: "All screens".into(),
             scrolling: "Scrolling capture".into(),
-            ocr: "Copy text (OCR)".into(),
             video: "Video".into(),
             record: "Record".into(),
             stop_recording: "Stop recording".into(),
             replay_start: "Start replay buffer".into(),
             replay_stop: "Stop replay buffer".into(),
             replay_save: "Save replay".into(),
-            profile: "Profile: {name}".into(),
             settings: "Settings".into(),
             pin: "Keep open".into(),
             close: "Close".into(),
@@ -575,8 +515,6 @@ mod tests {
         SideState {
             recording: false,
             replay: false,
-            profiles: vec!["Jeu 4K HDR".into(), "Tuto 1080p".into()],
-            profile: 0,
             dark: true,
             edge: Edge::Right,
             animate: false,
@@ -615,10 +553,6 @@ mod tests {
             !find(&list, Choice::ReplaySave).enabled,
             "no replay, nothing to save"
         );
-        assert_eq!(
-            list.iter().find(|e| e.id == PROFILE_ID).unwrap().label,
-            "Profile: Jeu 4K HDR"
-        );
         s.recording = true;
         s.replay = true;
         let list = entries(&texts(), &s);
@@ -632,17 +566,6 @@ mod tests {
             "Stop replay buffer"
         );
         assert!(find(&list, Choice::ReplaySave).enabled);
-        // One profile: nothing to cycle through; none: no entry at all.
-        s.profiles.truncate(1);
-        assert!(
-            !entries(&texts(), &s)
-                .iter()
-                .find(|e| e.id == PROFILE_ID)
-                .unwrap()
-                .enabled
-        );
-        s.profiles.clear();
-        assert!(entries(&texts(), &s).iter().all(|e| e.id != PROFILE_ID));
     }
 
     #[test]
@@ -654,20 +577,26 @@ mod tests {
         let last = list.len() as i32 - 1;
         assert_eq!(next_selectable(&list, last, 1), first);
         assert_eq!(next_selectable(&list, first, -1), last);
-        // Down from OCR jumps over the "Video" title to Record.
-        let ocr = list.iter().position(|e| e.id == Choice::Ocr.id()).unwrap() as i32;
+        // Down from the scrolling capture jumps over the "Video" title to Record.
+        let scrolling = list
+            .iter()
+            .position(|e| e.id == Choice::Scrolling.id())
+            .unwrap() as i32;
         let record = list
             .iter()
             .position(|e| e.id == Choice::RecordToggle.id())
             .unwrap() as i32;
-        assert_eq!(next_selectable(&list, ocr, 1), record);
-        // The replay save is disabled while there is no replay: Replay → Profile.
+        assert_eq!(next_selectable(&list, scrolling, 1), record);
+        // The replay save is disabled while there is no replay: Replay → Settings.
         let replay = list
             .iter()
             .position(|e| e.id == Choice::ReplayToggle.id())
             .unwrap() as i32;
-        let profile = list.iter().position(|e| e.id == PROFILE_ID).unwrap() as i32;
-        assert_eq!(next_selectable(&list, replay, 1), profile);
+        let settings = list
+            .iter()
+            .position(|e| e.id == Choice::Settings.id())
+            .unwrap() as i32;
+        assert_eq!(next_selectable(&list, replay, 1), settings);
         assert_eq!(next_selectable(&[], 0, 1), 0);
     }
 

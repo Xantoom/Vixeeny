@@ -12,7 +12,6 @@ use std::time::Duration;
 mod audio_rig;
 mod clipboard;
 mod gallery;
-mod ocr;
 mod probe;
 #[cfg(feature = "ffmpeg")]
 mod record;
@@ -67,11 +66,6 @@ fn perform(action: ActionId, config: &Config, frozen: Option<ipc::Frozen>) {
         ActionId::CaptureScrolling => {
             if let Err(e) = region::run(config, region::Mode::Scroll, frozen) {
                 tracing::error!("scrolling capture failed: {e:#}");
-            }
-        }
-        ActionId::OcrRegion => {
-            if let Err(e) = region::run(config, region::Mode::Ocr, frozen) {
-                tracing::error!("OCR failed: {e:#}");
             }
         }
         CaptureFullscreen | CaptureWindow | CaptureAllMonitors => {
@@ -210,14 +204,13 @@ fn run_action(
     frozen: Option<ipc::Frozen>,
     config: &mut Config,
     recording: &mut Recording,
-    send: &mut impl std::io::Write,
 ) -> anyhow::Result<Option<ActionId>> {
     match action {
         ActionId::RecordToggle
         | ActionId::RecordPause
         | ActionId::ReplayToggle
         | ActionId::ReplaySave => recording.handle(action, config),
-        ActionId::OverlayToggle => return overlay(config, recording, send),
+        ActionId::OverlayToggle => return Ok(overlay(config, recording)),
         ActionId::OpenSettings => open_settings(),
         _ => perform(action, config, frozen),
     }
@@ -238,7 +231,7 @@ impl<W: std::io::Write> Actions<'_, W> {
         let mut next = Some((action, frozen));
         let mut result = Ok(());
         while let Some((action, frozen)) = next.take() {
-            match run_action(action, frozen, self.config, self.recording, self.send) {
+            match run_action(action, frozen, self.config, self.recording) {
                 Ok(then) => next = then.map(|a| (a, None)),
                 Err(e) => result = Err(e),
             }
@@ -263,29 +256,15 @@ fn open_settings() {
     }
 }
 
-fn overlay(
-    config: &mut Config,
-    recording: &Recording,
-    send: &mut impl std::io::Write,
-) -> anyhow::Result<Option<ActionId>> {
+fn overlay(config: &Config, recording: &Recording) -> Option<ActionId> {
     let (recording, replay) = recording.flags();
     let outcome = match side::run(config, recording, replay, STRIP_PINNED.get()) {
         Ok(outcome) => outcome,
         Err(e) => {
             tracing::error!("overlay failed: {e:#}");
-            return Ok(None);
+            return None;
         }
     };
-    if let Some(profile) = outcome.profile {
-        config.video.profile = profile;
-        match vixeeny_common::paths::config_file() {
-            Some(path) => match config.save(&path) {
-                Ok(()) => ipc::write_msg(send, &AppToDaemon::ConfigChanged)?,
-                Err(e) => tracing::error!("cannot save the profile choice: {e}"),
-            },
-            None => tracing::error!("no settings folder: the profile choice is not saved"),
-        }
-    }
     STRIP_PINNED.set(outcome.pinned);
     // The strip is gone once the loop ends, but give the compositor a moment to repaint before
     // a capture freezes the screen: the strip must not be in it.
@@ -294,7 +273,7 @@ fn overlay(
     }
     // Pinned: it comes back once the action is done (see `run_action`).
     REOPEN_STRIP.set(outcome.pinned && outcome.action.is_some());
-    Ok(outcome.action)
+    outcome.action
 }
 
 /// The recording started by `RecordToggle`, if any (Windows with FFmpeg only).

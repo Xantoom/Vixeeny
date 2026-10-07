@@ -458,18 +458,6 @@ impl Current for Config {
     }
 }
 
-fn list(items: &[String]) -> String {
-    items.join(", ")
-}
-
-fn unlist(text: &str) -> Vec<String> {
-    text.split(',')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_owned)
-        .collect()
-}
-
 /// The rows of a section (empty for the sections that have a page of their own). Rows that do
 /// not apply with the current settings are left out, so a page only shows what matters.
 pub fn rows(section: Section, env: &Env, config: &Config) -> Vec<Row> {
@@ -748,15 +736,6 @@ mod tests {
             row(&folders, "app_names").value(&c),
             Value::Text("game.exe=Mon Jeu; x.exe=X".into())
         );
-        let ocr = rows(Section::Capture, &env(), &c);
-        row(&ocr, "ocr_languages")
-            .apply(&mut c, Value::Text("fr, en ,, ja".into()))
-            .unwrap();
-        assert_eq!(c.ocr.languages, ["fr", "en", "ja"]);
-        row(&ocr, "ocr_languages")
-            .apply(&mut c, Value::Text(" ".into()))
-            .unwrap();
-        assert_eq!(c.ocr.languages, ["auto"]);
         // The template cannot be emptied.
         row(&folders, "template")
             .apply(&mut c, Value::Text(String::new()))

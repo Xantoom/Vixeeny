@@ -68,7 +68,6 @@ pub struct Config {
     pub recording_widget: RecordingWidget,
     pub replay: Replay,
     pub overlay: Overlay,
-    pub ocr: Ocr,
     pub scrolling: Scrolling,
 }
 
@@ -86,7 +85,6 @@ impl Default for Config {
             recording_widget: RecordingWidget::default(),
             replay: Replay::default(),
             overlay: Overlay::default(),
-            ocr: Ocr::default(),
             scrolling: Scrolling::default(),
         }
     }
@@ -134,7 +132,6 @@ pub struct Hotkeys {
     pub capture_fullscreen: Vec<String>,
     pub capture_all_monitors: Vec<String>,
     pub capture_scrolling: Vec<String>,
-    pub ocr_region: Vec<String>,
     pub record_toggle: Vec<String>,
     pub record_pause: Vec<String>,
     pub replay_toggle: Vec<String>,
@@ -145,14 +142,13 @@ pub struct Hotkeys {
 
 impl Hotkeys {
     /// Every action with the shortcuts configured for it, in [`ActionId::ALL`] order.
-    pub fn bindings(&self) -> [(ActionId, &[String]); 12] {
+    pub fn bindings(&self) -> [(ActionId, &[String]); 11] {
         [
             (ActionId::CaptureRegion, &self.capture_region),
             (ActionId::CaptureWindow, &self.capture_window),
             (ActionId::CaptureFullscreen, &self.capture_fullscreen),
             (ActionId::CaptureAllMonitors, &self.capture_all_monitors),
             (ActionId::CaptureScrolling, &self.capture_scrolling),
-            (ActionId::OcrRegion, &self.ocr_region),
             (ActionId::RecordToggle, &self.record_toggle),
             (ActionId::RecordPause, &self.record_pause),
             (ActionId::ReplayToggle, &self.replay_toggle),
@@ -172,7 +168,6 @@ impl Default for Hotkeys {
             capture_fullscreen: one("Shift+PrintScreen"),
             capture_all_monitors: Vec::new(),
             capture_scrolling: Vec::new(),
-            ocr_region: Vec::new(),
             record_toggle: one("Ctrl+Shift+R"),
             record_pause: one("Ctrl+Shift+P"),
             replay_toggle: Vec::new(),
@@ -458,20 +453,6 @@ impl Default for Overlay {
     fn default() -> Self {
         Self {
             edge: "right".into(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Ocr {
-    pub languages: Vec<String>,
-}
-
-impl Default for Ocr {
-    fn default() -> Self {
-        Self {
-            languages: vec!["auto".into()],
         }
     }
 }

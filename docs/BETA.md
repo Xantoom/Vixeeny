@@ -9,9 +9,8 @@ real machines are what we need**: other GPUs, other monitor layouts, other scali
 2. Take a region screenshot, a window screenshot and a full-screen one, on each monitor if you
    have several; annotate one, copy it and paste it into another application.
 3. Record 30 seconds with system audio, pause, resume, stop; play the file.
-4. Read the text of a zone (OCR).
-5. Quit from the tray icon; start it again; try "Start with Windows".
-6. When an update comes out: let it install by itself, or install it from Settings → About.
+4. Quit from the tray icon; start it again; try "Start with Windows".
+5. When an update comes out: let it install by itself, or install it from Settings → Updates.
 
 ## Especially wanted
 

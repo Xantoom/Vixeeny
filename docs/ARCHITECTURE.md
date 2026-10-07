@@ -7,7 +7,7 @@ decision log at the end); this page is the map. Vixeeny is a Windows program (10
 
 ```
 Vixeeny.exe (always on)                         vixeeny-app.exe (on demand)
-  tray icon, global shortcuts, IPC server  ←──→  captures, editor, recording, settings, OCR…
+  tray icon, global shortcuts, IPC server  ←──→  captures, editor, recording, settings…
   no Slint, no FFmpeg, no capture code            started by Vixeeny.exe for an action,
   idles at ~0 % CPU and a few MB                  exits after `app_idle_exit_seconds`
 ```
@@ -36,7 +36,6 @@ runtime (`runtime.rs`); the platform layer (`platform/`) is a message-only windo
 | `vixeeny-encode` | codec registry (`codecs/registry.toml`), validation, hardware probe, recorder, replay ring, denoiser | FFmpeg |
 | `vixeeny-image` | PNG/JPEG (jpegli)/WebP/AVIF/JPEG XL encode and decode, HDR → SDR tone mapping | no |
 | `vixeeny-editor` | the annotation model (tools, undo/redo, rendering) | no |
-| `vixeeny-ocr` | Windows.Media.Ocr, language selection | yes |
 | `vixeeny-stitch` | scrolling-capture assembly | no |
 | `vixeeny-settings` | the settings model: pages, rows, validation, reset | no |
 | `vixeeny-ui` | Slint files and their Rust bindings | no |

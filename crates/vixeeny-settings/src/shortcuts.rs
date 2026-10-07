@@ -23,7 +23,6 @@ fn list_mut(hotkeys: &mut Hotkeys, action: ActionId) -> &mut Vec<String> {
         ActionId::CaptureFullscreen => &mut hotkeys.capture_fullscreen,
         ActionId::CaptureAllMonitors => &mut hotkeys.capture_all_monitors,
         ActionId::CaptureScrolling => &mut hotkeys.capture_scrolling,
-        ActionId::OcrRegion => &mut hotkeys.ocr_region,
         ActionId::RecordToggle => &mut hotkeys.record_toggle,
         ActionId::RecordPause => &mut hotkeys.record_pause,
         ActionId::ReplayToggle => &mut hotkeys.replay_toggle,

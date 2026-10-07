@@ -7,8 +7,8 @@ use vixeeny_encode::registry::ParamType;
 
 use crate::encoders::{self, param_label, param_range};
 use crate::{
-    Current, Env, Invalid, Kind, Opt, Row, Value, choice, folder, header, hinted, info, list,
-    number, opt, row, segmented, slider, text, toggle, unlist, when, when_boxed,
+    Current, Env, Invalid, Kind, Opt, Row, Value, choice, folder, header, hinted, info, number,
+    opt, row, segmented, slider, text, toggle, when, when_boxed,
 };
 
 /// `off`, `size:<MB>` or `duration:<minutes>` → (kind, amount).
@@ -296,25 +296,6 @@ pub fn capture(env: &Env, config: &Config) -> Vec<Row> {
             t(Key::SetHdrEnableHint),
         ));
     }
-    rows.extend([
-        header("h_ocr", t(Key::GrpOcr)),
-        hinted(
-            text(
-                "ocr_languages",
-                t(Key::SetOcrLanguages),
-                |c| list(&c.ocr.languages),
-                |c, v| {
-                    let languages = unlist(&v);
-                    c.ocr.languages = if languages.is_empty() {
-                        vec!["auto".into()]
-                    } else {
-                        languages
-                    };
-                },
-            ),
-            t(Key::SetOcrLanguagesHint),
-        ),
-    ]);
     rows
 }
 

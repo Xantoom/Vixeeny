@@ -40,7 +40,6 @@ pub enum Button {
     Save,
     SaveAs,
     Scroll,
-    Ocr,
     Close,
 }
 
@@ -56,7 +55,7 @@ const fn spec(button: Button, x: f32, icon: &'static str) -> ButtonSpec {
 
 /// The bar, in its groups: the zone · drawing · shapes and text · masks · style · history ·
 /// outputs · close. The order is the order of the tips the host gives.
-pub const BUTTONS: [ButtonSpec; 21] = [
+pub const BUTTONS: [ButtonSpec; 20] = [
     spec(Button::Tool(12), 6.0, icons::MOVE),
     spec(Button::Tool(0), 40.0, icons::CURSOR),
     spec(Button::Tool(1), 87.0, icons::PEN),
@@ -76,14 +75,13 @@ pub const BUTTONS: [ButtonSpec; 21] = [
     spec(Button::Save, 628.0, icons::SAVE),
     spec(Button::SaveAs, 662.0, icons::SAVE_AS),
     spec(Button::Scroll, 696.0, icons::SCROLL),
-    spec(Button::Ocr, 730.0, icons::SCAN_TEXT),
-    spec(Button::Close, 777.0, icons::DISMISS),
+    spec(Button::Close, 743.0, icons::DISMISS),
 ];
 
 /// The hairlines between the groups.
-pub const SEPARATORS: [f32; 7] = [78.0, 227.0, 376.0, 457.0, 504.0, 585.0, 768.0];
+pub const SEPARATORS: [f32; 7] = [78.0, 227.0, 376.0, 457.0, 504.0, 585.0, 734.0];
 
-pub const BAR_W: f32 = 813.0;
+pub const BAR_W: f32 = 779.0;
 pub const BAR_H: f32 = 46.0;
 pub const BUTTON: f32 = 30.0;
 pub const BUTTON_Y: f32 = 8.0;
@@ -214,9 +212,9 @@ mod tests {
         assert_eq!(button_at(10.0, 20.0), Some(0));
         assert_eq!(button_at(500.0, 20.0), None); // between undo and the style button
         assert_eq!(button_at(470.0, 20.0), Some(12));
-        assert_eq!(button_at(800.0, 20.0), Some(20));
+        assert_eq!(button_at(760.0, 20.0), Some(19));
         assert_eq!(button_at(10.0, 2.0), None);
-        assert!(matches!(BUTTONS[20].button, Button::Close));
+        assert!(matches!(BUTTONS[19].button, Button::Close));
     }
 
     #[test]

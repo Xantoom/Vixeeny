@@ -18,7 +18,7 @@ body:
     id: worked
     attributes:
       label: What you tried and how it went
-      description: "Screenshots (region, window, full screen), recording, OCR, converting, shortcuts, tray icon…"
+      description: "Screenshots (region, window, full screen), recording, converting, shortcuts, tray icon…"
     validations:
       required: true
   - type: textarea

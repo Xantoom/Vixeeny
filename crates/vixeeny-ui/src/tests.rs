@@ -49,32 +49,6 @@ fn save(name: &str, buf: &SharedPixelBuffer<Rgb8Pixel>) {
 }
 
 #[test]
-fn the_ocr_window_renders_text_hint_and_buttons() {
-    WINDOW.with(|_| ());
-    let panel = OcrPanel {
-        title: "Text recognition".into(),
-        text: "Hello world\nSecond line — 日本語".into(),
-        status: "Language: English (United States)".into(),
-        hint: "No OCR language is installed for: ja, ko. Open Windows Settings → Language & region and add the language with “Optical character recognition”.".into(),
-        copy_label: "Copy".into(),
-        settings_label: "Open language settings".into(),
-        show_settings: true,
-    };
-    let w = ocr_panel::build(&panel).unwrap_or_else(|e| panic!("{e}"));
-    let window = WINDOW.with(Rc::clone);
-    window.set_size(PhysicalSize::new(560, 380));
-    w.show().unwrap_or_else(|e| panic!("{e}"));
-    let mut buffer = SharedPixelBuffer::<Rgb8Pixel>::new(560, 380);
-    window.draw_if_needed(|r| {
-        r.render(buffer.make_mut_slice(), 560);
-    });
-    save("5-ocr", &buffer);
-    assert_eq!(w.get_text(), "Hello world\nSecond line — 日本語");
-    // not an all-black frame
-    assert!(buffer.as_slice().iter().any(|p| p.r > 100));
-}
-
-#[test]
 fn the_recording_widget_renders_both_states_and_reports_clicks() {
     use crate::widget_panel::{WidgetEvent, WidgetPanel, WidgetTexts};
     use std::cell::RefCell;
@@ -140,14 +114,12 @@ fn side_texts() -> side_panel::SideTexts {
         screen: "Screen".into(),
         all_monitors: "All screens".into(),
         scrolling: "Scrolling capture".into(),
-        ocr: "Copy text (OCR)".into(),
         video: "Video".into(),
         record: "Record".into(),
         stop_recording: "Stop recording".into(),
         replay_start: "Start replay buffer".into(),
         replay_stop: "Stop replay buffer".into(),
         replay_save: "Save replay".into(),
-        profile: "Profile: {name}".into(),
         settings: "Settings".into(),
         pin: "Keep open".into(),
         close: "Close".into(),
@@ -158,8 +130,6 @@ fn side_state(edge: side_panel::Edge, dark: bool) -> side_panel::SideState {
     side_panel::SideState {
         recording: false,
         replay: true,
-        profiles: vec!["Jeu 4K HDR".into(), "Tuto 1080p".into()],
-        profile: 0,
         dark,
         edge,
         animate: false,
@@ -274,35 +244,6 @@ fn the_side_strip_answers_to_the_keyboard_and_the_mouse() {
     let record_y = first + 9.0 + 2.0 + 6.0 * 42.0 + 9.0 + 2.0 + 20.0;
     click(record_y);
     assert_eq!(panel.chosen(), Some(Choice::RecordToggle));
-}
-
-#[test]
-fn cycling_the_profile_keeps_the_strip_open_and_reports_it() {
-    use side_panel::{Edge, SidePanel};
-    use slint::Model;
-    use std::cell::RefCell;
-    WINDOW.with(|_| ());
-    let panel = SidePanel::new(&side_texts(), &side_state(Edge::Right, true))
-        .unwrap_or_else(|e| panic!("{e}"));
-    let seen = Rc::new(RefCell::new(Vec::new()));
-    let sink = seen.clone();
-    panel.on_profile(move |i| sink.borrow_mut().push(i));
-    side_render(&panel, Edge::Right);
-    panel.window().invoke_activate(100);
-    panel.window().invoke_activate(100);
-    assert_eq!(*seen.borrow(), [1, 0]);
-    assert_eq!(panel.chosen(), None);
-    assert!(panel.window().get_shown());
-    let labels: Vec<_> = panel
-        .window()
-        .get_items()
-        .iter()
-        .map(|i| i.label.to_string())
-        .collect();
-    assert!(
-        labels.contains(&"Profile: Jeu 4K HDR".to_owned()),
-        "{labels:?}"
-    );
 }
 
 fn settings_panel() -> (

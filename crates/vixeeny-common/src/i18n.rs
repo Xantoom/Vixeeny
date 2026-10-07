@@ -17,18 +17,6 @@ pub enum Key {
     MenuQuit,
     AppCrashed,
     HotkeysUnavailable,
-    OcrTitle,
-    OcrCopy,
-    OcrOpenSettings,
-    OcrNoText,
-    /// `{language}`
-    OcrLanguageUsed,
-    /// `{languages}`, `{command}`
-    OcrMissingLanguages,
-    /// `{languages}`
-    OcrNoLanguage,
-    /// `{error}`
-    OcrFailed,
     ScrollTitle,
     ScrollIntro,
     ScrollStart,
@@ -43,14 +31,12 @@ pub enum Key {
     OvlScreen,
     OvlAllMonitors,
     OvlScrolling,
-    OvlOcr,
     OvlVideo,
     OvlRecord,
     OvlStopRecording,
     OvlReplayStart,
     OvlReplayStop,
     OvlReplaySave,
-    OvlProfile,
     OvlSettings,
     /// `{height}`
     ScrollCapturing,
@@ -162,7 +148,6 @@ pub enum Key {
     SetSubReplays,
     SetForegroundApp,
     SetAppNames,
-    SetOcrLanguages,
     SetCheckUpdates,
     SetCheckNow,
     SetProblems,
@@ -190,7 +175,6 @@ pub enum Key {
     ActCaptureFullscreen,
     ActCaptureAll,
     ActCaptureScrolling,
-    ActOcr,
     ActRecordToggle,
     ActRecordPause,
     ActReplayToggle,
@@ -258,7 +242,6 @@ pub enum Key {
     SetAutoUpdate,
     SetAutoUpdateHint,
     SecCapture,
-    GrpOcr,
     GrpSubfolders,
     GrpProfile,
     GrpLinks,
@@ -266,7 +249,6 @@ pub enum Key {
     SetProfileHint,
     SetTemplateHint,
     SetAppNamesHint,
-    SetOcrLanguagesHint,
     OptAuto,
     OptFlac,
     OptPcm16,
@@ -322,7 +304,6 @@ pub enum Key {
     TipSave,
     TipSaveAs,
     TipScroll,
-    TipOcr,
     TipClose,
 }
 
@@ -335,14 +316,6 @@ impl Key {
         Self::MenuQuit,
         Self::AppCrashed,
         Self::HotkeysUnavailable,
-        Self::OcrTitle,
-        Self::OcrCopy,
-        Self::OcrOpenSettings,
-        Self::OcrNoText,
-        Self::OcrLanguageUsed,
-        Self::OcrMissingLanguages,
-        Self::OcrNoLanguage,
-        Self::OcrFailed,
         Self::ScrollTitle,
         Self::ScrollIntro,
         Self::ScrollStart,
@@ -357,14 +330,12 @@ impl Key {
         Self::OvlScreen,
         Self::OvlAllMonitors,
         Self::OvlScrolling,
-        Self::OvlOcr,
         Self::OvlVideo,
         Self::OvlRecord,
         Self::OvlStopRecording,
         Self::OvlReplayStart,
         Self::OvlReplayStop,
         Self::OvlReplaySave,
-        Self::OvlProfile,
         Self::OvlSettings,
         Self::ScrollCapturing,
         Self::ScrollLost,
@@ -470,7 +441,6 @@ impl Key {
         Self::SetSubReplays,
         Self::SetForegroundApp,
         Self::SetAppNames,
-        Self::SetOcrLanguages,
         Self::SetCheckUpdates,
         Self::SetCheckNow,
         Self::SetProblems,
@@ -498,7 +468,6 @@ impl Key {
         Self::ActCaptureFullscreen,
         Self::ActCaptureAll,
         Self::ActCaptureScrolling,
-        Self::ActOcr,
         Self::ActRecordToggle,
         Self::ActRecordPause,
         Self::ActReplayToggle,
@@ -566,7 +535,6 @@ impl Key {
         Self::SetAutoUpdate,
         Self::SetAutoUpdateHint,
         Self::SecCapture,
-        Self::GrpOcr,
         Self::GrpSubfolders,
         Self::GrpProfile,
         Self::GrpLinks,
@@ -574,7 +542,6 @@ impl Key {
         Self::SetProfileHint,
         Self::SetTemplateHint,
         Self::SetAppNamesHint,
-        Self::SetOcrLanguagesHint,
         Self::OptAuto,
         Self::OptFlac,
         Self::OptPcm16,
@@ -630,7 +597,6 @@ impl Key {
         Self::TipSave,
         Self::TipSaveAs,
         Self::TipScroll,
-        Self::TipOcr,
         Self::TipClose,
     ];
 }
@@ -683,28 +649,6 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::HotkeysUnavailable, Lang::Fr) => {
             "Certains raccourcis n'ont pas pu être enregistrés (déjà utilisés ailleurs ?)"
         }
-        (Key::OcrTitle, Lang::En) => "Text recognition",
-        (Key::OcrTitle, Lang::Fr) => "Reconnaissance de texte",
-        (Key::OcrCopy, Lang::En) => "Copy",
-        (Key::OcrCopy, Lang::Fr) => "Copier",
-        (Key::OcrOpenSettings, Lang::En) => "Open language settings",
-        (Key::OcrOpenSettings, Lang::Fr) => "Ouvrir les paramètres de langue",
-        (Key::OcrNoText, Lang::En) => "No text found",
-        (Key::OcrNoText, Lang::Fr) => "Aucun texte trouvé",
-        (Key::OcrLanguageUsed, Lang::En) => "Language: {language} — copied to the clipboard",
-        (Key::OcrLanguageUsed, Lang::Fr) => "Langue : {language} — copié dans le presse-papier",
-        (Key::OcrMissingLanguages, Lang::En) => {
-            "Missing recognition language: {languages}. In Windows Settings → Time & language → Language & region, add the language with “Optical character recognition”, or run in an administrator PowerShell: Add-WindowsCapability -Online -Name {command}"
-        }
-        (Key::OcrMissingLanguages, Lang::Fr) => {
-            "Langue de reconnaissance manquante : {languages}. Dans Paramètres Windows → Heure et langue → Langue et région, ajoutez la langue avec « Reconnaissance optique des caractères », ou exécutez dans PowerShell administrateur : Add-WindowsCapability -Online -Name {command}"
-        }
-        (Key::OcrNoLanguage, Lang::En) => "No recognition language is installed for: {languages}",
-        (Key::OcrNoLanguage, Lang::Fr) => {
-            "Aucune langue de reconnaissance n'est installée pour : {languages}"
-        }
-        (Key::OcrFailed, Lang::En) => "Text recognition failed: {error}",
-        (Key::OcrFailed, Lang::Fr) => "Échec de la reconnaissance de texte : {error}",
         (Key::ScrollTitle, Lang::En) => "Scrolling capture",
         (Key::ScrollTitle, Lang::Fr) => "Capture défilante",
         (Key::ScrollIntro, Lang::En) => "Click Start, then scroll the content yourself.",
@@ -733,8 +677,6 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::OvlAllMonitors, Lang::Fr) => "Tous les écrans",
         (Key::OvlScrolling, Lang::En) => "Scrolling capture",
         (Key::OvlScrolling, Lang::Fr) => "Capture défilante",
-        (Key::OvlOcr, Lang::En) => "Copy text (OCR)",
-        (Key::OvlOcr, Lang::Fr) => "Copier le texte (OCR)",
         (Key::OvlVideo, Lang::En) => "Video",
         (Key::OvlVideo, Lang::Fr) => "Vidéo",
         (Key::OvlRecord, Lang::En) => "Record",
@@ -747,8 +689,6 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::OvlReplayStop, Lang::Fr) => "Désactiver le replay",
         (Key::OvlReplaySave, Lang::En) => "Save replay",
         (Key::OvlReplaySave, Lang::Fr) => "Sauvegarder le replay",
-        (Key::OvlProfile, Lang::En) => "Profile: {name}",
-        (Key::OvlProfile, Lang::Fr) => "Profil : {name}",
         (Key::OvlSettings, Lang::En) => "Settings",
         (Key::OvlSettings, Lang::Fr) => "Paramètres",
         (Key::ScrollCapturing, Lang::En) => "Capturing… {height} px (Enter to finish)",
@@ -989,8 +929,6 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         }
         (Key::SetAppNames, Lang::En) => "Application names",
         (Key::SetAppNames, Lang::Fr) => "Noms des applications",
-        (Key::SetOcrLanguages, Lang::En) => "Languages",
-        (Key::SetOcrLanguages, Lang::Fr) => "Langues",
         (Key::SetCheckUpdates, Lang::En) => "Check for updates",
         (Key::SetCheckUpdates, Lang::Fr) => "Rechercher les mises à jour",
         (Key::SetCheckNow, Lang::En) => "Check now",
@@ -1049,8 +987,6 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::ActCaptureAll, Lang::Fr) => "Capturer tous les écrans",
         (Key::ActCaptureScrolling, Lang::En) => "Scrolling capture",
         (Key::ActCaptureScrolling, Lang::Fr) => "Capture défilante",
-        (Key::ActOcr, Lang::En) => "Copy text (OCR)",
-        (Key::ActOcr, Lang::Fr) => "Copier le texte (OCR)",
         (Key::ActRecordToggle, Lang::En) => "Start / stop recording",
         (Key::ActRecordToggle, Lang::Fr) => "Démarrer / arrêter l'enregistrement",
         (Key::ActRecordPause, Lang::En) => "Pause / resume recording",
@@ -1223,8 +1159,6 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         }
         (Key::SecCapture, Lang::En) => "Captures",
         (Key::SecCapture, Lang::Fr) => "Captures",
-        (Key::GrpOcr, Lang::En) => "Text recognition (OCR)",
-        (Key::GrpOcr, Lang::Fr) => "Reconnaissance de texte (OCR)",
         (Key::GrpSubfolders, Lang::En) => "A sub-folder per application",
         (Key::GrpSubfolders, Lang::Fr) => "Un sous-dossier par application",
         (Key::GrpProfile, Lang::En) => "Profile",
@@ -1243,10 +1177,6 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         }
         (Key::SetAppNamesHint, Lang::En) => "file.exe=Name, separated by semicolons.",
         (Key::SetAppNamesHint, Lang::Fr) => "fichier.exe=Nom, séparés par des points-virgules.",
-        (Key::SetOcrLanguagesHint, Lang::En) => "auto, or codes separated by commas (fr, en, ja…).",
-        (Key::SetOcrLanguagesHint, Lang::Fr) => {
-            "auto, ou des codes séparés par des virgules (fr, en, ja…)."
-        }
         (Key::OptAuto, Lang::En) => "Automatic",
         (Key::OptAuto, Lang::Fr) => "Automatique",
         (Key::OptFlac, Lang::En) => "FLAC (lossless)",
@@ -1367,8 +1297,6 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::TipSaveAs, Lang::Fr) => "Enregistrer sous… (Ctrl+Maj+S)",
         (Key::TipScroll, Lang::En) => "Scrolling capture",
         (Key::TipScroll, Lang::Fr) => "Capture défilante",
-        (Key::TipOcr, Lang::En) => "Copy the text (Ctrl+T)",
-        (Key::TipOcr, Lang::Fr) => "Copier le texte (Ctrl+T)",
         (Key::TipClose, Lang::En) => "Close (Esc)",
         (Key::TipClose, Lang::Fr) => "Fermer (Échap)",
     }
