@@ -148,8 +148,8 @@ Ces choix sont **définitifs**. Ne pas proposer d'alternative.
 │ • icône système              │                                 │ • overlay latéral                 │
 │ • raccourcis globaux         │                                 │ • éditeur Print Screen            │
 │ • démarrage auto             │                                 │ • enregistrement vidéo + replay   │
-│ • instance unique            │                                 │ • OCR, capture défilante          │
-│ • lit la config              │                                 │ • paramètres + galerie            │
+│ • instance unique            │                                 │ • capture défilante               │
+│ • lit la config              │                                 │ • paramètres                      │
 │ • lance / réveille l'app     │                                 │ • conversion d'images             │
 │ • vérif. mise à jour (1/24h) │                                 │ • FFmpeg, encodeurs, Slint        │
 └──────────────────────────────┘                                 └──────────────────────────────────┘
@@ -182,7 +182,6 @@ vixeeny/
 │   ├── vixeeny-audio/          # capture audio système / par application / micro
 │   ├── vixeeny-encode/         # pipeline vidéo/audio, registre de codecs, sondage GPU, muxing, replay
 │   ├── vixeeny-image/          # encodage, décodage, conversion d'images, tone-mapping HDR→SDR
-│   ├── vixeeny-ocr/            # OCR via l'OS
 │   ├── vixeeny-stitch/         # assemblage de la capture défilante
 │   ├── vixeeny-editor/         # modèle de l'éditeur d'annotations (logique pure, testable)
 │   ├── vixeeny-ui/             # fichiers .slint et liaison Rust
@@ -427,6 +426,8 @@ CA :
 
 ### 5.6 OCR
 
+> **Retiré en 0.9.11** (décision du mainteneur : inutile). Spécification gardée pour l'historique.
+
 - Moteur : **celui de l'OS**.
   - Windows : `Windows.Media.Ocr`. Les langues disponibles dépendent des modules de langue installés dans Windows. Si une langue manque (ex. : japonais, coréen), l'app affiche comment l'installer (Paramètres Windows → Langue → ajouter la langue avec la fonctionnalité de reconnaissance optique), avec un bouton qui ouvre la page des paramètres.
   - macOS : framework Vision (`VNRecognizeTextRequest`, niveau « accurate », correction linguistique activée).
@@ -574,27 +575,22 @@ CA :
 - CA-OVL-1 : animation fluide à 240 Hz sur la machine de référence, sans image sautée visible (🧪 TEST MANUEL).
 - CA-OVL-2 : aucune consommation CPU/GPU une fois l'animation terminée et l'overlay immobile.
 
-### 5.13 Application de paramètres et galerie
+### 5.13 Application de paramètres
 
-Ouverte par un clic sur l'icône système ou par `open_settings`.
+Ouverte par un clic sur l'icône système ou par `open_settings`. Pas de galerie ni de profils d'enregistrement (retirés en 0.9.11). Une page par onglet, un seul titre, sans texte d'explication superflu.
 
-Sections :
-1. **Galerie** : grille des dernières captures (images et vidéos, miniatures générées à la demande et mises en cache), filtres (type, application, date), actions : ouvrir, ouvrir le dossier, copier, convertir, supprimer (vers la corbeille de l'OS).
-2. **Général** : langue, thème, démarrage avec l'OS, délai de fermeture de l'app, sons, notifications.
-3. **Raccourcis** : tableau des actions (5.1) avec 3 emplacements chacune.
-4. **Images** : formats et réglages, HDR, curseur, comportement après capture.
-5. **Vidéo** : encodeur, conteneur, résolution, framerate, profondeur, chroma, HDR, mode simple/avancé, découpage, widget.
-6. **Audio** : sources, routage des pistes, codecs.
-7. **Replay** : activation, durée, stockage, réglages propres.
-8. **Dossiers et noms** : dossiers, modèle de nom, sous-dossiers par application, table de correspondance des applications.
-9. **OCR** : langues, état des langues installées.
-10. **Profils** : créer / dupliquer / renommer / supprimer des profils de réglages vidéo+audio.
-11. **Matériel** : liste des GPU détectés, encodeurs disponibles par GPU, bouton « Relancer la détection ».
-12. **Mises à jour** : vérification automatique (oui/non), « Vérifier maintenant », version actuelle.
-13. **Intégration système** : menu contextuel de conversion (installer/retirer).
-14. **À propos** : licence, licences tierces, lien GitHub, dossier des logs.
+Onglets :
+1. **Général** : langue, thème, démarrage avec Windows, notifications, sons, modèle de nom, nom du jeu en plein écran.
+2. **Overlay** : bord de l'écran, widget d'enregistrement.
+3. **Image** : dossier (choisir / ouvrir dans l'Explorateur), sous-dossier par application, format et réglages, presse-papiers, curseur, HDR.
+4. **Vidéo** : dossier, sous-dossier, résolution, images par seconde, curseur, encodeur, préréglage, 10 bits, HDR, conteneur, découpage, réglages personnalisés.
+5. **Son** : son du PC, micro, pistes, codec, débit ; en dernier, les programmes enregistrés à part (« Ajouter un programme » ouvre la liste des programmes ouverts).
+6. **Replay** : activation au démarrage, durée, stockage, dossier.
+7. **Raccourcis** : une carte par action, groupées (captures, vidéo, autres), jusqu'à 3 raccourcis chacune.
+8. **Mise à jour** : état, vérification automatique, installation automatique.
+9. **À propos** : version, licences, GitHub, dossier des logs, copie des infos système.
 
-Chaque réglage modifié s'applique immédiatement (pas de bouton « Appliquer »), avec un bouton « Réinitialiser » par section.
+Chaque réglage modifié s'applique immédiatement (pas de bouton « Appliquer »).
 
 ### 5.14 Notifications et retour après capture
 
@@ -1137,4 +1133,5 @@ HDR (PQ, HDR10) : HEVC et AV1 en 10 bits, conteneurs MKV et MP4. (VP9 HDR possib
 | 2026-10-06 | **0.9.8**, éditeur de zone natif (DirectComposition + Direct2D) : l'image figée n'est plus redessinée, le voile et la zone sont déplacés par le compositeur, plus de dessin continu ni de fenêtre prise pour un jeu plein écran. | |
 | 2026-10-06 | **0.9.9**, correction de l'éditeur natif : l'image figée passait au-dessus du voile, de la zone et de la barre (ordre d'empilement DirectComposition inversé) ; le démon cède le premier plan à l'app avec l'action pour que l'éditeur ait le clavier. Exemple `smoke` (affichage réel bref + capture) ajouté. | |
 | 2026-10-06 | **0.9.10**, mise à jour intégrée : une installation demandée par une ancienne fenêtre restée ouverte (version déjà en place) réussit au lieu d'échouer (« no update is ready ») ; une erreur périmée n'est plus affichée sur la carte de mise à jour. | |
+| 2026-10-08 | **0.9.11** : copie Ctrl+C au format d'image choisi (JPEG collé en JPEG) ; **retraits** de la galerie, de l'OCR (crate `vixeeny-ocr`, `ocr_region`, `Ctrl+T`, bouton de l'overlay) et des profils d'enregistrement (le replay suit les réglages vidéo) ; **paramètres refaits** : onglets Général, Overlay, Image, Vidéo, Son, Replay, Raccourcis, Mise à jour, À propos, un seul titre par page, une carte par réglage (style Windows 11), dossier par onglet (choisir / ouvrir dans l'Explorateur), programmes audio ajoutés depuis la liste des programmes ouverts, raccourcis en touches séparées sans en-tête de tableau, transition d'onglet sans flash (glissement sans fondu), textes d'aide superflus retirés. Les miniatures des notifications ne passent plus par un cache disque. | |
 | | *(à compléter par l'agent)* | |
