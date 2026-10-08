@@ -4,11 +4,10 @@
 # `cargo xtask build-native` reads this file, so keep the keys stable.
 
 [ffmpeg]
-# Built by packaging/ffmpeg/build.sh (.github/workflows/ffmpeg.yml) from the BtbN GPL image:
+# Built by packaging/ffmpeg/build.sh from the BtbN GPL image (image and commit pinned there):
 # FFmpeg n9.0.2-22-g46d8f462ee with only what Vixeeny uses (its encoders, decoders, containers and
-# filters), x264, x265, SVT-AV1, libvpx, dav1d, opus, NVENC, AMF and QSV. Checked by SHA-256.
-url = "https://github.com/Xantoom/Vixeeny/releases/download/ffmpeg-n9.0.2-1/ffmpeg-vixeeny-n9.0.2-1-win64.zip"
-sha256 = "6065ae9424f455d867225e73decc1866267fb8b1cc8da828efc51fb8df682e4b"
+# filters), x264, x265, SVT-AV1, libvpx, dav1d, opus, NVENC, AMF and QSV. The CI builds it when its
+# cache has none (.github/workflows/ffmpeg.yml); `cargo xtask build-native` unpacks the zip.
 tag = "n9.0.2"
 license = "GPL-3.0-or-later (--enable-gpl --enable-version3, no nonfree); bundles x264 and x265 (GPL-2.0-or-later), libvpx and opus (BSD-3-Clause), SVT-AV1 (BSD-3-Clause-Clear) and dav1d (BSD-2-Clause)"
 

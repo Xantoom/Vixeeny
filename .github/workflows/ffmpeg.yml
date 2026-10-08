@@ -1,43 +1,24 @@
 name: FFmpeg
-# Builds the FFmpeg that Vixeeny ships (`packaging/ffmpeg/build.sh`) and publishes the zip as the
-# pre-release `ffmpeg-<packaging/ffmpeg/release>`, when the build changes and that name has no
-# release yet (raise the name to publish a new build). Then point `native/versions.toml` at the
-# zip and its SHA-256 (in the release notes). Pre-releases are never offered as updates.
+# The FFmpeg Vixeeny ships, built by `packaging/ffmpeg/build.sh` (pinned image and commit) only
+# when the cache has none for that script, then handed to the Windows jobs of the calling run as
+# the `ffmpeg` artifact. Nothing is published.
 on:
-  push:
-    branches: ["1.0"]
-    paths: ["packaging/ffmpeg/**"]
-  workflow_dispatch:
-permissions:
-  contents: write
+  workflow_call:
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - id: name
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          name=$(tr -d '[:space:]' < packaging/ffmpeg/release)
-          echo "name=$name" >> "$GITHUB_OUTPUT"
-          if gh release view "ffmpeg-$name" >/dev/null 2>&1; then
-            echo "ffmpeg-$name is already published: raise packaging/ffmpeg/release for a new build."
-            echo build=false >> "$GITHUB_OUTPUT"
-          else
-            echo build=true >> "$GITHUB_OUTPUT"
-          fi
+      - id: cache
+        uses: actions/cache@v4
+        with:
+          path: dist/ffmpeg.zip
+          key: ffmpeg-${{ hashFiles('packaging/ffmpeg/build.sh') }}
       - name: Build
-        if: steps.name.outputs.build == 'true'
-        run: packaging/ffmpeg/build.sh "dist/ffmpeg-vixeeny-${{ steps.name.outputs.name }}-win64.zip"
-      - name: Publish
-        if: steps.name.outputs.build == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          name="${{ steps.name.outputs.name }}"
-          zip="dist/ffmpeg-vixeeny-$name-win64.zip"
-          sum=$(sha256sum "$zip" | cut -d' ' -f1)
-          gh release create "ffmpeg-$name" "$zip" --prerelease --latest=false \
-            --target "${{ github.sha }}" --title "FFmpeg for Vixeeny ($name)" \
-            --notes "The FFmpeg DLLs Vixeeny ships, built by packaging/ffmpeg/build.sh. Not a Vixeeny release. SHA-256: $sum"
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: packaging/ffmpeg/build.sh dist/ffmpeg.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg
+          path: dist/ffmpeg.zip
+          retention-days: 7

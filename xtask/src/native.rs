@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! `cargo xtask build-native`: download the pinned prebuilt FFmpeg, then fetch the image
-//! libraries of `native/versions.toml` by exact commit and build them statically with MSVC into
+//! `cargo xtask build-native`: unpack FFmpeg (`native/build/work/ffmpeg.zip`, made by
+//! `packaging/ffmpeg/build.sh`), then fetch the image libraries of `native/versions.toml` by exact commit and build them statically with MSVC into
 //! `native/build/work/prefix`. Run it from a Visual Studio developer prompt.
 
 use std::collections::BTreeMap;
@@ -17,13 +17,6 @@ struct Lib {
     commit: String,
     /// Informational upstream tag; re-created locally so `git describe` works (x265 needs it).
     tag: String,
-}
-
-/// The prebuilt FFmpeg (maintainer decision 2026-10-01): it bundles the video encoders.
-#[derive(Deserialize)]
-struct Prebuilt {
-    url: String,
-    sha256: String,
 }
 
 /// Bump a library's revision to force its rebuild when its recipe changes (stamps embed it).
@@ -53,10 +46,8 @@ pub fn build(only: &[String]) -> Result<()> {
     let mut table: toml::Table =
         toml::from_str(&std::fs::read_to_string(root.join("native/versions.toml"))?)
             .context("parsing native/versions.toml")?;
-    let prebuilt: Prebuilt = table
-        .remove("ffmpeg")
-        .context("ffmpeg missing from versions.toml")?
-        .try_into()?;
+    // FFmpeg is described there but built by packaging/ffmpeg/build.sh.
+    table.remove("ffmpeg");
     let libs: BTreeMap<String, Lib> = table.try_into()?;
     let work = root.join("native/build/work");
     let prefix = work.join("prefix");
@@ -67,7 +58,7 @@ pub fn build(only: &[String]) -> Result<()> {
     let ctx = Ctx { work, prefix, jobs };
 
     if only.is_empty() || only.iter().any(|o| o == "ffmpeg") {
-        ffmpeg_prebuilt(&ctx, &prebuilt)?;
+        ffmpeg_prebuilt(&ctx)?;
     }
     for name in ORDER {
         if !only.is_empty() && !only.iter().any(|o| o == name) {
@@ -96,37 +87,27 @@ pub fn build(only: &[String]) -> Result<()> {
 
 /// Downloads the pinned prebuilt FFmpeg (shared, GPL) into `work/ffmpeg-prebuilt`, verifying
 /// its SHA-256. `FFMPEG_DIR` must point there for `ffmpeg-sys-next`, and `bin` must be on PATH.
-fn ffmpeg_prebuilt(ctx: &Ctx, pre: &Prebuilt) -> Result<()> {
+fn ffmpeg_prebuilt(ctx: &Ctx) -> Result<()> {
     let dest = ctx.work.join("ffmpeg-prebuilt");
     let stamp = dest.join(".sha256");
-    if std::fs::read_to_string(&stamp).is_ok_and(|s| s == pre.sha256) {
-        println!("== ffmpeg (prebuilt): up to date");
+    let zip_path = ctx.work.join("ffmpeg.zip");
+    let Ok(bytes) = std::fs::read(&zip_path) else {
+        bail!(
+            "{} is missing: build it with `packaging/ffmpeg/build.sh {}` (Docker), or take the \
+             `ffmpeg` artifact of a CI run (`gh run download -n ffmpeg -D native/build/work`)",
+            zip_path.display(),
+            zip_path.display()
+        );
+    };
+    let hex: String = Sha256::digest(&bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    if std::fs::read_to_string(&stamp).is_ok_and(|s| s == hex) {
+        println!("== ffmpeg: up to date");
         return msvc_import_libs(&dest);
     }
-    println!("== ffmpeg (prebuilt): downloading {}", pre.url);
-    let zip_path = ctx.work.join("ffmpeg-prebuilt.zip");
-    run(
-        &ctx.work,
-        "curl",
-        &[
-            "-fsSL",
-            "--retry",
-            "5",
-            "-o",
-            "ffmpeg-prebuilt.zip",
-            &pre.url,
-        ],
-        &[],
-    )?;
-    let digest = Sha256::digest(std::fs::read(&zip_path)?);
-    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
-    if hex != pre.sha256 {
-        bail!(
-            "SHA-256 mismatch for {}: got {hex}, expected {}",
-            pre.url,
-            pre.sha256
-        );
-    }
+    println!("== ffmpeg: unpacking {}", zip_path.display());
     let _ = std::fs::remove_dir_all(&dest);
     std::fs::create_dir_all(&dest)?;
     let mut archive = zip::ZipArchive::new(std::fs::File::open(&zip_path)?)?;
@@ -152,7 +133,7 @@ fn ffmpeg_prebuilt(ctx: &Ctx, pre: &Prebuilt) -> Result<()> {
             std::io::copy(&mut entry, &mut std::fs::File::create(&out)?)?;
         }
     }
-    std::fs::write(&stamp, &pre.sha256)?;
+    std::fs::write(&stamp, hex)?;
     msvc_import_libs(&dest)
 }
 

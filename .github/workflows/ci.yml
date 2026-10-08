@@ -13,7 +13,10 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  ffmpeg:
+    uses: ./.github/workflows/ffmpeg.yml
   check:
+    needs: ffmpeg
     runs-on: windows-latest
     env:
       FFMPEG_DIR: ${{ github.workspace }}\native\build\work\ffmpeg-prebuilt
@@ -25,7 +28,11 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - uses: ilammy/msvc-dev-cmd@v1
-      # The prebuilt FFmpeg (checked by SHA-256): every build links it, and the tests need its DLLs.
+      # Every build links FFmpeg, and the tests need its DLLs.
+      - uses: actions/download-artifact@v4
+        with:
+          name: ffmpeg
+          path: native/build/work
       - name: FFmpeg
         shell: pwsh
         run: |
@@ -48,8 +55,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
   native:
-    # The prebuilt FFmpeg (checked by SHA-256), and SVT-AV1, dav1d and the image libraries built
+    # FFmpeg (the `ffmpeg` job), and SVT-AV1, dav1d and the image libraries built
     # with MSVC for libavif and the image crates. The same build as a release, without packaging.
+    needs: ffmpeg
     runs-on: windows-latest
     env:
       FFMPEG_DIR: ${{ github.workspace }}\native\build\work\ffmpeg-prebuilt
@@ -76,6 +84,10 @@ jobs:
           path: native/build/work
           key: native-windows-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}
           restore-keys: native-windows-
+      - uses: actions/download-artifact@v4
+        with:
+          name: ffmpeg
+          path: native/build/work
       - run: cargo xtask build-native
       # Saved only when the libraries changed: an unchanged copy (750 MB) would only push the
       # other caches out of the 10 GB GitHub keeps per repository.

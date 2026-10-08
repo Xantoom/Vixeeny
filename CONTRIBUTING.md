@@ -14,9 +14,11 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-Every build links FFmpeg: `cargo xtask build-native ffmpeg` downloads the pinned prebuilt one
-(checked by SHA-256). Set `FFMPEG_DIR=native\build\work\ffmpeg-prebuilt` and put its `bin`
-folder in `PATH` so the tests find the DLLs.
+Every build links FFmpeg. Put its zip at `native\build\work\ffmpeg.zip`: build it with
+`packaging/ffmpeg/build.sh` (Docker), or take the one of a CI run (`gh run download -n ffmpeg -D
+native/build/work`). `cargo xtask build-native ffmpeg` unpacks it. Set
+`FFMPEG_DIR=native\build\work\ffmpeg-prebuilt` and put its `bin` folder in `PATH` so the tests
+find the DLLs.
 
 Clippy runs with warnings as errors (the lints are in the workspace `Cargo.toml`). Vixeeny is a
 Windows program; from Linux or WSL the workspace can be checked and its tests run with

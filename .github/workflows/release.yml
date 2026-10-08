@@ -34,8 +34,12 @@ jobs:
             echo "v$version already has a release: nothing to build."
             echo build=false >> "$GITHUB_OUTPUT"
           fi
-  windows:
+  ffmpeg:
     needs: version
+    if: needs.version.outputs.build == 'true'
+    uses: ./.github/workflows/ffmpeg.yml
+  windows:
+    needs: [version, ffmpeg]
     if: needs.version.outputs.build == 'true'
     runs-on: windows-latest
     env:
@@ -62,6 +66,10 @@ jobs:
           path: native/build/work
           key: native-windows-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}
           restore-keys: native-windows-
+      - uses: actions/download-artifact@v4
+        with:
+          name: ffmpeg
+          path: native/build/work
       - run: cargo xtask build-native
       - name: Build the programs
         shell: pwsh
