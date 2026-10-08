@@ -372,6 +372,34 @@ fn the_video_page_edits_the_current_profile_and_reports_problems() {
 }
 
 #[test]
+fn rows_that_appear_on_the_same_page_unfold() {
+    use slint::Model;
+    use vixeeny_settings::Section;
+    let (panel, _) = settings_panel();
+    let fresh = |p: &settings_panel::SettingsPanel| {
+        p.window()
+            .get_groups()
+            .iter()
+            .flat_map(|g| g.rows.iter().collect::<Vec<_>>())
+            .filter(|r| r.fresh)
+            .map(|r| r.id.to_string())
+            .collect::<Vec<_>>()
+    };
+    panel.select_section(Section::Image);
+    assert!(fresh(&panel).is_empty(), "a new page does not unfold");
+    // JPEG brings its own options in: they unfold, the rows already there do not.
+    panel.window().invoke_row_chosen("image_format".into(), 1);
+    let unfolded = fresh(&panel);
+    assert!(
+        unfolded.contains(&"jpeg_quality".to_owned()),
+        "{unfolded:?}"
+    );
+    assert!(!unfolded.contains(&"image_format".to_owned()));
+    panel.select_section(Section::Video);
+    assert!(fresh(&panel).is_empty());
+}
+
+#[test]
 fn shortcuts_are_edited_in_place_and_conflicts_are_explained() {
     use slint::Model;
     use vixeeny_settings::Section;

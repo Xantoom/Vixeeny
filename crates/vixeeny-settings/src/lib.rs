@@ -402,10 +402,6 @@ fn segmented(
     text_like(Kind::Segmented(options), id, label, get, set)
 }
 
-fn text(id: &str, label: String, get: fn(&Config) -> String, set: fn(&mut Config, String)) -> Row {
-    text_like(Kind::Text, id, label, get, set)
-}
-
 fn folder(
     id: &str,
     label: String,
@@ -714,12 +710,68 @@ mod tests {
             .apply(&mut c, Value::Text(" D:\\Clips ".into()))
             .unwrap();
         assert_eq!(c.paths.videos, "D:\\Clips");
-        let folders = rows(Section::General, &env(), &c);
-        // The template cannot be emptied.
-        row(&folders, "template")
-            .apply(&mut c, Value::Text(String::new()))
+        // Each kind names its files its own way; a template cannot be emptied.
+        let image = rows(Section::Image, &env(), &c);
+        row(&image, "template:images")
+            .apply(&mut c, Value::Text("{app}-{time}".into()))
             .unwrap();
-        assert_eq!(c.paths.filename_template, "{app}_{date}_{time}");
+        row(&image, "foreground_app:images")
+            .apply(&mut c, Value::Bool(false))
+            .unwrap();
+        row(&video, "template:videos")
+            .apply(&mut c, Value::Text(" ".into()))
+            .unwrap();
+        assert_eq!(c.paths.naming.images.template, "{app}-{time}");
+        assert!(!c.paths.naming.images.use_foreground_app);
+        assert_eq!(c.paths.naming.videos.template, "{app}_{date}_{time}");
+        assert!(c.paths.naming.videos.use_foreground_app);
+        let replay = rows(Section::Replay, &env(), &c);
+        assert!(replay.iter().any(|r| r.id == "template:replays"));
+        let general = rows(Section::General, &env(), &c);
+        assert!(!general.iter().any(|r| r.id.starts_with("template")));
+    }
+
+    #[test]
+    fn each_image_format_offers_its_encoder_options() {
+        let mut c = Config::default();
+        let ids = |c: &Config| -> Vec<String> {
+            rows(Section::Image, &env(), c)
+                .into_iter()
+                .map(|r| r.id)
+                .collect()
+        };
+        for (format, own) in [
+            ("png", &["png_compression", "png_optimize"][..]),
+            ("jpeg", &["jpeg_quality", "jpeg_chroma", "jpeg_progressive"]),
+            ("webp", &["webp_lossless", "webp_effort"]),
+            (
+                "avif",
+                &["avif_quality", "avif_depth", "avif_chroma", "avif_speed"],
+            ),
+            ("jxl", &["jxl_lossless", "jxl_effort"]),
+        ] {
+            c.image.format = format.into();
+            let ids = ids(&c);
+            for id in own {
+                assert!(ids.iter().any(|i| i == id), "{format}: {id}");
+            }
+            // Only its own.
+            let others = ids
+                .iter()
+                .filter(|i| i.contains('_') && !i.starts_with(format))
+                .filter(|i| {
+                    ["png", "jpeg", "webp", "avif", "jxl"]
+                        .iter()
+                        .any(|f| i.starts_with(f))
+                })
+                .count();
+            assert_eq!(others, 0, "{format}");
+        }
+        // A lossy quality only when it is not lossless.
+        c.image.format = "webp".into();
+        assert!(!ids(&c).iter().any(|i| i == "webp_quality"));
+        c.image.webp.lossless = false;
+        assert!(ids(&c).iter().any(|i| i == "webp_quality"));
     }
 
     #[test]

@@ -123,9 +123,9 @@ pub fn save_bgra(
     let now = vixeeny_platform::local_time();
     let dest = Destination {
         dir: &dir,
-        template: &config.paths.filename_template,
+        template: &config.paths.naming.images.template,
         per_app_subfolder: config.paths.per_app_subfolder.images,
-        use_foreground_app: config.paths.use_foreground_app,
+        use_foreground_app: config.paths.naming.images.use_foreground_app,
         app_names: &config.paths.app_names,
         now: &now,
         after_save: None,

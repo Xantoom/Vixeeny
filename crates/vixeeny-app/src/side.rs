@@ -99,10 +99,29 @@ pub fn run(
 
     // The blurred Windows 11 backdrop needs the native window, which exists once it is shown:
     // the strip is shown first, then dressed (a failure just leaves the opaque fill).
+    // A click elsewhere closes it. Losing the focus says so only when Windows let the strip
+    // take it, which it does not always do for a window opened by a shortcut: the clicks are
+    // watched directly.
+    let dismiss = panel.dismisser();
+    let mut outside = None;
     let choice = panel
         // No blurred backdrop: it would cover the whole window, the room for the labels too.
-        .run_with(|_| false)
+        .run_with(|handle| {
+            let dismiss = std::rc::Rc::new(dismiss);
+            outside = vixeeny_platform::on_click_outside(
+                vixeeny_platform::WindowId(handle),
+                Box::new(move || {
+                    // Not from inside the hook: the strip closes on the next turn of the loop.
+                    let dismiss = dismiss.clone();
+                    vixeeny_ui::slint::Timer::single_shot(std::time::Duration::ZERO, move || {
+                        dismiss()
+                    });
+                }),
+            );
+            false
+        })
         .map_err(|e| anyhow::anyhow!("{e}"))?;
+    drop(outside);
     Ok(Outcome {
         action: choice.map(action_of),
         pinned: panel.pinned(),

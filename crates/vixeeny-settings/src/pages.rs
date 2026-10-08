@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The rows of each page of the settings window.
 
-use vixeeny_common::config::Config;
+use vixeeny_common::config::{Config, Naming};
 use vixeeny_common::i18n::Key;
 use vixeeny_encode::registry::{
     BITRATE_RANGE, DEFAULT_BITRATE, DEFAULT_MAXRATE, ParamType, RateMode, rate_keys,
@@ -10,7 +10,7 @@ use vixeeny_encode::registry::{
 use crate::encoders::{self, param_label, param_range};
 use crate::{
     Env, Invalid, Kind, Opt, Row, Value, choice, folder, header, hinted, info, number, opt, row,
-    segmented, slider, text, toggle, when, when_boxed,
+    segmented, slider, toggle, when, when_boxed,
 };
 
 /// `off`, `size:<MB>` or `duration:<minutes>` → (kind, amount).
@@ -87,27 +87,47 @@ pub fn general(env: &Env) -> Vec<Row> {
             |c| c.general.sounds,
             |c, v| c.general.sounds = v,
         ),
-        header("h_naming"),
-        hinted(
-            text(
-                "template",
-                t(Key::SetTemplate),
-                |c| c.paths.filename_template.clone(),
-                |c, v| {
-                    if !v.is_empty() {
-                        c.paths.filename_template = v;
-                    }
-                },
-            ),
-            t(Key::SetTemplateHint),
-        ),
-        toggle(
-            "foreground_app",
-            t(Key::SetForegroundApp),
-            |c| c.paths.use_foreground_app,
-            |c, v| c.paths.use_foreground_app = v,
-        ),
     ]
+}
+
+/// How the files of one kind are named: the template, and whether `{app}` is the full-screen
+/// game. `get` and `naming` reach the settings of that kind.
+fn naming_rows(
+    env: &Env,
+    kind: &str,
+    get: fn(&Config) -> &Naming,
+    naming: fn(&mut Config) -> &mut Naming,
+) -> [Row; 2] {
+    let template = row(
+        format!("template:{kind}"),
+        env.t(Key::SetTemplate),
+        Kind::Text,
+        Box::new(move |c| Value::Text(get(c).template.clone())),
+        Box::new(move |c, v| match v {
+            Value::Text(v) => {
+                // The template cannot be emptied.
+                if !v.trim().is_empty() {
+                    naming(c).template = v;
+                }
+                Ok(())
+            }
+            _ => Err(Invalid),
+        }),
+    );
+    let game = row(
+        format!("foreground_app:{kind}"),
+        env.t(Key::SetForegroundApp),
+        Kind::Toggle,
+        Box::new(move |c| Value::Bool(get(c).use_foreground_app)),
+        Box::new(move |c, v| match v {
+            Value::Bool(on) => {
+                naming(c).use_foreground_app = on;
+                Ok(())
+            }
+            _ => Err(Invalid),
+        }),
+    );
+    [hinted(template, env.t(Key::SetTemplateHint)), game]
 }
 
 /// The side strip and the recording widget.
@@ -173,6 +193,14 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
             |c| c.paths.per_app_subfolder.images,
             |c, v| c.paths.per_app_subfolder.images = v,
         ),
+    ];
+    rows.extend(naming_rows(
+        env,
+        "images",
+        |c| &c.paths.naming.images,
+        |c| &mut c.paths.naming.images,
+    ));
+    rows.extend([
         header("h_format"),
         segmented(
             "image_format",
@@ -187,19 +215,53 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
             |c| c.image.format.clone(),
             |c, v| c.image.format = v,
         ),
-    ];
+    ]);
+    // The options of the chosen format's encoder.
     match config.image.format.as_str() {
+        "png" => {
+            rows.push(segmented(
+                "png_compression",
+                t(Key::SetPngCompression),
+                vec![
+                    opt("fast", t(Key::OptPngFast)),
+                    opt("default", t(Key::OptPngDefault)),
+                    opt("high", t(Key::OptPngHigh)),
+                ],
+                |c| c.image.png.compression.clone(),
+                |c, v| c.image.png.compression = v,
+            ));
+            rows.push(choice(
+                "png_optimize",
+                t(Key::SetPngOptimize),
+                vec![
+                    opt("0", t(Key::OptOff)),
+                    opt("2", t(Key::OptPngFast)),
+                    opt("4", t(Key::OptPngDefault)),
+                    opt("6", t(Key::OptPngHigh)),
+                ],
+                |c| {
+                    match c.image.png.optimize {
+                        0 => "0",
+                        1..=2 => "2",
+                        3..=4 => "4",
+                        _ => "6",
+                    }
+                    .to_owned()
+                },
+                |c, v| c.image.png.optimize = v.parse().unwrap_or(0),
+            ));
+        }
         "jpeg" => {
             rows.push(slider(
                 "jpeg_quality",
-                t(Key::SetJpegQuality),
+                t(Key::SetQuality),
                 (1, 100, 1),
                 |c| i64::from(c.image.jpeg.quality),
                 |c, v| c.image.jpeg.quality = v as u8,
             ));
             rows.push(segmented(
                 "jpeg_chroma",
-                t(Key::SetJpegChroma),
+                t(Key::SetChroma),
                 vec![
                     opt("444", t(Key::OptChromaSharp)),
                     opt("420", t(Key::OptChromaLight)),
@@ -207,11 +269,44 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
                 |c| c.image.jpeg.chroma.clone(),
                 |c, v| c.image.jpeg.chroma = v,
             ));
+            rows.push(toggle(
+                "jpeg_progressive",
+                t(Key::SetProgressive),
+                |c| c.image.jpeg.progressive,
+                |c, v| c.image.jpeg.progressive = v,
+            ));
+        }
+        "webp" => {
+            rows.push(toggle(
+                "webp_lossless",
+                t(Key::SetLossless),
+                |c| c.image.webp.lossless,
+                |c, v| c.image.webp.lossless = v,
+            ));
+            if !config.image.webp.lossless {
+                rows.push(slider(
+                    "webp_quality",
+                    t(Key::SetQuality),
+                    (0, 100, 1),
+                    |c| i64::from(c.image.webp.quality),
+                    |c, v| c.image.webp.quality = v as u8,
+                ));
+            }
+            rows.push(hinted(
+                slider(
+                    "webp_effort",
+                    t(Key::SetEffort),
+                    (0, 6, 1),
+                    |c| i64::from(c.image.webp.effort),
+                    |c, v| c.image.webp.effort = v as u8,
+                ),
+                t(Key::SetEffortHint),
+            ));
         }
         "avif" => {
             rows.push(slider(
                 "avif_quality",
-                t(Key::SetAvifQuality),
+                t(Key::SetQuality),
                 (0, 100, 1),
                 |c| i64::from(c.image.avif.quality),
                 |c, v| c.image.avif.quality = v as u8,
@@ -222,6 +317,53 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
                 vec![opt("8", "8 bits"), opt("10", "10 bits")],
                 |c| c.image.avif.depth.to_string(),
                 |c, v| c.image.avif.depth = v.parse().unwrap_or(10),
+            ));
+            rows.push(segmented(
+                "avif_chroma",
+                t(Key::SetChroma),
+                vec![
+                    opt("444", t(Key::OptChromaSharp)),
+                    opt("420", t(Key::OptChromaLight)),
+                ],
+                |c| c.image.avif.chroma.clone(),
+                |c, v| c.image.avif.chroma = v,
+            ));
+            rows.push(hinted(
+                slider(
+                    "avif_speed",
+                    t(Key::SetAvifSpeed),
+                    (0, 10, 1),
+                    |c| i64::from(c.image.avif.speed),
+                    |c, v| c.image.avif.speed = v as u8,
+                ),
+                t(Key::SetAvifSpeedHint),
+            ));
+        }
+        "jxl" => {
+            rows.push(toggle(
+                "jxl_lossless",
+                t(Key::SetLossless),
+                |c| c.image.jxl.lossless,
+                |c, v| c.image.jxl.lossless = v,
+            ));
+            if !config.image.jxl.lossless {
+                rows.push(slider(
+                    "jxl_quality",
+                    t(Key::SetQuality),
+                    (1, 100, 1),
+                    |c| i64::from(c.image.jxl.quality),
+                    |c, v| c.image.jxl.quality = v as u8,
+                ));
+            }
+            rows.push(hinted(
+                slider(
+                    "jxl_effort",
+                    t(Key::SetEffort),
+                    (1, 9, 1),
+                    |c| i64::from(c.image.jxl.effort),
+                    |c, v| c.image.jxl.effort = v as u8,
+                ),
+                t(Key::SetEffortHint),
             ));
         }
         _ => {}
@@ -404,6 +546,12 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
             |c, v| c.paths.per_app_subfolder.videos = v,
         ),
     ];
+    rows.extend(naming_rows(
+        env,
+        "videos",
+        |c| &c.paths.naming.videos,
+        |c| &mut c.paths.naming.videos,
+    ));
 
     // ---- the picture
     rows.push(header("h_video"));
@@ -858,7 +1006,7 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
 /// The replay buffer: the last moments, kept to be saved on demand.
 pub fn replay(env: &Env) -> Vec<Row> {
     let t = |k| env.t(k);
-    vec![
+    let mut rows = vec![
         toggle(
             "replay_start",
             t(Key::SetReplayStart),
@@ -895,7 +1043,14 @@ pub fn replay(env: &Env) -> Vec<Row> {
             |c| c.paths.per_app_subfolder.replays,
             |c, v| c.paths.per_app_subfolder.replays = v,
         ),
-    ]
+    ];
+    rows.extend(naming_rows(
+        env,
+        "replays",
+        |c| &c.paths.naming.replays,
+        |c| &mut c.paths.naming.replays,
+    ));
+    rows
 }
 
 /// The settings of the updates page (the state of the update is drawn by the page).

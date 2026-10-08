@@ -11,7 +11,7 @@
 
 [[encoder]]
 id = "libx264"
-display_name = "x264 (CPU)"
+display_name = "x264"
 family = "h264"
 kind = "software"
 vendor = "none"
@@ -83,7 +83,7 @@ auto = 0
 
 [[encoder]]
 id = "libx265"
-display_name = "x265 (CPU)"
+display_name = "x265"
 family = "hevc"
 kind = "software"
 vendor = "none"
@@ -146,53 +146,8 @@ auto = 0
 
 
 [[encoder]]
-id = "libsvtav1"
-display_name = "SVT-AV1 (CPU)"
-family = "av1"
-kind = "software"
-vendor = "none"
-ffmpeg_encoder = "libsvtav1"
-hw_frames = []
-pixel_formats = [
-  { depth = 8, chroma = "420", ffmpeg = "yuv420p" },
-  { depth = 10, chroma = "420", ffmpeg = "yuv420p10le" },
-]
-hdr = true
-containers = ["mkv", "mp4", "fmp4", "webm"]
-
-[encoder.presets]
-quality = { crf = 24, preset = 4 }
-balanced = { crf = 30, preset = 6 }
-performance = { crf = 36, preset = 10 }
-small = { crf = 42, preset = 6 }
-
-# No CBR: SVT-AV1 only allows it with the low-delay prediction structure.
-[encoder.rate_control]
-quality = { name = "CRF", min = 1, max = 63, default = 30 }
-modes.quality = { crf = "{quality}" }
-modes.vbr = { b = "{bitrate}" }
-
-[[encoder.params]]
-key = "preset"
-ffmpeg_option = "preset"
-type = "int"
-min = 0
-max = 13
-default = 6
-
-[[encoder.params]]
-key = "keyint"
-ffmpeg_option = "g"
-type = "int"
-min = 0
-max = 1000
-default = 0
-auto = 0
-
-
-[[encoder]]
 id = "libvpx_vp9"
-display_name = "VP9 (CPU)"
+display_name = "VP9"
 family = "vp9"
 kind = "software"
 vendor = "none"
@@ -242,6 +197,51 @@ key = "row-mt"
 ffmpeg_option = "row-mt"
 type = "bool"
 default = true
+
+[[encoder.params]]
+key = "keyint"
+ffmpeg_option = "g"
+type = "int"
+min = 0
+max = 1000
+default = 0
+auto = 0
+
+
+[[encoder]]
+id = "libsvtav1"
+display_name = "SVT-AV1"
+family = "av1"
+kind = "software"
+vendor = "none"
+ffmpeg_encoder = "libsvtav1"
+hw_frames = []
+pixel_formats = [
+  { depth = 8, chroma = "420", ffmpeg = "yuv420p" },
+  { depth = 10, chroma = "420", ffmpeg = "yuv420p10le" },
+]
+hdr = true
+containers = ["mkv", "mp4", "fmp4", "webm"]
+
+[encoder.presets]
+quality = { crf = 24, preset = 4 }
+balanced = { crf = 30, preset = 6 }
+performance = { crf = 36, preset = 10 }
+small = { crf = 42, preset = 6 }
+
+# No CBR: SVT-AV1 only allows it with the low-delay prediction structure.
+[encoder.rate_control]
+quality = { name = "CRF", min = 1, max = 63, default = 30 }
+modes.quality = { crf = "{quality}" }
+modes.vbr = { b = "{bitrate}" }
+
+[[encoder.params]]
+key = "preset"
+ffmpeg_option = "preset"
+type = "int"
+min = 0
+max = 13
+default = 6
 
 [[encoder.params]]
 key = "keyint"

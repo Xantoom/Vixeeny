@@ -99,9 +99,9 @@ fn direct_capture(action: ActionId, config: &Config) -> anyhow::Result<std::path
     let now = vixeeny_platform::local_time();
     let destination = still::Destination {
         dir: &dir,
-        template: &config.paths.filename_template,
+        template: &config.paths.naming.images.template,
         per_app_subfolder: config.paths.per_app_subfolder.images,
-        use_foreground_app: config.paths.use_foreground_app,
+        use_foreground_app: config.paths.naming.images.use_foreground_app,
         app_names: &config.paths.app_names,
         now: &now,
         after_save: None,
@@ -150,17 +150,32 @@ fn tonemap_hdr(rgba: &[f32], info: &vixeeny_platform::HdrInfo) -> Vec<u8> {
 /// Output format and settings from `[image]`. An unknown value falls back to the default (PNG,
 /// 4:4:4), never to a failed capture.
 fn image_output(config: &Config) -> (vixeeny_image::ImageFormat, vixeeny_image::Settings) {
-    use vixeeny_image::{Chroma, ImageFormat, Settings};
+    use vixeeny_image::{Chroma, ImageFormat, PngCompression, Settings};
+    let image = &config.image;
     let mut settings = Settings::default();
-    settings.jpeg.quality = config.image.jpeg.quality.clamp(1, 100);
-    if let Some(chroma) = Chroma::from_name(&config.image.jpeg.chroma) {
+    settings.png.compression = match image.png.compression.as_str() {
+        "default" => PngCompression::Default,
+        "high" => PngCompression::High,
+        _ => PngCompression::Fast,
+    };
+    settings.png.oxipng_level = (image.png.optimize > 0).then(|| image.png.optimize.min(6));
+    settings.jpeg.quality = image.jpeg.quality.clamp(1, 100);
+    if let Some(chroma) = Chroma::from_name(&image.jpeg.chroma) {
         settings.jpeg.chroma = chroma;
     }
-    settings.avif.quality = config.image.avif.quality.min(100);
-    settings.avif.depth = if config.image.avif.depth >= 10 { 10 } else { 8 };
-    if let Some(chroma) = Chroma::from_name(&config.image.avif.chroma) {
+    settings.jpeg.progressive = image.jpeg.progressive;
+    settings.webp.lossless = image.webp.lossless;
+    settings.webp.quality = f32::from(image.webp.quality.min(100));
+    settings.webp.effort = image.webp.effort.min(6);
+    settings.avif.quality = image.avif.quality.min(100);
+    settings.avif.depth = if image.avif.depth >= 10 { 10 } else { 8 };
+    if let Some(chroma) = Chroma::from_name(&image.avif.chroma) {
         settings.avif.chroma = chroma;
     }
+    settings.avif.speed = image.avif.speed.min(10);
+    settings.jxl.lossless = image.jxl.lossless;
+    settings.jxl.distance = jxl_distance(image.jxl.quality);
+    settings.jxl.effort = image.jxl.effort.clamp(1, 9);
     let format = ImageFormat::from_name(&config.image.format)
         .filter(|f| f.available())
         .unwrap_or_else(|| {
@@ -171,6 +186,16 @@ fn image_output(config: &Config) -> (vixeeny_image::ImageFormat, vixeeny_image::
             ImageFormat::Png
         });
     (format, settings)
+}
+
+/// The JPEG XL distance of a 1-100 quality, as `cjxl -q` maps it (90 → 1.0, visually lossless).
+fn jxl_distance(quality: u8) -> f32 {
+    let q = f32::from(quality.clamp(1, 100));
+    if q >= 30.0 {
+        0.1 + (100.0 - q) * 0.09
+    } else {
+        6.4 + (30.0 - q) * 0.2
+    }
 }
 
 /// `--action <name>` (default: open the settings), and the screens the daemon froze for it
@@ -522,5 +547,22 @@ mod tests {
             ImageFormat::Png
         };
         assert_eq!(image_output(&config).0, expected);
+        // Every format's own options reach its encoder.
+        config.image.png.compression = "high".into();
+        config.image.png.optimize = 9;
+        config.image.webp.lossless = false;
+        config.image.avif.speed = 2;
+        config.image.jxl.quality = 90;
+        let settings = image_output(&config).1;
+        assert_eq!(
+            settings.png.compression,
+            vixeeny_image::PngCompression::High
+        );
+        assert_eq!(settings.png.oxipng_level, Some(6));
+        assert!(!settings.webp.lossless);
+        assert_eq!(settings.avif.speed, 2);
+        assert!((settings.jxl.distance - 1.0).abs() < 1e-4);
+        config.image.png.optimize = 0;
+        assert_eq!(image_output(&config).1.png.oxipng_level, None);
     }
 }

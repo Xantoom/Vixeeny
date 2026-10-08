@@ -305,11 +305,13 @@ export component ComboBox inherits Rectangle {
         width: max(root.width, 220px);
         height: min(root.options.length * 36px + 8px, 320px);
         Rectangle {
-            // Unfolds when it opens.
+            // Unfolds from the box when it opens.
             property <bool> open: false;
-            y: self.open ? 0px : -6px;
+            y: 0px;
+            height: self.open ? parent.height : 0px;
             opacity: self.open ? 1 : 0;
-            animate y, opacity { duration: Theme.t-normal; easing: cubic-bezier(0.2, 0, 0, 1); }
+            clip: true;
+            animate height, opacity { duration: Theme.t-normal; easing: cubic-bezier(0.2, 0, 0, 1); }
             Timer { interval: 16ms; running: !parent.open; triggered => { parent.open = true; } }
             background: Theme.flyout;
             border-radius: Theme.radius-flyout;
@@ -583,6 +585,9 @@ export component GroupRow inherits Rectangle {
     in property <image> icon;
     in property <bool> has-icon: false;
     in property <string> glyph;
+    // A row that appears on a page already shown (a setting that only makes sense with the
+    // one above): it unfolds from nothing instead of popping in.
+    in property <bool> unfold: false;
     callback clicked();
 
     property <bool> stacked: root.width < root.stack-under;
@@ -593,7 +598,18 @@ export component GroupRow inherits Rectangle {
         : max(120px, root.width - 2 * root.pad - root.lead - ctl.preferred-width - 24px);
     property <length> body: root.stacked ? txt.preferred-height + 10px + ctl.preferred-height
         : max(txt.preferred-height, ctl.preferred-height);
-    height: max(60px, root.body + 26px);
+    property <length> natural: max(60px, root.body + 26px);
+    property <bool> grown: !root.unfold;
+    height: root.grown ? root.natural : 0px;
+    opacity: root.grown ? 1 : 0;
+    // Only while unfolding: a row that changes its height otherwise follows it at once.
+    animate height, opacity { duration: root.unfold ? Theme.t-normal : 0ms; easing: cubic-bezier(0.2, 0, 0, 1); }
+    clip: root.unfold;
+    Timer {
+        interval: 16ms;
+        running: root.unfold && !root.grown;
+        triggered => { root.grown = true; }
+    }
     border-radius: Theme.radius-card;
     border-width: 1px;
     border-color: Theme.stroke;
@@ -608,7 +624,7 @@ export component GroupRow inherits Rectangle {
     }
     if root.has-icon : Image {
         x: root.pad;
-        y: (parent.height - self.height) / 2;
+        y: (root.natural - self.height) / 2;
         width: 22px;
         height: 22px;
         source: root.icon;
@@ -616,7 +632,7 @@ export component GroupRow inherits Rectangle {
     }
     if !root.has-icon && root.glyph != "" : Icon {
         x: root.pad + 1px;
-        y: (parent.height - self.height) / 2;
+        y: (root.natural - self.height) / 2;
         data: root.glyph;
         size: 20px;
         tint: Theme.text;
@@ -624,7 +640,7 @@ export component GroupRow inherits Rectangle {
     }
     txt := VerticalLayout {
         x: root.pad + root.lead;
-        y: root.stacked ? 13px : (parent.height - self.preferred-height) / 2;
+        y: root.stacked ? 13px : (root.natural - self.preferred-height) / 2;
         width: root.text-w;
         height: self.preferred-height;
         spacing: 2px;
@@ -645,7 +661,7 @@ export component GroupRow inherits Rectangle {
     }
     ctl := HorizontalLayout {
         x: root.stacked ? root.pad : parent.width - root.pad - self.preferred-width;
-        y: root.stacked ? 13px + txt.preferred-height + 10px : (parent.height - self.preferred-height) / 2;
+        y: root.stacked ? 13px + txt.preferred-height + 10px : (root.natural - self.preferred-height) / 2;
         width: min(self.preferred-width, parent.width - 2 * root.pad);
         height: self.preferred-height;
         opacity: root.dimmed ? 0.6 : 1.0;

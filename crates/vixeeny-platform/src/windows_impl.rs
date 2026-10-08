@@ -436,6 +436,71 @@ pub fn without_open_animation() -> Option<NoOpenAnimation> {
         .map(NoOpenAnimation)
 }
 
+/// The window and the callback of [`on_click_outside`].
+type Outside = Option<(HWND, Box<dyn Fn()>)>;
+
+thread_local! {
+    static OUTSIDE: std::cell::RefCell<Outside> = const { std::cell::RefCell::new(None) };
+}
+
+/// Removes the hook of [`on_click_outside`] when dropped.
+pub struct OutsideClicks(HHOOK);
+
+impl Drop for OutsideClicks {
+    fn drop(&mut self) {
+        // SAFETY: the hook was installed by `on_click_outside` and is removed once.
+        let _ = unsafe { UnhookWindowsHookEx(self.0) };
+        OUTSIDE.with(|o| o.borrow_mut().take());
+    }
+}
+
+/// Calls `clicked` whenever a mouse button goes down outside window `id`, wherever the focus
+/// is. Losing the focus is not enough to notice a click elsewhere: a window Windows did not let
+/// come to the front never had it. The calling thread must pump messages (any UI event loop
+/// does); `clicked` runs on it.
+pub fn on_click_outside(id: WindowId, clicked: Box<dyn Fn()>) -> Option<OutsideClicks> {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        MSLLHOOKSTRUCT, WH_MOUSE_LL, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_RBUTTONDOWN, WM_XBUTTONDOWN,
+    };
+    unsafe extern "system" fn hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+        let down = matches!(
+            wparam.0 as u32,
+            WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_XBUTTONDOWN
+        );
+        if code >= 0 && down {
+            // SAFETY: for `WH_MOUSE_LL`, `lparam` points at the event.
+            let point = unsafe { &*(lparam.0 as *const MSLLHOOKSTRUCT) }.pt;
+            OUTSIDE.with(|o| {
+                if let Some((hwnd, clicked)) = &*o.borrow() {
+                    let mut r = RECT::default();
+                    // SAFETY: `r` is a valid out-pointer; a window gone reads as "outside".
+                    let known = unsafe { GetWindowRect(*hwnd, &mut r) }.is_ok();
+                    let inside = known
+                        && point.x >= r.left
+                        && point.x < r.right
+                        && point.y >= r.top
+                        && point.y < r.bottom;
+                    if !inside {
+                        clicked();
+                    }
+                }
+            });
+        }
+        // SAFETY: passes the event on, as every hook must.
+        unsafe { CallNextHookEx(None, code, wparam, lparam) }
+    }
+    OUTSIDE.with(|o| *o.borrow_mut() = Some((hwnd_of(id), clicked)));
+    // SAFETY: a low-level hook runs on this thread's message loop; its procedure lives as long
+    // as the program.
+    match unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(hook), None, 0) } {
+        Ok(h) => Some(OutsideClicks(h)),
+        Err(_) => {
+            OUTSIDE.with(|o| o.borrow_mut().take());
+            None
+        }
+    }
+}
+
 /// Gives one of our windows the blurred "acrylic" backdrop and rounded corners of Windows 11.
 /// Errors on Windows 10, where the caller keeps its own (more opaque) background.
 pub fn apply_acrylic(id: WindowId) -> Result<()> {

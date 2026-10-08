@@ -9,11 +9,11 @@ use serde::{Deserialize, Serialize};
 use crate::ipc::ActionId;
 
 /// Schema version written by this build. Bump it and add a migration to [`MIGRATIONS`].
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 /// `MIGRATIONS[n]` upgrades a table from schema `n + 1` to `n + 2`.
 pub type Migration = fn(&mut toml::Table);
-pub const MIGRATIONS: &[Migration] = &[v1_fragmented_mp4, v2_single_profile];
+pub const MIGRATIONS: &[Migration] = &[v1_fragmented_mp4, v2_single_profile, v3_naming_per_kind];
 
 /// 0.9 → 1.0: MP4 recordings are fragmented (a recording cut short still plays), and the cursor
 /// is left out of videos unless asked for again.
@@ -57,6 +57,31 @@ fn v2_single_profile(table: &mut toml::Table) {
     if let Some(replay) = table.get_mut("replay").and_then(|r| r.as_table_mut()) {
         replay.remove("profile");
     }
+}
+
+/// 0.9.12: images, videos and replays are named each their own way. The one template and the
+/// "name after the game" switch become those of the three.
+fn v3_naming_per_kind(table: &mut toml::Table) {
+    let Some(paths) = table.get_mut("paths").and_then(|p| p.as_table_mut()) else {
+        return;
+    };
+    let template = paths.remove("filename_template");
+    let foreground = paths.remove("use_foreground_app");
+    if template.is_none() && foreground.is_none() {
+        return;
+    }
+    let mut one = toml::Table::new();
+    if let Some(template) = template {
+        one.insert("template".into(), template);
+    }
+    if let Some(foreground) = foreground {
+        one.insert("use_foreground_app".into(), foreground);
+    }
+    let naming: toml::Table = ["images", "videos", "replays"]
+        .into_iter()
+        .map(|kind| (kind.to_owned(), toml::Value::Table(one.clone())))
+        .collect();
+    paths.insert("naming".into(), naming.into());
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -204,11 +229,8 @@ pub struct Paths {
     pub images: String,
     pub videos: String,
     pub replays: String,
-    pub filename_template: String,
+    pub naming: PerKindNaming,
     pub per_app_subfolder: PerAppSubfolder,
-    /// For captures that are not of a single window, `{app}` is the application that has the
-    /// focus (plan 5.8); otherwise it is `Vixeeny`.
-    pub use_foreground_app: bool,
     /// User table "executable file name → displayed name", consulted first (plan 5.8).
     pub app_names: BTreeMap<String, String>,
 }
@@ -219,12 +241,39 @@ impl Default for Paths {
             images: "{pictures}/Vixeeny".into(),
             videos: "{videos}/Vixeeny".into(),
             replays: "{videos}/Vixeeny/Replays".into(),
-            filename_template: "{app}_{date}_{time}".into(),
+            naming: PerKindNaming::default(),
             per_app_subfolder: PerAppSubfolder::default(),
-            use_foreground_app: true,
             app_names: BTreeMap::new(),
         }
     }
+}
+
+/// How the files of one kind are named (plan 5.8).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Naming {
+    /// `{app}`, `{date}`, `{time}`... are replaced.
+    pub template: String,
+    /// For captures that are not of a single window, `{app}` is the full-screen application
+    /// (a game); otherwise it is `Desktop`.
+    pub use_foreground_app: bool,
+}
+
+impl Default for Naming {
+    fn default() -> Self {
+        Self {
+            template: "{app}_{date}_{time}".into(),
+            use_foreground_app: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PerKindNaming {
+    pub images: Naming,
+    pub videos: Naming,
+    pub replays: Naming,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -242,8 +291,11 @@ pub struct Image {
     pub show_cursor: bool,
     pub hdr: String,
     pub copy_to_clipboard: bool,
+    pub png: Png,
     pub jpeg: Jpeg,
+    pub webp: Webp,
     pub avif: Avif,
+    pub jxl: Jxl,
 }
 
 impl Default for Image {
@@ -253,8 +305,11 @@ impl Default for Image {
             show_cursor: false,
             hdr: "tonemap_sdr".into(),
             copy_to_clipboard: false,
+            png: Png::default(),
             jpeg: Jpeg::default(),
+            webp: Webp::default(),
             avif: Avif::default(),
+            jxl: Jxl::default(),
         }
     }
 }
@@ -275,9 +330,28 @@ impl Default for Editor {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
+pub struct Png {
+    /// `fast`, `default` or `high`.
+    pub compression: String,
+    /// The oxipng pass after it: 0 = none, else its level (1 fast to 6 slow).
+    pub optimize: u8,
+}
+
+impl Default for Png {
+    fn default() -> Self {
+        Self {
+            compression: "fast".into(),
+            optimize: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Jpeg {
     pub quality: u8,
     pub chroma: String,
+    pub progressive: bool,
 }
 
 impl Default for Jpeg {
@@ -285,6 +359,47 @@ impl Default for Jpeg {
         Self {
             quality: 90,
             chroma: "444".into(),
+            progressive: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Webp {
+    pub lossless: bool,
+    /// 0 to 100, for the lossy mode.
+    pub quality: u8,
+    /// 0 (fast) to 6 (small).
+    pub effort: u8,
+}
+
+impl Default for Webp {
+    fn default() -> Self {
+        Self {
+            lossless: true,
+            quality: 90,
+            effort: 4,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Jxl {
+    pub lossless: bool,
+    /// 1 to 100, for the lossy mode (90 is visually lossless).
+    pub quality: u8,
+    /// 1 (fast) to 9 (small).
+    pub effort: u8,
+}
+
+impl Default for Jxl {
+    fn default() -> Self {
+        Self {
+            lossless: true,
+            quality: 90,
+            effort: 7,
         }
     }
 }
@@ -295,6 +410,8 @@ pub struct Avif {
     pub quality: u8,
     pub depth: u8,
     pub chroma: String,
+    /// 0 (slow, small) to 10 (fast).
+    pub speed: u8,
 }
 
 impl Default for Avif {
@@ -303,6 +420,7 @@ impl Default for Avif {
             quality: 80,
             depth: 10,
             chroma: "444".into(),
+            speed: 6,
         }
     }
 }
@@ -639,6 +757,24 @@ mod tests {
         let cfg = Config::default();
         let again = Config::from_toml(&cfg.to_toml().unwrap()).unwrap();
         assert_eq!(again, cfg);
+    }
+
+    #[test]
+    fn one_naming_becomes_that_of_each_kind() {
+        let text = "schema_version = 3\n[paths]\nfilename_template = \"{app}-{date}\"\n\
+                    use_foreground_app = false\n";
+        let cfg = Config::from_toml(text).unwrap();
+        for naming in [
+            &cfg.paths.naming.images,
+            &cfg.paths.naming.videos,
+            &cfg.paths.naming.replays,
+        ] {
+            assert_eq!(naming.template, "{app}-{date}");
+            assert!(!naming.use_foreground_app);
+        }
+        // Without them, the defaults.
+        let cfg = Config::from_toml("schema_version = 3\n[paths]\nimages = \"x\"\n").unwrap();
+        assert_eq!(cfg.paths.naming, PerKindNaming::default());
     }
 
     #[test]

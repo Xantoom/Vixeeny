@@ -34,6 +34,8 @@ export struct SettingRow {
     // A picture before the label (a program's icon).
     icon: image,
     has-icon: bool,
+    // New on a page already shown: it unfolds.
+    fresh: bool,
 }
 
 // Rows shown together; the next group stands apart.
@@ -54,8 +56,6 @@ export struct ShortcutRow {
     label: string,
     // Always the three slots.
     keys: [ShortcutKey],
-    // The first free slot (-1: all three are used).
-    free-slot: int,
     error: string,
 }
 
@@ -77,6 +77,8 @@ export struct UiTexts {
     press-keys: string,
     keys-help: string,
     restart: string,
+    col-action: string,
+    col-shortcut: string,
 }
 
 component SettingLine inherits GroupRow {
@@ -84,6 +86,7 @@ component SettingLine inherits GroupRow {
     in property <UiTexts> t;
     // The height of the window: a list opens upwards when it has no room below.
     in property <length> view-h;
+    in property <bool> animated: true;
     callback toggled(bool);
     callback chosen(int);
     callback number(int);
@@ -95,6 +98,7 @@ component SettingLine inherits GroupRow {
     description: root.entry.kind == 4 ? root.entry.text : root.entry.hint;
     icon: root.entry.icon;
     has-icon: root.entry.has-icon;
+    unfold: root.entry.fresh && root.animated;
     glyph: root.entry.kind == 10 ? Icons.add : (root.entry.kind == 4 ? Icons.folder : "");
     dimmed: !root.entry.enabled && root.entry.kind != 5;
     stack-under: root.entry.kind == 3 ? 620px : 500px;
@@ -191,10 +195,12 @@ component SettingLine inherits GroupRow {
         height: root.list-h;
         Rectangle {
             width: parent.width;
-            height: parent.height;
+            // Unfolds when it opens.
             property <bool> open: false;
+            height: self.open ? parent.height : 0px;
             opacity: self.open ? 1 : 0;
-            animate opacity { duration: Theme.t-normal; easing: cubic-bezier(0.2, 0, 0, 1); }
+            clip: true;
+            animate height, opacity { duration: Theme.t-normal; easing: cubic-bezier(0.2, 0, 0, 1); }
             Timer { interval: 16ms; running: !parent.open; triggered => { parent.open = true; } }
             background: Theme.flyout;
             border-radius: Theme.radius-flyout;
@@ -316,6 +322,102 @@ component KeyChip inherits Rectangle {
         }
     }
     accessible-role: button;
+}
+
+// A cell of the shortcuts table: a shortcut (a click records another, the cross removes it),
+// the invitation to press keys while it is recorded, or an empty slot to fill.
+component ShortcutCell inherits Rectangle {
+    in property <ShortcutKey> key;
+    in property <bool> recording;
+    in property <UiTexts> t;
+    callback record();
+    callback clear();
+
+    height: 36px;
+    property <bool> empty: root.key.text == "" && !root.recording;
+    if !root.empty : KeyChip {
+        x: 0px;
+        y: (parent.height - self.height) / 2;
+        width: min(self.preferred-width, parent.width);
+        parts: root.key.parts;
+        recording: root.recording;
+        press-label: root.t.press-keys;
+        remove-label: root.t.remove;
+        clicked => { root.record(); }
+        cleared => { root.clear(); }
+    }
+    if root.empty : Rectangle {
+        x: 0px;
+        y: (parent.height - self.height) / 2;
+        width: 32px;
+        height: 32px;
+        border-radius: Theme.radius;
+        background: add.pressed ? Theme.subtle-pressed : (add.has-hover ? Theme.subtle-hover : transparent);
+        animate background { duration: Theme.t-fast; }
+        Icon {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            data: Icons.add;
+            size: 14px;
+            tint: add.has-hover ? Theme.text : Theme.text-3;
+            animate tint { duration: Theme.t-fast; }
+        }
+        add := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.record(); }
+        }
+        accessible-role: button;
+        accessible-label: root.t.add-shortcut;
+    }
+}
+
+// One action of the shortcuts table: its name (and what went wrong) on the left, its three
+// shortcuts in the columns on the right.
+component ShortcutLine inherits Rectangle {
+    in property <ShortcutRow> entry;
+    in property <bool> recording-here;
+    in property <int> recording-slot;
+    in property <length> key-w;
+    in property <UiTexts> t;
+    callback record(int);
+    callback clear(int);
+
+    property <string> detail: root.entry.error != "" ? root.entry.error
+        : (root.recording-here ? root.t.keys-help : "");
+    height: max(52px, info.preferred-height + 24px);
+    border-radius: Theme.radius-card;
+    border-width: 1px;
+    border-color: Theme.stroke;
+    background: Theme.card;
+    info := VerticalLayout {
+        x: 16px;
+        y: (parent.height - self.preferred-height) / 2;
+        width: root.width - 32px - 3 * root.key-w;
+        height: self.preferred-height;
+        spacing: 2px;
+        Text {
+            text: root.entry.label;
+            color: Theme.text;
+            font-size: 14px;
+            wrap: word-wrap;
+        }
+        if root.detail != "" : Text {
+            text: root.detail;
+            color: root.entry.error != "" ? Theme.danger : Theme.text-2;
+            font-size: 12px;
+            wrap: word-wrap;
+        }
+    }
+    for key[k] in root.entry.keys : ShortcutCell {
+        x: root.width - 16px - (3 - k) * root.key-w;
+        y: (parent.height - self.height) / 2;
+        width: root.key-w - 8px;
+        key: key;
+        recording: root.recording-here && root.recording-slot == key.slot;
+        t: root.t;
+        record => { root.record(key.slot); }
+        clear => { root.clear(key.slot); }
+    }
 }
 
 // A button of the window's corner (minimize, maximize, close), as Windows draws them.
@@ -534,10 +636,12 @@ export component SettingsWindow inherits Window {
         // The column of the page: as wide as the window allows, up to a comfortable width.
         property <length> column: min(self.width - 56px, 860px);
 
-        // ---- the title of the page, on the line of the first tab
+        // ---- the title of the page, on the line of the first tab: their texts share a baseline
+        // (both are centred in the same height; the baseline sits ≈ 0.41 em under the centre,
+        // so the larger title is raised by the difference).
         Text {
             x: 24px;
-            y: root.top;
+            y: root.top - (24px - 14px) * 0.41;
             width: page.column;
             height: root.tab-h - 2px;
             text: root.section >= 0 && root.section < root.section-titles.length ? root.section-titles[root.section] : "";
@@ -593,6 +697,7 @@ export component SettingsWindow inherits Window {
                             entry: r;
                             t: root.t;
                             view-h: root.height;
+                            animated: root.animated;
                             toggled(v) => { root.row-toggled(r.id, v); }
                             chosen(k) => { root.row-chosen(r.id, k); }
                             number(v) => { root.row-number(r.id, v); }
@@ -604,41 +709,54 @@ export component SettingsWindow inherits Window {
                 }
             }
 
-            // ---- shortcuts: one card per action, its keys on the right
-            if root.section == 6 : ScrollArea {
-                width: parent.width - 8px;
+            // ---- shortcuts: a table, one row per action and a column per shortcut (three at
+            // most); the column titles stay above it
+            if root.section == 6 : Rectangle {
+                width: parent.width;
                 height: parent.height;
-                VerticalLayout {
+                property <length> key-w: max(140px, min(200px, (page.column - 272px) / 3));
+                Rectangle {
                     x: 24px;
+                    y: 0px;
                     width: page.column;
-                    alignment: start;
-                    spacing: 4px;
-                    padding-bottom: 32px;
-                    for sc[i] in root.shortcuts : VerticalLayout {
-                        padding-top: sc.group && i > 0 ? 20px : 0px;
-                        GroupRow {
-                            title: sc.label;
-                            description: sc.error != "" ? sc.error : (root.recording-row == i ? root.t.keys-help : "");
-                            stack-under: 560px;
-                            HorizontalLayout {
-                                spacing: 6px;
-                                for key in sc.keys : HorizontalLayout {
-                                    if key.text != "" || (root.recording-row == i && root.recording-slot == key.slot) : KeyChip {
-                                        y: (parent.height - self.height) / 2;
-                                        parts: key.parts;
-                                        recording: root.recording-row == i && root.recording-slot == key.slot;
-                                        press-label: root.t.press-keys;
-                                        remove-label: root.t.remove;
-                                        clicked => { root.shortcut-record(i, key.slot); }
-                                        cleared => { root.shortcut-clear(i, key.slot); }
-                                    }
-                                }
-                                if sc.free-slot >= 0 && !(root.recording-row == i && root.recording-slot == sc.free-slot) : IconButton {
-                                    y: (parent.height - self.height) / 2;
-                                    icon: Icons.add;
-                                    label: root.t.add-shortcut;
-                                    clicked => { root.shortcut-record(i, sc.free-slot); }
-                                }
+                    height: 24px;
+                    Text {
+                        x: 16px;
+                        text: root.t.col-action;
+                        color: Theme.text-2;
+                        font-size: 12px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+                    for k in 3 : Text {
+                        x: parent.width - 16px - (3 - k) * key-w;
+                        text: root.t.col-shortcut + " " + (k + 1);
+                        color: Theme.text-2;
+                        font-size: 12px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+                }
+                ScrollArea {
+                    y: 30px;
+                    width: parent.width - 8px;
+                    height: parent.height - self.y;
+                    VerticalLayout {
+                        x: 24px;
+                        width: page.column;
+                        alignment: start;
+                        spacing: 4px;
+                        padding-bottom: 32px;
+                        for sc[i] in root.shortcuts : VerticalLayout {
+                            padding-top: sc.group && i > 0 ? 20px : 0px;
+                            ShortcutLine {
+                                entry: sc;
+                                recording-here: root.recording-row == i;
+                                recording-slot: root.recording-slot;
+                                key-w: key-w;
+                                t: root.t;
+                                record(slot) => { root.shortcut-record(i, slot); }
+                                clear(slot) => { root.shortcut-clear(i, slot); }
                             }
                         }
                     }

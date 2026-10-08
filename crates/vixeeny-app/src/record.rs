@@ -369,16 +369,18 @@ fn output_file(
     size: (u32, u32),
     extension: &str,
 ) -> anyhow::Result<PathBuf> {
-    let (folder, per_app, action) = if replay {
+    let (folder, per_app, naming, action) = if replay {
         (
             &config.paths.replays,
             config.paths.per_app_subfolder.replays,
+            &config.paths.naming.replays,
             vixeeny_common::ipc::ActionId::ReplaySave,
         )
     } else {
         (
             &config.paths.videos,
             config.paths.per_app_subfolder.videos,
+            &config.paths.naming.videos,
             vixeeny_common::ipc::ActionId::RecordToggle,
         )
     };
@@ -393,9 +395,9 @@ fn output_file(
     };
     let destination = crate::still::Destination {
         dir: &dir,
-        template: &config.paths.filename_template,
+        template: &naming.template,
         per_app_subfolder: per_app,
-        use_foreground_app: config.paths.use_foreground_app,
+        use_foreground_app: naming.use_foreground_app,
         app_names: &config.paths.app_names,
         now: &now,
         after_save: None,

@@ -385,6 +385,17 @@ impl SidePanel {
         }
     }
 
+    /// What a click elsewhere does: closes the strip, unless it is pinned.
+    pub fn dismisser(&self) -> impl Fn() + 'static {
+        let closing = self.closer();
+        let weak = self.window.as_weak();
+        move || {
+            if !weak.upgrade().is_some_and(|w| w.get_pinned()) {
+                closing();
+            }
+        }
+    }
+
     pub fn window(&self) -> &SidePanelWindow {
         &self.window
     }
@@ -448,13 +459,11 @@ impl SidePanel {
             if let Some(handle) = self.native_handle() {
                 self.window.set_backdrop(dress(handle));
             }
-            let closing = self.closer();
-            let weak = self.window.as_weak();
+            let dismiss = self.dismisser();
             self.window.window().on_winit_window_event(move |_, event| {
                 // The user went to another window: the strip goes, unless it is pinned.
-                let pinned = weak.upgrade().is_some_and(|w| w.get_pinned());
-                if matches!(event, WindowEvent::Focused(false)) && !pinned {
-                    closing();
+                if matches!(event, WindowEvent::Focused(false)) {
+                    dismiss();
                 }
                 EventResult::Propagate
             });

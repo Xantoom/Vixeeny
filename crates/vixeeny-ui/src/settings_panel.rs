@@ -183,6 +183,8 @@ fn ui_texts(lang: Lang) -> UiTexts {
         press_keys: t(Key::UiPressKeys),
         keys_help: t(Key::UiKeysHelp),
         restart: t(Key::UpdateRestart),
+        col_action: t(Key::UiColAction),
+        col_shortcut: t(Key::UiColShortcut),
     }
 }
 
@@ -273,8 +275,20 @@ fn show_groups(window: &SettingsWindow, groups: Vec<Vec<SettingRow>>) {
         }
         return;
     }
+    // On the same page (some rows are still there), the new rows unfold; a new page does not.
+    let old: std::collections::HashSet<SharedString> = current
+        .iter()
+        .flat_map(|g| g.rows.iter().map(|r| r.id).collect::<Vec<_>>())
+        .collect();
+    let same_page = groups.iter().flatten().any(|r| old.contains(&r.id));
     let model: Vec<SettingGroup> = groups
         .into_iter()
+        .map(|mut rows| {
+            for r in &mut rows {
+                r.fresh = same_page && !old.contains(&r.id);
+            }
+            rows
+        })
         .map(|rows| SettingGroup {
             rows: ModelRc::from(Rc::new(VecModel::from(rows))),
         })
@@ -318,6 +332,7 @@ fn row_model(row: &Row, config: &Config) -> SettingRow {
         selected: -1,
         items: ModelRc::default(),
         has_icon: row.icon.is_some(),
+        fresh: false,
         icon: picture(row.icon.as_ref()),
     };
     match (&row.kind, value) {
@@ -754,12 +769,10 @@ impl SettingsPanel {
                         slot: slot as i32,
                     })
                     .collect();
-                let free_slot = slots.iter().position(String::is_empty);
                 ShortcutRow {
                     group: starts_group(action),
                     label: action_label(action, lang).into(),
                     keys: ModelRc::from(Rc::new(VecModel::from(keys))),
-                    free_slot: free_slot.map_or(-1, |i| i as i32),
                     error: errors
                         .iter()
                         .find(|(row, _)| *row == i)

@@ -2,7 +2,7 @@
 source: crates/vixeeny-common/src/config.rs
 expression: "Config::default().to_toml().unwrap()"
 ---
-schema_version = 3
+schema_version = 4
 
 [general]
 language = "auto"
@@ -32,7 +32,17 @@ open_settings = []
 images = "{pictures}/Vixeeny"
 videos = "{videos}/Vixeeny"
 replays = "{videos}/Vixeeny/Replays"
-filename_template = "{app}_{date}_{time}"
+
+[paths.naming.images]
+template = "{app}_{date}_{time}"
+use_foreground_app = true
+
+[paths.naming.videos]
+template = "{app}_{date}_{time}"
+use_foreground_app = true
+
+[paths.naming.replays]
+template = "{app}_{date}_{time}"
 use_foreground_app = true
 
 [paths.per_app_subfolder]
@@ -48,14 +58,30 @@ show_cursor = false
 hdr = "tonemap_sdr"
 copy_to_clipboard = false
 
+[image.png]
+compression = "fast"
+optimize = 0
+
 [image.jpeg]
 quality = 90
 chroma = "444"
+progressive = false
+
+[image.webp]
+lossless = true
+quality = 90
+effort = 4
 
 [image.avif]
 quality = 80
 depth = 10
 chroma = "444"
+speed = 6
+
+[image.jxl]
+lossless = true
+quality = 90
+effort = 7
 
 [editor]
 dim_percent = 40
