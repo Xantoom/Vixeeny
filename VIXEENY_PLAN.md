@@ -580,13 +580,13 @@ CA :
 Ouverte par un clic sur l'icône système ou par `open_settings`. Pas de galerie ni de profils d'enregistrement (retirés en 0.9.11). Une page par onglet, un seul titre, sans texte d'explication superflu.
 
 Onglets :
-1. **Général** : langue, thème, démarrage avec Windows, notifications, sons, modèle de nom, nom du jeu en plein écran.
+1. **Général** : langue, thème, démarrage avec Windows, notifications, sons.
 2. **Overlay** : bord de l'écran, widget d'enregistrement.
-3. **Image** : dossier (choisir / ouvrir dans l'Explorateur), sous-dossier par application, format et réglages, presse-papiers, curseur, HDR.
-4. **Vidéo** : dossier, sous-dossier, résolution, images par seconde, curseur, encodeur, préréglage, 10 bits, HDR, conteneur, découpage, réglages personnalisés.
+3. **Image** : dossier (choisir / ouvrir dans l'Explorateur), sous-dossier par application, modèle de nom et nom du jeu en plein écran, format et options de son encodeur, presse-papiers, curseur, HDR.
+4. **Vidéo** : dossier, sous-dossier, modèle de nom, résolution, images par seconde, curseur, encodeur, préréglage, 10 bits, HDR, conteneur, découpage, réglages personnalisés.
 5. **Son** : son du PC, micro, pistes, codec, débit ; en dernier, les programmes enregistrés à part (« Ajouter un programme » ouvre la liste des programmes ouverts).
-6. **Replay** : activation au démarrage, durée, stockage, dossier.
-7. **Raccourcis** : une carte par action, groupées (captures, vidéo, autres), jusqu'à 3 raccourcis chacune.
+6. **Replay** : activation au démarrage, durée, stockage, dossier, modèle de nom.
+7. **Raccourcis** : un tableau par groupe (captures, vidéo, autres), une ligne par action, 3 colonnes de raccourcis.
 8. **Mise à jour** : état, vérification automatique, installation automatique.
 9. **À propos** : version, licences, GitHub, dossier des logs, copie des infos système.
 
