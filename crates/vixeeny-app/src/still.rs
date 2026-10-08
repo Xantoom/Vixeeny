@@ -94,10 +94,20 @@ pub(crate) fn app_name(
 ) -> String {
     let window = match action {
         ActionId::CaptureWindow => snap.foreground.as_ref(),
-        _ => snap
-            .foreground
-            .as_ref()
-            .filter(|w| dest.use_foreground_app && is_full_screen(w, &snap.monitors)),
+        // Only a window over the screen being captured (all of them for an all-monitor
+        // capture), and never one of Vixeeny's own (a menu, the settings, a notification).
+        _ => snap.foreground.as_ref().filter(|w| {
+            let monitors: Vec<MonitorInfo> = if action == ActionId::CaptureAllMonitors {
+                snap.monitors.clone()
+            } else {
+                let (x, y) = snap.cursor;
+                monitor_at(&snap.monitors, x, y)
+                    .into_iter()
+                    .cloned()
+                    .collect()
+            };
+            dest.use_foreground_app && is_full_screen(w, &monitors) && !is_ours(w)
+        }),
     };
     let resolved = window.and_then(|w| {
         let meta = w.exe_path.as_deref().map(metadata).unwrap_or_default();
@@ -118,6 +128,18 @@ pub(crate) fn app_name(
             naming::DESKTOP_APP_NAME.to_owned()
         }
     })
+}
+
+/// Whether `window` belongs to Vixeeny: this process, or an executable next to it (the daemon).
+fn is_ours(window: &WindowInfo) -> bool {
+    if window.pid == std::process::id() {
+        return true;
+    }
+    let dir = |p: &Path| p.parent().map(|d| d.to_string_lossy().to_lowercase());
+    match (window.exe_path.as_deref(), std::env::current_exe()) {
+        (Some(exe), Ok(me)) => dir(Path::new(exe)).is_some() && dir(Path::new(exe)) == dir(&me),
+        _ => false,
+    }
 }
 
 /// A window covering a whole monitor: a game or a video, not a window among others.
@@ -444,6 +466,7 @@ mod tests {
             &no_metadata,
         );
         assert_eq!(on.file_name().unwrap(), "Game.png");
+        let _ = std::fs::remove_file(&on);
         let off = run_with(
             ActionId::CaptureFullscreen,
             &snap,
@@ -455,6 +478,48 @@ mod tests {
             &no_metadata,
         );
         assert_eq!(off.file_name().unwrap(), "Desktop.png");
+        let _ = std::fs::remove_file(&off);
+        // Vixeeny's own window over the screen (a menu, the settings) is not a game.
+        let mut ours = snap.clone();
+        ours.foreground.as_mut().unwrap().pid = std::process::id();
+        let own = run_with(
+            ActionId::CaptureFullscreen,
+            &ours,
+            &dir,
+            "{app}",
+            false,
+            true,
+            &names,
+            &no_metadata,
+        );
+        assert_eq!(own.file_name().unwrap(), "Desktop.png");
+        let _ = std::fs::remove_file(&own);
+        // A game on the other screen names neither this screen's capture...
+        let mut other = snapshot();
+        other.foreground.as_mut().unwrap().rect = PhysicalRect::new(0, 0, 200, 100);
+        let here = run_with(
+            ActionId::CaptureFullscreen,
+            &other,
+            &dir,
+            "{app}",
+            false,
+            true,
+            &names,
+            &no_metadata,
+        );
+        assert_eq!(here.file_name().unwrap(), "Desktop.png");
+        // ...but it does name a capture of every screen.
+        let all = run_with(
+            ActionId::CaptureAllMonitors,
+            &other,
+            &dir,
+            "{app}",
+            false,
+            true,
+            &names,
+            &no_metadata,
+        );
+        assert_eq!(all.file_name().unwrap(), "Game.png");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
