@@ -315,9 +315,9 @@ fn every_page_of_the_settings_renders() {
         let name = format!("9-page-{section:?}").to_lowercase();
         settings_render(&panel, &name);
     }
-    // Narrow: the navigation keeps its icons only, the controls go under their text.
+    // The smallest window: nothing overlaps.
     panel.select_section(Section::General);
-    settings_render_at(&panel, "9-page-narrow", (660, 720));
+    settings_render_at(&panel, "9-page-smallest", (960, 640));
 }
 
 #[test]

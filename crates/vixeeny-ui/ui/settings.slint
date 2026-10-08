@@ -430,13 +430,12 @@ export component SettingsWindow inherits Window {
     no-frame: true;
     icon: Theme.app-icon;
     background: Theme.bg;
-    min-width: 640px;
-    min-height: 480px;
+    min-width: 960px;
+    min-height: 640px;
     preferred-width: 1040px;
     preferred-height: 760px;
     default-font-family: Theme.font;
 
-    property <bool> compact: root.width < 820px;
     property <bool> is-rows: root.section != 6 && root.section != 8;
     // The first tab and the title of the page share this line.
     property <length> top: 52px;
@@ -475,10 +474,10 @@ export component SettingsWindow inherits Window {
         x: 0px;
         y: 0px;
         height: root.height;
-        width: root.compact ? 64px : 220px;
+        width: 220px;
         // The name of the program, in the title bar.
         HorizontalLayout {
-            x: root.compact ? 22px : 24px;
+            x: 24px;
             y: 0px;
             height: 44px;
             spacing: 10px;
@@ -488,7 +487,7 @@ export component SettingsWindow inherits Window {
                 height: 20px;
                 y: (parent.height - self.height) / 2;
             }
-            if !root.compact : Text {
+            Text {
                 text: "Vixeeny";
                 color: Theme.text;
                 font-size: 15px;
@@ -527,7 +526,6 @@ export component SettingsWindow inherits Window {
                 text: title;
                 icon: root.nav-icon(i);
                 current: i == root.section;
-                compact: root.compact;
                 clicked => { root.go(i); }
             }
         }
@@ -546,7 +544,7 @@ export component SettingsWindow inherits Window {
                 spacing: 8px;
                 alignment: center;
                 Icon { y: (parent.height - self.height) / 2; data: Icons.download; tint: Theme.on-accent; size: 16px; }
-                if !root.compact : Text {
+                Text {
                     text: root.t.restart;
                     color: Theme.on-accent;
                     font-size: 13px;

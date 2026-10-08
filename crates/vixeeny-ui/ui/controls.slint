@@ -525,12 +525,11 @@ export component Segmented inherits Rectangle {
 }
 
 // An entry of the side navigation. The highlight of the current one is drawn by the list (it
-// slides from one entry to the next); `compact` shows the icon only.
+// slides from one entry to the next).
 export component NavItem inherits Rectangle {
     in property <string> text;
     in property <string> icon;
     in property <bool> current: false;
-    in property <bool> compact: false;
     callback clicked();
 
     height: 36px;
@@ -538,7 +537,7 @@ export component NavItem inherits Rectangle {
     background: touch.pressed ? Theme.subtle-pressed : (touch.has-hover && !root.current ? Theme.subtle-hover : transparent);
     animate background { duration: Theme.t-fast; }
     HorizontalLayout {
-        padding-left: root.compact ? (root.width - 18px) / 2 : 12px;
+        padding-left: 12px;
         padding-right: 10px;
         spacing: 12px;
         Icon {
@@ -548,7 +547,7 @@ export component NavItem inherits Rectangle {
             size: 18px;
             animate tint { duration: Theme.t-normal; }
         }
-        if !root.compact : Text {
+        Text {
             horizontal-stretch: 1;
             text: root.text;
             color: root.current ? Theme.text : Theme.text-2;
