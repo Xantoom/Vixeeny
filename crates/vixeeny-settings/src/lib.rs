@@ -9,7 +9,7 @@ pub mod encoders;
 mod pages;
 pub mod shortcuts;
 
-use vixeeny_common::config::{Config, Profile};
+use vixeeny_common::config::{Config, Video};
 use vixeeny_common::i18n::{Key, Lang, tr};
 use vixeeny_encode::probe::ProbeResult;
 
@@ -451,27 +451,6 @@ fn info(id: &str, label: String, value: String) -> Row {
     )
 }
 
-/// The settings the video and audio rows edit: those of `video.profile`, created on first
-/// write. (Profiles are not offered any more; older settings may name another one.)
-pub(crate) trait Current {
-    fn cur(&self) -> Profile;
-    fn cur_mut(&mut self) -> &mut Profile;
-}
-
-impl Current for Config {
-    fn cur(&self) -> Profile {
-        self.profiles
-            .get(&self.video.profile)
-            .cloned()
-            .unwrap_or_default()
-    }
-
-    fn cur_mut(&mut self) -> &mut Profile {
-        let name = self.video.profile.clone();
-        self.profiles.entry(name).or_default()
-    }
-}
-
 /// The rows of a section (empty for the sections that have a page of their own). Rows that do
 /// not apply with the current settings are left out, so a page only shows what matters.
 pub fn rows(section: Section, env: &Env, config: &Config) -> Vec<Row> {
@@ -502,9 +481,9 @@ pub fn video_problems(config: &Config, source: (u32, u32), lang: Lang) -> Vec<St
         probe: None,
     };
     // The variable frame rate of older settings is not used any more.
-    let profile = Profile {
+    let profile = Video {
         vfr: false,
-        ..config.cur()
+        ..config.video.clone()
     };
     validate(&profile, &ctx)
         .into_iter()
@@ -654,11 +633,8 @@ mod tests {
     }
 
     #[test]
-    fn video_rows_edit_the_current_profile_only() {
+    fn video_rows_edit_the_video_settings() {
         let mut c = Config::default();
-        c.profiles.insert("default".into(), Profile::default());
-        c.profiles.insert("Tuto".into(), Profile::default());
-        c.video.profile = "Tuto".into();
         let video = rows(Section::Video, &env(), &c);
         row(&video, "fps")
             .apply(&mut c, Value::Text("30".into()))
@@ -666,20 +642,7 @@ mod tests {
         row(&video, "container")
             .apply(&mut c, Value::Text("mkv".into()))
             .unwrap();
-        assert_eq!(
-            (
-                c.profiles["Tuto"].fps,
-                c.profiles["Tuto"].container.as_str()
-            ),
-            (30, "mkv")
-        );
-        assert_eq!(c.profiles["default"], Profile::default());
-        // A profile that does not exist yet is created on the first write.
-        c.video.profile = "Nouveau".into();
-        row(&video, "preset")
-            .apply(&mut c, Value::Text("small".into()))
-            .unwrap();
-        assert_eq!(c.profiles["Nouveau"].preset, "small");
+        assert_eq!((c.video.fps, c.video.container.as_str()), (30, "mkv"));
     }
 
     #[test]
@@ -699,18 +662,18 @@ mod tests {
         let fps = |e: &Env, c: &Config| row(&rows(Section::Video, e, c), "fps").value(c);
         assert_eq!(fps(&slow, &c), Value::Text("60".into()));
         // A rate this machine does not offer shows as the closest one offered.
-        c.cur_mut().fps = 144;
+        c.video.fps = 144;
         assert_eq!(fps(&fast, &c), Value::Text("144".into()));
         assert_eq!(fps(&slow, &c), Value::Text("60".into()));
         // HDR: offered only while Windows shows it.
-        c.cur_mut().hdr = "keep_hdr".into();
+        c.video.hdr = "keep_hdr".into();
         assert!(!has(Section::Video, &c, "hdr"));
         assert!(!has(Section::Image, &c, "image_hdr"));
         let on = rows(Section::Video, &fast, &c);
         assert!(row(&on, "hdr").enabled(&c));
         assert_eq!(row(&on, "hdr").value(&c), Value::Bool(true));
         // Only fragmented MP4, which older settings read as.
-        c.cur_mut().container = "mp4_hybrid".into();
+        c.video.container = "mp4_hybrid".into();
         let container = row(&on, "container");
         assert_eq!(container.value(&c), Value::Text("mp4_fragmented".into()));
         assert!(matches!(&container.kind, Kind::Choice(o) if o.len() == 3));
@@ -723,16 +686,16 @@ mod tests {
         let video = rows(Section::Video, &env(), &c);
         let kind = row(&video, "split");
         kind.apply(&mut c, Value::Text("size".into())).unwrap();
-        assert_eq!(c.cur().split.mode, "size:2048");
+        assert_eq!(c.video.split.mode, "size:2048");
         let video = rows(Section::Video, &env(), &c);
         let (kind, amount) = (row(&video, "split"), row(&video, "split_amount"));
         amount.apply(&mut c, Value::Int(4096)).unwrap();
-        assert_eq!(c.cur().split.mode, "size:4096");
+        assert_eq!(c.video.split.mode, "size:4096");
         kind.apply(&mut c, Value::Text("duration".into())).unwrap();
-        assert_eq!(c.cur().split.mode, "duration:4096");
+        assert_eq!(c.video.split.mode, "duration:4096");
         assert_eq!(kind.value(&c), Value::Text("duration".into()));
         kind.apply(&mut c, Value::Text("off".into())).unwrap();
-        assert_eq!(c.cur().split.mode, "off");
+        assert_eq!(c.video.split.mode, "off");
     }
 
     #[test]
@@ -831,19 +794,19 @@ mod tests {
         let software = encoder_options(&video);
         assert!(software.contains(&"libx264".to_owned()));
         assert!(!software.contains(&"nvenc_h264".to_owned()));
-        assert_eq!(c.cur().encoder, "auto");
+        assert_eq!(c.video.encoder, "auto");
     }
 
     #[test]
     fn ten_bit_needs_an_encoder_that_can_do_it() {
         let mut c = Config::default();
-        c.cur_mut().encoder_kind = "software".into();
+        c.video.encoder_kind = "software".into();
         let video = rows(Section::Video, &env(), &c);
         assert!(row(&video, "ten_bit").enabled(&c));
         row(&video, "ten_bit")
             .apply(&mut c, Value::Bool(true))
             .unwrap();
-        assert_eq!(c.cur().depth, 10);
+        assert_eq!(c.video.depth, 10);
         // The only probed hardware encoder does 8-bit only.
         let hw = Config::default();
         let video = rows(Section::Video, &with_nvenc(), &hw);
@@ -865,17 +828,17 @@ mod tests {
         assert_eq!(c.image.hdr, "keep_hdr");
         let video = rows(Section::Video, &env, &c);
         row(&video, "hdr").apply(&mut c, Value::Bool(true)).unwrap();
-        assert_eq!(c.cur().hdr, "keep_hdr");
+        assert_eq!(c.video.hdr, "keep_hdr");
         row(&video, "hdr")
             .apply(&mut c, Value::Bool(false))
             .unwrap();
-        assert_eq!(c.cur().hdr, "tonemap_sdr");
+        assert_eq!(c.video.hdr, "tonemap_sdr");
     }
 
     #[test]
     fn presets_are_best_quality_light_or_custom_and_custom_shows_the_encoder_options() {
         let mut c = Config::default();
-        c.cur_mut().encoder_kind = "software".into();
+        c.video.encoder_kind = "software".into();
         let ids = |c: &Config| -> Vec<String> {
             rows(Section::Video, &env(), c)
                 .into_iter()
@@ -884,20 +847,20 @@ mod tests {
         };
         assert!(!ids(&c).iter().any(|i| i.starts_with("p:")));
         // Older presets are shown as custom.
-        c.cur_mut().preset = "balanced".into();
+        c.video.preset = "balanced".into();
         let video = rows(Section::Video, &env(), &c);
         assert_eq!(
             row(&video, "preset").value(&c),
             Value::Text("custom".into())
         );
-        c.cur_mut().preset = "custom".into();
+        c.video.preset = "custom".into();
         let video = rows(Section::Video, &env(), &c);
         assert!(ids(&c).iter().any(|i| i == "p:crf"));
         // A custom option is stored by its key and read back (the default until set).
         let crf = row(&video, "p:crf");
         assert_eq!(crf.value(&c), Value::Int(23));
         crf.apply(&mut c, Value::Int(18)).unwrap();
-        assert_eq!(c.cur().params["crf"], "18");
+        assert_eq!(c.video.params["crf"], "18");
         assert_eq!(crf.value(&c), Value::Int(18));
     }
 
@@ -930,7 +893,7 @@ mod tests {
         row(&audio, "mic_on")
             .apply(&mut c, Value::Bool(true))
             .unwrap();
-        assert_eq!(c.cur().audio.sources, ["system", "mic"]);
+        assert_eq!(c.video.audio.sources, ["system", "mic"]);
         assert!(row(&audio, "mic_device").enabled(&c));
         match &row(&audio, "mic_device").kind {
             Kind::Choice(o) => assert_eq!(
@@ -962,21 +925,21 @@ mod tests {
         row(&audio, "src:system")
             .apply(&mut c, Value::Bool(false))
             .unwrap();
-        assert_eq!(c.cur().audio.sources, ["mic:{in-1}", "app:spotify.exe"]);
+        assert_eq!(c.video.audio.sources, ["mic:{in-1}", "app:spotify.exe"]);
         // Off removes the microphone, whichever it was.
         row(&audio, "mic_on")
             .apply(&mut c, Value::Bool(false))
             .unwrap();
-        assert_eq!(c.cur().audio.sources, ["app:spotify.exe"]);
+        assert_eq!(c.video.audio.sources, ["app:spotify.exe"]);
         // A program that is not open now stays listed, so it can be removed.
-        c.cur_mut().audio.sources.push("app:closed.exe".into());
-        c.cur_mut().audio.sources.push("out:{out-1}".into());
+        c.video.audio.sources.push("app:closed.exe".into());
+        c.video.audio.sources.push("out:{out-1}".into());
         let audio = rows(Section::Audio, &e, &c);
         assert_eq!(row(&audio, "src:app:closed.exe").label, "closed.exe");
         row(&audio, "src:app:closed.exe")
             .apply(&mut c, Value::Bool(false))
             .unwrap();
-        assert!(!c.cur().audio.sources.contains(&"app:closed.exe".into()));
+        assert!(!c.video.audio.sources.contains(&"app:closed.exe".into()));
         assert_eq!(row(&audio, "src:out:{out-1}").label, "Headset");
     }
 
@@ -984,8 +947,7 @@ mod tests {
     fn bad_video_settings_are_reported() {
         let mut c = Config::default();
         assert!(video_problems(&c, (1920, 1080), Lang::En).is_empty());
-        c.profiles.insert("default".into(), Profile::default());
-        c.profiles.get_mut("default").unwrap().container = "avi".into();
+        c.video.container = "avi".into();
         let problems = video_problems(&c, (1920, 1080), Lang::Fr);
         assert!(
             problems.iter().any(|p| p.contains("conteneur")),

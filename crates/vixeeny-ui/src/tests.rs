@@ -353,9 +353,9 @@ fn the_video_page_edits_the_current_profile_and_reports_problems() {
     settings_render(&panel, "9-settings-video");
     let w = panel.window();
     w.invoke_row_chosen("fps".into(), 1); // 24, 30, 60 (and more on a fast monitor)
-    assert_eq!(panel.config().profiles["default"].fps, 30);
+    assert_eq!(panel.config().video.fps, 30);
     w.invoke_row_chosen("split".into(), 1);
-    assert_eq!(panel.config().profiles["default"].split.mode, "size:2048");
+    assert_eq!(panel.config().video.split.mode, "size:2048");
     assert_eq!(w.get_notice(), "");
     // HEVC does not go in WebM: a problem the page says out loud.
     w.invoke_row_chosen("encoder_kind".into(), 1);

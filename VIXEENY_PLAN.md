@@ -986,9 +986,6 @@ depth = 10
 chroma = "444"
 
 [video]
-profile = "default"
-
-[profiles.default]
 encoder = "auto"            # meilleur encodeur matériel détecté, sinon libx264
 container = "mp4_hybrid"
 resolution = "source"
@@ -1002,7 +999,7 @@ show_cursor = true
 vfr = false                 # fréquence variable (MKV / WebM seulement)
 split = { mode = "off" }
 
-[profiles.default.audio]
+[video.audio]
 routing = "one_track_per_source"
 sources = ["system"]
 codec = "auto"              # AAC en MP4, Opus en MKV/WebM

@@ -4,7 +4,7 @@
 
 use std::sync::LazyLock;
 
-use vixeeny_common::config::Profile;
+use vixeeny_common::config::Video;
 use vixeeny_common::i18n::Lang;
 use vixeeny_encode::registry::{Chroma, Encoder, Family, Kind, ParamType, Registry, Vendor};
 
@@ -70,7 +70,7 @@ pub fn choices(env: &Env, hardware: bool) -> Vec<&EncoderInfo> {
 }
 
 /// The encoder a profile uses: its own when it is listed for its kind, else the best one.
-pub fn resolved<'a>(env: &'a Env, profile: &Profile) -> Option<&'a EncoderInfo> {
+pub fn resolved<'a>(env: &'a Env, profile: &Video) -> Option<&'a EncoderInfo> {
     let list = choices(env, profile.encoder_kind != "software");
     list.iter()
         .find(|e| e.id == profile.encoder)

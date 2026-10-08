@@ -1,9 +1,8 @@
 ---
 source: crates/vixeeny-common/src/config.rs
-assertion_line: 567
 expression: "Config::default().to_toml().unwrap()"
 ---
-schema_version = 2
+schema_version = 3
 
 [general]
 language = "auto"
@@ -62,9 +61,6 @@ chroma = "444"
 dim_percent = 40
 
 [video]
-profile = "default"
-
-[profiles.default]
 encoder_kind = "hardware"
 encoder = "auto"
 container = "mp4_fragmented"
@@ -78,12 +74,12 @@ preset = "quality"
 show_cursor = false
 vfr = false
 
-[profiles.default.params]
+[video.params]
 
-[profiles.default.split]
+[video.split]
 mode = "off"
 
-[profiles.default.audio]
+[video.audio]
 routing = "one_track_per_source"
 sources = ["system"]
 codec = "auto"
@@ -93,7 +89,7 @@ surround = true
 mic_noise_reduction = false
 tracks = []
 
-[profiles.default.audio.volumes]
+[video.audio.volumes]
 
 [recording_widget]
 enabled = true

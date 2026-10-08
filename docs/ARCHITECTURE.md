@@ -29,7 +29,7 @@ runtime (`runtime.rs`); the platform layer (`platform/`) is a message-only windo
 
 | Crate | Role | OS code |
 |---|---|---|
-| `vixeeny-common` | config (`config.toml`, profiles), IPC, hotkey parsing, i18n table, paths, naming | no |
+| `vixeeny-common` | config (`config.toml`), IPC, hotkey parsing, i18n table, paths, naming | no |
 | `vixeeny-platform` | monitors/DPI, windows, clipboard, notifications | yes |
 | `vixeeny-capture` | still and video capture through Windows.Graphics.Capture | yes |
 | `vixeeny-audio` | WASAPI sources (loopback, microphones, per process), the time-driven `Mixer` | yes |

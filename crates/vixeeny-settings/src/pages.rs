@@ -7,8 +7,8 @@ use vixeeny_encode::registry::ParamType;
 
 use crate::encoders::{self, param_label, param_range};
 use crate::{
-    Current, Env, Invalid, Kind, Opt, Row, Value, choice, folder, header, hinted, info, number,
-    opt, row, segmented, slider, text, toggle, when, when_boxed,
+    Env, Invalid, Kind, Opt, Row, Value, choice, folder, header, hinted, info, number, opt, row,
+    segmented, slider, text, toggle, when, when_boxed,
 };
 
 /// `off`, `size:<MB>` or `duration:<minutes>` → (kind, amount).
@@ -266,10 +266,10 @@ fn custom_rows(env: &Env, encoder: &str) -> Vec<Row> {
             let label = param_label(&key, lang);
             let read = {
                 let (key, default) = (key.clone(), default);
-                move |c: &Config| c.cur().params.get(&key).cloned().unwrap_or(default.clone())
+                move |c: &Config| c.video.params.get(&key).cloned().unwrap_or(default.clone())
             };
             let write = move |c: &mut Config, v: String| {
-                c.cur_mut().params.insert(key.clone(), v);
+                c.video.params.insert(key.clone(), v);
             };
             let text_row = |kind: Kind| {
                 let (read, write) = (read.clone(), write.clone());
@@ -345,10 +345,10 @@ fn custom_rows(env: &Env, encoder: &str) -> Vec<Row> {
 /// the encoder's own options when they are set by hand.
 pub fn video(env: &Env, config: &Config) -> Vec<Row> {
     let t = |k| env.t(k);
-    let profile = config.cur();
+    let profile = &config.video;
     let hardware = profile.encoder_kind != "software";
     let list = encoders::choices(env, hardware);
-    let current = encoders::resolved(env, &profile).map(|e| e.id.clone());
+    let current = encoders::resolved(env, profile).map(|e| e.id.clone());
 
     let mut rows = vec![
         folder(
@@ -378,8 +378,8 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
             opt("720p", "720p"),
             opt("480p", "480p"),
         ],
-        |c| c.cur().resolution,
-        |c, v| c.cur_mut().resolution = v,
+        |c| c.video.resolution.clone(),
+        |c, v| c.video.resolution = v,
     ));
     // Above 60 fps only what a monitor shows.
     let max = env.display.max_refresh.max(60);
@@ -397,14 +397,14 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
             .iter()
             .map(|f| opt(&f.to_string(), format!("{f} fps")))
             .collect(),
-        move |c| fps_option(c.cur().fps, &offered).to_string(),
-        |c, v| c.cur_mut().fps = v.parse().unwrap_or(60),
+        move |c| fps_option(c.video.fps, &offered).to_string(),
+        |c, v| c.video.fps = v.parse().unwrap_or(60),
     ));
     rows.push(toggle(
         "video_cursor",
         t(Key::SetShowCursor),
-        |c| c.cur().show_cursor,
-        |c, v| c.cur_mut().show_cursor = v,
+        |c| c.video.show_cursor,
+        |c, v| c.video.show_cursor = v,
     ));
 
     // ---- the encoder
@@ -416,9 +416,9 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
             opt("hardware", t(Key::SetKindHardware)),
             opt("software", t(Key::SetKindSoftware)),
         ],
-        |c| c.cur().encoder_kind,
+        |c| c.video.encoder_kind.clone(),
         |c, v| {
-            let profile = c.cur_mut();
+            let profile = &mut c.video;
             profile.encoder_kind = v;
             // The best encoder of the new kind, resolved when it is read.
             profile.encoder = "auto".into();
@@ -441,7 +441,7 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
             Kind::Choice(options),
             Box::new(move |c| {
                 // `auto` (older files) shows the encoder it resolves to.
-                let own = c.cur().encoder;
+                let own = c.video.encoder.clone();
                 Value::Text(if own == "auto" {
                     shown.clone().unwrap_or_default()
                 } else {
@@ -450,7 +450,7 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
             }),
             Box::new(|c, v| match v {
                 Value::Text(id) => {
-                    c.cur_mut().encoder = id;
+                    c.video.encoder = id;
                     Ok(())
                 }
                 _ => Err(Invalid),
@@ -465,12 +465,12 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
             opt("small", t(Key::SetPresetLight)),
             opt("custom", t(Key::SetPresetCustom)),
         ],
-        |c| match c.cur().preset.as_str() {
-            "quality" | "small" => c.cur().preset,
+        |c| match c.video.preset.as_str() {
+            "quality" | "small" => c.video.preset.clone(),
             // The older presets were tuned by hand: they are the custom one now.
             _ => "custom".to_owned(),
         },
-        |c, v| c.cur_mut().preset = v,
+        |c, v| c.video.preset = v,
     ));
     let ten = current
         .as_deref()
@@ -479,20 +479,20 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
         toggle(
             "ten_bit",
             t(Key::SetTenBit),
-            |c| c.cur().depth == 10,
-            |c, v| c.cur_mut().depth = if v { 10 } else { 8 },
+            |c| c.video.depth == 10,
+            |c, v| c.video.depth = if v { 10 } else { 8 },
         ),
         // HDR needs 10 bits: the switch stays on, and cannot be turned off, while HDR is on.
-        move |c| ten && !hdr_on(&c.cur().hdr),
+        move |c| ten && !hdr_on(&c.video.hdr),
     ));
     // Only when Windows shows HDR: there is nothing to keep otherwise.
     if env.display.hdr {
         rows.push(toggle(
             "hdr",
             t(Key::SetHdrEnable),
-            |c| hdr_on(&c.cur().hdr),
+            |c| hdr_on(&c.video.hdr),
             |c, v| {
-                let profile = c.cur_mut();
+                let profile = &mut c.video;
                 profile.hdr = if v { "keep_hdr" } else { "tonemap_sdr" }.into();
                 if v {
                     profile.depth = 10;
@@ -512,11 +512,11 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
             opt("mkv", "MKV"),
             opt("webm", "WebM"),
         ],
-        |c| match c.cur().container.as_str() {
+        |c| match c.video.container.as_str() {
             "mp4" | "mp4_hybrid" => "mp4_fragmented".to_owned(),
             other => other.to_owned(),
         },
-        |c, v| c.cur_mut().container = v,
+        |c, v| c.video.container = v,
     ));
     rows.push(choice(
         "split",
@@ -526,9 +526,9 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
             opt("size", t(Key::SetSplitSize)),
             opt("duration", t(Key::SetSplitDuration)),
         ],
-        |c| split_parts(&c.cur().split.mode).0.to_owned(),
+        |c| split_parts(&c.video.split.mode).0.to_owned(),
         |c, v| {
-            let amount = split_parts(&c.cur().split.mode).1;
+            let amount = split_parts(&c.video.split.mode).1;
             let amount = if amount > 0 {
                 amount
             } else if v == "size" {
@@ -536,11 +536,11 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
             } else {
                 10
             };
-            c.cur_mut().split.mode = split_join(&v, amount);
+            c.video.split.mode = split_join(&v, amount);
         },
     ));
-    let mode = config.cur().split.mode;
-    let split = split_parts(&mode).0;
+    let mode = &config.video.split.mode;
+    let split = split_parts(mode).0;
     if split != "off" {
         rows.push(number(
             "split_amount",
@@ -550,10 +550,10 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
                 Key::SetSplitSizeMb
             }),
             (1, 1_000_000, 1),
-            |c| split_parts(&c.cur().split.mode).1,
+            |c| split_parts(&c.video.split.mode).1,
             |c, v| {
-                let kind = split_parts(&c.cur().split.mode).0.to_owned();
-                c.cur_mut().split.mode = split_join(&kind, v);
+                let kind = split_parts(&c.video.split.mode).0.to_owned();
+                c.video.split.mode = split_join(&kind, v);
             },
         ));
     }
@@ -572,8 +572,8 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
                 opt("422", "4:2:2"),
                 opt("444", "4:4:4"),
             ],
-            |c| c.cur().chroma,
-            |c, v| c.cur_mut().chroma = v,
+            |c| c.video.chroma.clone(),
+            |c, v| c.video.chroma = v,
         ));
     }
     rows
@@ -587,10 +587,10 @@ fn source_row(spec: String, label: String) -> Row {
         format!("src:{spec}"),
         label,
         Kind::Toggle,
-        Box::new(move |c| Value::Bool(c.cur().audio.sources.contains(&read))),
+        Box::new(move |c| Value::Bool(c.video.audio.sources.contains(&read))),
         Box::new(move |c, v| match v {
             Value::Bool(on) => {
-                let sources = &mut c.cur_mut().audio.sources;
+                let sources = &mut c.video.audio.sources;
                 sources.retain(|s| *s != write);
                 if on {
                     sources.push(write.clone());
@@ -624,7 +624,7 @@ fn program_row(spec: String, label: String, icon: Option<crate::Icon>) -> Row {
         Box::new(|_| Value::Bool(true)),
         Box::new(move |c, v| match v {
             Value::Bool(false) => {
-                c.cur_mut().audio.sources.retain(|s| *s != write);
+                c.video.audio.sources.retain(|s| *s != write);
                 Ok(())
             }
             _ => Err(Invalid),
@@ -636,7 +636,7 @@ fn program_row(spec: String, label: String, icon: Option<crate::Icon>) -> Row {
 
 pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
     let t = |k| env.t(k);
-    let chosen = config.cur().audio.sources;
+    let chosen = &config.video.audio.sources;
     let mut rows = vec![source_row("system".into(), t(Key::SrcSystem))];
     // A particular output, from older settings: it stays visible so it can be turned off.
     for spec in chosen.iter().filter(|s| s.starts_with("out:")) {
@@ -655,10 +655,10 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
         "mic_on",
         t(Key::SetMicOn),
         Kind::Toggle,
-        Box::new(|c| Value::Bool(c.cur().audio.sources.iter().any(|s| is_mic(s)))),
+        Box::new(|c| Value::Bool(c.video.audio.sources.iter().any(|s| is_mic(s)))),
         Box::new(|c, v| match v {
             Value::Bool(on) => {
-                let sources = &mut c.cur_mut().audio.sources;
+                let sources = &mut c.video.audio.sources;
                 if !on {
                     sources.retain(|s| !is_mic(s));
                 } else if !sources.iter().any(|s| is_mic(s)) {
@@ -691,32 +691,33 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
             t(Key::SetMicDevice),
             mics,
             |c| {
-                c.cur()
+                c.video
                     .audio
                     .sources
-                    .into_iter()
+                    .iter()
                     .find(|s| is_mic(s))
+                    .cloned()
                     .unwrap_or_else(|| "mic".into())
             },
             // Greyed out while the microphone is off: nothing to change then.
             |c, v| {
-                let sources = &mut c.cur_mut().audio.sources;
+                let sources = &mut c.video.audio.sources;
                 if sources.iter().any(|s| is_mic(s)) {
                     sources.retain(|s| !is_mic(s));
                     sources.push(v);
                 }
             },
         ),
-        |c| c.cur().audio.sources.iter().any(|s| is_mic(s)),
+        |c| c.video.audio.sources.iter().any(|s| is_mic(s)),
     ));
     rows.push(when(
         toggle(
             "audio_denoise",
             t(Key::SetAudioDenoise),
-            |c| c.cur().audio.mic_noise_reduction,
-            |c, v| c.cur_mut().audio.mic_noise_reduction = v,
+            |c| c.video.audio.mic_noise_reduction,
+            |c, v| c.video.audio.mic_noise_reduction = v,
         ),
-        |c| c.cur().audio.sources.iter().any(|s| is_mic(s)),
+        |c| c.video.audio.sources.iter().any(|s| is_mic(s)),
     ));
 
     // ---- the tracks and their codec
@@ -729,8 +730,8 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
             opt("mix_all", t(Key::SetRouteMix)),
             opt("advanced", t(Key::SetRouteAdvanced)),
         ],
-        |c| c.cur().audio.routing,
-        |c, v| c.cur_mut().audio.routing = v,
+        |c| c.video.audio.routing.clone(),
+        |c, v| c.video.audio.routing = v,
     ));
     rows.push(choice(
         "audio_codec",
@@ -743,30 +744,30 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
             opt("pcm16", t(Key::OptPcm16)),
             opt("pcm24", t(Key::OptPcm24)),
         ],
-        |c| c.cur().audio.codec,
-        |c, v| c.cur_mut().audio.codec = v,
+        |c| c.video.audio.codec.clone(),
+        |c, v| c.video.audio.codec = v,
     ));
     // A bitrate only means something for the compressed codecs (not FLAC or PCM).
-    if matches!(config.cur().audio.codec.as_str(), "auto" | "aac" | "opus") {
+    if matches!(config.video.audio.codec.as_str(), "auto" | "aac" | "opus") {
         rows.push(slider(
             "audio_bitrate",
             t(Key::SetAudioBitrate),
             (32, 512, 16),
-            |c| i64::from(c.cur().audio.bitrate_kbps),
-            |c, v| c.cur_mut().audio.bitrate_kbps = v as u32,
+            |c| i64::from(c.video.audio.bitrate_kbps),
+            |c, v| c.video.audio.bitrate_kbps = v as u32,
         ));
         rows.push(toggle(
             "audio_vbr",
             t(Key::SetAudioVbr),
-            |c| c.cur().audio.vbr,
-            |c, v| c.cur_mut().audio.vbr = v,
+            |c| c.video.audio.vbr,
+            |c, v| c.video.audio.vbr = v,
         ));
     }
     rows.push(toggle(
         "audio_surround",
         t(Key::SetAudioSurround),
-        |c| c.cur().audio.surround,
-        |c, v| c.cur_mut().audio.surround = v,
+        |c| c.video.audio.surround,
+        |c, v| c.video.audio.surround = v,
     ));
 
     // ---- the programs recorded on their own, then a button to add one of those open now
@@ -802,7 +803,7 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
         Box::new(|_| Value::Text(String::new())),
         Box::new(|c, v| match v {
             Value::Text(spec) => {
-                let sources = &mut c.cur_mut().audio.sources;
+                let sources = &mut c.video.audio.sources;
                 if !sources.contains(&spec) {
                     sources.push(spec);
                 }

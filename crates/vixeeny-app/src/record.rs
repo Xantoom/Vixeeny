@@ -14,7 +14,7 @@ use std::time::Duration;
 use crate::audio_rig::Rig;
 use crate::widget_math::FromWidget;
 use anyhow::Context;
-use vixeeny_common::config::{Config, Profile};
+use vixeeny_common::config::{self, Config};
 use vixeeny_common::ipc::RecState;
 use vixeeny_encode::audio::{AudioCodec, AudioTrackConfig};
 use vixeeny_encode::clock::Fps;
@@ -97,7 +97,7 @@ impl Drop for Handle {
 /// The encoder a profile asks for: its own, or the best detected one for `auto`.
 fn choose_encoder<'a>(
     registry: &'a Registry,
-    profile: &Profile,
+    profile: &config::Video,
     probe: Option<&ProbeResult>,
 ) -> anyhow::Result<&'a Encoder> {
     if profile.encoder == "auto" {
@@ -222,11 +222,7 @@ fn plan(config: &Config, allow_gpu: bool, replay: bool) -> anyhow::Result<Plan> 
     let source = (monitor.rect.width, monitor.rect.height);
 
     // The replay records with the video settings, like a recording.
-    let profile = config
-        .profiles
-        .get(&config.video.profile)
-        .cloned()
-        .unwrap_or_default();
+    let profile = &config.video;
     let registry = Registry::builtin().context("codec registry")?;
     let probe = crate::probe::current(false).ok();
     let ctx = ValidateContext {
@@ -234,11 +230,11 @@ fn plan(config: &Config, allow_gpu: bool, replay: bool) -> anyhow::Result<Plan> 
         source,
         probe: probe.as_ref(),
     };
-    let issues = validate::validate(&profile, &ctx);
+    let issues = validate::validate(profile, &ctx);
     if let Some(issue) = issues.iter().find(|i| i.severity == Severity::Error) {
         anyhow::bail!("the video profile is not valid: {issue:?}");
     }
-    let encoder = choose_encoder(&registry, &profile, probe.as_ref())?.clone();
+    let encoder = choose_encoder(&registry, profile, probe.as_ref())?.clone();
 
     let container = OutputContainer::from_setting(&profile.container)
         .with_context(|| format!("unknown container `{}`", profile.container))?;

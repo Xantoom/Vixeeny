@@ -2,7 +2,7 @@
 use std::cell::RefCell;
 use std::path::PathBuf;
 
-use vixeeny_common::config::Profile;
+use vixeeny_common::config::Video;
 
 use crate::probe::{
     Adapter, EncoderProbe, FormatProbe, ProbeResult, Prober, cache_key, cached_or_probe, from_toml,
@@ -101,15 +101,15 @@ fn a_broken_registry_is_rejected() {
 
 // ---- validation ---------------------------------------------------------------------------
 
-fn profile(encoder: &str, container: &str) -> Profile {
-    Profile {
+fn profile(encoder: &str, container: &str) -> Video {
+    Video {
         encoder: encoder.into(),
         container: container.into(),
-        ..Profile::default()
+        ..Video::default()
     }
 }
 
-fn check(profile: &Profile, probe: Option<&ProbeResult>) -> Vec<IssueKind> {
+fn check(profile: &Video, probe: Option<&ProbeResult>) -> Vec<IssueKind> {
     let r = registry();
     validate(
         profile,
@@ -128,7 +128,7 @@ fn check(profile: &Profile, probe: Option<&ProbeResult>) -> Vec<IssueKind> {
 fn the_default_profile_is_valid() {
     let r = registry();
     let issues = validate(
-        &Profile::default(),
+        &Video::default(),
         &Context {
             registry: &r,
             source: (1920, 1080),
@@ -227,14 +227,14 @@ fn frame_rate_is_checked_against_the_codec_level() {
 
 #[test]
 fn bad_numbers_are_reported() {
-    let p = Profile {
+    let p = Video {
         fps: 0,
         depth: 12,
         chroma: "411".into(),
         resolution: "huge".into(),
         preset: "ludicrous".into(),
         hdr: "maybe".into(),
-        ..Profile::default()
+        ..Video::default()
     };
     let issues = check(&p, None);
     for expected in [
@@ -270,13 +270,13 @@ fn validation_agrees_with_the_data_exhaustively() {
             for depth in [8u8, 10] {
                 for chroma in ["420", "422", "444"] {
                     for hdr in ["tonemap_sdr", "keep_hdr"] {
-                        let p = Profile {
+                        let p = Video {
                             encoder: e.id.clone(),
                             container: container.into(),
                             depth,
                             chroma: chroma.into(),
                             hdr: hdr.into(),
-                            ..Profile::default()
+                            ..Video::default()
                         };
                         let c = Container::from_setting(container).unwrap_or_else(|| panic!());
                         let ch = Chroma::from_setting(chroma).unwrap_or_else(|| panic!());

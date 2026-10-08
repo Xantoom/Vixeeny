@@ -9,11 +9,11 @@ use serde::{Deserialize, Serialize};
 use crate::ipc::ActionId;
 
 /// Schema version written by this build. Bump it and add a migration to [`MIGRATIONS`].
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 /// `MIGRATIONS[n]` upgrades a table from schema `n + 1` to `n + 2`.
 pub type Migration = fn(&mut toml::Table);
-pub const MIGRATIONS: &[Migration] = &[v1_fragmented_mp4];
+pub const MIGRATIONS: &[Migration] = &[v1_fragmented_mp4, v2_single_profile];
 
 /// 0.9 → 1.0: MP4 recordings are fragmented (a recording cut short still plays), and the cursor
 /// is left out of videos unless asked for again.
@@ -32,6 +32,30 @@ fn v1_fragmented_mp4(table: &mut toml::Table) {
             profile.insert("container".into(), "mp4_fragmented".into());
         }
         profile.insert("show_cursor".into(), false.into());
+    }
+}
+
+/// 0.9.12: no more profiles. The one in use (`video.profile`, else `default`) becomes `[video]`.
+fn v2_single_profile(table: &mut toml::Table) {
+    let mut profiles = match table.remove("profiles") {
+        Some(toml::Value::Table(profiles)) => profiles,
+        _ => toml::Table::new(),
+    };
+    let name = table
+        .get("video")
+        .and_then(|v| v.get("profile"))
+        .and_then(|p| p.as_str())
+        .unwrap_or("default")
+        .to_owned();
+    match profiles
+        .remove(&name)
+        .or_else(|| profiles.remove("default"))
+    {
+        Some(profile) => table.insert("video".into(), profile),
+        None => table.remove("video"),
+    };
+    if let Some(replay) = table.get_mut("replay").and_then(|r| r.as_table_mut()) {
+        replay.remove("profile");
     }
 }
 
@@ -62,7 +86,6 @@ pub struct Config {
     pub image: Image,
     pub editor: Editor,
     pub video: Video,
-    pub profiles: BTreeMap<String, Profile>,
     pub recording_widget: RecordingWidget,
     pub replay: Replay,
     pub overlay: Overlay,
@@ -79,7 +102,6 @@ impl Default for Config {
             image: Image::default(),
             editor: Editor::default(),
             video: Video::default(),
-            profiles: BTreeMap::from([("default".to_owned(), Profile::default())]),
             recording_widget: RecordingWidget::default(),
             replay: Replay::default(),
             overlay: Overlay::default(),
@@ -285,23 +307,10 @@ impl Default for Avif {
     }
 }
 
+/// How videos (recordings and the replay) are encoded.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Video {
-    pub profile: String,
-}
-
-impl Default for Video {
-    fn default() -> Self {
-        Self {
-            profile: "default".into(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Profile {
     /// `hardware` or `software`: which family of encoders the settings list.
     pub encoder_kind: String,
     /// An encoder id of the codec registry. `auto` (older files) = the best detected hardware
@@ -325,7 +334,7 @@ pub struct Profile {
     pub audio: Audio,
 }
 
-impl Default for Profile {
+impl Default for Video {
     fn default() -> Self {
         Self {
             encoder_kind: "hardware".into(),
@@ -608,9 +617,28 @@ mod tests {
                     show_cursor = true\n[profiles.mkv]\ncontainer = \"mkv\"\n";
         let cfg = Config::from_toml(text).unwrap();
         assert_eq!(cfg.schema_version, SCHEMA_VERSION);
-        assert_eq!(cfg.profiles["default"].container, "mp4_fragmented");
-        assert_eq!(cfg.profiles["mkv"].container, "mkv");
-        assert!(!cfg.profiles["default"].show_cursor);
+        assert_eq!(cfg.video.container, "mp4_fragmented");
+        assert!(!cfg.video.show_cursor);
+    }
+
+    #[test]
+    fn the_profile_in_use_becomes_the_video_settings() {
+        let text = "schema_version = 2\n[video]\nprofile = \"Game\"\n\
+                    [profiles.default]\nfps = 30\n[profiles.Game]\nfps = 120\n\
+                    [replay]\nprofile = \"default\"\nduration_seconds = 60\n";
+        let cfg = Config::from_toml(text).unwrap();
+        assert_eq!(cfg.video.fps, 120);
+        assert_eq!(cfg.replay.duration_seconds, 60);
+        // A missing profile falls back to `default`, then to the defaults.
+        let text =
+            "schema_version = 2\n[video]\nprofile = \"Gone\"\n[profiles.default]\nfps = 30\n";
+        assert_eq!(Config::from_toml(text).unwrap().video.fps, 30);
+        let text = "schema_version = 2\n[video]\nprofile = \"Gone\"\n";
+        assert_eq!(Config::from_toml(text).unwrap().video, Video::default());
+        // The new layout reads back.
+        let cfg = Config::default();
+        let again = Config::from_toml(&cfg.to_toml().unwrap()).unwrap();
+        assert_eq!(again, cfg);
     }
 
     #[test]

@@ -2,7 +2,7 @@
 //! Validation of a recording profile against the registry (plan 6.4) and the choice of the
 //! `auto` encoder. Pure functions: no FFmpeg, no OS.
 
-use vixeeny_common::config::Profile;
+use vixeeny_common::config::Video;
 
 use crate::probe::ProbeResult;
 use crate::registry::{Chroma, Container, Encoder, Family, Kind, PresetName, Registry, Vendor};
@@ -116,7 +116,7 @@ fn audio_ok(codec: &str, container: Container) -> Option<bool> {
     })
 }
 
-pub fn validate(profile: &Profile, ctx: &Context<'_>) -> Vec<Issue> {
+pub fn validate(profile: &Video, ctx: &Context<'_>) -> Vec<Issue> {
     let mut issues = Vec::new();
 
     let container = Container::from_setting(&profile.container);
