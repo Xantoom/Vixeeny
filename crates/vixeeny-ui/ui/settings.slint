@@ -44,9 +44,9 @@ export struct SettingGroup {
 }
 
 export struct ShortcutKey {
-    // `Ctrl+Shift+R`, and its keys one by one (empty: a free slot).
+    // `Ctrl+Shift+R` (empty: a free slot), and as the user reads it: `Ctrl + Shift + R`.
     text: string,
-    parts: [string],
+    shown: string,
     slot: int,
 }
 
@@ -252,38 +252,18 @@ component SettingLine inherits GroupRow {
     }
 }
 
-// A key of a shortcut, drawn as a keycap.
-component Keycap inherits Rectangle {
-    in property <string> text;
-    min-width: 26px;
-    height: 24px;
-    preferred-width: label.preferred-width + 14px;
-    border-radius: 5px;
-    background: Theme.control-hover;
-    border-width: 1px;
-    border-color: Theme.stroke-strong;
-    label := Text {
-        text: root.text;
-        color: Theme.text;
-        font-size: 12px;
-        font-weight: 600;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
-}
-
 // A shortcut of an action, as a field: its keys (or "none"); a click records new ones, shown
 // as they are held; the cross empties it.
 component ShortcutField inherits Rectangle {
     in property <ShortcutKey> key;
     in property <bool> recording;
     // The keys held while it records.
-    in property <[string]> held;
+    in property <string> held;
     in property <UiTexts> t;
     callback record();
     callback clear();
 
-    property <[string]> shown: root.recording ? root.held : root.key.parts;
+    property <string> shown: root.recording ? root.held : root.key.shown;
     property <bool> removable: root.key.text != "" && !root.recording;
     height: 32px;
     border-radius: Theme.radius;
@@ -297,21 +277,12 @@ component ShortcutField inherits Rectangle {
         mouse-cursor: pointer;
         clicked => { root.record(); }
     }
-    HorizontalLayout {
-        x: 4px;
-        width: parent.width - (root.removable ? 32px : 8px);
-        spacing: 4px;
-        alignment: start;
-        for part in root.shown : Keycap {
-            y: (parent.height - self.height) / 2;
-            text: part;
-        }
-    }
-    if root.shown.length == 0 : Text {
+    Text {
         x: 10px;
-        width: parent.width - 20px;
-        text: root.recording ? root.t.press-keys : root.t.no-shortcut;
-        color: root.recording ? Theme.accent : Theme.text-3;
+        width: parent.width - (root.removable ? 38px : 20px);
+        text: root.shown != "" ? root.shown
+            : (root.recording ? root.t.press-keys : root.t.no-shortcut);
+        color: root.shown != "" ? Theme.text : (root.recording ? Theme.accent : Theme.text-3);
         font-size: 13px;
         vertical-alignment: center;
         overflow: elide;
@@ -335,7 +306,7 @@ component ShortcutLine inherits Rectangle {
     in property <ShortcutRow> entry;
     in property <bool> recording-here;
     in property <int> recording-slot;
-    in property <[string]> held;
+    in property <string> held;
     in property <length> key-w;
     in property <UiTexts> t;
     callback record(int);
@@ -418,7 +389,7 @@ export component SettingsWindow inherits Window {
     in property <int> recording-row: -1;
     in property <int> recording-slot: -1;
     // The keys held while it is recorded.
-    in property <[string]> recording-parts;
+    in property <string> recording-keys;
     in property <[LineItem]> lines;
     in property <string> extra;
     // Off in the tests, where no time passes: what animates is shown at its end at once.
@@ -692,7 +663,7 @@ export component SettingsWindow inherits Window {
                                 entry: sc;
                                 recording-here: root.recording-row == i;
                                 recording-slot: root.recording-slot;
-                                held: root.recording-parts;
+                                held: root.recording-keys;
                                 key-w: key-w;
                                 t: root.t;
                                 record(slot) => { root.shortcut-record(i, slot); }

@@ -832,7 +832,7 @@ impl SettingsPanel {
                     .enumerate()
                     .map(|(slot, text)| ShortcutKey {
                         text: text.as_str().into(),
-                        parts: strings(key_names(text, lang)),
+                        shown: key_names(text, lang).join(" + ").into(),
                         slot: slot as i32,
                     })
                     .collect();
@@ -882,7 +882,7 @@ impl SettingsPanel {
     fn record(&self, target: Option<(usize, usize)>) {
         let was = self.state.recording.replace(target).is_some();
         *self.state.chord.borrow_mut() = Chord::default();
-        self.window.set_recording_parts(strings(Vec::new()));
+        self.window.set_recording_keys(SharedString::new());
         self.window
             .set_recording_row(target.map_or(-1, |(row, _)| row as i32));
         self.window
@@ -924,7 +924,7 @@ impl SettingsPanel {
         match step {
             ChordStep::Held(text) => {
                 let names = key_names(&text, self.state.lang());
-                self.window.set_recording_parts(strings(names));
+                self.window.set_recording_keys(names.join(" + ").into());
             }
             ChordStep::Done(pressed) => {
                 self.captured(pressed);
