@@ -152,13 +152,7 @@ fn update_view(lang: Lang) -> UpdateView {
         Some(release) => UpdateView {
             stage: UpdateStage::Available,
             title: tr(Key::UpdateFound, lang).replace("{version}", &release.version),
-            detail: release
-                .notes
-                .lines()
-                .next()
-                .unwrap_or_default()
-                .trim()
-                .to_owned(),
+            detail: String::new(),
             progress: 0.0,
             action: tr(Key::UpdateNow, lang).into(),
         },

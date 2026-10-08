@@ -85,7 +85,6 @@ mod tests {
             checked_at: 5,
             available: Some(Release {
                 version: "1.0.0".into(),
-                notes: "n".into(),
                 assets: Vec::new(),
             }),
             notified: Some("1.0.0".into()),
@@ -102,7 +101,6 @@ mod tests {
     fn an_offer_older_than_the_running_version_is_dropped() {
         let release = Release {
             version: "0.5.0".into(),
-            notes: String::new(),
             assets: Vec::new(),
         };
         let state = State {

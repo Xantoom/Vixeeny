@@ -24,15 +24,12 @@ pub struct Asset {
 pub struct Release {
     /// `1.2.3`, without the `v` of the tag.
     pub version: String,
-    pub notes: String,
     pub assets: Vec<Asset>,
 }
 
 #[derive(Deserialize)]
 struct ApiRelease {
     tag_name: String,
-    #[serde(default)]
-    body: Option<String>,
     #[serde(default)]
     draft: bool,
     #[serde(default)]
@@ -66,7 +63,6 @@ impl Release {
         }
         Ok(Some(Self {
             version: api.tag_name.trim_start_matches(['v', 'V']).to_owned(),
-            notes: api.body.unwrap_or_default(),
             assets: api
                 .assets
                 .into_iter()
@@ -124,7 +120,6 @@ mod tests {
             .unwrap_or_default()
             .unwrap_or_else(|| panic!("none"));
         assert_eq!(release.version, "0.5.1");
-        assert_eq!(release.notes, "Fixes");
         let files = release
             .files("windows-x64")
             .unwrap_or_else(|| panic!("no files"));
