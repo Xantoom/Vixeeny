@@ -158,6 +158,9 @@ pub fn verify(registry: &Registry, require_hardware: bool) -> Vec<Mismatch> {
             // SAFETY: `unit` is a static NUL-terminated string.
             let unit = unsafe { CStr::from_ptr(unit) };
             for value in &p.values {
+                if p.auto.as_ref().is_some_and(|a| a.to_ffmpeg() == *value) {
+                    continue; // never written
+                }
                 if find_option(&codec, value, Some(unit)).is_none() {
                     bad(format!(
                         "param `{}`: `{}` has no value `{value}`",
@@ -175,6 +178,13 @@ pub fn verify(registry: &Registry, require_hardware: bool) -> Vec<Mismatch> {
             for key in e.presets.get(name).keys() {
                 if find_option(&codec, key, None).is_none() {
                     bad(format!("preset {name:?}: no option `{key}`"));
+                }
+            }
+        }
+        for (mode, options) in &e.rate_control.modes {
+            for key in options.keys() {
+                if find_option(&codec, key, None).is_none() {
+                    bad(format!("rate mode {mode:?}: no option `{key}`"));
                 }
             }
         }

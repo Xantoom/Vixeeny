@@ -3,7 +3,9 @@
 
 use vixeeny_common::config::Config;
 use vixeeny_common::i18n::Key;
-use vixeeny_encode::registry::ParamType;
+use vixeeny_encode::registry::{
+    BITRATE_RANGE, DEFAULT_BITRATE, DEFAULT_MAXRATE, ParamType, RateMode, rate_keys,
+};
 
 use crate::encoders::{self, param_label, param_range};
 use crate::{
@@ -252,93 +254,131 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
 }
 
 /// The registry parameters of the encoder in use, as editable rows (the `custom` preset).
-fn custom_rows(env: &Env, encoder: &str) -> Vec<Row> {
+/// A custom option, stored as text under `key` in the profile's `params`.
+fn param_row(id: String, label: String, kind: Kind, key: String, default: String) -> Row {
+    let read = key.clone();
+    let numeric = matches!(kind, Kind::Number { .. } | Kind::Slider { .. });
+    let toggle = matches!(kind, Kind::Toggle);
+    row(
+        id,
+        label,
+        kind,
+        Box::new(move |c| {
+            let v = c.video.params.get(&read).unwrap_or(&default);
+            if numeric {
+                Value::Int(v.parse::<f64>().map_or(0, |n| n as i64))
+            } else if toggle {
+                Value::Bool(matches!(v.as_str(), "1" | "true"))
+            } else {
+                Value::Text(v.clone())
+            }
+        }),
+        Box::new(move |c, v| {
+            let v = match v {
+                Value::Int(n) => n.to_string(),
+                Value::Bool(b) => u8::from(b).to_string(),
+                Value::Text(t) => t,
+            };
+            c.video.params.insert(key.clone(), v);
+            Ok(())
+        }),
+    )
+}
+
+/// The options of the encoder set by hand: the rate control first (only the fields of the
+/// chosen mode), then the encoder's own parameters.
+fn custom_rows(env: &Env, config: &Config, encoder: &str) -> Vec<Row> {
     let Some(spec) = encoders::spec(encoder) else {
         return Vec::new();
     };
     let lang = env.lang;
-    spec.params
-        .iter()
-        .map(|param| {
-            let key = param.key.clone();
-            let default = param.default.to_ffmpeg();
-            let id = format!("p:{key}");
-            let label = param_label(&key, lang);
-            let read = {
-                let (key, default) = (key.clone(), default);
-                move |c: &Config| c.video.params.get(&key).cloned().unwrap_or(default.clone())
-            };
-            let write = move |c: &mut Config, v: String| {
-                c.video.params.insert(key.clone(), v);
-            };
-            let text_row = |kind: Kind| {
-                let (read, write) = (read.clone(), write.clone());
-                row(
-                    id.clone(),
-                    label.clone(),
-                    kind,
-                    Box::new(move |c| Value::Text(read(c))),
-                    Box::new(move |c, v| match v {
-                        Value::Text(t) => {
-                            write(c, t);
-                            Ok(())
-                        }
-                        _ => Err(Invalid),
-                    }),
-                )
-            };
-            let number_row = |kind: Kind| {
-                let (read, write) = (read.clone(), write.clone());
-                row(
-                    id.clone(),
-                    label.clone(),
-                    kind,
-                    Box::new(move |c| Value::Int(read(c).parse::<f64>().map_or(0, |n| n as i64))),
-                    Box::new(move |c, v| match v {
-                        Value::Int(n) => {
-                            write(c, n.to_string());
-                            Ok(())
-                        }
-                        _ => Err(Invalid),
-                    }),
-                )
-            };
-            match param.kind {
-                ParamType::Enum => {
-                    let options = param.values.iter().map(|v| opt(v, v.as_str())).collect();
-                    text_row(Kind::Choice(options))
-                }
-                ParamType::Bool => row(
-                    id.clone(),
-                    label.clone(),
-                    Kind::Toggle,
-                    {
-                        let read = read.clone();
-                        Box::new(move |c| Value::Bool(matches!(read(c).as_str(), "1" | "true")))
-                    },
-                    {
-                        let write = write.clone();
-                        Box::new(move |c, v| match v {
-                            Value::Bool(b) => {
-                                write(c, u8::from(b).to_string());
-                                Ok(())
-                            }
-                            _ => Err(Invalid),
-                        })
-                    },
+    let rc = &spec.rate_control;
+    let mode = spec.rate_mode(&config.video.params);
+    let mut rows = Vec::new();
+    let modes: Vec<Opt> = spec
+        .rate_modes()
+        .map(|m| opt(m.name(), encoders::rate_mode_label(m, lang)))
+        .collect();
+    if modes.len() > 1 {
+        rows.push(param_row(
+            format!("p:{}", rate_keys::MODE),
+            param_label(rate_keys::MODE, lang),
+            Kind::Choice(modes),
+            rate_keys::MODE.into(),
+            RateMode::Quality.name().into(),
+        ));
+    }
+    if mode == RateMode::Quality {
+        let q = &rc.quality;
+        rows.push(param_row(
+            format!("p:{}", rate_keys::QUALITY),
+            encoders::quality_label(&q.name, lang),
+            Kind::Slider {
+                min: q.min,
+                max: q.max,
+                step: 1,
+            },
+            rate_keys::QUALITY.into(),
+            q.default.to_string(),
+        ));
+    } else {
+        let (min, max) = BITRATE_RANGE;
+        let mut rate = |key: &str, default: i64| {
+            rows.push(param_row(
+                format!("p:{key}"),
+                param_label(key, lang),
+                Kind::Number {
+                    min,
+                    max,
+                    step: 500,
+                },
+                key.into(),
+                default.to_string(),
+            ));
+        };
+        rate(rate_keys::BITRATE, DEFAULT_BITRATE);
+        if rc.uses(mode, "{maxrate}") {
+            rate(rate_keys::MAXRATE, DEFAULT_MAXRATE);
+        }
+    }
+    for param in &spec.params {
+        let (min, max, step) = param_range(param.min, param.max);
+        let (label, kind) = match param.kind {
+            ParamType::Enum => (
+                param_label(&param.key, lang),
+                Kind::Choice(
+                    param
+                        .values
+                        .iter()
+                        .map(|v| opt(v, encoders::value_label(&param.key, v, lang)))
+                        .collect(),
                 ),
-                ParamType::Int => {
-                    let (min, max, step) = param_range(param.kind, param.min, param.max);
-                    number_row(Kind::Number { min, max, step })
-                }
-                ParamType::Float => {
-                    let (min, max, step) = param_range(param.kind, param.min, param.max);
-                    number_row(Kind::Slider { min, max, step })
-                }
-                ParamType::String => text_row(Kind::Text),
-            }
-        })
-        .collect()
+            ),
+            ParamType::Bool => (param_label(&param.key, lang), Kind::Toggle),
+            // A numbered preset reads better on a slider, with what its ends mean.
+            ParamType::Int if param.key == "preset" => (
+                encoders::numbered_preset_label(min, max, lang),
+                Kind::Slider { min, max, step },
+            ),
+            ParamType::Int => (
+                param_label(&param.key, lang),
+                Kind::Number { min, max, step },
+            ),
+            ParamType::Float => (
+                param_label(&param.key, lang),
+                Kind::Slider { min, max, step },
+            ),
+            ParamType::String => (param_label(&param.key, lang), Kind::Text),
+        };
+        rows.push(param_row(
+            format!("p:{}", param.key),
+            label,
+            kind,
+            param.key.clone(),
+            param.default.to_ffmpeg(),
+        ));
+    }
+    rows
 }
 
 /// The recording, in the order of OBS: the folder, the picture, the encoder, the file, then
@@ -562,7 +602,7 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
     if profile.preset == "custom" || !matches!(profile.preset.as_str(), "quality" | "small") {
         rows.push(header("h_custom"));
         if let Some(id) = &current {
-            rows.extend(custom_rows(env, id));
+            rows.extend(custom_rows(env, config, id));
         }
         rows.push(choice(
             "chroma",

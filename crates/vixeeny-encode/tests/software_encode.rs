@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! M1 demo: every software video encoder × every allowed container (plan 13.2) encodes
 //! 100 synthetic frames; every audio encoder × allowed container encodes 1 s of sine.
-//! Each output is demuxed again and its packet count / codec checked.
+//! Each output is demuxed again and its packet count / codec checked. The custom preset of each
+//! encoder is also tried in every rate mode (the hardware ones when this machine has them).
 //! Needs the native build: `cargo xtask build-native ffmpeg`.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -230,6 +231,110 @@ fn software_video_encoders_in_every_container() {
                 "{enc} in {label}"
             );
             std::fs::remove_file(path).ok();
+        }
+    }
+}
+
+/// The custom preset of every software encoder opens and encodes in each of its rate modes.
+#[test]
+fn custom_rate_modes_encode() {
+    ffmpeg::init().unwrap();
+    let registry = vixeeny_encode::registry::Registry::builtin().unwrap();
+    for e in registry
+        .encoders()
+        .filter(|e| e.kind == vixeeny_encode::registry::Kind::Software)
+    {
+        for mode in e.rate_modes() {
+            let params = [("rc.mode".to_owned(), mode.name().to_owned())].into();
+            let options: Vec<String> = e
+                .custom_options(&params)
+                .into_iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .collect();
+            let label = format!("custom-{}", mode.name());
+            let path = encode_video(
+                &e.ffmpeg_encoder,
+                &options.join(","),
+                &label,
+                "matroska",
+                "mkv",
+                "",
+            );
+            assert_eq!(
+                count_packets(&path, media::Type::Video),
+                FRAMES,
+                "{} {mode:?}: {options:?}",
+                e.id
+            );
+            std::fs::remove_file(path).ok();
+        }
+    }
+}
+
+/// Opens `enc` with `options` on NV12 frames and encodes a few: `Err` when it refuses.
+fn try_encode(enc: &str, options: &str) -> Result<usize, ffmpeg::Error> {
+    let codec = encoder::find_by_name(enc).ok_or(ffmpeg::Error::EncoderNotFound)?;
+    let mut ctx = codec::context::Context::new_with_codec(codec)
+        .encoder()
+        .video()?;
+    ctx.set_width(W);
+    ctx.set_height(H);
+    ctx.set_format(Pixel::NV12);
+    ctx.set_time_base(Rational(1, FPS));
+    ctx.set_frame_rate(Some(Rational(FPS, 1)));
+    let mut venc = ctx.open_with(opts(options))?;
+    let mut packets = 0;
+    let mut pkt = Packet::empty();
+    for i in 0..30 {
+        let mut f = frame::Video::new(Pixel::NV12, W, H);
+        for plane in 0..2 {
+            f.data_mut(plane).fill((i * 7 % 256) as u8);
+        }
+        f.set_pts(Some(i as i64));
+        venc.send_frame(&f)?;
+        while venc.receive_packet(&mut pkt).is_ok() {
+            packets += 1;
+        }
+    }
+    venc.send_eof()?;
+    while venc.receive_packet(&mut pkt).is_ok() {
+        packets += 1;
+    }
+    Ok(packets)
+}
+
+/// The same with the hardware encoders this machine has (the others are skipped).
+#[test]
+fn custom_rate_modes_on_this_gpu() {
+    ffmpeg::init().unwrap();
+    let registry = vixeeny_encode::registry::Registry::builtin().unwrap();
+    let join = |o: std::collections::BTreeMap<String, String>| {
+        o.into_iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    for e in registry
+        .encoders()
+        .filter(|e| e.kind == vixeeny_encode::registry::Kind::Hardware)
+    {
+        let balanced = e
+            .presets
+            .balanced
+            .iter()
+            .map(|(k, v)| (k.clone(), v.to_ffmpeg()))
+            .collect();
+        if let Err(err) = try_encode(&e.ffmpeg_encoder, &join(balanced)) {
+            eprintln!("{}: skipped ({err})", e.id);
+            continue;
+        }
+        for mode in e.rate_modes() {
+            let params = [("rc.mode".to_owned(), mode.name().to_owned())].into();
+            let options = join(e.custom_options(&params));
+            let packets = try_encode(&e.ffmpeg_encoder, &options)
+                .unwrap_or_else(|err| panic!("{} {mode:?} ({options}): {err}", e.id));
+            eprintln!("{} {mode:?}: {packets} packets", e.id);
+            assert_eq!(packets, 30, "{} {mode:?}", e.id);
         }
     }
 }

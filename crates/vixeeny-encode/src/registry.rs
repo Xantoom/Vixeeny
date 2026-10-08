@@ -67,14 +67,80 @@ impl Container {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// How the custom preset spends bits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum RateControl {
-    Crf,
-    Cqp,
+pub enum RateMode {
+    /// A constant quality; the size follows the picture.
+    Quality,
+    /// A target bitrate, allowed to vary.
     Vbr,
+    /// A constant bitrate.
     Cbr,
 }
+
+impl RateMode {
+    pub const ALL: [Self; 3] = [Self::Quality, Self::Vbr, Self::Cbr];
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Quality => "quality",
+            Self::Vbr => "vbr",
+            Self::Cbr => "cbr",
+        }
+    }
+
+    pub fn from_setting(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|m| m.name() == name)
+    }
+}
+
+/// The scale of the constant-quality mode (lower is better).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QualityScale {
+    /// What the encoder calls it: CRF, CQ, QP, ICQ.
+    pub name: String,
+    pub min: i64,
+    pub max: i64,
+    pub default: i64,
+}
+
+/// The rate control of the custom preset.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RateControl {
+    pub quality: QualityScale,
+    /// The FFmpeg options of each mode, with the placeholders of [`PLACEHOLDERS`].
+    pub modes: BTreeMap<RateMode, BTreeMap<String, OptionValue>>,
+}
+
+impl RateControl {
+    /// Whether `mode` uses the user's value of `placeholder` (`{maxrate}`, ...).
+    pub fn uses(&self, mode: RateMode, placeholder: &str) -> bool {
+        self.modes.get(&mode).is_some_and(|options| {
+            options
+                .values()
+                .any(|v| matches!(v, OptionValue::Text(s) if s.contains(placeholder)))
+        })
+    }
+}
+
+/// What the rate-control options of the registry may contain.
+pub const PLACEHOLDERS: [&str; 4] = ["{quality}", "{bitrate}", "{maxrate}", "{bufsize}"];
+
+/// The keys of the rate control in the custom options of a profile (`Video::params`); the
+/// rates are in kbit/s.
+pub mod rate_keys {
+    pub const MODE: &str = "rc.mode";
+    pub const QUALITY: &str = "rc.quality";
+    pub const BITRATE: &str = "rc.bitrate";
+    pub const MAXRATE: &str = "rc.maxrate";
+}
+
+/// The rates (kbit/s) until the user sets them: fine for 1080p60.
+pub const DEFAULT_BITRATE: i64 = 10_000;
+pub const DEFAULT_MAXRATE: i64 = 15_000;
+/// The range of the bitrate fields (kbit/s).
+pub const BITRATE_RANGE: (i64, i64) = (500, 500_000);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Chroma {
@@ -200,8 +266,33 @@ pub struct Param {
     pub min: Option<f64>,
     pub max: Option<f64>,
     pub default: OptionValue,
-    /// Translation key.
-    pub label: String,
+    /// The value that leaves the option to FFmpeg (`auto`, or 0 for the key-frame interval).
+    pub auto: Option<OptionValue>,
+}
+
+impl Param {
+    /// The FFmpeg value of `raw` (a stored setting), or `None` when it does not parse.
+    fn parse(&self, raw: &str) -> Option<String> {
+        match self.kind {
+            ParamType::Enum => self.values.iter().any(|v| v == raw).then(|| raw.to_owned()),
+            ParamType::Int => raw.parse::<f64>().ok().map(|v| {
+                let v = v.round() as i64;
+                let lo = self.min.map_or(i64::MIN, |m| m as i64);
+                let hi = self.max.map_or(i64::MAX, |m| m as i64);
+                v.clamp(lo, hi).to_string()
+            }),
+            ParamType::Float => raw.parse::<f64>().ok().map(|v| {
+                v.clamp(self.min.unwrap_or(f64::MIN), self.max.unwrap_or(f64::MAX))
+                    .to_string()
+            }),
+            ParamType::Bool => match raw {
+                "1" | "true" | "on" => Some("1".into()),
+                "0" | "false" | "off" => Some("0".into()),
+                _ => None,
+            },
+            ParamType::String => Some(raw.to_owned()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -218,43 +309,76 @@ pub struct Encoder {
     pub pixel_formats: Vec<PixelFormatSpec>,
     pub hdr: bool,
     pub containers: Vec<Container>,
-    pub rate_control: Vec<RateControl>,
     pub presets: Presets,
+    pub rate_control: RateControl,
     #[serde(default)]
     pub params: Vec<Param>,
 }
 
 impl Encoder {
-    /// The FFmpeg options of the `custom` preset: the balanced preset with the user's values
-    /// (by parameter key) on top. A value that does not parse for its parameter is ignored.
-    pub fn custom_options(
-        &self,
-        params: &std::collections::BTreeMap<String, String>,
-    ) -> BTreeMap<String, String> {
-        let mut options: BTreeMap<String, String> = self
-            .presets
-            .balanced
-            .iter()
-            .map(|(k, v)| (k.clone(), v.to_ffmpeg()))
-            .collect();
-        for param in &self.params {
-            let Some(raw) = params.get(&param.key) else {
-                continue;
-            };
-            let value = match param.kind {
-                ParamType::Enum => param.values.iter().any(|v| v == raw).then(|| raw.clone()),
-                ParamType::Int => raw.parse::<i64>().ok().map(|v| v.to_string()),
-                ParamType::Float => raw.parse::<f64>().ok().map(|v| v.to_string()),
-                ParamType::Bool => match raw.as_str() {
-                    "1" | "true" | "on" => Some("1".into()),
-                    "0" | "false" | "off" => Some("0".into()),
-                    _ => None,
-                },
-                ParamType::String => Some(raw.clone()),
-            };
-            if let Some(value) = value {
-                options.insert(param.ffmpeg_option.clone(), value);
+    /// The rate mode of the custom options: the user's when the encoder has it, else
+    /// constant quality.
+    pub fn rate_mode(&self, params: &BTreeMap<String, String>) -> RateMode {
+        params
+            .get(rate_keys::MODE)
+            .and_then(|m| RateMode::from_setting(m))
+            .filter(|m| self.rate_control.modes.contains_key(m))
+            .unwrap_or(RateMode::Quality)
+    }
+
+    /// The modes the encoder offers, in the order of [`RateMode::ALL`].
+    pub fn rate_modes(&self) -> impl Iterator<Item = RateMode> + '_ {
+        RateMode::ALL
+            .into_iter()
+            .filter(|m| self.rate_control.modes.contains_key(m))
+    }
+
+    /// The FFmpeg options of the `custom` preset: the options of the chosen rate mode, then
+    /// every parameter with the user's value (by key) or its default. Values that do not parse
+    /// fall back to the default; numbers are clamped to their range.
+    pub fn custom_options(&self, params: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+        let number = |key: &str, default: i64, (lo, hi): (i64, i64)| {
+            params
+                .get(key)
+                .and_then(|v| v.parse::<f64>().ok())
+                .map_or(default, |v| v.round() as i64)
+                .clamp(lo, hi)
+        };
+        let scale = &self.rate_control.quality;
+        let mode = self.rate_mode(params);
+        let quality = number(rate_keys::QUALITY, scale.default, (scale.min, scale.max));
+        let bitrate = number(rate_keys::BITRATE, DEFAULT_BITRATE, BITRATE_RANGE);
+        let maxrate = number(rate_keys::MAXRATE, DEFAULT_MAXRATE, BITRATE_RANGE).max(bitrate);
+        let peak = if self.rate_control.uses(mode, "{maxrate}") {
+            maxrate
+        } else {
+            bitrate
+        };
+        let values = [
+            ("{quality}", quality),
+            ("{bitrate}", bitrate * 1000),
+            ("{maxrate}", maxrate * 1000),
+            ("{bufsize}", peak * 2000),
+        ];
+        let mut options = BTreeMap::new();
+        for (key, value) in self.rate_control.modes.get(&mode).into_iter().flatten() {
+            let mut value = value.to_ffmpeg();
+            for (placeholder, n) in values {
+                value = value.replace(placeholder, &n.to_string());
             }
+            options.insert(key.clone(), value);
+        }
+        for param in &self.params {
+            let default = param.default.to_ffmpeg();
+            let value = params
+                .get(&param.key)
+                .and_then(|raw| param.parse(raw))
+                .or_else(|| param.parse(&default))
+                .unwrap_or(default);
+            if param.auto.as_ref().is_some_and(|a| a.to_ffmpeg() == value) {
+                continue;
+            }
+            options.insert(param.ffmpeg_option.clone(), value);
         }
         options
     }
@@ -315,9 +439,34 @@ impl Registry {
             if e.hdr && !e.pixel_formats.iter().any(|p| p.depth >= 10) {
                 return bad(format!("`{}`: hdr needs a 10-bit format", e.id));
             }
+            let rc = &e.rate_control;
+            let q = &rc.quality;
+            if !(q.min <= q.default && q.default <= q.max) {
+                return bad(format!("`{}`: the quality default is out of range", e.id));
+            }
+            if !rc.modes.contains_key(&RateMode::Quality) {
+                return bad(format!("`{}`: no constant-quality mode", e.id));
+            }
+            for value in rc.modes.values().flat_map(|o| o.values()) {
+                if let OptionValue::Text(s) = value {
+                    let rest = PLACEHOLDERS.iter().fold(s.clone(), |s, p| s.replace(p, ""));
+                    if rest.contains('{') {
+                        return bad(format!("`{}`: unknown placeholder in `{s}`", e.id));
+                    }
+                }
+            }
             for p in &e.params {
                 if p.kind == ParamType::Enum && p.values.is_empty() {
                     return bad(format!("`{}`.{}: enum without values", e.id, p.key));
+                }
+                if p.key.starts_with("rc.") {
+                    return bad(format!(
+                        "`{}`.{}: `rc.` keys are the rate control's",
+                        e.id, p.key
+                    ));
+                }
+                if p.parse(&p.default.to_ffmpeg()).as_deref() != Some(&p.default.to_ffmpeg()) {
+                    return bad(format!("`{}`.{}: bad default", e.id, p.key));
                 }
                 if let (Some(lo), Some(hi)) = (p.min, p.max)
                     && lo > hi

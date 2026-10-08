@@ -82,10 +82,73 @@ fn every_encoder_has_four_presets_and_sane_params() {
         keys.sort();
         keys.dedup();
         assert_eq!(keys.len(), e.params.len(), "{}: duplicate param keys", e.id);
-        for p in &e.params {
-            assert!(p.label.starts_with("encoder.param."), "{}", e.id);
-        }
     }
+}
+
+fn custom(id: &str, params: &[(&str, &str)]) -> std::collections::BTreeMap<String, String> {
+    let params = params
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+    registry().get(id).unwrap().custom_options(&params)
+}
+
+#[test]
+fn the_custom_options_follow_the_rate_mode() {
+    // Constant quality: the quality alone, the defaults of the other parameters.
+    let o = custom("nvenc_h264", &[("rc.quality", "28")]);
+    assert_eq!(o["rc"], "vbr");
+    assert_eq!(o["cq"], "28");
+    assert_eq!(o["preset"], "p4");
+    assert!(!o.contains_key("b") && !o.contains_key("bf") && !o.contains_key("g"));
+    // VBR: no quality left over, the rates in bit/s, two seconds of buffer.
+    let o = custom(
+        "nvenc_h264",
+        &[
+            ("rc.mode", "vbr"),
+            ("rc.quality", "28"),
+            ("rc.bitrate", "8000"),
+            ("rc.maxrate", "12000"),
+        ],
+    );
+    assert!(!o.contains_key("cq"));
+    assert_eq!(
+        (o["b"].as_str(), o["maxrate"].as_str()),
+        ("8000000", "12000000")
+    );
+    assert_eq!(o["bufsize"], "24000000");
+    // CBR, and a maximum below the target is raised to it.
+    let o = custom("libx264", &[("rc.mode", "cbr"), ("rc.bitrate", "6000")]);
+    assert_eq!(
+        (o["b"].as_str(), o["maxrate"].as_str()),
+        ("6000000", "6000000")
+    );
+    assert!(!o.contains_key("crf"));
+    let o = custom(
+        "libx264",
+        &[
+            ("rc.mode", "vbr"),
+            ("rc.bitrate", "9000"),
+            ("rc.maxrate", "1000"),
+        ],
+    );
+    assert_eq!(o["maxrate"], "9000000");
+    // A mode the encoder lacks falls back to constant quality.
+    let o = custom("libsvtav1", &[("rc.mode", "cbr")]);
+    assert_eq!(o["crf"], "30");
+    // AMF quality sets every frame type; AV1 counts on 0-255.
+    let o = custom("amf_av1", &[("rc.quality", "300")]);
+    assert_eq!((o["rc"].as_str(), o["qp_b"].as_str()), ("cqp", "255"));
+    // Values out of range are clamped, unknown ones fall back to the default, `auto` is left out.
+    let o = custom(
+        "libx264",
+        &[("keyint", "120"), ("tune", "nope"), ("bframes", "99")],
+    );
+    assert_eq!(o["g"], "120");
+    assert_eq!(o["bf"], "16");
+    assert!(!o.contains_key("tune"));
+    let o = custom("amf_h264", &[("bframes", "2")]);
+    assert_eq!(o["bf"], "2");
 }
 
 #[test]

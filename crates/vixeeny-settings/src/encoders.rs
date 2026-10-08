@@ -6,7 +6,7 @@ use std::sync::LazyLock;
 
 use vixeeny_common::config::Video;
 use vixeeny_common::i18n::Lang;
-use vixeeny_encode::registry::{Chroma, Encoder, Family, Kind, ParamType, Registry, Vendor};
+use vixeeny_encode::registry::{Chroma, Encoder, Family, Kind, RateMode, Registry, Vendor};
 
 use crate::Env;
 
@@ -99,59 +99,131 @@ pub fn spec(id: &str) -> Option<&'static Encoder> {
 /// The label of an encoder option, by its registry key.
 pub fn param_label(key: &str, lang: Lang) -> String {
     let (en, fr) = match key {
-        "preset" => (
-            "Speed / efficiency preset",
-            "Préréglage vitesse / efficacité",
-        ),
+        "rc.mode" => ("Rate control", "Contrôle du débit"),
+        "rc.bitrate" => ("Bitrate (kbit/s)", "Débit (kbit/s)"),
+        "rc.maxrate" => ("Maximum bitrate (kbit/s)", "Débit maximal (kbit/s)"),
+        "preset" => ("Speed / quality preset", "Préréglage vitesse / qualité"),
         "tune" => ("Tuning", "Optimisation"),
-        "profile" => ("Profile", "Profil"),
-        "crf" => (
-            "Quality (CRF, lower = better)",
-            "Qualité (CRF, plus bas = meilleur)",
-        ),
-        "cq" => (
-            "Quality (CQ, lower = better)",
-            "Qualité (CQ, plus bas = meilleur)",
-        ),
-        "qp" => (
-            "Quantizer (QP, lower = better)",
-            "Quantificateur (QP, plus bas = meilleur)",
-        ),
-        "qp_i" => ("Quantizer of key frames", "Quantificateur des images clés"),
-        "qp_p" => (
-            "Quantizer of other frames",
-            "Quantificateur des autres images",
-        ),
-        "global_quality" => ("Quality (lower = better)", "Qualité (plus bas = meilleur)"),
-        "quality" => ("Quality level", "Niveau de qualité"),
-        "rc" | "rc_mode" => ("Rate control", "Contrôle du débit"),
+        "quality" => ("Quality preset", "Préréglage de qualité"),
         "usage" => ("Usage", "Usage"),
-        "multipass" => ("Multi-pass encoding", "Encodage multi-passes"),
+        "multipass" => ("Two-pass encoding", "Encodage en deux passes"),
         "keyint" => (
-            "Key frame interval (frames)",
-            "Intervalle d'images clés (images)",
+            "Key-frame interval (frames, 0 = auto)",
+            "Intervalle d'images clés (images, 0 = auto)",
         ),
         "bframes" => ("B-frames", "Images B"),
         "lookahead" => ("Look-ahead (frames)", "Anticipation (images)"),
-        "low_power" => ("Low-power mode", "Mode basse consommation"),
-        "spatial-aq" => ("Adaptive quantization", "Quantification adaptative"),
-        "realtime" => ("Real-time mode", "Mode temps réel"),
+        "spatial-aq" => (
+            "Spatial adaptive quantization",
+            "Quantification adaptative spatiale",
+        ),
+        "temporal-aq" => (
+            "Temporal adaptive quantization",
+            "Quantification adaptative temporelle",
+        ),
+        "vbaq" => (
+            "Variance-based adaptive quantization",
+            "Quantification adaptative (VBAQ)",
+        ),
+        "preanalysis" => ("Pre-analysis", "Pré-analyse"),
         "row-mt" => ("Multi-threaded rows", "Lignes multi-thread"),
-        "deadline" => ("Deadline", "Délai d'encodage"),
+        "deadline" => ("Quality / speed", "Qualité / vitesse"),
         "cpu-used" => (
-            "CPU effort (higher = faster)",
-            "Effort CPU (plus haut = plus rapide)",
+            "Speed (-8 = slowest, 8 = fastest)",
+            "Vitesse (-8 = la plus lente, 8 = la plus rapide)",
         ),
         other => return other.to_owned(),
     };
     if lang == Lang::Fr { fr } else { en }.to_owned()
 }
 
+/// The label of the constant-quality slider: `scale` is what the encoder calls it (CRF, CQ...).
+pub fn quality_label(scale: &str, lang: Lang) -> String {
+    if lang == Lang::Fr {
+        format!("Qualité ({scale}, plus bas = meilleur)")
+    } else {
+        format!("Quality ({scale}, lower = better)")
+    }
+}
+
+/// The label of a numbered preset (SVT-AV1).
+pub fn numbered_preset_label(min: i64, max: i64, lang: Lang) -> String {
+    if lang == Lang::Fr {
+        format!("Préréglage ({min} = le plus lent, {max} = le plus rapide)")
+    } else {
+        format!("Preset ({min} = slowest, {max} = fastest)")
+    }
+}
+
+/// The label of one value of an encoder option.
+pub fn value_label(key: &str, value: &str, lang: Lang) -> String {
+    let pair = match (key, value) {
+        (_, "auto") => ("Auto", "Auto"),
+        // NVENC: P1 to P7.
+        ("preset", "p1") => ("P1 (fastest)", "P1 (le plus rapide)"),
+        ("preset", "p4") => ("P4 (balanced)", "P4 (équilibré)"),
+        ("preset", "p7") => ("P7 (best quality)", "P7 (la meilleure qualité)"),
+        ("preset", p) if p.len() == 2 && p.starts_with('p') => return p.to_uppercase(),
+        // x264, x265, Quick Sync.
+        ("preset", "ultrafast") => ("Ultra fast", "Ultra rapide"),
+        ("preset", "superfast") => ("Super fast", "Super rapide"),
+        ("preset", "veryfast") => ("Very fast", "Très rapide"),
+        ("preset", "faster") => ("Faster", "Plus rapide"),
+        ("preset", "fast") => ("Fast", "Rapide"),
+        ("preset", "medium") => ("Medium", "Moyen"),
+        ("preset", "slow") => ("Slow", "Lent"),
+        ("preset", "slower") => ("Slower", "Plus lent"),
+        ("preset", "veryslow") => ("Very slow", "Très lent"),
+        ("preset", "placebo") => ("Placebo (slowest)", "Placebo (le plus lent)"),
+        ("tune", "hq") => ("High quality", "Haute qualité"),
+        ("tune", "ll") => ("Low latency", "Faible latence"),
+        ("tune", "ull") => ("Ultra-low latency", "Très faible latence"),
+        ("tune", "lossless") => ("Lossless", "Sans perte"),
+        ("tune", "film") => ("Film", "Film"),
+        ("tune", "animation") => ("Animation", "Animation"),
+        ("tune", "grain") => ("Grain", "Grain"),
+        ("tune", "stillimage") => ("Still image", "Image fixe"),
+        ("tune", "fastdecode") => ("Fast decoding", "Décodage rapide"),
+        ("tune", "zerolatency") => ("Zero latency", "Latence nulle"),
+        ("tune", "psnr") => ("PSNR", "PSNR"),
+        ("tune", "ssim") => ("SSIM", "SSIM"),
+        ("multipass", "disabled") => ("Off", "Désactivé"),
+        ("multipass", "qres") => (
+            "Quarter resolution (faster)",
+            "Quart de résolution (plus rapide)",
+        ),
+        ("multipass", "fullres") => (
+            "Full resolution (more precise)",
+            "Pleine résolution (plus précis)",
+        ),
+        ("usage", "transcoding") => ("Transcoding", "Transcodage"),
+        ("usage", "lowlatency") => ("Low latency", "Faible latence"),
+        ("usage", "ultralowlatency") => ("Ultra-low latency", "Très faible latence"),
+        ("quality", "speed") => ("Speed", "Vitesse"),
+        ("quality", "balanced") => ("Balanced", "Équilibré"),
+        ("quality", "quality") => ("Quality", "Qualité"),
+        ("deadline", "best") => ("Best (very slow)", "Meilleure (très lent)"),
+        ("deadline", "good") => ("Good", "Bonne"),
+        ("deadline", "realtime") => ("Real time", "Temps réel"),
+        _ => return value.to_owned(),
+    };
+    if lang == Lang::Fr { pair.1 } else { pair.0 }.to_owned()
+}
+
+/// The label of a rate mode.
+pub fn rate_mode_label(mode: RateMode, lang: Lang) -> &'static str {
+    let (en, fr) = match mode {
+        RateMode::Quality => ("Constant quality", "Qualité constante"),
+        RateMode::Vbr => ("Variable bitrate (VBR)", "Débit variable (VBR)"),
+        RateMode::Cbr => ("Constant bitrate (CBR)", "Débit constant (CBR)"),
+    };
+    if lang == Lang::Fr { fr } else { en }
+}
+
 /// `(min, max, step)` of a numeric registry parameter.
-pub fn param_range(kind: ParamType, min: Option<f64>, max: Option<f64>) -> (i64, i64, i64) {
+pub fn param_range(min: Option<f64>, max: Option<f64>) -> (i64, i64, i64) {
     let lo = min.unwrap_or(0.0) as i64;
     let hi = max.unwrap_or(100.0) as i64;
-    let step = if hi - lo >= 1000 { 10 } else { 1 };
-    let _ = kind;
+    let step = if hi - lo > 1000 { 10 } else { 1 };
     (lo, hi, step)
 }

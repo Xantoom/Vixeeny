@@ -855,13 +855,28 @@ mod tests {
         );
         c.video.preset = "custom".into();
         let video = rows(Section::Video, &env(), &c);
-        assert!(ids(&c).iter().any(|i| i == "p:crf"));
+        assert!(ids(&c).iter().any(|i| i == "p:rc.quality"));
         // A custom option is stored by its key and read back (the default until set).
-        let crf = row(&video, "p:crf");
+        let crf = row(&video, "p:rc.quality");
         assert_eq!(crf.value(&c), Value::Int(23));
         crf.apply(&mut c, Value::Int(18)).unwrap();
-        assert_eq!(c.video.params["crf"], "18");
+        assert_eq!(c.video.params["rc.quality"], "18");
         assert_eq!(crf.value(&c), Value::Int(18));
+        // Values are shown by name.
+        let Kind::Choice(presets) = &row(&video, "p:preset").kind else {
+            panic!("the preset is a list")
+        };
+        assert_eq!(presets[0].label, "Ultra fast");
+        // The fields follow the rate mode: a bitrate replaces the quality.
+        row(&video, "p:rc.mode")
+            .apply(&mut c, Value::Text("vbr".into()))
+            .unwrap();
+        let after = ids(&c);
+        assert!(!after.iter().any(|i| i == "p:rc.quality"));
+        assert!(after.iter().any(|i| i == "p:rc.bitrate"));
+        assert!(after.iter().any(|i| i == "p:rc.maxrate"));
+        c.video.params.insert("rc.mode".into(), "cbr".into());
+        assert!(!ids(&c).iter().any(|i| i == "p:rc.maxrate"));
     }
 
     #[test]

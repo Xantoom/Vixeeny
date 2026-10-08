@@ -8,7 +8,7 @@
 #   packaging/ffmpeg/build.sh <out.zip>
 #
 # Needs Docker. The image and the FFmpeg commit are pinned below; `.github/workflows/ffmpeg.yml`
-# runs this and publishes the zip, which `native/versions.toml` then points at.
+# runs this (cached until this script changes) and hands the zip to the Windows jobs.
 set -euo pipefail
 
 IMAGE="ghcr.io/btbn/ffmpeg-builds/win64-gpl-shared-9.0@sha256:e6738cf07c5607353552e8df94e6293604f2af5307898df7ae8c93e2e8e90645"

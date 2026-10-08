@@ -362,6 +362,13 @@ fn the_video_page_edits_the_current_profile_and_reports_problems() {
     w.invoke_row_chosen("encoder".into(), 1); // x264, x265, …
     w.invoke_row_chosen("container".into(), 2);
     assert!(!w.get_notice().is_empty(), "{}", w.get_notice());
+    // The custom options of x264 in VBR: a bitrate and a maximum instead of the quality.
+    w.invoke_row_chosen("container".into(), 0);
+    w.invoke_row_chosen("encoder".into(), 0);
+    w.invoke_row_chosen("preset".into(), 2); // best, light, custom
+    w.invoke_row_chosen("p:rc.mode".into(), 1); // quality, VBR, CBR
+    assert_eq!(panel.config().video.params["rc.mode"], "vbr");
+    settings_render_at(&panel, "9-settings-video-custom", (1040, 2200));
 }
 
 #[test]

@@ -59,10 +59,20 @@ fn the_probe_finds_the_software_encoders() {
 #[test]
 fn the_verifier_catches_wrong_data() {
     let text = include_str!("../codecs/registry.toml");
-    let wrong_option =
-        Registry::parse(&text.replacen("ffmpeg_option = \"crf\"", "ffmpeg_option = \"crfx\"", 1))
-            .unwrap();
+    let wrong_option = Registry::parse(&text.replacen(
+        "ffmpeg_option = \"rc-lookahead\"",
+        "ffmpeg_option = \"lookaheadx\"",
+        1,
+    ))
+    .unwrap();
     let found = verify(&wrong_option, false);
+    assert!(
+        found.iter().any(|m| m.what.contains("lookaheadx")),
+        "{found:?}"
+    );
+    let wrong_rate =
+        Registry::parse(&text.replacen("crf = \"{quality}\"", "crfx = \"{quality}\"", 1)).unwrap();
+    let found = verify(&wrong_rate, false);
     assert!(found.iter().any(|m| m.what.contains("crfx")), "{found:?}");
     let wrong_value =
         Registry::parse(&text.replacen("\"best\", \"good\"", "\"bestest\", \"good\"", 1)).unwrap();
