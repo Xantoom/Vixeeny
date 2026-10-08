@@ -322,7 +322,7 @@ component ShortcutLine inherits Rectangle {
     info := VerticalLayout {
         x: 16px;
         y: (parent.height - self.preferred-height) / 2;
-        width: root.width - 32px - 3 * root.key-w;
+        width: root.width - 44px - 3 * root.key-w;
         height: self.preferred-height;
         spacing: 2px;
         Text {
@@ -647,7 +647,7 @@ export component SettingsWindow inherits Window {
             if root.section == 6 : Rectangle {
                 width: parent.width;
                 height: parent.height;
-                property <length> key-w: max(140px, min(200px, (page.column - 272px) / 3));
+                property <length> key-w: max(150px, min(210px, (page.column - 220px) / 3));
                 ScrollArea {
                     width: parent.width - 8px;
                     height: parent.height;
