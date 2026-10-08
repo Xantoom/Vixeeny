@@ -242,8 +242,7 @@ pub enum Key {
     SetEffortHint,
     SetAvifSpeed,
     SetAvifSpeedHint,
-    UiColAction,
-    UiColShortcut,
+    UiNoShortcut,
 }
 
 impl Key {
@@ -478,8 +477,7 @@ impl Key {
         Self::SetEffortHint,
         Self::SetAvifSpeed,
         Self::SetAvifSpeedHint,
-        Self::UiColAction,
-        Self::UiColShortcut,
+        Self::UiNoShortcut,
     ];
 }
 
@@ -707,10 +705,12 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::SrcMic, Lang::Fr) => "Celui par défaut de Windows",
         (Key::SrcAbsent, Lang::En) => "not available right now",
         (Key::SrcAbsent, Lang::Fr) => "indisponible pour le moment",
-        (Key::UiPressKeys, Lang::En) => "Press the shortcut…",
-        (Key::UiPressKeys, Lang::Fr) => "Appuyez sur le raccourci…",
-        (Key::UiKeysHelp, Lang::En) => "Esc cancels, Backspace clears.",
-        (Key::UiKeysHelp, Lang::Fr) => "Échap annule, Retour arrière efface.",
+        (Key::UiPressKeys, Lang::En) => "Press keys…",
+        (Key::UiPressKeys, Lang::Fr) => "Appuyez…",
+        (Key::UiKeysHelp, Lang::En) => "Hold the keys, release to save. Esc leaves none.",
+        (Key::UiKeysHelp, Lang::Fr) => {
+            "Maintenez les touches, relâchez pour valider. Échap n'en met aucun."
+        }
         (Key::SetReplayStart, Lang::En) => "Turn on at startup",
         (Key::SetReplayStart, Lang::Fr) => "Activer au démarrage",
         (Key::SetReplayDuration, Lang::En) => "Duration (seconds)",
@@ -1009,10 +1009,8 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::SetAvifSpeedHint, Lang::Fr) => {
             "Plus haut : enregistrement plus rapide, fichiers plus gros."
         }
-        (Key::UiColAction, Lang::En) => "Action",
-        (Key::UiColAction, Lang::Fr) => "Action",
-        (Key::UiColShortcut, Lang::En) => "Shortcut",
-        (Key::UiColShortcut, Lang::Fr) => "Raccourci",
+        (Key::UiNoShortcut, Lang::En) => "None",
+        (Key::UiNoShortcut, Lang::Fr) => "Aucun",
     }
 }
 

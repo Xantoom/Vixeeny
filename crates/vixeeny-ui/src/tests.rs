@@ -222,7 +222,7 @@ fn shortcuts_are_edited_in_place_and_conflicts_are_explained() {
     let row = w.get_shortcuts().row_data(6).unwrap();
     assert!(row.error.contains("Save the replay"), "{}", row.error);
     assert_eq!(seen.borrow().len(), 1, "a refusal is not a change");
-    // Escape stops the recording without touching anything.
+    // Leaving the window stops the recording without touching anything.
     w.invoke_shortcut_record(6, 1);
     assert!(panel.captured(settings_panel::Captured::Cancel));
     assert!(
@@ -230,6 +230,47 @@ fn shortcuts_are_edited_in_place_and_conflicts_are_explained() {
         "nothing is recording any more"
     );
     assert_eq!(seen.borrow().len(), 1);
+    // The keys show while held, in the order pressed; letting go saves them.
+    w.invoke_shortcut_record(6, 1);
+    for code in ["ShiftLeft", "ControlRight", "ShiftRight", "F10"] {
+        assert!(panel.key(code, true));
+    }
+    let held: Vec<String> = w.get_recording_parts().iter().map(Into::into).collect();
+    assert_eq!(held, ["Shift", "Ctrl", "F10"]);
+    assert!(panel.key("F10", false));
+    assert_eq!(
+        panel.config().hotkeys.replay_toggle,
+        ["Ctrl+Shift+F9", "Shift+Ctrl+F10"]
+    );
+    assert!(
+        !panel.key("ShiftLeft", false),
+        "recorded: the keys are free again"
+    );
+    // Escape empties the slot.
+    w.invoke_shortcut_record(6, 0);
+    assert!(panel.key("Escape", true));
+    assert_eq!(panel.config().hotkeys.replay_toggle, ["Shift+Ctrl+F10"]);
+}
+
+#[test]
+fn a_chord_ends_at_the_first_key_let_go() {
+    use settings_panel::{Captured, Chord, ChordStep};
+    let mut chord = Chord::default();
+    chord.press("ControlLeft");
+    // Modifiers alone, let go: forgotten, still waiting.
+    assert_eq!(chord.release("ControlLeft"), ChordStep::Held(String::new()));
+    chord.press("AltLeft");
+    // Print Screen only reports going up.
+    assert_eq!(
+        chord.release("PrintScreen"),
+        ChordStep::Done(Captured::Combination("Alt+PrintScreen".into()))
+    );
+    chord.press("ShiftLeft");
+    chord.press("KeyR");
+    assert_eq!(
+        chord.release("ShiftLeft"),
+        ChordStep::Done(Captured::Combination("Shift+KeyR".into()))
+    );
 }
 
 #[test]

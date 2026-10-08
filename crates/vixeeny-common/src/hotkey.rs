@@ -119,12 +119,12 @@ impl Hotkey {
         let mut mods = Modifiers::default();
         let mut code = None;
         for token in text.split('+').map(str::trim) {
-            match token.to_ascii_lowercase().as_str() {
-                "ctrl" | "control" => mods.ctrl = true,
-                "alt" | "option" => mods.alt = true,
-                "shift" => mods.shift = true,
-                "win" | "meta" | "super" | "cmd" | "command" => mods.meta = true,
-                _ => {
+            match modifier_name(token) {
+                Some("Ctrl") => mods.ctrl = true,
+                Some("Alt") => mods.alt = true,
+                Some("Shift") => mods.shift = true,
+                Some(_) => mods.meta = true,
+                None => {
                     if code.is_some() || token.is_empty() {
                         return Err(HotkeyError::UnknownKey(text.to_owned()));
                     }
@@ -139,6 +139,42 @@ impl Hotkey {
             return Err(HotkeyError::NeedsModifier(code));
         }
         Ok(Self { mods, code })
+    }
+
+    /// Spells `self` keeping the order its modifiers were written in (`Shift+Ctrl+R` stays so,
+    /// as the user pressed them); `written` is the text that parsed into `self`.
+    pub fn in_order(&self, written: &str) -> String {
+        let mut out = String::new();
+        for token in written.split('+').map(str::trim) {
+            let Some(name) = modifier_name(token) else {
+                continue;
+            };
+            if !out.split('+').any(|p| p == name) {
+                out.push_str(name);
+                out.push('+');
+            }
+        }
+        out.push_str(self.key_name());
+        out
+    }
+
+    /// The key without its modifiers, as written (`R`, `5`, `F8`).
+    fn key_name(&self) -> &str {
+        self.code
+            .strip_prefix("Key")
+            .or_else(|| self.code.strip_prefix("Digit"))
+            .unwrap_or(&self.code)
+    }
+}
+
+/// The canonical name of a modifier as written (`control` → `Ctrl`), `None` for a key.
+fn modifier_name(token: &str) -> Option<&'static str> {
+    match token.to_ascii_lowercase().as_str() {
+        "ctrl" | "control" => Some("Ctrl"),
+        "alt" | "option" => Some("Alt"),
+        "shift" => Some("Shift"),
+        "win" | "meta" | "super" | "cmd" | "command" => Some("Win"),
+        _ => None,
     }
 }
 
@@ -155,12 +191,7 @@ impl fmt::Display for Hotkey {
                 write!(f, "{name}+")?;
             }
         }
-        let key = self
-            .code
-            .strip_prefix("Key")
-            .or_else(|| self.code.strip_prefix("Digit"))
-            .unwrap_or(&self.code);
-        f.write_str(key)
+        f.write_str(self.key_name())
     }
 }
 
@@ -259,6 +290,8 @@ mod tests {
         assert_eq!(p("super+ctrl+5").to_string(), "Ctrl+Win+5");
         assert_eq!(p("PrtSc"), p("PrintScreen"));
         assert_eq!(p("ctrl+f12").to_string(), "Ctrl+F12");
+        let pressed = "shift+Control+KeyR";
+        assert_eq!(p(pressed).in_order(pressed), "Shift+Ctrl+R");
         for s in ["Ctrl+Alt+PageDown", "Win+Space", "F5", "Ctrl+KeyQ"] {
             let h = p(s);
             assert_eq!(p(&h.to_string()), h);

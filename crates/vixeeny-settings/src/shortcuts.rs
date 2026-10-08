@@ -57,8 +57,8 @@ pub fn listed(config: &Config) -> Vec<(ActionId, [String; MAX_PER_ACTION])> {
         .collect()
 }
 
-/// Sets slot `slot` of `action` to `text` (empty clears it). The shortcut is written in its
-/// canonical form. Nothing changes when it is refused.
+/// Sets slot `slot` of `action` to `text` (empty clears it). The shortcut is written with its
+/// canonical names, its modifiers in the order given. Nothing changes when it is refused.
 pub fn set(config: &mut Config, action: ActionId, slot: usize, text: &str) -> Result<(), Refusal> {
     let mut slots = table(config)
         .into_iter()
@@ -87,7 +87,7 @@ pub fn set(config: &mut Config, action: ActionId, slot: usize, text: &str) -> Re
                 }
             }
         }
-        *target = hotkey.to_string();
+        *target = hotkey.in_order(text);
     }
     *list_mut(&mut config.hotkeys, action) = slots.into_iter().filter(|s| !s.is_empty()).collect();
     Ok(())
@@ -113,10 +113,10 @@ mod tests {
     }
 
     #[test]
-    fn a_shortcut_is_stored_in_canonical_form_and_can_be_cleared() {
+    fn a_shortcut_keeps_its_order_in_canonical_names_and_can_be_cleared() {
         let mut c = Config::default();
         set(&mut c, ActionId::ReplayToggle, 0, "shift + ctrl + f9").unwrap();
-        assert_eq!(c.hotkeys.replay_toggle, ["Ctrl+Shift+F9"]);
+        assert_eq!(c.hotkeys.replay_toggle, ["Shift+Ctrl+F9"]);
         set(&mut c, ActionId::ReplayToggle, 1, "Alt+F9").unwrap();
         assert_eq!(c.hotkeys.replay_toggle.len(), 2);
         set(&mut c, ActionId::ReplayToggle, 0, "").unwrap();

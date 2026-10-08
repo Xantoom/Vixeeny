@@ -77,8 +77,7 @@ export struct UiTexts {
     press-keys: string,
     keys-help: string,
     restart: string,
-    col-action: string,
-    col-shortcut: string,
+    no-shortcut: string,
 }
 
 component SettingLine inherits GroupRow {
@@ -273,102 +272,61 @@ component Keycap inherits Rectangle {
     }
 }
 
-// A shortcut of an action: its keys (a click records new ones, the cross removes it), or the
-// invitation to press keys while it is recorded.
-component KeyChip inherits Rectangle {
-    in property <[string]> parts;
-    in property <bool> recording: false;
-    in property <string> press-label;
-    in property <string> remove-label;
-    callback clicked();
-    callback cleared();
-
-    height: 32px;
-    preferred-width: line.preferred-width;
-    border-radius: Theme.radius;
-    border-width: 1px;
-    border-color: root.recording ? Theme.accent : (touch.has-hover ? Theme.control-stroke : transparent);
-    background: root.recording ? Theme.accent-soft : (touch.has-hover ? Theme.subtle-hover : transparent);
-    animate background, border-color { duration: Theme.t-fast; }
-    touch := TouchArea {
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
-    }
-    line := HorizontalLayout {
-        padding-left: 4px;
-        padding-right: root.recording ? 10px : 2px;
-        spacing: 4px;
-        alignment: start;
-        if root.recording : Text {
-            text: root.press-label;
-            color: Theme.accent;
-            font-size: 13px;
-            vertical-alignment: center;
-        }
-        if !root.recording : HorizontalLayout {
-            spacing: 4px;
-            for part in root.parts : Keycap {
-                y: (parent.height - self.height) / 2;
-                text: part;
-            }
-        }
-        if !root.recording : IconButton {
-            icon: Icons.dismiss;
-            label: root.remove-label;
-            size: 24px;
-            y: (parent.height - self.height) / 2;
-            tint: Theme.text-3;
-            clicked => { root.cleared(); }
-        }
-    }
-    accessible-role: button;
-}
-
-// A cell of the shortcuts table: a shortcut (a click records another, the cross removes it),
-// the invitation to press keys while it is recorded, or an empty slot to fill.
-component ShortcutCell inherits Rectangle {
+// A shortcut of an action, as a field: its keys (or "none"); a click records new ones, shown
+// as they are held; the cross empties it.
+component ShortcutField inherits Rectangle {
     in property <ShortcutKey> key;
     in property <bool> recording;
+    // The keys held while it records.
+    in property <[string]> held;
     in property <UiTexts> t;
     callback record();
     callback clear();
 
-    height: 36px;
-    property <bool> empty: root.key.text == "" && !root.recording;
-    if !root.empty : KeyChip {
-        x: 0px;
-        y: (parent.height - self.height) / 2;
-        width: min(self.preferred-width, parent.width);
-        parts: root.key.parts;
-        recording: root.recording;
-        press-label: root.t.press-keys;
-        remove-label: root.t.remove;
+    property <[string]> shown: root.recording ? root.held : root.key.parts;
+    property <bool> removable: root.key.text != "" && !root.recording;
+    height: 32px;
+    border-radius: Theme.radius;
+    border-width: 1px;
+    border-color: root.recording ? Theme.accent : Theme.control-stroke;
+    background: root.recording ? Theme.accent-soft
+        : (touch.has-hover ? Theme.control-hover : Theme.control);
+    clip: true;
+    animate background, border-color { duration: Theme.t-fast; }
+    touch := TouchArea {
+        mouse-cursor: pointer;
         clicked => { root.record(); }
-        cleared => { root.clear(); }
     }
-    if root.empty : Rectangle {
-        x: 0px;
-        y: (parent.height - self.height) / 2;
-        width: 32px;
-        height: 32px;
-        border-radius: Theme.radius;
-        background: add.pressed ? Theme.subtle-pressed : (add.has-hover ? Theme.subtle-hover : transparent);
-        animate background { duration: Theme.t-fast; }
-        Icon {
-            x: (parent.width - self.width) / 2;
+    HorizontalLayout {
+        x: 4px;
+        width: parent.width - (root.removable ? 32px : 8px);
+        spacing: 4px;
+        alignment: start;
+        for part in root.shown : Keycap {
             y: (parent.height - self.height) / 2;
-            data: Icons.add;
-            size: 14px;
-            tint: add.has-hover ? Theme.text : Theme.text-3;
-            animate tint { duration: Theme.t-fast; }
+            text: part;
         }
-        add := TouchArea {
-            mouse-cursor: pointer;
-            clicked => { root.record(); }
-        }
-        accessible-role: button;
-        accessible-label: root.t.add-shortcut;
     }
+    if root.shown.length == 0 : Text {
+        x: 10px;
+        width: parent.width - 20px;
+        text: root.recording ? root.t.press-keys : root.t.no-shortcut;
+        color: root.recording ? Theme.accent : Theme.text-3;
+        font-size: 13px;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    if root.removable : IconButton {
+        x: parent.width - self.width - 4px;
+        y: (parent.height - self.height) / 2;
+        icon: Icons.dismiss;
+        label: root.t.remove;
+        size: 24px;
+        tint: Theme.text-3;
+        clicked => { root.clear(); }
+    }
+    accessible-role: button;
+    accessible-label: root.key.text != "" ? root.key.text : root.t.add-shortcut;
 }
 
 // One action of the shortcuts table: its name (and what went wrong) on the left, its three
@@ -377,6 +335,7 @@ component ShortcutLine inherits Rectangle {
     in property <ShortcutRow> entry;
     in property <bool> recording-here;
     in property <int> recording-slot;
+    in property <[string]> held;
     in property <length> key-w;
     in property <UiTexts> t;
     callback record(int);
@@ -408,12 +367,13 @@ component ShortcutLine inherits Rectangle {
             wrap: word-wrap;
         }
     }
-    for key[k] in root.entry.keys : ShortcutCell {
+    for key[k] in root.entry.keys : ShortcutField {
         x: root.width - 16px - (3 - k) * root.key-w;
         y: (parent.height - self.height) / 2;
         width: root.key-w - 8px;
         key: key;
         recording: root.recording-here && root.recording-slot == key.slot;
+        held: root.held;
         t: root.t;
         record => { root.record(key.slot); }
         clear => { root.clear(key.slot); }
@@ -457,6 +417,8 @@ export component SettingsWindow inherits Window {
     // The shortcut being recorded (-1: none).
     in property <int> recording-row: -1;
     in property <int> recording-slot: -1;
+    // The keys held while it is recorded.
+    in property <[string]> recording-parts;
     in property <[LineItem]> lines;
     in property <string> extra;
     // Off in the tests, where no time passes: what animates is shown at its end at once.
@@ -710,37 +672,14 @@ export component SettingsWindow inherits Window {
             }
 
             // ---- shortcuts: a table, one row per action and a column per shortcut (three at
-            // most); the column titles stay above it
+            // most)
             if root.section == 6 : Rectangle {
                 width: parent.width;
                 height: parent.height;
                 property <length> key-w: max(140px, min(200px, (page.column - 272px) / 3));
-                Rectangle {
-                    x: 24px;
-                    y: 0px;
-                    width: page.column;
-                    height: 24px;
-                    Text {
-                        x: 16px;
-                        text: root.t.col-action;
-                        color: Theme.text-2;
-                        font-size: 12px;
-                        font-weight: 600;
-                        vertical-alignment: center;
-                    }
-                    for k in 3 : Text {
-                        x: parent.width - 16px - (3 - k) * key-w;
-                        text: root.t.col-shortcut + " " + (k + 1);
-                        color: Theme.text-2;
-                        font-size: 12px;
-                        font-weight: 600;
-                        vertical-alignment: center;
-                    }
-                }
                 ScrollArea {
-                    y: 30px;
                     width: parent.width - 8px;
-                    height: parent.height - self.y;
+                    height: parent.height;
                     VerticalLayout {
                         x: 24px;
                         width: page.column;
@@ -753,6 +692,7 @@ export component SettingsWindow inherits Window {
                                 entry: sc;
                                 recording-here: root.recording-row == i;
                                 recording-slot: root.recording-slot;
+                                held: root.recording-parts;
                                 key-w: key-w;
                                 t: root.t;
                                 record(slot) => { root.shortcut-record(i, slot); }

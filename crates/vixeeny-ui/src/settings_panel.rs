@@ -85,6 +85,72 @@ pub enum Captured {
     Combination(String),
 }
 
+/// The keys held while a shortcut is recorded: the modifiers in the order they went down, then
+/// the key. Letting go of a key ends the shortcut; Escape empties the slot.
+#[derive(Debug, Default)]
+pub struct Chord {
+    mods: Vec<&'static str>,
+    key: Option<String>,
+}
+
+/// What a key did to the shortcut being recorded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChordStep {
+    /// Still held: the keys so far, `Ctrl+Shift` or `Ctrl+Shift+KeyR`.
+    Held(String),
+    Done(Captured),
+}
+
+impl Chord {
+    /// A key (its `KeyboardEvent.code` name, `ControlLeft`, `KeyR`) went down.
+    pub fn press(&mut self, code: &str) -> ChordStep {
+        if code == "Escape" {
+            *self = Self::default();
+            return ChordStep::Done(Captured::Clear);
+        }
+        match modifier(code) {
+            Some(name) if !self.mods.contains(&name) => self.mods.push(name),
+            Some(_) => {}
+            None => self.key = Some(code.to_owned()),
+        }
+        ChordStep::Held(self.text())
+    }
+
+    /// A key went up: the shortcut is complete once it has a key. Letting go of modifiers alone
+    /// forgets them (a key that only reports its release, Print Screen, still counts).
+    pub fn release(&mut self, code: &str) -> ChordStep {
+        match modifier(code) {
+            Some(name) if self.key.is_none() => {
+                self.mods.retain(|m| *m != name);
+                return ChordStep::Held(self.text());
+            }
+            Some(_) => {}
+            None if self.key.is_none() => self.key = Some(code.to_owned()),
+            None => {}
+        }
+        let text = self.text();
+        *self = Self::default();
+        ChordStep::Done(Captured::Combination(text))
+    }
+
+    fn text(&self) -> String {
+        let mut parts: Vec<&str> = self.mods.clone();
+        parts.extend(self.key.as_deref());
+        parts.join("+")
+    }
+}
+
+/// The modifier a key is, both sides alike.
+fn modifier(code: &str) -> Option<&'static str> {
+    match code {
+        "ControlLeft" | "ControlRight" => Some("Ctrl"),
+        "AltLeft" | "AltRight" => Some("Alt"),
+        "ShiftLeft" | "ShiftRight" => Some("Shift"),
+        "SuperLeft" | "SuperRight" | "MetaLeft" | "MetaRight" => Some("Win"),
+        _ => None,
+    }
+}
+
 type ChangeFn = Box<dyn Fn(&Config)>;
 type BrowseFn = Box<dyn Fn(&str) -> Option<String>>;
 type PageFn = Box<dyn Fn(Section, &str, &str)>;
@@ -104,6 +170,7 @@ struct State {
     display: Cell<Display>,
     /// The shortcut being recorded: `(row, slot)`.
     recording: Cell<Option<(usize, usize)>>,
+    chord: RefCell<Chord>,
     on_recording: RefCell<Box<dyn Fn(bool)>>,
     on_change: RefCell<ChangeFn>,
     on_browse: RefCell<BrowseFn>,
@@ -181,10 +248,9 @@ fn ui_texts(lang: Lang) -> UiTexts {
         add_shortcut: t(Key::UiAddShortcut),
         no_programs: t(Key::SrcNoPrograms),
         press_keys: t(Key::UiPressKeys),
+        no_shortcut: t(Key::UiNoShortcut),
         keys_help: t(Key::UiKeysHelp),
         restart: t(Key::UpdateRestart),
-        col_action: t(Key::UiColAction),
-        col_shortcut: t(Key::UiColShortcut),
     }
 }
 
@@ -518,6 +584,7 @@ impl SettingsPanel {
             audio_source: RefCell::default(),
             display: Cell::default(),
             recording: Cell::new(None),
+            chord: RefCell::default(),
             on_recording: RefCell::new(Box::new(|_| {})),
             on_change: RefCell::new(Box::new(|_| {})),
             on_browse: RefCell::new(Box::new(|_| None)),
@@ -814,6 +881,8 @@ impl SettingsPanel {
     /// Starts (or stops, with `None`) recording the shortcut of `(row, slot)`.
     fn record(&self, target: Option<(usize, usize)>) {
         let was = self.state.recording.replace(target).is_some();
+        *self.state.chord.borrow_mut() = Chord::default();
+        self.window.set_recording_parts(strings(Vec::new()));
         self.window
             .set_recording_row(target.map_or(-1, |(row, _)| row as i32));
         self.window
@@ -823,8 +892,8 @@ impl SettingsPanel {
         }
     }
 
-    /// What the user pressed while a shortcut is being recorded (`Some(text)`: the combination,
-    /// empty to clear). Returns whether the key was consumed.
+    /// What the user pressed while a shortcut is being recorded (the combination, or the slot
+    /// emptied). Returns whether a shortcut was being recorded.
     pub fn captured(&self, pressed: Captured) -> bool {
         let Some((row, slot)) = self.state.recording.get() else {
             return false;
@@ -838,61 +907,59 @@ impl SettingsPanel {
         true
     }
 
+    /// A key went down (`down`) or up while a shortcut may be recorded; `code` is its
+    /// `KeyboardEvent.code` name. Returns whether the key was taken.
+    pub fn key(&self, code: &str, down: bool) -> bool {
+        if self.state.recording.get().is_none() {
+            return false;
+        }
+        let step = {
+            let mut chord = self.state.chord.borrow_mut();
+            if down {
+                chord.press(code)
+            } else {
+                chord.release(code)
+            }
+        };
+        match step {
+            ChordStep::Held(text) => {
+                let names = key_names(&text, self.state.lang());
+                self.window.set_recording_parts(strings(names));
+            }
+            ChordStep::Done(pressed) => {
+                self.captured(pressed);
+            }
+        }
+        true
+    }
+
     /// Hooks the keyboard of the window so that a recorded shortcut is read from the keys
     /// themselves. Needs the real (winit) backend.
     #[cfg(feature = "desktop")]
     pub fn capture_keys(&self) {
         use slint::winit_030::winit::event::{ElementState, WindowEvent};
-        use slint::winit_030::winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
+        use slint::winit_030::winit::keyboard::PhysicalKey;
         use slint::winit_030::{EventResult, WinitWindowAccessor};
         let (weak, state) = (self.window.as_weak(), self.state.clone());
-        let modifiers = Rc::new(Cell::new(ModifiersState::empty()));
         self.window.window().on_winit_window_event(move |_, event| {
+            let panel = || {
+                weak.upgrade().map(|window| SettingsPanel {
+                    window,
+                    state: state.clone(),
+                })
+            };
             match event {
-                WindowEvent::ModifiersChanged(m) => modifiers.set(m.state()),
-                WindowEvent::KeyboardInput { event, .. }
-                    if state.recording.get().is_some()
-                        && event.state == ElementState::Pressed
-                        && !event.repeat =>
-                {
-                    let PhysicalKey::Code(code) = event.physical_key else {
-                        return EventResult::PreventDefault;
-                    };
-                    let m = modifiers.get();
-                    let pressed = match code {
-                        KeyCode::Escape => Some(Captured::Cancel),
-                        KeyCode::Backspace if m.is_empty() => Some(Captured::Clear),
-                        // A modifier alone is not a shortcut: wait for the key.
-                        KeyCode::ControlLeft
-                        | KeyCode::ControlRight
-                        | KeyCode::ShiftLeft
-                        | KeyCode::ShiftRight
-                        | KeyCode::AltLeft
-                        | KeyCode::AltRight
-                        | KeyCode::SuperLeft
-                        | KeyCode::SuperRight => None,
-                        other => {
-                            let mut text = String::new();
-                            for (on, name) in [
-                                (m.control_key(), "Ctrl+"),
-                                (m.alt_key(), "Alt+"),
-                                (m.shift_key(), "Shift+"),
-                                (m.super_key(), "Win+"),
-                            ] {
-                                if on {
-                                    text.push_str(name);
-                                }
-                            }
-                            text.push_str(&format!("{other:?}"));
-                            Some(Captured::Combination(text))
-                        }
-                    };
-                    if let (Some(pressed), Some(window)) = (pressed, weak.upgrade()) {
-                        let panel = SettingsPanel {
-                            window,
-                            state: state.clone(),
-                        };
-                        panel.captured(pressed);
+                // Elsewhere, the keys go to another program: the recording stops.
+                WindowEvent::Focused(false) => {
+                    if let Some(p) = panel() {
+                        p.captured(Captured::Cancel);
+                    }
+                }
+                WindowEvent::KeyboardInput { event, .. } if state.recording.get().is_some() => {
+                    if let (PhysicalKey::Code(code), false, Some(p)) =
+                        (event.physical_key, event.repeat, panel())
+                    {
+                        p.key(&format!("{code:?}"), event.state == ElementState::Pressed);
                     }
                     return EventResult::PreventDefault;
                 }
