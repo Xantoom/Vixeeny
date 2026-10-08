@@ -68,7 +68,7 @@ jobs:
         run: |
           $env:PKG_CONFIG_PATH = "${{ github.workspace }}\native\build\work\prefix\lib\pkgconfig"
           cargo build --release -p vixeeny-daemon -p xtask
-          cargo build --release -p vixeeny-app --features "ffmpeg native-codecs"
+          cargo build --release -p vixeeny-app --features native-codecs
       - name: Package (stage, update archive, portable archive)
         shell: pwsh
         run: cargo xtask dist --out dist

@@ -2,8 +2,7 @@
 //! M1 demo: every software video encoder × every allowed container (plan 13.2) encodes
 //! 100 synthetic frames; every audio encoder × allowed container encodes 1 s of sine.
 //! Each output is demuxed again and its packet count / codec checked.
-//! Needs the native build: `cargo xtask build-native`, then `--features ffmpeg-next`.
-#![cfg(feature = "ffmpeg-next")]
+//! Needs the native build: `cargo xtask build-native ffmpeg`.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::path::PathBuf;

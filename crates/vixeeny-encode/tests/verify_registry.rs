@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! `cargo xtask verify-registry`: the registry against the real encoders of the linked FFmpeg
 //! (plan 6.1), and the probe against the software encoders (CA-REC-6 for what runs everywhere).
-//! Needs the native build and `--features ffmpeg-next`.
-#![cfg(feature = "ffmpeg-next")]
+//! Needs the native build: `cargo xtask build-native ffmpeg`.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use vixeeny_encode::ffmpeg_probe::{FfmpegProber, verify};

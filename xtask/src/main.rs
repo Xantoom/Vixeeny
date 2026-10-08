@@ -36,8 +36,6 @@ fn verify_registry() -> Result<()> {
         "test",
         "-p",
         "vixeeny-encode",
-        "--features",
-        "ffmpeg-next",
         "--test",
         "verify_registry",
         "--",

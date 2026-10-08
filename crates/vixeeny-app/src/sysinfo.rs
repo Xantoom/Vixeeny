@@ -73,13 +73,8 @@ pub fn collect(config: &Config, probe: Option<&vixeeny_encode::probe::ProbeResul
         }
         .to_owned(),
     ];
-    for (on, name) in [
-        (cfg!(feature = "ffmpeg"), "ffmpeg"),
-        (cfg!(feature = "native-codecs"), "native-codecs"),
-    ] {
-        if on {
-            build.push(name.to_owned());
-        }
+    if cfg!(feature = "native-codecs") {
+        build.push("native-codecs".to_owned());
     }
     let monitors = vixeeny_platform::monitors()
         .unwrap_or_default()

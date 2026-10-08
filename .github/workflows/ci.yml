@@ -15,6 +15,8 @@ concurrency:
 jobs:
   check:
     runs-on: windows-latest
+    env:
+      FFMPEG_DIR: ${{ github.workspace }}\native\build\work\ffmpeg-prebuilt
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -22,6 +24,13 @@ jobs:
           toolchain: 1.98.1
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - uses: ilammy/msvc-dev-cmd@v1
+      # The prebuilt FFmpeg (checked by SHA-256): every build links it, and the tests need its DLLs.
+      - name: FFmpeg
+        shell: pwsh
+        run: |
+          cargo xtask build-native ffmpeg
+          "$env:FFMPEG_DIR\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
       - run: cargo fmt --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
@@ -75,14 +84,10 @@ jobs:
         with:
           path: native/build/work
           key: native-windows-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}
-      - name: Software encode matrix
-        run: cargo test -p vixeeny-encode --features ffmpeg-next --test software_encode --test recorder
-      - name: Registry against FFmpeg (every encoder must exist and expose the declared options)
-        run: cargo test -p vixeeny-encode --features ffmpeg-next --test verify_registry -- --nocapture
-      - name: The app with recording and image codecs (clippy)
+      - name: The app with the image codecs (clippy)
         env:
           PKG_CONFIG_PATH: ${{ github.workspace }}\native\build\work\prefix\lib\pkgconfig
-        run: cargo clippy -p vixeeny-app -p vixeeny-capture --features vixeeny-app/ffmpeg,vixeeny-app/native-codecs --all-targets -- -D warnings
+        run: cargo clippy -p vixeeny-app --features native-codecs --all-targets -- -D warnings
       - name: Image codecs (AVIF, JPEG XL)
         env:
           PKG_CONFIG_PATH: ${{ github.workspace }}\native\build\work\prefix\lib\pkgconfig

@@ -5,23 +5,12 @@ use std::path::Path;
 
 const VIDEO_EXTENSIONS: [&str; 3] = ["mp4", "mkv", "webm"];
 
-#[cfg(feature = "ffmpeg")]
-fn video_thumbnail(path: &Path, max_side: u32) -> Option<(u32, u32, Vec<u8>)> {
-    vixeeny_encode::thumbnail::video_thumbnail(path, max_side)
-}
-
-/// Without FFmpeg a video has no picture: the notification has none.
-#[cfg(not(feature = "ffmpeg"))]
-fn video_thumbnail(_: &Path, _: u32) -> Option<(u32, u32, Vec<u8>)> {
-    None
-}
-
-/// A thumbnail of an image file, at most `max_side` pixels on its long side: RGBA.
-/// `None` for files that cannot be decoded (and for videos in a build without FFmpeg).
+/// A thumbnail of a capture, at most `max_side` pixels on its long side: RGBA. `None` for files
+/// that cannot be decoded.
 pub fn thumbnail(path: &Path, max_side: u32) -> Option<(u32, u32, Vec<u8>)> {
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
     if VIDEO_EXTENSIONS.contains(&ext.as_str()) {
-        return video_thumbnail(path, max_side);
+        return vixeeny_encode::thumbnail::video_thumbnail(path, max_side);
     }
     let bytes = std::fs::read(path).ok()?;
     let img = vixeeny_image::decode(&bytes).ok()?;

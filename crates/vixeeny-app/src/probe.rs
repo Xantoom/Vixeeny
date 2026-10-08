@@ -36,7 +36,6 @@ pub fn adapters() -> Vec<Adapter> {
 }
 
 /// The child process: probes and prints the result on stdout.
-#[cfg(feature = "ffmpeg")]
 pub fn child() -> anyhow::Result<()> {
     use vixeeny_encode::ffmpeg_probe::FfmpegProber;
     let registry = Registry::builtin()?;
@@ -44,12 +43,6 @@ pub fn child() -> anyhow::Result<()> {
     let result = vixeeny_encode::probe::probe(&registry, &prober, env!("CARGO_PKG_VERSION"));
     print!("{}", vixeeny_encode::probe::to_toml(&result)?);
     Ok(())
-}
-
-#[cfg(not(feature = "ffmpeg"))]
-pub fn child() -> anyhow::Result<()> {
-    let _ = Registry::builtin();
-    anyhow::bail!("this build has no FFmpeg (build with `--features ffmpeg`)")
 }
 
 /// The probe result: cached while the GPUs and drivers are the same, else a fresh child run.

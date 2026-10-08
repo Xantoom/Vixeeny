@@ -8,11 +8,9 @@
 use std::sync::mpsc::{RecvTimeoutError, channel};
 use std::time::Duration;
 
-#[cfg(feature = "ffmpeg")]
 mod audio_rig;
 mod clipboard;
 mod probe;
-#[cfg(feature = "ffmpeg")]
 mod record;
 mod region;
 mod scroll;
@@ -279,38 +277,21 @@ fn overlay(config: &Config, recording: &Recording) -> Option<ActionId> {
 /// The recording started by `RecordToggle`, if any (Windows with FFmpeg only).
 #[derive(Default)]
 struct Recording {
-    #[cfg(feature = "ffmpeg")]
     handle: Option<record::Handle>,
     /// The replay buffer (`ReplayToggle`), which runs alongside a recording.
-    #[cfg(feature = "ffmpeg")]
     replay: Option<record::Handle>,
 }
 
 impl Recording {
     /// `(recording, replay buffer)` is running.
-    #[cfg(feature = "ffmpeg")]
     fn flags(&self) -> (bool, bool) {
         (self.handle.is_some(), self.replay.is_some())
     }
 
-    #[cfg(not(feature = "ffmpeg"))]
-    #[allow(clippy::unused_self, dead_code)]
-    fn flags(&self) -> (bool, bool) {
-        (false, false)
-    }
-
-    #[cfg(feature = "ffmpeg")]
     fn active(&self) -> bool {
         self.handle.is_some() || self.replay.is_some()
     }
 
-    #[cfg(not(feature = "ffmpeg"))]
-    #[allow(clippy::unused_self)]
-    fn active(&self) -> bool {
-        false
-    }
-
-    #[cfg(feature = "ffmpeg")]
     fn handle(&mut self, action: ActionId, config: &Config) {
         match action {
             ActionId::ReplayToggle => {
@@ -351,14 +332,7 @@ impl Recording {
         }
     }
 
-    #[cfg(not(feature = "ffmpeg"))]
-    #[allow(clippy::unused_self)]
-    fn handle(&mut self, action: ActionId, _: &Config) {
-        tracing::info!("action {action:?}: recording needs Windows and the `ffmpeg` feature");
-    }
-
     /// Tells the daemon (tray icon) when the state changed, and forgets a finished recording.
-    #[cfg(feature = "ffmpeg")]
     fn report(&mut self, send: &mut impl std::io::Write) -> anyhow::Result<()> {
         let Some(handle) = self.handle.as_mut() else {
             return Ok(());
@@ -375,12 +349,6 @@ impl Recording {
         if finished {
             self.handle = None;
         }
-        Ok(())
-    }
-
-    #[cfg(not(feature = "ffmpeg"))]
-    #[allow(clippy::unused_self)]
-    fn report(&mut self, _: &mut impl std::io::Write) -> anyhow::Result<()> {
         Ok(())
     }
 }

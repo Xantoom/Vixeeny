@@ -2,8 +2,6 @@
 //! The pure parts of the recording widget: where it goes and how the two processes talk.
 //! (The widget is a process of its own, `vixeeny-app --widget …`, so the action loop of the app
 //! keeps answering the daemon while it is on screen.)
-#![cfg_attr(not(feature = "ffmpeg"), allow(dead_code))]
-
 /// The window's size at 96 DPI, in pixels: the bar (196 × 40) and 10 px around it for its
 /// shadow.
 pub const WIDTH: u32 = 216;

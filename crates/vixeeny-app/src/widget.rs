@@ -4,8 +4,6 @@
 //! the app's action loop stays free while the pill is on screen. The widget window is excluded
 //! from every screen capture (CA-REC-5) and never takes the focus.
 
-#![cfg_attr(not(feature = "ffmpeg"), allow(dead_code))]
-
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::time::Duration;

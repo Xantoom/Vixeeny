@@ -2,7 +2,7 @@
 //! Hardware probing (plan 6.3). For every hardware encoder and every GPU of its vendor, a trial
 //! session is opened for each declared pixel format (256×256, then 3840×2160, with and without
 //! HDR). Only what succeeds is offered. The work is done by a [`Prober`], so it can be tested
-//! with fake adapters; the real one lives behind the `ffmpeg-next` feature.
+//! with fake adapters; the real one is `ffmpeg_probe`.
 //!
 //! The probe runs in a child process (`vixeeny-app --probe`, see [`run_child`]) so that a driver
 //! crash cannot take the app down; its result is cached in `hw_cache.toml`.

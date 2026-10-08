@@ -10,24 +10,15 @@ pub mod probe;
 pub mod registry;
 pub mod validate;
 
-#[cfg(feature = "ffmpeg-next")]
 pub mod audio;
-#[cfg(feature = "ffmpeg-next")]
 pub mod denoise;
-#[cfg(feature = "ffmpeg-next")]
 pub mod ffmpeg_probe;
-#[cfg(feature = "ffmpeg-next")]
 pub mod gpu;
-#[cfg(feature = "ffmpeg-next")]
-#[cfg(feature = "ffmpeg-next")]
 pub mod recorder;
-#[cfg(feature = "ffmpeg-next")]
 pub mod replay;
-#[cfg(feature = "ffmpeg-next")]
 pub mod thumbnail;
 
 /// FFmpeg bindings, built against the pinned prebuilt FFmpeg of `native/versions.toml`.
-#[cfg(feature = "ffmpeg-next")]
 pub use ffmpeg_next as ffmpeg;
 
 /// Crate name, used by the M0 smoke test.

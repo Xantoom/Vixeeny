@@ -8,21 +8,25 @@ and make sure the checks below pass.
 On Windows, with the MSVC toolchain:
 
 ```
+cargo xtask build-native ffmpeg
 cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
+
+Every build links FFmpeg: `cargo xtask build-native ffmpeg` downloads the pinned prebuilt one
+(checked by SHA-256). Set `FFMPEG_DIR=native\build\work\ffmpeg-prebuilt` and put its `bin`
+folder in `PATH` so the tests find the DLLs.
 
 Clippy runs with warnings as errors (the lints are in the workspace `Cargo.toml`). Vixeeny is a
 Windows program; from Linux or WSL the workspace can be checked and its tests run with
 [`cargo-xwin`](https://github.com/rust-cross/cargo-xwin) (`cargo xwin clippy --target
 x86_64-pc-windows-msvc …`).
 
-Release builds also need the pinned native libraries: `cargo xtask build-native` from a Visual
-Studio developer prompt (it downloads the prebuilt FFmpeg and builds SVT-AV1, dav1d and the image
-libraries; see `native/versions.toml`), then set `FFMPEG_DIR=native\build\work\ffmpeg-prebuilt`
-and `PKG_CONFIG_PATH=native\build\work\prefix\lib\pkgconfig` and build `vixeeny-app` with
-`--features "ffmpeg native-codecs"`. `cargo xtask dist` gathers the release files.
+Release builds also need the image libraries: `cargo xtask build-native` from a Visual Studio
+developer prompt (it builds SVT-AV1, dav1d and the image libraries; see `native/versions.toml`),
+then set `PKG_CONFIG_PATH=native\build\work\prefix\lib\pkgconfig` and build `vixeeny-app`
+with `--features native-codecs`. `cargo xtask dist` gathers the release files.
 
 The UI tests render every window without a display; set `VIXEENY_SCREENSHOTS=<folder>` to keep
 the images (`cargo test -p vixeeny-ui`).

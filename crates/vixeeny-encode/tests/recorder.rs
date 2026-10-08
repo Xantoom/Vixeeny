@@ -2,8 +2,7 @@
 //! The recording pipeline end to end with synthetic frames and a simulated clock:
 //! CA-REC-2 (crash-safe hybrid MP4), CA-REC-3 (pause), CA-REC-6 (every software encoder × every
 //! allowed container gives a readable file), constant frame rate, scaling, splitting.
-//! Needs the native build and `--features ffmpeg-next`.
-#![cfg(feature = "ffmpeg-next")]
+//! Needs the native build: `cargo xtask build-native ffmpeg`.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::path::{Path, PathBuf};

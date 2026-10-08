@@ -27,8 +27,6 @@ rfd = { version = "0.17.2", default-features = false }
 png.workspace = true
 
 [features]
-# The FFmpeg-backed hardware probe (`--probe`); needs the native FFmpeg build.
-ffmpeg = ["vixeeny-encode/ffmpeg-next"]
 # AVIF and JPEG XL output; needs the natively built libraries (see vixeeny-image).
 native-codecs = ["vixeeny-image/native-codecs"]
 
