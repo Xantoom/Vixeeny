@@ -235,7 +235,7 @@ fn shortcuts_are_edited_in_place_and_conflicts_are_explained() {
     for code in ["ShiftLeft", "ControlRight", "ShiftRight", "F10"] {
         assert!(panel.key(code, true));
     }
-    assert_eq!(w.get_recording_keys(), "Shift + Ctrl + F10");
+    assert_eq!(w.get_recording_keys(), "SHIFT + CTRL + F10");
     assert!(panel.key("F10", false));
     assert_eq!(
         panel.config().hotkeys.replay_toggle,

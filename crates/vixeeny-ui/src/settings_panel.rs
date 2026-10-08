@@ -832,7 +832,7 @@ impl SettingsPanel {
                     .enumerate()
                     .map(|(slot, text)| ShortcutKey {
                         text: text.as_str().into(),
-                        shown: key_names(text, lang).join(" + ").into(),
+                        shown: shortcut_label(text, lang).into(),
                         slot: slot as i32,
                     })
                     .collect();
@@ -923,8 +923,8 @@ impl SettingsPanel {
         };
         match step {
             ChordStep::Held(text) => {
-                let names = key_names(&text, self.state.lang());
-                self.window.set_recording_keys(names.join(" + ").into());
+                let label = shortcut_label(&text, self.state.lang());
+                self.window.set_recording_keys(label.into());
             }
             ChordStep::Done(pressed) => {
                 self.captured(pressed);
@@ -1120,6 +1120,11 @@ impl SettingsPanel {
             }
         });
     }
+}
+
+/// A shortcut as the field shows it: `Ctrl+Shift+KeyR` → `CTRL + SHIFT + R`.
+pub fn shortcut_label(text: &str, lang: Lang) -> String {
+    key_names(text, lang).join(" + ").to_uppercase()
 }
 
 /// The keys of a shortcut as the user reads them: `Ctrl+Shift+KeyR` → Ctrl, Shift, R.
