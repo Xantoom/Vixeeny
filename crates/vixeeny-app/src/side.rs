@@ -6,8 +6,9 @@ use anyhow::Context;
 use vixeeny_common::config::Config;
 use vixeeny_common::i18n::{Key, Lang, tr};
 use vixeeny_common::ipc::ActionId;
-use vixeeny_ui::side_panel::{
-    Choice, Edge, SidePanel, SideState, SideTexts, dark_theme, entries, panel_geometry,
+use vixeeny_overlay::dark_theme;
+use vixeeny_overlay::side::{
+    Choice, Edge, SidePanel, SideState, SideTexts, entries, panel_geometry,
 };
 
 /// What the user did in the overlay.
@@ -49,8 +50,6 @@ fn texts(lang: Lang) -> SideTexts {
         replay_stop: tr(Key::OvlReplayStop, lang).into(),
         replay_save: tr(Key::OvlReplaySave, lang).into(),
         settings: tr(Key::OvlSettings, lang).into(),
-        pin: tr(Key::OvlPin, lang).into(),
-        close: tr(Key::OvlClose, lang).into(),
     }
 }
 
@@ -79,12 +78,10 @@ pub fn run(
         ),
         edge: Edge::from_setting(&config.overlay.edge),
         animate: vixeeny_platform::animations_enabled(),
-        backdrop: false,
         pinned,
     };
     let texts = texts(lang);
-    let panel = SidePanel::new(&texts, &state).map_err(|e| anyhow::anyhow!("{e}"))?;
-    let (gx, gy, gw, gh) = panel_geometry(
+    let geometry = panel_geometry(
         state.edge,
         (
             monitor.rect.x,
@@ -95,32 +92,19 @@ pub fn run(
         monitor.dpi,
         &entries(&texts, &state),
     );
-    panel.set_geometry(gx, gy, gw, gh);
+    let panel = SidePanel::new(&texts, &state, geometry, monitor.dpi)?;
 
-    // The blurred Windows 11 backdrop needs the native window, which exists once it is shown:
-    // the strip is shown first, then dressed (a failure just leaves the opaque fill).
     // A click elsewhere closes it. Losing the focus says so only when Windows let the strip
     // take it, which it does not always do for a window opened by a shortcut: the clicks are
-    // watched directly.
+    // watched directly. The strip closes on the next turn of its loop, not inside the hook.
     let dismiss = panel.dismisser();
     let mut outside = None;
-    let choice = panel
-        // No blurred backdrop: it would cover the whole window, the room for the labels too.
-        .run_with(|handle| {
-            let dismiss = std::rc::Rc::new(dismiss);
-            outside = vixeeny_platform::on_click_outside(
-                vixeeny_platform::WindowId(handle),
-                Box::new(move || {
-                    // Not from inside the hook: the strip closes on the next turn of the loop.
-                    let dismiss = dismiss.clone();
-                    vixeeny_ui::slint::Timer::single_shot(std::time::Duration::ZERO, move || {
-                        dismiss()
-                    });
-                }),
-            );
-            false
-        })
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let choice = panel.run_with(|handle| {
+        outside = vixeeny_platform::on_click_outside(
+            vixeeny_platform::WindowId(handle),
+            Box::new(dismiss),
+        );
+    })?;
     drop(outside);
     Ok(Outcome {
         action: choice.map(action_of),

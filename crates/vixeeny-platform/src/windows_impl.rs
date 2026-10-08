@@ -13,8 +13,8 @@ use windows::Win32::Foundation::{
     CloseHandle, HANDLE, HWND, LPARAM, LRESULT, POINT, RECT, TRUE, WPARAM,
 };
 use windows::Win32::Graphics::Dwm::{
-    DWMWA_CLOAK, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DWMWA_TRANSITIONS_FORCEDISABLED,
-    DWMWINDOWATTRIBUTE, DwmGetWindowAttribute, DwmSetWindowAttribute,
+    DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DWMWINDOWATTRIBUTE, DwmGetWindowAttribute,
+    DwmSetWindowAttribute,
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
 use windows::Win32::Graphics::Dxgi::{
@@ -25,19 +25,16 @@ use windows::Win32::Graphics::Gdi::{
     HDC, HMONITOR, MONITORINFO, MONITORINFOEXW,
 };
 use windows::Win32::System::Threading::{
-    GetCurrentThreadId, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
-    QueryFullProcessImageNameW,
+    OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
 };
 use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForMonitor, MDT_EFFECTIVE_DPI,
     SetProcessDpiAwarenessContext,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CWPSTRUCT, CallNextHookEx, EnumWindows, GWL_EXSTYLE, GetCursorPos, GetForegroundWindow,
-    GetWindowLongW, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, HHOOK,
-    IsWindowVisible, SetWindowDisplayAffinity, SetWindowLongW, SetWindowsHookExW,
-    UnhookWindowsHookEx, WDA_EXCLUDEFROMCAPTURE, WH_CALLWNDPROC, WM_CREATE, WS_EX_NOACTIVATE,
-    WS_EX_TOOLWINDOW,
+    CallNextHookEx, EnumWindows, GWL_EXSTYLE, GetCursorPos, GetForegroundWindow, GetWindowLongW,
+    GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, HHOOK, IsWindowVisible,
+    SetWindowsHookExW, UnhookWindowsHookEx, WS_EX_TOOLWINDOW,
 };
 use windows::core::{Interface, PWSTR};
 
@@ -284,28 +281,6 @@ pub fn top_level_windows() -> Result<Vec<WindowInfo>> {
     Ok(out)
 }
 
-/// Hides one of our own windows from every screen capture (plan 5.2 CA-IMG-2). Needs
-/// Windows 10 2004 or later; the window shows normally on screen.
-pub fn exclude_from_capture(id: WindowId) -> Result<()> {
-    // SAFETY: plain call on a window handle owned by this process.
-    unsafe { SetWindowDisplayAffinity(hwnd_of(id), WDA_EXCLUDEFROMCAPTURE) }
-        .map_err(|e| os_err("SetWindowDisplayAffinity", e))
-}
-
-/// Makes one of our windows a tool window that never takes the focus when clicked (a recording
-/// widget must not pull the keyboard away from the game) and stays out of Alt+Tab.
-pub fn set_noactivate_tool_window(id: WindowId) -> Result<()> {
-    let hwnd = hwnd_of(id);
-    // SAFETY: reads and writes the extended style of a window owned by this process.
-    unsafe {
-        let style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
-        let wanted = style | WS_EX_TOOLWINDOW.0 | WS_EX_NOACTIVATE.0;
-        // 0 is both "failed" and "the previous style was 0"; the style is cosmetic either way.
-        let _ = SetWindowLongW(hwnd, GWL_EXSTYLE, wanted as i32);
-    }
-    Ok(())
-}
-
 /// `true` when the user chose the dark theme for apps (`AppsUseLightTheme` = 0).
 pub fn system_prefers_dark() -> bool {
     use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
@@ -345,95 +320,10 @@ pub fn animations_enabled() -> bool {
     ok.is_err() || on.as_bool()
 }
 
-/// While it lives, the windows this thread creates appear and disappear at once, without the
-/// zoom and fade of Windows (the frozen screens must look like the screen itself).
-pub struct NoOpenAnimation(HHOOK);
-
-impl Drop for NoOpenAnimation {
-    fn drop(&mut self) {
-        // SAFETY: the hook was installed by `without_open_animation` and is removed once.
-        let _ = unsafe { UnhookWindowsHookEx(self.0) };
-    }
-}
-
-thread_local! {
-    /// Windows created by this thread start cloaked (see [`cloak_new_windows`]).
-    static CLOAK_NEW: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    /// Windows created by this thread are kept out of captures (see [`exclude_new_windows`]).
-    static EXCLUDE_NEW: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-/// While on (and a [`without_open_animation`] guard lives), the windows this thread creates are
-/// kept out of screen captures from their creation, before their first frame: a recording never
-/// shows them, not even for a moment.
-pub fn exclude_new_windows(on: bool) {
-    EXCLUDE_NEW.set(on);
-}
-
-/// While on (and a [`without_open_animation`] guard lives), the windows this thread creates are
-/// "cloaked": they exist and draw, but the screen shows them only after [`uncloak`]. A window
-/// thus appears with its first frame, never blank.
-pub fn cloak_new_windows(on: bool) {
-    CLOAK_NEW.set(on);
-}
-
-fn set_cloak(hwnd: HWND, on: bool) {
-    let value = windows::core::BOOL::from(on);
-    // SAFETY: `value` is a live BOOL, the size the attribute wants.
-    let _ = unsafe {
-        DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_CLOAK,
-            (&raw const value).cast(),
-            std::mem::size_of_val(&value) as u32,
-        )
-    };
-}
-
-/// Shows a window created cloaked.
-pub fn uncloak(id: WindowId) {
-    set_cloak(hwnd_of(id), false);
-}
-
 /// Waits until the compositor has drawn the next frame of the screen.
 pub fn wait_for_composition() {
     // SAFETY: plain call.
     let _ = unsafe { windows::Win32::Graphics::Dwm::DwmFlush() };
-}
-
-/// Turns the DWM transitions off for every window this thread creates while the guard lives.
-pub fn without_open_animation() -> Option<NoOpenAnimation> {
-    unsafe extern "system" fn hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-        if code >= 0 {
-            // SAFETY: for `WH_CALLWNDPROC`, `lparam` points at the message being sent.
-            let msg = unsafe { &*(lparam.0 as *const CWPSTRUCT) };
-            if msg.message == WM_CREATE {
-                let off = TRUE;
-                // SAFETY: `off` is a live BOOL, the size the attribute wants.
-                let _ = unsafe {
-                    DwmSetWindowAttribute(
-                        msg.hwnd,
-                        DWMWA_TRANSITIONS_FORCEDISABLED,
-                        (&raw const off).cast(),
-                        std::mem::size_of_val(&off) as u32,
-                    )
-                };
-                if CLOAK_NEW.get() {
-                    set_cloak(msg.hwnd, true);
-                }
-                if EXCLUDE_NEW.get() {
-                    // SAFETY: plain call on the window being created.
-                    let _ = unsafe { SetWindowDisplayAffinity(msg.hwnd, WDA_EXCLUDEFROMCAPTURE) };
-                }
-            }
-        }
-        // SAFETY: passes the message on, as every hook must.
-        unsafe { CallNextHookEx(None, code, wparam, lparam) }
-    }
-    // SAFETY: a hook for this thread only, with a procedure that lives as long as the program.
-    unsafe { SetWindowsHookExW(WH_CALLWNDPROC, Some(hook), None, GetCurrentThreadId()) }
-        .ok()
-        .map(NoOpenAnimation)
 }
 
 /// The window and the callback of [`on_click_outside`].
@@ -499,27 +389,6 @@ pub fn on_click_outside(id: WindowId, clicked: Box<dyn Fn()>) -> Option<OutsideC
             None
         }
     }
-}
-
-/// Gives one of our windows the blurred "acrylic" backdrop and rounded corners of Windows 11.
-/// Errors on Windows 10, where the caller keeps its own (more opaque) background.
-pub fn apply_acrylic(id: WindowId) -> Result<()> {
-    // `DWMWA_WINDOW_CORNER_PREFERENCE` = 33 (`DWMWCP_ROUND` = 2) and
-    // `DWMWA_SYSTEMBACKDROP_TYPE` = 38 (`DWMSBT_TRANSIENTWINDOW` = 3): Windows 11 22H2.
-    let hwnd = hwnd_of(id);
-    let set = |attribute: i32, value: i32| {
-        // SAFETY: `value` is a live i32 of the size the attribute wants.
-        unsafe {
-            DwmSetWindowAttribute(
-                hwnd,
-                DWMWINDOWATTRIBUTE(attribute),
-                (&raw const value).cast(),
-                std::mem::size_of::<i32>() as u32,
-            )
-        }
-    };
-    let _ = set(33, 2);
-    set(38, 3).map_err(|e| PlatformError::Os(e.to_string()))
 }
 
 /// The accent colour the user chose in Windows (`[r, g, b]`).

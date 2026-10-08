@@ -2,10 +2,8 @@
 //! The pure parts of the recording widget: where it goes and how the two processes talk.
 //! (The widget is a process of its own, `vixeeny-app --widget …`, so the action loop of the app
 //! keeps answering the daemon while it is on screen.)
-/// The window's size at 96 DPI, in pixels: the bar (196 × 40) and 10 px around it for its
-/// shadow.
-pub const WIDTH: u32 = 216;
-pub const HEIGHT: u32 = 60;
+/// The window's size at 96 DPI, in pixels: the bar and room around it for its shadow.
+pub use vixeeny_overlay::widget::{HEIGHT, WIDTH};
 /// Gap from the window to the screen edge at 96 DPI (the bar is 16 px from it).
 pub const MARGIN: u32 = 6;
 

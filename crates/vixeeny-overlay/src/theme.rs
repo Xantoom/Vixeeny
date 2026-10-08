@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The colours of the editor: the design tokens of `vixeeny-ui/ui/theme.slint`, for the look the
-//! host gives (light or dark, the system accent).
+//! The colours of the native windows: the design tokens of `vixeeny-ui/ui/theme.slint`, for the
+//! look the host gives (light or dark, the system accent).
 
 /// Straight-alpha RGBA, 0.0–1.0.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -101,6 +101,15 @@ impl Default for Look {
     }
 }
 
+/// Whether the dark theme applies: the `general.theme` setting, or the OS's choice for `system`.
+pub fn dark_theme(setting: &str, os_prefers_dark: bool) -> bool {
+    match setting {
+        "dark" => true,
+        "light" => false,
+        _ => os_prefers_dark,
+    }
+}
+
 /// The colours the editor draws with.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Theme {
@@ -113,6 +122,17 @@ pub struct Theme {
     pub subtle_pressed: Rgba,
     pub accent: Rgba,
     pub accent_soft: Rgba,
+    pub text_2: Rgba,
+    pub text_3: Rgba,
+    pub selected: Rgba,
+    pub control: Rgba,
+    pub control_hover: Rgba,
+    pub control_pressed: Rgba,
+    pub control_stroke: Rgba,
+    pub bg_deep: Rgba,
+    pub danger: Rgba,
+    pub warning: Rgba,
+    pub record: Rgba,
     pub animations: bool,
 }
 
@@ -136,6 +156,17 @@ impl Theme {
             subtle_pressed: pick(Rgba::hex(0xffffff, 0x08), Rgba::hex(0x000000, 0x10)),
             accent,
             accent_soft: accent.with_alpha(0.16),
+            text_2: pick(Rgba::hex(0xa1a1aa, 255), Rgba::hex(0x5b5b63, 255)),
+            text_3: pick(Rgba::hex(0x71717a, 255), Rgba::hex(0x8e8e96, 255)),
+            selected: pick(Rgba::hex(0xffffff, 0x12), Rgba::hex(0x000000, 0x0d)),
+            control: pick(Rgba::hex(0xffffff, 0x0d), Rgba::hex(0x000000, 0x08)),
+            control_hover: pick(Rgba::hex(0xffffff, 0x14), Rgba::hex(0x000000, 0x0d)),
+            control_pressed: pick(Rgba::hex(0xffffff, 0x0a), Rgba::hex(0x000000, 0x12)),
+            control_stroke: pick(Rgba::hex(0xffffff, 0x12), Rgba::hex(0x000000, 0x14)),
+            bg_deep: pick(Rgba::hex(0x0f0f11, 255), Rgba::hex(0xededef, 255)),
+            danger: pick(Rgba::hex(0xff8a8a, 255), Rgba::hex(0xc42b1c, 255)),
+            warning: pick(Rgba::hex(0xf5c451, 255), Rgba::hex(0x9d5d00, 255)),
+            record: Rgba::hex(0xe5322d, 255),
             animations: look.animations,
         }
     }
@@ -157,6 +188,15 @@ mod tests {
             let (r2, g2, b2) = hsv_to_rgb(h, s, v);
             assert!((r - r2).abs() < 1e-5 && (g - g2).abs() < 1e-5 && (b - b2).abs() < 1e-5);
         }
+    }
+
+    #[test]
+    fn the_theme_follows_the_setting_or_the_os() {
+        assert!(dark_theme("dark", false));
+        assert!(!dark_theme("light", true));
+        assert!(dark_theme("system", true));
+        assert!(!dark_theme("system", false));
+        assert!(dark_theme("whatever", true));
     }
 
     #[test]

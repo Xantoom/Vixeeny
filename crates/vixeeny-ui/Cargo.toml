@@ -21,8 +21,10 @@ vixeeny-settings = { path = "../vixeeny-settings" }
 slint-build = "1.18.1"
 
 [features]
-# The windowing backend and GPU renderer of the real application (plan M0: FemtoVG).
-desktop = ["slint/backend-winit", "slint/unstable-winit-030", "slint/renderer-femtovg", "slint/accessibility"]
+# The windowing backend and renderer of the real application. Software rendering: an OpenGL
+# window counts as a game for the variable refresh rate of the screen (G-SYNC / FreeSync in
+# windowed mode), whose rate then drops and flickers while the window is idle.
+desktop = ["slint/backend-winit", "slint/unstable-winit-030", "slint/renderer-software", "slint/accessibility"]
 
 [dev-dependencies]
 slint = { version = "1.18.1", default-features = false, features = ["std", "compat-1-2", "renderer-software"] }

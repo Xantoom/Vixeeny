@@ -3,7 +3,7 @@
 //! window, wait for the first frame, copy it to CPU memory and tear the session down.
 //!
 //! Own windows are kept out of monitor captures by `WDA_EXCLUDEFROMCAPTURE`, set by the
-//! windows' owner (see `vixeeny_platform::exclude_from_capture`), not here.
+//! windows' owner (see `vixeeny_overlay::popup`), not here.
 
 use std::sync::mpsc::{Sender, channel};
 use std::time::Duration;

@@ -1,6 +1,6 @@
 [package]
 name = "vixeeny-overlay"
-description = "Vixeeny: the native zone editor (DirectComposition + Direct2D)"
+description = "Vixeeny: the native windows (zone editor, side strip, notifications, recording widget)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

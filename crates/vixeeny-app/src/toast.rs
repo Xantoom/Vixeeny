@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use vixeeny_common::config::Config;
 use vixeeny_common::i18n::Key;
+use vixeeny_overlay::toast::{ToastContent, ToastEvent, Toasts};
 
 /// What the card announces.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -212,15 +213,14 @@ fn folder_of(path: &Path) -> PathBuf {
 }
 
 /// What the card shows, in the current language and theme.
-fn content_of(toast: &Toast) -> vixeeny_ui::toast_panel::ToastContent {
+fn content_of(toast: &Toast) -> ToastContent {
     use vixeeny_common::i18n::tr;
-    use vixeeny_ui::toast_panel::ToastContent;
 
     let config = vixeeny_common::paths::config_file()
         .and_then(|p| Config::load(&p).ok())
         .unwrap_or_default();
     let lang = crate::lang(&config.general.language);
-    let dark = vixeeny_ui::side_panel::dark_theme(
+    let dark = vixeeny_overlay::dark_theme(
         &config.general.theme,
         vixeeny_platform::system_prefers_dark(),
     );
@@ -254,35 +254,33 @@ fn content_of(toast: &Toast) -> vixeeny_ui::toast_panel::ToastContent {
     }
 }
 
-/// A card for `toast`, in the bottom-right corner of the main monitor.
-fn panel_for(toast: &Toast) -> anyhow::Result<vixeeny_ui::toast_panel::ToastPanel> {
-    use vixeeny_ui::toast_panel::{ToastPanel, corner};
-
-    let content = content_of(toast);
-    let panel = ToastPanel::new(&content).map_err(|e| anyhow::anyhow!("{e}"))?;
+/// Shows the card for `toast` in the bottom-right corner of the main monitor; `act` runs once it
+/// is gone.
+fn show(toasts: &Toasts, toast: Toast) -> anyhow::Result<()> {
+    let content = content_of(&toast);
     let monitors = vixeeny_platform::monitors()?;
     let monitor = monitors
         .iter()
         .find(|m| m.primary)
-        .or_else(|| monitors.first());
-    if let Some(m) = monitor {
-        let scale = m.scale_factor();
-        let (w, h) = vixeeny_ui::toast_panel::size_for(&content);
-        let size = ((w * scale) as u32, (h * scale) as u32);
-        let (x, y) = corner(
-            (m.rect.x, m.rect.y, m.rect.width, m.rect.height),
-            size,
-            (16.0 * scale) as u32,
-            (48.0 * scale) as u32,
-        );
-        panel.set_geometry(x, y, size.0, size.1);
-    }
-    Ok(panel)
+        .or_else(|| monitors.first())
+        .ok_or_else(|| anyhow::anyhow!("no monitor"))?;
+    toasts.show(
+        &content,
+        (
+            monitor.rect.x,
+            monitor.rect.y,
+            monitor.rect.width,
+            monitor.rect.height,
+        ),
+        monitor.dpi,
+        vixeeny_platform::animations_enabled(),
+        move |event| act(event, &toast),
+    )?;
+    Ok(())
 }
 
 /// Does what the user clicked on the card.
-fn act(event: Option<vixeeny_ui::toast_panel::ToastEvent>, toast: &Toast) {
-    use vixeeny_ui::toast_panel::ToastEvent;
+fn act(event: Option<ToastEvent>, toast: &Toast) {
     match (event, toast) {
         (Some(ToastEvent::Activated), Toast::Saved(_, path)) => {
             let _ = vixeeny_platform::open_path(&path.display().to_string());
@@ -311,92 +309,46 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     let toast =
         Toast::from_args(kind, text).ok_or_else(|| anyhow::anyhow!("unknown toast `{kind}`"))?;
     vixeeny_platform::ensure_dpi_aware();
-    let event = panel_for(&toast)?
-        .run()
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-    act(event, &toast);
+    let toasts = Toasts::new()?;
+    show(&toasts, toast)?;
+    vixeeny_overlay::popup::pump_while(|| !toasts.is_empty());
     Ok(())
 }
 
 /// `--toast-host`: shows the cards read on standard input, a new one replacing the one on
 /// screen. Ends once the input is closed and no card is left.
 pub fn run_host() -> anyhow::Result<()> {
-    use std::cell::{Cell, RefCell};
+    use std::cell::Cell;
     use std::io::BufRead;
     use std::rc::Rc;
 
-    thread_local! {
-        /// The card on screen, numbered.
-        static SHOWN: RefCell<Option<(u64, vixeeny_ui::toast_panel::ToastPanel)>> =
-            const { RefCell::new(None) };
-        static COUNT: Cell<u64> = const { Cell::new(0) };
-        static INPUT_CLOSED: Cell<bool> = const { Cell::new(false) };
-    }
-    fn quit_if_done() {
-        if INPUT_CLOSED.get() && SHOWN.with(|s| s.borrow().is_none()) {
-            let _ = vixeeny_ui::slint::quit_event_loop();
-        }
-    }
-    fn show(toast: Toast) {
-        let panel = match panel_for(&toast) {
-            Ok(panel) => panel,
-            Err(e) => {
-                tracing::error!("notification: {e:#}");
-                return;
-            }
-        };
-        let id = COUNT.get() + 1;
-        COUNT.set(id);
-        let toast = Rc::new(toast);
-        let result = panel.show(move |event| {
-            act(event, &toast);
-            // Forget the card unless a newer one took its place; it is dropped after its own
-            // callback has returned.
-            let gone = SHOWN.with(|s| {
-                let mut s = s.borrow_mut();
-                if s.as_ref().is_some_and(|(shown, _)| *shown == id) {
-                    s.take()
-                } else {
-                    None
-                }
-            });
-            vixeeny_ui::slint::Timer::single_shot(std::time::Duration::ZERO, move || {
-                drop(gone);
-                quit_if_done();
-            });
-        });
-        if let Err(e) = result {
-            tracing::error!("notification: {e}");
-            return;
-        }
-        // The previous card goes: the new one has its place.
-        if let Some((_, old)) = SHOWN.with(|s| s.borrow_mut().replace((id, panel))) {
-            let _ = vixeeny_ui::ComponentHandle::hide(old.window());
-        }
-    }
-
     vixeeny_platform::ensure_dpi_aware();
-    // The input is read once the event loop runs: before, the cards it posts would be lost.
-    vixeeny_ui::slint::Timer::single_shot(std::time::Duration::ZERO, || {
-        let reader = std::thread::Builder::new()
-            .name("toast-input".into())
-            .spawn(|| {
-                for line in std::io::stdin().lock().lines().map_while(Result::ok) {
-                    if let Some(toast) = decode_line(&line) {
-                        let _ = vixeeny_ui::slint::invoke_from_event_loop(move || show(toast));
-                    }
+    let toasts = Rc::new(Toasts::new()?);
+    let closed = Rc::new(Cell::new(false));
+    // `None`: the input is closed.
+    let (_mailbox, sender) = vixeeny_overlay::popup::mailbox({
+        let (toasts, closed) = (toasts.clone(), closed.clone());
+        move |mail: Option<Toast>| match mail {
+            Some(toast) => {
+                if let Err(e) = show(&toasts, toast) {
+                    tracing::error!("notification: {e:#}");
                 }
-                let _ = vixeeny_ui::slint::invoke_from_event_loop(|| {
-                    INPUT_CLOSED.set(true);
-                    quit_if_done();
-                });
-            });
-        if let Err(e) = reader {
-            tracing::error!("notifications: {e}");
-            let _ = vixeeny_ui::slint::quit_event_loop();
+            }
+            None => closed.set(true),
         }
-    });
-    vixeeny_ui::slint::run_event_loop_until_quit().map_err(|e| anyhow::anyhow!("{e}"))
+    })?;
+    std::thread::Builder::new()
+        .name("toast-input".into())
+        .spawn(move || {
+            for line in std::io::stdin().lock().lines().map_while(Result::ok) {
+                if let Some(toast) = decode_line(&line) {
+                    sender.send(Some(toast));
+                }
+            }
+            sender.send(None);
+        })?;
+    vixeeny_overlay::popup::pump_while(|| !(closed.get() && toasts.is_empty()));
+    Ok(())
 }
 
 #[cfg(test)]

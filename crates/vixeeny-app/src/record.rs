@@ -143,8 +143,8 @@ struct Plan {
     audio: Vec<vixeeny_audio::TrackPlan>,
     /// Filter the microphone sources (`[audio] mic_noise_reduction`).
     mic_denoise: bool,
-    /// The widget to show, and the language of its labels.
-    widget: Option<(vixeeny_common::config::RecordingWidget, String)>,
+    /// The widget to show.
+    widget: Option<vixeeny_common::config::RecordingWidget>,
     /// The settings, for the notifications that end a session.
     notice: Config,
 }
@@ -351,12 +351,8 @@ fn plan(config: &Config, allow_gpu: bool, replay: bool) -> anyhow::Result<Plan> 
         gpu,
         audio,
         mic_denoise: profile.audio.mic_noise_reduction,
-        widget: (config.recording_widget.enabled && !replay).then(|| {
-            (
-                config.recording_widget.clone(),
-                config.general.language.clone(),
-            )
-        }),
+        widget: (config.recording_widget.enabled && !replay)
+            .then(|| config.recording_widget.clone()),
         notice: config.clone(),
     })
 }
@@ -506,9 +502,9 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
     let recorder = Recorder::start(plan.config, plan.namer)?;
     let (ctl, rx) = channel();
     // The widget is a nicety: without it the recording goes on (hotkeys still work).
-    let widget = plan.widget.as_ref().and_then(|(settings, language)| {
+    let widget = plan.widget.as_ref().and_then(|settings| {
         let presses = ctl.clone();
-        crate::widget::Widget::spawn(settings, language, &plan.monitor, move |press| {
+        crate::widget::Widget::spawn(settings, &plan.monitor, move |press| {
             let _ = presses.send(match press {
                 FromWidget::TogglePause => Ctl::TogglePause,
                 FromWidget::Stop => Ctl::Stop,

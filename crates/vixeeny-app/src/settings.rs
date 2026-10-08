@@ -428,7 +428,7 @@ fn now() -> u64 {
 
 /// Light or dark by the setting (or the system), with the accent colour of the system.
 pub fn look_of(config: &Config) -> vixeeny_ui::theme::Look {
-    let dark = vixeeny_ui::side_panel::dark_theme(
+    let dark = vixeeny_overlay::dark_theme(
         &config.general.theme,
         vixeeny_platform::system_prefers_dark(),
     );

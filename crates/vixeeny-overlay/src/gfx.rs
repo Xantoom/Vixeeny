@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The devices (Direct3D 11 → Direct2D → DirectComposition, DirectWrite for text) and a small
-//! drawing API over a Direct2D context: rounded boxes, text, icons, shadows, bitmaps.
+//! drawing API over a Direct2D context: rounded boxes, text, icons, shadows, bitmaps. The editor
+//! and the popups (side strip, notification, recording widget) draw with it.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -18,12 +19,13 @@ use windows::Win32::Graphics::Direct2D::{
     D2D1_BITMAP_OPTIONS_CPU_READ, D2D1_BITMAP_OPTIONS_NONE, D2D1_BITMAP_OPTIONS_TARGET,
     D2D1_BITMAP_PROPERTIES1, D2D1_DEVICE_CONTEXT_OPTIONS_NONE, D2D1_DRAW_TEXT_OPTIONS_NONE,
     D2D1_ELLIPSE, D2D1_EXTEND_MODE_CLAMP, D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_GAMMA_2_2,
-    D2D1_INTERPOLATION_MODE_LINEAR, D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
+    D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC, D2D1_INTERPOLATION_MODE_LINEAR,
+    D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR, D2D1_LAYER_OPTIONS1_NONE, D2D1_LAYER_PARAMETERS1,
     D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES, D2D1_MAP_OPTIONS_READ, D2D1_PROPERTY_TYPE_FLOAT,
     D2D1_PROPERTY_TYPE_VECTOR4, D2D1_ROUNDED_RECT, D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION,
     D2D1_SHADOW_PROP_COLOR, D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, D2D1CreateFactory, ID2D1Bitmap1,
-    ID2D1Brush, ID2D1Device, ID2D1DeviceContext, ID2D1Factory1, ID2D1Image, ID2D1PathGeometry,
-    ID2D1RenderTarget, ID2D1SolidColorBrush,
+    ID2D1Brush, ID2D1Device, ID2D1DeviceContext, ID2D1Factory1, ID2D1Geometry, ID2D1Image,
+    ID2D1Layer, ID2D1PathGeometry, ID2D1RenderTarget, ID2D1SolidColorBrush,
 };
 use windows::Win32::Graphics::Direct3D::{
     D3D_DRIVER_TYPE, D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP,
@@ -36,9 +38,10 @@ use windows::Win32::Graphics::DirectComposition::{
 };
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-    DWRITE_FONT_WEIGHT, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_LINE_SPACING_METHOD_UNIFORM,
-    DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_LEADING,
-    DWRITE_TEXT_METRICS, DWRITE_WORD_WRAPPING_NO_WRAP, DWriteCreateFactory, IDWriteFactory,
+    DWRITE_FONT_WEIGHT, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD,
+    DWRITE_LINE_SPACING_METHOD_UNIFORM, DWRITE_PARAGRAPH_ALIGNMENT_CENTER,
+    DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_TEXT_METRICS,
+    DWRITE_WORD_WRAPPING_NO_WRAP, DWRITE_WORD_WRAPPING_WRAP, DWriteCreateFactory, IDWriteFactory,
     IDWriteFactory5, IDWriteFontCollection, IDWriteTextLayout,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
@@ -346,6 +349,71 @@ impl Gfx {
         Ok((m.widthIncludingTrailingWhitespace, m.height))
     }
 
+    /// `text` in the interface font at `size` pixels, wrapped at `width` (one line when it fits),
+    /// semi-bold or regular, with its size.
+    pub fn paragraph(&self, text: &str, size: f32, bold: bool, width: f32) -> Result<Paragraph> {
+        let weight = if bold {
+            DWRITE_FONT_WEIGHT_SEMI_BOLD
+        } else {
+            DWRITE_FONT_WEIGHT_NORMAL
+        };
+        let format = self.format(size, Font::Ui, weight)?;
+        let wide: Vec<u16> = text.encode_utf16().collect();
+        let mut m = DWRITE_TEXT_METRICS::default();
+        // SAFETY: plain calls on live objects; the out-pointer is valid.
+        let layout = unsafe {
+            format.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP)?;
+            let layout = self
+                .dwrite
+                .CreateTextLayout(&wide, &format, width.max(1.0), 100_000.0)?;
+            layout.GetMetrics(&mut m)?;
+            layout
+        };
+        Ok(Paragraph {
+            layout,
+            width: m.widthIncludingTrailingWhitespace,
+            height: m.height,
+        })
+    }
+
+    /// An RGBA picture (straight alpha, `w`×`h`) as a Direct2D bitmap.
+    pub fn rgba_bitmap(&self, w: u32, h: u32, rgba: &[u8]) -> Result<ID2D1Bitmap1> {
+        if rgba.len() != w as usize * h as usize * 4 || w == 0 || h == 0 {
+            return Err(windows::core::Error::from_hresult(
+                windows::Win32::Foundation::E_INVALIDARG,
+            ));
+        }
+        let mut premultiplied = rgba.to_vec();
+        for px in premultiplied.as_chunks_mut::<4>().0 {
+            let a = u16::from(px[3]);
+            for c in &mut px[..3] {
+                *c = ((u16::from(*c) * a + 127) / 255) as u8;
+            }
+        }
+        let props = D2D1_BITMAP_PROPERTIES1 {
+            pixelFormat: D2D1_PIXEL_FORMAT {
+                format: DXGI_FORMAT_R8G8B8A8_UNORM,
+                alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+            },
+            dpiX: 96.0,
+            dpiY: 96.0,
+            bitmapOptions: D2D1_BITMAP_OPTIONS_NONE,
+            colorContext: std::mem::ManuallyDrop::new(None),
+        };
+        // SAFETY: `premultiplied` holds `h` rows of `w` RGBA pixels, `w * 4` bytes apart.
+        unsafe {
+            self.dc.CreateBitmap(
+                D2D_SIZE_U {
+                    width: w,
+                    height: h,
+                },
+                Some(premultiplied.as_ptr().cast()),
+                w * 4,
+                &props,
+            )
+        }
+    }
+
     /// The x of the caret after `chars` UTF-16 units of `layout`.
     pub fn caret_x(layout: &IDWriteTextLayout, position: u32) -> f32 {
         let (mut x, mut y) = (0.0, 0.0);
@@ -451,6 +519,13 @@ impl Gfx {
             Ok(out)
         }
     }
+}
+
+/// Laid out text and its size, in pixels.
+pub struct Paragraph {
+    pub layout: IDWriteTextLayout,
+    pub width: f32,
+    pub height: f32,
 }
 
 /// Drawing on a Direct2D context, in pixels.
@@ -653,6 +728,57 @@ impl Canvas<'_> {
             );
         }
         Ok(())
+    }
+
+    /// `bitmap` scaled smoothly over `r`.
+    pub fn picture(&self, bitmap: &ID2D1Bitmap1, r: D2D_RECT_F) -> Result<()> {
+        // SAFETY: plain drawing call.
+        unsafe {
+            self.dc.DrawBitmap(
+                bitmap,
+                Some(&r),
+                1.0,
+                D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC,
+                None,
+                None,
+            );
+        }
+        Ok(())
+    }
+
+    /// Clips what follows to the rounded box `r` until [`Canvas::pop_layer`].
+    pub fn push_round_clip(&self, r: D2D_RECT_F, radius: f32) -> Result<()> {
+        // SAFETY: the geometry is created on the context's factory and kept by the layer until
+        // `pop_layer`.
+        unsafe {
+            let mask = self
+                .gfx
+                .factory
+                .CreateRoundedRectangleGeometry(&D2D1_ROUNDED_RECT {
+                    rect: r,
+                    radiusX: radius,
+                    radiusY: radius,
+                })?;
+            let mask: ID2D1Geometry = mask.cast()?;
+            let params = D2D1_LAYER_PARAMETERS1 {
+                contentBounds: rect(-1e6, -1e6, 2e6, 2e6),
+                geometricMask: std::mem::ManuallyDrop::new(Some(mask)),
+                maskAntialiasMode: D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+                maskTransform: Matrix3x2::identity(),
+                opacity: 1.0,
+                opacityBrush: std::mem::ManuallyDrop::new(None),
+                layerOptions: D2D1_LAYER_OPTIONS1_NONE,
+            };
+            self.dc.PushLayer(&params, None::<&ID2D1Layer>);
+            // The layer holds its own reference.
+            drop(std::mem::ManuallyDrop::into_inner(params.geometricMask));
+        }
+        Ok(())
+    }
+
+    pub fn pop_layer(&self) {
+        // SAFETY: pairs a `push_round_clip`.
+        unsafe { self.dc.PopLayer() };
     }
 
     /// A linear gradient over `r` from `(x0, y0)` to `(x1, y1)` through `stops`.

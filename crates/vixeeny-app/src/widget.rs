@@ -10,7 +10,6 @@ use std::time::Duration;
 
 use anyhow::Context;
 use vixeeny_common::config::RecordingWidget;
-use vixeeny_common::i18n::{Key, tr};
 use vixeeny_platform::MonitorInfo;
 
 use crate::widget_math::{FromWidget, ToWidget, corner_geometry};
@@ -26,7 +25,6 @@ impl Widget {
     /// thread of its own for each button press.
     pub fn spawn(
         settings: &RecordingWidget,
-        language: &str,
         monitor: &MonitorInfo,
         on_press: impl Fn(FromWidget) + Send + 'static,
     ) -> anyhow::Result<Self> {
@@ -45,7 +43,7 @@ impl Widget {
             .arg("--widget")
             .args([x.to_string(), y.to_string(), w.to_string(), h.to_string()])
             .arg(if settings.auto_hide { "1" } else { "0" })
-            .arg(language)
+            .arg(monitor.dpi.to_string())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
@@ -96,9 +94,10 @@ impl Drop for Widget {
     }
 }
 
-/// `--widget <x> <y> <width> <height> <auto_hide 0|1> <language>`: the widget process.
+/// `--widget <x> <y> <width> <height> <auto_hide 0|1> <dpi>`: the widget process.
 pub fn run_child(args: &[String]) -> anyhow::Result<()> {
-    use vixeeny_ui::widget_panel::{WidgetEvent, WidgetPanel, WidgetTexts};
+    use std::rc::Rc;
+    use vixeeny_overlay::widget::{Widget as Bar, WidgetEvent};
 
     let num = |i: usize| -> anyhow::Result<i64> {
         args.get(i)
@@ -112,19 +111,16 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
         num(3)? as u32,
     );
     let auto_hide = args.get(4).is_some_and(|a| a == "1");
-    let lang = crate::lang(args.get(5).map_or("auto", String::as_str));
+    let dpi = num(5)? as u32;
 
-    let panel = WidgetPanel::new(
-        &WidgetTexts {
-            pause: tr(Key::RecWidgetPause, lang).into(),
-            resume: tr(Key::RecWidgetResume, lang).into(),
-            stop: tr(Key::RecWidgetStop, lang).into(),
-        },
-        auto_hide,
-    )
-    .map_err(|e| anyhow::anyhow!("{e}"))?;
-    panel.set_geometry(x, y, w, h);
-    panel.on_event(|event| {
+    vixeeny_platform::ensure_dpi_aware();
+    let look = vixeeny_overlay::Look {
+        animations: vixeeny_platform::animations_enabled(),
+        ..vixeeny_overlay::Look::default()
+    };
+    // Out of the captures from its creation, never stealing the keyboard.
+    let bar = Rc::new(Bar::new((x, y, w, h), dpi, look, auto_hide)?);
+    bar.on_event(|event| {
         let press = match event {
             WidgetEvent::TogglePause => FromWidget::TogglePause,
             WidgetEvent::Stop => FromWidget::Stop,
@@ -133,41 +129,32 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
         let _ = out.write_all(press.to_line().as_bytes());
         let _ = out.flush();
     });
-    // Out of the captures from its creation: excluded only once shown, its first frames (a black
-    // block) would be in the video. The guard lives as long as the event loop that creates it.
-    let _creation = vixeeny_platform::without_open_animation();
-    vixeeny_platform::exclude_new_windows(true);
-    panel.show().map_err(|e| anyhow::anyhow!("{e}"))?;
-    // Never in the video, never stealing the keyboard. If the exclusion fails the widget could
-    // end up in the recording: that is logged loudly and the recording goes on.
-    // The native window exists only once the event loop runs: the handle is fetched then (and
-    // asked again for a moment if it is not there yet).
-    vixeeny_ui::theme::when_native(panel.window(), |hwnd| {
-        let id = vixeeny_platform::WindowId(hwnd);
-        if let Err(e) = vixeeny_platform::exclude_from_capture(id) {
-            tracing::error!("the widget cannot be excluded from the capture: {e}");
-        }
-        if let Err(e) = vixeeny_platform::set_noactivate_tool_window(id) {
-            tracing::warn!("widget window style: {e}");
-        }
-    });
 
-    // Messages from the recorder arrive on a thread and are applied on the event loop; when the
+    // Messages from the recorder arrive on a thread and are applied on the widget's; when the
     // recorder is gone (or says quit) the widget closes.
-    let handle = panel.handle();
+    let (_mailbox, sender) = vixeeny_overlay::popup::mailbox({
+        let bar = bar.clone();
+        move |msg: ToWidget| match msg {
+            ToWidget::State { paused, elapsed_ms } => {
+                bar.set_state(paused, Duration::from_millis(elapsed_ms));
+            }
+            ToWidget::Quit => bar.close(),
+        }
+    })?;
     std::thread::Builder::new()
         .name("widget-stdin".into())
         .spawn(move || {
             for line in std::io::stdin().lock().lines().map_while(Result::ok) {
                 match ToWidget::parse(&line) {
-                    Some(ToWidget::State { paused, elapsed_ms }) => {
-                        handle.set_state(paused, Duration::from_millis(elapsed_ms));
-                    }
                     Some(ToWidget::Quit) => break,
+                    Some(msg) => {
+                        sender.send(msg);
+                    }
                     None => {}
                 }
             }
-            handle.quit();
+            sender.send(ToWidget::Quit);
         })?;
-    panel.run().map_err(|e| anyhow::anyhow!("{e}"))
+    bar.run()?;
+    Ok(())
 }

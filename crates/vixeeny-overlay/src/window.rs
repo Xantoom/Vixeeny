@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The editor's windows: borderless, top-most popups without a redirection bitmap (their only
+//! The native windows: borderless, top-most popups without a redirection bitmap (their only
 //! content is a DirectComposition tree), created cloaked so they appear with their first content.
+//! The editor has its own class; the popups (side strip, notification, recording widget) share
+//! another, and a message-only window carries the messages other threads post.
 
 use std::sync::OnceLock;
 
@@ -11,10 +13,12 @@ use windows::Win32::Graphics::Dwm::{
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CS_DBLCLKS, CreateWindowExW, DefWindowProcW, HCURSOR, HWND_NOTOPMOST, HWND_TOPMOST, IDC_ARROW,
-    IDC_CROSS, IDC_HAND, IDC_SIZEALL, IDC_SIZENESW, IDC_SIZENS, IDC_SIZENWSE, IDC_SIZEWE,
-    LoadCursorW, RegisterClassExW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos,
-    WNDCLASSEXW, WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    CS_DBLCLKS, CreateWindowExW, DefWindowProcW, HCURSOR, HWND_MESSAGE, HWND_NOTOPMOST,
+    HWND_TOPMOST, IDC_ARROW, IDC_CROSS, IDC_HAND, IDC_SIZEALL, IDC_SIZENESW, IDC_SIZENS,
+    IDC_SIZENWSE, IDC_SIZEWE, LoadCursorW, RegisterClassExW, SWP_NOACTIVATE, SWP_NOMOVE,
+    SWP_NOSIZE, SetWindowDisplayAffinity, SetWindowPos, WDA_EXCLUDEFROMCAPTURE, WINDOW_EX_STYLE,
+    WNDCLASSEXW, WS_EX_NOACTIVATE, WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+    WS_POPUP,
 };
 use windows::core::{BOOL, PCWSTR, Result, w};
 
@@ -30,10 +34,9 @@ fn instance() -> HINSTANCE {
         .unwrap_or_default()
 }
 
-/// Registers the window class once per process.
-fn register(proc: WndProc) -> bool {
-    static DONE: OnceLock<bool> = OnceLock::new();
-    *DONE.get_or_init(|| {
+/// Registers a window class once per process.
+fn register(class: PCWSTR, proc: WndProc, done: &'static OnceLock<bool>) -> bool {
+    *done.get_or_init(|| {
         let class = WNDCLASSEXW {
             cbSize: size_of::<WNDCLASSEXW>() as u32,
             style: CS_DBLCLKS,
@@ -41,7 +44,7 @@ fn register(proc: WndProc) -> bool {
             hInstance: instance(),
             // The cursor is set on every move (WM_SETCURSOR).
             hCursor: HCURSOR::default(),
-            lpszClassName: CLASS,
+            lpszClassName: class,
             ..Default::default()
         };
         // SAFETY: `class` is fully initialised and its strings are static.
@@ -49,17 +52,17 @@ fn register(proc: WndProc) -> bool {
     })
 }
 
-/// A cloaked, hidden editor window over `(x, y, w, h)` (physical pixels).
-pub fn create(proc: WndProc, x: i32, y: i32, w: u32, h: u32) -> Result<HWND> {
-    if !register(proc) {
-        return Err(windows::core::Error::from_thread());
-    }
+fn popup_window(
+    class: PCWSTR,
+    ex: WINDOW_EX_STYLE,
+    (x, y, w, h): (i32, i32, u32, u32),
+) -> Result<HWND> {
     // SAFETY: the class is registered; the strings are static. Attributes are set on the window
     // just created.
     unsafe {
         let hwnd = CreateWindowExW(
-            WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOREDIRECTIONBITMAP,
-            CLASS,
+            WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOREDIRECTIONBITMAP | ex,
+            class,
             w!("Vixeeny"),
             WS_POPUP,
             x,
@@ -80,6 +83,69 @@ pub fn create(proc: WndProc, x: i32, y: i32, w: u32, h: u32) -> Result<HWND> {
             size_of::<BOOL>() as u32,
         );
         Ok(hwnd)
+    }
+}
+
+/// A cloaked, hidden editor window over `(x, y, w, h)` (physical pixels).
+pub fn create(proc: WndProc, x: i32, y: i32, w: u32, h: u32) -> Result<HWND> {
+    static DONE: OnceLock<bool> = OnceLock::new();
+    if !register(CLASS, proc, &DONE) {
+        return Err(windows::core::Error::from_thread());
+    }
+    popup_window(CLASS, WINDOW_EX_STYLE::default(), (x, y, w, h))
+}
+
+const POPUP_CLASS: PCWSTR = w!("VixeenyPopup");
+static POPUP_DONE: OnceLock<bool> = OnceLock::new();
+
+/// A cloaked, hidden popup over `(x, y, w, h)` (physical pixels). One that does not `activate`
+/// never takes the keyboard, even when clicked. One `hidden_from_capture` is left out of every
+/// screen capture from its creation (Windows 10 2004 or later).
+pub fn create_popup(
+    proc: WndProc,
+    geometry: (i32, i32, u32, u32),
+    activate: bool,
+    hidden_from_capture: bool,
+) -> Result<HWND> {
+    if !register(POPUP_CLASS, proc, &POPUP_DONE) {
+        return Err(windows::core::Error::from_thread());
+    }
+    let ex = if activate {
+        WINDOW_EX_STYLE::default()
+    } else {
+        WS_EX_NOACTIVATE
+    };
+    let hwnd = popup_window(POPUP_CLASS, ex, geometry)?;
+    if hidden_from_capture {
+        // SAFETY: plain call on the window just created.
+        if let Err(e) = unsafe { SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE) } {
+            tracing::error!("a window cannot be excluded from the capture: {e}");
+        }
+    }
+    Ok(hwnd)
+}
+
+/// A message-only window, for the messages other threads post.
+pub fn create_message_window(proc: WndProc) -> Result<HWND> {
+    if !register(POPUP_CLASS, proc, &POPUP_DONE) {
+        return Err(windows::core::Error::from_thread());
+    }
+    // SAFETY: the class is registered; the strings are static.
+    unsafe {
+        CreateWindowExW(
+            WINDOW_EX_STYLE::default(),
+            POPUP_CLASS,
+            w!("Vixeeny"),
+            Default::default(),
+            0,
+            0,
+            0,
+            0,
+            Some(HWND_MESSAGE),
+            None,
+            Some(instance()),
+            None,
+        )
     }
 }
 
