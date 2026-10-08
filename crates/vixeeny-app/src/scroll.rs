@@ -104,7 +104,7 @@ fn capture_loop(
         max_height,
         ..Default::default()
     });
-    let mut last_preview = Instant::now() - PREVIEW_INTERVAL;
+    let mut last_preview: Option<Instant> = None;
     let mut lost = false;
     let mut warned_full = false;
     loop {
@@ -132,8 +132,8 @@ fn capture_loop(
             }
             Push::Full | Push::Unchanged => {}
         }
-        if last_preview.elapsed() >= PREVIEW_INTERVAL && !warned_full {
-            last_preview = Instant::now();
+        if last_preview.is_none_or(|t| t.elapsed() >= PREVIEW_INTERVAL) && !warned_full {
+            last_preview = Some(Instant::now());
             if let Some(p) = stitcher.preview(preview_box.0, preview_box.1) {
                 let status = if lost {
                     tr(Key::ScrollLost, lang).to_owned()

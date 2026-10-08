@@ -28,7 +28,8 @@ pub fn share(packet: &Packet) -> Packet {
 /// RAM the ring needs for `seconds` of replay at the given bitrates (video + all audio tracks, in
 /// kbit/s). One more key frame interval is kept beyond the duration, so a save always starts on a
 /// key frame at least `seconds` back.
-pub fn estimate_ram_bytes(total_kbps: u32, seconds: u32, keyframe_seconds: f64) -> u64 {
+#[cfg(test)]
+fn estimate_ram_bytes(total_kbps: u32, seconds: u32, keyframe_seconds: f64) -> u64 {
     let span = f64::from(seconds) + keyframe_seconds;
     (f64::from(total_kbps) * 1000.0 / 8.0 * span) as u64
 }

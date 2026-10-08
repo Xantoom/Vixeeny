@@ -243,11 +243,6 @@ impl Mixer {
         }
         out
     }
-
-    /// Samples emitted so far (per channel).
-    pub fn emitted_frames(&self) -> u64 {
-        self.next
-    }
 }
 
 #[cfg(test)]

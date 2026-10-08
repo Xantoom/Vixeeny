@@ -267,18 +267,6 @@ fn marker_shows_its_number_in_a_contrasting_colour() {
 }
 
 #[test]
-fn crop_changes_the_output_size_and_content() {
-    let mut base = white(20, 10);
-    base.data[(3 * 20 + 5) * 4..(3 * 20 + 5) * 4 + 3].fill(0);
-    let mut doc = Document::new(20, 10);
-    doc.crop = Some(Rect::new(5.0, 3.0, 4.0, 2.0));
-    let img = render(&base, &doc);
-    assert_eq!((img.width, img.height), (4, 2));
-    assert_eq!(img.pixel(0, 0), Color::rgb(0, 0, 0));
-    assert_eq!(img.pixel(1, 0), WHITE);
-}
-
-#[test]
 fn annotations_outside_the_image_do_not_panic() {
     let doc = doc_with(
         10,

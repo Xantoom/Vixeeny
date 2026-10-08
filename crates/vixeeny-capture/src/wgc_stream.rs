@@ -34,14 +34,11 @@ use windows::Win32::System::WinRT::Direct3D11::{
 use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop;
 use windows::core::{IInspectable, Interface, factory};
 
+use crate::wgc::os;
 use crate::{CaptureError, CpuFrame};
 
 /// Frames the consumer may be behind by before new ones are dropped.
 const BACKLOG: usize = 3;
-
-fn os<E: std::fmt::Display>(what: &str) -> impl FnOnce(E) -> CaptureError + '_ {
-    move |e| CaptureError::Os(format!("{what}: {e}"))
-}
 
 fn pixel_format(hdr: bool) -> DirectXPixelFormat {
     if hdr {
@@ -195,7 +192,6 @@ pub struct VideoStream {
     arrived: i64,
     closed: i64,
     rx: Receiver<Result<CapturedFrame, CaptureError>>,
-    size: (u32, u32),
 }
 
 impl VideoStream {
@@ -309,10 +305,6 @@ impl VideoStream {
         let _ = session.SetIsCursorCaptureEnabled(cursor);
         let _ = session.SetIsBorderRequired(false);
         session.StartCapture().map_err(os("StartCapture"))?;
-        let (w, h) = match region {
-            Some(r) => (r.width, r.height),
-            None => (size.Width.max(1) as u32, size.Height.max(1) as u32),
-        };
         Ok(Self {
             pool,
             session,
@@ -320,14 +312,7 @@ impl VideoStream {
             arrived,
             closed,
             rx,
-            size: (w, h),
         })
-    }
-
-    /// Size of the captured area when the stream started (a window may change it later: read
-    /// the size of the frames).
-    pub fn source_size(&self) -> (u32, u32) {
-        self.size
     }
 
     /// The next frame; `Ok(None)` when none arrived within `timeout` (nothing changed on screen).

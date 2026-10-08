@@ -168,7 +168,7 @@ fn the_style_panel_opens_and_picks_a_colour() {
         size: (1200, 900),
         area: Rect::new(0.0, 0.0, 1200.0, 900.0),
     };
-    let (l, out) = (log.clone(), colour.clone());
+    let (l, out) = (log, colour.clone());
     let overlay = Overlay::on_screens(session(), 1.0, &[screen], Look::default(), move |c, s| {
         l.borrow_mut().push((c, s.zone()));
         *out.borrow_mut() = Some(s.view().color);

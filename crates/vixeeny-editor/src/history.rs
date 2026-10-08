@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Unlimited undo/redo as invertible edits.
 
-use crate::geometry::Rect;
 use crate::model::{Annotation, AnnotationId, Document, Item};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -18,10 +17,6 @@ pub enum Edit {
         id: AnnotationId,
         old: Annotation,
         new: Annotation,
-    },
-    Crop {
-        old: Option<Rect>,
-        new: Option<Rect>,
     },
 }
 
@@ -41,10 +36,6 @@ impl Edit {
                 old: new.clone(),
                 new: old.clone(),
             },
-            Self::Crop { old, new } => Self::Crop {
-                old: *new,
-                new: *old,
-            },
         }
     }
 
@@ -59,7 +50,6 @@ impl Edit {
                     i.annotation = new.clone();
                 }
             }
-            Self::Crop { new, .. } => doc.crop = *new,
         }
     }
 }
@@ -147,13 +137,6 @@ mod tests {
                 new: line(9.0),
             },
         );
-        h.commit(
-            &mut doc,
-            Edit::Crop {
-                old: None,
-                new: Some(Rect::new(1.0, 1.0, 5.0, 5.0)),
-            },
-        );
         let item_b = doc.items.iter().find(|i| i.id == b).cloned().unwrap();
         h.commit(
             &mut doc,
@@ -166,9 +149,9 @@ mod tests {
         assert_eq!(doc.items.len(), 1);
 
         while h.undo(&mut doc).is_some() {}
-        assert_eq!((&doc.items, doc.crop), (&before.items, before.crop));
+        assert_eq!(doc.items, before.items);
         while h.redo(&mut doc).is_some() {}
-        assert_eq!((&doc.items, doc.crop), (&after.items, after.crop));
+        assert_eq!(doc.items, after.items);
     }
 
     #[test]

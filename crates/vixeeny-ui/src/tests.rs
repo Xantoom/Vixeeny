@@ -454,12 +454,10 @@ fn the_updates_and_about_pages_show_what_the_host_gives_them() {
         Line {
             text: "Licence GPL-3.0-or-later".into(),
             detail: "https://github.com/Xantoom/Vixeeny".into(),
-            strong: false,
         },
         Line {
             text: "Logs".into(),
             detail: "C:\\Users\\me\\AppData\\Local\\Vixeeny\\logs".into(),
-            strong: false,
         },
     ]);
     panel.set_update(&settings_panel::UpdateView {

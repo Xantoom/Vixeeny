@@ -216,8 +216,7 @@ impl Session {
     /// and takes effect once the zone is drawn.
     pub fn choose_tool(&mut self, tool: Option<Tool>) {
         self.text_input = None;
-        // Crop is the zone itself: adjusting it is the crop tool.
-        self.tool = tool.filter(|t| *t != Tool::Crop);
+        self.tool = tool;
         if let Some(t) = self.tool {
             self.editor.tool = t;
         }
@@ -320,6 +319,7 @@ impl Session {
         self.text_input = None;
     }
 
+    #[cfg(test)]
     pub fn is_typing(&self) -> bool {
         self.text_input.is_some()
     }

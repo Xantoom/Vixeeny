@@ -65,13 +65,7 @@ fn sniffing() {
         SourceFormat::sniff(&png_bytes(&tagged(), 4, 2)),
         Some(SourceFormat::Png)
     );
-    assert_eq!(SourceFormat::sniff(b"GIF89a.."), Some(SourceFormat::Gif));
-    assert_eq!(SourceFormat::sniff(b"BM......"), Some(SourceFormat::Bmp));
     assert_eq!(SourceFormat::sniff(b"hello"), None);
-    assert_eq!(
-        SourceFormat::from_extension("JPEG"),
-        Some(SourceFormat::Jpeg)
-    );
     assert!(decode(b"not an image").is_err());
 }
 
@@ -161,35 +155,11 @@ fn transparency_is_flattened_on_white() {
 }
 
 #[test]
-fn webp_jxl_bmp_gif_tiff_read() {
+fn webp_reads_back_exactly() {
     let src = tagged();
     let img = Bgra::new(4, 2, 16, &src);
-    // Lossless formats come back bit-exact.
     let webp = encode(ImageFormat::WebP, &img, &Settings::default()).unwrap();
     assert_eq!(decode(&webp).unwrap().bgra, src);
-    // Formats written with the `image` crate.
-    let rgba: Vec<u8> = src
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .flat_map(|p| [p[2], p[1], p[0], 255])
-        .collect();
-    let buffer = image::RgbaImage::from_raw(4, 2, rgba).unwrap();
-    for format in [
-        image::ImageFormat::Bmp,
-        image::ImageFormat::Tiff,
-        image::ImageFormat::Gif,
-    ] {
-        let mut bytes = Vec::new();
-        image::DynamicImage::ImageRgba8(buffer.clone())
-            .write_to(&mut std::io::Cursor::new(&mut bytes), format)
-            .unwrap();
-        let d = decode(&bytes).unwrap();
-        assert_eq!((d.width, d.height), (4, 2), "{format:?}");
-        if format != image::ImageFormat::Gif {
-            assert_eq!(d.bgra, src, "{format:?}");
-        }
-    }
 }
 
 #[cfg(feature = "native-codecs")]

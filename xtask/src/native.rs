@@ -62,7 +62,7 @@ pub fn build(only: &[String]) -> Result<()> {
     let prefix = work.join("prefix");
     std::fs::create_dir_all(&prefix)?;
     let jobs = std::thread::available_parallelism()
-        .map_or(2, |n| n.get())
+        .map_or(2, std::num::NonZero::get)
         .to_string();
     let ctx = Ctx { work, prefix, jobs };
 

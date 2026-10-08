@@ -265,14 +265,11 @@ fn custom_rows(env: &Env, encoder: &str) -> Vec<Row> {
             let id = format!("p:{key}");
             let label = param_label(&key, lang);
             let read = {
-                let (key, default) = (key.clone(), default.clone());
+                let (key, default) = (key.clone(), default);
                 move |c: &Config| c.cur().params.get(&key).cloned().unwrap_or(default.clone())
             };
-            let write = {
-                let key = key.clone();
-                move |c: &mut Config, v: String| {
-                    c.cur_mut().params.insert(key.clone(), v);
-                }
+            let write = move |c: &mut Config, v: String| {
+                c.cur_mut().params.insert(key.clone(), v);
             };
             let text_row = |kind: Kind| {
                 let (read, write) = (read.clone(), write.clone());

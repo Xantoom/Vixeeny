@@ -11,7 +11,7 @@ use crate::probe::{
 use crate::registry::{
     Chroma, Container, Encoder, Family, Kind, PixelFormatSpec, Registry, Vendor,
 };
-use crate::validate::{Context, IssueKind, Severity, is_valid, output_size, pick_auto, validate};
+use crate::validate::{Context, IssueKind, Severity, output_size, pick_auto, validate};
 
 fn registry() -> Registry {
     Registry::builtin().unwrap_or_else(|e| panic!("{e}"))
@@ -216,7 +216,10 @@ fn frame_rate_is_checked_against_the_codec_level() {
         .iter()
         .find(|i| matches!(i.kind, IssueKind::FramerateTooHigh { .. }));
     assert_eq!(warning.map(|i| i.severity), Some(Severity::Warning));
-    assert!(is_valid(&issues), "a warning does not block");
+    assert!(
+        issues.iter().all(|i| i.severity != Severity::Error),
+        "a warning does not block"
+    );
     assert!(check(&profile("libx265", "mkv"), None).is_empty());
     p.encoder = "libx265".into();
     assert!(check(&p, None).is_empty(), "HEVC level 6.2 handles 4K 240");
@@ -461,7 +464,7 @@ fn auto_prefers_h264_on_the_best_vendor_then_other_codecs() {
         Some("nvenc_h264")
     );
     // Without NVIDIA H.264, Intel H.264 would come next; with only HEVC, HEVC wins.
-    let mut only_hevc = result.clone();
+    let mut only_hevc = result;
     only_hevc
         .encoders
         .retain(|e| e.id == "nvenc_hevc" || e.id.starts_with("lib"));
@@ -516,7 +519,7 @@ fn results_round_trip_through_toml_and_the_cache_key_tracks_drivers() {
         "order does not matter"
     );
     assert_ne!(key, cache_key(&a, "0.2"), "new Vixeeny version");
-    let mut newer = a.clone();
+    let mut newer = a;
     newer[0].driver_version = "32.0.15.8000".into();
     assert_ne!(key, cache_key(&newer, "0.1"), "new driver");
     newer.pop();
@@ -544,7 +547,7 @@ fn the_cache_is_reused_until_the_key_changes() {
     assert_eq!(*runs.borrow(), 1, "second call is served by the cache");
     assert_eq!(first, second);
     // A driver update invalidates it.
-    let mut updated = adapters.clone();
+    let mut updated = adapters;
     updated[0].driver_version = "99".into();
     cached_or_probe(&path, &updated, "0.1", run).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(*runs.borrow(), 2);

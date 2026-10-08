@@ -27,7 +27,6 @@ use crate::{
 pub struct Line {
     pub text: String,
     pub detail: String,
-    pub strong: bool,
 }
 
 /// Where the update stands, for the card of the updates page.
@@ -151,7 +150,6 @@ fn line_model(lines: Vec<Line>, selected: Option<usize>) -> ModelRc<LineItem> {
             text: l.text.into(),
             detail: l.detail.into(),
             selected: selected == Some(i),
-            strong: l.strong,
         })
         .collect();
     ModelRc::from(Rc::new(VecModel::from(items)))

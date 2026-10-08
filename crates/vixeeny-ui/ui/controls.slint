@@ -698,8 +698,6 @@ export component ProgressBar inherits Rectangle {
 
 // A scrollable area with a thin scroll bar that appears on hover.
 export component ScrollArea inherits Rectangle {
-    in-out property <length> scroll-y <=> fl.content-y;
-    out property <length> total-height: fl.content-height;
     clip: true;
     fl := Flickable {
         @children

@@ -305,16 +305,6 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
             Err(e) => tracing::warn!("config not reloaded: {e}"),
         }
     }
-
-    /// Entry point for tray menu clicks.
-    pub fn open_settings_event() -> Event {
-        Event::Action(ActionId::OpenSettings)
-    }
-}
-
-/// Convenience used by the tray implementations.
-pub fn menu_label(key: Key, lang: Lang) -> &'static str {
-    tr(key, lang)
 }
 
 #[cfg(test)]
@@ -447,7 +437,7 @@ mod tests {
     #[test]
     fn tray_click_starts_the_app() {
         let (mut rt, tx, _, spawned) = runtime(false, Config::default());
-        tx.send(Runtime::<FakeTray, FakeSpawner>::open_settings_event());
+        tx.send(Event::Action(ActionId::OpenSettings));
         assert_eq!(rt.pump(), Flow::Continue);
         assert_eq!(*spawned.lock().unwrap(), vec![(1, ActionId::OpenSettings)]);
     }

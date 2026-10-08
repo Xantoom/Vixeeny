@@ -97,7 +97,6 @@ pub fn hardware_lines(lang: Lang, result: &ProbeResult) -> Vec<Line> {
                 tr(Key::HwDriver, lang).replace("{version}", &adapter.driver_version),
                 encoders.join(", ")
             ),
-            strong: true,
         });
     }
     let software: Vec<String> = result
@@ -110,7 +109,6 @@ pub fn hardware_lines(lang: Lang, result: &ProbeResult) -> Vec<Line> {
         lines.push(Line {
             text: tr(Key::HwSoftware, lang).into(),
             detail: software.join(", "),
-            strong: true,
         });
     }
     lines
@@ -264,7 +262,6 @@ fn about_lines(lang: Lang) -> Vec<Line> {
         Line {
             text: tr(Key::AboutLicense, lang).into(),
             detail: REPO.into(),
-            ..Line::default()
         },
         Line {
             text: tr(Key::AboutThirdParty, lang).into(),
@@ -290,7 +287,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
         return first_run(&config, lang);
     }
     let panel = SettingsPanel::new(
-        config.clone(),
+        config,
         vixeeny_platform::user_locale(),
         env!("CARGO_PKG_VERSION"),
         look,
@@ -352,7 +349,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
         });
     }
     {
-        let handle = handle.clone();
+        let handle = handle;
         panel.on_page_action(move |section, action, value| {
             let lang = crate::lang(&load_config().general.language);
             match (section, action) {

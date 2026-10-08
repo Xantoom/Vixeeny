@@ -50,8 +50,6 @@ pub enum ConfigError {
     TooNew { found: u32, supported: u32 },
     #[error("invalid schema_version in config")]
     BadVersion,
-    #[error("no config directory available on this system")]
-    NoConfigDir,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -428,8 +426,6 @@ pub struct Replay {
     pub enabled_on_start: bool,
     pub duration_seconds: u32,
     pub storage: String,
-    /// The video profile of the replay; empty = the recording's.
-    pub profile: String,
 }
 
 impl Default for Replay {
@@ -438,7 +434,6 @@ impl Default for Replay {
             enabled_on_start: false,
             duration_seconds: 30,
             storage: "ram".into(),
-            profile: String::new(),
         }
     }
 }
@@ -530,11 +525,6 @@ impl Config {
                 source,
             }),
         }
-    }
-
-    /// Loads the config from the OS config directory.
-    pub fn load_default_location() -> Result<Self, ConfigError> {
-        Self::load(&crate::paths::config_file().ok_or(ConfigError::NoConfigDir)?)
     }
 
     /// Atomically writes the config (temporary file + rename).

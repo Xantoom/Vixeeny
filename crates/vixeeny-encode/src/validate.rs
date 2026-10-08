@@ -235,11 +235,6 @@ pub fn validate(profile: &Profile, ctx: &Context<'_>) -> Vec<Issue> {
     issues
 }
 
-/// Whether the profile has no blocking issue.
-pub fn is_valid(issues: &[Issue]) -> bool {
-    issues.iter().all(|i| i.severity != Severity::Error)
-}
-
 /// The encoder `auto` stands for: the best hardware encoder the probe validated for 8-bit 4:2:0,
 /// else libx264. Order: H.264 first (plays everywhere), then HEVC, then AV1; NVIDIA, AMD, Intel…
 pub fn pick_auto<'a>(registry: &'a Registry, probe: Option<&ProbeResult>) -> Option<&'a Encoder> {

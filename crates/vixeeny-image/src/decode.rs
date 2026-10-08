@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Reading images for the converter (plan 5.5): PNG, JPEG, WebP, AVIF, JPEG XL, BMP, TIFF and
-//! GIF (first frame). The result is opaque sRGB BGRA, upright: the embedded colour profile and
+//! Reading the images Vixeeny writes (for the notification thumbnails): PNG, JPEG, WebP, AVIF and
+//! JPEG XL. The result is opaque sRGB BGRA, upright: the embedded colour profile and
 //! the orientation (EXIF, or `irot`/`imir` for AVIF) are applied, transparency is flattened on
 //! white (the encoders ignore alpha).
 
@@ -19,31 +19,9 @@ pub enum SourceFormat {
     WebP,
     Avif,
     Jxl,
-    Bmp,
-    Tiff,
-    Gif,
 }
 
 impl SourceFormat {
-    /// File extensions the converter accepts.
-    pub const EXTENSIONS: &'static [&'static str] = &[
-        "png", "jpg", "jpeg", "jpe", "webp", "avif", "jxl", "bmp", "tif", "tiff", "gif",
-    ];
-
-    pub fn from_extension(ext: &str) -> Option<Self> {
-        Some(match ext.to_ascii_lowercase().as_str() {
-            "png" => Self::Png,
-            "jpg" | "jpeg" | "jpe" => Self::Jpeg,
-            "webp" => Self::WebP,
-            "avif" => Self::Avif,
-            "jxl" => Self::Jxl,
-            "bmp" => Self::Bmp,
-            "tif" | "tiff" => Self::Tiff,
-            "gif" => Self::Gif,
-            _ => return None,
-        })
-    }
-
     /// Whether this build can read the format (AVIF needs `native-codecs`).
     pub const fn available(self) -> bool {
         !matches!(self, Self::Avif) || cfg!(feature = "native-codecs")
@@ -65,12 +43,6 @@ impl SourceFormat {
             Some(Self::Avif)
         } else if starts(&[0xFF, 0x0A]) || starts(b"\0\0\0\x0cJXL \r\n\x87\n") {
             Some(Self::Jxl)
-        } else if starts(b"BM") {
-            Some(Self::Bmp)
-        } else if starts(b"II*\0") || starts(b"MM\0*") {
-            Some(Self::Tiff)
-        } else if starts(b"GIF8") {
-            Some(Self::Gif)
         } else {
             None
         }
@@ -84,12 +56,6 @@ pub struct Decoded {
     pub height: u32,
     /// Tightly packed BGRA, alpha 255.
     pub bgra: Vec<u8>,
-}
-
-impl Decoded {
-    pub fn as_bgra(&self) -> crate::Bgra<'_> {
-        crate::Bgra::new(self.width, self.height, self.width as usize * 4, &self.bgra)
-    }
 }
 
 fn bad(e: impl std::fmt::Display) -> ImageError {

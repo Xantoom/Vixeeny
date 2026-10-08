@@ -309,7 +309,7 @@ impl SidePanel {
         let model = Rc::new(VecModel::from(
             entries.iter().map(to_item).collect::<Vec<_>>(),
         ));
-        window.set_items(model.clone().into());
+        window.set_items(model.into());
         window.set_vertical(state.edge.is_vertical());
         window.set_edge(state.edge.index());
         crate::theme::apply(
@@ -337,7 +337,7 @@ impl SidePanel {
             animate: state.animate,
         };
 
-        let list = entries.clone();
+        let list = entries;
         panel.window.on_navigate({
             let weak = panel.window.as_weak();
             move |delta| {

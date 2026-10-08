@@ -26,15 +26,6 @@ impl Color {
         format!("#{:02x}{:02x}{:02x}", self.r, self.g, self.b)
     }
 
-    pub fn from_hex(s: &str) -> Option<Self> {
-        let s = s.strip_prefix('#').unwrap_or(s);
-        if s.len() != 6 || !s.is_ascii() {
-            return None;
-        }
-        let v = u32::from_str_radix(s, 16).ok()?;
-        Some(Self::rgb((v >> 16) as u8, (v >> 8) as u8, v as u8))
-    }
-
     /// The eight preset colours of the palette (plan 5.3).
     pub const PALETTE: [Self; 8] = [
         Self::rgb(0xE5, 0x39, 0x35), // red
@@ -316,12 +307,11 @@ pub struct Item {
     pub annotation: Annotation,
 }
 
-/// The annotations over an image of `size` pixels, bottom to top, and the final crop.
+/// The annotations over an image of `size` pixels, bottom to top.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Document {
     pub size: (u32, u32),
     pub items: Vec<Item>,
-    pub crop: Option<Rect>,
     next_id: u32,
 }
 
@@ -330,7 +320,6 @@ impl Document {
         Self {
             size: (width, height),
             items: Vec::new(),
-            crop: None,
             next_id: 1,
         }
     }
@@ -368,12 +357,6 @@ impl Document {
             .max()
             .map_or(1, |n| n + 1)
     }
-
-    /// The area that ends up in the exported image: the crop, clamped to the image.
-    pub fn output_rect(&self) -> Rect {
-        let full = Rect::new(0.0, 0.0, self.size.0 as f32, self.size.1 as f32);
-        self.crop.and_then(|c| c.intersect(&full)).unwrap_or(full)
-    }
 }
 
 #[cfg(test)]
@@ -390,17 +373,6 @@ mod tests {
     #[test]
     fn hex_colours() {
         assert_eq!(Color::rgb(0xE5, 0x39, 0x35).hex(), "#e53935");
-        assert_eq!(
-            Color::from_hex("#1e88e5"),
-            Some(Color::rgb(0x1E, 0x88, 0xE5))
-        );
-        assert_eq!(
-            Color::from_hex("1e88e5"),
-            Some(Color::rgb(0x1E, 0x88, 0xE5))
-        );
-        assert_eq!(Color::from_hex("#12"), None);
-        assert_eq!(Color::from_hex("#gggggg"), None);
-        assert_eq!(Color::from_hex("#é1234"), None);
     }
 
     #[test]
@@ -486,15 +458,5 @@ mod tests {
             });
         }
         assert_eq!(doc.next_marker_number(), 4);
-    }
-
-    #[test]
-    fn output_rect_is_clamped_to_the_image() {
-        let mut doc = Document::new(100, 50);
-        assert_eq!(doc.output_rect(), Rect::new(0.0, 0.0, 100.0, 50.0));
-        doc.crop = Some(Rect::new(-10.0, 10.0, 60.0, 100.0));
-        assert_eq!(doc.output_rect(), Rect::new(0.0, 10.0, 50.0, 40.0));
-        doc.crop = Some(Rect::new(500.0, 500.0, 5.0, 5.0));
-        assert_eq!(doc.output_rect(), Rect::new(0.0, 0.0, 100.0, 50.0));
     }
 }

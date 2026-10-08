@@ -104,7 +104,6 @@ auto_hide = false
 enabled_on_start = false
 duration_seconds = 30
 storage = "ram"
-profile = ""
 
 [overlay]
 edge = "right"

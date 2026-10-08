@@ -20,7 +20,6 @@ pub enum Tool {
     Blur,
     Pixelate,
     Marker,
-    Crop,
     Eyedropper,
 }
 
@@ -265,19 +264,6 @@ impl Editor {
         }
     }
 
-    /// The rectangle being cropped, while the Crop tool drags.
-    pub fn crop_preview(&self) -> Option<Rect> {
-        match self.drag.as_ref()? {
-            Drag::Draw {
-                start,
-                current,
-                shift,
-                ..
-            } if self.tool == Tool::Crop => Some(self.drag_rect(*start, *current, *shift)),
-            _ => None,
-        }
-    }
-
     fn drag_rect(&self, start: Point, current: Point, shift: bool) -> Rect {
         let end = if shift {
             square_corner(start, current)
@@ -365,19 +351,7 @@ impl Editor {
         else {
             return;
         };
-        if self.tool == Tool::Crop {
-            let rect = self.drag_rect(start, current, shift);
-            if rect.w >= MIN_DRAG && rect.h >= MIN_DRAG {
-                let old = self.doc.crop;
-                self.history.commit(
-                    &mut self.doc,
-                    Edit::Crop {
-                        old,
-                        new: Some(rect),
-                    },
-                );
-            }
-        } else if let Some(a) = self.build(start, &points, current, shift) {
+        if let Some(a) = self.build(start, &points, current, shift) {
             let id = self.add(a);
             self.selection = Some(id);
         }
@@ -401,31 +375,6 @@ impl Editor {
         Some(id)
     }
 
-    /// Replaces the text of an existing text annotation.
-    pub fn edit_text(&mut self, id: AnnotationId, text: &str) {
-        let Some(
-            old @ Annotation::Text {
-                pos,
-                size,
-                color,
-                background,
-                ..
-            },
-        ) = self.doc.get(id).cloned()
-        else {
-            return;
-        };
-        let new = Annotation::Text {
-            pos,
-            text: text.to_owned(),
-            size,
-            color,
-            background,
-        };
-        self.history
-            .commit(&mut self.doc, Edit::Replace { id, old, new });
-    }
-
     pub fn delete_selected(&mut self) {
         let Some(id) = self.selection.take() else {
             return;
@@ -444,18 +393,6 @@ impl Editor {
             let new = old.translated(dx, dy);
             self.history
                 .commit(&mut self.doc, Edit::Replace { id, old, new });
-        }
-    }
-
-    pub fn clear_crop(&mut self) {
-        if let Some(old) = self.doc.crop {
-            self.history.commit(
-                &mut self.doc,
-                Edit::Crop {
-                    old: Some(old),
-                    new: None,
-                },
-            );
         }
     }
 
@@ -638,13 +575,7 @@ mod tests {
             Outcome::TextRequested(p(20.0, 20.0))
         );
         assert!(ed.add_text(p(20.0, 20.0), "   ").is_none());
-        let id = ed.add_text(p(20.0, 20.0), "Hello").unwrap();
-        ed.edit_text(id, "Bye");
-        let Annotation::Text { text, .. } = only(&ed) else {
-            panic!()
-        };
-        assert_eq!(text, "Bye");
-        ed.undo();
+        ed.add_text(p(20.0, 20.0), "Hello").unwrap();
         let Annotation::Text { text, .. } = only(&ed) else {
             panic!()
         };
@@ -709,22 +640,6 @@ mod tests {
         ed.pointer_down(p(30.0, 30.0), NO, None);
         ed.pointer_up(p(30.0, 30.0), NO);
         ed.undo(); // only the creation is in the history
-        assert!(ed.doc.items.is_empty());
-    }
-
-    #[test]
-    fn crop_tool_sets_and_clears_the_crop() {
-        let mut ed = Editor::new(100, 100);
-        ed.tool = Tool::Crop;
-        ed.pointer_down(p(10.0, 10.0), NO, None);
-        ed.pointer_move(p(60.0, 50.0), NO);
-        assert_eq!(ed.crop_preview(), Some(Rect::new(10.0, 10.0, 50.0, 40.0)));
-        ed.pointer_up(p(60.0, 50.0), NO);
-        assert_eq!(ed.doc.crop, Some(Rect::new(10.0, 10.0, 50.0, 40.0)));
-        ed.clear_crop();
-        assert_eq!(ed.doc.crop, None);
-        ed.undo();
-        assert!(ed.doc.crop.is_some());
         assert!(ed.doc.items.is_empty());
     }
 

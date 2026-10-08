@@ -34,10 +34,6 @@ impl Look {
         }
     }
 
-    pub fn with_dark(self, dark: bool) -> Self {
-        Self { dark, ..self }
-    }
-
     /// The window background, for the title bar to match.
     pub const fn caption(self) -> [u8; 3] {
         if self.dark {

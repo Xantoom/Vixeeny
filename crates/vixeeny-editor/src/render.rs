@@ -410,14 +410,9 @@ pub fn render_region<'a>(
     Some(flatten(base.crop(r), moved.iter()))
 }
 
-/// Renders the document over `base`: annotations bottom to top, then the crop.
+/// Renders the document over `base`: annotations bottom to top.
 pub fn render(base: &RgbaImage, doc: &Document) -> RgbaImage {
-    render_region(
-        base,
-        doc.items.iter().map(|i| &i.annotation),
-        &doc.output_rect(),
-    )
-    .unwrap_or_else(|| base.clone())
+    flatten(base.clone(), doc.items.iter().map(|i| &i.annotation))
 }
 
 #[cfg(test)]

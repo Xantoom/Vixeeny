@@ -200,7 +200,7 @@ pub fn save_image(
         dest.template,
         &vars,
         format.extension(),
-        |p| p.exists(),
+        std::path::Path::exists,
     );
     write_atomic(&path, &bytes)?;
     if let Some(after) = dest.after_save {

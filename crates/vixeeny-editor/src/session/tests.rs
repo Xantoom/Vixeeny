@@ -116,7 +116,7 @@ fn tools_draw_inside_the_zone_and_the_export_contains_them() {
     assert_eq!(out.pixel(90, 2), Color::rgb(0, 0, 255)); // untouched blue
     // the live view agrees with the export, over what the annotation covers only
     let view = s.view();
-    let (annotated, at) = view.annotated.clone().unwrap();
+    let (annotated, at) = view.annotated.unwrap();
     assert!(at.x >= 20.0 && at.y >= 20.0, "{at:?}");
     assert!(annotated.width < out.width && annotated.height < out.height);
     for y in 0..annotated.height {

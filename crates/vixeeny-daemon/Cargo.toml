@@ -15,7 +15,6 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 auto-launch.workspace = true
-thiserror.workspace = true
 tracing.workspace = true
 vixeeny-capture = { path = "../vixeeny-capture" }
 vixeeny-common = { path = "../vixeeny-common" }

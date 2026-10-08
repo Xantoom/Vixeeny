@@ -30,7 +30,8 @@ impl Fps {
     }
 
     /// Media time of the start of slot `index`.
-    pub fn time_of(self, index: u64) -> i64 {
+    #[cfg(test)]
+    fn time_of(self, index: u64) -> i64 {
         (i128::from(index) * i128::from(self.den) * 1_000_000_000 / i128::from(self.num)) as i64
     }
 }

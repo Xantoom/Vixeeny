@@ -401,7 +401,7 @@ impl Pane {
         };
         add(&content, &veil_group)?;
         let veil = [0; 4].map(|_| solid_visual(gfx, &solids.black));
-        let veil = veil.map(|v| v.ok());
+        let veil = veil.map(std::result::Result::ok);
         let veil: [IDCompositionVisual2; 4] = match veil {
             [Some(a), Some(b), Some(c), Some(d)] => [a, b, c, d],
             _ => {
