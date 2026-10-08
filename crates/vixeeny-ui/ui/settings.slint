@@ -807,8 +807,8 @@ export component SettingsWindow inherits Window {
                         HorizontalLayout {
                             spacing: 8px;
                             alignment: start;
-                            Button { icon: Icons.globe; text: root.t.github; clicked => { root.page-action("github", ""); } }
-                            Button { icon: Icons.document; text: root.t.logs; clicked => { root.page-action("logs", ""); } }
+                            Button { icon: Icons.github; text: root.t.github; clicked => { root.page-action("github", ""); } }
+                            Button { icon: Icons.folder-open; text: root.t.logs; clicked => { root.page-action("logs", ""); } }
                             Button { icon: Icons.copy; text: root.t.copy-info; clicked => { root.page-action("copy-info", ""); } }
                         }
                         if root.extra != "" : Text {

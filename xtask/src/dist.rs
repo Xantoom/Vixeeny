@@ -100,7 +100,8 @@ pub fn third_party_licenses() -> Result<String> {
     }
     text.push_str(
         "\nAssets:\nInter (the typeface of the text drawn on captures) — SIL OFL 1.1\n\
-         Fluent UI System Icons (Microsoft; the icons of the windows) — MIT\n",
+         Fluent UI System Icons (Microsoft; the icons of the windows) — MIT\n\
+         Octicons (GitHub; the GitHub mark on the About page) — MIT\n",
     );
     text.push_str("\nRust crates:\n");
     for line in lines {
