@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Which encoders the video page offers: the ones of the codec registry that exist on this
-//! platform and, for the hardware ones, that the probe opened a session with.
+//! platform and, for the hardware ones, that the GPU driver reports.
 
 use std::sync::LazyLock;
 
