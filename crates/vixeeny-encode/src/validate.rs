@@ -236,7 +236,8 @@ pub fn validate(profile: &Video, ctx: &Context<'_>) -> Vec<Issue> {
 }
 
 /// The encoder `auto` stands for: the best hardware encoder the probe validated for 8-bit 4:2:0,
-/// else libx264. Order: H.264 first (plays everywhere), then HEVC, then AV1; NVIDIA, AMD, Intel…
+/// else libx264. Order: AV1 first (the smallest files for the quality), then HEVC, then H.264;
+/// NVIDIA, AMD, Intel…
 pub fn pick_auto<'a>(registry: &'a Registry, probe: Option<&ProbeResult>) -> Option<&'a Encoder> {
     let vendor_rank = |v: Vendor| match v {
         Vendor::Nvidia => 0,
@@ -245,9 +246,9 @@ pub fn pick_auto<'a>(registry: &'a Registry, probe: Option<&ProbeResult>) -> Opt
         Vendor::None => 3,
     };
     let family_rank = |f: Family| match f {
-        Family::H264 => 0,
+        Family::Av1 => 0,
         Family::Hevc => 1,
-        Family::Av1 => 2,
+        Family::H264 => 2,
         Family::Vp9 => 3,
     };
     let best = probe.and_then(|probe| {

@@ -17,7 +17,8 @@ pub struct EncoderInfo {
     pub id: String,
     pub name: String,
     pub hardware: bool,
-    /// Lower is better: the codec first, then the vendor (the order `pick_auto` uses).
+    /// Lower is better: the codec (AV1, HEVC, H.264), then the vendor (the order `pick_auto`
+    /// uses).
     rank: (u8, u8),
 }
 
@@ -31,9 +32,9 @@ pub fn all() -> Vec<EncoderInfo> {
         return Vec::new();
     };
     let family = |f: Family| match f {
-        Family::H264 => 0,
+        Family::Av1 => 0,
         Family::Hevc => 1,
-        Family::Av1 => 2,
+        Family::H264 => 2,
         Family::Vp9 => 3,
     };
     let vendor = |v: Vendor| match v {
@@ -51,7 +52,8 @@ pub fn all() -> Vec<EncoderInfo> {
             rank: (family(e.family), vendor(e.vendor)),
         })
         .collect();
-    // Stable: software keeps the registry's order (x264, x265, AV1, VP9).
+    // Stable: software keeps the registry's order (x264, x265, VP9, SVT-AV1): an AV1 encoder
+    // on the processor cannot keep up with a game in real time.
     list.sort_by_key(|e| (!e.hardware, if e.hardware { e.rank } else { (0, 0) }));
     list
 }
@@ -105,7 +107,6 @@ pub fn param_label(key: &str, lang: Lang) -> String {
         "preset" => ("Speed / quality preset", "Préréglage vitesse / qualité"),
         "tune" => ("Tuning", "Optimisation"),
         "quality" => ("Quality preset", "Préréglage de qualité"),
-        "usage" => ("Usage", "Usage"),
         "multipass" => ("Two-pass encoding", "Encodage en deux passes"),
         "keyint" => (
             "Key-frame interval (frames, 0 = auto)",
@@ -159,10 +160,8 @@ pub fn numbered_preset_label(min: i64, max: i64, lang: Lang) -> String {
 pub fn value_label(key: &str, value: &str, lang: Lang) -> String {
     let pair = match (key, value) {
         (_, "auto") => ("Auto", "Auto"),
-        // NVENC: P1 to P7.
-        ("preset", "p1") => ("P1 (fastest)", "P1 (le plus rapide)"),
-        ("preset", "p4") => ("P4 (balanced)", "P4 (équilibré)"),
-        ("preset", "p7") => ("P7 (best quality)", "P7 (la meilleure qualité)"),
+        // NVENC: P1 to P7. Above P5 the encoder struggles with 4K at 60 fps.
+        ("preset", "p5") => ("P5 (recommended)", "P5 (recommandé)"),
         ("preset", p) if p.len() == 2 && p.starts_with('p') => return p.to_uppercase(),
         // x264, x265, Quick Sync.
         ("preset", "ultrafast") => ("Ultra fast", "Ultra rapide"),
@@ -174,17 +173,12 @@ pub fn value_label(key: &str, value: &str, lang: Lang) -> String {
         ("preset", "slow") => ("Slow", "Lent"),
         ("preset", "slower") => ("Slower", "Plus lent"),
         ("preset", "veryslow") => ("Very slow", "Très lent"),
-        ("preset", "placebo") => ("Placebo (slowest)", "Placebo (le plus lent)"),
-        ("tune", "hq") => ("High quality", "Haute qualité"),
-        ("tune", "ll") => ("Low latency", "Faible latence"),
-        ("tune", "ull") => ("Ultra-low latency", "Très faible latence"),
-        ("tune", "lossless") => ("Lossless", "Sans perte"),
+        ("preset", "placebo") => ("Placebo", "Placebo"),
         ("tune", "film") => ("Film", "Film"),
         ("tune", "animation") => ("Animation", "Animation"),
         ("tune", "grain") => ("Grain", "Grain"),
         ("tune", "stillimage") => ("Still image", "Image fixe"),
         ("tune", "fastdecode") => ("Fast decoding", "Décodage rapide"),
-        ("tune", "zerolatency") => ("Zero latency", "Latence nulle"),
         ("tune", "psnr") => ("PSNR", "PSNR"),
         ("tune", "ssim") => ("SSIM", "SSIM"),
         ("multipass", "disabled") => ("Off", "Désactivé"),
@@ -196,9 +190,6 @@ pub fn value_label(key: &str, value: &str, lang: Lang) -> String {
             "Full resolution (more precise)",
             "Pleine résolution (plus précis)",
         ),
-        ("usage", "transcoding") => ("Transcoding", "Transcodage"),
-        ("usage", "lowlatency") => ("Low latency", "Faible latence"),
-        ("usage", "ultralowlatency") => ("Ultra-low latency", "Très faible latence"),
         ("quality", "speed") => ("Speed", "Vitesse"),
         ("quality", "balanced") => ("Balanced", "Équilibré"),
         ("quality", "quality") => ("Quality", "Qualité"),
@@ -215,7 +206,6 @@ pub fn rate_mode_label(mode: RateMode, lang: Lang) -> &'static str {
     let (en, fr) = match mode {
         RateMode::Quality => ("Constant quality", "Qualité constante"),
         RateMode::Vbr => ("Variable bitrate (VBR)", "Débit variable (VBR)"),
-        RateMode::Cbr => ("Constant bitrate (CBR)", "Débit constant (CBR)"),
     };
     if lang == Lang::Fr { fr } else { en }
 }

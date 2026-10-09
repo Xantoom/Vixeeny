@@ -927,8 +927,6 @@ mod tests {
         assert!(!after.iter().any(|i| i == "p:rc.quality"));
         assert!(after.iter().any(|i| i == "p:rc.bitrate"));
         assert!(after.iter().any(|i| i == "p:rc.maxrate"));
-        c.video.params.insert("rc.mode".into(), "cbr".into());
-        assert!(!ids(&c).iter().any(|i| i == "p:rc.maxrate"));
     }
 
     #[test]

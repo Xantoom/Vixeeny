@@ -99,7 +99,7 @@ fn the_custom_options_follow_the_rate_mode() {
     let o = custom("nvenc_h264", &[("rc.quality", "28")]);
     assert_eq!(o["rc"], "vbr");
     assert_eq!(o["cq"], "28");
-    assert_eq!(o["preset"], "p4");
+    assert_eq!(o["preset"], "p5");
     assert!(!o.contains_key("b") && !o.contains_key("bf") && !o.contains_key("g"));
     // VBR: no quality left over, the rates in bit/s, two seconds of buffer.
     let o = custom(
@@ -117,13 +117,11 @@ fn the_custom_options_follow_the_rate_mode() {
         ("8000000", "12000000")
     );
     assert_eq!(o["bufsize"], "24000000");
-    // CBR, and a maximum below the target is raised to it.
+    // A constant bitrate (older settings) is the variable one now.
     let o = custom("libx264", &[("rc.mode", "cbr"), ("rc.bitrate", "6000")]);
-    assert_eq!(
-        (o["b"].as_str(), o["maxrate"].as_str()),
-        ("6000000", "6000000")
-    );
+    assert_eq!(o["b"], "6000000");
     assert!(!o.contains_key("crf"));
+    // A maximum below the target is raised to it.
     let o = custom(
         "libx264",
         &[
@@ -133,8 +131,8 @@ fn the_custom_options_follow_the_rate_mode() {
         ],
     );
     assert_eq!(o["maxrate"], "9000000");
-    // A mode the encoder lacks falls back to constant quality.
-    let o = custom("libsvtav1", &[("rc.mode", "cbr")]);
+    // A mode the encoder does not know falls back to constant quality.
+    let o = custom("libsvtav1", &[("rc.mode", "nope")]);
     assert_eq!(o["crf"], "30");
     // AMF quality sets every frame type; AV1 counts on 0-255.
     let o = custom("amf_av1", &[("rc.quality", "300")]);
@@ -519,14 +517,22 @@ fn a_system_without_a_gpu_only_offers_software() {
 }
 
 #[test]
-fn auto_prefers_h264_on_the_best_vendor_then_other_codecs() {
+fn auto_prefers_av1_on_the_best_vendor_then_hevc_then_h264() {
     let r = registry();
     let result = probe(&r, &multi_gpu(), "0.1");
     assert_eq!(
         pick_auto(&r, Some(&result)).map(|e| e.id.as_str()),
-        Some("nvenc_h264")
+        Some("nvenc_av1")
     );
-    // Without NVIDIA H.264, Intel H.264 would come next; with only HEVC, HEVC wins.
+    // Without AV1, HEVC wins; with only H.264, H.264.
+    let mut only_hevc = result.clone();
+    only_hevc
+        .encoders
+        .retain(|e| e.id.contains("hevc") || e.id.contains("h264") || e.id.starts_with("lib"));
+    assert_eq!(
+        pick_auto(&r, Some(&only_hevc)).map(|e| e.id.as_str()),
+        Some("nvenc_hevc")
+    );
     let mut only_hevc = result;
     only_hevc
         .encoders

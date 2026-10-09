@@ -1,9 +1,11 @@
 # Codec registry (plan section 6). One entry per encoder; presets are plain FFmpeg options.
+# Vixeeny records to files: what only serves streaming (constant bitrate, low-latency tunings
+# and usages) is left out.
 # Checked against the real encoders by `cargo xtask verify-registry`.
 #
 # The custom preset is built from `rate_control` and `params`:
 # - `rate_control.quality`: the scale of the constant-quality mode (lower = better);
-# - `rate_control.modes`: the FFmpeg options of each mode (`quality`, `vbr`, `cbr`), where
+# - `rate_control.modes`: the FFmpeg options of each mode (`quality`, `vbr`), where
 #   `{quality}`, `{bitrate}`, `{maxrate}` and `{bufsize}` are replaced by the user's values
 #   (rates in bit/s; the buffer is two seconds of the highest rate);
 # - `params`: the other options, each always written with its value or `default`, except a
@@ -38,7 +40,6 @@ small = { crf = 28, preset = "slow" }
 quality = { name = "CRF", min = 0, max = 51, default = 23 }
 modes.quality = { crf = "{quality}" }
 modes.vbr = { b = "{bitrate}", maxrate = "{maxrate}", bufsize = "{bufsize}" }
-modes.cbr = { b = "{bitrate}", maxrate = "{bitrate}", bufsize = "{bufsize}" }
 
 [[encoder.params]]
 key = "preset"
@@ -51,7 +52,7 @@ default = "medium"
 key = "tune"
 ffmpeg_option = "tune"
 type = "enum"
-values = ["auto", "film", "animation", "grain", "stillimage", "fastdecode", "zerolatency"]
+values = ["auto", "film", "animation", "grain", "stillimage", "fastdecode"]
 default = "auto"
 auto = "auto"
 
@@ -110,7 +111,6 @@ small = { crf = 29, preset = "slow" }
 quality = { name = "CRF", min = 0, max = 51, default = 24 }
 modes.quality = { crf = "{quality}" }
 modes.vbr = { b = "{bitrate}", maxrate = "{maxrate}", bufsize = "{bufsize}" }
-modes.cbr = { b = "{bitrate}", maxrate = "{bitrate}", bufsize = "{bufsize}" }
 
 [[encoder.params]]
 key = "preset"
@@ -123,7 +123,7 @@ default = "medium"
 key = "tune"
 ffmpeg_option = "tune"
 type = "enum"
-values = ["auto", "psnr", "ssim", "grain", "zerolatency", "fastdecode", "animation"]
+values = ["auto", "psnr", "ssim", "grain", "fastdecode", "animation"]
 default = "auto"
 auto = "auto"
 
@@ -170,12 +170,11 @@ balanced = { crf = 32, deadline = "good", cpu-used = 4, b = 0 }
 performance = { crf = 36, deadline = "realtime", cpu-used = 8, b = 0 }
 small = { crf = 40, deadline = "good", cpu-used = 3, b = 0 }
 
-# Constant quality needs `b = 0`; CBR is chosen when the three rates are equal.
+# Constant quality needs `b = 0`.
 [encoder.rate_control]
 quality = { name = "CRF", min = 0, max = 63, default = 32 }
 modes.quality = { crf = "{quality}", b = 0 }
 modes.vbr = { b = "{bitrate}" }
-modes.cbr = { b = "{bitrate}", minrate = "{bitrate}", maxrate = "{bitrate}", bufsize = "{bufsize}" }
 
 [[encoder.params]]
 key = "deadline"
@@ -229,7 +228,6 @@ balanced = { crf = 30, preset = 6 }
 performance = { crf = 36, preset = 10 }
 small = { crf = 42, preset = 6 }
 
-# No CBR: SVT-AV1 only allows it with the low-delay prediction structure.
 [encoder.rate_control]
 quality = { name = "CRF", min = 1, max = 63, default = 30 }
 modes.quality = { crf = "{quality}" }
@@ -269,30 +267,22 @@ hdr = false
 containers = ["mkv", "mp4", "fmp4"]
 
 [encoder.presets]
-quality = { rc = "vbr", cq = 19, preset = "p6", tune = "hq", multipass = "qres" }
+quality = { rc = "vbr", cq = 19, preset = "p5", tune = "hq" }
 balanced = { rc = "vbr", cq = 23, preset = "p4", tune = "hq" }
-performance = { rc = "vbr", cq = 25, preset = "p2", tune = "ll" }
+performance = { rc = "vbr", cq = 25, preset = "p2", tune = "hq" }
 small = { rc = "vbr", cq = 30, preset = "p5", tune = "hq" }
 
 [encoder.rate_control]
 quality = { name = "CQ", min = 1, max = 51, default = 23 }
 modes.quality = { rc = "vbr", cq = "{quality}" }
 modes.vbr = { rc = "vbr", b = "{bitrate}", maxrate = "{maxrate}", bufsize = "{bufsize}" }
-modes.cbr = { rc = "cbr", b = "{bitrate}", bufsize = "{bufsize}" }
 
 [[encoder.params]]
 key = "preset"
 ffmpeg_option = "preset"
 type = "enum"
 values = ["p1", "p2", "p3", "p4", "p5", "p6", "p7"]
-default = "p4"
-
-[[encoder.params]]
-key = "tune"
-ffmpeg_option = "tune"
-type = "enum"
-values = ["hq", "ll", "ull", "lossless"]
-default = "hq"
+default = "p5"
 
 [[encoder.params]]
 key = "multipass"
@@ -357,30 +347,22 @@ hdr = true
 containers = ["mkv", "mp4", "fmp4"]
 
 [encoder.presets]
-quality = { rc = "vbr", cq = 19, preset = "p6", tune = "hq", multipass = "qres" }
+quality = { rc = "vbr", cq = 19, preset = "p5", tune = "hq" }
 balanced = { rc = "vbr", cq = 23, preset = "p4", tune = "hq" }
-performance = { rc = "vbr", cq = 25, preset = "p2", tune = "ll" }
+performance = { rc = "vbr", cq = 25, preset = "p2", tune = "hq" }
 small = { rc = "vbr", cq = 30, preset = "p5", tune = "hq" }
 
 [encoder.rate_control]
 quality = { name = "CQ", min = 1, max = 51, default = 23 }
 modes.quality = { rc = "vbr", cq = "{quality}" }
 modes.vbr = { rc = "vbr", b = "{bitrate}", maxrate = "{maxrate}", bufsize = "{bufsize}" }
-modes.cbr = { rc = "cbr", b = "{bitrate}", bufsize = "{bufsize}" }
 
 [[encoder.params]]
 key = "preset"
 ffmpeg_option = "preset"
 type = "enum"
 values = ["p1", "p2", "p3", "p4", "p5", "p6", "p7"]
-default = "p4"
-
-[[encoder.params]]
-key = "tune"
-ffmpeg_option = "tune"
-type = "enum"
-values = ["hq", "ll", "ull", "lossless"]
-default = "hq"
+default = "p5"
 
 [[encoder.params]]
 key = "multipass"
@@ -443,30 +425,22 @@ hdr = true
 containers = ["mkv", "mp4", "fmp4", "webm"]
 
 [encoder.presets]
-quality = { rc = "vbr", cq = 24, preset = "p6", tune = "hq", multipass = "qres" }
+quality = { rc = "vbr", cq = 24, preset = "p5", tune = "hq" }
 balanced = { rc = "vbr", cq = 30, preset = "p4", tune = "hq" }
-performance = { rc = "vbr", cq = 32, preset = "p2", tune = "ll" }
+performance = { rc = "vbr", cq = 32, preset = "p2", tune = "hq" }
 small = { rc = "vbr", cq = 38, preset = "p5", tune = "hq" }
 
 [encoder.rate_control]
 quality = { name = "CQ", min = 1, max = 63, default = 30 }
 modes.quality = { rc = "vbr", cq = "{quality}" }
 modes.vbr = { rc = "vbr", b = "{bitrate}", maxrate = "{maxrate}", bufsize = "{bufsize}" }
-modes.cbr = { rc = "cbr", b = "{bitrate}", bufsize = "{bufsize}" }
 
 [[encoder.params]]
 key = "preset"
 ffmpeg_option = "preset"
 type = "enum"
 values = ["p1", "p2", "p3", "p4", "p5", "p6", "p7"]
-default = "p4"
-
-[[encoder.params]]
-key = "tune"
-ffmpeg_option = "tune"
-type = "enum"
-values = ["hq", "ll", "ull", "lossless"]
-default = "hq"
+default = "p5"
 
 [[encoder.params]]
 key = "multipass"
@@ -524,21 +498,13 @@ containers = ["mkv", "mp4", "fmp4"]
 [encoder.presets]
 quality = { usage = "transcoding", quality = "quality", rc = "cqp", qp_i = 20, qp_p = 22, qp_b = 22 }
 balanced = { usage = "transcoding", quality = "balanced", rc = "cqp", qp_i = 24, qp_p = 26, qp_b = 26 }
-performance = { usage = "lowlatency", quality = "speed", rc = "cqp", qp_i = 26, qp_p = 28, qp_b = 28 }
+performance = { usage = "transcoding", quality = "speed", rc = "cqp", qp_i = 26, qp_p = 28, qp_b = 28 }
 small = { usage = "transcoding", quality = "quality", rc = "cqp", qp_i = 30, qp_p = 32, qp_b = 32 }
 
 [encoder.rate_control]
 quality = { name = "QP", min = 0, max = 51, default = 24 }
 modes.quality = { rc = "cqp", qp_i = "{quality}", qp_p = "{quality}", qp_b = "{quality}" }
 modes.vbr = { rc = "vbr_peak", b = "{bitrate}", maxrate = "{maxrate}", bufsize = "{bufsize}" }
-modes.cbr = { rc = "cbr", b = "{bitrate}", maxrate = "{bitrate}", bufsize = "{bufsize}" }
-
-[[encoder.params]]
-key = "usage"
-ffmpeg_option = "usage"
-type = "enum"
-values = ["transcoding", "lowlatency", "ultralowlatency"]
-default = "transcoding"
 
 [[encoder.params]]
 key = "quality"
@@ -595,21 +561,13 @@ containers = ["mkv", "mp4", "fmp4"]
 [encoder.presets]
 quality = { usage = "transcoding", quality = "quality", rc = "cqp", qp_i = 20, qp_p = 22 }
 balanced = { usage = "transcoding", quality = "balanced", rc = "cqp", qp_i = 24, qp_p = 26 }
-performance = { usage = "lowlatency", quality = "speed", rc = "cqp", qp_i = 26, qp_p = 28 }
+performance = { usage = "transcoding", quality = "speed", rc = "cqp", qp_i = 26, qp_p = 28 }
 small = { usage = "transcoding", quality = "quality", rc = "cqp", qp_i = 30, qp_p = 32 }
 
 [encoder.rate_control]
 quality = { name = "QP", min = 0, max = 51, default = 24 }
 modes.quality = { rc = "cqp", qp_i = "{quality}", qp_p = "{quality}" }
 modes.vbr = { rc = "vbr_peak", b = "{bitrate}", maxrate = "{maxrate}", bufsize = "{bufsize}" }
-modes.cbr = { rc = "cbr", b = "{bitrate}", maxrate = "{bitrate}", bufsize = "{bufsize}" }
-
-[[encoder.params]]
-key = "usage"
-ffmpeg_option = "usage"
-type = "enum"
-values = ["transcoding", "lowlatency", "ultralowlatency"]
-default = "transcoding"
 
 [[encoder.params]]
 key = "quality"
@@ -658,21 +616,13 @@ containers = ["mkv", "mp4", "fmp4", "webm"]
 [encoder.presets]
 quality = { usage = "transcoding", quality = "quality", rc = "cqp", qp_i = 96, qp_p = 100, qp_b = 100 }
 balanced = { usage = "transcoding", quality = "balanced", rc = "cqp", qp_i = 116, qp_p = 120, qp_b = 120 }
-performance = { usage = "lowlatency", quality = "speed", rc = "cqp", qp_i = 126, qp_p = 130, qp_b = 130 }
+performance = { usage = "transcoding", quality = "speed", rc = "cqp", qp_i = 126, qp_p = 130, qp_b = 130 }
 small = { usage = "transcoding", quality = "quality", rc = "cqp", qp_i = 146, qp_p = 150, qp_b = 150 }
 
 [encoder.rate_control]
 quality = { name = "QP", min = 0, max = 255, default = 120 }
 modes.quality = { rc = "cqp", qp_i = "{quality}", qp_p = "{quality}", qp_b = "{quality}" }
 modes.vbr = { rc = "vbr_peak", b = "{bitrate}", maxrate = "{maxrate}", bufsize = "{bufsize}" }
-modes.cbr = { rc = "cbr", b = "{bitrate}", maxrate = "{bitrate}", bufsize = "{bufsize}" }
-
-[[encoder.params]]
-key = "usage"
-ffmpeg_option = "usage"
-type = "enum"
-values = ["transcoding", "lowlatency", "ultralowlatency"]
-default = "transcoding"
 
 [[encoder.params]]
 key = "quality"
@@ -729,7 +679,6 @@ small = { global_quality = 32, preset = "slow" }
 quality = { name = "ICQ", min = 1, max = 51, default = 24 }
 modes.quality = { global_quality = "{quality}" }
 modes.vbr = { b = "{bitrate}", maxrate = "{maxrate}", bufsize = "{bufsize}" }
-modes.cbr = { b = "{bitrate}", maxrate = "{bitrate}", bufsize = "{bufsize}" }
 
 [[encoder.params]]
 key = "preset"
@@ -781,7 +730,6 @@ small = { global_quality = 32, preset = "slow" }
 quality = { name = "ICQ", min = 1, max = 51, default = 24 }
 modes.quality = { global_quality = "{quality}" }
 modes.vbr = { b = "{bitrate}", maxrate = "{maxrate}", bufsize = "{bufsize}" }
-modes.cbr = { b = "{bitrate}", maxrate = "{bitrate}", bufsize = "{bufsize}" }
 
 [[encoder.params]]
 key = "preset"
@@ -833,7 +781,6 @@ small = { global_quality = 32, preset = "slow" }
 quality = { name = "ICQ", min = 1, max = 51, default = 24 }
 modes.quality = { global_quality = "{quality}" }
 modes.vbr = { b = "{bitrate}", maxrate = "{maxrate}", bufsize = "{bufsize}" }
-modes.cbr = { b = "{bitrate}", maxrate = "{bitrate}", bufsize = "{bufsize}" }
 
 [[encoder.params]]
 key = "preset"
@@ -885,7 +832,6 @@ small = { global_quality = 32, preset = "slow" }
 quality = { name = "ICQ", min = 1, max = 51, default = 24 }
 modes.quality = { global_quality = "{quality}" }
 modes.vbr = { b = "{bitrate}", maxrate = "{maxrate}", bufsize = "{bufsize}" }
-modes.cbr = { b = "{bitrate}", maxrate = "{bitrate}", bufsize = "{bufsize}" }
 
 [[encoder.params]]
 key = "preset"

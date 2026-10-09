@@ -75,22 +75,24 @@ pub enum RateMode {
     Quality,
     /// A target bitrate, allowed to vary.
     Vbr,
-    /// A constant bitrate.
-    Cbr,
 }
 
 impl RateMode {
-    pub const ALL: [Self; 3] = [Self::Quality, Self::Vbr, Self::Cbr];
+    pub const ALL: [Self; 2] = [Self::Quality, Self::Vbr];
 
     pub const fn name(self) -> &'static str {
         match self {
             Self::Quality => "quality",
             Self::Vbr => "vbr",
-            Self::Cbr => "cbr",
         }
     }
 
+    /// The mode of a setting. A constant bitrate (older settings; it only serves streaming)
+    /// becomes the variable one.
     pub fn from_setting(name: &str) -> Option<Self> {
+        if name == "cbr" {
+            return Some(Self::Vbr);
+        }
         Self::ALL.into_iter().find(|m| m.name() == name)
     }
 }
