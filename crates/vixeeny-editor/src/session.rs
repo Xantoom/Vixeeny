@@ -502,8 +502,8 @@ impl Session {
                 let y = if z.y >= label { z.y - label } else { z.y + 4.0 };
                 (text, Point::new(z.x, y))
             }),
-            // Only while an edge of the zone is being placed: a calm frozen screen otherwise.
-            magnifier: if zone.is_some() && self.selection.is_placing_an_edge() {
+            // Only while the zone is drawn: a calm frozen screen otherwise (not while resizing).
+            magnifier: if zone.is_some() && self.selection.is_drawing() {
                 self.magnifier()
             } else {
                 None

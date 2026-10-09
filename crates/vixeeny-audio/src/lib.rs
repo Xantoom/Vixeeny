@@ -30,8 +30,6 @@ pub use wasapi::{
 pub const SAMPLE_RATE: u32 = 48_000;
 /// Channels of a stereo chunk, the default.
 pub const CHANNELS: usize = 2;
-/// The most channels a track can have (7.1).
-pub const MAX_CHANNELS: usize = 8;
 
 /// A run of interleaved samples.
 #[derive(Debug, Clone, PartialEq)]

@@ -114,7 +114,7 @@ fn naming_rows(
             _ => Err(Invalid),
         }),
     );
-    [hinted(template, env.t(Key::SetTemplateHint))]
+    [template]
 }
 
 /// The side strip and the recording widget.
@@ -570,11 +570,7 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
             },
             |c, v| c.video.aspect = v,
         );
-        rows.push(if profile.aspect == "source" {
-            aspect
-        } else {
-            hinted(aspect, t(Key::SetAspectHint))
-        });
+        rows.push(aspect);
     }
     let (_, _, cw, ch) = validate::center_crop(screen, validate::aspect(&profile.aspect));
     let mut sizes = vec![opt("source", size_name((cw, ch)))];
@@ -776,7 +772,7 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
             .unwrap_or_default();
         rows.extend(basic);
         let (row, open) = crate::expander(env, "expert_video", t(Key::SetExpert));
-        rows.push(hinted(row, t(Key::SetExpertHint)));
+        rows.push(row);
         if open {
             rows.extend(expert);
             rows.push(choice(
@@ -1006,10 +1002,7 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
             _ => Err(Invalid),
         }),
     );
-    let mut rows = vec![match mode {
-        "target" => hinted(capture, t(Key::CapTargetHint)),
-        _ => capture,
-    }];
+    let mut rows = vec![capture];
     match mode {
         // Which device: the outputs, then the inputs, each in alphabetical order.
         "output" => {
@@ -1249,7 +1242,7 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
     let surround = matches!(config.video.audio.channels.as_str(), "5.1" | "7.1");
     let carried = config.video.container == "mkv" && codec != "aac";
     rows.push(if surround && !carried {
-        hinted(channels, t(Key::SetSurroundHint))
+        crate::warned(channels, t(Key::SetSurroundHint))
     } else {
         channels
     });
@@ -1279,14 +1272,11 @@ pub fn replay(env: &Env, config: &Config) -> Vec<Row> {
         None => storage,
     };
     let mut rows = vec![
-        hinted(
-            toggle(
-                "replay_enabled",
-                t(Key::SetReplayStart),
-                |c| c.replay.enabled,
-                |c, v| c.replay.enabled = v,
-            ),
-            t(Key::SetReplayStartHint),
+        toggle(
+            "replay_enabled",
+            t(Key::SetReplayStart),
+            |c| c.replay.enabled,
+            |c, v| c.replay.enabled = v,
         ),
         choice(
             "replay_duration",

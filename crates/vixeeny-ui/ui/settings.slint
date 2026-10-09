@@ -10,9 +10,10 @@ import { Theme, Icons, Icon, Button, IconButton, Toggle, TextBox, ComboBox, Numb
 export struct SettingRow {
     id: string,
     label: string,
-    hint: string,
     // Behind the "i" beside the label.
     info: string,
+    // Behind a warning sign beside the label (empty: nothing wrong).
+    warning: string,
     // A list as wide as its longest choice needs, in pixels (0: the usual width).
     wide: int,
     // 0 toggle, 1 choice, 2 number, 3 text, 4 folder, 5 info, 6 level meter, 8 slider,
@@ -158,7 +159,9 @@ component SettingLine inherits GroupRow {
 
     title: root.entry.label;
     info: root.entry.info;
-    description: root.entry.kind == 4 ? root.entry.text : root.entry.hint;
+    warning: root.entry.warning;
+    // Only a folder says something under its name: its path.
+    description: root.entry.kind == 4 ? root.entry.text : "";
     icon: root.entry.icon;
     has-icon: root.entry.has-icon;
     unfold: root.entry.fresh && root.animated;
@@ -657,6 +660,27 @@ export component SettingsWindow inherits Window {
                         text: root.notice;
                     }
                     if root.section == 0 && root.pc-lines.length > 0 : PcSheet { lines: root.pc-lines; }
+                    // Where the update stands, and what to do about it.
+                    if root.section == 7 : Group {
+                        GroupRow {
+                            title: root.update-title;
+                            description: root.update-detail;
+                            glyph: root.update-state == 5 ? Icons.error
+                                : (root.update-state == 0 ? Icons.checkmark-circle : Icons.download);
+                            if root.update-state == 3 || root.update-state == 6 : ProgressBar {
+                                width: 160px;
+                                value: root.update-state == 6 ? 1 : root.update-progress;
+                            }
+                            if root.update-action != "" && root.update-state != 1 && root.update-state != 3 && root.update-state != 6 : Button {
+                                accent: root.update-state == 2 || root.update-state == 4;
+                                text: root.update-action;
+                                clicked => {
+                                    root.page-action(root.update-state == 2 ? "update-download"
+                                        : root.update-state == 4 ? "update-restart" : "update-check", "");
+                                }
+                            }
+                        }
+                    }
                     for g in root.groups : Group {
                         for r in g.rows : SettingLine {
                             entry: r;

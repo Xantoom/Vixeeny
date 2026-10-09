@@ -523,16 +523,22 @@ export component Group inherits VerticalLayout {
 // A setting, as a card: a title (and a line of explanation) on the left, the control on the
 // right; narrower than `stack-under`, the control goes under the text. The text wraps, and the
 // height follows it.
-// A small "i": its text shows while the pointer rests on it.
+// A small "i" (or, with `alert`, a warning sign): its text shows while the pointer rests on it.
 export component InfoTip inherits Rectangle {
     in property <string> text;
+    in property <bool> alert: false;
     width: 16px;
     height: 16px;
     border-radius: 8px;
-    border-width: 1px;
+    border-width: root.alert ? 0px : 1px;
     border-color: area.has-hover ? Theme.accent : Theme.text-3;
     animate border-color { duration: Theme.t-fast; }
-    Text {
+    if root.alert : Icon {
+        data: Icons.warning;
+        tint: Theme.warning;
+        size: 16px;
+    }
+    if !root.alert : Text {
         width: parent.width;
         height: parent.height;
         text: "i";
@@ -590,6 +596,8 @@ export component GroupRow inherits Rectangle {
     in property <string> description;
     // What the setting does and what to choose: behind an "i" beside the title.
     in property <string> info;
+    // What is wrong with it as it is: behind a warning sign beside the title.
+    in property <string> warning;
     in property <bool> dimmed: false;
     in property <bool> clickable: false;
     in property <length> stack-under: 500px;
@@ -683,6 +691,11 @@ export component GroupRow inherits Rectangle {
             if root.info != "" : InfoTip {
                 y: (parent.height - self.height) / 2;
                 text: root.info;
+            }
+            if root.warning != "" : InfoTip {
+                y: (parent.height - self.height) / 2;
+                text: root.warning;
+                alert: true;
             }
         }
         if root.description != "" : Text {

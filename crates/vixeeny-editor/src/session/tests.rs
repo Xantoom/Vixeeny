@@ -54,6 +54,23 @@ fn the_magnifier_shows_the_pixel_under_the_drag() {
 }
 
 #[test]
+fn resizing_a_zone_shows_no_magnifier() {
+    let mut s = session();
+    drag(&mut s, p(20.0, 20.0), p(120.0, 80.0));
+    // The pointer leaves the fresh corner, then takes the right edge.
+    s.pointer_move(p(150.0, 95.0), NO);
+    s.pointer_down(p(120.0, 50.0), NO);
+    s.pointer_move(p(160.0, 50.0), NO);
+    let v = s.view();
+    assert!(
+        v.selection.is_some_and(|z| z.right() > 150.0),
+        "{:?}",
+        v.selection
+    );
+    assert!(v.magnifier.is_none());
+}
+
+#[test]
 fn the_toolbar_and_magnifier_stay_on_one_monitor() {
     // Two 1000×800 monitors side by side; a zone ending at the right edge of the left one.
     let base = RgbaImage::filled(2000, 800, Color::rgb(0, 0, 0));

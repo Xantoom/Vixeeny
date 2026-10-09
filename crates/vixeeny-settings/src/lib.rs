@@ -140,8 +140,9 @@ pub enum Picker {
 pub struct Row {
     pub id: String,
     pub label: String,
-    /// A line of explanation under the label (empty = none).
-    pub hint: String,
+    /// Something wrong with this setting as it is, behind a warning sign beside the label
+    /// (empty = none).
+    pub warning: String,
     /// What the setting does and what to choose, behind an "i" beside the label (empty =
     /// none).
     pub info: String,
@@ -324,7 +325,7 @@ fn row(id: impl Into<String>, label: String, kind: Kind, get: Get, set: Set) -> 
     Row {
         id: id.into(),
         label,
-        hint: String::new(),
+        warning: String::new(),
         info: String::new(),
         icon: None,
         kind,
@@ -447,8 +448,15 @@ fn meter(id: &str, label: String) -> Row {
     )
 }
 
-fn hinted(mut row: Row, hint: String) -> Row {
-    row.hint = hint;
+/// Adds `more` to what the "i" of the row says (after the explanation of the setting).
+fn hinted(mut row: Row, more: String) -> Row {
+    row.info = more;
+    row
+}
+
+/// Puts a warning sign beside the row, `text` on hover.
+fn warned(mut row: Row, text: String) -> Row {
+    row.warning = text;
     row
 }
 
@@ -500,11 +508,14 @@ pub fn rows(section: Section, env: &Env, config: &Config) -> Vec<Row> {
         Section::Updates => pages::updates(env, config),
         Section::Shortcuts | Section::About => Vec::new(),
     };
+    // What the setting does, then what the page added for it now (an estimate).
     for row in &mut rows {
-        if row.info.is_empty()
-            && let Some(text) = info::info(&row.id, env, config)
-        {
-            row.info = text;
+        if let Some(text) = info::info(&row.id, env, config) {
+            row.info = if row.info.is_empty() {
+                text
+            } else {
+                format!("{text}\n\n{}", row.info)
+            };
         }
     }
     rows
@@ -1260,21 +1271,21 @@ mod tests {
         c.replay.duration_seconds = 300;
         let hint = |env: &Env, c: &Config| {
             row(&rows(Section::Replay, env, c), "replay_storage")
-                .hint
+                .info
                 .clone()
         };
         assert!(
-            hint(&with_ram(64), &c).contains("RAM"),
+            hint(&with_ram(64), &c).contains("kept in RAM"),
             "{}",
             hint(&with_ram(64), &c)
         );
         assert!(
-            hint(&with_ram(8), &c).contains("disk"),
+            hint(&with_ram(8), &c).contains("kept on the disk"),
             "{}",
             hint(&with_ram(8), &c)
         );
         c.replay.storage = "disk".into();
-        assert!(!hint(&with_ram(64), &c).contains("RAM"));
+        assert!(!hint(&with_ram(64), &c).contains("kept in"));
         assert!(hint(&with_ram(64), &c).contains("GB"));
     }
 

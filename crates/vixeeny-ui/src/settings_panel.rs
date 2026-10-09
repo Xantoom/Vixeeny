@@ -325,7 +325,8 @@ fn same_row(a: &SettingRow, b: &SettingRow) -> bool {
     let options = |r: &SettingRow| r.options.iter().collect::<Vec<_>>();
     a.id == b.id
         && a.label == b.label
-        && a.hint == b.hint
+        && a.info == b.info
+        && a.warning == b.warning
         && a.kind == b.kind
         && a.enabled == b.enabled
         && a.on == b.on
@@ -502,7 +503,7 @@ fn row_model(row: &Row, config: &Config) -> SettingRow {
     let mut out = SettingRow {
         id: row.id.as_str().into(),
         label: row.label.as_str().into(),
-        hint: row.hint.as_str().into(),
+        warning: row.warning.as_str().into(),
         info: row.info.as_str().into(),
         wide: 0,
         kind: 5,

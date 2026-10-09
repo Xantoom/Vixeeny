@@ -178,7 +178,6 @@ pub enum Key {
     UpdateView,
     UpdateNever,
     SetAutoUpdate,
-    SetTemplateHint,
     OptAuto,
     OptFlac,
     OptPcm16,
@@ -239,7 +238,6 @@ pub enum Key {
     OptStereo,
     SetAudioChannels,
     SetSurroundHint,
-    SetReplayStartHint,
     UiLicenses,
     PcCpu,
     PcCores,
@@ -252,7 +250,6 @@ pub enum Key {
     CapOutput,
     CapPrograms,
     CapNone,
-    CapTargetHint,
     SetAudioOutput,
     SrcClosed,
     ReplayEstimate,
@@ -261,10 +258,8 @@ pub enum Key {
     SetAspect,
     OptAspectScreen,
     OptAspectCrop,
-    SetAspectHint,
     OptMp4Fragmented,
     SetExpert,
-    SetExpertHint,
     SrcOutputs,
     SrcInputs,
     PcScreenN,
@@ -458,7 +453,6 @@ impl Key {
         Self::UpdateView,
         Self::UpdateNever,
         Self::SetAutoUpdate,
-        Self::SetTemplateHint,
         Self::OptAuto,
         Self::OptFlac,
         Self::OptPcm16,
@@ -519,7 +513,6 @@ impl Key {
         Self::OptStereo,
         Self::SetAudioChannels,
         Self::SetSurroundHint,
-        Self::SetReplayStartHint,
         Self::UiLicenses,
         Self::PcCpu,
         Self::PcCores,
@@ -532,7 +525,6 @@ impl Key {
         Self::CapOutput,
         Self::CapPrograms,
         Self::CapNone,
-        Self::CapTargetHint,
         Self::SetAudioOutput,
         Self::SrcClosed,
         Self::ReplayEstimate,
@@ -541,10 +533,8 @@ impl Key {
         Self::SetAspect,
         Self::OptAspectScreen,
         Self::OptAspectCrop,
-        Self::SetAspectHint,
         Self::OptMp4Fragmented,
         Self::SetExpert,
-        Self::SetExpertHint,
         Self::SrcOutputs,
         Self::SrcInputs,
         Self::PcScreenN,
@@ -963,12 +953,6 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::UpdateNever, Lang::Fr) => "Jamais vérifié",
         (Key::SetAutoUpdate, Lang::En) => "Install updates automatically",
         (Key::SetAutoUpdate, Lang::Fr) => "Installer les mises à jour automatiquement",
-        (Key::SetTemplateHint, Lang::En) => {
-            "{app} is the game in full screen (Desktop without one), {date} and {time} when it was taken."
-        }
-        (Key::SetTemplateHint, Lang::Fr) => {
-            "{app} est le jeu en plein écran (Desktop sans jeu), {date} et {time} le moment de la capture."
-        }
         (Key::OptAuto, Lang::En) => "Automatic",
         (Key::OptAuto, Lang::Fr) => "Automatique",
         (Key::OptFlac, Lang::En) => "FLAC (lossless)",
@@ -1092,16 +1076,10 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::SetAudioChannels, Lang::En) => "Channels",
         (Key::SetAudioChannels, Lang::Fr) => "Canaux",
         (Key::SetSurroundHint, Lang::En) => {
-            "5.1 and 7.1 need MKV with Opus, FLAC or PCM: this recording will be in stereo."
+            "5.1 and 7.1 need MKV with Opus, FLAC or PCM: this recording will be stereo."
         }
         (Key::SetSurroundHint, Lang::Fr) => {
             "Le 5.1 et le 7.1 demandent le MKV avec Opus, FLAC ou PCM : cet enregistrement sera en stéréo."
-        }
-        (Key::SetReplayStartHint, Lang::En) => {
-            "It runs during full-screen games only: it starts with the game and stops when the game closes. Its shortcut starts or stops it by hand."
-        }
-        (Key::SetReplayStartHint, Lang::Fr) => {
-            "Il tourne seulement pendant les jeux en plein écran : il démarre avec le jeu et s'arrête quand le jeu se ferme. Son raccourci le lance ou l'arrête à la main."
         }
         (Key::UiLicenses, Lang::En) => "Third-party licences",
         (Key::UiLicenses, Lang::Fr) => "Licences tierces",
@@ -1127,12 +1105,6 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::CapPrograms, Lang::Fr) => "Programmes choisis",
         (Key::CapNone, Lang::En) => "None (microphone only)",
         (Key::CapNone, Lang::Fr) => "Aucun (micro seulement)",
-        (Key::CapTargetHint, Lang::En) => {
-            "The program in the foreground when the recording starts (the full-screen game), without Discord or music. Without one, all the PC sound."
-        }
-        (Key::CapTargetHint, Lang::Fr) => {
-            "Le programme au premier plan quand l'enregistrement commence (le jeu en plein écran), sans Discord ni musique. S'il n'y en a pas, tout le son du PC."
-        }
         (Key::SetAudioOutput, Lang::En) => "Device",
         (Key::SetAudioOutput, Lang::Fr) => "Appareil",
         (Key::SrcClosed, Lang::En) => "closed",
@@ -1155,22 +1127,10 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::OptAspectScreen, Lang::Fr) => "Celui de l'écran ({ratio})",
         (Key::OptAspectCrop, Lang::En) => "{ratio}, cropped in the middle",
         (Key::OptAspectCrop, Lang::Fr) => "{ratio}, recadré au centre",
-        (Key::SetAspectHint, Lang::En) => {
-            "Only the middle of the screen is recorded: what is outside is cut."
-        }
-        (Key::SetAspectHint, Lang::Fr) => {
-            "Seul le milieu de l'écran est enregistré : le reste est coupé."
-        }
         (Key::OptMp4Fragmented, Lang::En) => "MP4 (fragmented)",
         (Key::OptMp4Fragmented, Lang::Fr) => "MP4 (fragmenté)",
         (Key::SetExpert, Lang::En) => "Expert settings",
         (Key::SetExpert, Lang::Fr) => "Paramètres experts",
-        (Key::SetExpertHint, Lang::En) => {
-            "For those who know these options: the defaults suit most recordings."
-        }
-        (Key::SetExpertHint, Lang::Fr) => {
-            "Pour qui connaît ces options : les valeurs par défaut conviennent à la plupart des enregistrements."
-        }
         (Key::SrcOutputs, Lang::En) => "Outputs",
         (Key::SrcOutputs, Lang::Fr) => "Sorties",
         (Key::SrcInputs, Lang::En) => "Inputs",
