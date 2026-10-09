@@ -359,7 +359,6 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
         Mode::Editor => {}
         Mode::Scroll => session = session.with_auto_command(Command::Scroll),
     }
-    session.dim = f32::from(config.editor.dim_percent.min(90)) / 100.0;
     let mut overlay = vixeeny_overlay::Overlay::on_screens(
         session,
         scale,

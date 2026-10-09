@@ -112,6 +112,8 @@ pub enum Kind {
     Info,
     /// Starts a new group of rows (shown apart from the one above); nothing to edit.
     Header,
+    /// How loud the microphone is right now (drawn by the window from what the host measures).
+    Meter,
     /// Shows or hides the rows under it (its value: whether they are shown). Its state is the
     /// window's, not a setting: see [`Env::open`].
     Expander,
@@ -123,7 +125,17 @@ pub struct Invalid;
 
 type Get = Box<dyn Fn(&Config) -> Value>;
 type Set = Box<dyn Fn(&mut Config, Value) -> Result<(), Invalid>>;
-type Enabled = Box<dyn Fn(&Config) -> bool>;
+
+/// A choice drawn as a small screen to click on rather than a list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Picker {
+    #[default]
+    List,
+    /// Left, right, top, bottom: an edge of the screen.
+    Edge,
+    /// Top left, top right, bottom left, bottom right: a corner of the screen.
+    Corner,
+}
 
 pub struct Row {
     pub id: String,
@@ -136,9 +148,10 @@ pub struct Row {
     /// A picture before the label (a program's icon).
     pub icon: Option<Icon>,
     pub kind: Kind,
+    /// How a choice is drawn.
+    pub picker: Picker,
     get: Get,
     set: Set,
-    enabled: Enabled,
 }
 
 impl Row {
@@ -146,10 +159,10 @@ impl Row {
         (self.get)(config)
     }
 
-    /// Greyed out (a setting that does not apply with the others, like the amount of a split
-    /// that is off).
-    pub fn enabled(&self, config: &Config) -> bool {
-        !matches!(self.kind, Kind::Info | Kind::Header) && (self.enabled)(config)
+    /// Whether it can be changed (a setting that does not apply is left out of the page, not
+    /// greyed out).
+    pub fn enabled(&self) -> bool {
+        !matches!(self.kind, Kind::Info | Kind::Header | Kind::Meter)
     }
 
     /// Checks `value` against the kind of the row, then writes it. Numbers are brought into
@@ -307,10 +320,6 @@ fn opt(value: &str, label: impl Into<String>) -> Opt {
     }
 }
 
-fn always(_: &Config) -> bool {
-    true
-}
-
 fn row(id: impl Into<String>, label: String, kind: Kind, get: Get, set: Set) -> Row {
     Row {
         id: id.into(),
@@ -319,9 +328,9 @@ fn row(id: impl Into<String>, label: String, kind: Kind, get: Get, set: Set) -> 
         info: String::new(),
         icon: None,
         kind,
+        picker: Picker::List,
         get,
         set,
-        enabled: Box::new(always),
     }
 }
 
@@ -421,9 +430,21 @@ fn folder(
     text_like(Kind::Folder, id, label, get, set)
 }
 
-fn when(mut row: Row, enabled: fn(&Config) -> bool) -> Row {
-    row.enabled = Box::new(enabled);
+/// A choice drawn as a small screen.
+fn picked(picker: Picker, mut row: Row) -> Row {
+    row.picker = picker;
     row
+}
+
+/// A level that the window draws live.
+fn meter(id: &str, label: String) -> Row {
+    row(
+        id,
+        label,
+        Kind::Meter,
+        Box::new(|_| Value::Text(String::new())),
+        Box::new(|_, _| Err(Invalid)),
+    )
 }
 
 fn hinted(mut row: Row, hint: String) -> Row {
@@ -476,7 +497,7 @@ pub fn rows(section: Section, env: &Env, config: &Config) -> Vec<Row> {
         Section::Video => pages::video(env, config),
         Section::Audio => pages::audio(env, config),
         Section::Replay => pages::replay(env, config),
-        Section::Updates => pages::updates(env),
+        Section::Updates => pages::updates(env, config),
         Section::Shortcuts | Section::About => Vec::new(),
     };
     for row in &mut rows {
@@ -487,6 +508,68 @@ pub fn rows(section: Section, env: &Env, config: &Config) -> Vec<Row> {
         }
     }
     rows
+}
+
+/// A setting that answers a search.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Found {
+    pub section: Section,
+    /// The row to bring into view.
+    pub id: String,
+    pub label: String,
+}
+
+/// Lower case without accents, for comparing what is typed with what is written.
+pub fn folded(text: &str) -> String {
+    text.chars()
+        .flat_map(char::to_lowercase)
+        .map(|c| match c {
+            'à' | 'â' | 'ä' | 'á' => 'a',
+            'é' | 'è' | 'ê' | 'ë' => 'e',
+            'î' | 'ï' | 'í' => 'i',
+            'ô' | 'ö' | 'ó' => 'o',
+            'ù' | 'û' | 'ü' | 'ú' => 'u',
+            'ç' => 'c',
+            'ÿ' => 'y',
+            '’' => '\'',
+            other => other,
+        })
+        .collect()
+}
+
+/// Whether every word of `query` begins a word of `text` (both folded), in any order.
+pub fn matches(query: &str, text: &str) -> bool {
+    let text = folded(text);
+    let words: Vec<&str> = text
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+    let query = folded(query);
+    let mut wanted = query
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .peekable();
+    wanted.peek().is_some() && wanted.all(|q| words.iter().any(|w| w.starts_with(q)))
+}
+
+/// The settings whose name answers `query`, page by page, the folded ones included.
+pub fn search(query: &str, env: &Env, config: &Config) -> Vec<Found> {
+    let mut env = env.clone();
+    env.open.insert("expert_video".into());
+    Section::ALL
+        .into_iter()
+        .flat_map(|section| {
+            rows(section, &env, config)
+                .into_iter()
+                .filter(|r| !matches!(r.kind, Kind::Header | Kind::Expander | Kind::Meter))
+                .filter(|r| matches(query, &r.label))
+                .map(move |r| Found {
+                    section,
+                    id: r.id,
+                    label: r.label,
+                })
+        })
+        .collect()
 }
 
 /// Things wrong with the current video settings, for the user to read (empty when fine).
@@ -631,6 +714,10 @@ mod tests {
         assert_eq!(c.video.split.mode, "size:1");
     }
 
+    fn has_in(rows: &[Row], id: &str) -> bool {
+        rows.iter().any(|r| r.id == id)
+    }
+
     fn has(section: Section, c: &Config, id: &str) -> bool {
         rows(section, &env(), c).iter().any(|r| r.id == id)
     }
@@ -645,10 +732,9 @@ mod tests {
         assert!(has(Section::Overlay, &c, "widget_corner"));
         c.recording_widget.enabled = false;
         assert!(!has(Section::Overlay, &c, "widget_corner"));
-        let updates = rows(Section::Updates, &env(), &c);
-        assert!(row(&updates, "auto_update").enabled(&c));
+        assert!(has(Section::Updates, &c, "auto_update"));
         c.general.check_updates = false;
-        assert!(!row(&updates, "auto_update").enabled(&c));
+        assert!(!has(Section::Updates, &c, "auto_update"));
     }
 
     #[test]
@@ -689,7 +775,7 @@ mod tests {
         assert!(!has(Section::Video, &c, "hdr"));
         assert!(!has(Section::Image, &c, "image_hdr"));
         let on = rows(Section::Video, &fast, &c);
-        assert!(row(&on, "hdr").enabled(&c));
+        assert!(row(&on, "hdr").enabled());
         assert_eq!(row(&on, "hdr").value(&c), Value::Bool(true));
         // Only fragmented MP4, which older settings read as.
         c.video.container = "mp4_hybrid".into();
@@ -1021,16 +1107,19 @@ mod tests {
             }],
         });
         let audio = rows(Section::Audio, &e, &c);
-        // All the PC sound; the microphone is off, its choice greyed out.
+        // All the PC sound; the microphone is off, its choice left out.
         let capture = |c: &Config| row(&rows(Section::Audio, &e, c), "audio_capture").value(c);
         assert_eq!(capture(&c), Value::Text("system".into()));
         assert_eq!(row(&audio, "mic_on").value(&c), Value::Bool(false));
-        assert!(!row(&audio, "mic_device").enabled(&c));
+        assert!(!has_in(&audio, "mic_device"));
+        assert!(!has_in(&audio, "mic_level"));
         // On: the Windows default, then the one picked.
         row(&audio, "mic_on")
             .apply(&mut c, Value::Bool(true))
             .unwrap();
         assert_eq!(c.video.audio.sources, ["system", "mic"]);
+        let audio = rows(Section::Audio, &e, &c);
+        assert!(has_in(&audio, "mic_level"));
         match &row(&audio, "mic_device").kind {
             Kind::Choice(o) => assert_eq!(
                 o.iter().map(|o| o.label.as_str()).collect::<Vec<_>>(),
@@ -1081,6 +1170,61 @@ mod tests {
         old.video.audio.sources = vec!["mic".into()];
         old.video.audio.capture = "system".into();
         assert_eq!(capture(&old), Value::Text("none".into()));
+    }
+
+    #[test]
+    fn the_volumes_are_percentages_of_each_side() {
+        let mut c = Config::default();
+        let audio = rows(Section::Audio, &env(), &c);
+        let capture = row(&audio, "capture_volume");
+        assert_eq!(capture.value(&c), Value::Int(100));
+        capture.apply(&mut c, Value::Int(152)).unwrap();
+        assert_eq!(c.video.audio.volumes["capture"], 1.5);
+        // As it is: nothing written.
+        capture.apply(&mut c, Value::Int(100)).unwrap();
+        assert!(c.video.audio.volumes.is_empty());
+        c.video.audio.sources.push("mic".into());
+        let audio = rows(Section::Audio, &env(), &c);
+        row(&audio, "mic_volume")
+            .apply(&mut c, Value::Int(60))
+            .unwrap();
+        assert_eq!(c.video.audio.volumes["mic"], 0.6);
+        // Nothing recorded besides the microphone: no volume for it.
+        c.video.audio.capture = "none".into();
+        c.video.audio.sources = vec!["mic".into()];
+        assert!(!has(Section::Audio, &c, "capture_volume"));
+    }
+
+    #[test]
+    fn the_replay_can_go_on_after_its_shortcut() {
+        let mut c = Config::default();
+        let replay = rows(Section::Replay, &env(), &c);
+        let after = row(&replay, "replay_after");
+        assert_eq!(after.value(&c), Value::Text("0".into()));
+        after.apply(&mut c, Value::Text("10".into())).unwrap();
+        assert_eq!(c.replay.after_seconds, 10);
+        assert_eq!(
+            row(&rows(Section::Overlay, &env(), &c), "overlay_edge").picker,
+            Picker::Edge
+        );
+    }
+
+    #[test]
+    fn a_search_finds_settings_by_the_start_of_their_words_without_accents() {
+        let fr = Env::new(Lang::Fr, "1");
+        let mut c = Config::default();
+        c.video.preset = "custom".into();
+        assert!(matches("debit", "Débit audio (kbit/s)"));
+        assert!(matches("AUDIO deb", "Débit audio (kbit/s)"));
+        assert!(!matches("bit", "Débit audio"));
+        assert!(!matches("  ", "Débit audio"));
+        let found = search("dossier", &fr, &c);
+        let pages: Vec<Section> = found.iter().map(|f| f.section).collect();
+        assert!(pages.contains(&Section::Image) && pages.contains(&Section::Replay));
+        // The folded expert settings are found too.
+        let found = search("chroma", &fr, &c);
+        assert_eq!(found[0].section, Section::Video);
+        assert!(search("zzz", &fr, &c).is_empty());
     }
 
     #[test]

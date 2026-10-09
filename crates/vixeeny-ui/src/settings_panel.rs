@@ -13,12 +13,14 @@ use vixeeny_common::ipc::ActionId;
 use vixeeny_encode::probe::ProbeResult;
 use vixeeny_settings::shortcuts::{self, Refusal};
 use vixeeny_settings::{
-    AudioDevices, Display, Env, Kind, Machine, Row, Section, Value, rows, video_problems,
+    AudioDevices, Display, Env, Found, Kind, Machine, Picker, Row, Section, Value, rows, search,
+    video_problems,
 };
 
 use crate::theme::{self, Look};
 use crate::{
-    LineItem, PcLine, SettingGroup, SettingRow, SettingsWindow, ShortcutKey, ShortcutRow, UiTexts,
+    LineItem, PcLine, SearchHit, SettingGroup, SettingRow, SettingsWindow, ShortcutKey,
+    ShortcutRow, UiTexts,
 };
 
 /// One line of the about page.
@@ -154,6 +156,7 @@ type ChangeFn = Box<dyn Fn(&Config)>;
 type BrowseFn = Box<dyn Fn(&str) -> Option<String>>;
 type PageFn = Box<dyn Fn(Section, &str, &str)>;
 type AudioFn = std::sync::Arc<dyn Fn() -> AudioDevices + Send + Sync>;
+type MeterFn = Box<dyn Fn(Option<String>)>;
 
 struct State {
     config: RefCell<Config>,
@@ -178,6 +181,13 @@ struct State {
     on_browse: RefCell<BrowseFn>,
     on_page_action: RefCell<PageFn>,
     on_section: RefCell<Box<dyn Fn(Section)>>,
+    /// What answers the search now.
+    found: RefCell<Vec<Found>>,
+    /// The shortcuts the daemon could not register.
+    taken: RefCell<Vec<String>>,
+    /// The microphone whose level the audio page shows (`None`: no meter on screen).
+    metered: RefCell<Option<String>>,
+    on_meter: RefCell<MeterFn>,
 }
 
 /// A way to update the window from another thread (a detection, a download that takes a while).
@@ -201,6 +211,13 @@ impl PanelHandle {
         let _ = self
             .0
             .upgrade_in_event_loop(move |w| show_update(&w, &view));
+    }
+
+    /// How loud the microphone is now, 0 to 1 (from the thread that measures it).
+    pub fn set_mic_level(&self, level: f32) {
+        let _ = self
+            .0
+            .upgrade_in_event_loop(move |w| w.set_mic_level(level));
     }
 
     /// Closes the window (the program then ends).
@@ -322,10 +339,83 @@ fn same_row(a: &SettingRow, b: &SettingRow) -> bool {
         && options(a) == options(b)
 }
 
+/// The rows of a group model, when it is the list the panel made.
+fn row_list(group: &SettingGroup) -> Option<&VecModel<SettingRow>> {
+    group.rows.as_any().downcast_ref::<VecModel<SettingRow>>()
+}
+
+/// Removes the rows that have folded away (and the groups left empty).
+fn drop_leaving(window: &SettingsWindow) {
+    let groups = window.get_groups();
+    let Some(list) = groups.as_any().downcast_ref::<VecModel<SettingGroup>>() else {
+        return;
+    };
+    for i in (0..list.row_count()).rev() {
+        let Some(group) = list.row_data(i) else {
+            continue;
+        };
+        if let Some(rows) = row_list(&group) {
+            for j in (0..rows.row_count()).rev() {
+                if rows.row_data(j).is_some_and(|r| r.leaving) {
+                    rows.remove(j);
+                }
+            }
+            if rows.row_count() == 0 {
+                list.remove(i);
+            }
+        }
+    }
+}
+
+/// Puts back, where they were, the rows of `old` that `new` no longer has, marked as leaving:
+/// they fold away instead of vanishing.
+fn keep_leaving(old: &[Vec<SettingRow>], new: &mut Vec<Vec<SettingRow>>) {
+    let kept: std::collections::HashSet<SharedString> =
+        new.iter().flatten().map(|r| r.id.clone()).collect();
+    let find = |new: &[Vec<SettingRow>], id: &SharedString| {
+        new.iter()
+            .enumerate()
+            .find_map(|(g, rows)| rows.iter().position(|r| r.id == *id).map(|i| (g, i)))
+    };
+    for (gi, group) in old.iter().enumerate() {
+        for (ri, row) in group.iter().enumerate() {
+            if kept.contains(&row.id) {
+                continue;
+            }
+            let mut leaving = row.clone();
+            leaving.leaving = true;
+            leaving.fresh = false;
+            // After the row above it (still there, or leaving too), else before the next one
+            // that stays.
+            let place = group[..ri]
+                .iter()
+                .rev()
+                .find_map(|r| find(new, &r.id).map(|(g, i)| (g, i + 1)))
+                .or_else(|| group[ri + 1..].iter().find_map(|r| find(new, &r.id)));
+            match place {
+                Some((g, i)) => new[g].insert(i, leaving),
+                // The whole group goes: after the group of the rows above it.
+                None => {
+                    let at = old[..gi]
+                        .iter()
+                        .rev()
+                        .flatten()
+                        .find_map(|r| find(new, &r.id).map(|(g, _)| g + 1))
+                        .unwrap_or(0);
+                    new.insert(at.min(new.len()), vec![leaving]);
+                }
+            }
+        }
+    }
+}
+
 /// Shows `groups`. When the page keeps its shape (same groups, same rows) only the rows that
 /// changed are updated, in place: their controls stay, so a toggle slides instead of being
-/// redrawn in its new state, and nothing flickers.
+/// redrawn in its new state, and nothing flickers. On the same page, rows that appear unfold
+/// and rows that go fold away.
 fn show_groups(window: &SettingsWindow, groups: Vec<Vec<SettingRow>>) {
+    // Rows still folding away from the change before go at once.
+    drop_leaving(window);
     let current = window.get_groups();
     let same_shape = current.row_count() == groups.len()
         && groups.iter().enumerate().all(|(i, rows)| {
@@ -354,25 +444,39 @@ fn show_groups(window: &SettingsWindow, groups: Vec<Vec<SettingRow>>) {
         }
         return;
     }
-    // On the same page (some rows are still there), the new rows unfold; a new page does not.
-    let old: std::collections::HashSet<SharedString> = current
-        .iter()
-        .flat_map(|g| g.rows.iter().map(|r| r.id).collect::<Vec<_>>())
-        .collect();
-    let same_page = groups.iter().flatten().any(|r| old.contains(&r.id));
-    let model: Vec<SettingGroup> = groups
+    let old: Vec<Vec<SettingRow>> = current.iter().map(|g| g.rows.iter().collect()).collect();
+    let old_ids: std::collections::HashSet<SharedString> =
+        old.iter().flatten().map(|r| r.id.clone()).collect();
+    let same_page = groups.iter().flatten().any(|r| old_ids.contains(&r.id));
+    let mut groups: Vec<Vec<SettingRow>> = groups
         .into_iter()
         .map(|mut rows| {
             for r in &mut rows {
-                r.fresh = same_page && !old.contains(&r.id);
+                r.fresh = same_page && !old_ids.contains(&r.id);
             }
             rows
         })
+        .collect();
+    let folding = same_page && window.get_animated();
+    if folding {
+        keep_leaving(&old, &mut groups);
+    }
+    let model: Vec<SettingGroup> = groups
+        .into_iter()
         .map(|rows| SettingGroup {
             rows: ModelRc::from(Rc::new(VecModel::from(rows))),
         })
         .collect();
     window.set_groups(ModelRc::from(Rc::new(VecModel::from(model))));
+    if folding {
+        // Once folded (a little after the animation), they go.
+        let weak = window.as_weak();
+        slint::Timer::single_shot(std::time::Duration::from_millis(260), move || {
+            if let Some(w) = weak.upgrade() {
+                drop_leaving(&w);
+            }
+        });
+    }
 }
 
 /// Whether a shortcut starts a group of actions (captures, recording, the program).
@@ -402,7 +506,7 @@ fn row_model(row: &Row, config: &Config) -> SettingRow {
         info: row.info.as_str().into(),
         wide: 0,
         kind: 5,
-        enabled: row.enabled(config),
+        enabled: row.enabled(),
         on: false,
         text: SharedString::new(),
         num: 0,
@@ -414,6 +518,7 @@ fn row_model(row: &Row, config: &Config) -> SettingRow {
         selected: -1,
         has_icon: row.icon.is_some(),
         fresh: false,
+        leaving: false,
         icon: picture(row.icon.as_ref()),
     };
     match (&row.kind, value) {
@@ -422,7 +527,11 @@ fn row_model(row: &Row, config: &Config) -> SettingRow {
             out.on = b;
         }
         (Kind::Choice(options), Value::Text(t)) => {
-            out.kind = 1;
+            out.kind = match row.picker {
+                Picker::List => 1,
+                Picker::Edge => 10,
+                Picker::Corner => 11,
+            };
             out.selected = options
                 .iter()
                 .position(|o| o.value == t)
@@ -441,6 +550,7 @@ fn row_model(row: &Row, config: &Config) -> SettingRow {
                 )));
             }
         }
+        (Kind::Meter, _) => out.kind = 6,
         (Kind::Expander, Value::Bool(open)) => {
             out.kind = 9;
             out.on = open;
@@ -606,6 +716,10 @@ impl SettingsPanel {
             on_browse: RefCell::new(Box::new(|_| None)),
             on_page_action: RefCell::new(Box::new(|_, _, _| {})),
             on_section: RefCell::new(Box::new(|_| {})),
+            found: RefCell::default(),
+            taken: RefCell::default(),
+            metered: RefCell::default(),
+            on_meter: RefCell::new(Box::new(|_| {})),
         });
         theme::apply(&window, look);
         wire_chrome(&window);
@@ -651,6 +765,53 @@ impl SettingsPanel {
         self.state.display.set(display);
         self.rebuild_env();
         self.refresh();
+    }
+
+    /// The shortcuts the daemon could not register (their text as the settings file has them,
+    /// any spelling): the shortcuts page marks them.
+    pub fn set_taken_shortcuts(&self, taken: Vec<String>) {
+        if *self.state.taken.borrow() == taken {
+            return;
+        }
+        *self.state.taken.borrow_mut() = taken;
+        if self.current_section() == Section::Shortcuts {
+            self.refresh_shortcuts(&[]);
+        }
+    }
+
+    /// Asks `read` for the shortcuts the daemon could not register now, and again every second
+    /// while the window is open.
+    pub fn watch_taken_shortcuts(&self, read: impl Fn() -> Vec<String> + 'static) {
+        self.set_taken_shortcuts(read());
+        let (weak, state) = (self.window.as_weak(), self.state.clone());
+        let timer = slint::Timer::default();
+        timer.start(
+            slint::TimerMode::Repeated,
+            std::time::Duration::from_secs(1),
+            move || {
+                if let Some(window) = weak.upgrade() {
+                    SettingsPanel {
+                        window,
+                        state: state.clone(),
+                    }
+                    .set_taken_shortcuts(read());
+                }
+            },
+        );
+        // Runs as long as the window: the program ends with it.
+        std::mem::forget(timer);
+    }
+
+    /// Called with the microphone to measure (`mic` or `mic:<id>`) while the audio page shows
+    /// its level, and with `None` when it stops showing it. The host then measures it and
+    /// reports through [`SettingsPanel::set_mic_level`].
+    pub fn on_meter(&self, f: impl Fn(Option<String>) + 'static) {
+        *self.state.on_meter.borrow_mut() = Box::new(f);
+    }
+
+    /// How loud the microphone is now, 0 to 1.
+    pub fn set_mic_level(&self, level: f32) {
+        self.window.set_mic_level(level);
     }
 
     pub fn set_audio(&self, audio: AudioDevices) {
@@ -817,6 +978,10 @@ impl SettingsPanel {
         self.window
             .set_version(format!("Version {}", self.state.version).into());
         self.window.set_tagline(tr(Key::AboutTagline, lang).into());
+        self.window
+            .set_search_placeholder(tr(Key::UiSearch, lang).into());
+        self.window
+            .set_search_title(tr(Key::UiSearchTitle, lang).into());
     }
 
     /// The model's view of this machine: language, hardware probe, audio devices.
@@ -840,8 +1005,24 @@ impl SettingsPanel {
         if section.is_rows() {
             let built = rows(section, &env, &config);
             show_groups(&self.window, grouped(&built, &config));
+            // The level of the microphone, while its meter is on screen.
+            let metered = built
+                .iter()
+                .any(|r| matches!(r.kind, Kind::Meter))
+                .then(|| {
+                    config
+                        .video
+                        .audio
+                        .sources
+                        .iter()
+                        .find(|s| *s == "mic" || s.starts_with("mic:"))
+                        .cloned()
+                })
+                .flatten();
             *state.rows.borrow_mut() = built;
+            self.meter(metered);
         } else {
+            self.meter(None);
             self.window.set_groups(ModelRc::default());
             state.rows.borrow_mut().clear();
         }
@@ -869,13 +1050,29 @@ impl SettingsPanel {
         }
     }
 
+    /// Starts or stops the measure of the microphone when what the page shows changes.
+    fn meter(&self, metered: Option<String>) {
+        if *self.state.metered.borrow() == metered {
+            return;
+        }
+        if metered.is_none() {
+            self.window.set_mic_level(0.0);
+        }
+        *self.state.metered.borrow_mut() = metered.clone();
+        (self.state.on_meter.borrow())(metered);
+    }
+
     fn refresh_shortcuts(&self, errors: &[(usize, String)]) {
         let config = self.state.config.borrow();
+        let taken = self.state.taken.borrow();
         let lang = self.state.lang();
         let table: Vec<ShortcutRow> = shortcuts::listed(&config)
             .into_iter()
             .enumerate()
             .map(|(i, (action, slots))| {
+                // Kept by Windows, or refused by the OS when the daemon registered it.
+                let windows = |text: &str| shortcuts::kept_by_windows(text);
+                let other = |text: &str| taken.iter().any(|t| shortcuts::same(t, text));
                 let keys: Vec<ShortcutKey> = slots
                     .iter()
                     .enumerate()
@@ -883,8 +1080,16 @@ impl SettingsPanel {
                         text: text.as_str().into(),
                         shown: shortcut_label(text, lang).into(),
                         slot: slot as i32,
+                        taken: windows(text) || other(text),
                     })
                     .collect();
+                let unusable = if slots.iter().any(|t| windows(t)) {
+                    tr(Key::ShortcutWindows, lang)
+                } else if slots.iter().any(|t| other(t)) {
+                    tr(Key::ShortcutTaken, lang)
+                } else {
+                    ""
+                };
                 ShortcutRow {
                     group: starts_group(action),
                     label: action_label(action, lang).into(),
@@ -892,7 +1097,7 @@ impl SettingsPanel {
                     error: errors
                         .iter()
                         .find(|(row, _)| *row == i)
-                        .map_or_else(SharedString::new, |(_, e)| e.as_str().into()),
+                        .map_or_else(|| unusable.into(), |(_, e)| e.as_str().into()),
                 }
             })
             .collect();
@@ -1018,6 +1223,78 @@ impl SettingsPanel {
         });
     }
 
+    /// Lists the settings that answer `query` (empty: back to the page).
+    fn search(&self, query: &str) {
+        let state = &self.state;
+        let lang = state.lang();
+        let found = if query.trim().is_empty() {
+            Vec::new()
+        } else {
+            let config = state.config.borrow();
+            let mut found = search(query, &state.env.borrow(), &config);
+            // The actions of the shortcuts page.
+            for (action, _) in shortcuts::listed(&config) {
+                let label = action_label(action, lang);
+                if vixeeny_settings::matches(query, label) {
+                    found.push(Found {
+                        section: Section::Shortcuts,
+                        id: String::new(),
+                        label: label.to_owned(),
+                    });
+                }
+            }
+            found
+        };
+        let hits: Vec<SearchHit> = found
+            .iter()
+            .map(|f| SearchHit {
+                label: f.label.as_str().into(),
+                page: tr(f.section.title(), lang).into(),
+                section: Section::ALL
+                    .iter()
+                    .position(|s| *s == f.section)
+                    .unwrap_or(0) as i32,
+            })
+            .collect();
+        self.window
+            .set_search_hits(ModelRc::from(Rc::new(VecModel::from(hits))));
+        self.window.set_search_none(
+            tr(Key::UiSearchNone, lang)
+                .replace("{query}", query.trim())
+                .into(),
+        );
+        *state.found.borrow_mut() = found;
+    }
+
+    /// Leaves the search for the page of `found`, the setting outlined and in view.
+    fn go_to(&self, found: &Found) {
+        let state = &self.state;
+        self.window.set_search_text(SharedString::new());
+        state.found.borrow_mut().clear();
+        // A folded setting: its section opens.
+        let shown = || state.rows.borrow().iter().any(|r| r.id == found.id);
+        self.select_section(found.section);
+        if found.section == Section::Video && !found.id.is_empty() && !shown() {
+            state.open.borrow_mut().insert("expert_video".into());
+            self.rebuild_env();
+            self.refresh();
+        }
+        if found.id.is_empty() {
+            return;
+        }
+        let id: SharedString = found.id.as_str().into();
+        self.window.set_highlight_id(id.clone());
+        // The outline fades after a moment.
+        let weak = self.window.as_weak();
+        slint::Timer::single_shot(std::time::Duration::from_millis(1600), move || {
+            if let Some(w) = weak.upgrade()
+                && w.get_highlight_id() == id
+            {
+                w.set_highlight_id(SharedString::new());
+            }
+        });
+    }
+
     fn wire(&self) {
         let w = &self.window;
         let weak = w.as_weak();
@@ -1138,6 +1415,23 @@ impl SettingsPanel {
             }
         });
 
+        w.on_search_edited({
+            let (weak, state) = (weak.clone(), self.state.clone());
+            move |text| {
+                if let Some(p) = panel(&weak, &state) {
+                    p.search(&text);
+                }
+            }
+        });
+        w.on_search_picked({
+            let (weak, state) = (weak.clone(), self.state.clone());
+            move |i| {
+                let found = state.found.borrow().get(i.max(0) as usize).cloned();
+                if let (Some(p), Some(found)) = (panel(&weak, &state), found) {
+                    p.go_to(&found);
+                }
+            }
+        });
         w.on_shortcut_record({
             let (weak, state) = (weak.clone(), self.state.clone());
             move |row, slot| {

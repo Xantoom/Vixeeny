@@ -4,7 +4,7 @@
 // on the right, its settings as cards, a group of cards apart from the next. Rows are generic (a
 // toggle, a choice, a folder…); the shortcuts, the updates and the about page have their own
 // layouts. Plain Slint elements only (std-widgets would pull the SVG decoder in for its icons).
-import { Theme, Icons, Icon, Button, IconButton, Toggle, TextBox, ComboBox, NumberBox, Slider, NavItem, Group, GroupRow, InfoBar, ScrollArea, ProgressBar } from "controls.slint";
+import { Theme, Icons, Icon, Button, IconButton, Toggle, TextBox, ComboBox, NumberBox, Slider, NavItem, Group, GroupRow, InfoBar, ScrollArea, ProgressBar, SearchBox, ScreenPicker, LevelMeter } from "controls.slint";
 
 // A choice of a list with pictures (a program to record).
 export struct SettingRow {
@@ -15,7 +15,8 @@ export struct SettingRow {
     info: string,
     // A list as wide as its longest choice needs, in pixels (0: the usual width).
     wide: int,
-    // 0 toggle, 1 choice, 2 number, 3 text, 4 folder, 5 info, 8 slider, 9 expander (`on`: open)
+    // 0 toggle, 1 choice, 2 number, 3 text, 4 folder, 5 info, 6 level meter, 8 slider,
+    // 9 expander (`on`: open), 10 choice of a screen edge, 11 choice of a screen corner
     kind: int,
     enabled: bool,
     on: bool,
@@ -34,6 +35,16 @@ export struct SettingRow {
     has-icon: bool,
     // New on a page already shown: it unfolds.
     fresh: bool,
+    // No longer applies: it folds away, then goes.
+    leaving: bool,
+}
+
+// A setting found by the search of the side navigation.
+export struct SearchHit {
+    label: string,
+    // The page it is on, by its title and its index in the navigation.
+    page: string,
+    section: int,
 }
 
 // A line of the sheet of this computer, on the general page.
@@ -42,8 +53,9 @@ export struct PcLine {
     value: string,
 }
 
-// The open expander's chevron, 20x20, drawn for Vixeeny.
+// Chevrons, 20x20: the open expander's, and the one that leads to a setting found.
 global Glyphs {
+    out property <string> chevron-right: "M7.64582 4.14708C7.84073 3.95147 8.15731 3.9509 8.35292 4.14582L13.8374 9.6108C14.0531 9.82574 14.0531 10.1751 13.8374 10.39L8.35292 15.855C8.15731 16.0499 7.84073 16.0493 7.64582 15.8537C7.4509 15.6581 7.45147 15.3415 7.64708 15.1466L12.8117 10.0004L7.64708 4.85418C7.45147 4.65927 7.4509 4.34269 7.64582 4.14708Z";
     out property <string> chevron-up: "M15.35 12.85A0.5 0.5 0 0 1 14.65 12.85L10 8.21L5.35 12.85A0.5 0.5 0 0 1 4.65 12.15L9.65 7.15A0.5 0.5 0 0 1 10.35 7.15L15.35 12.15A0.5 0.5 0 0 1 15.35 12.85Z";
 }
 
@@ -91,6 +103,8 @@ export struct ShortcutKey {
     text: string,
     shown: string,
     slot: int,
+    // Kept by Windows or taken by another program: it does not reach Vixeeny.
+    taken: bool,
 }
 
 export struct ShortcutRow {
@@ -129,6 +143,11 @@ component SettingLine inherits GroupRow {
     // The height of the window: a list opens upwards when it has no room below.
     in property <length> view-h;
     in property <bool> animated: true;
+    // How loud the microphone is (a level meter row).
+    in property <float> level;
+    // Found by a search: outlined, and brought into view.
+    in property <bool> highlighted;
+    callback reveal(length);
     callback toggled(bool);
     callback chosen(int);
     callback number(int);
@@ -142,8 +161,16 @@ component SettingLine inherits GroupRow {
     icon: root.entry.icon;
     has-icon: root.entry.has-icon;
     unfold: root.entry.fresh && root.animated;
+    fold: root.entry.leaving;
+    flash: root.highlighted;
+    // Once laid out, a row found by a search scrolls into view.
+    Timer {
+        interval: 30ms;
+        running: root.highlighted;
+        triggered => { self.running = false; root.reveal(root.absolute-position.y); }
+    }
     glyph: root.entry.kind == 4 ? Icons.folder : "";
-    dimmed: !root.entry.enabled && root.entry.kind != 5;
+    dimmed: !root.entry.enabled && root.entry.kind != 5 && root.entry.kind != 6;
     stack-under: root.entry.kind == 3 ? 620px : 500px;
     clickable: (root.entry.kind == 0 || root.entry.kind == 9) && root.entry.enabled;
     clicked => { root.toggled(!root.entry.on); }
@@ -171,6 +198,13 @@ component SettingLine inherits GroupRow {
         headings: root.entry.headings;
         current: root.entry.selected;
         enabled: root.entry.enabled;
+        selected(i) => { root.chosen(i); }
+    }
+    if root.entry.kind == 6 : LevelMeter { level: root.level; }
+    if root.entry.kind == 10 || root.entry.kind == 11 : ScreenPicker {
+        corners: root.entry.kind == 11;
+        options: root.entry.options;
+        current: root.entry.selected;
         selected(i) => { root.chosen(i); }
     }
     if root.entry.kind == 2 : NumberBox {
@@ -238,8 +272,8 @@ component ShortcutField inherits Rectangle {
     property <bool> removable: root.key.text != "" && !root.recording;
     height: 32px;
     border-radius: Theme.radius;
-    border-width: 1px;
-    border-color: root.recording ? Theme.accent : Theme.control-stroke;
+    border-color: root.recording ? Theme.accent : (root.key.taken ? Theme.danger : Theme.control-stroke);
+    border-width: root.key.taken && !root.recording ? 2px : 1px;
     background: root.recording ? Theme.accent-soft
         : (touch.has-hover ? Theme.control-hover : Theme.control);
     clip: true;
@@ -253,7 +287,8 @@ component ShortcutField inherits Rectangle {
         width: parent.width - (root.removable ? 38px : 20px);
         text: root.shown != "" ? root.shown
             : (root.recording ? root.t.press-keys : root.t.no-shortcut);
-        color: root.shown != "" ? Theme.text : (root.recording ? Theme.accent : Theme.text-3);
+        color: root.shown != "" ? (root.key.taken && !root.recording ? Theme.danger : Theme.text)
+            : (root.recording ? Theme.accent : Theme.text-3);
         font-size: 13px;
         vertical-alignment: center;
         overflow: elide;
@@ -367,6 +402,16 @@ export component SettingsWindow inherits Window {
     in property <string> extra;
     // Off in the tests, where no time passes: what animates is shown at its end at once.
     in property <bool> animated: true;
+    // The search of the side navigation: what is typed, and what answers it.
+    in-out property <string> search-text;
+    in property <[SearchHit]> search-hits;
+    in property <string> search-placeholder;
+    in property <string> search-title;
+    in property <string> search-none;
+    // The row a search led to (outlined for a moment).
+    in property <string> highlight-id;
+    // How loud the microphone is now, 0 to 1.
+    in property <float> mic-level;
 
     // The about page: the version.
     in property <string> version;
@@ -389,6 +434,8 @@ export component SettingsWindow inherits Window {
     callback shortcut-record(int, int);
     callback shortcut-clear(int, int);
     callback page-action(string, string);
+    callback search-edited(string);
+    callback search-picked(int);
 
     // The window has no system frame: its title bar is drawn here.
     in property <bool> zoomed: false;
@@ -409,7 +456,8 @@ export component SettingsWindow inherits Window {
     preferred-height: 760px;
     default-font-family: Theme.font;
 
-    property <bool> is-rows: root.section != 6 && root.section != 8;
+    property <bool> searching: root.search-text != "";
+    property <bool> is-rows: root.section != 6 && root.section != 8 && !root.searching;
     // The first tab and the title of the page share this line.
     property <length> top: 52px;
     property <length> tab-h: 38px;
@@ -428,6 +476,7 @@ export component SettingsWindow inherits Window {
             : Icons.info;
     }
     function go(i: int) {
+        if root.searching { search.clear(); }
         if i == root.section { return; }
         root.section = i;
         root.page-settled = false;
@@ -468,10 +517,21 @@ export component SettingsWindow inherits Window {
                 vertical-alignment: center;
             }
         }
-        // The tabs, right under the name; the highlight slides from one to the next.
-        items := Rectangle {
+        // The search, on the line of the title of the page.
+        search := SearchBox {
             x: 12px;
             y: root.top;
+            width: parent.width - 24px;
+            height: root.tab-h - 2px;
+            placeholder: root.search-placeholder;
+            text <=> root.search-text;
+            edited(text) => { root.search-edited(text); }
+        }
+        // The tabs, level with the first card of the page; the highlight slides from one to
+        // the next.
+        items := Rectangle {
+            x: 12px;
+            y: root.top + root.tab-h + 14px;
             width: parent.width - 24px;
             height: root.section-titles.length * root.tab-h;
             Rectangle {
@@ -481,7 +541,8 @@ export component SettingsWindow inherits Window {
                 height: root.tab-h - 2px;
                 border-radius: Theme.radius;
                 background: Theme.selected;
-                animate y { duration: Theme.t-normal; easing: cubic-bezier(0.2, 0, 0, 1); }
+                animate y { duration: root.animated ? Theme.t-normal : 0ms; easing: cubic-bezier(0.2, 0, 0, 1); }
+                visible: !root.searching;
                 Rectangle {
                     x: 0px;
                     y: (parent.height - self.height) / 2;
@@ -498,7 +559,7 @@ export component SettingsWindow inherits Window {
                 height: root.tab-h - 2px;
                 text: title;
                 icon: root.nav-icon(i);
-                current: i == root.section;
+                current: i == root.section && !root.searching;
                 clicked => { root.go(i); }
             }
         }
@@ -548,7 +609,8 @@ export component SettingsWindow inherits Window {
             y: root.top - (24px - 14px) * 0.41;
             width: page.column;
             height: root.tab-h - 2px;
-            text: root.section >= 0 && root.section < root.section-titles.length ? root.section-titles[root.section] : "";
+            text: root.searching ? root.search-title
+                : (root.section >= 0 && root.section < root.section-titles.length ? root.section-titles[root.section] : "");
             color: Theme.text;
             font-size: 24px;
             font-weight: 700;
@@ -563,7 +625,7 @@ export component SettingsWindow inherits Window {
             height: parent.height - self.y;
 
             // ---- pages made of rows (and the updates page)
-            if root.is-rows : ScrollArea {
+            if root.is-rows : rows-area := ScrollArea {
                 width: parent.width - 8px;
                 height: parent.height;
                 VerticalLayout {
@@ -583,6 +645,9 @@ export component SettingsWindow inherits Window {
                             t: root.t;
                             view-h: root.height;
                             animated: root.animated;
+                            level: root.mic-level;
+                            highlighted: r.id != "" && r.id == root.highlight-id;
+                            reveal(y) => { rows-area.reveal(y); }
                             toggled(v) => { root.row-toggled(r.id, v); }
                             chosen(k) => { root.row-chosen(r.id, k); }
                             number(v) => { root.row-number(r.id, v); }
@@ -594,9 +659,40 @@ export component SettingsWindow inherits Window {
                 }
             }
 
+            // ---- the answers of a search: each leads to its setting
+            if root.searching : ScrollArea {
+                width: parent.width - 8px;
+                height: parent.height;
+                VerticalLayout {
+                    x: 24px;
+                    width: page.column;
+                    alignment: start;
+                    spacing: 4px;
+                    padding-bottom: 32px;
+                    if root.search-hits.length == 0 : Text {
+                        text: root.search-none;
+                        color: Theme.text-2;
+                        font-size: 14px;
+                        wrap: word-wrap;
+                    }
+                    for hit[i] in root.search-hits : GroupRow {
+                        title: hit.label;
+                        description: hit.page;
+                        glyph: root.nav-icon(hit.section);
+                        clickable: true;
+                        clicked => { root.search-picked(i); }
+                        Icon {
+                            data: Glyphs.chevron-right;
+                            tint: Theme.text-2;
+                            size: 14px;
+                        }
+                    }
+                }
+            }
+
             // ---- shortcuts: a table, one row per action and a column per shortcut (three at
             // most)
-            if root.section == 6 : Rectangle {
+            if root.section == 6 && !root.searching : Rectangle {
                 width: parent.width;
                 height: parent.height;
                 property <length> key-w: max(150px, min(210px, (page.column - 220px) / 3));
@@ -627,7 +723,7 @@ export component SettingsWindow inherits Window {
             }
 
             // ---- about: who we are, this machine, the links
-            if root.section == 8 : ScrollArea {
+            if root.section == 8 && !root.searching : ScrollArea {
                 width: parent.width - 8px;
                 height: parent.height;
                 VerticalLayout {

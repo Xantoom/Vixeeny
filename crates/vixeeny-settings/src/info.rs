@@ -286,6 +286,18 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
             "Removes the steady noise of the microphone (fan, hum). Recommended: on.",
             "Enlève le bruit continu du micro (ventilateur, souffle). Recommandé : activé.",
         ),
+        "capture_volume" => pick(
+            "Makes the recorded sound louder or quieter than you hear it, the microphone apart. Recommended: 100 %.",
+            "Rend le son enregistré plus fort ou plus faible que ce que vous entendez, le micro à part. Recommandé : 100 %.",
+        ),
+        "mic_volume" => pick(
+            "Your voice against the game: lower it if it covers the game, raise it if it is lost. Recommended: 100 %, then adjust with the level above.",
+            "Votre voix face au jeu : baissez si elle couvre le jeu, montez si elle se perd. Recommandé : 100 %, puis ajustez avec le niveau au-dessus.",
+        ),
+        "mic_level" => pick(
+            "What the microphone hears now. Speak normally: the bar should reach the middle without turning red.",
+            "Ce que le micro entend en ce moment. Parlez normalement : la barre doit atteindre le milieu sans passer au rouge.",
+        ),
         "audio_routing" => pick(
             "One track per source lets you set each volume when editing; one mixed track plays the same everywhere. Recommended: one track per source.",
             "Une piste par source permet de régler chaque volume au montage ; une piste mixée se lit pareil partout. Recommandé : une piste par source.",
@@ -313,6 +325,10 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
         "replay_duration" => pick(
             "How much is kept, before the moment you save. Longer takes more memory or disk. Recommended: 30 s to 2 min.",
             "Ce qui est gardé avant le moment où vous enregistrez. Plus long prend plus de mémoire ou de disque. Recommandé : 30 s à 2 min.",
+        ),
+        "replay_after" => pick(
+            "The replay goes on for a few seconds after its shortcut, so the end of the action is in it. Recommended: 5 to 10 seconds if you often save too early.",
+            "Le replay continue quelques secondes après son raccourci, pour que la fin de l'action y soit. Recommandé : 5 à 10 secondes si vous enregistrez souvent trop tôt.",
         ),
         "replay_storage" => pick(
             "RAM spares the disk but takes memory from the game; the disk suits long replays and PCs with little RAM. Automatic chooses for you. Recommended: automatic.",

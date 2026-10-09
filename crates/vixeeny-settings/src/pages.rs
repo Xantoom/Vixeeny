@@ -11,7 +11,7 @@ use vixeeny_encode::{replay, validate};
 use crate::encoders::{self, param_label, param_range};
 use crate::{
     Env, Invalid, Kind, Opt, Row, Value, choice, folder, header, hinted, info, number, opt, row,
-    slider, toggle, when,
+    slider, toggle,
 };
 
 /// `off`, `size:<MB>` or `duration:<minutes>` → (kind, amount).
@@ -121,17 +121,20 @@ fn naming_rows(
 pub fn overlay(env: &Env, config: &Config) -> Vec<Row> {
     let t = |k| env.t(k);
     let mut rows = vec![
-        choice(
-            "overlay_edge",
-            t(Key::SetOverlayEdge),
-            vec![
-                opt("left", t(Key::SetEdgeLeft)),
-                opt("right", t(Key::SetEdgeRight)),
-                opt("top", t(Key::SetEdgeTop)),
-                opt("bottom", t(Key::SetEdgeBottom)),
-            ],
-            |c| c.overlay.edge.clone(),
-            |c, v| c.overlay.edge = v,
+        crate::picked(
+            crate::Picker::Edge,
+            choice(
+                "overlay_edge",
+                t(Key::SetOverlayEdge),
+                vec![
+                    opt("left", t(Key::SetEdgeLeft)),
+                    opt("right", t(Key::SetEdgeRight)),
+                    opt("top", t(Key::SetEdgeTop)),
+                    opt("bottom", t(Key::SetEdgeBottom)),
+                ],
+                |c| c.overlay.edge.clone(),
+                |c, v| c.overlay.edge = v,
+            ),
         ),
         header("h_widget"),
         toggle(
@@ -142,17 +145,20 @@ pub fn overlay(env: &Env, config: &Config) -> Vec<Row> {
         ),
     ];
     if config.recording_widget.enabled {
-        rows.push(choice(
-            "widget_corner",
-            t(Key::SetWidgetCorner),
-            vec![
-                opt("top_left", t(Key::SetCornerTl)),
-                opt("top_right", t(Key::SetCornerTr)),
-                opt("bottom_left", t(Key::SetCornerBl)),
-                opt("bottom_right", t(Key::SetCornerBr)),
-            ],
-            |c| c.recording_widget.corner.clone(),
-            |c, v| c.recording_widget.corner = v,
+        rows.push(crate::picked(
+            crate::Picker::Corner,
+            choice(
+                "widget_corner",
+                t(Key::SetWidgetCorner),
+                vec![
+                    opt("top_left", t(Key::SetCornerTl)),
+                    opt("top_right", t(Key::SetCornerTr)),
+                    opt("bottom_left", t(Key::SetCornerBl)),
+                    opt("bottom_right", t(Key::SetCornerBr)),
+                ],
+                |c| c.recording_widget.corner.clone(),
+                |c, v| c.recording_widget.corner = v,
+            ),
         ));
         rows.push(toggle(
             "widget_hide",
@@ -942,6 +948,40 @@ fn program_row(spec: String, label: String, icon: Option<crate::Icon>) -> Row {
     r
 }
 
+/// The volume keys of the microphone and of what is recorded besides it (a source of its own
+/// in the settings file is more precise and wins).
+const MIC_VOLUME: &str = "mic";
+const CAPTURE_VOLUME: &str = "capture";
+
+/// A volume, in percent of the sound as it is (up to twice as loud).
+fn volume_row(id: &str, label: String, key: &'static str) -> Row {
+    row(
+        id,
+        label,
+        Kind::Slider {
+            min: 0,
+            max: 200,
+            step: 5,
+        },
+        Box::new(move |c| {
+            let v = c.video.audio.volumes.get(key).copied().unwrap_or(1.0);
+            Value::Int((f64::from(v) * 100.0).round() as i64)
+        }),
+        Box::new(move |c, v| match v {
+            Value::Int(n) => {
+                let volumes = &mut c.video.audio.volumes;
+                if n == 100 {
+                    volumes.remove(key);
+                } else {
+                    volumes.insert(key.to_owned(), n as f32 / 100.0);
+                }
+                Ok(())
+            }
+            _ => Err(Invalid),
+        }),
+    )
+}
+
 pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
     let t = |k| env.t(k);
     let chosen = &config.video.audio.sources;
@@ -1047,6 +1087,14 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
         _ => {}
     }
 
+    if mode != "none" {
+        rows.push(volume_row(
+            "capture_volume",
+            t(Key::SetCaptureVolume),
+            CAPTURE_VOLUME,
+        ));
+    }
+
     // ---- the microphone: a switch, then which one
     rows.push(header("h_mic"));
     rows.push(row(
@@ -1067,24 +1115,24 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
             _ => Err(Invalid),
         }),
     ));
-    let mut mics = vec![opt("mic", t(Key::SrcMic))];
-    mics.extend(
-        env.audio
-            .inputs
-            .iter()
-            .map(|d| opt(&format!("mic:{}", d.id), d.name.as_str())),
-    );
-    // An unplugged microphone that the profile records.
-    for spec in chosen.iter().filter(|s| s.starts_with("mic:")) {
-        if !mics.iter().any(|o| o.value == *spec) {
-            mics.push(opt(
-                spec,
-                format!("{} ({})", absent_label(spec), t(Key::SrcAbsent)),
-            ));
+    if chosen.iter().any(|s| is_mic(s)) {
+        let mut mics = vec![opt("mic", t(Key::SrcMic))];
+        mics.extend(
+            env.audio
+                .inputs
+                .iter()
+                .map(|d| opt(&format!("mic:{}", d.id), d.name.as_str())),
+        );
+        // An unplugged microphone that the profile records.
+        for spec in chosen.iter().filter(|s| s.starts_with("mic:")) {
+            if !mics.iter().any(|o| o.value == *spec) {
+                mics.push(opt(
+                    spec,
+                    format!("{} ({})", absent_label(spec), t(Key::SrcAbsent)),
+                ));
+            }
         }
-    }
-    rows.push(when(
-        choice(
+        rows.push(choice(
             "mic_device",
             t(Key::SetMicDevice),
             mics,
@@ -1097,26 +1145,21 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
                     .cloned()
                     .unwrap_or_else(|| "mic".into())
             },
-            // Greyed out while the microphone is off: nothing to change then.
             |c, v| {
                 let sources = &mut c.video.audio.sources;
-                if sources.iter().any(|s| is_mic(s)) {
-                    sources.retain(|s| !is_mic(s));
-                    sources.push(v);
-                }
+                sources.retain(|s| !is_mic(s));
+                sources.push(v);
             },
-        ),
-        |c| c.video.audio.sources.iter().any(|s| is_mic(s)),
-    ));
-    rows.push(when(
-        toggle(
+        ));
+        rows.push(crate::meter("mic_level", t(Key::SetMicLevel)));
+        rows.push(volume_row("mic_volume", t(Key::SetMicVolume), MIC_VOLUME));
+        rows.push(toggle(
             "audio_denoise",
             t(Key::SetAudioDenoise),
             |c| c.video.audio.mic_noise_reduction,
             |c, v| c.video.audio.mic_noise_reduction = v,
-        ),
-        |c| c.video.audio.sources.iter().any(|s| is_mic(s)),
-    ));
+        ));
+    }
 
     // ---- the tracks and their codec
     rows.push(header("h_tracks"));
@@ -1269,6 +1312,30 @@ pub fn replay(env: &Env, config: &Config) -> Vec<Row> {
             },
             |c, v| c.replay.duration_seconds = v.parse().unwrap_or(30),
         ),
+        choice(
+            "replay_after",
+            t(Key::SetReplayAfter),
+            REPLAY_AFTER
+                .iter()
+                .map(|s| {
+                    let label = if *s == 0 {
+                        t(Key::OptReplayAfterNone)
+                    } else {
+                        t(Key::OptReplayAfter).replace("{s}", &s.to_string())
+                    };
+                    opt(&s.to_string(), label)
+                })
+                .collect(),
+            |c| {
+                let s = c.replay.after_seconds;
+                REPLAY_AFTER
+                    .iter()
+                    .min_by_key(|d| d.abs_diff(s))
+                    .unwrap_or(&0)
+                    .to_string()
+            },
+            |c, v| c.replay.after_seconds = v.parse().unwrap_or(0),
+        ),
         storage,
         header("h_folder"),
         folder(
@@ -1293,6 +1360,9 @@ pub fn replay(env: &Env, config: &Config) -> Vec<Row> {
     rows
 }
 
+/// How long a replay can go on after its shortcut, in seconds.
+const REPLAY_AFTER: [u32; 5] = [0, 5, 10, 15, 30];
+
 /// The durations a replay can keep, in seconds.
 const REPLAY_DURATIONS: [u32; 9] = [15, 30, 60, 120, 300, 600, 900, 1200, 1800];
 
@@ -1312,7 +1382,7 @@ fn replay_estimate(env: &Env, config: &Config) -> Option<String> {
     let size = validate::output_size(&config.video.resolution, (cw, ch)).unwrap_or((cw, ch));
     let bytes = replay::expected_bytes(
         replay::profile_kbps(&config.video, encoder, size),
-        config.replay.duration_seconds,
+        config.replay.duration_seconds + config.replay.after_seconds,
     );
     let key = match config.replay.storage.as_str() {
         "ram" | "disk" => Key::ReplayEstimate,
@@ -1336,22 +1406,20 @@ fn size_label(bytes: u64, lang: vixeeny_common::i18n::Lang) -> String {
 }
 
 /// The settings of the updates page (the state of the update is drawn by the page).
-pub fn updates(env: &Env) -> Vec<Row> {
-    vec![
-        toggle(
-            "check_updates",
-            env.t(Key::SetCheckUpdates),
-            |c| c.general.check_updates,
-            |c, v| c.general.check_updates = v,
-        ),
-        when(
-            toggle(
-                "auto_update",
-                env.t(Key::SetAutoUpdate),
-                |c| c.general.auto_update,
-                |c, v| c.general.auto_update = v,
-            ),
-            |c| c.general.check_updates,
-        ),
-    ]
+pub fn updates(env: &Env, config: &Config) -> Vec<Row> {
+    let mut rows = vec![toggle(
+        "check_updates",
+        env.t(Key::SetCheckUpdates),
+        |c| c.general.check_updates,
+        |c, v| c.general.check_updates = v,
+    )];
+    if config.general.check_updates {
+        rows.push(toggle(
+            "auto_update",
+            env.t(Key::SetAutoUpdate),
+            |c| c.general.auto_update,
+            |c, v| c.general.auto_update = v,
+        ));
+    }
+    rows
 }

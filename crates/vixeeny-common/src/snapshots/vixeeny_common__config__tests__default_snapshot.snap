@@ -77,9 +77,6 @@ lossless = true
 quality = 90
 effort = 7
 
-[editor]
-dim_percent = 40
-
 [video]
 encoder_kind = "hardware"
 encoder = "auto"
@@ -120,6 +117,7 @@ auto_hide = false
 [replay]
 enabled = false
 duration_seconds = 30
+after_seconds = 0
 storage = "auto"
 
 [overlay]

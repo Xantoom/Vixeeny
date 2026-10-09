@@ -205,6 +205,104 @@ fn rows_that_appear_on_the_same_page_unfold() {
 }
 
 #[test]
+fn rows_that_stop_applying_fold_away_then_go() {
+    use slint::Model;
+    use vixeeny_settings::Section;
+    let (panel, _) = settings_panel();
+    let rows = |p: &settings_panel::SettingsPanel| {
+        p.window()
+            .get_groups()
+            .iter()
+            .flat_map(|g| g.rows.iter().collect::<Vec<_>>())
+            .map(|r| (r.id.to_string(), r.leaving))
+            .collect::<Vec<_>>()
+    };
+    panel.select_section(Section::Overlay);
+    panel.window().invoke_row_toggled("widget".into(), false);
+    // Still there, folding, in their place under the switch.
+    let now = rows(&panel);
+    let corner = now.iter().position(|(id, _)| id == "widget_corner");
+    let widget = now.iter().position(|(id, _)| id == "widget");
+    assert!(
+        corner.is_some_and(|c| widget.is_some_and(|w| c == w + 1)),
+        "{now:?}"
+    );
+    assert!(
+        now.iter()
+            .any(|(id, leaving)| id == "widget_corner" && *leaving)
+    );
+    // The next change takes them away for good.
+    panel.window().invoke_row_chosen("overlay_edge".into(), 0);
+    assert!(!rows(&panel).iter().any(|(id, _)| id == "widget_corner"));
+    // Without animations, nothing lingers.
+    panel.window().set_animated(false);
+    panel.window().invoke_row_toggled("widget".into(), true);
+    panel.window().invoke_row_toggled("widget".into(), false);
+    assert!(!rows(&panel).iter().any(|(_, leaving)| *leaving));
+}
+
+#[test]
+fn the_search_leads_to_the_setting() {
+    use slint::Model;
+    use vixeeny_settings::Section;
+    let (panel, _) = settings_panel();
+    panel.window().set_animated(false);
+    panel.select_section(Section::General);
+    let w = panel.window();
+    w.set_search_text("dossier par".into());
+    w.invoke_search_edited("dossier par".into());
+    // English: nothing; the words are those of the window's language.
+    assert_eq!(w.get_search_hits().row_count(), 0);
+    w.invoke_search_edited("folder".into());
+    let pages: Vec<String> = w
+        .get_search_hits()
+        .iter()
+        .map(|h| h.page.to_string())
+        .collect();
+    assert!(pages.contains(&"Image".to_owned()), "{pages:?}");
+    w.set_search_text("save repl".into());
+    w.invoke_search_edited("save repl".into());
+    settings_render(&panel, "9-settings-search");
+    let hits = w.get_search_hits();
+    assert_eq!(hits.row_count(), 1);
+    assert_eq!(hits.row_data(0).unwrap().label, "Save the replay");
+    // A folded expert setting: its section opens, the row is outlined.
+    w.set_search_text(Default::default());
+    panel.select_section(Section::Video);
+    w.invoke_row_chosen("preset".into(), 2); // best, light, custom
+    panel.select_section(Section::General);
+    w.set_search_text("chroma".into());
+    w.invoke_search_edited("chroma".into());
+    assert_eq!(w.get_search_hits().row_count(), 1);
+    w.invoke_search_picked(0);
+    assert_eq!(w.get_search_text(), "");
+    assert_eq!(panel.current_section(), Section::Video);
+    assert_eq!(w.get_highlight_id(), "chroma");
+}
+
+#[test]
+fn shortcuts_that_cannot_work_are_marked() {
+    use slint::Model;
+    use vixeeny_settings::Section;
+    let (panel, _) = settings_panel();
+    panel.window().set_animated(false);
+    panel.select_section(Section::Shortcuts);
+    let w = panel.window();
+    // The region capture (row 0) is taken by another program.
+    panel.set_taken_shortcuts(vec!["PrintScreen".into()]);
+    let row = w.get_shortcuts().row_data(0).unwrap();
+    assert!(row.keys.row_data(0).unwrap().taken);
+    assert!(row.error.contains("another program"), "{}", row.error);
+    // One that Windows keeps.
+    w.invoke_shortcut_record(5, 1);
+    panel.captured(settings_panel::Captured::Combination("Win+Alt+R".into()));
+    let row = w.get_shortcuts().row_data(5).unwrap();
+    assert!(row.keys.row_data(1).unwrap().taken);
+    assert!(row.error.contains("Windows"), "{}", row.error);
+    settings_render(&panel, "9-settings-shortcuts-taken");
+}
+
+#[test]
 fn shortcuts_are_edited_in_place_and_conflicts_are_explained() {
     use slint::Model;
     use vixeeny_settings::Section;
@@ -383,6 +481,10 @@ fn every_page_of_the_settings_renders() {
         .window()
         .invoke_row_toggled("src:app:Spotify.exe".into(), true);
     settings_render(&panel, "9-page-audio-programs");
+    // The microphone: its level, its volume.
+    panel.window().invoke_row_toggled("mic_on".into(), true);
+    panel.set_mic_level(0.62);
+    settings_render_at(&panel, "9-page-audio-mic", (1040, 1100));
     // The smallest window: nothing overlaps.
     panel.select_section(Section::General);
     settings_render_at(&panel, "9-page-smallest", (960, 640));

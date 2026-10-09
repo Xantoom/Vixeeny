@@ -45,6 +45,12 @@ pub fn hw_cache_file() -> Option<PathBuf> {
     config_dir().map(|d| d.join("hw_cache.toml"))
 }
 
+/// The shortcuts the daemon could not register (taken by another program or by Windows), one
+/// per line in their canonical spelling: the settings window marks them.
+pub fn hotkeys_taken_file() -> Option<PathBuf> {
+    cache_dir().map(|d| d.join("hotkeys-taken.txt"))
+}
+
 /// Directory for data that can be rebuilt (gallery thumbnails).
 pub fn cache_dir() -> Option<PathBuf> {
     if let Some(dir) = portable_dir() {

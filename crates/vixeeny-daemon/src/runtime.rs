@@ -25,9 +25,9 @@ pub trait Tray {
 /// Registers the global shortcuts with the OS. A shortcut press becomes an
 /// [`Event::Action`] sent by the backend itself.
 pub trait HotkeyBackend {
-    /// Replaces the registered shortcuts by `bindings`. Returns one message per shortcut the
-    /// OS refused (typically because another application owns it).
-    fn apply(&mut self, bindings: &[(ActionId, Hotkey)]) -> Vec<String>;
+    /// Replaces the registered shortcuts by `bindings`. Returns the shortcuts the OS refused
+    /// (typically because another application owns them), each with the reason.
+    fn apply(&mut self, bindings: &[(ActionId, Hotkey)]) -> Vec<(Hotkey, String)>;
 }
 
 /// Freezes the screens the moment a zone capture is asked for (see
@@ -166,10 +166,12 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
                 }
             }
         }
-        for failure in self.hotkeys.apply(&resolution.bindings) {
-            tracing::warn!("shortcut not registered: {failure}");
+        let failures = self.hotkeys.apply(&resolution.bindings);
+        for (hotkey, failure) in &failures {
+            tracing::warn!("shortcut {hotkey} not registered: {failure}");
             trouble = true;
         }
+        write_taken(&failures);
         if trouble {
             self.execute(Effect::Notify(Key::HotkeysUnavailable));
         }
@@ -313,6 +315,24 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
     }
 }
 
+/// Tells the settings window which shortcuts did not register (the file is emptied when all
+/// did). Not in tests: they would write to the user's folder.
+fn write_taken(failures: &[(Hotkey, String)]) {
+    if cfg!(test) {
+        return;
+    }
+    let Some(path) = vixeeny_common::paths::hotkeys_taken_file() else {
+        return;
+    };
+    let text: String = failures.iter().map(|(h, _)| format!("{h}\n")).collect();
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Err(e) = std::fs::write(&path, text) {
+        tracing::warn!("cannot write {}: {e}", path.display());
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::field_reassign_with_default)]
 mod tests {
@@ -350,11 +370,14 @@ mod tests {
         refuse: bool,
     }
     impl HotkeyBackend for FakeHotkeys {
-        fn apply(&mut self, bindings: &[(ActionId, Hotkey)]) -> Vec<String> {
+        fn apply(&mut self, bindings: &[(ActionId, Hotkey)]) -> Vec<(Hotkey, String)> {
             *self.applied.lock().unwrap() =
                 bindings.iter().map(|(a, h)| (*a, h.to_string())).collect();
             if self.refuse {
-                vec!["taken".into()]
+                bindings
+                    .iter()
+                    .map(|(_, h)| (h.clone(), "taken".into()))
+                    .collect()
             } else {
                 Vec::new()
             }

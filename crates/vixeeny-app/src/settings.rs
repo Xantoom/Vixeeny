@@ -291,6 +291,18 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     panel.on_recording(pause_hotkeys);
     start_probe_watch(&panel);
     let handle = panel.handle();
+    panel.on_meter(meter(handle.clone()));
+    // The shortcuts the daemon could not register (it registers them again after each change).
+    panel.watch_taken_shortcuts(|| {
+        vixeeny_common::paths::hotkeys_taken_file()
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .unwrap_or_default()
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(str::to_owned)
+            .collect()
+    });
 
     let weak = panel.window().as_weak();
     panel.on_change(move |config| {
@@ -574,6 +586,55 @@ fn machine() -> vixeeny_settings::Machine {
                 hz: s.hz,
             })
             .collect(),
+    }
+}
+
+/// Measures the microphone the audio page shows the level of: a capture of it while the page
+/// is on screen, its loudest sample every 50 ms sent to the window.
+fn meter(handle: PanelHandle) -> impl Fn(Option<String>) {
+    use vixeeny_audio::{
+        AudioChunk, AudioSink, AudioSource, SourceEvent, SourceSpec, WasapiSource,
+    };
+    struct Level {
+        handle: PanelHandle,
+        peak: f32,
+        sent: std::time::Instant,
+    }
+    impl AudioSink for Level {
+        fn on_audio(&mut self, chunk: AudioChunk) {
+            let peak = chunk.samples.iter().fold(0.0_f32, |m, s| m.max(s.abs()));
+            self.peak = self.peak.max(peak);
+            if self.sent.elapsed() >= std::time::Duration::from_millis(50) {
+                // -60 dB to 0 dB across the bar: what the ear hears as even steps.
+                let db = 20.0 * self.peak.max(1e-6).log10();
+                self.handle
+                    .set_mic_level(((db + 60.0) / 60.0).clamp(0.0, 1.0));
+                self.peak = 0.0;
+                self.sent = std::time::Instant::now();
+            }
+        }
+        fn on_event(&mut self, _: SourceEvent) {
+            self.handle.set_mic_level(0.0);
+        }
+    }
+    let running: std::cell::RefCell<Option<WasapiSource>> = std::cell::RefCell::default();
+    move |spec| {
+        if let Some(mut old) = running.borrow_mut().take() {
+            let _ = old.stop();
+        }
+        let Some(spec) = spec.as_deref().and_then(SourceSpec::parse) else {
+            return;
+        };
+        let mut source = WasapiSource::new(spec.kind);
+        let sink = Level {
+            handle: handle.clone(),
+            peak: 0.0,
+            sent: std::time::Instant::now(),
+        };
+        match source.start(Box::new(sink)) {
+            Ok(()) => *running.borrow_mut() = Some(source),
+            Err(e) => tracing::warn!("cannot measure the microphone: {e}"),
+        }
     }
 }
 

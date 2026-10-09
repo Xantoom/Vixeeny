@@ -61,12 +61,15 @@ fn to_global(hotkey: &Hotkey) -> Result<HotKey, String> {
 }
 
 impl HotkeyBackend for Hotkeys {
-    fn apply(&mut self, bindings: &[(ActionId, Hotkey)]) -> Vec<String> {
+    fn apply(&mut self, bindings: &[(ActionId, Hotkey)]) -> Vec<(Hotkey, String)> {
         // Forget the previous set first; a failure here only means it was not registered.
         let _ = self.manager.unregister_all(&self.registered);
         self.registered.clear();
         let Ok(mut actions) = self.actions.lock() else {
-            return vec!["hotkey table poisoned".into()];
+            return bindings
+                .iter()
+                .map(|(_, h)| (h.clone(), "hotkey table poisoned".into()))
+                .collect();
         };
         actions.clear();
         let mut failures = Vec::new();
@@ -82,7 +85,7 @@ impl HotkeyBackend for Hotkeys {
                     actions.insert(global.id(), *action);
                     self.registered.push(global);
                 }
-                Err(e) => failures.push(format!("{hotkey} ({action:?}): {e}")),
+                Err(e) => failures.push((hotkey.clone(), format!("{action:?}: {e}"))),
             }
         }
         failures

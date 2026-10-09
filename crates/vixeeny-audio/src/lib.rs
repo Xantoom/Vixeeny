@@ -17,7 +17,9 @@ mod wasapi;
 pub use fake::FakeAudioSource;
 pub use layout::{convert as convert_layout, track_channels};
 pub use mixer::{Block, Mixer};
-pub use routing::{TrackMember, TrackPlan, assign_channels, plan_tracks};
+pub use routing::{
+    CAPTURE_VOLUME, MIC_VOLUME, TrackMember, TrackPlan, assign_channels, plan_tracks,
+};
 pub use spec::{SourceKind, SourceSpec, parse_sources};
 pub use wasapi::{
     AppInfo, DeviceInfo, WasapiSource, list_applications, list_microphones, list_outputs,

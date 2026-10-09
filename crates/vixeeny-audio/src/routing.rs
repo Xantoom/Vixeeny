@@ -40,12 +40,25 @@ pub fn assign_channels(
     }
 }
 
+/// The volume key of every microphone.
+pub const MIC_VOLUME: &str = "mic";
+/// The volume key of everything recorded besides the microphone.
+pub const CAPTURE_VOLUME: &str = "capture";
+
 /// The tracks of a profile, and the source names that could not be understood.
 pub fn plan_tracks(audio: &Audio) -> (Vec<TrackPlan>, Vec<String>) {
+    // A source's own volume, else that of its side: the microphone (`mic`) or what is recorded
+    // besides it (`capture`), as the settings window sets them.
     let volume = |s: &SourceSpec| {
+        let side = if matches!(s.kind, crate::SourceKind::Microphone(_)) {
+            MIC_VOLUME
+        } else {
+            CAPTURE_VOLUME
+        };
         audio
             .volumes
             .get(&s.name)
+            .or_else(|| audio.volumes.get(side))
             .copied()
             .unwrap_or(1.0)
             .clamp(0.0, 4.0)
@@ -197,6 +210,13 @@ mod tests {
         let (tracks, _) = plan_tracks(&a);
         assert_eq!(tracks[0].members[0].volume, 0.5);
         assert_eq!(tracks[1].members[0].volume, 4.0);
+        // A side's volume reaches every source of that side that has none of its own.
+        let mut a = audio("one_track_per_source", &["mic:Blue Yeti", "app:game.exe"]);
+        a.volumes.insert(MIC_VOLUME.into(), 0.8);
+        a.volumes.insert(CAPTURE_VOLUME.into(), 1.5);
+        let (tracks, _) = plan_tracks(&a);
+        assert_eq!(tracks[0].members[0].volume, 0.8);
+        assert_eq!(tracks[1].members[0].volume, 1.5);
     }
 
     #[test]

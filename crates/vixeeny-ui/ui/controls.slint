@@ -600,6 +600,10 @@ export component GroupRow inherits Rectangle {
     // A row that appears on a page already shown (a setting that only makes sense with the
     // one above): it unfolds from nothing instead of popping in.
     in property <bool> unfold: false;
+    // A row that no longer applies: it folds away to nothing before it is removed.
+    in property <bool> fold: false;
+    // Found by a search: outlined in the accent colour for a moment.
+    in property <bool> flash: false;
     callback clicked();
 
     property <bool> stacked: root.width < root.stack-under;
@@ -612,25 +616,34 @@ export component GroupRow inherits Rectangle {
         : max(txt.preferred-height, ctl.preferred-height);
     property <length> natural: max(60px, root.body + 26px);
     property <bool> grown: !root.unfold;
-    height: root.grown ? root.natural : 0px;
-    opacity: root.grown ? 1 : 0;
-    // Only while unfolding: a row that changes its height otherwise follows it at once.
-    animate height, opacity { duration: root.unfold ? Theme.t-normal : 0ms; easing: cubic-bezier(0.2, 0, 0, 1); }
-    clip: root.unfold;
+    // A row made already leaving starts shown, then folds (the change is what animates).
+    property <bool> folded: false;
+    property <bool> shown: root.grown && !root.folded;
+    height: root.shown ? root.natural : 0px;
+    opacity: root.shown ? 1 : 0;
+    // Only while unfolding or folding: a row that changes its height otherwise follows it at once.
+    animate height, opacity { duration: root.unfold || root.fold ? Theme.t-normal : 0ms; easing: cubic-bezier(0.2, 0, 0, 1); }
+    clip: root.unfold || root.fold;
     Timer {
         interval: 16ms;
         running: root.unfold && !root.grown;
         triggered => { root.grown = true; }
     }
+    Timer {
+        interval: 16ms;
+        running: root.fold && !root.folded;
+        triggered => { root.folded = true; }
+    }
     border-radius: Theme.radius-card;
-    border-width: 1px;
-    border-color: Theme.stroke;
+    border-width: root.flash ? 2px : 1px;
+    border-color: root.flash ? Theme.accent : Theme.stroke;
+    animate border-color { duration: Theme.t-slow; }
     background: root.clickable && touch.pressed ? Theme.card-pressed
         : (root.clickable && touch.has-hover ? Theme.card-hover : Theme.card);
     animate background { duration: Theme.t-fast; }
 
     touch := TouchArea {
-        enabled: root.clickable;
+        enabled: root.clickable && !root.fold;
         mouse-cursor: root.clickable ? pointer : default;
         clicked => { root.clicked(); }
     }
@@ -735,6 +748,13 @@ export component ProgressBar inherits Rectangle {
 // A scrollable area with a thin scroll bar that appears on hover.
 export component ScrollArea inherits Rectangle {
     clip: true;
+    // Scrolls so that what is at `abs-y` (a window coordinate) shows near the top.
+    public function reveal(abs-y: length) {
+        let inside = abs-y - root.absolute-position.y - fl.content-y;
+        fl.content-y = clamp(24px - inside, min(0px, root.height - fl.content-height), 0px);
+    }
+    // Back to the top.
+    public function to-top() { fl.content-y = 0px; }
     fl := Flickable {
         @children
     }
@@ -769,4 +789,169 @@ export component ScrollArea inherits Rectangle {
             }
         }
     }
+}
+
+// The search field of the side navigation: a magnifier, the text, a cross that empties it.
+export component SearchBox inherits Rectangle {
+    in property <string> placeholder;
+    in-out property <string> text;
+    callback edited(string);
+    public function clear() { input.text = ""; root.text = ""; root.edited(""); }
+
+    height: 36px;
+    border-radius: Theme.radius;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.accent : Theme.control-stroke;
+    background: input.has-focus ? (Theme.dark ? #1f1f1f : #ffffff) : (touch.has-hover ? Theme.control-hover : Theme.control);
+    animate background, border-color { duration: Theme.t-fast; }
+    touch := TouchArea { mouse-cursor: MouseCursor.text; clicked => { input.focus(); } }
+    Icon {
+        x: 12px;
+        y: (parent.height - self.height) / 2;
+        data: Icons.search;
+        tint: input.has-focus ? Theme.accent : Theme.text-2;
+        size: 16px;
+    }
+    Text {
+        x: 38px;
+        width: parent.width - 38px - 32px;
+        height: parent.height;
+        text: root.placeholder;
+        visible: input.text == "";
+        color: Theme.text-3;
+        font-size: 14px;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    input := TextInput {
+        x: 38px;
+        width: parent.width - 38px - 32px;
+        height: parent.height;
+        text <=> root.text;
+        color: Theme.text;
+        selection-background-color: Theme.accent;
+        selection-foreground-color: Theme.on-accent;
+        font-size: 14px;
+        vertical-alignment: center;
+        single-line: true;
+        edited => { root.edited(self.text); }
+        key-pressed(e) => {
+            if e.text == Key.Escape { root.clear(); return accept; }
+            reject
+        }
+    }
+    if root.text != "" : IconButton {
+        x: parent.width - self.width - 6px;
+        y: (parent.height - self.height) / 2;
+        icon: Icons.dismiss;
+        size: 24px;
+        tint: Theme.text-2;
+        clicked => { root.clear(); }
+    }
+    accessible-role: text-input;
+    accessible-label: root.placeholder;
+}
+
+// A small screen to click on: an edge (left, right, top, bottom) or a corner (top left, top
+// right, bottom left, bottom right) of it, the chosen one in the accent colour.
+export component ScreenPicker inherits Rectangle {
+    // false: the four edges; true: the four corners.
+    in property <bool> corners;
+    // The names of the four places, in the order above.
+    in property <[string]> options;
+    in property <int> current: -1;
+    callback selected(int);
+
+    width: 176px;
+    height: 112px;
+    // The screen, on a little stand.
+    screen := Rectangle {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: 99px;
+        border-radius: 6px;
+        border-width: 2px;
+        border-color: Theme.stroke-strong;
+        background: Theme.control;
+        Text {
+            x: 0px;
+            width: parent.width;
+            height: parent.height;
+            text: root.current >= 0 && root.current < root.options.length ? root.options[root.current] : "";
+            color: Theme.text-2;
+            font-size: 12px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        for i in 4 : Rectangle {
+            property <bool> chosen: i == root.current;
+            // Edges: bars along the middle of each side; corners: small windows.
+            property <length> bar: 6px;
+            property <length> long-h: parent.width * 0.42;
+            property <length> long-v: parent.height * 0.46;
+            x: root.corners
+                ? (mod(i, 2) == 0 ? 8px : parent.width - self.width - 8px)
+                : (i == 0 ? 6px : i == 1 ? parent.width - self.width - 6px : (parent.width - self.width) / 2);
+            y: root.corners
+                ? (i < 2 ? 8px : parent.height - self.height - 8px)
+                : (i == 2 ? 6px : i == 3 ? parent.height - self.height - 6px : (parent.height - self.height) / 2);
+            width: root.corners ? 34px : (i < 2 ? self.bar : self.long-h);
+            height: root.corners ? 20px : (i < 2 ? self.long-v : self.bar);
+            border-radius: root.corners ? 4px : 3px;
+            background: self.chosen ? Theme.accent
+                : (zone.has-hover ? Theme.text-2 : Theme.stroke-strong);
+            animate background { duration: Theme.t-fast; }
+            zone := TouchArea {
+                // Larger than what is drawn, easy to hit.
+                x: -8px;
+                y: -8px;
+                width: parent.width + 16px;
+                height: parent.height + 16px;
+                mouse-cursor: pointer;
+                clicked => { root.selected(i); }
+            }
+            accessible-role: button;
+            accessible-label: i < root.options.length ? root.options[i] : "";
+            accessible-checked: self.chosen;
+        }
+    }
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: screen.height;
+        width: 14px;
+        height: 7px;
+        background: Theme.stroke-strong;
+    }
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: screen.height + 7px;
+        width: 56px;
+        height: 4px;
+        border-radius: 2px;
+        background: Theme.stroke-strong;
+    }
+}
+
+// How loud a sound is, 0 to 1: green, then amber, then red near the top.
+export component LevelMeter inherits Rectangle {
+    in property <float> level;
+    width: 240px;
+    height: 32px;
+    Rectangle {
+        y: (parent.height - self.height) / 2;
+        height: 8px;
+        border-radius: 4px;
+        background: Theme.control-stroke;
+        clip: true;
+        Rectangle {
+            x: 0px;
+            width: parent.width * clamp(root.level, 0, 1);
+            border-radius: 4px;
+            background: root.level > 0.9 ? Theme.danger : (root.level > 0.75 ? Theme.warning : Theme.success);
+            animate width { duration: 80ms; }
+        }
+    }
+    accessible-role: progress-indicator;
+    accessible-value: round(root.level * 100);
 }

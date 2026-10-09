@@ -277,6 +277,17 @@ pub enum Key {
     OptGroupModern,
     OptGroupCompressed,
     OptGroupLossless,
+    SetMicLevel,
+    SetMicVolume,
+    SetCaptureVolume,
+    SetReplayAfter,
+    OptReplayAfterNone,
+    OptReplayAfter,
+    UiSearch,
+    UiSearchNone,
+    UiSearchTitle,
+    ShortcutTaken,
+    ShortcutWindows,
 }
 
 impl Key {
@@ -546,6 +557,17 @@ impl Key {
         Self::OptGroupModern,
         Self::OptGroupCompressed,
         Self::OptGroupLossless,
+        Self::SetMicLevel,
+        Self::SetMicVolume,
+        Self::SetCaptureVolume,
+        Self::SetReplayAfter,
+        Self::OptReplayAfterNone,
+        Self::OptReplayAfter,
+        Self::UiSearch,
+        Self::UiSearchNone,
+        Self::UiSearchTitle,
+        Self::ShortcutTaken,
+        Self::ShortcutWindows,
     ];
 }
 
@@ -1173,6 +1195,36 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::OptGroupCompressed, Lang::Fr) => "Compressés",
         (Key::OptGroupLossless, Lang::En) => "Lossless, heavy",
         (Key::OptGroupLossless, Lang::Fr) => "Sans perte, lourds",
+        (Key::SetMicLevel, Lang::En) => "Microphone level",
+        (Key::SetMicLevel, Lang::Fr) => "Niveau du micro",
+        (Key::SetMicVolume, Lang::En) => "Microphone volume (%)",
+        (Key::SetMicVolume, Lang::Fr) => "Volume du micro (%)",
+        (Key::SetCaptureVolume, Lang::En) => "Volume of the recorded sound (%)",
+        (Key::SetCaptureVolume, Lang::Fr) => "Volume du son enregistré (%)",
+        (Key::SetReplayAfter, Lang::En) => "Keep recording after the shortcut",
+        (Key::SetReplayAfter, Lang::Fr) => "Continuer après le raccourci",
+        (Key::OptReplayAfterNone, Lang::En) => "No, stop at the press",
+        (Key::OptReplayAfterNone, Lang::Fr) => "Non, s'arrêter à l'appui",
+        (Key::OptReplayAfter, Lang::En) => "{s} more seconds",
+        (Key::OptReplayAfter, Lang::Fr) => "{s} secondes de plus",
+        (Key::UiSearch, Lang::En) => "Search a setting",
+        (Key::UiSearch, Lang::Fr) => "Rechercher un réglage",
+        (Key::UiSearchNone, Lang::En) => "No setting matches “{query}”.",
+        (Key::UiSearchNone, Lang::Fr) => "Aucun réglage ne correspond à « {query} ».",
+        (Key::UiSearchTitle, Lang::En) => "Search",
+        (Key::UiSearchTitle, Lang::Fr) => "Recherche",
+        (Key::ShortcutTaken, Lang::En) => {
+            "Already taken by another program (or by Windows): it does not work here."
+        }
+        (Key::ShortcutTaken, Lang::Fr) => {
+            "Déjà pris par un autre logiciel (ou par Windows) : il ne fonctionne pas ici."
+        }
+        (Key::ShortcutWindows, Lang::En) => {
+            "Windows keeps this shortcut for itself: choose another one."
+        }
+        (Key::ShortcutWindows, Lang::Fr) => {
+            "Windows garde ce raccourci pour lui : choisissez-en un autre."
+        }
     }
 }
 

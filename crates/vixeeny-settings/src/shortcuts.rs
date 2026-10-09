@@ -94,6 +94,47 @@ pub fn set(config: &mut Config, action: ActionId, slot: usize, text: &str) -> Re
     Ok(())
 }
 
+/// Shortcuts Windows keeps for itself: a program never receives them.
+const KEPT_BY_WINDOWS: &[&str] = &[
+    "Alt+Tab",
+    "Alt+F4",
+    "Ctrl+Alt+Delete",
+    "Win+A",
+    "Win+D",
+    "Win+E",
+    "Win+G",
+    "Win+H",
+    "Win+I",
+    "Win+K",
+    "Win+L",
+    "Win+P",
+    "Win+R",
+    "Win+S",
+    "Win+U",
+    "Win+V",
+    "Win+X",
+    "Win+Tab",
+    "Win+Space",
+    "Win+PrintScreen",
+    "Win+Shift+S",
+    "Win+Alt+B",
+    "Win+Alt+G",
+    "Win+Alt+M",
+    "Win+Alt+R",
+    "Win+Alt+T",
+    "Win+Alt+PrintScreen",
+];
+
+/// The same key combination, however it is written.
+pub fn same(a: &str, b: &str) -> bool {
+    matches!((Hotkey::parse(a), Hotkey::parse(b)), (Ok(a), Ok(b)) if a == b)
+}
+
+/// Whether Windows keeps `text` for itself.
+pub fn kept_by_windows(text: &str) -> bool {
+    KEPT_BY_WINDOWS.iter().any(|k| same(k, text))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -144,5 +185,14 @@ mod tests {
             set(&mut c, ActionId::ReplayToggle, 1, "Alt+F9"),
             Err(Refusal::Duplicate)
         );
+    }
+
+    #[test]
+    fn the_shortcuts_of_windows_are_known_however_written() {
+        assert!(kept_by_windows("Alt+Win+R"));
+        assert!(kept_by_windows("Shift+Win+S"));
+        assert!(!kept_by_windows("Ctrl+Shift+R"));
+        assert!(same("Shift+Ctrl+KeyR", "Ctrl+Shift+R"));
+        assert!(!same("", ""));
     }
 }

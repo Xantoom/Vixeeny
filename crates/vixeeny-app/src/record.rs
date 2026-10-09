@@ -352,7 +352,11 @@ fn plan(config: &Config, allow_gpu: bool, replay: bool) -> anyhow::Result<Plan> 
         audio: audio_configs,
         gpu: None,
         encoder,
-        replay_seconds: replay.then(|| replay::clamp_seconds(config.replay.duration_seconds)),
+        // The moments after the shortcut are kept as well.
+        replay_seconds: replay.then(|| {
+            replay::clamp_seconds(config.replay.duration_seconds)
+                + config.replay.after_seconds.min(60)
+        }),
         replay_storage: storage,
         files: !replay,
     };
@@ -673,11 +677,25 @@ fn record_loop(
     if let Some(w) = &mut widget {
         w.state(false, Duration::ZERO);
     }
+    // A replay can go on for a few seconds after its shortcut: the save waits until then.
+    let after = Duration::from_secs(u64::from(notice.replay.after_seconds));
+    let mut save_at: Option<std::time::Instant> = None;
     loop {
+        if save_at.is_some_and(|at| std::time::Instant::now() >= at) {
+            save_at = None;
+            if let Some(next_path) = &mut save_as {
+                save_replay(&recorder, next_path, notice);
+            }
+        }
         match ctl.try_recv() {
             Ok(Ctl::Save) => {
                 if let Some(next_path) = &mut save_as {
-                    save_replay(&recorder, next_path, notice);
+                    if after.is_zero() {
+                        save_replay(&recorder, next_path, notice);
+                    } else if save_at.is_none() {
+                        // A second press while it waits changes nothing.
+                        save_at = Some(std::time::Instant::now() + after);
+                    }
                 }
             }
             // A replay has no pause: it always keeps the last seconds.
@@ -706,7 +724,15 @@ fn record_loop(
                     state.store(RECORDING, Ordering::Release);
                 }
             }
-            Ok(Ctl::Stop) | Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+            Ok(Ctl::Stop) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                // The game closed while a save waited: what there is is saved now.
+                if save_at.take().is_some()
+                    && let Some(next_path) = &mut save_as
+                {
+                    save_replay(&recorder, next_path, notice);
+                }
+                break;
+            }
             Err(std::sync::mpsc::TryRecvError::Empty) => {}
         }
         if let Some(rig) = &mut rig {
@@ -794,7 +820,7 @@ fn replay_storage(config: &Config, encoder: &Encoder, size: (u32, u32)) -> repla
         _ => {
             let bytes = replay::expected_bytes(
                 replay::profile_kbps(&config.video, encoder, size),
-                config.replay.duration_seconds,
+                config.replay.duration_seconds + config.replay.after_seconds,
             );
             let ram = vixeeny_platform::machine::ram_bytes();
             let free = vixeeny_platform::machine::free_ram_bytes();
