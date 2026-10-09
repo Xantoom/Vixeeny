@@ -168,7 +168,7 @@ fn the_video_page_edits_the_current_profile_and_reports_problems() {
     w.invoke_row_chosen("container".into(), 0);
     w.invoke_row_chosen("encoder".into(), 0);
     w.invoke_row_chosen("preset".into(), 2); // best, light, custom
-    w.invoke_row_chosen("p:rc.mode".into(), 1); // quality, VBR, CBR
+    w.invoke_row_chosen("p:rc.mode".into(), 1); // quality, VBR
     assert_eq!(panel.config().video.params["rc.mode"], "vbr");
     settings_render_at(&panel, "9-settings-video-custom", (1040, 2200));
 }
@@ -276,6 +276,7 @@ fn a_chord_ends_at_the_first_key_let_go() {
 fn every_page_of_the_settings_renders() {
     use vixeeny_settings::{AudioDevices, AudioEntry, Section};
     let (panel, _) = settings_panel();
+    panel.window().set_animated(false);
     let entry = |id: &str, name: &str| AudioEntry {
         id: id.into(),
         name: name.into(),
@@ -310,6 +311,32 @@ fn every_page_of_the_settings_renders() {
             entry("chrome.exe", "Google Chrome"),
         ],
     });
+    {
+        use vixeeny_settings::machine::{Cpu, Disk, Gpu, Machine, Screen};
+        panel.set_machine(Machine {
+            cpu: Some(Cpu {
+                name: "AMD Ryzen 7 9800X3D 8-Core Processor".into(),
+                cores: 8,
+                threads: 16,
+            }),
+            ram_bytes: 64 << 30,
+            gpus: vec![Gpu {
+                name: "NVIDIA GeForce RTX 5080".into(),
+                integrated: false,
+                memory_bytes: 16 << 30,
+            }],
+            disks: vec![Disk {
+                model: "CT2000T500SSD8".into(),
+                bytes: 2_000_398_934_016,
+            }],
+            screens: vec![Screen {
+                name: "Odyssey G80SH".into(),
+                width: 3840,
+                height: 2160,
+                hz: 240,
+            }],
+        });
+    }
     for section in Section::ALL {
         panel.select_section(section);
         let name = format!("9-page-{section:?}").to_lowercase();

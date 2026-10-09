@@ -13,7 +13,7 @@ use vixeeny_common::ipc::ActionId;
 use vixeeny_encode::probe::ProbeResult;
 use vixeeny_settings::shortcuts::{self, Refusal};
 use vixeeny_settings::{
-    AudioDevices, Display, Env, Kind, Row, Section, Value, rows, video_problems,
+    AudioDevices, Display, Env, Kind, Machine, Row, Section, Value, rows, video_problems,
 };
 
 use crate::theme::{self, Look};
@@ -165,6 +165,7 @@ struct State {
     /// The hardware probe, once known, and whether it is still running.
     probe: RefCell<(Option<ProbeResult>, bool)>,
     audio: RefCell<AudioDevices>,
+    machine: RefCell<Machine>,
     /// Lists the devices and programs (slow: the programs' icons); run on another thread.
     audio_source: RefCell<Option<AudioFn>>,
     display: Cell<Display>,
@@ -241,6 +242,7 @@ fn ui_texts(lang: Lang) -> UiTexts {
     UiTexts {
         github: t(Key::UiGithub),
         logs: t(Key::UiLogs),
+        licenses: t(Key::UiLicenses),
         copy_info: t(Key::UiCopyInfo),
         change: t(Key::UiChange),
         show: t(Key::UiShow),
@@ -419,12 +421,8 @@ fn row_model(row: &Row, config: &Config) -> SettingRow {
             out.items = ModelRc::from(Rc::new(VecModel::from(items)));
         }
         (Kind::Removable, _) => out.kind = 11,
-        (Kind::Choice(options) | Kind::Segmented(options), Value::Text(t)) => {
-            out.kind = if matches!(row.kind, Kind::Segmented(_)) {
-                7
-            } else {
-                1
-            };
+        (Kind::Choice(options), Value::Text(t)) => {
+            out.kind = 1;
             out.selected = options
                 .iter()
                 .position(|o| o.value == t)
@@ -581,6 +579,7 @@ impl SettingsPanel {
             rows: RefCell::default(),
             probe: RefCell::new((None, false)),
             audio: RefCell::default(),
+            machine: RefCell::default(),
             audio_source: RefCell::default(),
             display: Cell::default(),
             recording: Cell::new(None),
@@ -654,34 +653,59 @@ impl SettingsPanel {
         let Some(source) = self.state.audio_source.borrow().clone() else {
             return;
         };
-        type Slot = std::sync::Arc<std::sync::Mutex<Option<AudioDevices>>>;
-        let slot: Slot = std::sync::Arc::default();
+        self.in_background("audio-list", move || source(), Self::set_audio);
+    }
+
+    /// What this computer is made of, for the general page: read once, on another thread.
+    pub fn set_machine_source(&self, source: impl FnOnce() -> Machine + Send + 'static) {
+        self.in_background("machine", source, Self::set_machine);
+    }
+
+    pub fn set_machine(&self, machine: Machine) {
+        *self.state.machine.borrow_mut() = machine;
+        self.rebuild_env();
+        self.refresh();
+    }
+
+    /// Runs `make` on a thread of its own, then `apply` with its answer on this one.
+    fn in_background<T: Send + 'static>(
+        &self,
+        name: &str,
+        make: impl FnOnce() -> T + Send + 'static,
+        apply: fn(&Self, T),
+    ) {
+        let slot: std::sync::Arc<std::sync::Mutex<Option<T>>> = std::sync::Arc::default();
         let filled = slot.clone();
         let started = std::thread::Builder::new()
-            .name("audio-list".into())
+            .name(name.into())
             .spawn(move || {
-                let audio = source();
+                let value = make();
                 if let Ok(mut s) = filled.lock() {
-                    *s = Some(audio);
+                    *s = Some(value);
                 }
             });
         if started.is_err() {
             return;
         }
-        // Looked at a few times a second until the list is there, then not any more.
-        fn poll(slot: Slot, weak: slint::Weak<SettingsWindow>, state: Rc<State>) {
+        // Looked at a few times a second until the answer is there, then not any more.
+        fn poll<T: Send + 'static>(
+            slot: std::sync::Arc<std::sync::Mutex<Option<T>>>,
+            weak: slint::Weak<SettingsWindow>,
+            state: Rc<State>,
+            apply: fn(&SettingsPanel, T),
+        ) {
             let ready = slot.lock().ok().and_then(|mut s| s.take());
             match (ready, weak.upgrade()) {
-                (Some(audio), Some(window)) => SettingsPanel { window, state }.set_audio(audio),
+                (Some(value), Some(window)) => apply(&SettingsPanel { window, state }, value),
                 (None, Some(_)) => {
                     slint::Timer::single_shot(std::time::Duration::from_millis(40), move || {
-                        poll(slot, weak, state);
+                        poll(slot, weak, state, apply);
                     });
                 }
                 (_, None) => {}
             }
         }
-        poll(slot, self.window.as_weak(), self.state.clone());
+        poll(slot, self.window.as_weak(), self.state.clone(), apply);
     }
 
     /// The hardware probe: its result once it exists, and whether it is still running.
@@ -785,6 +809,7 @@ impl SettingsPanel {
         *state.env.borrow_mut() = Env::new(state.lang(), &state.version)
             .with_probe(probe, detecting)
             .with_audio(state.audio.borrow().clone())
+            .with_machine(state.machine.borrow().clone())
             .with_display(state.display.get());
     }
 
@@ -1042,10 +1067,9 @@ impl SettingsPanel {
                     .iter()
                     .find(|r| r.id == id.as_str())
                     .and_then(|r| match &r.kind {
-                        Kind::Choice(options) | Kind::Segmented(options) => {
+                        Kind::Choice(options) | Kind::Add(options) => {
                             options.get(index as usize).map(|o| o.value.clone())
                         }
-                        Kind::Add(options) => options.get(index as usize).map(|o| o.value.clone()),
                         _ => None,
                     });
                 if let Some(value) = value {

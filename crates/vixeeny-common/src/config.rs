@@ -491,12 +491,13 @@ impl Default for Split {
 pub struct Audio {
     pub routing: String,
     pub sources: Vec<String>,
-    /// `auto` = AAC in MP4, Opus in MKV/WebM.
+    /// `auto` = Opus beside AV1 (and VP9, and in WebM), else AAC.
     pub codec: String,
     pub bitrate_kbps: u32,
     pub vbr: bool,
-    /// Keep 5.1/7.1 sources in surround (Matroska with Opus, FLAC or PCM; stereo elsewhere).
-    pub surround: bool,
+    /// `mono`, `stereo`, `5.1` or `7.1`. Surround keeps 5.1/7.1 sources so (Matroska with
+    /// Opus, FLAC or PCM; stereo elsewhere).
+    pub channels: String,
     /// Remove steady background noise from microphone sources (FFmpeg `afftdn`).
     pub mic_noise_reduction: bool,
     /// Volume per source (`"mic" = 0.8`); missing = 1.0.
@@ -521,7 +522,7 @@ impl Default for Audio {
             codec: "auto".into(),
             bitrate_kbps: 160,
             vbr: true,
-            surround: true,
+            channels: "stereo".into(),
             mic_noise_reduction: false,
             volumes: BTreeMap::new(),
             tracks: Vec::new(),

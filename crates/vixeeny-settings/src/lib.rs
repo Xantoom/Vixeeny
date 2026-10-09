@@ -6,6 +6,7 @@
 //! No UI and no OS code here, so all of it is tested on any machine.
 
 pub mod encoders;
+pub mod machine;
 mod pages;
 pub mod shortcuts;
 
@@ -14,6 +15,7 @@ use vixeeny_common::i18n::{Key, Lang, tr};
 use vixeeny_encode::probe::ProbeResult;
 
 pub use encoders::{EncoderInfo, param_label};
+pub use machine::Machine;
 
 /// The sections of the settings window, in the order of the sidebar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,8 +93,6 @@ pub enum Kind {
     Toggle,
     /// A drop-down list.
     Choice(Vec<Opt>),
-    /// Two or three choices side by side.
-    Segmented(Vec<Opt>),
     /// A button that opens a list to pick from (a program to record); picking writes the
     /// value of the option.
     Add(Vec<Opt>),
@@ -156,7 +156,7 @@ impl Row {
     pub fn apply(&self, config: &mut Config, value: Value) -> Result<(), Invalid> {
         let value = match (&self.kind, value) {
             (Kind::Toggle, v @ Value::Bool(_)) => v,
-            (Kind::Choice(options) | Kind::Segmented(options), Value::Text(t)) => {
+            (Kind::Choice(options), Value::Text(t)) => {
                 if !options.iter().any(|o| o.value == t) {
                     return Err(Invalid);
                 }
@@ -226,6 +226,8 @@ pub struct Env {
     pub audio: AudioDevices,
     pub version: String,
     pub display: Display,
+    /// What this computer is made of, once the host has read it.
+    pub machine: Machine,
 }
 
 /// What the monitors can show.
@@ -256,7 +258,13 @@ impl Env {
             audio: AudioDevices::default(),
             version: version.to_owned(),
             display: Display::default(),
+            machine: Machine::default(),
         }
+    }
+
+    pub fn with_machine(mut self, machine: Machine) -> Self {
+        self.machine = machine;
+        self
     }
 
     pub const fn with_display(mut self, display: Display) -> Self {
@@ -390,16 +398,6 @@ fn choice(
     set: fn(&mut Config, String),
 ) -> Row {
     text_like(Kind::Choice(options), id, label, get, set)
-}
-
-fn segmented(
-    id: &str,
-    label: String,
-    options: Vec<Opt>,
-    get: impl Fn(&Config) -> String + 'static,
-    set: fn(&mut Config, String),
-) -> Row {
-    text_like(Kind::Segmented(options), id, label, get, set)
 }
 
 fn folder(

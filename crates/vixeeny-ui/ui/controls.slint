@@ -465,65 +465,6 @@ export component Slider inherits Rectangle {
     accessible-value: root.value;
 }
 
-// Two to five exclusive choices side by side (software / hardware, light / dark…): equal
-// segments, the chosen one raised, sliding to the new choice.
-export component Segmented inherits Rectangle {
-    in property <[string]> options;
-    in property <int> current: 0;
-    in property <bool> enabled: true;
-    callback selected(int);
-
-    property <length> widest: 0px;
-    property <length> seg: max(64px, root.widest + 24px);
-    height: 32px;
-    width: root.options.length * root.seg + 4px;
-    border-radius: Theme.radius + 2px;
-    background: Theme.control;
-    opacity: root.enabled ? 1.0 : 0.45;
-    // The widest label sets the width of every segment.
-    for option in root.options : Text {
-        visible: false;
-        text: option;
-        font-size: 13px;
-        init => { root.widest = max(root.widest, self.preferred-width); }
-    }
-    if root.current >= 0 && root.current < root.options.length : Rectangle {
-        x: 2px + root.current * root.seg;
-        y: 2px;
-        width: root.seg;
-        height: parent.height - 4px;
-        border-radius: Theme.radius;
-        background: Theme.dark ? #34343a : #ffffff;
-        drop-shadow-blur: 4px;
-        drop-shadow-color: #00000030;
-        drop-shadow-offset-y: 1px;
-        animate x { duration: Theme.t-normal; easing: cubic-bezier(0.2, 0, 0, 1); }
-    }
-    for option[i] in root.options : Rectangle {
-        x: 2px + i * root.seg;
-        y: 2px;
-        width: root.seg;
-        height: parent.height - 4px;
-        Text {
-            text: option;
-            color: i == root.current ? Theme.text : (item.has-hover ? Theme.text : Theme.text-2);
-            font-size: 13px;
-            font-weight: i == root.current ? 600 : 400;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-            animate color { duration: Theme.t-fast; }
-        }
-        item := TouchArea {
-            enabled: root.enabled;
-            mouse-cursor: pointer;
-            clicked => { root.selected(i); }
-        }
-        accessible-role: radio-button;
-        accessible-label: option;
-        accessible-checked: i == root.current;
-    }
-}
-
 // An entry of the side navigation. The highlight of the current one is drawn by the list (it
 // slides from one entry to the next).
 export component NavItem inherits Rectangle {

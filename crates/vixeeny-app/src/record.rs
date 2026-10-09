@@ -263,14 +263,19 @@ fn plan(config: &Config, allow_gpu: bool, replay: bool) -> anyhow::Result<Plan> 
     for name in unknown {
         tracing::warn!("unknown audio source `{name}` ignored");
     }
-    let audio_codec = AudioCodec::from_setting(&profile.audio.codec, container)
+    let audio_codec = AudioCodec::from_setting(&profile.audio.codec, container, encoder.family)
         .with_context(|| format!("unknown audio codec `{}`", profile.audio.codec))?;
-    if profile.audio.surround && audio_codec.surround_in(container) {
-        vixeeny_audio::assign_channels(
-            &mut audio,
-            vixeeny_audio::MAX_CHANNELS,
-            vixeeny_audio::source_channels,
-        );
+    match profile.audio.channels.as_str() {
+        "mono" => audio.iter_mut().for_each(|t| t.channels = 1),
+        // Surround keeps what the sources have, up to 5.1 or 7.1.
+        surround @ ("5.1" | "7.1") if audio_codec.surround_in(container) => {
+            vixeeny_audio::assign_channels(
+                &mut audio,
+                if surround == "5.1" { 6 } else { 8 },
+                vixeeny_audio::source_channels,
+            );
+        }
+        _ => {}
     }
     let audio_configs = audio
         .iter()

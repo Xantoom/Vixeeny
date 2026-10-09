@@ -90,7 +90,6 @@ pub enum Key {
     SetAudioCodec,
     SetAudioBitrate,
     SetAudioVbr,
-    SetAudioSurround,
     SetAudioDenoise,
     SetHdrEnable,
     SetTenBit,
@@ -137,7 +136,6 @@ pub enum Key {
     HwDriver,
     HwDetecting,
     AboutLicense,
-    AboutThirdParty,
     ToastImageSaved,
     ToastRecordingSaved,
     ToastReplaySaved,
@@ -243,6 +241,22 @@ pub enum Key {
     SetAvifSpeed,
     SetAvifSpeedHint,
     UiNoShortcut,
+    OptRecommended,
+    OptVbr,
+    OptCbr,
+    OptStereo,
+    SetAudioChannels,
+    SetSurroundHint,
+    SetReplayStartHint,
+    UiLicenses,
+    PcCpu,
+    PcCores,
+    PcRam,
+    PcGpu,
+    PcIgpu,
+    PcVram,
+    PcDisk,
+    PcScreen,
 }
 
 impl Key {
@@ -325,7 +339,6 @@ impl Key {
         Self::SetAudioCodec,
         Self::SetAudioBitrate,
         Self::SetAudioVbr,
-        Self::SetAudioSurround,
         Self::SetAudioDenoise,
         Self::SetHdrEnable,
         Self::SetTenBit,
@@ -372,7 +385,6 @@ impl Key {
         Self::HwDriver,
         Self::HwDetecting,
         Self::AboutLicense,
-        Self::AboutThirdParty,
         Self::ToastImageSaved,
         Self::ToastRecordingSaved,
         Self::ToastReplaySaved,
@@ -478,6 +490,22 @@ impl Key {
         Self::SetAvifSpeed,
         Self::SetAvifSpeedHint,
         Self::UiNoShortcut,
+        Self::OptRecommended,
+        Self::OptVbr,
+        Self::OptCbr,
+        Self::OptStereo,
+        Self::SetAudioChannels,
+        Self::SetSurroundHint,
+        Self::SetReplayStartHint,
+        Self::UiLicenses,
+        Self::PcCpu,
+        Self::PcCores,
+        Self::PcRam,
+        Self::PcGpu,
+        Self::PcIgpu,
+        Self::PcVram,
+        Self::PcDisk,
+        Self::PcScreen,
     ];
 }
 
@@ -669,10 +697,8 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::SetAudioCodec, Lang::Fr) => "Codec audio",
         (Key::SetAudioBitrate, Lang::En) => "Audio bitrate (kbit/s)",
         (Key::SetAudioBitrate, Lang::Fr) => "Débit audio (kbit/s)",
-        (Key::SetAudioVbr, Lang::En) => "Variable bitrate",
-        (Key::SetAudioVbr, Lang::Fr) => "Débit variable",
-        (Key::SetAudioSurround, Lang::En) => "Keep 5.1 / 7.1 sound",
-        (Key::SetAudioSurround, Lang::Fr) => "Conserver le son 5.1 / 7.1",
+        (Key::SetAudioVbr, Lang::En) => "Bitrate mode",
+        (Key::SetAudioVbr, Lang::Fr) => "Mode de débit",
         (Key::SetAudioDenoise, Lang::En) => "Reduce microphone background noise",
         (Key::SetAudioDenoise, Lang::Fr) => "Réduire le bruit de fond du micro",
         (Key::SetHdrEnable, Lang::En) => "Enable HDR",
@@ -711,8 +737,8 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::UiKeysHelp, Lang::Fr) => {
             "Maintenez les touches, relâchez pour valider. Échap n'en met aucun."
         }
-        (Key::SetReplayStart, Lang::En) => "Turn on at startup",
-        (Key::SetReplayStart, Lang::Fr) => "Activer au démarrage",
+        (Key::SetReplayStart, Lang::En) => "Start the replay with Vixeeny",
+        (Key::SetReplayStart, Lang::Fr) => "Lancer le replay avec Vixeeny",
         (Key::SetReplayDuration, Lang::En) => "Duration (seconds)",
         (Key::SetReplayDuration, Lang::Fr) => "Durée (secondes)",
         (Key::SetTemplate, Lang::En) => "File name",
@@ -773,12 +799,6 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::HwDetecting, Lang::Fr) => "Détection en cours…",
         (Key::AboutLicense, Lang::En) => "Licence: GNU GPL v3 or later",
         (Key::AboutLicense, Lang::Fr) => "Licence : GNU GPL v3 ou ultérieure",
-        (Key::AboutThirdParty, Lang::En) => {
-            "Third-party licences: THIRD-PARTY-LICENSES.txt, next to the application"
-        }
-        (Key::AboutThirdParty, Lang::Fr) => {
-            "Licences tierces : THIRD-PARTY-LICENSES.txt, à côté de l'application"
-        }
         (Key::ToastImageSaved, Lang::En) => "Image saved",
         (Key::ToastImageSaved, Lang::Fr) => "Image enregistrée",
         (Key::ToastRecordingSaved, Lang::En) => "Recording saved",
@@ -1011,6 +1031,46 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         }
         (Key::UiNoShortcut, Lang::En) => "None",
         (Key::UiNoShortcut, Lang::Fr) => "Aucun",
+        (Key::OptRecommended, Lang::En) => "recommended",
+        (Key::OptRecommended, Lang::Fr) => "recommandé",
+        (Key::OptVbr, Lang::En) => "Variable bitrate",
+        (Key::OptVbr, Lang::Fr) => "Débit variable",
+        (Key::OptCbr, Lang::En) => "Constant bitrate",
+        (Key::OptCbr, Lang::Fr) => "Débit constant",
+        (Key::OptStereo, Lang::En) => "Stereo",
+        (Key::OptStereo, Lang::Fr) => "Stéréo",
+        (Key::SetAudioChannels, Lang::En) => "Channels",
+        (Key::SetAudioChannels, Lang::Fr) => "Canaux",
+        (Key::SetSurroundHint, Lang::En) => {
+            "5.1 and 7.1 need MKV with Opus, FLAC or PCM: this recording will be in stereo."
+        }
+        (Key::SetSurroundHint, Lang::Fr) => {
+            "Le 5.1 et le 7.1 demandent le MKV avec Opus, FLAC ou PCM : cet enregistrement sera en stéréo."
+        }
+        (Key::SetReplayStartHint, Lang::En) => {
+            "It then runs all the time. Otherwise, start and stop it with its shortcut or from the overlay."
+        }
+        (Key::SetReplayStartHint, Lang::Fr) => {
+            "Il tourne alors en permanence. Sinon, lancez-le et arrêtez-le avec son raccourci ou depuis l'overlay."
+        }
+        (Key::UiLicenses, Lang::En) => "Third-party licences",
+        (Key::UiLicenses, Lang::Fr) => "Licences tierces",
+        (Key::PcCpu, Lang::En) => "Processor",
+        (Key::PcCpu, Lang::Fr) => "Processeur",
+        (Key::PcCores, Lang::En) => "{cores} cores, {threads} threads",
+        (Key::PcCores, Lang::Fr) => "{cores} cœurs, {threads} threads",
+        (Key::PcRam, Lang::En) => "Memory (RAM)",
+        (Key::PcRam, Lang::Fr) => "Mémoire vive",
+        (Key::PcGpu, Lang::En) => "Graphics card",
+        (Key::PcGpu, Lang::Fr) => "Carte graphique",
+        (Key::PcIgpu, Lang::En) => "Integrated graphics",
+        (Key::PcIgpu, Lang::Fr) => "Graphiques intégrés",
+        (Key::PcVram, Lang::En) => "{size} of video memory",
+        (Key::PcVram, Lang::Fr) => "{size} de mémoire vidéo",
+        (Key::PcDisk, Lang::En) => "Disk",
+        (Key::PcDisk, Lang::Fr) => "Disque",
+        (Key::PcScreen, Lang::En) => "Screen",
+        (Key::PcScreen, Lang::Fr) => "Écran",
     }
 }
 

@@ -9,6 +9,7 @@ use ffmpeg_next::software::resampling;
 use ffmpeg_next::{ChannelLayout, Dictionary, Packet, Rational, codec, encoder, frame};
 
 use crate::recorder::{OutputContainer, RecordError};
+use crate::registry::Family;
 
 /// The sample rate of the recorder's audio input.
 pub const SAMPLE_RATE: u32 = 48_000;
@@ -33,13 +34,10 @@ pub enum AudioCodec {
 }
 
 impl AudioCodec {
-    /// `auto` = AAC in MP4, Opus in MKV and WebM (plan 5.10).
-    pub fn from_setting(name: &str, container: OutputContainer) -> Option<Self> {
+    /// `auto` = Opus beside AV1 (and VP9, and in WebM, which only takes Opus), else AAC.
+    pub fn from_setting(name: &str, container: OutputContainer, video: Family) -> Option<Self> {
         Some(match name {
-            "auto" => match container {
-                OutputContainer::Mp4Hybrid | OutputContainer::Mp4Fragmented => Self::Aac,
-                OutputContainer::Mkv | OutputContainer::WebM => Self::Opus,
-            },
+            "auto" => Self::auto(container, video),
             "aac" => Self::Aac,
             "opus" => Self::Opus,
             "flac" => Self::Flac,
@@ -47,6 +45,16 @@ impl AudioCodec {
             "pcm24" => Self::Pcm24,
             _ => return None,
         })
+    }
+
+    /// What `auto` stands for.
+    pub const fn auto(container: OutputContainer, video: Family) -> Self {
+        if matches!(video, Family::Av1 | Family::Vp9) || matches!(container, OutputContainer::WebM)
+        {
+            Self::Opus
+        } else {
+            Self::Aac
+        }
     }
 
     /// FFmpeg encoder names to try, best first.

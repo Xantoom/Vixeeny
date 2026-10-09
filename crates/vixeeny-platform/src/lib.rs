@@ -10,6 +10,7 @@ mod time;
 pub use geometry::{PhysicalRect, virtual_bounds};
 pub use time::{LocalTime, local_time};
 
+pub mod machine;
 mod windows_impl;
 pub use windows_impl::{
     APP_ID, InstanceGuard, OutsideClicks, allow_foreground_handoff, animations_enabled,

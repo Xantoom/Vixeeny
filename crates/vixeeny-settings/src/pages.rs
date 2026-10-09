@@ -4,13 +4,13 @@
 use vixeeny_common::config::{Config, Naming};
 use vixeeny_common::i18n::Key;
 use vixeeny_encode::registry::{
-    BITRATE_RANGE, DEFAULT_BITRATE, DEFAULT_MAXRATE, ParamType, RateMode, rate_keys,
+    BITRATE_RANGE, DEFAULT_BITRATE, DEFAULT_MAXRATE, Family, ParamType, RateMode, rate_keys,
 };
 
 use crate::encoders::{self, param_label, param_range};
 use crate::{
     Env, Invalid, Kind, Opt, Row, Value, choice, folder, header, hinted, info, number, opt, row,
-    segmented, slider, toggle, when, when_boxed,
+    slider, toggle, when, when_boxed,
 };
 
 /// `off`, `size:<MB>` or `duration:<minutes>` → (kind, amount).
@@ -46,7 +46,7 @@ fn hdr_on(setting: &str) -> bool {
 
 pub fn general(env: &Env) -> Vec<Row> {
     let t = |k| env.t(k);
-    vec![
+    let mut rows = vec![
         choice(
             "language",
             t(Key::SetLanguage),
@@ -58,7 +58,7 @@ pub fn general(env: &Env) -> Vec<Row> {
             |c| c.general.language.clone(),
             |c, v| c.general.language = v,
         ),
-        segmented(
+        choice(
             "theme",
             t(Key::SetTheme),
             vec![
@@ -87,7 +87,9 @@ pub fn general(env: &Env) -> Vec<Row> {
             |c| c.general.sounds,
             |c, v| c.general.sounds = v,
         ),
-    ]
+    ];
+    rows.extend(crate::machine::rows(env));
+    rows
 }
 
 /// How the files of one kind are named: the template, and whether `{app}` is the full-screen
@@ -202,7 +204,7 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
     ));
     rows.extend([
         header("h_format"),
-        segmented(
+        choice(
             "image_format",
             t(Key::SetImageFormat),
             vec![
@@ -219,7 +221,7 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
     // The options of the chosen format's encoder.
     match config.image.format.as_str() {
         "png" => {
-            rows.push(segmented(
+            rows.push(choice(
                 "png_compression",
                 t(Key::SetPngCompression),
                 vec![
@@ -259,7 +261,7 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
                 |c| i64::from(c.image.jpeg.quality),
                 |c, v| c.image.jpeg.quality = v as u8,
             ));
-            rows.push(segmented(
+            rows.push(choice(
                 "jpeg_chroma",
                 t(Key::SetChroma),
                 vec![
@@ -311,14 +313,14 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
                 |c| i64::from(c.image.avif.quality),
                 |c, v| c.image.avif.quality = v as u8,
             ));
-            rows.push(segmented(
+            rows.push(choice(
                 "avif_depth",
                 t(Key::SetAvifDepth),
                 vec![opt("8", "8 bits"), opt("10", "10 bits")],
                 |c| c.image.avif.depth.to_string(),
                 |c, v| c.image.avif.depth = v.parse().unwrap_or(10),
             ));
-            rows.push(segmented(
+            rows.push(choice(
                 "avif_chroma",
                 t(Key::SetChroma),
                 vec![
@@ -597,7 +599,7 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
 
     // ---- the encoder
     rows.push(header("h_encoder"));
-    rows.push(segmented(
+    rows.push(choice(
         "encoder_kind",
         t(Key::SetEncoderKind),
         vec![
@@ -645,7 +647,7 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
             }),
         ));
     }
-    rows.push(segmented(
+    rows.push(choice(
         "preset",
         t(Key::SetPreset),
         vec![
@@ -765,6 +767,30 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
         ));
     }
     rows
+}
+
+/// The audio bitrates offered, in kbit/s (160 is recommended).
+const AUDIO_BITRATES: [u32; 6] = [96, 128, 160, 192, 256, 320];
+
+/// The offered audio bitrate closest to `kbps` (a setting from an older version).
+fn audio_bitrate_option(kbps: u32) -> u32 {
+    AUDIO_BITRATES
+        .iter()
+        .copied()
+        .min_by_key(|k| k.abs_diff(kbps))
+        .unwrap_or(160)
+}
+
+/// The audio codec `auto` stands for: Opus beside AV1 (and VP9, and in WebM), else AAC.
+fn auto_audio_codec(env: &Env, config: &Config) -> &'static str {
+    let family = encoders::resolved(env, &config.video)
+        .and_then(|e| encoders::spec(&e.id))
+        .map(|spec| spec.family);
+    if matches!(family, Some(Family::Av1 | Family::Vp9)) || config.video.container == "webm" {
+        "opus"
+    } else {
+        "aac"
+    }
 }
 
 /// A switch that adds or removes `spec` from the sources of the profile.
@@ -921,11 +947,19 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
         |c| c.video.audio.routing.clone(),
         |c, v| c.video.audio.routing = v,
     ));
+    let auto = auto_audio_codec(env, config);
     rows.push(choice(
         "audio_codec",
         t(Key::SetAudioCodec),
         vec![
-            opt("auto", t(Key::OptAuto)),
+            opt(
+                "auto",
+                format!(
+                    "{} ({})",
+                    t(Key::OptAuto),
+                    if auto == "opus" { "Opus" } else { "AAC" }
+                ),
+            ),
             opt("aac", "AAC"),
             opt("opus", "Opus"),
             opt("flac", t(Key::OptFlac)),
@@ -935,28 +969,61 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
         |c| c.video.audio.codec.clone(),
         |c, v| c.video.audio.codec = v,
     ));
+    let codec = match config.video.audio.codec.as_str() {
+        "auto" => auto,
+        other => other,
+    };
+    let recommended = |label: String| format!("{label} ({})", t(Key::OptRecommended));
     // A bitrate only means something for the compressed codecs (not FLAC or PCM).
-    if matches!(config.video.audio.codec.as_str(), "auto" | "aac" | "opus") {
-        rows.push(slider(
+    if matches!(codec, "aac" | "opus") {
+        rows.push(choice(
             "audio_bitrate",
             t(Key::SetAudioBitrate),
-            (32, 512, 16),
-            |c| i64::from(c.video.audio.bitrate_kbps),
-            |c, v| c.video.audio.bitrate_kbps = v as u32,
-        ));
-        rows.push(toggle(
-            "audio_vbr",
-            t(Key::SetAudioVbr),
-            |c| c.video.audio.vbr,
-            |c, v| c.video.audio.vbr = v,
+            AUDIO_BITRATES
+                .iter()
+                .map(|k| {
+                    let label = format!("{k} kbit/s");
+                    let label = if *k == 160 { recommended(label) } else { label };
+                    opt(&k.to_string(), label)
+                })
+                .collect(),
+            |c| audio_bitrate_option(c.video.audio.bitrate_kbps).to_string(),
+            |c, v| c.video.audio.bitrate_kbps = v.parse().unwrap_or(160),
         ));
     }
-    rows.push(toggle(
-        "audio_surround",
-        t(Key::SetAudioSurround),
-        |c| c.video.audio.surround,
-        |c, v| c.video.audio.surround = v,
-    ));
+    // Only Opus varies its bitrate (AAC stays constant).
+    if codec == "opus" {
+        rows.push(choice(
+            "audio_vbr",
+            t(Key::SetAudioVbr),
+            vec![
+                opt("vbr", recommended(t(Key::OptVbr))),
+                opt("cbr", t(Key::OptCbr)),
+            ],
+            |c| if c.video.audio.vbr { "vbr" } else { "cbr" }.to_owned(),
+            |c, v| c.video.audio.vbr = v == "vbr",
+        ));
+    }
+    let channels = choice(
+        "audio_channels",
+        t(Key::SetAudioChannels),
+        vec![
+            opt("mono", "Mono"),
+            opt("stereo", recommended(t(Key::OptStereo))),
+            opt("5.1", "5.1"),
+            opt("7.1", "7.1"),
+        ],
+        |c| c.video.audio.channels.clone(),
+        |c, v| c.video.audio.channels = v,
+    );
+    // Surround needs Matroska and a codec that carries it: say so when it falls back to stereo.
+    let surround = matches!(config.video.audio.channels.as_str(), "5.1" | "7.1");
+    let carried = config.video.container == "mkv" && codec != "aac";
+    rows.push(if surround && !carried {
+        hinted(channels, t(Key::SetSurroundHint))
+    } else {
+        channels
+    });
 
     // ---- the programs recorded on their own, then a button to add one of those open now
     rows.push(header("h_programs"));
@@ -1007,11 +1074,14 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
 pub fn replay(env: &Env) -> Vec<Row> {
     let t = |k| env.t(k);
     let mut rows = vec![
-        toggle(
-            "replay_start",
-            t(Key::SetReplayStart),
-            |c| c.replay.enabled_on_start,
-            |c, v| c.replay.enabled_on_start = v,
+        hinted(
+            toggle(
+                "replay_start",
+                t(Key::SetReplayStart),
+                |c| c.replay.enabled_on_start,
+                |c, v| c.replay.enabled_on_start = v,
+            ),
+            t(Key::SetReplayStartHint),
         ),
         slider(
             "replay_duration",
@@ -1020,7 +1090,7 @@ pub fn replay(env: &Env) -> Vec<Row> {
             |c| i64::from(c.replay.duration_seconds),
             |c, v| c.replay.duration_seconds = v as u32,
         ),
-        segmented(
+        choice(
             "replay_storage",
             t(Key::SetReplayStorage),
             vec![

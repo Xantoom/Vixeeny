@@ -111,7 +111,7 @@ sources = ["system"]
 codec = "auto"
 bitrate_kbps = 160
 vbr = true
-surround = true
+channels = "stereo"
 mic_noise_reduction = false
 tracks = []
 

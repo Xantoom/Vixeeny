@@ -252,16 +252,10 @@ fn restart_for_update(handle: &PanelHandle, lang: Lang) {
 }
 
 fn about_lines(lang: Lang) -> Vec<Line> {
-    vec![
-        Line {
-            text: tr(Key::AboutLicense, lang).into(),
-            detail: REPO.into(),
-        },
-        Line {
-            text: tr(Key::AboutThirdParty, lang).into(),
-            ..Line::default()
-        },
-    ]
+    vec![Line {
+        text: tr(Key::AboutLicense, lang).into(),
+        detail: REPO.into(),
+    }]
 }
 
 /// `--settings [--updates]`: the window, until it is closed.
@@ -289,6 +283,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     .map_err(|e| anyhow::anyhow!("{e}"))?;
     panel.capture_keys();
     panel.set_audio_source(audio_devices);
+    panel.set_machine_source(machine);
     panel.set_display(vixeeny_settings::Display {
         hdr: vixeeny_platform::hdr_active(),
         max_refresh: vixeeny_platform::max_refresh_hz(),
@@ -377,6 +372,17 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
                         };
                         handle.set_extra(message);
                     });
+                }
+                // Shipped beside the programs.
+                (Section::About, "licenses") => {
+                    let file = std::env::current_exe()
+                        .ok()
+                        .and_then(|exe| Some(exe.parent()?.join("THIRD-PARTY-LICENSES.txt")));
+                    if let Some(file) = file.filter(|f| f.exists())
+                        && let Err(e) = vixeeny_platform::open_path(&file.display().to_string())
+                    {
+                        tracing::error!("{e}");
+                    }
                 }
                 (Section::About, "logs") => {
                     if let Some(dir) = vixeeny_common::paths::log_dir() {
@@ -523,6 +529,47 @@ fn programs(apps: Vec<vixeeny_audio::AppInfo>) -> Vec<vixeeny_settings::AudioEnt
             .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
     entries.into_iter().map(|(_, e)| e).collect()
+}
+
+/// What this computer is made of, for the general page.
+fn machine() -> vixeeny_settings::Machine {
+    use vixeeny_settings::machine::{Cpu, Disk, Gpu, Screen};
+    let m = vixeeny_platform::machine::machine();
+    vixeeny_settings::Machine {
+        cpu: m.cpu.map(|c| Cpu {
+            name: c.name,
+            cores: c.cores,
+            threads: c.threads,
+        }),
+        ram_bytes: m.ram_bytes,
+        gpus: m
+            .gpus
+            .into_iter()
+            .map(|g| Gpu {
+                name: g.name,
+                integrated: g.integrated,
+                memory_bytes: g.memory_bytes,
+            })
+            .collect(),
+        disks: m
+            .disks
+            .into_iter()
+            .map(|d| Disk {
+                model: d.model,
+                bytes: d.bytes,
+            })
+            .collect(),
+        screens: m
+            .screens
+            .into_iter()
+            .map(|s| Screen {
+                name: s.name,
+                width: s.width,
+                height: s.height,
+                hz: s.hz,
+            })
+            .collect(),
+    }
 }
 
 /// Releases (or gives back) the global shortcuts of the daemon while a shortcut is recorded.

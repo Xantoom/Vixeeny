@@ -4,7 +4,7 @@
 // on the right, its settings as cards, a group of cards apart from the next. Rows are generic (a
 // toggle, a choice, a folder…); the shortcuts, the updates and the about page have their own
 // layouts. Plain Slint elements only (std-widgets would pull the SVG decoder in for its icons).
-import { Theme, Icons, Icon, Button, IconButton, Toggle, TextBox, ComboBox, NumberBox, Slider, Segmented, NavItem, Group, GroupRow, InfoBar, ScrollArea, ProgressBar } from "controls.slint";
+import { Theme, Icons, Icon, Button, IconButton, Toggle, TextBox, ComboBox, NumberBox, Slider, NavItem, Group, GroupRow, InfoBar, ScrollArea, ProgressBar } from "controls.slint";
 
 // A choice of a list with pictures (a program to record).
 export struct MenuOption {
@@ -17,7 +17,7 @@ export struct SettingRow {
     id: string,
     label: string,
     hint: string,
-    // 0 toggle, 1 choice, 2 number, 3 text, 4 folder, 5 info, 7 segmented, 8 slider,
+    // 0 toggle, 1 choice, 2 number, 3 text, 4 folder, 5 info, 8 slider,
     // 10 add (a list to pick from), 11 removable
     kind: int,
     enabled: bool,
@@ -68,6 +68,7 @@ export struct LineItem {
 export struct UiTexts {
     github: string,
     logs: string,
+    licenses: string,
     copy-info: string,
     change: string,
     show: string,
@@ -114,12 +115,6 @@ component SettingLine inherits GroupRow {
     }
     if root.entry.kind == 1 : ComboBox {
         width: 240px;
-        options: root.entry.options;
-        current: root.entry.selected;
-        enabled: root.entry.enabled;
-        selected(i) => { root.chosen(i); }
-    }
-    if root.entry.kind == 7 : Segmented {
         options: root.entry.options;
         current: root.entry.selected;
         enabled: root.entry.enabled;
@@ -718,6 +713,7 @@ export component SettingsWindow inherits Window {
                             alignment: start;
                             Button { icon: Icons.github; text: root.t.github; clicked => { root.page-action("github", ""); } }
                             Button { icon: Icons.folder-open; text: root.t.logs; clicked => { root.page-action("logs", ""); } }
+                            Button { icon: Icons.document; text: root.t.licenses; clicked => { root.page-action("licenses", ""); } }
                             Button { icon: Icons.copy; text: root.t.copy-info; clicked => { root.page-action("copy-info", ""); } }
                         }
                         if root.extra != "" : Text {

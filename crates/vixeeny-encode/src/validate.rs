@@ -111,7 +111,7 @@ fn audio_ok(codec: &str, container: Container) -> Option<bool> {
     Some(match codec {
         "aac" | "flac" => !matches!(container, Container::Webm),
         "opus" => true,
-        "pcm" => matches!(container, Container::Mkv),
+        "pcm" | "pcm16" | "pcm24" => matches!(container, Container::Mkv),
         _ => return None,
     })
 }
