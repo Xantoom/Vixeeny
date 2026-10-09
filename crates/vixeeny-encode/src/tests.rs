@@ -577,7 +577,7 @@ fn results_round_trip_through_toml_and_the_cache_key_tracks_drivers() {
         cache_key(&a.iter().rev().cloned().collect::<Vec<_>>(), "0.1"),
         "order does not matter"
     );
-    assert_ne!(key, cache_key(&a, "0.2"), "new Vixeeny version");
+    assert_ne!(key, cache_key(&a, "0.2"), "new probe identity");
     let mut newer = a;
     newer[0].driver_version = "32.0.15.8000".into();
     assert_ne!(key, cache_key(&newer, "0.1"), "new driver");
@@ -615,6 +615,14 @@ fn the_cache_is_reused_until_the_key_changes() {
     cached_or_probe(&path, &updated, "0.1", run).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(*runs.borrow(), 3);
     let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn the_probe_identity_does_not_follow_the_app_version() {
+    let id = crate::probe::identity();
+    assert_eq!(id, crate::probe::identity(), "stable");
+    assert!(!id.contains(env!("CARGO_PKG_VERSION")), "{id}");
+    assert!(id.contains("registry") && id.contains("avcodec"), "{id}");
 }
 
 #[test]

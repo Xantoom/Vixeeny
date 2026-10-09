@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-const REGISTRY: &str = include_str!("../codecs/registry.toml");
+pub(crate) const REGISTRY: &str = include_str!("../codecs/registry.toml");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

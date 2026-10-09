@@ -153,7 +153,27 @@ fn probe_formats(
     out
 }
 
-/// Probes every encoder. `version` is Vixeeny's, part of the cache key.
+/// What the answer of the probe depends on besides the machine: the way it tries the encoders
+/// (bump [`PROBE_REVISION`] when that changes), the encoders it tries (the registry) and the
+/// FFmpeg it tries them with. A new version of Vixeeny that changes none of them keeps the
+/// cache: the probe (a few seconds of encoder sessions on the GPU) does not run again.
+pub fn identity() -> String {
+    // FNV-1a: stable from one build to the next, unlike the standard hasher.
+    let registry = crate::registry::REGISTRY
+        .bytes()
+        .fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
+            (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+        });
+    // SAFETY: a plain query of the linked library.
+    let avcodec = unsafe { ffmpeg_next::ffi::avcodec_version() };
+    format!("probe {PROBE_REVISION}, registry {registry:016x}, avcodec {avcodec}")
+}
+
+/// The way the probe works: bumped when a change of it must run it again everywhere.
+pub const PROBE_REVISION: u32 = 1;
+
+/// Probes every encoder. `version` is what the answer depends on besides the machine (see
+/// [`identity`]), part of the cache key.
 pub fn probe(registry: &Registry, prober: &dyn Prober, version: &str) -> ProbeResult {
     let adapters = prober.adapters();
     let mut encoders = Vec::new();
@@ -176,7 +196,7 @@ pub fn probe(registry: &Registry, prober: &dyn Prober, version: &str) -> ProbeRe
     }
 }
 
-/// The set {GPU, driver version, Vixeeny version}: a new key means a new probe.
+/// The set {GPU, driver version, [`identity`]}: a new key means a new probe.
 pub fn cache_key(adapters: &[Adapter], version: &str) -> String {
     let mut parts: Vec<String> = adapters
         .iter()

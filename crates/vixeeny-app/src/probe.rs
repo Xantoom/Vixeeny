@@ -40,7 +40,7 @@ pub fn child() -> anyhow::Result<()> {
     use vixeeny_encode::ffmpeg_probe::FfmpegProber;
     let registry = Registry::builtin()?;
     let prober = FfmpegProber::new(adapters());
-    let result = vixeeny_encode::probe::probe(&registry, &prober, env!("CARGO_PKG_VERSION"));
+    let result = vixeeny_encode::probe::probe(&registry, &prober, &vixeeny_encode::probe::identity());
     print!("{}", vixeeny_encode::probe::to_toml(&result)?);
     Ok(())
 }
@@ -55,7 +55,7 @@ pub fn current(force: bool) -> anyhow::Result<ProbeResult> {
     Ok(cached_or_probe(
         &path,
         &adapters(),
-        env!("CARGO_PKG_VERSION"),
+        &vixeeny_encode::probe::identity(),
         || run_child(&exe, TIMEOUT),
     )?)
 }
@@ -63,7 +63,7 @@ pub fn current(force: bool) -> anyhow::Result<ProbeResult> {
 /// The probe result if the cache already holds it (no process is started).
 pub fn cached() -> Option<ProbeResult> {
     let path = vixeeny_common::paths::hw_cache_file()?;
-    let key = vixeeny_encode::probe::cache_key(&adapters(), env!("CARGO_PKG_VERSION"));
+    let key = vixeeny_encode::probe::cache_key(&adapters(), &vixeeny_encode::probe::identity());
     vixeeny_encode::probe::load_cache(&path, &key)
 }
 
