@@ -125,7 +125,7 @@ pub fn save_bgra(
         dir: &dir,
         template: &config.paths.naming.images.template,
         per_app_subfolder: config.paths.per_app_subfolder.images,
-        use_foreground_app: config.paths.naming.images.use_foreground_app,
+        use_foreground_app: true,
         app_names: &config.paths.app_names,
         now: &now,
         after_save: None,

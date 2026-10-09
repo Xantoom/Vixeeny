@@ -11,6 +11,10 @@ export struct SettingRow {
     id: string,
     label: string,
     hint: string,
+    // Behind the "i" beside the label.
+    info: string,
+    // A list as wide as its longest choice needs, in pixels (0: the usual width).
+    wide: int,
     // 0 toggle, 1 choice, 2 number, 3 text, 4 folder, 5 info, 8 slider, 9 expander (`on`: open)
     kind: int,
     enabled: bool,
@@ -133,6 +137,7 @@ component SettingLine inherits GroupRow {
     callback action(string);
 
     title: root.entry.label;
+    info: root.entry.info;
     description: root.entry.kind == 4 ? root.entry.text : root.entry.hint;
     icon: root.entry.icon;
     has-icon: root.entry.has-icon;
@@ -160,7 +165,8 @@ component SettingLine inherits GroupRow {
         toggled(v) => { root.toggled(v); }
     }
     if root.entry.kind == 1 : ComboBox {
-        width: 240px;
+        // As wide as its longest choice (estimated from its length), so nothing is cut.
+        width: max(240px, root.entry.wide * 1px);
         options: root.entry.options;
         headings: root.entry.headings;
         current: root.entry.selected;

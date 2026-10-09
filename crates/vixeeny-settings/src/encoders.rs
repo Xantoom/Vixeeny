@@ -17,6 +17,8 @@ pub struct EncoderInfo {
     pub id: String,
     pub name: String,
     pub hardware: bool,
+    /// The maker of a hardware encoder's chip (`NVIDIA`, `AMD`, `Intel`; empty for software).
+    pub vendor: &'static str,
     /// Lower is better: for the hardware ones the codec (AV1, HEVC, H.264), then the vendor
     /// (the order `pick_auto` uses); for the software ones the registry's order (x264 first:
     /// an AV1 encoder on the processor cannot keep up with a game in real time).
@@ -65,12 +67,19 @@ pub fn all() -> Vec<EncoderInfo> {
                 id: e.id.clone(),
                 name: e.display_name.clone(),
                 hardware,
+                vendor: match e.vendor {
+                    Vendor::Nvidia => "NVIDIA",
+                    Vendor::Amd => "AMD",
+                    Vendor::Intel => "Intel",
+                    Vendor::None => "",
+                },
                 rank,
             };
             (info, (shown(e.family), vendor(e.vendor)))
         })
         .collect();
-    list.sort_by_key(|(e, order)| (!e.hardware, *order));
+    // By maker, then codec: the encoders of one chip together.
+    list.sort_by_key(|(e, (codec, vendor))| (!e.hardware, *vendor, *codec));
     list.into_iter().map(|(e, _)| e).collect()
 }
 

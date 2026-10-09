@@ -168,7 +168,7 @@ fn the_video_page_edits_the_current_profile_and_reports_problems() {
     w.invoke_row_chosen("container".into(), 0);
     w.invoke_row_chosen("encoder".into(), 0);
     w.invoke_row_chosen("preset".into(), 2); // best, light, custom
-    w.invoke_row_chosen("p:rc.mode".into(), 2); // quality, CQP, VBR, CBR
+    w.invoke_row_chosen("p:rc.mode".into(), 4); // Quality: CRF, CQP; Bitrate: VBR, CBR
     assert_eq!(panel.config().video.params["rc.mode"], "vbr");
     // The rows that just appeared, shown at the end of their unfolding.
     panel.window().set_animated(false);
@@ -193,7 +193,7 @@ fn rows_that_appear_on_the_same_page_unfold() {
     panel.select_section(Section::Image);
     assert!(fresh(&panel).is_empty(), "a new page does not unfold");
     // JPEG brings its own options in: they unfold, the rows already there do not.
-    panel.window().invoke_row_chosen("image_format".into(), 1);
+    panel.window().invoke_row_chosen("image_format".into(), 2); // (title), PNG, JPEG
     let unfolded = fresh(&panel);
     assert!(
         unfolded.contains(&"jpeg_quality".to_owned()),

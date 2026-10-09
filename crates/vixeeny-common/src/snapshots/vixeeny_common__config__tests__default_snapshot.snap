@@ -35,15 +35,12 @@ replays = "{videos}/Vixeeny/Replays"
 
 [paths.naming.images]
 template = "{app}_{date}_{time}"
-use_foreground_app = true
 
 [paths.naming.videos]
 template = "{app}_{date}_{time}"
-use_foreground_app = true
 
 [paths.naming.replays]
 template = "{app}_{date}_{time}"
-use_foreground_app = true
 
 [paths.per_app_subfolder]
 images = false

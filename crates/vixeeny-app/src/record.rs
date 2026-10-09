@@ -438,7 +438,7 @@ fn output_file(
         dir: &dir,
         template: &naming.template,
         per_app_subfolder: per_app,
-        use_foreground_app: naming.use_foreground_app,
+        use_foreground_app: true,
         app_names: &config.paths.app_names,
         now: &now,
         after_save: None,

@@ -59,24 +59,19 @@ fn v2_single_profile(table: &mut toml::Table) {
     }
 }
 
-/// 0.9.12: images, videos and replays are named each their own way. The one template and the
-/// "name after the game" switch become those of the three.
+/// 0.9.12: images, videos and replays are named each their own way. The one template becomes
+/// that of the three (the "name after the game" switch is gone: `{app}` always is the game).
 fn v3_naming_per_kind(table: &mut toml::Table) {
     let Some(paths) = table.get_mut("paths").and_then(|p| p.as_table_mut()) else {
         return;
     };
     let template = paths.remove("filename_template");
-    let foreground = paths.remove("use_foreground_app");
-    if template.is_none() && foreground.is_none() {
+    paths.remove("use_foreground_app");
+    let Some(template) = template else {
         return;
-    }
+    };
     let mut one = toml::Table::new();
-    if let Some(template) = template {
-        one.insert("template".into(), template);
-    }
-    if let Some(foreground) = foreground {
-        one.insert("use_foreground_app".into(), foreground);
-    }
+    one.insert("template".into(), template);
     let naming: toml::Table = ["images", "videos", "replays"]
         .into_iter()
         .map(|kind| (kind.to_owned(), toml::Value::Table(one.clone())))
@@ -252,18 +247,15 @@ impl Default for Paths {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Naming {
-    /// `{app}`, `{date}`, `{time}`... are replaced.
+    /// `{app}`, `{date}`, `{time}`... are replaced. `{app}` of a capture that is not of a
+    /// single window is the full-screen application (a game), else `Desktop`.
     pub template: String,
-    /// For captures that are not of a single window, `{app}` is the full-screen application
-    /// (a game); otherwise it is `Desktop`.
-    pub use_foreground_app: bool,
 }
 
 impl Default for Naming {
     fn default() -> Self {
         Self {
             template: "{app}_{date}_{time}".into(),
-            use_foreground_app: true,
         }
     }
 }
@@ -775,7 +767,6 @@ mod tests {
             &cfg.paths.naming.replays,
         ] {
             assert_eq!(naming.template, "{app}-{date}");
-            assert!(!naming.use_foreground_app);
         }
         // Without them, the defaults.
         let cfg = Config::from_toml("schema_version = 3\n[paths]\nimages = \"x\"\n").unwrap();

@@ -66,7 +66,6 @@ pub enum Key {
     SetEncoder,
     SetContainer,
     SetResolution,
-    SetResSource,
     SetFps,
     SetChroma,
     SetPreset,
@@ -107,7 +106,6 @@ pub enum Key {
     SetReplayStart,
     SetReplayDuration,
     SetTemplate,
-    SetForegroundApp,
     SetCheckUpdates,
     SetCheckNow,
     SetProblems,
@@ -273,6 +271,12 @@ pub enum Key {
     PcPrimary,
     PcDriveN,
     PcFree,
+    OptGroupQuality,
+    OptGroupBitrate,
+    OptGroupCompatible,
+    OptGroupModern,
+    OptGroupCompressed,
+    OptGroupLossless,
 }
 
 impl Key {
@@ -331,7 +335,6 @@ impl Key {
         Self::SetEncoder,
         Self::SetContainer,
         Self::SetResolution,
-        Self::SetResSource,
         Self::SetFps,
         Self::SetChroma,
         Self::SetPreset,
@@ -372,7 +375,6 @@ impl Key {
         Self::SetReplayStart,
         Self::SetReplayDuration,
         Self::SetTemplate,
-        Self::SetForegroundApp,
         Self::SetCheckUpdates,
         Self::SetCheckNow,
         Self::SetProblems,
@@ -538,6 +540,12 @@ impl Key {
         Self::PcPrimary,
         Self::PcDriveN,
         Self::PcFree,
+        Self::OptGroupQuality,
+        Self::OptGroupBitrate,
+        Self::OptGroupCompatible,
+        Self::OptGroupModern,
+        Self::OptGroupCompressed,
+        Self::OptGroupLossless,
     ];
 }
 
@@ -683,8 +691,6 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::SetContainer, Lang::Fr) => "Conteneur",
         (Key::SetResolution, Lang::En) => "Resolution",
         (Key::SetResolution, Lang::Fr) => "Résolution",
-        (Key::SetResSource, Lang::En) => "The screen's ({size})",
-        (Key::SetResSource, Lang::Fr) => "Celle de l'écran ({size})",
         (Key::SetFps, Lang::En) => "Frames per second",
         (Key::SetFps, Lang::Fr) => "Images par seconde",
         (Key::SetChroma, Lang::En) => "Chroma",
@@ -771,8 +777,6 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::SetReplayDuration, Lang::Fr) => "Durée",
         (Key::SetTemplate, Lang::En) => "File name",
         (Key::SetTemplate, Lang::Fr) => "Nom des fichiers",
-        (Key::SetForegroundApp, Lang::En) => "Name files after the full-screen game",
-        (Key::SetForegroundApp, Lang::Fr) => "Nommer les fichiers d'après le jeu en plein écran",
         (Key::SetCheckUpdates, Lang::En) => "Check for updates",
         (Key::SetCheckUpdates, Lang::Fr) => "Rechercher les mises à jour",
         (Key::SetCheckNow, Lang::En) => "Check now",
@@ -937,8 +941,12 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::UpdateNever, Lang::Fr) => "Jamais vérifié",
         (Key::SetAutoUpdate, Lang::En) => "Install updates automatically",
         (Key::SetAutoUpdate, Lang::Fr) => "Installer les mises à jour automatiquement",
-        (Key::SetTemplateHint, Lang::En) => "{app}, {date} and {time} are replaced.",
-        (Key::SetTemplateHint, Lang::Fr) => "{app}, {date} et {time} sont remplacés.",
+        (Key::SetTemplateHint, Lang::En) => {
+            "{app} is the game in full screen (Desktop without one), {date} and {time} when it was taken."
+        }
+        (Key::SetTemplateHint, Lang::Fr) => {
+            "{app} est le jeu en plein écran (Desktop sans jeu), {date} et {time} le moment de la capture."
+        }
         (Key::OptAuto, Lang::En) => "Automatic",
         (Key::OptAuto, Lang::Fr) => "Automatique",
         (Key::OptFlac, Lang::En) => "FLAC (lossless)",
@@ -1153,6 +1161,18 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::PcDriveN, Lang::Fr) => "Disque {letter}",
         (Key::PcFree, Lang::En) => "{free} free of {total}",
         (Key::PcFree, Lang::Fr) => "{free} libres sur {total}",
+        (Key::OptGroupQuality, Lang::En) => "Quality",
+        (Key::OptGroupQuality, Lang::Fr) => "Qualité",
+        (Key::OptGroupBitrate, Lang::En) => "Bitrate",
+        (Key::OptGroupBitrate, Lang::Fr) => "Débit",
+        (Key::OptGroupCompatible, Lang::En) => "Read everywhere",
+        (Key::OptGroupCompatible, Lang::Fr) => "Lisibles partout",
+        (Key::OptGroupModern, Lang::En) => "Modern, lighter",
+        (Key::OptGroupModern, Lang::Fr) => "Modernes, plus légers",
+        (Key::OptGroupCompressed, Lang::En) => "Compressed",
+        (Key::OptGroupCompressed, Lang::Fr) => "Compressés",
+        (Key::OptGroupLossless, Lang::En) => "Lossless, heavy",
+        (Key::OptGroupLossless, Lang::Fr) => "Sans perte, lourds",
     }
 }
 

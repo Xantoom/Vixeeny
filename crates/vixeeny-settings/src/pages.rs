@@ -91,14 +91,13 @@ pub fn general(env: &Env) -> Vec<Row> {
     ]
 }
 
-/// How the files of one kind are named: the template, and whether `{app}` is the full-screen
-/// game. `get` and `naming` reach the settings of that kind.
+/// How the files of one kind are named. `get` and `naming` reach the settings of that kind.
 fn naming_rows(
     env: &Env,
     kind: &str,
     get: fn(&Config) -> &Naming,
     naming: fn(&mut Config) -> &mut Naming,
-) -> [Row; 2] {
+) -> [Row; 1] {
     let template = row(
         format!("template:{kind}"),
         env.t(Key::SetTemplate),
@@ -115,20 +114,7 @@ fn naming_rows(
             _ => Err(Invalid),
         }),
     );
-    let game = row(
-        format!("foreground_app:{kind}"),
-        env.t(Key::SetForegroundApp),
-        Kind::Toggle,
-        Box::new(move |c| Value::Bool(get(c).use_foreground_app)),
-        Box::new(move |c, v| match v {
-            Value::Bool(on) => {
-                naming(c).use_foreground_app = on;
-                Ok(())
-            }
-            _ => Err(Invalid),
-        }),
-    );
-    [hinted(template, env.t(Key::SetTemplateHint)), game]
+    [hinted(template, env.t(Key::SetTemplateHint))]
 }
 
 /// The side strip and the recording widget.
@@ -207,8 +193,10 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
             "image_format",
             t(Key::SetImageFormat),
             vec![
+                crate::heading(t(Key::OptGroupCompatible)),
                 opt("png", "PNG"),
                 opt("jpeg", "JPEG"),
+                crate::heading(t(Key::OptGroupModern)),
                 opt("webp", "WebP"),
                 opt("avif", "AVIF"),
                 opt("jxl", "JPEG XL"),
@@ -413,11 +401,20 @@ fn custom_rows(env: &Env, config: &Config, encoder: &str) -> (Vec<Row>, Vec<Row>
     let rc = &spec.rate_control;
     let mode = spec.rate_mode(&config.video.params);
     let mut rows = Vec::new();
-    let modes: Vec<Opt> = spec
-        .rate_modes()
-        .map(|m| opt(m.name(), encoders::rate_mode_label(m, spec, lang)))
-        .collect();
-    if modes.len() > 1 {
+    // Grouped: aiming at a quality, aiming at a bitrate.
+    let mut modes: Vec<Opt> = Vec::new();
+    for (bitrate, title) in [(false, Key::OptGroupQuality), (true, Key::OptGroupBitrate)] {
+        let group: Vec<Opt> = spec
+            .rate_modes()
+            .filter(|m| m.has_bitrate() == bitrate)
+            .map(|m| opt(m.name(), encoders::rate_mode_label(m, spec, lang)))
+            .collect();
+        if !group.is_empty() {
+            modes.push(crate::heading(env.t(title)));
+            modes.extend(group);
+        }
+    }
+    if modes.len() > 2 {
         rows.push(param_row(
             format!("p:{}", rate_keys::MODE),
             param_label(rate_keys::MODE, lang),
@@ -574,16 +571,13 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
         });
     }
     let (_, _, cw, ch) = validate::center_crop(screen, validate::aspect(&profile.aspect));
-    let mut sizes = vec![opt(
-        "source",
-        t(Key::SetResSource).replace("{size}", &size_name((cw, ch), false)),
-    )];
+    let mut sizes = vec![opt("source", size_name((cw, ch)))];
     for height in [2160u32, 1440, 1080, 720, 480] {
         let value = format!("{height}p");
         // Only smaller than the screen (the setting of another machine stays listed).
         if height < ch || profile.resolution == value {
             let size = validate::output_size(&value, (cw, ch)).unwrap_or((cw, ch));
-            sizes.push(opt(&value, size_name(size, true)));
+            sizes.push(opt(&value, size_name(size)));
         }
     }
     rows.push(choice(
@@ -637,16 +631,22 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
         },
     ));
     let recommended = encoders::best(env, hardware).map(|e| e.id.clone());
-    let options: Vec<Opt> = list
+    // One section per maker when there are several chips (a graphics card and the processor's).
+    let makers = list
         .iter()
-        .map(|e| {
-            if recommended.as_deref() == Some(e.id.as_str()) {
-                opt(&e.id, format!("{} ({})", e.name, t(Key::OptRecommended)))
-            } else {
-                opt(&e.id, e.name.as_str())
-            }
-        })
-        .collect();
+        .map(|e| e.vendor)
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut options: Vec<Opt> = Vec::new();
+    for e in &list {
+        if makers.len() > 1 && !options.iter().any(|o| o.heading && o.label == e.vendor) {
+            options.push(crate::heading(e.vendor));
+        }
+        options.push(if recommended.as_deref() == Some(e.id.as_str()) {
+            opt(&e.id, format!("{} ({})", e.name, t(Key::OptRecommended)))
+        } else {
+            opt(&e.id, e.name.as_str())
+        });
+    }
     let shown = current.clone();
     if list.is_empty() {
         // Nothing to choose from (yet): say why instead of an empty list.
@@ -821,8 +821,8 @@ fn ratio_name((w, h): (u32, u32)) -> String {
     format!("{}:{}", w / g, h / g)
 }
 
-/// `3840 × 2160`, with its usual name for the 16:9 sizes when `named`.
-fn size_name((w, h): (u32, u32), named: bool) -> String {
+/// `3840 × 2160`, with its usual name for the 16:9 sizes.
+fn size_name((w, h): (u32, u32)) -> String {
     let name = match (w, h) {
         (3840, 2160) => "4K UHD",
         (2560, 1440) => "QHD",
@@ -830,7 +830,7 @@ fn size_name((w, h): (u32, u32), named: bool) -> String {
         (1280, 720) => "HD",
         _ => "",
     };
-    if named && !name.is_empty() {
+    if !name.is_empty() {
         format!("{w} × {h} ({name})")
     } else {
         format!("{w} × {h}")
@@ -1136,6 +1136,7 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
         "audio_codec",
         t(Key::SetAudioCodec),
         vec![
+            crate::heading(t(Key::OptGroupCompressed)),
             opt(
                 "auto",
                 format!(
@@ -1146,6 +1147,7 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
             ),
             opt("aac", "AAC"),
             opt("opus", "Opus"),
+            crate::heading(t(Key::OptGroupLossless)),
             opt("flac", t(Key::OptFlac)),
             opt("pcm16", t(Key::OptPcm16)),
             opt("pcm24", t(Key::OptPcm24)),

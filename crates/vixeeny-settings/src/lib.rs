@@ -6,6 +6,7 @@
 //! No UI and no OS code here, so all of it is tested on any machine.
 
 pub mod encoders;
+mod info;
 pub mod machine;
 mod pages;
 pub mod shortcuts;
@@ -129,6 +130,9 @@ pub struct Row {
     pub label: String,
     /// A line of explanation under the label (empty = none).
     pub hint: String,
+    /// What the setting does and what to choose, behind an "i" beside the label (empty =
+    /// none).
+    pub info: String,
     /// A picture before the label (a program's icon).
     pub icon: Option<Icon>,
     pub kind: Kind,
@@ -312,6 +316,7 @@ fn row(id: impl Into<String>, label: String, kind: Kind, get: Get, set: Set) -> 
         id: id.into(),
         label,
         hint: String::new(),
+        info: String::new(),
         icon: None,
         kind,
         get,
@@ -464,7 +469,7 @@ fn info(id: &str, label: String, value: String) -> Row {
 /// The rows of a section (empty for the sections that have a page of their own). Rows that do
 /// not apply with the current settings are left out, so a page only shows what matters.
 pub fn rows(section: Section, env: &Env, config: &Config) -> Vec<Row> {
-    match section {
+    let mut rows = match section {
         Section::General => pages::general(env),
         Section::Overlay => pages::overlay(env, config),
         Section::Image => pages::image(env, config),
@@ -473,7 +478,15 @@ pub fn rows(section: Section, env: &Env, config: &Config) -> Vec<Row> {
         Section::Replay => pages::replay(env, config),
         Section::Updates => pages::updates(env),
         Section::Shortcuts | Section::About => Vec::new(),
+    };
+    for row in &mut rows {
+        if row.info.is_empty()
+            && let Some(text) = info::info(&row.id, env, config)
+        {
+            row.info = text;
+        }
     }
+    rows
 }
 
 /// Things wrong with the current video settings, for the user to read (empty when fine).
@@ -725,16 +738,11 @@ mod tests {
         row(&image, "template:images")
             .apply(&mut c, Value::Text("{app}-{time}".into()))
             .unwrap();
-        row(&image, "foreground_app:images")
-            .apply(&mut c, Value::Bool(false))
-            .unwrap();
         row(&video, "template:videos")
             .apply(&mut c, Value::Text(" ".into()))
             .unwrap();
         assert_eq!(c.paths.naming.images.template, "{app}-{time}");
-        assert!(!c.paths.naming.images.use_foreground_app);
         assert_eq!(c.paths.naming.videos.template, "{app}_{date}_{time}");
-        assert!(c.paths.naming.videos.use_foreground_app);
         let replay = rows(Section::Replay, &env(), &c);
         assert!(replay.iter().any(|r| r.id == "template:replays"));
         let general = rows(Section::General, &env(), &c);
@@ -882,7 +890,7 @@ mod tests {
         assert_eq!(
             options(&video, "resolution"),
             [
-                "The screen's (3840 × 2160)",
+                "3840 × 2160 (4K UHD)",
                 "2560 × 1440 (QHD)",
                 "1920 × 1080 (Full HD)",
                 "1280 × 720 (HD)",
@@ -906,7 +914,7 @@ mod tests {
         let video = rows(Section::Video, &wide, &c);
         assert_eq!(
             options(&video, "resolution")[..2],
-            ["The screen's (2560 × 1440)", "1920 × 1080 (Full HD)"]
+            ["2560 × 1440 (QHD)", "1920 × 1080 (Full HD)"]
         );
     }
 
@@ -1124,5 +1132,24 @@ mod tests {
         c.replay.storage = "disk".into();
         assert!(!hint(&with_ram(64), &c).contains("RAM"));
         assert!(hint(&with_ram(64), &c).contains("GB"));
+    }
+
+    #[test]
+    fn settings_explain_themselves_and_name_the_image_encoder() {
+        let mut c = Config::default();
+        c.video.preset = "custom".into();
+        let video = rows(Section::Video, &with_nvenc(), &c);
+        assert!(
+            row(&video, "encoder_kind")
+                .info
+                .contains("Recommended: hardware")
+        );
+        assert!(row(&video, "p:preset").info.contains("P5"));
+        assert!(row(&video, "p:rc.quality").info.contains("Recommended: 23"));
+        // A setting with nothing to add has no "i".
+        assert!(row(&video, "video_cursor").info.is_empty());
+        c.image.format = "jpeg".into();
+        let image = rows(Section::Image, &env(), &c);
+        assert!(row(&image, "image_format").info.contains("jpegli"));
     }
 }
