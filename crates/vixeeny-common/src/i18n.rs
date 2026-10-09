@@ -101,7 +101,6 @@ pub enum Key {
     SetPresetCustom,
     SetDetecting,
     SetNoHardware,
-    SrcSystem,
     SrcMic,
     SrcAbsent,
     UiPressKeys,
@@ -222,7 +221,6 @@ pub enum Key {
     SecUpdates,
     SetFolder,
     SetSubfolder,
-    SetAddProgram,
     UiChange,
     UiShow,
     UiRemove,
@@ -257,6 +255,15 @@ pub enum Key {
     PcVram,
     PcDisk,
     PcScreen,
+    SetCapture,
+    CapSystem,
+    CapTarget,
+    CapOutput,
+    CapPrograms,
+    CapNone,
+    CapTargetHint,
+    SetAudioOutput,
+    SrcClosed,
 }
 
 impl Key {
@@ -350,7 +357,6 @@ impl Key {
         Self::SetPresetCustom,
         Self::SetDetecting,
         Self::SetNoHardware,
-        Self::SrcSystem,
         Self::SrcMic,
         Self::SrcAbsent,
         Self::UiPressKeys,
@@ -471,7 +477,6 @@ impl Key {
         Self::SecUpdates,
         Self::SetFolder,
         Self::SetSubfolder,
-        Self::SetAddProgram,
         Self::UiChange,
         Self::UiShow,
         Self::UiRemove,
@@ -506,6 +511,15 @@ impl Key {
         Self::PcVram,
         Self::PcDisk,
         Self::PcScreen,
+        Self::SetCapture,
+        Self::CapSystem,
+        Self::CapTarget,
+        Self::CapOutput,
+        Self::CapPrograms,
+        Self::CapNone,
+        Self::CapTargetHint,
+        Self::SetAudioOutput,
+        Self::SrcClosed,
     ];
 }
 
@@ -725,8 +739,6 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::SetNoHardware, Lang::Fr) => {
             "Aucun encodeur matériel détecté : utilisez les encodeurs logiciels."
         }
-        (Key::SrcSystem, Lang::En) => "Record the PC sound",
-        (Key::SrcSystem, Lang::Fr) => "Enregistrer le son du PC",
         (Key::SrcMic, Lang::En) => "Windows default",
         (Key::SrcMic, Lang::Fr) => "Celui par défaut de Windows",
         (Key::SrcAbsent, Lang::En) => "not available right now",
@@ -935,8 +947,8 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::SetMicOn, Lang::Fr) => "Enregistrer le microphone",
         (Key::SetMicDevice, Lang::En) => "Microphone to use",
         (Key::SetMicDevice, Lang::Fr) => "Microphone utilisé",
-        (Key::SrcNoPrograms, Lang::En) => "No other program is open.",
-        (Key::SrcNoPrograms, Lang::Fr) => "Aucun autre programme ouvert.",
+        (Key::SrcNoPrograms, Lang::En) => "No program is playing sound right now.",
+        (Key::SrcNoPrograms, Lang::Fr) => "Aucun programme ne joue de son pour le moment.",
         (Key::SecReplay, Lang::En) => "Replay",
         (Key::SecReplay, Lang::Fr) => "Replay",
         (Key::TipMove, Lang::En) => "Move the zone",
@@ -989,8 +1001,6 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::SetFolder, Lang::Fr) => "Dossier",
         (Key::SetSubfolder, Lang::En) => "One folder per application",
         (Key::SetSubfolder, Lang::Fr) => "Un dossier par application",
-        (Key::SetAddProgram, Lang::En) => "Add a program",
-        (Key::SetAddProgram, Lang::Fr) => "Ajouter un programme",
         (Key::UiChange, Lang::En) => "Change",
         (Key::UiChange, Lang::Fr) => "Modifier",
         (Key::UiShow, Lang::En) => "Open",
@@ -1071,6 +1081,28 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::PcDisk, Lang::Fr) => "Disque",
         (Key::PcScreen, Lang::En) => "Screen",
         (Key::PcScreen, Lang::Fr) => "Écran",
+        (Key::SetCapture, Lang::En) => "Sound to record",
+        (Key::SetCapture, Lang::Fr) => "Son à enregistrer",
+        (Key::CapSystem, Lang::En) => "All the PC sound",
+        (Key::CapSystem, Lang::Fr) => "Tout le son du PC",
+        (Key::CapTarget, Lang::En) => "Only the recorded program",
+        (Key::CapTarget, Lang::Fr) => "Seulement le programme enregistré",
+        (Key::CapOutput, Lang::En) => "One audio output",
+        (Key::CapOutput, Lang::Fr) => "Une sortie audio précise",
+        (Key::CapPrograms, Lang::En) => "Chosen programs",
+        (Key::CapPrograms, Lang::Fr) => "Programmes choisis",
+        (Key::CapNone, Lang::En) => "None (microphone only)",
+        (Key::CapNone, Lang::Fr) => "Aucun (micro seulement)",
+        (Key::CapTargetHint, Lang::En) => {
+            "The program in the foreground when the recording starts (the full-screen game), without Discord or music. Without one, all the PC sound."
+        }
+        (Key::CapTargetHint, Lang::Fr) => {
+            "Le programme au premier plan quand l'enregistrement commence (le jeu en plein écran), sans Discord ni musique. S'il n'y en a pas, tout le son du PC."
+        }
+        (Key::SetAudioOutput, Lang::En) => "Audio output",
+        (Key::SetAudioOutput, Lang::Fr) => "Sortie audio",
+        (Key::SrcClosed, Lang::En) => "closed",
+        (Key::SrcClosed, Lang::Fr) => "fermé",
     }
 }
 

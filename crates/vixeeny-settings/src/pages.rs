@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The rows of each page of the settings window.
 
-use vixeeny_common::config::{Config, Naming};
+use vixeeny_common::config::{Config, Naming, TARGET_SOURCE};
 use vixeeny_common::i18n::Key;
 use vixeeny_encode::registry::{
     BITRATE_RANGE, DEFAULT_BITRATE, DEFAULT_MAXRATE, Family, ParamType, RateMode, rate_keys,
@@ -793,29 +793,6 @@ fn auto_audio_codec(env: &Env, config: &Config) -> &'static str {
     }
 }
 
-/// A switch that adds or removes `spec` from the sources of the profile.
-fn source_row(spec: String, label: String) -> Row {
-    let read = spec.clone();
-    let write = spec.clone();
-    row(
-        format!("src:{spec}"),
-        label,
-        Kind::Toggle,
-        Box::new(move |c| Value::Bool(c.video.audio.sources.contains(&read))),
-        Box::new(move |c, v| match v {
-            Value::Bool(on) => {
-                let sources = &mut c.video.audio.sources;
-                sources.retain(|s| *s != write);
-                if on {
-                    sources.push(write.clone());
-                }
-                Ok(())
-            }
-            _ => Err(Invalid),
-        }),
-    )
-}
-
 /// A microphone source: `mic` (the Windows default) or `mic:<device id>`.
 fn is_mic(spec: &str) -> bool {
     spec == "mic" || spec.starts_with("mic:")
@@ -828,17 +805,65 @@ fn absent_label(spec: &str) -> String {
         .to_owned()
 }
 
-/// A program the profile records, with a button to stop recording it.
+/// What the profile records besides the microphone: `system` (all the PC sound), `target` (the
+/// recorded program), `output` (one output device), `programs` (the ones ticked) or `none`.
+/// Settings from before 0.9.15 have no such field: it is read from their sources.
+fn capture_mode(config: &Config) -> &str {
+    let audio = &config.video.audio;
+    if matches!(audio.capture.as_str(), "programs" | "none") {
+        return &audio.capture;
+    }
+    let sources = &audio.sources;
+    if sources.iter().any(|s| s == TARGET_SOURCE) {
+        "target"
+    } else if sources.iter().any(|s| s.starts_with("out:")) {
+        "output"
+    } else if sources.iter().any(|s| s.starts_with("app:")) {
+        "programs"
+    } else if sources.iter().any(|s| s == "system") {
+        "system"
+    } else {
+        "none"
+    }
+}
+
+/// Switches what is recorded besides the microphone (the microphone is kept as it is).
+fn set_capture(config: &mut Config, mode: &str, first_output: Option<&str>) {
+    let audio = &mut config.video.audio;
+    let kept_output = audio
+        .sources
+        .iter()
+        .find(|s| s.starts_with("out:"))
+        .cloned();
+    audio.sources.retain(|s| is_mic(s));
+    match mode {
+        "system" => audio.sources.push("system".into()),
+        "target" => audio.sources.push(TARGET_SOURCE.into()),
+        "output" => {
+            if let Some(out) = kept_output.or_else(|| first_output.map(|id| format!("out:{id}"))) {
+                audio.sources.push(out);
+            }
+        }
+        _ => {}
+    }
+    audio.capture = mode.to_owned();
+}
+
+/// A program of the list, ticked when the profile records it.
 fn program_row(spec: String, label: String, icon: Option<crate::Icon>) -> Row {
-    let write = spec.clone();
+    let read = spec.clone();
     let mut r = row(
         format!("src:{spec}"),
         label,
-        Kind::Removable,
-        Box::new(|_| Value::Bool(true)),
+        Kind::Toggle,
+        Box::new(move |c| Value::Bool(c.video.audio.sources.contains(&read))),
         Box::new(move |c, v| match v {
-            Value::Bool(false) => {
-                c.video.audio.sources.retain(|s| *s != write);
+            Value::Bool(on) => {
+                let sources = &mut c.video.audio.sources;
+                sources.retain(|s| *s != spec);
+                if on {
+                    sources.push(spec.clone());
+                }
                 Ok(())
             }
             _ => Err(Invalid),
@@ -851,16 +876,94 @@ fn program_row(spec: String, label: String, icon: Option<crate::Icon>) -> Row {
 pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
     let t = |k| env.t(k);
     let chosen = &config.video.audio.sources;
-    let mut rows = vec![source_row("system".into(), t(Key::SrcSystem))];
-    // A particular output, from older settings: it stays visible so it can be turned off.
-    for spec in chosen.iter().filter(|s| s.starts_with("out:")) {
-        let label = env
-            .audio
-            .outputs
-            .iter()
-            .find(|d| format!("out:{}", d.id) == *spec)
-            .map_or_else(|| absent_label(spec), |d| d.name.clone());
-        rows.push(source_row(spec.clone(), label));
+    let mode = capture_mode(config);
+    let first_output = env.audio.outputs.first().map(|d| d.id.clone());
+    let capture = row(
+        "audio_capture",
+        t(Key::SetCapture),
+        Kind::Choice(vec![
+            opt("system", t(Key::CapSystem)),
+            opt("target", t(Key::CapTarget)),
+            opt("output", t(Key::CapOutput)),
+            opt("programs", t(Key::CapPrograms)),
+            opt("none", t(Key::CapNone)),
+        ]),
+        Box::new(|c| Value::Text(capture_mode(c).to_owned())),
+        Box::new(move |c, v| match v {
+            Value::Text(mode) => {
+                set_capture(c, &mode, first_output.as_deref());
+                Ok(())
+            }
+            _ => Err(Invalid),
+        }),
+    );
+    let mut rows = vec![match mode {
+        "target" => hinted(capture, t(Key::CapTargetHint)),
+        _ => capture,
+    }];
+    match mode {
+        // Which output device.
+        "output" => {
+            let mut outputs: Vec<Opt> = env
+                .audio
+                .outputs
+                .iter()
+                .map(|d| opt(&format!("out:{}", d.id), d.name.as_str()))
+                .collect();
+            // An unplugged device that the profile records.
+            for spec in chosen.iter().filter(|s| s.starts_with("out:")) {
+                if !outputs.iter().any(|o| o.value == *spec) {
+                    outputs.push(opt(
+                        spec,
+                        format!("{} ({})", absent_label(spec), t(Key::SrcAbsent)),
+                    ));
+                }
+            }
+            rows.push(choice(
+                "audio_output",
+                t(Key::SetAudioOutput),
+                outputs,
+                |c| {
+                    c.video
+                        .audio
+                        .sources
+                        .iter()
+                        .find(|s| s.starts_with("out:"))
+                        .cloned()
+                        .unwrap_or_default()
+                },
+                |c, v| {
+                    let sources = &mut c.video.audio.sources;
+                    sources.retain(|s| !s.starts_with("out:"));
+                    sources.push(v);
+                },
+            ));
+        }
+        // The programs that play sound now, and those ticked before that are closed.
+        "programs" => {
+            for p in &env.audio.programs {
+                rows.push(program_row(
+                    format!("app:{}", p.id),
+                    p.name.clone(),
+                    p.icon.clone(),
+                ));
+            }
+            for spec in chosen.iter().filter(|s| s.starts_with("app:")) {
+                if !env
+                    .audio
+                    .programs
+                    .iter()
+                    .any(|p| format!("app:{}", p.id) == *spec)
+                {
+                    let label = format!("{} ({})", absent_label(spec), t(Key::SrcClosed));
+                    rows.push(program_row(spec.clone(), label, None));
+                }
+            }
+            if !rows.iter().any(|r| r.id.starts_with("src:app:")) {
+                rows.push(info("no_programs", t(Key::SrcNoPrograms), String::new()));
+            }
+        }
+        _ => {}
     }
 
     // ---- the microphone: a switch, then which one
@@ -1025,48 +1128,6 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
         channels
     });
 
-    // ---- the programs recorded on their own, then a button to add one of those open now
-    rows.push(header("h_programs"));
-    let program_of = |spec: &str| {
-        env.audio
-            .programs
-            .iter()
-            .find(|p| format!("app:{}", p.id) == spec)
-    };
-    for spec in chosen.iter().filter(|s| s.starts_with("app:")) {
-        let (label, icon) = program_of(spec).map_or_else(
-            || (absent_label(spec), None),
-            |p| (p.name.clone(), p.icon.clone()),
-        );
-        rows.push(program_row(spec.clone(), label, icon));
-    }
-    let offered: Vec<Opt> = env
-        .audio
-        .programs
-        .iter()
-        .map(|p| Opt {
-            value: format!("app:{}", p.id),
-            label: p.name.clone(),
-            icon: p.icon.clone(),
-        })
-        .filter(|o| !chosen.contains(&o.value))
-        .collect();
-    rows.push(row(
-        "add_program",
-        t(Key::SetAddProgram),
-        Kind::Add(offered),
-        Box::new(|_| Value::Text(String::new())),
-        Box::new(|c, v| match v {
-            Value::Text(spec) => {
-                let sources = &mut c.video.audio.sources;
-                if !sources.contains(&spec) {
-                    sources.push(spec);
-                }
-                Ok(())
-            }
-            _ => Err(Invalid),
-        }),
-    ));
     rows
 }
 

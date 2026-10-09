@@ -94,6 +94,42 @@ impl Drop for Handle {
     }
 }
 
+/// The audio settings with the recorded program in place of [`config::TARGET_SOURCE`]: the
+/// program in the foreground now (the full-screen game). Without one (the desktop, Vixeeny
+/// itself), all the PC sound.
+fn with_target(audio: &config::Audio) -> config::Audio {
+    let mut audio = audio.clone();
+    let wanted = |list: &[String]| list.iter().any(|s| s == config::TARGET_SOURCE);
+    if !wanted(&audio.sources) && !audio.tracks.iter().any(|t| wanted(&t.sources)) {
+        return audio;
+    }
+    let exe = vixeeny_platform::foreground_window()
+        .ok()
+        .flatten()
+        .and_then(|w| w.exe_path)
+        .and_then(|p| {
+            std::path::Path::new(&p)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+        })
+        .filter(|exe| {
+            let lower = exe.to_ascii_lowercase();
+            !lower.starts_with("vixeeny") && lower != "explorer.exe"
+        });
+    let source = exe.map_or_else(|| "system".to_owned(), |exe| format!("app:{exe}"));
+    tracing::info!("the recorded program's sound: {source}");
+    let swap = |list: &mut Vec<String>| {
+        for s in list.iter_mut().filter(|s| *s == config::TARGET_SOURCE) {
+            s.clone_from(&source);
+        }
+    };
+    swap(&mut audio.sources);
+    for track in &mut audio.tracks {
+        swap(&mut track.sources);
+    }
+    audio
+}
+
 /// The encoder a profile asks for: its own, or the best detected one for `auto`.
 fn choose_encoder<'a>(
     registry: &'a Registry,
@@ -259,7 +295,7 @@ fn plan(config: &Config, allow_gpu: bool, replay: bool) -> anyhow::Result<Plan> 
             .map(|(k, v)| (k.clone(), v.to_ffmpeg()))
             .collect()
     };
-    let (mut audio, unknown) = vixeeny_audio::plan_tracks(&profile.audio);
+    let (mut audio, unknown) = vixeeny_audio::plan_tracks(&with_target(&profile.audio));
     for name in unknown {
         tracing::warn!("unknown audio source `{name}` ignored");
     }

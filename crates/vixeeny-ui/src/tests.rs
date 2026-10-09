@@ -342,6 +342,13 @@ fn every_page_of_the_settings_renders() {
         let name = format!("9-page-{section:?}").to_lowercase();
         settings_render(&panel, &name);
     }
+    // The programs to record, ticked one by one.
+    panel.select_section(Section::Audio);
+    panel.window().invoke_row_chosen("audio_capture".into(), 3);
+    panel
+        .window()
+        .invoke_row_toggled("src:app:Spotify.exe".into(), true);
+    settings_render(&panel, "9-page-audio-programs");
     // The smallest window: nothing overlaps.
     panel.select_section(Section::General);
     settings_render_at(&panel, "9-page-smallest", (960, 640));

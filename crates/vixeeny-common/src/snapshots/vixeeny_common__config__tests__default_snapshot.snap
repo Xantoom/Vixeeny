@@ -107,6 +107,7 @@ mode = "off"
 
 [video.audio]
 routing = "one_track_per_source"
+capture = "system"
 sources = ["system"]
 codec = "auto"
 bitrate_kbps = 160

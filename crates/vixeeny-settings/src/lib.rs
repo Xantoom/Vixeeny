@@ -84,8 +84,6 @@ pub struct Opt {
     pub value: String,
     /// What the user reads.
     pub label: String,
-    /// A picture before the label (a program's icon).
-    pub icon: Option<Icon>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -93,12 +91,6 @@ pub enum Kind {
     Toggle,
     /// A drop-down list.
     Choice(Vec<Opt>),
-    /// A button that opens a list to pick from (a program to record); picking writes the
-    /// value of the option.
-    Add(Vec<Opt>),
-    /// Something that was added (a program to record), with a button to remove it: writing
-    /// `false` removes it.
-    Removable,
     Number {
         min: i64,
         max: i64,
@@ -162,13 +154,6 @@ impl Row {
                 }
                 Value::Text(t)
             }
-            (Kind::Add(options), Value::Text(t)) => {
-                if !options.iter().any(|o| o.value == t) {
-                    return Err(Invalid);
-                }
-                Value::Text(t)
-            }
-            (Kind::Removable, Value::Bool(false)) => Value::Bool(false),
             (Kind::Number { min, max, step } | Kind::Slider { min, max, step }, Value::Int(n)) => {
                 let step = (*step).max(1);
                 let snapped = (n.clamp(*min, *max) - min + step / 2) / step * step + min;
@@ -292,7 +277,6 @@ fn opt(value: &str, label: impl Into<String>) -> Opt {
     Opt {
         value: value.to_owned(),
         label: label.into(),
-        icon: None,
     }
 }
 
@@ -542,6 +526,7 @@ fn problem_text(kind: &vixeeny_encode::validate::IssueKind, lang: Lang) -> Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vixeeny_common::config::TARGET_SOURCE;
 
     fn env() -> Env {
         Env::new(Lang::En, "1.2.3")
@@ -571,7 +556,7 @@ mod tests {
             assert_eq!(ids.len(), rows.len(), "{section:?}");
             for row in rows
                 .iter()
-                .filter(|r| !matches!(r.kind, Kind::Info | Kind::Header | Kind::Add(_)))
+                .filter(|r| !matches!(r.kind, Kind::Info | Kind::Header))
             {
                 let mut copy = config.clone();
                 let value = row.value(&config);
@@ -928,7 +913,7 @@ mod tests {
     }
 
     #[test]
-    fn audio_sources_are_ticked_one_by_one() {
+    fn the_sound_to_record_is_one_choice_and_the_microphone_another() {
         let mut c = Config::default();
         let e = env().with_audio(AudioDevices {
             outputs: vec![AudioEntry {
@@ -948,8 +933,9 @@ mod tests {
             }],
         });
         let audio = rows(Section::Audio, &e, &c);
-        // The profile records the PC sound; the microphone is off, its choice greyed out.
-        assert_eq!(row(&audio, "src:system").value(&c), Value::Bool(true));
+        // All the PC sound; the microphone is off, its choice greyed out.
+        let capture = |c: &Config| row(&rows(Section::Audio, &e, c), "audio_capture").value(c);
+        assert_eq!(capture(&c), Value::Text("system".into()));
         assert_eq!(row(&audio, "mic_on").value(&c), Value::Bool(false));
         assert!(!row(&audio, "mic_device").enabled(&c));
         // On: the Windows default, then the one picked.
@@ -957,7 +943,6 @@ mod tests {
             .apply(&mut c, Value::Bool(true))
             .unwrap();
         assert_eq!(c.video.audio.sources, ["system", "mic"]);
-        assert!(row(&audio, "mic_device").enabled(&c));
         match &row(&audio, "mic_device").kind {
             Kind::Choice(o) => assert_eq!(
                 o.iter().map(|o| o.label.as_str()).collect::<Vec<_>>(),
@@ -968,42 +953,46 @@ mod tests {
         row(&audio, "mic_device")
             .apply(&mut c, Value::Text("mic:{in-1}".into()))
             .unwrap();
-        // A program is added from the list of those open, then shown with a remove button.
-        let Kind::Add(offered) = &row(&audio, "add_program").kind else {
-            panic!("add_program is a list to pick from")
+        // The recorded program: the microphone stays.
+        let set = |c: &mut Config, mode: &str| {
+            row(&rows(Section::Audio, &e, c), "audio_capture")
+                .apply(c, Value::Text(mode.into()))
+                .unwrap();
         };
-        assert_eq!(offered[0].label, "Spotify");
-        row(&audio, "add_program")
-            .apply(&mut c, Value::Text("app:spotify.exe".into()))
-            .unwrap();
+        set(&mut c, "target");
+        assert_eq!(c.video.audio.sources, ["mic:{in-1}", TARGET_SOURCE]);
+        // One output: the first device, then the one picked.
+        set(&mut c, "output");
+        assert_eq!(c.video.audio.sources, ["mic:{in-1}", "out:{out-1}"]);
         let audio = rows(Section::Audio, &e, &c);
-        assert!(matches!(
-            row(&audio, "src:app:spotify.exe").kind,
-            Kind::Removable
-        ));
-        assert!(
-            matches!(&row(&audio, "add_program").kind, Kind::Add(o) if o.is_empty()),
-            "an added program is not offered again"
+        assert_eq!(
+            row(&audio, "audio_output").value(&c),
+            Value::Text("out:{out-1}".into())
         );
-        row(&audio, "src:system")
-            .apply(&mut c, Value::Bool(false))
+        // Chosen programs: ticked one by one; none ticked is still that choice.
+        set(&mut c, "programs");
+        assert_eq!(c.video.audio.sources, ["mic:{in-1}"]);
+        assert_eq!(capture(&c), Value::Text("programs".into()));
+        let audio = rows(Section::Audio, &e, &c);
+        assert_eq!(row(&audio, "src:app:spotify.exe").label, "Spotify");
+        row(&audio, "src:app:spotify.exe")
+            .apply(&mut c, Value::Bool(true))
             .unwrap();
         assert_eq!(c.video.audio.sources, ["mic:{in-1}", "app:spotify.exe"]);
+        // A ticked program that is closed now stays listed.
+        c.video.audio.sources.push("app:game.exe".into());
+        let audio = rows(Section::Audio, &e, &c);
+        assert_eq!(row(&audio, "src:app:game.exe").label, "game.exe (closed)");
         // Off removes the microphone, whichever it was.
         row(&audio, "mic_on")
             .apply(&mut c, Value::Bool(false))
             .unwrap();
-        assert_eq!(c.video.audio.sources, ["app:spotify.exe"]);
-        // A program that is not open now stays listed, so it can be removed.
-        c.video.audio.sources.push("app:closed.exe".into());
-        c.video.audio.sources.push("out:{out-1}".into());
-        let audio = rows(Section::Audio, &e, &c);
-        assert_eq!(row(&audio, "src:app:closed.exe").label, "closed.exe");
-        row(&audio, "src:app:closed.exe")
-            .apply(&mut c, Value::Bool(false))
-            .unwrap();
-        assert!(!c.video.audio.sources.contains(&"app:closed.exe".into()));
-        assert_eq!(row(&audio, "src:out:{out-1}").label, "Headset");
+        assert_eq!(c.video.audio.sources, ["app:spotify.exe", "app:game.exe"]);
+        // Older settings without the field: read from their sources.
+        let mut old = Config::default();
+        old.video.audio.sources = vec!["mic".into()];
+        old.video.audio.capture = "system".into();
+        assert_eq!(capture(&old), Value::Text("none".into()));
     }
 
     #[test]

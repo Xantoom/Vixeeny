@@ -7,18 +7,11 @@
 import { Theme, Icons, Icon, Button, IconButton, Toggle, TextBox, ComboBox, NumberBox, Slider, NavItem, Group, GroupRow, InfoBar, ScrollArea, ProgressBar } from "controls.slint";
 
 // A choice of a list with pictures (a program to record).
-export struct MenuOption {
-    label: string,
-    icon: image,
-    has-icon: bool,
-}
-
 export struct SettingRow {
     id: string,
     label: string,
     hint: string,
-    // 0 toggle, 1 choice, 2 number, 3 text, 4 folder, 5 info, 8 slider,
-    // 10 add (a list to pick from), 11 removable
+    // 0 toggle, 1 choice, 2 number, 3 text, 4 folder, 5 info, 8 slider
     kind: int,
     enabled: bool,
     on: bool,
@@ -30,7 +23,6 @@ export struct SettingRow {
     options: [string],
     selected: int,
     // The choices of an "add" row.
-    items: [MenuOption],
     // A picture before the label (a program's icon).
     icon: image,
     has-icon: bool,
@@ -74,7 +66,6 @@ export struct UiTexts {
     show: string,
     remove: string,
     add-shortcut: string,
-    no-programs: string,
     press-keys: string,
     keys-help: string,
     restart: string,
@@ -99,14 +90,11 @@ component SettingLine inherits GroupRow {
     icon: root.entry.icon;
     has-icon: root.entry.has-icon;
     unfold: root.entry.fresh && root.animated;
-    glyph: root.entry.kind == 10 ? Icons.add : (root.entry.kind == 4 ? Icons.folder : "");
+    glyph: root.entry.kind == 4 ? Icons.folder : "";
     dimmed: !root.entry.enabled && root.entry.kind != 5;
     stack-under: root.entry.kind == 3 ? 620px : 500px;
-    clickable: (root.entry.kind == 0 || root.entry.kind == 10) && root.entry.enabled;
-    clicked => {
-        if root.entry.kind == 0 { root.toggled(!root.entry.on); }
-        if root.entry.kind == 10 { list.show(); }
-    }
+    clickable: root.entry.kind == 0 && root.entry.enabled;
+    clicked => { root.toggled(!root.entry.on); }
 
     if root.entry.kind == 0 : Toggle {
         on: root.entry.on;
@@ -167,83 +155,6 @@ component SettingLine inherits GroupRow {
         horizontal-alignment: right;
         vertical-alignment: center;
         wrap: word-wrap;
-    }
-    if root.entry.kind == 10 : Icon {
-        data: Icons.chevron-down;
-        tint: Theme.text-2;
-        size: 12px;
-    }
-    if root.entry.kind == 11 : IconButton {
-        icon: Icons.dismiss;
-        label: root.t.remove;
-        clicked => { root.toggled(false); }
-    }
-
-    // The list of an "add" row: under the row, or above it near the bottom of the window.
-    property <length> list-h: min(max(1, root.entry.items.length) * 40px + 8px, 328px);
-    list := PopupWindow {
-        x: root.width - self.width;
-        y: root.absolute-position.y + root.height + 4px + self.height > root.view-h
-            ? -self.height - 4px : root.height + 4px;
-        width: min(320px, root.width);
-        height: root.list-h;
-        Rectangle {
-            width: parent.width;
-            // Unfolds when it opens.
-            property <bool> open: false;
-            height: self.open ? parent.height : 0px;
-            opacity: self.open ? 1 : 0;
-            clip: true;
-            animate height, opacity { duration: Theme.t-normal; easing: cubic-bezier(0.2, 0, 0, 1); }
-            Timer { interval: 16ms; running: !parent.open; triggered => { parent.open = true; } }
-            background: Theme.flyout;
-            border-radius: Theme.radius-flyout;
-            border-width: 1px;
-            border-color: Theme.stroke-strong;
-            drop-shadow-blur: 24px;
-            drop-shadow-color: #00000050;
-            drop-shadow-offset-y: 6px;
-            if root.entry.items.length == 0 : Text {
-                x: 16px;
-                width: parent.width - 32px;
-                text: root.t.no-programs;
-                color: Theme.text-2;
-                font-size: 13px;
-                vertical-alignment: center;
-            }
-            Flickable {
-                content-height: root.entry.items.length * 40px + 8px;
-                for item[i] in root.entry.items : Rectangle {
-                    x: 4px;
-                    y: 4px + i * 40px;
-                    width: parent.width - 8px;
-                    height: 38px;
-                    border-radius: Theme.radius;
-                    background: pick.pressed ? Theme.subtle-pressed : (pick.has-hover ? Theme.subtle-hover : transparent);
-                    animate background { duration: Theme.t-fast; }
-                    if item.has-icon : Image {
-                        x: 10px;
-                        y: (parent.height - self.height) / 2;
-                        width: 20px;
-                        height: 20px;
-                        source: item.icon;
-                    }
-                    Text {
-                        x: 40px;
-                        width: parent.width - 48px;
-                        text: item.label;
-                        color: Theme.text;
-                        font-size: 14px;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
-                    pick := TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => { root.chosen(i); list.close(); }
-                    }
-                }
-            }
-        }
     }
 }
 

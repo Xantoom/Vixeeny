@@ -490,6 +490,10 @@ impl Default for Split {
 #[serde(default)]
 pub struct Audio {
     pub routing: String,
+    /// What is recorded besides the microphone: `system`, `target` (the program in the
+    /// foreground when the recording starts), `output`, `programs` or `none`. `sources` holds
+    /// the matching sources.
+    pub capture: String,
     pub sources: Vec<String>,
     /// `auto` = Opus beside AV1 (and VP9, and in WebM), else AAC.
     pub codec: String,
@@ -506,6 +510,9 @@ pub struct Audio {
     pub tracks: Vec<AudioTrack>,
 }
 
+/// The audio source that stands for the program in the foreground when the recording starts.
+pub const TARGET_SOURCE: &str = "app:@target";
+
 /// A track of the advanced routing: a name and the sources mixed into it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default)]
@@ -518,6 +525,7 @@ impl Default for Audio {
     fn default() -> Self {
         Self {
             routing: "one_track_per_source".into(),
+            capture: "system".into(),
             sources: vec!["system".into()],
             codec: "auto".into(),
             bitrate_kbps: 160,

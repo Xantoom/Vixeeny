@@ -18,8 +18,7 @@ use vixeeny_settings::{
 
 use crate::theme::{self, Look};
 use crate::{
-    LineItem, MenuOption, SettingGroup, SettingRow, SettingsWindow, ShortcutKey, ShortcutRow,
-    UiTexts,
+    LineItem, SettingGroup, SettingRow, SettingsWindow, ShortcutKey, ShortcutRow, UiTexts,
 };
 
 /// One line of the about page.
@@ -248,7 +247,6 @@ fn ui_texts(lang: Lang) -> UiTexts {
         show: t(Key::UiShow),
         remove: t(Key::UiRemove),
         add_shortcut: t(Key::UiAddShortcut),
-        no_programs: t(Key::SrcNoPrograms),
         press_keys: t(Key::UiPressKeys),
         no_shortcut: t(Key::UiNoShortcut),
         keys_help: t(Key::UiKeysHelp),
@@ -293,7 +291,6 @@ fn grouped(rows: &[Row], config: &Config) -> Vec<Vec<SettingRow>> {
 /// The same row as far as the eye can tell (the option lists compared by content).
 fn same_row(a: &SettingRow, b: &SettingRow) -> bool {
     let options = |r: &SettingRow| r.options.iter().collect::<Vec<_>>();
-    let items = |r: &SettingRow| r.items.iter().map(|i| i.label).collect::<Vec<_>>();
     a.id == b.id
         && a.label == b.label
         && a.hint == b.hint
@@ -308,7 +305,6 @@ fn same_row(a: &SettingRow, b: &SettingRow) -> bool {
         && a.selected == b.selected
         && a.has_icon == b.has_icon
         && options(a) == options(b)
-        && items(a) == items(b)
 }
 
 /// Shows `groups`. When the page keeps its shape (same groups, same rows) only the rows that
@@ -398,7 +394,6 @@ fn row_model(row: &Row, config: &Config) -> SettingRow {
         step: 1,
         options: ModelRc::default(),
         selected: -1,
-        items: ModelRc::default(),
         has_icon: row.icon.is_some(),
         fresh: false,
         icon: picture(row.icon.as_ref()),
@@ -408,19 +403,6 @@ fn row_model(row: &Row, config: &Config) -> SettingRow {
             out.kind = 0;
             out.on = b;
         }
-        (Kind::Add(options), _) => {
-            out.kind = 10;
-            let items: Vec<MenuOption> = options
-                .iter()
-                .map(|o| MenuOption {
-                    label: o.label.as_str().into(),
-                    has_icon: o.icon.is_some(),
-                    icon: picture(o.icon.as_ref()),
-                })
-                .collect();
-            out.items = ModelRc::from(Rc::new(VecModel::from(items)));
-        }
-        (Kind::Removable, _) => out.kind = 11,
         (Kind::Choice(options), Value::Text(t)) => {
             out.kind = 1;
             out.selected = options
@@ -1067,7 +1049,7 @@ impl SettingsPanel {
                     .iter()
                     .find(|r| r.id == id.as_str())
                     .and_then(|r| match &r.kind {
-                        Kind::Choice(options) | Kind::Add(options) => {
+                        Kind::Choice(options) => {
                             options.get(index as usize).map(|o| o.value.clone())
                         }
                         _ => None,
