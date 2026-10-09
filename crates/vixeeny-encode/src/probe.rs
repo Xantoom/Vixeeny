@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Hardware probing (plan 6.3). The driver of every GPU is asked what its video encoder can do
-//! (codecs, 10-bit, 4:2:2 / 4:4:4, largest picture): nothing is encoded, so the GPU is left
-//! alone. Only a driver that cannot answer (a runtime older than the query) gets trial sessions
-//! instead: one per declared pixel format (256×256, then 3840×2160, with and without HDR).
-//! Software encoders always get a trial session (it only takes the CPU). The work is done by a
+//! (codecs, 10-bit, 4:2:2 / 4:4:4, largest picture). Nothing is ever encoded: no heavy work
+//! happens outside a recording. A GPU whose driver cannot answer offers no hardware encoder;
+//! software encoders built into FFmpeg offer what the registry declares. The work is done by a
 //! [`Prober`], so it can be tested with fake adapters; the real one is `ffmpeg_probe`.
 //!
 //! The probe runs in a child process (`vixeeny-app --probe`, see [`run_child`]) so that a driver
@@ -16,9 +15,8 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-use crate::registry::{Chroma, Encoder, Family, Kind, PixelFormatSpec, Registry, Vendor};
+use crate::registry::{Chroma, Encoder, Family, PixelFormatSpec, Registry, Vendor};
 
-pub const SMALL: (u32, u32) = (256, 256);
 pub const UHD: (u32, u32) = (3840, 2160);
 
 /// A GPU.
@@ -112,17 +110,8 @@ pub trait Prober {
     /// Whether FFmpeg has `encoder` built in.
     fn built_in(&self, encoder: &Encoder) -> bool;
     /// The encoders of `adapter`'s GPU as its driver describes them, one entry per codec. `Err`
-    /// when the driver cannot be asked: the probe then opens trial sessions.
+    /// when the driver cannot be asked.
     fn driver_caps(&self, adapter: &Adapter) -> Result<Vec<DriverCaps>, String>;
-    /// Opens a trial session and encodes one frame. `adapter` is the GPU to use, if any.
-    fn try_open(
-        &self,
-        encoder: &Encoder,
-        adapter: Option<&Adapter>,
-        format: &PixelFormatSpec,
-        size: (u32, u32),
-        hdr: bool,
-    ) -> Result<(), String>;
 }
 
 /// The GPUs an encoder can run on.
@@ -157,51 +146,24 @@ fn described_formats(encoder: &Encoder, caps: &[DriverCaps]) -> Vec<FormatProbe>
         .collect()
 }
 
-/// Trial sessions, for software encoders and drivers that cannot describe themselves.
-fn tried_formats(
-    encoder: &Encoder,
-    adapter: Option<&Adapter>,
-    prober: &dyn Prober,
-) -> Vec<FormatProbe> {
-    let hardware = encoder.kind == Kind::Hardware;
-    let mut out = Vec::new();
-    for format in &encoder.pixel_formats {
-        if prober
-            .try_open(encoder, adapter, format, SMALL, false)
-            .is_err()
-        {
-            continue;
-        }
-        // Software encoders are not tried at 4K (slow, and size-independent).
-        let uhd = !hardware
-            || prober
-                .try_open(encoder, adapter, format, UHD, false)
-                .is_ok();
-        let hdr = encoder.hdr
-            && format.depth >= 10
-            && prober
-                .try_open(
-                    encoder,
-                    adapter,
-                    format,
-                    if uhd { UHD } else { SMALL },
-                    true,
-                )
-                .is_ok();
-        out.push(FormatProbe {
-            depth: format.depth,
-            chroma: format.chroma,
-            uhd,
-            hdr,
-        });
-    }
-    out
+/// A software encoder: what the registry declares (`cargo xtask verify-registry` checks it
+/// against FFmpeg), at any size.
+fn declared_formats(encoder: &Encoder) -> Vec<FormatProbe> {
+    encoder
+        .pixel_formats
+        .iter()
+        .map(|f| FormatProbe {
+            depth: f.depth,
+            chroma: f.chroma,
+            uhd: true,
+            hdr: encoder.hdr && f.depth >= 10,
+        })
+        .collect()
 }
 
-/// What the answer of the probe depends on besides the machine: the way it tries the encoders
-/// (bump [`PROBE_REVISION`] when that changes), the encoders it tries (the registry) and the
-/// FFmpeg it tries them with. A new version of Vixeeny that changes none of them keeps the
-/// cache: the probe (a few seconds of encoder sessions on the GPU) does not run again.
+/// What the answer of the probe depends on besides the machine: the way it probes (bump
+/// [`PROBE_REVISION`] when that changes), the encoders it knows (the registry) and the FFmpeg
+/// they are built into. A new version of Vixeeny that changes none of them keeps the cache.
 pub fn identity() -> String {
     // FNV-1a: stable from one build to the next, unlike the standard hasher.
     let registry = crate::registry::REGISTRY
@@ -215,7 +177,7 @@ pub fn identity() -> String {
 }
 
 /// The way the probe works: bumped when a change of it must run it again everywhere.
-pub const PROBE_REVISION: u32 = 2;
+pub const PROBE_REVISION: u32 = 3;
 
 /// Probes every encoder. `version` is what the answer depends on besides the machine (see
 /// [`identity`]), part of the cache key.
@@ -240,12 +202,12 @@ pub fn probe(registry: &Registry, prober: &dyn Prober, version: &str) -> ProbeRe
             continue;
         }
         for adapter in candidate_adapters(encoder, &adapters) {
-            let caps = adapter
-                .and_then(|a| adapters.iter().position(|b| b == a))
-                .map(|i| &described[i]);
-            let formats = match caps {
-                Some(Ok(caps)) => described_formats(encoder, caps),
-                _ => tried_formats(encoder, adapter, prober),
+            let formats = match adapter {
+                None => declared_formats(encoder),
+                Some(a) => match adapters.iter().position(|b| b == a).map(|i| &described[i]) {
+                    Some(Ok(caps)) => described_formats(encoder, caps),
+                    _ => Vec::new(),
+                },
             };
             if !formats.is_empty() {
                 encoders.push(EncoderProbe {

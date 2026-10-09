@@ -5,13 +5,12 @@ use std::ffi::{CStr, CString, c_void};
 use std::str::FromStr;
 
 use ffmpeg_next::format::Pixel;
-use ffmpeg_next::{Dictionary, Packet, Rational, codec, color, encoder, ffi, frame};
+use ffmpeg_next::{encoder, ffi};
 
 use crate::probe::{Adapter, DriverCaps, Prober};
-use crate::registry::{Encoder, Kind, ParamType, PixelFormatSpec, Registry};
+use crate::registry::{Encoder, Kind, ParamType, Registry};
 
-/// Asks the GPU drivers what their encoders can do; opens trial sessions with the encoders of the
-/// linked FFmpeg for the rest.
+/// Asks the GPU drivers what their encoders can do, and the linked FFmpeg which encoders it has.
 pub struct FfmpegProber {
     adapters: Vec<Adapter>,
 }
@@ -20,8 +19,6 @@ impl FfmpegProber {
     /// `adapters` come from the OS (`vixeeny_platform::gpu_adapters`).
     pub fn new(adapters: Vec<Adapter>) -> Self {
         let _ = ffmpeg_next::init();
-        // Trial sessions are noisy and their failures are the point.
-        ffmpeg_next::log::set_level(ffmpeg_next::log::Level::Quiet);
         Self { adapters }
     }
 }
@@ -47,48 +44,6 @@ impl Prober for FfmpegProber {
     #[cfg(not(windows))]
     fn driver_caps(&self, _adapter: &Adapter) -> Result<Vec<DriverCaps>, String> {
         Err("no capability query on this system".into())
-    }
-
-    fn try_open(
-        &self,
-        encoder: &Encoder,
-        adapter: Option<&Adapter>,
-        format: &PixelFormatSpec,
-        size: (u32, u32),
-        hdr: bool,
-    ) -> Result<(), String> {
-        let codec = encoder::find_by_name(&encoder.ffmpeg_encoder)
-            .ok_or_else(|| format!("{} is not built in", encoder.ffmpeg_encoder))?;
-        let pix = pixel(&format.ffmpeg)?;
-        let mut ctx = codec::context::Context::new_with_codec(codec)
-            .encoder()
-            .video()
-            .map_err(|e| e.to_string())?;
-        ctx.set_width(size.0);
-        ctx.set_height(size.1);
-        ctx.set_format(pix);
-        ctx.set_time_base(Rational(1, 60));
-        ctx.set_frame_rate(Some(Rational(60, 1)));
-        ctx.set_max_b_frames(0);
-        if hdr {
-            ctx.set_color_primaries(color::Primaries::BT2020);
-            ctx.set_color_transfer_characteristic(color::TransferCharacteristic::SMPTE2084);
-            ctx.set_colorspace(color::Space::BT2020NCL);
-        }
-        let mut options = Dictionary::new();
-        if let (Some(adapter), true) = (adapter, encoder.vendor == crate::registry::Vendor::Nvidia)
-        {
-            options.set("gpu", &adapter.index.to_string());
-        }
-        let mut opened = ctx.open_with(options).map_err(|e| e.to_string())?;
-        let mut frame = frame::Video::new(pix, size.0, size.1);
-        frame.set_pts(Some(0));
-        opened.send_frame(&frame).map_err(|e| e.to_string())?;
-        opened.send_eof().map_err(|e| e.to_string())?;
-        let mut packet = Packet::empty();
-        opened
-            .receive_packet(&mut packet)
-            .map_err(|e| format!("no packet: {e}"))
     }
 }
 

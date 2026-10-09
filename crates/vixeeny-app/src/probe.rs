@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Hardware encoder probe (plan 6.3). `vixeeny-app --probe` is the child process that asks the
-//! GPU drivers what their encoders can do and prints the result as TOML; `--probe-report` runs it (through the cache)
-//! and prints a readable report, for the 🧪 check against the vendor documentation.
+//! GPU drivers what their encoders can do and prints the result as TOML; `--probe-report` runs
+//! it (through the cache) and prints a readable report, for the 🧪 check against the vendor
+//! documentation.
 
 use std::time::Duration;
 
@@ -96,7 +97,7 @@ pub fn report(force: bool) -> anyhow::Result<()> {
             }
         );
     }
-    println!("\nEncoders that opened a session:");
+    println!("\nEncoders:");
     let registry = Registry::builtin()?;
     for e in &result.encoders {
         let name = registry
