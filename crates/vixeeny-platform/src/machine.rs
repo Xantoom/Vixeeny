@@ -4,7 +4,8 @@
 //! out rather than failing the rest.
 
 use windows::Win32::Devices::Display::{
-    DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME, DISPLAYCONFIG_MODE_INFO, DISPLAYCONFIG_PATH_INFO,
+    DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME, DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
+    DISPLAYCONFIG_MODE_INFO, DISPLAYCONFIG_PATH_INFO, DISPLAYCONFIG_SOURCE_DEVICE_NAME,
     DISPLAYCONFIG_TARGET_DEVICE_NAME, DisplayConfigGetDeviceInfo, GetDisplayConfigBufferSizes,
     QDC_ONLY_ACTIVE_PATHS, QueryDisplayConfig,
 };
@@ -17,18 +18,21 @@ use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory1, DXGI_ADAPTER_FLAG_SOFTWARE, IDXGIAdapter1, IDXGIFactory1,
 };
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+    CreateFileW, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE, GetDiskFreeSpaceExW,
+    GetDriveTypeW, GetLogicalDrives, GetVolumeInformationW, OPEN_EXISTING,
 };
 use windows::Win32::System::IO::DeviceIoControl;
 use windows::Win32::System::Ioctl::{
-    DISK_GEOMETRY_EX, IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, IOCTL_STORAGE_QUERY_PROPERTY,
-    PropertyStandardQuery, STORAGE_DEVICE_DESCRIPTOR, STORAGE_PROPERTY_QUERY,
-    StorageDeviceProperty,
+    DISK_GEOMETRY_EX, IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, IOCTL_STORAGE_GET_DEVICE_NUMBER,
+    IOCTL_STORAGE_QUERY_PROPERTY, PropertyStandardQuery, STORAGE_DEVICE_DESCRIPTOR,
+    STORAGE_DEVICE_NUMBER, STORAGE_PROPERTY_QUERY, StorageDeviceProperty,
 };
 use windows::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RegGetValueW};
 use windows::Win32::System::SystemInformation::{
-    GetLogicalProcessorInformationEx, GetPhysicallyInstalledSystemMemory, RelationProcessorCore,
+    GetLogicalProcessorInformationEx, GetPhysicallyInstalledSystemMemory, GlobalMemoryStatusEx,
+    MEMORYSTATUSEX, RelationProcessorCore,
 };
+use windows::Win32::System::WindowsProgramming::DRIVE_FIXED;
 use windows::core::{HSTRING, PCWSTR, w};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -57,14 +61,25 @@ pub struct Gpu {
     pub memory_bytes: u64,
 }
 
+/// A drive letter on a fixed disk.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Disk {
+    /// `C:`.
+    pub letter: String,
+    /// The name given to the volume (often empty).
+    pub label: String,
+    /// The model of the disk the volume is on (empty when it cannot be read).
     pub model: String,
     pub bytes: u64,
+    pub free_bytes: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Screen {
+    /// 1, 2, 3... in the order of Windows' display numbers.
+    pub number: u32,
+    /// The main screen (the taskbar's, at the origin of the desktop).
+    pub primary: bool,
     pub name: String,
     pub width: u32,
     pub height: u32,
@@ -157,6 +172,17 @@ pub fn ram_bytes() -> u64 {
     }
 }
 
+/// The memory free right now, in bytes (`None` when it cannot be read).
+pub fn free_ram_bytes() -> Option<u64> {
+    let mut status = MEMORYSTATUSEX {
+        dwLength: size_of::<MEMORYSTATUSEX>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: `status` is a valid structure with its length set.
+    unsafe { GlobalMemoryStatusEx(&raw mut status) }.ok()?;
+    Some(status.ullAvailPhys)
+}
+
 fn gpus() -> Vec<Gpu> {
     // SAFETY: plain DXGI enumeration; every interface is released when dropped.
     let Ok(factory) = (unsafe { CreateDXGIFactory1::<IDXGIFactory1>() }) else {
@@ -214,12 +240,103 @@ fn shares_memory(adapter: &IDXGIAdapter1) -> Option<bool> {
     Some(data.UMA.as_bool())
 }
 
+/// The letters of the fixed disks, with their sizes and the model of the disk under them.
 fn disks() -> Vec<Disk> {
-    (0..32).filter_map(disk).collect()
+    // SAFETY: no arguments.
+    let mask = unsafe { GetLogicalDrives() };
+    (0..26u8)
+        .filter(|i| mask & (1 << i) != 0)
+        .filter_map(|i| volume(char::from(b'A' + i)))
+        .collect()
 }
 
-/// `\\.\PhysicalDriveN`, opened without read access (no administrator rights needed).
-fn disk(n: u32) -> Option<Disk> {
+fn volume(letter: char) -> Option<Disk> {
+    let root = HSTRING::from(format!(r"{letter}:\"));
+    // SAFETY: a NUL-terminated path.
+    if unsafe { GetDriveTypeW(PCWSTR(root.as_ptr())) } != DRIVE_FIXED {
+        return None;
+    }
+    let (mut total, mut free) = (0u64, 0u64);
+    // SAFETY: valid out-pointers.
+    unsafe {
+        GetDiskFreeSpaceExW(
+            PCWSTR(root.as_ptr()),
+            None,
+            Some(&raw mut total),
+            Some(&raw mut free),
+        )
+    }
+    .ok()?;
+    let mut name = [0u16; 261];
+    // SAFETY: `name` is a writable buffer; the other outputs are not asked for.
+    let label = unsafe {
+        GetVolumeInformationW(
+            PCWSTR(root.as_ptr()),
+            Some(&mut name),
+            None,
+            None,
+            None,
+            None,
+        )
+    }
+    .map_or_else(
+        |_| String::new(),
+        |()| {
+            let len = name.iter().position(|c| *c == 0).unwrap_or(0);
+            String::from_utf16_lossy(&name[..len])
+        },
+    );
+    let model = disk_number(letter)
+        .and_then(physical_disk)
+        .map(|(model, _)| model)
+        .unwrap_or_default();
+    Some(Disk {
+        letter: format!("{letter}:"),
+        label,
+        model,
+        bytes: total,
+        free_bytes: free,
+    })
+}
+
+/// The physical disk a volume is on (`\\.\C:`, opened without read access).
+fn disk_number(letter: char) -> Option<u32> {
+    let path = HSTRING::from(format!(r"\\.\{letter}:"));
+    // SAFETY: a NUL-terminated path; the handle is closed below.
+    let handle = unsafe {
+        CreateFileW(
+            PCWSTR(path.as_ptr()),
+            0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAGS_AND_ATTRIBUTES(0),
+            None,
+        )
+    }
+    .ok()?;
+    let mut number = STORAGE_DEVICE_NUMBER::default();
+    // SAFETY: the output buffer is passed with its size and outlives the call.
+    let asked = unsafe {
+        DeviceIoControl(
+            handle,
+            IOCTL_STORAGE_GET_DEVICE_NUMBER,
+            None,
+            0,
+            Some((&raw mut number).cast()),
+            size_of::<STORAGE_DEVICE_NUMBER>() as u32,
+            None,
+            None,
+        )
+    };
+    // SAFETY: the handle was opened above.
+    let _ = unsafe { CloseHandle(handle) };
+    asked.ok().map(|()| number.DeviceNumber)
+}
+
+/// `\\.\PhysicalDriveN`, opened without read access (no administrator rights needed): its
+/// model and size.
+fn physical_disk(n: u32) -> Option<(String, u64)> {
     let path = HSTRING::from(format!(r"\\.\PhysicalDrive{n}"));
     // SAFETY: a NUL-terminated path; the handle is closed below.
     let handle = unsafe {
@@ -307,7 +424,7 @@ fn disk(n: u32) -> Option<Disk> {
             format!("{vendor} {product}")
         }
     });
-    Some(Disk { model, bytes })
+    Some((model, bytes))
 }
 
 fn screens() -> Vec<Screen> {
@@ -340,7 +457,7 @@ fn screens() -> Vec<Screen> {
         return Vec::new();
     }
     paths.truncate(paths_len as usize);
-    paths
+    let mut screens: Vec<(u32, Screen)> = paths
         .iter()
         .filter_map(|path| {
             let target = &path.targetInfo;
@@ -368,12 +485,46 @@ fn screens() -> Vec<Screen> {
             } else {
                 (f64::from(rate.Numerator) / f64::from(rate.Denominator)).round() as u32
             };
-            Some(Screen {
-                name: String::from_utf16_lossy(&name.monitorFriendlyDeviceName[..len]),
-                width: source.width,
-                height: source.height,
-                hz,
-            })
+            // `\\.\DISPLAY2`: the number Windows gives the screen.
+            let mut gdi = DISPLAYCONFIG_SOURCE_DEVICE_NAME::default();
+            gdi.header.r#type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
+            gdi.header.size = size_of::<DISPLAYCONFIG_SOURCE_DEVICE_NAME>() as u32;
+            gdi.header.adapterId = path.sourceInfo.adapterId;
+            gdi.header.id = path.sourceInfo.id;
+            // SAFETY: `gdi` starts with its header, whose size field is set.
+            let _ = unsafe { DisplayConfigGetDeviceInfo(&raw mut gdi.header) };
+            let gdi_len = gdi
+                .viewGdiDeviceName
+                .iter()
+                .position(|c| *c == 0)
+                .unwrap_or(0);
+            let gdi_name = String::from_utf16_lossy(&gdi.viewGdiDeviceName[..gdi_len]);
+            let order = gdi_name
+                .trim_start_matches(|c: char| !c.is_ascii_digit())
+                .parse()
+                .unwrap_or(u32::MAX);
+            Some((
+                order,
+                Screen {
+                    number: 0,
+                    primary: source.position.x == 0 && source.position.y == 0,
+                    name: String::from_utf16_lossy(&name.monitorFriendlyDeviceName[..len]),
+                    width: source.width,
+                    height: source.height,
+                    hz,
+                },
+            ))
+        })
+        .collect();
+    // A screen shown on two outputs (duplicated) is one screen.
+    screens.sort_by_key(|(order, _)| *order);
+    screens.dedup_by_key(|(order, _)| *order);
+    screens
+        .into_iter()
+        .enumerate()
+        .map(|(i, (_, screen))| Screen {
+            number: i as u32 + 1,
+            ..screen
         })
         .collect()
 }

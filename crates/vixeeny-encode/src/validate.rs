@@ -26,14 +26,12 @@ pub enum IssueKind {
         container: Container,
     },
     UnknownChroma(String),
-    BadDepth(u8),
     FormatNotSupported {
         depth: u8,
         chroma: Chroma,
     },
     UnknownHdrSetting(String),
     HdrNeedsHevcOrAv1,
-    HdrNeeds10Bit,
     HdrContainer(Container),
     HdrNotSupported,
     /// Variable frame rate needs Matroska or WebM.
@@ -98,12 +96,60 @@ pub fn output_size(setting: &str, source: (u32, u32)) -> Option<(u32, u32)> {
     }
     if let Some(lines) = setting.strip_suffix('p') {
         let h: u32 = lines.parse().ok().filter(|h| *h > 0)?;
-        let w = (u64::from(source.0) * u64::from(h) / u64::from(source.1.max(1))) as u32;
-        return Some((w.max(2) & !1, h & !1));
+        // To the nearest even width (854 × 480 for 16:9).
+        let w = (u64::from(source.0) * u64::from(h) + u64::from(source.1.max(1)))
+            / (2 * u64::from(source.1.max(1)))
+            * 2;
+        return Some(((w as u32).max(2), h & !1));
     }
     let (w, h) = setting.split_once('x')?;
     let (w, h): (u32, u32) = (w.parse().ok()?, h.parse().ok()?);
     (w > 0 && h > 0).then_some((w, h))
+}
+
+/// The bit depth a recording gets: 10 bits for HDR, and for HEVC and AV1 whenever the encoder
+/// (and, for a hardware one, the GPU) can (finer gradients, no banding, and a few percent
+/// smaller at the same quality; every HEVC and AV1 decoder of the last years plays it). H.264
+/// and VP9 stay 8-bit: their 10-bit profiles play almost nowhere in hardware.
+pub fn depth(encoder: &Encoder, chroma: Chroma, hdr: bool, probe: Option<&ProbeResult>) -> u8 {
+    if hdr {
+        return 10;
+    }
+    let can = matches!(encoder.family, Family::Hevc | Family::Av1)
+        && encoder.supports_format(10, chroma)
+        && (encoder.kind == Kind::Software
+            || probe.is_none_or(|p| p.supports(&encoder.id, 10, chroma, false)));
+    if can { 10 } else { 8 }
+}
+
+/// An `aspect` setting: `source` (`None`) or `W:H`.
+pub fn aspect(setting: &str) -> Option<(u32, u32)> {
+    let (w, h) = setting.split_once(':')?;
+    let (w, h): (u32, u32) = (w.trim().parse().ok()?, h.trim().parse().ok()?);
+    (w > 0 && h > 0).then_some((w, h))
+}
+
+/// The middle part of a `size` picture with the `aspect` ratio (the whole picture without
+/// one): `(left, top, width, height)`, even sizes.
+pub fn center_crop(size: (u32, u32), aspect: Option<(u32, u32)>) -> (u32, u32, u32, u32) {
+    let (w, h) = size;
+    let Some((aw, ah)) = aspect else {
+        return (0, 0, w, h);
+    };
+    let (aw, ah) = (u64::from(aw), u64::from(ah));
+    // Wider than the ratio: the sides go; taller: the top and the bottom.
+    let (cw, ch) = if u64::from(w) * ah > u64::from(h) * aw {
+        (((u64::from(h) * aw / ah) as u32).min(w), h)
+    } else {
+        (w, ((u64::from(w) * ah / aw) as u32).min(h))
+    };
+    let (cw, ch) = (cw.max(2) & !1, ch.max(2) & !1);
+    (
+        (w - cw.min(w)) / 2,
+        (h - ch.min(h)) / 2,
+        cw.min(w),
+        ch.min(h),
+    )
 }
 
 /// Whether an audio codec fits a container (annex 13.2); `None` for an unknown codec.
@@ -128,9 +174,6 @@ pub fn validate(profile: &Video, ctx: &Context<'_>) -> Vec<Issue> {
     let chroma = Chroma::from_setting(&profile.chroma);
     if chroma.is_none() {
         issues.push(error(IssueKind::UnknownChroma(profile.chroma.clone())));
-    }
-    if !matches!(profile.depth, 8 | 10) {
-        issues.push(error(IssueKind::BadDepth(profile.depth)));
     }
     if profile.fps == 0 {
         issues.push(error(IssueKind::ZeroFps));
@@ -175,15 +218,11 @@ pub fn validate(profile: &Video, ctx: &Context<'_>) -> Vec<Issue> {
     {
         issues.push(error(IssueKind::VfrContainer(c)));
     }
-    if wants_hdr {
-        if let Some(c) = container
-            && c == Container::Webm
-        {
-            issues.push(error(IssueKind::HdrContainer(c)));
-        }
-        if profile.depth < 10 {
-            issues.push(error(IssueKind::HdrNeeds10Bit));
-        }
+    if wants_hdr
+        && let Some(c) = container
+        && c == Container::Webm
+    {
+        issues.push(error(IssueKind::HdrContainer(c)));
     }
 
     if profile.encoder == "auto" {
@@ -201,16 +240,12 @@ pub fn validate(profile: &Video, ctx: &Context<'_>) -> Vec<Issue> {
             container: c,
         }));
     }
-    if let Some(chroma) = chroma
-        && matches!(profile.depth, 8 | 10)
-    {
-        if !encoder.supports_format(profile.depth, chroma) {
-            issues.push(error(IssueKind::FormatNotSupported {
-                depth: profile.depth,
-                chroma,
-            }));
+    if let Some(chroma) = chroma {
+        let depth = depth(encoder, chroma, wants_hdr, ctx.probe);
+        if !encoder.supports_format(depth, chroma) {
+            issues.push(error(IssueKind::FormatNotSupported { depth, chroma }));
         } else if let Some(probe) = ctx.probe
-            && !probe.supports(&encoder.id, profile.depth, chroma, wants_hdr)
+            && !probe.supports(&encoder.id, depth, chroma, wants_hdr)
         {
             issues.push(error(IssueKind::NotAvailable));
         }

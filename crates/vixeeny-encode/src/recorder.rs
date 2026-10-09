@@ -106,6 +106,9 @@ pub struct RecordConfig {
     pub options: Vec<(String, String)>,
     pub container: OutputContainer,
     pub output_size: (u32, u32),
+    /// Keep only the middle of the picture with this ratio (`None`: all of it). GPU frames
+    /// come cropped already.
+    pub crop: Option<(u32, u32)>,
     pub fps: Fps,
     pub depth: u8,
     pub chroma: Chroma,
@@ -813,7 +816,9 @@ impl Worker {
 
     fn convert(&mut self, src: &VideoFrame) -> Result<frame::Video, RecordError> {
         let (ow, oh) = self.cfg.output_size;
-        let key = (src.width, src.height, src.format);
+        let (left, top, width, height) =
+            crate::validate::center_crop((src.width, src.height), self.cfg.crop);
+        let key = (width, height, src.format);
         // Half-float HDR frames become 16-bit PQ RGB first; swscale does the rest.
         let hdr16;
         let (input_pix, bytes, stride, bpp) = match src.format {
@@ -827,8 +832,8 @@ impl Worker {
         if self.scaler.as_ref().is_none_or(|(_, k)| *k != key) {
             let mut ctx = scaling::Context::get(
                 input_pix,
-                src.width,
-                src.height,
+                width,
+                height,
                 self.pix,
                 ow,
                 oh,
@@ -856,11 +861,11 @@ impl Worker {
             }
             self.scaler = Some((ctx, key));
         }
-        let mut input = frame::Video::new(input_pix, src.width, src.height);
+        let mut input = frame::Video::new(input_pix, width, height);
         let dst_stride = input.stride(0);
-        let row = src.width as usize * bpp;
-        for y in 0..src.height as usize {
-            let from = y * stride;
+        let row = width as usize * bpp;
+        for y in 0..height as usize {
+            let from = (y + top as usize) * stride + left as usize * bpp;
             let line = bytes
                 .get(from..from + row)
                 .ok_or_else(|| RecordError::Config("frame buffer too small".into()))?;

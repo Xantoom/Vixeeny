@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Source names as the profile writes them: `system`, `out:<device id or name>`, `mic`,
-//! `mic:<device id or name>`, `app:<executable name>`.
+//! `mic:<device id or name>`, `in:<device id or name>`, `app:<executable name>`.
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SourceKind {
@@ -10,6 +10,9 @@ pub enum SourceKind {
     Output(String),
     /// A capture device; `None` = the default one.
     Microphone(Option<String>),
+    /// A capture device recorded as a source of its own rather than as the microphone (a
+    /// capture card, a line input), by device id or part of its name.
+    Input(String),
     /// One application (and its child processes), by executable name, e.g. `spotify.exe`.
     Application(String),
 }
@@ -34,6 +37,7 @@ impl SourceSpec {
                 SourceKind::Microphone(Some(id.trim().to_owned()))
             }
             Some(("out", id)) if !id.trim().is_empty() => SourceKind::Output(id.trim().to_owned()),
+            Some(("in", id)) if !id.trim().is_empty() => SourceKind::Input(id.trim().to_owned()),
             Some(("app", exe)) if !exe.trim().is_empty() => {
                 SourceKind::Application(exe.trim().to_owned())
             }
@@ -50,6 +54,7 @@ impl SourceSpec {
         match &self.kind {
             SourceKind::System => "System".into(),
             SourceKind::Output(_) => "Output".into(),
+            SourceKind::Input(_) => "Input".into(),
             SourceKind::Microphone(_) => "Micro".into(),
             SourceKind::Application(exe) => exe
                 .strip_suffix(".exe")
@@ -95,6 +100,10 @@ mod tests {
         assert_eq!(
             SourceSpec::parse(" app:Spotify.exe ").unwrap().kind,
             SourceKind::Application("Spotify.exe".into())
+        );
+        assert_eq!(
+            SourceSpec::parse("in:Line").unwrap().kind,
+            SourceKind::Input("Line".into())
         );
         assert_eq!(
             SourceSpec::parse("out:Speakers").unwrap().kind,

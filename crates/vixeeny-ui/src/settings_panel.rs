@@ -18,7 +18,7 @@ use vixeeny_settings::{
 
 use crate::theme::{self, Look};
 use crate::{
-    LineItem, SettingGroup, SettingRow, SettingsWindow, ShortcutKey, ShortcutRow, UiTexts,
+    LineItem, PcTile, SettingGroup, SettingRow, SettingsWindow, ShortcutKey, ShortcutRow, UiTexts,
 };
 
 /// One line of the about page.
@@ -165,6 +165,8 @@ struct State {
     probe: RefCell<(Option<ProbeResult>, bool)>,
     audio: RefCell<AudioDevices>,
     machine: RefCell<Machine>,
+    /// The expanders that are open (closed again when the window closes).
+    open: RefCell<std::collections::BTreeSet<String>>,
     /// Lists the devices and programs (slow: the programs' icons); run on another thread.
     audio_source: RefCell<Option<AudioFn>>,
     display: Cell<Display>,
@@ -225,6 +227,32 @@ fn line_model(lines: Vec<Line>, selected: Option<usize>) -> ModelRc<LineItem> {
 pub struct SettingsPanel {
     window: SettingsWindow,
     state: Rc<State>,
+}
+
+/// The tiles of this computer, for the general page.
+fn pc_tiles(tiles: &[vixeeny_settings::machine::Tile]) -> ModelRc<PcTile> {
+    use vixeeny_settings::machine::Glyph;
+    ModelRc::from(Rc::new(VecModel::from(
+        tiles
+            .iter()
+            .map(|t| PcTile {
+                glyph: match t.glyph {
+                    Glyph::Cpu => 0,
+                    Glyph::Ram => 1,
+                    Glyph::Gpu => 2,
+                    Glyph::Drive => 3,
+                    Glyph::Screen => 4,
+                },
+                caption: t.caption.as_str().into(),
+                title: t.title.as_str().into(),
+                detail: t.detail.as_str().into(),
+                badge: t.badge.as_str().into(),
+                mark: t.mark.as_str().into(),
+                usage: t.usage.unwrap_or(-1.0),
+                ratio: t.ratio,
+            })
+            .collect::<Vec<_>>(),
+    )))
 }
 
 fn strings(items: impl IntoIterator<Item = String>) -> ModelRc<SharedString> {
@@ -393,6 +421,7 @@ fn row_model(row: &Row, config: &Config) -> SettingRow {
         max: 0,
         step: 1,
         options: ModelRc::default(),
+        headings: ModelRc::default(),
         selected: -1,
         has_icon: row.icon.is_some(),
         fresh: false,
@@ -410,6 +439,15 @@ fn row_model(row: &Row, config: &Config) -> SettingRow {
                 .position(|o| o.value == t)
                 .map_or(-1, |i| i as i32);
             out.options = strings(options.iter().map(|o| o.label.clone()));
+            if options.iter().any(|o| o.heading) {
+                out.headings = ModelRc::from(Rc::new(VecModel::from(
+                    options.iter().map(|o| o.heading).collect::<Vec<_>>(),
+                )));
+            }
+        }
+        (Kind::Expander, Value::Bool(open)) => {
+            out.kind = 9;
+            out.on = open;
         }
         (Kind::Number { min, max, step } | Kind::Slider { min, max, step }, Value::Int(n)) => {
             out.kind = if matches!(row.kind, Kind::Slider { .. }) {
@@ -562,6 +600,7 @@ impl SettingsPanel {
             probe: RefCell::new((None, false)),
             audio: RefCell::default(),
             machine: RefCell::default(),
+            open: RefCell::default(),
             audio_source: RefCell::default(),
             display: Cell::default(),
             recording: Cell::new(None),
@@ -782,6 +821,9 @@ impl SettingsPanel {
         self.window
             .set_version(format!("Version {}", self.state.version).into());
         self.window.set_tagline(tr(Key::AboutTagline, lang).into());
+        self.window.set_pc_titles(strings(
+            [Key::PcParts, Key::PcScreens, Key::PcDisks].map(|k| tr(k, lang).to_owned()),
+        ));
     }
 
     /// The model's view of this machine: language, hardware probe, audio devices.
@@ -792,6 +834,7 @@ impl SettingsPanel {
             .with_probe(probe, detecting)
             .with_audio(state.audio.borrow().clone())
             .with_machine(state.machine.borrow().clone())
+            .with_open(state.open.borrow().clone())
             .with_display(state.display.get());
     }
 
@@ -809,6 +852,14 @@ impl SettingsPanel {
             self.window.set_groups(ModelRc::default());
             state.rows.borrow_mut().clear();
         }
+        let overview = if section == Section::General {
+            vixeeny_settings::machine::overview(&env)
+        } else {
+            vixeeny_settings::machine::Overview::default()
+        };
+        self.window.set_pc_parts(pc_tiles(&overview.parts));
+        self.window.set_pc_screens(pc_tiles(&overview.screens));
+        self.window.set_pc_disks(pc_tiles(&overview.disks));
         let notice = if section == Section::Video {
             video_problems(&config, (1920, 1080), env.lang).join("\n")
         } else {
@@ -1007,6 +1058,23 @@ impl SettingsPanel {
                 let Some(p) = panel(&weak, &state) else {
                     return;
                 };
+                // An expander opens or closes rows: the window's state, not a setting.
+                let expander = state
+                    .rows
+                    .borrow()
+                    .iter()
+                    .any(|r| r.id == id && matches!(r.kind, Kind::Expander));
+                if expander {
+                    {
+                        let mut open = state.open.borrow_mut();
+                        if !open.remove(id) {
+                            open.insert(id.to_owned());
+                        }
+                    }
+                    p.rebuild_env();
+                    p.refresh();
+                    return;
+                }
                 let result = {
                     let rows = state.rows.borrow();
                     let mut config = state.config.borrow_mut();

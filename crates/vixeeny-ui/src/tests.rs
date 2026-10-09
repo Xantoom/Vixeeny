@@ -168,8 +168,11 @@ fn the_video_page_edits_the_current_profile_and_reports_problems() {
     w.invoke_row_chosen("container".into(), 0);
     w.invoke_row_chosen("encoder".into(), 0);
     w.invoke_row_chosen("preset".into(), 2); // best, light, custom
-    w.invoke_row_chosen("p:rc.mode".into(), 1); // quality, VBR
+    w.invoke_row_chosen("p:rc.mode".into(), 2); // quality, CQP, VBR, CBR
     assert_eq!(panel.config().video.params["rc.mode"], "vbr");
+    // The rows that just appeared, shown at the end of their unfolding.
+    panel.window().set_animated(false);
+    w.invoke_row_toggled("expert_video".into(), true);
     settings_render_at(&panel, "9-settings-video-custom", (1040, 2200));
 }
 
@@ -320,21 +323,52 @@ fn every_page_of_the_settings_renders() {
                 threads: 16,
             }),
             ram_bytes: 64 << 30,
-            gpus: vec![Gpu {
-                name: "NVIDIA GeForce RTX 5080".into(),
-                integrated: false,
-                memory_bytes: 16 << 30,
-            }],
-            disks: vec![Disk {
-                model: "CT2000T500SSD8".into(),
-                bytes: 2_000_398_934_016,
-            }],
-            screens: vec![Screen {
-                name: "Odyssey G80SH".into(),
-                width: 3840,
-                height: 2160,
-                hz: 240,
-            }],
+            gpus: vec![
+                Gpu {
+                    name: "NVIDIA GeForce RTX 5080".into(),
+                    integrated: false,
+                    memory_bytes: 16 << 30,
+                },
+                Gpu {
+                    name: "AMD Radeon(TM) Graphics".into(),
+                    integrated: true,
+                    memory_bytes: 0,
+                },
+            ],
+            disks: vec![
+                Disk {
+                    letter: "C:".into(),
+                    label: String::new(),
+                    model: "CT2000T500SSD8".into(),
+                    bytes: 2_000_398_934_016,
+                    free_bytes: 612_000_000_000,
+                },
+                Disk {
+                    letter: "D:".into(),
+                    label: "Jeux".into(),
+                    model: "Samsung SSD 990 PRO 4TB".into(),
+                    bytes: 4_000_787_030_016,
+                    free_bytes: 3_100_000_000_000,
+                },
+            ],
+            screens: vec![
+                Screen {
+                    number: 1,
+                    primary: true,
+                    name: "Odyssey G80SH".into(),
+                    width: 3840,
+                    height: 2160,
+                    hz: 240,
+                },
+                Screen {
+                    number: 2,
+                    primary: false,
+                    name: "LG ULTRAWIDE".into(),
+                    width: 3440,
+                    height: 1440,
+                    hz: 144,
+                },
+            ],
         });
     }
     for section in Section::ALL {

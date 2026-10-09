@@ -274,7 +274,9 @@ fn plan(config: &Config, allow_gpu: bool, replay: bool) -> anyhow::Result<Plan> 
 
     let container = OutputContainer::from_setting(&profile.container)
         .with_context(|| format!("unknown container `{}`", profile.container))?;
-    let (w, h) = validate::output_size(&profile.resolution, source).context("bad resolution")?;
+    let crop = validate::aspect(&profile.aspect);
+    let (_, _, cw, ch) = validate::center_crop(source, crop);
+    let (w, h) = validate::output_size(&profile.resolution, (cw, ch)).context("bad resolution")?;
     let output_size = (w.max(2) & !1, h.max(2) & !1);
     let chroma = match profile.chroma.as_str() {
         "444" => Chroma::C444,
@@ -331,8 +333,9 @@ fn plan(config: &Config, allow_gpu: bool, replay: bool) -> anyhow::Result<Plan> 
         options,
         container,
         output_size,
+        crop,
         fps: Fps::whole(profile.fps.clamp(1, 240)),
-        depth: profile.depth,
+        depth: validate::depth(&encoder, chroma, hdr, probe.as_ref()),
         chroma,
         hdr,
         split: if replay {
@@ -510,13 +513,15 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
             Some(gpu) => {
                 let (tx, rx) = std::sync::mpsc::sync_channel::<(i64, HwFrame)>(GPU_BACKLOG);
                 let pipeline = Arc::clone(&gpu.pipeline);
+                let crop = plan.config.crop;
                 let sink: vixeeny_capture::TextureSink =
                     Box::new(move |texture, content, time_ns| {
+                        let (left, top, width, height) = validate::center_crop(content, crop);
                         let rect = d3d::Rect {
-                            left: 0,
-                            top: 0,
-                            right: content.0 as i32,
-                            bottom: content.1 as i32,
+                            left: left as i32,
+                            top: top as i32,
+                            right: (left + width) as i32,
+                            bottom: (top + height) as i32,
                         };
                         // A refused conversion (pool exhausted, GPU busy) is a dropped frame.
                         if let Ok(frame) = pipeline.convert(texture, rect) {
@@ -792,7 +797,9 @@ fn replay_storage(config: &Config, encoder: &Encoder, size: (u32, u32)) -> repla
                 config.replay.duration_seconds,
             );
             let ram = vixeeny_platform::machine::ram_bytes();
-            let fits = replay::fits_in_ram(bytes, ram);
+            let free = vixeeny_platform::machine::free_ram_bytes();
+            let fits = replay::fits_in_ram(bytes, ram)
+                && free.is_none_or(|free| replay::fits_in_free_ram(bytes, free));
             tracing::info!(
                 "replay of about {} MB: kept {}",
                 bytes >> 20,

@@ -69,9 +69,9 @@ pub fn profile_kbps(
     encoder: &crate::registry::Encoder,
     size: (u32, u32),
 ) -> u32 {
-    use crate::registry::{RateMode, rate_keys};
+    use crate::registry::rate_keys;
     let custom = profile.preset == "custom";
-    let bitrate = (custom && encoder.rate_mode(&profile.params) == RateMode::Vbr)
+    let bitrate = (custom && encoder.rate_mode(&profile.params).has_bitrate())
         .then(|| profile.params.get(rate_keys::BITRATE)?.parse().ok())
         .flatten();
     expected_kbps(
@@ -91,17 +91,27 @@ pub fn expected_bytes(kbps: u32, seconds: u32) -> u64 {
 /// Where `storage = "auto"` keeps a replay of `bytes`: in RAM up to a tenth of the installed
 /// memory (512 MB when it is not known), on the disk beyond.
 pub fn fits_in_ram(bytes: u64, ram_bytes: u64) -> bool {
-    let budget = if ram_bytes == 0 {
-        512 << 20
-    } else {
-        ram_bytes / 10
-    };
-    bytes <= budget
+    bytes <= ram_budget(ram_bytes)
 }
 
-/// The allowed durations: 5 s to 20 min, in steps of 5 s.
+/// What a replay may take in RAM on a machine with `ram_bytes` installed: a quarter of what
+/// Windows and a game leave (8 GB for them), at most 4 GB. Nothing on 8 GB (the disk then), 2 GB
+/// on 16 GB, 4 GB from 24 GB.
+pub fn ram_budget(ram_bytes: u64) -> u64 {
+    const KEPT: u64 = 8 << 30;
+    const MAX: u64 = 4 << 30;
+    (ram_bytes.saturating_sub(KEPT) / 4).min(MAX)
+}
+
+/// Whether the RAM free right now holds a replay of `bytes` and still leaves 4 GB to the rest
+/// (a game already loaded, a browser...).
+pub fn fits_in_free_ram(bytes: u64, free_bytes: u64) -> bool {
+    bytes.saturating_add(4 << 30) <= free_bytes
+}
+
+/// The allowed durations: 5 s to 30 min, in steps of 5 s.
 pub fn clamp_seconds(seconds: u32) -> u32 {
-    (seconds.clamp(5, 1200) + 2) / 5 * 5
+    (seconds.clamp(5, 1800) + 2) / 5 * 5
 }
 
 /// Where the packets of a ring are kept.
@@ -504,19 +514,27 @@ mod tests {
 
     #[test]
     fn the_size_of_a_replay_decides_where_it_is_kept() {
-        // 4K60 AV1 for five minutes: a few gigabytes, in RAM on 64 GB but not on 8 GB.
+        // 4K60 AV1 for five minutes: a few gigabytes, in RAM on 64 GB but not on 12 GB.
         let kbps = expected_kbps(Family::Av1, (3840, 2160), 60, false, None);
         assert!((40_000..80_000).contains(&kbps), "{kbps}");
         let bytes = expected_bytes(kbps, 300);
         assert!((1_500_000_000..3_000_000_000).contains(&bytes), "{bytes}");
         assert!(fits_in_ram(bytes, 64 << 30));
-        assert!(!fits_in_ram(bytes, 8 << 30));
-        // 30 s of 1080p60: fine anywhere.
+        assert!(!fits_in_ram(bytes, 12 << 30));
+        // Thirty minutes of it: on the disk, whatever the RAM.
+        assert!(!fits_in_ram(expected_bytes(kbps, 1800), 128 << 30));
+        // 30 s of 1080p60: in RAM from 16 GB; 8 GB is left to Windows and the game.
         let small = expected_bytes(
             expected_kbps(Family::H264, (1920, 1080), 60, false, None),
             30,
         );
-        assert!(fits_in_ram(small, 8 << 30));
+        assert!(fits_in_ram(small, 16 << 30));
+        assert!(!fits_in_ram(small, 8 << 30));
+        assert_eq!(ram_budget(16 << 30), 2 << 30);
+        assert_eq!(ram_budget(64 << 30), 4 << 30);
+        // What is free right now counts too.
+        assert!(fits_in_free_ram(small, 6 << 30));
+        assert!(!fits_in_free_ram(small, 4 << 30));
         // A custom bitrate is taken as it is.
         assert_eq!(
             expected_kbps(Family::Av1, (3840, 2160), 60, false, Some(8_000)),
@@ -693,6 +711,6 @@ mod tests {
         assert_eq!(clamp_seconds(30), 30);
         assert_eq!(clamp_seconds(32), 30);
         assert_eq!(clamp_seconds(33), 35);
-        assert_eq!(clamp_seconds(99_999), 1200);
+        assert_eq!(clamp_seconds(99_999), 1800);
     }
 }

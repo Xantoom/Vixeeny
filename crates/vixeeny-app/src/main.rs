@@ -150,7 +150,7 @@ fn tonemap_hdr(rgba: &[f32], info: &vixeeny_platform::HdrInfo) -> Vec<u8> {
 /// Output format and settings from `[image]`. An unknown value falls back to the default (PNG,
 /// 4:4:4), never to a failed capture.
 fn image_output(config: &Config) -> (vixeeny_image::ImageFormat, vixeeny_image::Settings) {
-    use vixeeny_image::{Chroma, ImageFormat, PngCompression, Settings};
+    use vixeeny_image::{ImageFormat, PngCompression, Settings};
     let image = &config.image;
     let mut settings = Settings::default();
     settings.png.compression = match image.png.compression.as_str() {
@@ -160,18 +160,11 @@ fn image_output(config: &Config) -> (vixeeny_image::ImageFormat, vixeeny_image::
     };
     settings.png.oxipng_level = (image.png.optimize > 0).then(|| image.png.optimize.min(6));
     settings.jpeg.quality = image.jpeg.quality.clamp(1, 100);
-    if let Some(chroma) = Chroma::from_name(&image.jpeg.chroma) {
-        settings.jpeg.chroma = chroma;
-    }
-    settings.jpeg.progressive = image.jpeg.progressive;
     settings.webp.lossless = image.webp.lossless;
     settings.webp.quality = f32::from(image.webp.quality.min(100));
     settings.webp.effort = image.webp.effort.min(6);
     settings.avif.quality = image.avif.quality.min(100);
     settings.avif.depth = if image.avif.depth >= 10 { 10 } else { 8 };
-    if let Some(chroma) = Chroma::from_name(&image.avif.chroma) {
-        settings.avif.chroma = chroma;
-    }
     settings.avif.speed = image.avif.speed.min(10);
     settings.jxl.lossless = image.jxl.lossless;
     settings.jxl.distance = jxl_distance(image.jxl.quality);
@@ -584,7 +577,6 @@ mod tests {
         assert_eq!(image_output(&config).0, ImageFormat::Png);
         config.image.format = "jpeg".into();
         config.image.jpeg.quality = 70;
-        config.image.jpeg.chroma = "420".into();
         let (format, settings) = image_output(&config);
         let native = cfg!(feature = "native-codecs");
         assert_eq!(
@@ -597,7 +589,7 @@ mod tests {
         );
         assert_eq!(
             (settings.jpeg.quality, settings.jpeg.chroma),
-            (70, Chroma::Yuv420)
+            (70, Chroma::Yuv444)
         );
         config.image.format = "bmp".into(); // unknown
         assert_eq!(image_output(&config).0, ImageFormat::Png);

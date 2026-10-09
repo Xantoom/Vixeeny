@@ -220,23 +220,19 @@ fn encoder_and_container_must_agree() {
 #[test]
 fn pixel_format_and_hdr_rules() {
     let mut p = profile("nvenc_h264", "mp4_hybrid");
-    p.chroma = "444".into();
-    p.depth = 10;
+    p.chroma = "422".into();
     assert!(check(&p, None).contains(&IssueKind::FormatNotSupported {
-        depth: 10,
-        chroma: Chroma::C444
+        depth: 8,
+        chroma: Chroma::C422
     }));
 
     let mut hdr = profile("nvenc_hevc", "mp4_hybrid");
     hdr.hdr = "keep_hdr".into();
-    assert!(check(&hdr, None).contains(&IssueKind::HdrNeeds10Bit));
-    hdr.depth = 10;
     assert!(check(&hdr, None).is_empty());
     hdr.container = "webm".into();
     assert!(check(&hdr, None).contains(&IssueKind::HdrContainer(Container::Webm)));
     let mut h264 = profile("libx264", "mkv");
     h264.hdr = "keep_hdr".into();
-    h264.depth = 10;
     assert!(check(&h264, None).contains(&IssueKind::HdrNeedsHevcOrAv1));
 }
 
@@ -290,7 +286,6 @@ fn frame_rate_is_checked_against_the_codec_level() {
 fn bad_numbers_are_reported() {
     let p = Video {
         fps: 0,
-        depth: 12,
         chroma: "411".into(),
         resolution: "huge".into(),
         preset: "ludicrous".into(),
@@ -300,7 +295,6 @@ fn bad_numbers_are_reported() {
     let issues = check(&p, None);
     for expected in [
         IssueKind::ZeroFps,
-        IssueKind::BadDepth(12),
         IssueKind::UnknownChroma("411".into()),
         IssueKind::BadResolution("huge".into()),
         IssueKind::UnknownPreset("ludicrous".into()),
@@ -328,33 +322,30 @@ fn validation_agrees_with_the_data_exhaustively() {
     let containers = ["mkv", "mp4_hybrid", "mp4_fragmented", "webm"];
     for e in r.encoders() {
         for container in containers {
-            for depth in [8u8, 10] {
-                for chroma in ["420", "422", "444"] {
-                    for hdr in ["tonemap_sdr", "keep_hdr"] {
-                        let p = Video {
-                            encoder: e.id.clone(),
-                            container: container.into(),
-                            depth,
-                            chroma: chroma.into(),
-                            hdr: hdr.into(),
-                            ..Video::default()
-                        };
-                        let c = Container::from_setting(container).unwrap_or_else(|| panic!());
-                        let ch = Chroma::from_setting(chroma).unwrap_or_else(|| panic!());
-                        let want = e.containers.contains(&c)
-                            && e.supports_format(depth, ch)
-                            && (hdr == "tonemap_sdr"
-                                || (e.hdr && depth == 10 && c != Container::Webm));
-                        let issues = check(&p, None);
-                        let got = !issues
-                            .iter()
-                            .any(|k| !matches!(k, IssueKind::FramerateTooHigh { .. }));
-                        assert_eq!(
-                            got, want,
-                            "{} {container} {depth}-bit {chroma} {hdr}: {issues:?}",
-                            e.id
-                        );
-                    }
+            for chroma in ["420", "422", "444"] {
+                for hdr in ["tonemap_sdr", "keep_hdr"] {
+                    let p = Video {
+                        encoder: e.id.clone(),
+                        container: container.into(),
+                        chroma: chroma.into(),
+                        hdr: hdr.into(),
+                        ..Video::default()
+                    };
+                    let c = Container::from_setting(container).unwrap_or_else(|| panic!());
+                    let ch = Chroma::from_setting(chroma).unwrap_or_else(|| panic!());
+                    let depth = crate::validate::depth(e, ch, hdr == "keep_hdr", None);
+                    let want = e.containers.contains(&c)
+                        && e.supports_format(depth, ch)
+                        && (hdr == "tonemap_sdr" || (e.hdr && c != Container::Webm));
+                    let issues = check(&p, None);
+                    let got = !issues
+                        .iter()
+                        .any(|k| !matches!(k, IssueKind::FramerateTooHigh { .. }));
+                    assert_eq!(
+                        got, want,
+                        "{} {container} {depth}-bit {chroma} {hdr}: {issues:?}",
+                        e.id
+                    );
                 }
             }
         }
@@ -569,7 +560,6 @@ fn availability_drives_validation() {
     assert!(check(&profile("nvenc_h264", "mkv"), Some(&result)).is_empty());
     // The iGPU cannot do HDR: asking for it is "not available".
     let mut p = profile("qsv_hevc", "mkv");
-    p.depth = 10;
     p.hdr = "keep_hdr".into();
     assert!(check(&p, Some(&result)).contains(&IssueKind::NotAvailable));
 }
@@ -699,4 +689,50 @@ fn variable_frame_rate_needs_matroska_or_webm() {
         // WebM carries no H.264 (another issue), but the VFR rule itself must not fire.
         assert_eq!(!has, ok, "{container}");
     }
+}
+
+#[test]
+fn hevc_and_av1_record_in_10_bits_when_they_can() {
+    use crate::validate::depth;
+    let r = registry();
+    let get = |id: &str| r.get(id).unwrap();
+    for id in ["libx265", "libsvtav1", "nvenc_hevc", "nvenc_av1"] {
+        assert_eq!(depth(get(id), Chroma::C420, false, None), 10, "{id}");
+    }
+    for id in ["libx264", "nvenc_h264", "libvpx_vp9"] {
+        assert_eq!(depth(get(id), Chroma::C420, false, None), 8, "{id}");
+    }
+    // A GPU without 10-bit: 8 bits; HDR always asks for 10.
+    let probe = ProbeResult::default();
+    assert_eq!(
+        depth(get("nvenc_hevc"), Chroma::C420, false, Some(&probe)),
+        8
+    );
+    assert_eq!(
+        depth(get("nvenc_hevc"), Chroma::C420, true, Some(&probe)),
+        10
+    );
+    assert_eq!(depth(get("libx265"), Chroma::C420, false, Some(&probe)), 10);
+}
+
+#[test]
+fn a_wide_screen_is_cropped_in_its_middle() {
+    use crate::validate::{aspect, center_crop};
+    assert_eq!(aspect("16:9"), Some((16, 9)));
+    assert_eq!(aspect("source"), None);
+    // 21:9 to 16:9: the sides go.
+    assert_eq!(
+        center_crop((3440, 1440), aspect("16:9")),
+        (440, 0, 2560, 1440)
+    );
+    // 16:10 to 16:9: the top and the bottom.
+    assert_eq!(
+        center_crop((1920, 1200), aspect("16:9")),
+        (0, 60, 1920, 1080)
+    );
+    assert_eq!(
+        center_crop((1920, 1080), aspect("16:9")),
+        (0, 0, 1920, 1080)
+    );
+    assert_eq!(center_crop((1920, 1080), None), (0, 0, 1920, 1080));
 }

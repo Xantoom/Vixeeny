@@ -64,8 +64,6 @@ optimize = 0
 
 [image.jpeg]
 quality = 90
-chroma = "444"
-progressive = false
 
 [image.webp]
 lossless = true
@@ -75,7 +73,6 @@ effort = 4
 [image.avif]
 quality = 80
 depth = 10
-chroma = "444"
 speed = 6
 
 [image.jxl]
@@ -91,8 +88,8 @@ encoder_kind = "hardware"
 encoder = "auto"
 container = "mp4_fragmented"
 resolution = "source"
+aspect = "source"
 fps = 60
-depth = 8
 chroma = "420"
 hdr = "tonemap_sdr"
 mode = "simple"

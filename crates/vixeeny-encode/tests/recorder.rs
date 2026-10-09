@@ -65,6 +65,7 @@ fn config(registry: &Registry, id: &str, container: OutputContainer, fps: u32) -
         options.push(("preset".into(), "12".into()));
     }
     RecordConfig {
+        crop: None,
         encoder,
         options,
         container,

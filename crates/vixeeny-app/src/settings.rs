@@ -555,14 +555,19 @@ fn machine() -> vixeeny_settings::Machine {
             .disks
             .into_iter()
             .map(|d| Disk {
+                letter: d.letter,
+                label: d.label,
                 model: d.model,
                 bytes: d.bytes,
+                free_bytes: d.free_bytes,
             })
             .collect(),
         screens: m
             .screens
             .into_iter()
             .map(|s| Screen {
+                number: s.number,
+                primary: s.primary,
                 name: s.name,
                 width: s.width,
                 height: s.height,

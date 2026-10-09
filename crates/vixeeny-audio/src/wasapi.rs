@@ -530,7 +530,7 @@ fn endpoint(kind: &SourceKind) -> Result<Option<(IMMDevice, bool, bool)>, AudioE
                 .map_err(os("default microphone"))?;
             Some((device, false, true))
         }
-        SourceKind::Microphone(Some(wanted)) => {
+        SourceKind::Microphone(Some(wanted)) | SourceKind::Input(wanted) => {
             let e = enumerator()?;
             // SAFETY: live enumerator and collection; every item is checked.
             let found = unsafe {

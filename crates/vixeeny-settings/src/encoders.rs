@@ -6,7 +6,7 @@ use std::sync::LazyLock;
 
 use vixeeny_common::config::Video;
 use vixeeny_common::i18n::Lang;
-use vixeeny_encode::registry::{Chroma, Encoder, Family, Kind, RateMode, Registry, Vendor};
+use vixeeny_encode::registry::{Encoder, Family, Kind, RateMode, Registry, Vendor};
 
 use crate::Env;
 
@@ -17,8 +17,9 @@ pub struct EncoderInfo {
     pub id: String,
     pub name: String,
     pub hardware: bool,
-    /// Lower is better: the codec (AV1, HEVC, H.264), then the vendor (the order `pick_auto`
-    /// uses).
+    /// Lower is better: for the hardware ones the codec (AV1, HEVC, H.264), then the vendor
+    /// (the order `pick_auto` uses); for the software ones the registry's order (x264 first:
+    /// an AV1 encoder on the processor cannot keep up with a game in real time).
     rank: (u8, u8),
 }
 
@@ -26,7 +27,8 @@ pub fn registry() -> Option<&'static Registry> {
     REGISTRY.as_ref()
 }
 
-/// The encoders, hardware before software, best first.
+/// The encoders, hardware before software, each kind in the order of the codecs (H.264, HEVC,
+/// VP9, AV1), then of the vendors.
 pub fn all() -> Vec<EncoderInfo> {
     let Some(registry) = registry() else {
         return Vec::new();
@@ -43,19 +45,33 @@ pub fn all() -> Vec<EncoderInfo> {
         Vendor::Intel => 2,
         Vendor::None => 3,
     };
-    let mut list: Vec<EncoderInfo> = registry
+    let shown = |f: Family| match f {
+        Family::H264 => 0,
+        Family::Hevc => 1,
+        Family::Vp9 => 2,
+        Family::Av1 => 3,
+    };
+    let mut list: Vec<(EncoderInfo, (u8, u8))> = registry
         .encoders()
-        .map(|e| EncoderInfo {
-            id: e.id.clone(),
-            name: e.display_name.clone(),
-            hardware: e.kind == Kind::Hardware,
-            rank: (family(e.family), vendor(e.vendor)),
+        .enumerate()
+        .map(|(i, e)| {
+            let hardware = e.kind == Kind::Hardware;
+            let rank = if hardware {
+                (family(e.family), vendor(e.vendor))
+            } else {
+                (0, i as u8)
+            };
+            let info = EncoderInfo {
+                id: e.id.clone(),
+                name: e.display_name.clone(),
+                hardware,
+                rank,
+            };
+            (info, (shown(e.family), vendor(e.vendor)))
         })
         .collect();
-    // Stable: software keeps the registry's order (x264, x265, VP9, SVT-AV1): an AV1 encoder
-    // on the processor cannot keep up with a game in real time.
-    list.sort_by_key(|e| (!e.hardware, if e.hardware { e.rank } else { (0, 0) }));
-    list
+    list.sort_by_key(|(e, order)| (!e.hardware, *order));
+    list.into_iter().map(|(e, _)| e).collect()
 }
 
 /// Whether `id` can be used now: software always, hardware once the probe opened it.
@@ -71,27 +87,18 @@ pub fn choices(env: &Env, hardware: bool) -> Vec<&EncoderInfo> {
         .collect()
 }
 
-/// The encoder a profile uses: its own when it is listed for its kind, else the best one.
-pub fn resolved<'a>(env: &'a Env, profile: &Video) -> Option<&'a EncoderInfo> {
-    let list = choices(env, profile.encoder_kind != "software");
-    list.iter()
-        .find(|e| e.id == profile.encoder)
-        .copied()
-        .or_else(|| list.first().copied())
+/// The best usable encoder of one kind (the one recommended).
+pub fn best(env: &Env, hardware: bool) -> Option<&EncoderInfo> {
+    choices(env, hardware).into_iter().min_by_key(|e| e.rank)
 }
 
-/// Whether the encoder can do 10-bit 4:2:0 (what the 10-bit switch turns on).
-pub fn ten_bit(env: &Env, encoder: &str) -> bool {
-    let Some(spec) = spec(encoder) else {
-        return false;
-    };
-    if !spec.supports_format(10, Chroma::C420) {
-        return false;
-    }
-    match (&env.probe, spec.kind) {
-        (Some(probe), Kind::Hardware) => probe.supports(encoder, 10, Chroma::C420, false),
-        _ => true,
-    }
+/// The encoder a profile uses: its own when it is listed for its kind, else the best one.
+pub fn resolved<'a>(env: &'a Env, profile: &Video) -> Option<&'a EncoderInfo> {
+    let hardware = profile.encoder_kind != "software";
+    choices(env, hardware)
+        .into_iter()
+        .find(|e| e.id == profile.encoder)
+        .or_else(|| best(env, hardware))
 }
 
 pub fn spec(id: &str) -> Option<&'static Encoder> {
@@ -138,12 +145,12 @@ pub fn param_label(key: &str, lang: Lang) -> String {
     if lang == Lang::Fr { fr } else { en }.to_owned()
 }
 
-/// The label of the constant-quality slider: `scale` is what the encoder calls it (CRF, CQ...).
-pub fn quality_label(scale: &str, lang: Lang) -> String {
+/// The hint of the quality and quantizer sliders.
+pub fn lower_is_better(lang: Lang) -> &'static str {
     if lang == Lang::Fr {
-        format!("Qualité ({scale}, plus bas = meilleur)")
+        "Plus bas = meilleure image, fichiers plus gros."
     } else {
-        format!("Quality ({scale}, lower = better)")
+        "Lower = better picture, larger files."
     }
 }
 
@@ -201,13 +208,37 @@ pub fn value_label(key: &str, value: &str, lang: Lang) -> String {
     if lang == Lang::Fr { pair.1 } else { pair.0 }.to_owned()
 }
 
-/// The label of a rate mode.
-pub fn rate_mode_label(mode: RateMode, lang: Lang) -> &'static str {
-    let (en, fr) = match mode {
-        RateMode::Quality => ("Constant quality", "Qualité constante"),
-        RateMode::Vbr => ("Variable bitrate (VBR)", "Débit variable (VBR)"),
-    };
-    if lang == Lang::Fr { fr } else { en }
+/// The label of a rate mode, with what the encoder calls it (CRF, CQ...).
+pub fn rate_mode_label(mode: RateMode, encoder: &Encoder, lang: Lang) -> String {
+    let fr = lang == Lang::Fr;
+    match mode {
+        RateMode::Quality => {
+            let scale = &encoder.rate_control.quality.name;
+            if fr {
+                format!("Qualité constante ({scale})")
+            } else {
+                format!("Constant quality ({scale})")
+            }
+        }
+        RateMode::Cqp => if fr {
+            "QP constant (CQP)"
+        } else {
+            "Constant QP (CQP)"
+        }
+        .to_owned(),
+        RateMode::Vbr => if fr {
+            "Débit variable (VBR)"
+        } else {
+            "Variable bitrate (VBR)"
+        }
+        .to_owned(),
+        RateMode::Cbr => if fr {
+            "Débit constant (CBR)"
+        } else {
+            "Constant bitrate (CBR)"
+        }
+        .to_owned(),
+    }
 }
 
 /// `(min, max, step)` of a numeric registry parameter.

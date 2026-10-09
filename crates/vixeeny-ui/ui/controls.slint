@@ -259,6 +259,8 @@ export component TextBox inherits Rectangle {
 
 export component ComboBox inherits Rectangle {
     in property <[string]> options;
+    // Options that only title the ones under them (not chosen).
+    in property <[bool]> headings;
     in property <int> current: -1;
     in property <bool> enabled: true;
     in property <string> placeholder;
@@ -323,14 +325,16 @@ export component ComboBox inherits Rectangle {
             Flickable {
                 content-height: root.options.length * 36px + 8px;
                 for option[i] in root.options : Rectangle {
+                    property <bool> head: i < root.headings.length && root.headings[i];
                     x: 4px;
                     y: 4px + i * 36px;
                     width: parent.width - 8px;
                     height: 34px;
                     border-radius: Theme.radius;
-                    background: item.pressed ? Theme.subtle-pressed : (item.has-hover || i == root.current ? Theme.subtle-hover : transparent);
+                    background: self.head ? transparent
+                        : (item.pressed ? Theme.subtle-pressed : (item.has-hover || i == root.current ? Theme.subtle-hover : transparent));
                     animate background { duration: Theme.t-fast; }
-                    if i == root.current : Rectangle {
+                    if i == root.current && !self.head : Rectangle {
                         x: 0px;
                         y: (parent.height - 16px) / 2;
                         width: 3px;
@@ -339,15 +343,19 @@ export component ComboBox inherits Rectangle {
                         background: Theme.accent;
                     }
                     Text {
-                        x: 12px;
+                        x: parent.head ? 8px : 12px;
+                        y: 0px;
                         width: parent.width - 20px;
+                        height: parent.height;
                         text: option;
-                        color: Theme.text;
-                        font-size: 14px;
-                        vertical-alignment: center;
+                        color: parent.head ? Theme.text-3 : Theme.text;
+                        font-size: parent.head ? 12px : 14px;
+                        font-weight: parent.head ? 600 : 400;
+                        vertical-alignment: parent.head ? bottom : center;
                         overflow: elide;
                     }
                     item := TouchArea {
+                        enabled: !parent.head;
                         mouse-cursor: pointer;
                         clicked => { root.selected(i); menu.close(); }
                     }

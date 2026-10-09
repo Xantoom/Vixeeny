@@ -84,6 +84,8 @@ pub struct Opt {
     pub value: String,
     /// What the user reads.
     pub label: String,
+    /// The title of the options under it, not one to choose.
+    pub heading: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -109,6 +111,9 @@ pub enum Kind {
     Info,
     /// Starts a new group of rows (shown apart from the one above); nothing to edit.
     Header,
+    /// Shows or hides the rows under it (its value: whether they are shown). Its state is the
+    /// window's, not a setting: see [`Env::open`].
+    Expander,
 }
 
 /// The value was refused (not one of the choices, not a number, empty where it must not be).
@@ -149,7 +154,7 @@ impl Row {
         let value = match (&self.kind, value) {
             (Kind::Toggle, v @ Value::Bool(_)) => v,
             (Kind::Choice(options), Value::Text(t)) => {
-                if !options.iter().any(|o| o.value == t) {
+                if !options.iter().any(|o| o.value == t && !o.heading) {
                     return Err(Invalid);
                 }
                 Value::Text(t)
@@ -213,6 +218,8 @@ pub struct Env {
     pub display: Display,
     /// What this computer is made of, once the host has read it.
     pub machine: Machine,
+    /// The expanders that are open (by row id); all closed at first.
+    pub open: std::collections::BTreeSet<String>,
 }
 
 /// What the monitors can show.
@@ -244,7 +251,13 @@ impl Env {
             version: version.to_owned(),
             display: Display::default(),
             machine: Machine::default(),
+            open: std::collections::BTreeSet::new(),
         }
+    }
+
+    pub fn with_open(mut self, open: std::collections::BTreeSet<String>) -> Self {
+        self.open = open;
+        self
     }
 
     pub fn with_machine(mut self, machine: Machine) -> Self {
@@ -273,8 +286,18 @@ impl Env {
     }
 }
 
+/// The title of the options that follow, in a list.
+fn heading(label: impl Into<String>) -> Opt {
+    Opt {
+        value: String::new(),
+        label: label.into(),
+        heading: true,
+    }
+}
+
 fn opt(value: &str, label: impl Into<String>) -> Opt {
     Opt {
+        heading: false,
         value: value.to_owned(),
         label: label.into(),
     }
@@ -398,11 +421,6 @@ fn when(mut row: Row, enabled: fn(&Config) -> bool) -> Row {
     row
 }
 
-fn when_boxed(mut row: Row, enabled: impl Fn(&Config) -> bool + 'static) -> Row {
-    row.enabled = Box::new(enabled);
-    row
-}
-
 fn hinted(mut row: Row, hint: String) -> Row {
     row.hint = hint;
     row
@@ -417,6 +435,20 @@ fn header(id: &str) -> Row {
         Box::new(|_| Value::Text(String::new())),
         Box::new(|_, _| Err(Invalid)),
     )
+}
+
+/// A closed section of rows, open when `env` says so: the caller adds the rows under it only
+/// then.
+fn expander(env: &Env, id: &str, label: String) -> (Row, bool) {
+    let open = env.open.contains(id);
+    let row = row(
+        id,
+        label,
+        Kind::Expander,
+        Box::new(move |_| Value::Bool(open)),
+        Box::new(|_, _| Err(Invalid)),
+    );
+    (row, open)
 }
 
 fn info(id: &str, label: String, value: String) -> Row {
@@ -483,17 +515,13 @@ fn problem_text(kind: &vixeeny_encode::validate::IssueKind, lang: Lang) -> Strin
             "Cet encodeur ne peut pas écrire dans le conteneur choisi : choisissez-en un autre."
                 .into(),
         ),
-        I::UnknownChroma(_) | I::BadDepth(_) | I::FormatNotSupported { .. } => (
+        I::UnknownChroma(_) | I::FormatNotSupported { .. } => (
             "This encoder does not support the chosen colour format.".into(),
             "Cet encodeur ne gère pas le format de couleur choisi.".into(),
         ),
         I::UnknownHdrSetting(_) | I::HdrNotSupported | I::HdrNeedsHevcOrAv1 => (
             "HDR needs an HEVC or AV1 encoder that supports it.".into(),
             "Le HDR demande un encodeur HEVC ou AV1 qui le gère.".into(),
-        ),
-        I::HdrNeeds10Bit => (
-            "HDR needs 10-bit colour.".into(),
-            "Le HDR demande la couleur 10 bits.".into(),
         ),
         I::HdrContainer(_) => (
             "HDR cannot be stored in this container.".into(),
@@ -556,7 +584,7 @@ mod tests {
             assert_eq!(ids.len(), rows.len(), "{section:?}");
             for row in rows
                 .iter()
-                .filter(|r| !matches!(r.kind, Kind::Info | Kind::Header))
+                .filter(|r| !matches!(r.kind, Kind::Info | Kind::Header | Kind::Expander))
             {
                 let mut copy = config.clone();
                 let value = row.value(&config);
@@ -581,14 +609,13 @@ mod tests {
         assert_eq!(theme.apply(&mut c, Value::Bool(true)), Err(Invalid));
         assert_eq!(c.general.theme, "dark");
         // Numbers are clamped and put on the step.
-        let replay = rows(Section::Replay, &env(), &c);
-        let duration = row(&replay, "replay_duration");
-        duration.apply(&mut c, Value::Int(47)).unwrap();
-        assert_eq!(c.replay.duration_seconds, 45);
-        duration.apply(&mut c, Value::Int(100_000)).unwrap();
-        assert_eq!(c.replay.duration_seconds, 1_200);
-        duration.apply(&mut c, Value::Int(-5)).unwrap();
-        assert_eq!(c.replay.duration_seconds, 5);
+        c.video.split.mode = "size:2048".into();
+        let video = rows(Section::Video, &env(), &c);
+        let amount = row(&video, "split_amount");
+        amount.apply(&mut c, Value::Int(5_000_000)).unwrap();
+        assert_eq!(c.video.split.mode, "size:1000000");
+        amount.apply(&mut c, Value::Int(-5)).unwrap();
+        assert_eq!(c.video.split.mode, "size:1");
     }
 
     fn has(section: Section, c: &Config, id: &str) -> bool {
@@ -725,12 +752,9 @@ mod tests {
         };
         for (format, own) in [
             ("png", &["png_compression", "png_optimize"][..]),
-            ("jpeg", &["jpeg_quality", "jpeg_chroma", "jpeg_progressive"]),
+            ("jpeg", &["jpeg_quality"]),
             ("webp", &["webp_lossless", "webp_effort"]),
-            (
-                "avif",
-                &["avif_quality", "avif_depth", "avif_chroma", "avif_speed"],
-            ),
+            ("avif", &["avif_quality", "avif_depth", "avif_speed"]),
             ("jxl", &["jxl_lossless", "jxl_effort"]),
         ] {
             c.image.format = format.into();
@@ -761,10 +785,12 @@ mod tests {
     fn the_replay_keeps_its_duration_and_storage() {
         let mut c = Config::default();
         let replay = rows(Section::Replay, &env(), &c);
-        row(&replay, "replay_duration")
-            .apply(&mut c, Value::Int(33))
-            .unwrap();
-        assert_eq!(c.replay.duration_seconds, 35);
+        let duration = row(&replay, "replay_duration");
+        duration.apply(&mut c, Value::Text("1800".into())).unwrap();
+        assert_eq!(c.replay.duration_seconds, 1800);
+        // An older duration shows as the closest one offered.
+        c.replay.duration_seconds = 45;
+        assert_eq!(duration.value(&c), Value::Text("30".into()));
         row(&replay, "replay_storage")
             .apply(&mut c, Value::Text("disk".into()))
             .unwrap();
@@ -833,19 +859,73 @@ mod tests {
     }
 
     #[test]
-    fn ten_bit_needs_an_encoder_that_can_do_it() {
+    fn the_video_page_speaks_in_pixels_and_offers_16_9_on_a_wide_screen() {
+        use crate::machine::{Machine, Screen};
+        let screen = |width, height| Machine {
+            screens: vec![Screen {
+                number: 1,
+                primary: true,
+                name: "Screen".into(),
+                width,
+                height,
+                hz: 144,
+            }],
+            ..Machine::default()
+        };
+        let options = |rows_: &[Row], id: &str| match &row(rows_, id).kind {
+            Kind::Choice(o) => o.iter().map(|o| o.label.clone()).collect::<Vec<_>>(),
+            _ => Vec::new(),
+        };
         let mut c = Config::default();
-        c.video.encoder_kind = "software".into();
-        let video = rows(Section::Video, &env(), &c);
-        assert!(row(&video, "ten_bit").enabled(&c));
-        row(&video, "ten_bit")
-            .apply(&mut c, Value::Bool(true))
+        let uhd = env().with_machine(screen(3840, 2160));
+        let video = rows(Section::Video, &uhd, &c);
+        assert_eq!(
+            options(&video, "resolution"),
+            [
+                "The screen's (3840 × 2160)",
+                "2560 × 1440 (QHD)",
+                "1920 × 1080 (Full HD)",
+                "1280 × 720 (HD)",
+                "854 × 480"
+            ]
+        );
+        // 16:9: nothing to choose.
+        assert!(!video.iter().any(|r| r.id == "aspect"));
+        assert!(!video.iter().any(|r| r.id == "ten_bit"));
+        // An ultrawide screen can be recorded as 16:9, and the sizes follow.
+        let wide = env().with_machine(screen(3440, 1440));
+        let video = rows(Section::Video, &wide, &c);
+        assert_eq!(
+            options(&video, "aspect"),
+            ["The screen's (21:9)", "16:9, cropped in the middle"]
+        );
+        assert_eq!(options(&video, "resolution")[1], "2580 × 1080");
+        row(&video, "aspect")
+            .apply(&mut c, Value::Text("16:9".into()))
             .unwrap();
-        assert_eq!(c.video.depth, 10);
-        // The only probed hardware encoder does 8-bit only.
-        let hw = Config::default();
-        let video = rows(Section::Video, &with_nvenc(), &hw);
-        assert!(!row(&video, "ten_bit").enabled(&hw));
+        let video = rows(Section::Video, &wide, &c);
+        assert_eq!(
+            options(&video, "resolution")[..2],
+            ["The screen's (2560 × 1440)", "1920 × 1080 (Full HD)"]
+        );
+    }
+
+    #[test]
+    fn expert_settings_stay_folded_until_opened() {
+        let mut c = Config::default();
+        c.video.preset = "custom".into();
+        let closed = rows(Section::Video, &with_nvenc(), &c);
+        assert!(matches!(row(&closed, "expert_video").kind, Kind::Expander));
+        assert!(closed.iter().any(|r| r.id == "p:preset"));
+        assert!(
+            !closed
+                .iter()
+                .any(|r| r.id == "p:multipass" || r.id == "chroma")
+        );
+        let open = with_nvenc().with_open(["expert_video".to_owned()].into());
+        let opened = rows(Section::Video, &open, &c);
+        assert!(opened.iter().any(|r| r.id == "p:multipass"));
+        assert!(opened.iter().any(|r| r.id == "chroma"));
     }
 
     #[test]
@@ -1014,6 +1094,8 @@ mod tests {
             with_nvenc().with_machine(Machine {
                 ram_bytes: gb << 30,
                 screens: vec![Screen {
+                    number: 1,
+                    primary: true,
                     name: "4K".into(),
                     width: 3840,
                     height: 2160,

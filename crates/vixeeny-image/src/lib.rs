@@ -114,8 +114,10 @@ impl Default for JpegSettings {
     fn default() -> Self {
         Self {
             quality: 90,
+            // Full colour: screenshots are text and interfaces, which 4:2:0 fringes.
             chroma: Chroma::Yuv444,
-            progressive: false,
+            // A few percent smaller, at the same quality.
+            progressive: true,
         }
     }
 }

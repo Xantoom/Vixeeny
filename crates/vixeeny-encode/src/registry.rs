@@ -73,27 +73,33 @@ impl Container {
 pub enum RateMode {
     /// A constant quality; the size follows the picture.
     Quality,
+    /// The same quantizer for every frame: simple, and larger than constant quality.
+    Cqp,
     /// A target bitrate, allowed to vary.
     Vbr,
+    /// The same bitrate all along.
+    Cbr,
 }
 
 impl RateMode {
-    pub const ALL: [Self; 2] = [Self::Quality, Self::Vbr];
+    pub const ALL: [Self; 4] = [Self::Quality, Self::Cqp, Self::Vbr, Self::Cbr];
 
     pub const fn name(self) -> &'static str {
         match self {
             Self::Quality => "quality",
+            Self::Cqp => "cqp",
             Self::Vbr => "vbr",
+            Self::Cbr => "cbr",
         }
     }
 
-    /// The mode of a setting. A constant bitrate (older settings; it only serves streaming)
-    /// becomes the variable one.
     pub fn from_setting(name: &str) -> Option<Self> {
-        if name == "cbr" {
-            return Some(Self::Vbr);
-        }
         Self::ALL.into_iter().find(|m| m.name() == name)
+    }
+
+    /// Whether the mode aims at a bitrate (rather than a quality).
+    pub const fn has_bitrate(self) -> bool {
+        matches!(self, Self::Vbr | Self::Cbr)
     }
 }
 
@@ -111,6 +117,9 @@ pub struct QualityScale {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RateControl {
     pub quality: QualityScale,
+    /// The scale of the constant-quantizer mode, when the encoder has one.
+    #[serde(default)]
+    pub qp: Option<QualityScale>,
     /// The FFmpeg options of each mode, with the placeholders of [`PLACEHOLDERS`].
     pub modes: BTreeMap<RateMode, BTreeMap<String, OptionValue>>,
 }
@@ -127,13 +136,14 @@ impl RateControl {
 }
 
 /// What the rate-control options of the registry may contain.
-pub const PLACEHOLDERS: [&str; 4] = ["{quality}", "{bitrate}", "{maxrate}", "{bufsize}"];
+pub const PLACEHOLDERS: [&str; 5] = ["{quality}", "{qp}", "{bitrate}", "{maxrate}", "{bufsize}"];
 
 /// The keys of the rate control in the custom options of a profile (`Video::params`); the
 /// rates are in kbit/s.
 pub mod rate_keys {
     pub const MODE: &str = "rc.mode";
     pub const QUALITY: &str = "rc.quality";
+    pub const QP: &str = "rc.qp";
     pub const BITRATE: &str = "rc.bitrate";
     pub const MAXRATE: &str = "rc.maxrate";
 }
@@ -318,14 +328,18 @@ pub struct Encoder {
 }
 
 impl Encoder {
-    /// The rate mode of the custom options: the user's when the encoder has it, else
-    /// constant quality.
+    /// The rate mode of the custom options: the user's when the encoder has it (a constant
+    /// bitrate falls back to the variable one), else constant quality.
     pub fn rate_mode(&self, params: &BTreeMap<String, String>) -> RateMode {
-        params
+        let has = |m: &RateMode| self.rate_control.modes.contains_key(m);
+        let wanted = params
             .get(rate_keys::MODE)
-            .and_then(|m| RateMode::from_setting(m))
-            .filter(|m| self.rate_control.modes.contains_key(m))
-            .unwrap_or(RateMode::Quality)
+            .and_then(|m| RateMode::from_setting(m));
+        match wanted {
+            Some(m) if has(&m) => m,
+            Some(RateMode::Cbr) if has(&RateMode::Vbr) => RateMode::Vbr,
+            _ => RateMode::Quality,
+        }
     }
 
     /// The modes the encoder offers, in the order of [`RateMode::ALL`].
@@ -349,6 +363,11 @@ impl Encoder {
         let scale = &self.rate_control.quality;
         let mode = self.rate_mode(params);
         let quality = number(rate_keys::QUALITY, scale.default, (scale.min, scale.max));
+        let qp = self
+            .rate_control
+            .qp
+            .as_ref()
+            .map_or(0, |s| number(rate_keys::QP, s.default, (s.min, s.max)));
         let bitrate = number(rate_keys::BITRATE, DEFAULT_BITRATE, BITRATE_RANGE);
         let maxrate = number(rate_keys::MAXRATE, DEFAULT_MAXRATE, BITRATE_RANGE).max(bitrate);
         let peak = if self.rate_control.uses(mode, "{maxrate}") {
@@ -358,6 +377,7 @@ impl Encoder {
         };
         let values = [
             ("{quality}", quality),
+            ("{qp}", qp),
             ("{bitrate}", bitrate * 1000),
             ("{maxrate}", maxrate * 1000),
             ("{bufsize}", peak * 2000),
@@ -445,6 +465,12 @@ impl Registry {
             let q = &rc.quality;
             if !(q.min <= q.default && q.default <= q.max) {
                 return bad(format!("`{}`: the quality default is out of range", e.id));
+            }
+            if rc.modes.contains_key(&RateMode::Cqp) != rc.qp.is_some() {
+                return bad(format!(
+                    "`{}`: the cqp mode and the qp scale go together",
+                    e.id
+                ));
             }
             if !rc.modes.contains_key(&RateMode::Quality) {
                 return bad(format!("`{}`: no constant-quality mode", e.id));

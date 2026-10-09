@@ -350,17 +350,11 @@ impl Default for Png {
 #[serde(default)]
 pub struct Jpeg {
     pub quality: u8,
-    pub chroma: String,
-    pub progressive: bool,
 }
 
 impl Default for Jpeg {
     fn default() -> Self {
-        Self {
-            quality: 90,
-            chroma: "444".into(),
-            progressive: false,
-        }
+        Self { quality: 90 }
     }
 }
 
@@ -409,7 +403,6 @@ impl Default for Jxl {
 pub struct Avif {
     pub quality: u8,
     pub depth: u8,
-    pub chroma: String,
     /// 0 (slow, small) to 10 (fast).
     pub speed: u8,
 }
@@ -419,7 +412,6 @@ impl Default for Avif {
         Self {
             quality: 80,
             depth: 10,
-            chroma: "444".into(),
             speed: 6,
         }
     }
@@ -436,8 +428,9 @@ pub struct Video {
     pub encoder: String,
     pub container: String,
     pub resolution: String,
+    /// `source` (the screen's) or `W:H`: the middle of the screen with that ratio.
+    pub aspect: String,
     pub fps: u32,
-    pub depth: u8,
     pub chroma: String,
     pub hdr: String,
     pub mode: String,
@@ -459,8 +452,8 @@ impl Default for Video {
             encoder: "auto".into(),
             container: "mp4_fragmented".into(),
             resolution: "source".into(),
+            aspect: "source".into(),
             fps: 60,
-            depth: 8,
             chroma: "420".into(),
             hdr: "tonemap_sdr".into(),
             mode: "simple".into(),
