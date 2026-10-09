@@ -18,7 +18,7 @@ use vixeeny_settings::{
 
 use crate::theme::{self, Look};
 use crate::{
-    LineItem, PcTile, SettingGroup, SettingRow, SettingsWindow, ShortcutKey, ShortcutRow, UiTexts,
+    LineItem, PcLine, SettingGroup, SettingRow, SettingsWindow, ShortcutKey, ShortcutRow, UiTexts,
 };
 
 /// One line of the about page.
@@ -229,27 +229,14 @@ pub struct SettingsPanel {
     state: Rc<State>,
 }
 
-/// The tiles of this computer, for the general page.
-fn pc_tiles(tiles: &[vixeeny_settings::machine::Tile]) -> ModelRc<PcTile> {
-    use vixeeny_settings::machine::Glyph;
+/// The sheet of this computer, for the general page.
+fn pc_lines(lines: &[vixeeny_settings::machine::Line]) -> ModelRc<PcLine> {
     ModelRc::from(Rc::new(VecModel::from(
-        tiles
+        lines
             .iter()
-            .map(|t| PcTile {
-                glyph: match t.glyph {
-                    Glyph::Cpu => 0,
-                    Glyph::Ram => 1,
-                    Glyph::Gpu => 2,
-                    Glyph::Drive => 3,
-                    Glyph::Screen => 4,
-                },
-                caption: t.caption.as_str().into(),
-                title: t.title.as_str().into(),
-                detail: t.detail.as_str().into(),
-                badge: t.badge.as_str().into(),
-                mark: t.mark.as_str().into(),
-                usage: t.usage.unwrap_or(-1.0),
-                ratio: t.ratio,
+            .map(|l| PcLine {
+                label: l.label.as_str().into(),
+                value: l.value.as_str().into(),
             })
             .collect::<Vec<_>>(),
     )))
@@ -821,9 +808,6 @@ impl SettingsPanel {
         self.window
             .set_version(format!("Version {}", self.state.version).into());
         self.window.set_tagline(tr(Key::AboutTagline, lang).into());
-        self.window.set_pc_titles(strings(
-            [Key::PcParts, Key::PcScreens, Key::PcDisks].map(|k| tr(k, lang).to_owned()),
-        ));
     }
 
     /// The model's view of this machine: language, hardware probe, audio devices.
@@ -855,11 +839,9 @@ impl SettingsPanel {
         let overview = if section == Section::General {
             vixeeny_settings::machine::overview(&env)
         } else {
-            vixeeny_settings::machine::Overview::default()
+            Vec::new()
         };
-        self.window.set_pc_parts(pc_tiles(&overview.parts));
-        self.window.set_pc_screens(pc_tiles(&overview.screens));
-        self.window.set_pc_disks(pc_tiles(&overview.disks));
+        self.window.set_pc_lines(pc_lines(&overview));
         let notice = if section == Section::Video {
             video_problems(&config, (1920, 1080), env.lang).join("\n")
         } else {
