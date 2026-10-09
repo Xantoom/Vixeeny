@@ -438,7 +438,7 @@ pub fn rows(section: Section, env: &Env, config: &Config) -> Vec<Row> {
         Section::Image => pages::image(env, config),
         Section::Video => pages::video(env, config),
         Section::Audio => pages::audio(env, config),
-        Section::Replay => pages::replay(env),
+        Section::Replay => pages::replay(env, config),
         Section::Updates => pages::updates(env),
         Section::Shortcuts | Section::About => Vec::new(),
     }
@@ -1005,5 +1005,42 @@ mod tests {
             problems.iter().any(|p| p.contains("conteneur")),
             "{problems:?}"
         );
+    }
+
+    #[test]
+    fn the_replay_says_how_big_it_will_be_and_where_auto_keeps_it() {
+        use crate::machine::{Machine, Screen};
+        let with_ram = |gb: u64| {
+            with_nvenc().with_machine(Machine {
+                ram_bytes: gb << 30,
+                screens: vec![Screen {
+                    name: "4K".into(),
+                    width: 3840,
+                    height: 2160,
+                    hz: 144,
+                }],
+                ..Machine::default()
+            })
+        };
+        let mut c = Config::default();
+        c.replay.duration_seconds = 300;
+        let hint = |env: &Env, c: &Config| {
+            row(&rows(Section::Replay, env, c), "replay_storage")
+                .hint
+                .clone()
+        };
+        assert!(
+            hint(&with_ram(64), &c).contains("RAM"),
+            "{}",
+            hint(&with_ram(64), &c)
+        );
+        assert!(
+            hint(&with_ram(8), &c).contains("disk"),
+            "{}",
+            hint(&with_ram(8), &c)
+        );
+        c.replay.storage = "disk".into();
+        assert!(!hint(&with_ram(64), &c).contains("RAM"));
+        assert!(hint(&with_ram(64), &c).contains("GB"));
     }
 }

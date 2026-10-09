@@ -131,10 +131,11 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
         self.apply_hotkeys();
     }
 
-    /// Starts the replay buffer if the settings say so (once, when the daemon starts).
+    /// Starts watching for full-screen games if the replay is on (once, when the daemon
+    /// starts): the app starts the replay with a game.
     pub fn start_replay_if_configured(&mut self) {
-        if self.config.replay.enabled_on_start {
-            self.tx.send(Event::Action(ActionId::ReplayToggle));
+        if self.config.replay.enabled {
+            self.tx.send(Event::Action(ActionId::ReplayWatch));
         }
     }
 
@@ -293,7 +294,12 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
         };
         match Config::load(path) {
             Ok(config) => {
+                // The app follows the replay being turned on or off (and reads the settings).
+                let replay = self.config.replay.enabled || config.replay.enabled;
                 self.config = config;
+                if replay {
+                    self.tx.send(Event::Action(ActionId::ReplayWatch));
+                }
                 self.lang = Lang::resolve(&self.config.general.language, self.os_locale.as_deref());
                 self.tray.set_language(self.lang);
                 self.tray
@@ -405,18 +411,18 @@ mod tests {
     }
 
     #[test]
-    fn the_replay_buffer_starts_with_the_daemon_only_when_asked() {
+    fn the_app_watches_for_games_only_when_the_replay_is_on() {
         let (mut rt, _, _, spawned) = runtime(false, Config::default());
         rt.start_replay_if_configured();
         rt.pump();
         assert!(spawned.lock().unwrap().is_empty());
 
         let mut config = Config::default();
-        config.replay.enabled_on_start = true;
+        config.replay.enabled = true;
         let (mut rt, _, _, spawned) = runtime(false, config);
         rt.start_replay_if_configured();
         rt.pump();
-        assert_eq!(*spawned.lock().unwrap(), vec![(1, ActionId::ReplayToggle)]);
+        assert_eq!(*spawned.lock().unwrap(), vec![(1, ActionId::ReplayWatch)]);
     }
 
     #[test]

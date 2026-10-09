@@ -130,6 +130,42 @@ pub(crate) fn app_name(
     })
 }
 
+/// Programs that fill the screen without being a game: the desktop, the lock screen, the
+/// browsers and the video players (a film in full screen is not worth a replay).
+const NOT_GAMES: &[&str] = &[
+    "explorer.exe",
+    "lockapp.exe",
+    "searchhost.exe",
+    "shellexperiencehost.exe",
+    "startmenuexperiencehost.exe",
+    "applicationframehost.exe",
+    "chrome.exe",
+    "msedge.exe",
+    "firefox.exe",
+    "opera.exe",
+    "brave.exe",
+    "vivaldi.exe",
+    "vlc.exe",
+    "mpc-hc64.exe",
+    "mpc-be64.exe",
+    "mpv.exe",
+    "potplayermini64.exe",
+];
+
+/// The full-screen game in the foreground, if there is one: a window of another program that
+/// covers its whole monitor (borderless full screen too).
+pub fn game_in_front() -> Option<WindowInfo> {
+    let window = vixeeny_platform::foreground_window().ok()??;
+    let monitors = vixeeny_platform::monitors().ok()?;
+    let exe = window
+        .exe_path
+        .as_deref()
+        .and_then(|p| Path::new(p).file_name())
+        .map(|n| n.to_string_lossy().to_ascii_lowercase())?;
+    (is_full_screen(&window, &monitors) && !is_ours(&window) && !NOT_GAMES.contains(&exe.as_str()))
+        .then_some(window)
+}
+
 /// Whether `window` belongs to Vixeeny: this process, or an executable next to it (the daemon).
 fn is_ours(window: &WindowInfo) -> bool {
     if window.pid == std::process::id() {

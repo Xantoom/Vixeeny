@@ -6,6 +6,7 @@ use vixeeny_common::i18n::Key;
 use vixeeny_encode::registry::{
     BITRATE_RANGE, DEFAULT_BITRATE, DEFAULT_MAXRATE, Family, ParamType, RateMode, rate_keys,
 };
+use vixeeny_encode::replay;
 
 use crate::encoders::{self, param_label, param_range};
 use crate::{
@@ -1132,15 +1133,33 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
 }
 
 /// The replay buffer: the last moments, kept to be saved on demand.
-pub fn replay(env: &Env) -> Vec<Row> {
+pub fn replay(env: &Env, config: &Config) -> Vec<Row> {
     let t = |k| env.t(k);
+    let storage = choice(
+        "replay_storage",
+        t(Key::SetReplayStorage),
+        vec![
+            opt(
+                "auto",
+                format!("{} ({})", t(Key::OptAuto), t(Key::OptRecommended)),
+            ),
+            opt("ram", t(Key::SetStorageRam)),
+            opt("disk", t(Key::SetStorageDisk)),
+        ],
+        |c| c.replay.storage.clone(),
+        |c, v| c.replay.storage = v,
+    );
+    let storage = match replay_estimate(env, config) {
+        Some(hint) => hinted(storage, hint),
+        None => storage,
+    };
     let mut rows = vec![
         hinted(
             toggle(
-                "replay_start",
+                "replay_enabled",
                 t(Key::SetReplayStart),
-                |c| c.replay.enabled_on_start,
-                |c, v| c.replay.enabled_on_start = v,
+                |c| c.replay.enabled,
+                |c, v| c.replay.enabled = v,
             ),
             t(Key::SetReplayStartHint),
         ),
@@ -1151,16 +1170,7 @@ pub fn replay(env: &Env) -> Vec<Row> {
             |c| i64::from(c.replay.duration_seconds),
             |c, v| c.replay.duration_seconds = v as u32,
         ),
-        choice(
-            "replay_storage",
-            t(Key::SetReplayStorage),
-            vec![
-                opt("ram", t(Key::SetStorageRam)),
-                opt("disk", t(Key::SetStorageDisk)),
-            ],
-            |c| c.replay.storage.clone(),
-            |c, v| c.replay.storage = v,
-        ),
+        storage,
         header("h_folder"),
         folder(
             "dir_replays",
@@ -1182,6 +1192,45 @@ pub fn replay(env: &Env) -> Vec<Row> {
         |c| &mut c.paths.naming.replays,
     ));
     rows
+}
+
+/// How big the replay will be with the video settings, and where `auto` keeps it. `None` while
+/// the encoder is not known.
+fn replay_estimate(env: &Env, config: &Config) -> Option<String> {
+    let encoder = encoders::resolved(env, &config.video).and_then(|e| encoders::spec(&e.id))?;
+    // The largest screen (a recording is of one screen).
+    let screen = env
+        .machine
+        .screens
+        .iter()
+        .map(|s| (s.width, s.height))
+        .max_by_key(|(w, h)| u64::from(*w) * u64::from(*h))
+        .unwrap_or((1920, 1080));
+    let size =
+        vixeeny_encode::validate::output_size(&config.video.resolution, screen).unwrap_or(screen);
+    let bytes = replay::expected_bytes(
+        replay::profile_kbps(&config.video, encoder, size),
+        config.replay.duration_seconds,
+    );
+    let key = match config.replay.storage.as_str() {
+        "ram" | "disk" => Key::ReplayEstimate,
+        _ if replay::fits_in_ram(bytes, env.machine.ram_bytes) => Key::ReplayEstimateRam,
+        _ => Key::ReplayEstimateDisk,
+    };
+    Some(env.t(key).replace("{size}", &size_label(bytes, env.lang)))
+}
+
+/// A file size: megabytes below a gigabyte, gigabytes with one decimal above.
+fn size_label(bytes: u64, lang: vixeeny_common::i18n::Lang) -> String {
+    let fr = lang == vixeeny_common::i18n::Lang::Fr;
+    if bytes < 1 << 30 {
+        let mb = (bytes >> 20).max(1);
+        format!("{mb} {}", if fr { "Mo" } else { "MB" })
+    } else {
+        let gb = format!("{:.1}", bytes as f64 / f64::from(1u32 << 30));
+        let gb = if fr { gb.replace('.', ",") } else { gb };
+        format!("{gb} {}", if fr { "Go" } else { "GB" })
+    }
 }
 
 /// The settings of the updates page (the state of the update is drawn by the page).

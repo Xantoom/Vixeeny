@@ -30,11 +30,14 @@ pub enum ActionId {
     ReplaySave,
     OverlayToggle,
     OpenSettings,
+    /// Not a shortcut: keeps the app running while the replay is on, to start it during
+    /// full-screen games (the daemon sends it at startup and when the settings change).
+    ReplayWatch,
 }
 
 impl ActionId {
     /// All actions, in a stable order.
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::CaptureRegion,
         Self::CaptureWindow,
         Self::CaptureFullscreen,
@@ -46,6 +49,7 @@ impl ActionId {
         Self::ReplaySave,
         Self::OverlayToggle,
         Self::OpenSettings,
+        Self::ReplayWatch,
     ];
 
     /// Name used on the `vixeeny-app --action <name>` command line.
@@ -62,6 +66,7 @@ impl ActionId {
             Self::ReplaySave => "replay-save",
             Self::OverlayToggle => "overlay-toggle",
             Self::OpenSettings => "open-settings",
+            Self::ReplayWatch => "replay-watch",
         }
     }
 

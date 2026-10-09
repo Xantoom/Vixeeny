@@ -15,6 +15,7 @@ use ffmpeg_next::packet::{Mut, Ref};
 use ffmpeg_next::{Packet, ffi};
 
 use crate::audio::SAMPLE_RATE;
+use crate::registry::Family;
 
 /// A packet shared between the ring and a save in progress, without copying its data.
 pub fn share(packet: &Packet) -> Packet {
@@ -25,13 +26,77 @@ pub fn share(packet: &Packet) -> Packet {
     copy
 }
 
-/// RAM the ring needs for `seconds` of replay at the given bitrates (video + all audio tracks, in
-/// kbit/s). One more key frame interval is kept beyond the duration, so a save always starts on a
-/// key frame at least `seconds` back.
-#[cfg(test)]
-fn estimate_ram_bytes(total_kbps: u32, seconds: u32, keyframe_seconds: f64) -> u64 {
+/// What the ring holds for `seconds` of replay at the given bitrates (video + all audio tracks,
+/// in kbit/s). One more key frame interval is kept beyond the duration, so a save always starts
+/// on a key frame at least `seconds` back.
+pub fn estimate_ram_bytes(total_kbps: u32, seconds: u32, keyframe_seconds: f64) -> u64 {
     let span = f64::from(seconds) + keyframe_seconds;
     (f64::from(total_kbps) * 1000.0 / 8.0 * span) as u64
+}
+
+/// The bitrate (video and sound) a recording is expected to reach, in kbit/s: a generous guess
+/// for a busy game, as the constant-quality modes follow the picture. `bitrate` is the video
+/// target of a custom variable-bitrate profile, when it has one; `light` is the light-files
+/// preset.
+pub fn expected_kbps(
+    family: Family,
+    (width, height): (u32, u32),
+    fps: u32,
+    light: bool,
+    bitrate: Option<u32>,
+) -> u32 {
+    let video = bitrate.map_or_else(
+        || {
+            // The best-quality presets at 1080p and 60 fps.
+            let base = match family {
+                Family::H264 => 30_000.0,
+                Family::Hevc | Family::Vp9 => 22_000.0,
+                Family::Av1 => 18_000.0,
+            };
+            let pixels = f64::from(width) * f64::from(height) / (1920.0 * 1080.0);
+            let scale = pixels.powf(0.8) * f64::from(fps.max(1)) / 60.0;
+            base * scale * if light { 0.5 } else { 1.0 }
+        },
+        f64::from,
+    );
+    // The sound, a few tracks at most.
+    video as u32 + 512
+}
+
+/// The bitrate `profile` is expected to reach with `encoder` at `size` (see [`expected_kbps`]).
+pub fn profile_kbps(
+    profile: &vixeeny_common::config::Video,
+    encoder: &crate::registry::Encoder,
+    size: (u32, u32),
+) -> u32 {
+    use crate::registry::{RateMode, rate_keys};
+    let custom = profile.preset == "custom";
+    let bitrate = (custom && encoder.rate_mode(&profile.params) == RateMode::Vbr)
+        .then(|| profile.params.get(rate_keys::BITRATE)?.parse().ok())
+        .flatten();
+    expected_kbps(
+        encoder.family,
+        size,
+        profile.fps,
+        profile.preset == "small",
+        bitrate,
+    )
+}
+
+/// The size of a replay of `seconds` at `kbps`, as the settings and the recorder estimate it.
+pub fn expected_bytes(kbps: u32, seconds: u32) -> u64 {
+    estimate_ram_bytes(kbps, clamp_seconds(seconds), 2.0)
+}
+
+/// Where `storage = "auto"` keeps a replay of `bytes`: in RAM up to a tenth of the installed
+/// memory (512 MB when it is not known), on the disk beyond.
+pub fn fits_in_ram(bytes: u64, ram_bytes: u64) -> bool {
+    let budget = if ram_bytes == 0 {
+        512 << 20
+    } else {
+        ram_bytes / 10
+    };
+    bytes <= budget
 }
 
 /// The allowed durations: 5 s to 20 min, in steps of 5 s.
@@ -436,6 +501,28 @@ impl Ring {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_size_of_a_replay_decides_where_it_is_kept() {
+        // 4K60 AV1 for five minutes: a few gigabytes, in RAM on 64 GB but not on 8 GB.
+        let kbps = expected_kbps(Family::Av1, (3840, 2160), 60, false, None);
+        assert!((40_000..80_000).contains(&kbps), "{kbps}");
+        let bytes = expected_bytes(kbps, 300);
+        assert!((1_500_000_000..3_000_000_000).contains(&bytes), "{bytes}");
+        assert!(fits_in_ram(bytes, 64 << 30));
+        assert!(!fits_in_ram(bytes, 8 << 30));
+        // 30 s of 1080p60: fine anywhere.
+        let small = expected_bytes(
+            expected_kbps(Family::H264, (1920, 1080), 60, false, None),
+            30,
+        );
+        assert!(fits_in_ram(small, 8 << 30));
+        // A custom bitrate is taken as it is.
+        assert_eq!(
+            expected_kbps(Family::Av1, (3840, 2160), 60, false, Some(8_000)),
+            8_512
+        );
+    }
     use std::path::PathBuf;
 
     fn packet(size: usize, key: bool) -> Packet {

@@ -233,6 +233,7 @@ fn run_action(
         | ActionId::RecordPause
         | ActionId::ReplayToggle
         | ActionId::ReplaySave => recording.handle(action, config),
+        ActionId::ReplayWatch => recording.watch(config, true),
         ActionId::OverlayToggle => return Ok(overlay(config, recording)),
         ActionId::OpenSettings => open_settings(),
         _ => perform(action, config, frozen),
@@ -251,6 +252,12 @@ impl<W: std::io::Write> Actions<'_, W> {
     fn run(&mut self, action: ActionId, frozen: Option<ipc::Frozen>) -> anyhow::Result<()> {
         use std::sync::atomic::Ordering;
         BUSY.store(true, Ordering::Release);
+        // The app may run for long (the replay): each action reads the settings as they are now.
+        if let Some(config) =
+            vixeeny_common::paths::config_file().and_then(|path| Config::load(&path).ok())
+        {
+            *self.config = config;
+        }
         let mut next = Some((action, frozen));
         let mut result = Ok(());
         while let Some((action, frozen)) = next.take() {
@@ -305,6 +312,12 @@ struct Recording {
     handle: Option<record::Handle>,
     /// The replay buffer (`ReplayToggle`), which runs alongside a recording.
     replay: Option<record::Handle>,
+    /// The game (its process) the replay was started for: the replay stops when it closes.
+    replay_game: Option<u32>,
+    /// A game whose replay the user stopped by hand: it is not started again for it.
+    declined: Option<u32>,
+    /// When the foreground was last looked at.
+    watched: Option<std::time::Instant>,
 }
 
 impl Recording {
@@ -317,12 +330,58 @@ impl Recording {
         self.handle.is_some() || self.replay.is_some()
     }
 
+    /// With the replay on: starts it when a full-screen game comes to the foreground, stops it
+    /// when that game closes. Looks once a second at most, unless `now`.
+    fn watch(&mut self, config: &Config, now: bool) {
+        if !now
+            && self
+                .watched
+                .is_some_and(|t| t.elapsed() < Duration::from_secs(1))
+        {
+            return;
+        }
+        self.watched = Some(std::time::Instant::now());
+        if let Some(pid) = self.replay_game {
+            if !config.replay.enabled || !vixeeny_platform::process_alive(pid) {
+                tracing::info!("the game closed (or the replay was turned off): replay stopped");
+                self.replay_game = None;
+                self.replay = None;
+            }
+            return;
+        }
+        if !config.replay.enabled || self.replay.is_some() {
+            return;
+        }
+        let Some(game) = still::game_in_front() else {
+            return;
+        };
+        if self.declined == Some(game.pid) {
+            return;
+        }
+        match record::start_replay(config) {
+            Ok(handle) => {
+                tracing::info!("full-screen game ({}): replay started", game.title);
+                self.replay = Some(handle);
+                self.replay_game = Some(game.pid);
+            }
+            Err(e) => {
+                tracing::error!("cannot start the replay buffer: {e:#}");
+                // Not again for this game.
+                self.declined = Some(game.pid);
+            }
+        }
+    }
+
     fn handle(&mut self, action: ActionId, config: &Config) {
         match action {
             ActionId::ReplayToggle => {
                 match self.replay.take() {
-                    // Dropping the handle stops the buffer.
-                    Some(replay) => drop(replay),
+                    // Dropping the handle stops the buffer; stopped by hand during a game, it
+                    // stays off for that game.
+                    Some(replay) => {
+                        drop(replay);
+                        self.declined = self.replay_game.take();
+                    }
                     None => match record::start_replay(config) {
                         Ok(handle) => self.replay = Some(handle),
                         Err(e) => tracing::error!("cannot start the replay buffer: {e:#}"),
@@ -483,8 +542,9 @@ fn run() -> anyhow::Result<()> {
     };
     actions.run(first_action, first_frozen)?;
     loop {
-        // While recording the app must not exit as idle; it polls the recording state instead.
-        let wait = if recording.active() {
+        // While recording, or while the replay waits for a game, the app must not exit as idle;
+        // it polls instead.
+        let wait = if recording.active() || config.replay.enabled {
             Duration::from_millis(200)
         } else {
             idle
@@ -498,7 +558,8 @@ fn run() -> anyhow::Result<()> {
                 }
                 .run(action, frozen)?;
             }
-            Err(RecvTimeoutError::Timeout) if recording.active() => {
+            Err(RecvTimeoutError::Timeout) if recording.active() || config.replay.enabled => {
+                recording.watch(&config, false);
                 recording.report(&mut send)?;
             }
             Ok(DaemonToApp::ConfigChanged) => {}

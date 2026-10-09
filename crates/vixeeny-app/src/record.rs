@@ -325,6 +325,7 @@ fn plan(config: &Config, allow_gpu: bool, replay: bool) -> anyhow::Result<Plan> 
         .collect();
     // An SDR monitor has nothing to preserve: such a recording stays SDR.
     let hdr = monitor.hdr.is_some() && matches!(profile.hdr.as_str(), "keep_hdr" | "hdr");
+    let storage = replay_storage(config, &encoder, output_size);
     #[allow(unused_mut)]
     let mut record = RecordConfig {
         options,
@@ -349,7 +350,7 @@ fn plan(config: &Config, allow_gpu: bool, replay: bool) -> anyhow::Result<Plan> 
         gpu: None,
         encoder,
         replay_seconds: replay.then(|| replay::clamp_seconds(config.replay.duration_seconds)),
-        replay_storage: replay_storage(config),
+        replay_storage: storage,
         files: !replay,
     };
     let gpu = if allow_gpu {
@@ -778,10 +779,26 @@ fn record_loop(
 }
 
 /// Where the replay keeps its packets: in RAM, or in temporary files (`[replay] storage`).
-fn replay_storage(config: &Config) -> replay::Storage {
-    if config.replay.storage == "disk" {
-        replay::Storage::Disk(std::env::temp_dir().join("Vixeeny-replay"))
-    } else {
-        replay::Storage::Ram
+/// `auto` keeps it in RAM when it is small next to the installed memory (see
+/// [`replay::fits_in_ram`]), on the disk otherwise.
+fn replay_storage(config: &Config, encoder: &Encoder, size: (u32, u32)) -> replay::Storage {
+    let disk = || replay::Storage::Disk(std::env::temp_dir().join("Vixeeny-replay"));
+    match config.replay.storage.as_str() {
+        "ram" => replay::Storage::Ram,
+        "disk" => disk(),
+        _ => {
+            let bytes = replay::expected_bytes(
+                replay::profile_kbps(&config.video, encoder, size),
+                config.replay.duration_seconds,
+            );
+            let ram = vixeeny_platform::machine::ram_bytes();
+            let fits = replay::fits_in_ram(bytes, ram);
+            tracing::info!(
+                "replay of about {} MB: kept {}",
+                bytes >> 20,
+                if fits { "in RAM" } else { "on the disk" }
+            );
+            if fits { replay::Storage::Ram } else { disk() }
+        }
     }
 }

@@ -196,6 +196,23 @@ pub fn process_path(pid: u32) -> Option<String> {
     exe_path(pid)
 }
 
+/// Whether the process `pid` is still running.
+pub fn process_alive(pid: u32) -> bool {
+    use windows::Win32::System::Threading::GetExitCodeProcess;
+    /// What `GetExitCodeProcess` reports while the process runs.
+    const STILL_ACTIVE: u32 = 259;
+    // SAFETY: the handle is closed on every path; `code` is a valid out-pointer.
+    unsafe {
+        let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
+            return false;
+        };
+        let mut code = 0u32;
+        let ok = GetExitCodeProcess(process, &raw mut code).is_ok();
+        let _ = CloseHandle(process);
+        ok && code == STILL_ACTIVE
+    }
+}
+
 fn exe_path(pid: u32) -> Option<String> {
     // SAFETY: standard query of a process image name into a buffer whose capacity is passed
     // and updated by the call; the handle is closed on every path.

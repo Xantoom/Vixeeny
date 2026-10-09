@@ -265,7 +265,7 @@ pub fn action_label(action: ActionId, lang: Lang) -> &'static str {
             ActionId::CaptureScrolling => Key::ActCaptureScrolling,
             ActionId::RecordToggle => Key::ActRecordToggle,
             ActionId::RecordPause => Key::ActRecordPause,
-            ActionId::ReplayToggle => Key::ActReplayToggle,
+            ActionId::ReplayToggle | ActionId::ReplayWatch => Key::ActReplayToggle,
             ActionId::ReplaySave => Key::ActReplaySave,
             ActionId::OverlayToggle => Key::ActOverlay,
             ActionId::OpenSettings => Key::ActSettings,

@@ -559,7 +559,10 @@ impl Default for RecordingWidget {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Replay {
-    pub enabled_on_start: bool,
+    /// The replay runs during every full-screen game: it starts with the game and stops when
+    /// the game closes.
+    #[serde(alias = "enabled_on_start")]
+    pub enabled: bool,
     pub duration_seconds: u32,
     pub storage: String,
 }
@@ -567,9 +570,9 @@ pub struct Replay {
 impl Default for Replay {
     fn default() -> Self {
         Self {
-            enabled_on_start: false,
+            enabled: false,
             duration_seconds: 30,
-            storage: "ram".into(),
+            storage: "auto".into(),
         }
     }
 }

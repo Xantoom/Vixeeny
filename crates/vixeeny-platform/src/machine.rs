@@ -147,7 +147,8 @@ fn cores() -> Option<u32> {
     (count > 0).then_some(count)
 }
 
-fn ram_bytes() -> u64 {
+/// The installed memory, in bytes (0 when it cannot be read).
+pub fn ram_bytes() -> u64 {
     let mut kib = 0u64;
     // SAFETY: a valid out-pointer.
     match unsafe { GetPhysicallyInstalledSystemMemory(&raw mut kib) } {

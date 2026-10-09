@@ -124,9 +124,9 @@ corner = "top_left"
 auto_hide = false
 
 [replay]
-enabled_on_start = false
+enabled = false
 duration_seconds = 30
-storage = "ram"
+storage = "auto"
 
 [overlay]
 edge = "right"

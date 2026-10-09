@@ -264,6 +264,9 @@ pub enum Key {
     CapTargetHint,
     SetAudioOutput,
     SrcClosed,
+    ReplayEstimate,
+    ReplayEstimateRam,
+    ReplayEstimateDisk,
 }
 
 impl Key {
@@ -520,6 +523,9 @@ impl Key {
         Self::CapTargetHint,
         Self::SetAudioOutput,
         Self::SrcClosed,
+        Self::ReplayEstimate,
+        Self::ReplayEstimateRam,
+        Self::ReplayEstimateDisk,
     ];
 }
 
@@ -749,8 +755,8 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::UiKeysHelp, Lang::Fr) => {
             "Maintenez les touches, relâchez pour valider. Échap n'en met aucun."
         }
-        (Key::SetReplayStart, Lang::En) => "Start the replay with Vixeeny",
-        (Key::SetReplayStart, Lang::Fr) => "Lancer le replay avec Vixeeny",
+        (Key::SetReplayStart, Lang::En) => "Turn on the replay",
+        (Key::SetReplayStart, Lang::Fr) => "Activer le replay",
         (Key::SetReplayDuration, Lang::En) => "Duration (seconds)",
         (Key::SetReplayDuration, Lang::Fr) => "Durée (secondes)",
         (Key::SetTemplate, Lang::En) => "File name",
@@ -901,8 +907,8 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::ToastAudioLost, Lang::Fr) => {
             "Une source audio a été perdue (la piste reste muette jusqu'à son retour)"
         }
-        (Key::SetReplayStorage, Lang::En) => "Keep the replay in",
-        (Key::SetReplayStorage, Lang::Fr) => "Garder le replay en",
+        (Key::SetReplayStorage, Lang::En) => "Where to keep it",
+        (Key::SetReplayStorage, Lang::Fr) => "Où le garder",
         (Key::SetStorageRam, Lang::En) => "Memory (RAM)",
         (Key::SetStorageRam, Lang::Fr) => "Mémoire (RAM)",
         (Key::SetStorageDisk, Lang::En) => "Temporary files on disk",
@@ -1058,10 +1064,10 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
             "Le 5.1 et le 7.1 demandent le MKV avec Opus, FLAC ou PCM : cet enregistrement sera en stéréo."
         }
         (Key::SetReplayStartHint, Lang::En) => {
-            "It then runs all the time. Otherwise, start and stop it with its shortcut or from the overlay."
+            "It runs during full-screen games only: it starts with the game and stops when the game closes. Its shortcut starts or stops it by hand."
         }
         (Key::SetReplayStartHint, Lang::Fr) => {
-            "Il tourne alors en permanence. Sinon, lancez-le et arrêtez-le avec son raccourci ou depuis l'overlay."
+            "Il tourne seulement pendant les jeux en plein écran : il démarre avec le jeu et s'arrête quand le jeu se ferme. Son raccourci le lance ou l'arrête à la main."
         }
         (Key::UiLicenses, Lang::En) => "Third-party licences",
         (Key::UiLicenses, Lang::Fr) => "Licences tierces",
@@ -1103,6 +1109,18 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::SetAudioOutput, Lang::Fr) => "Sortie audio",
         (Key::SrcClosed, Lang::En) => "closed",
         (Key::SrcClosed, Lang::Fr) => "fermé",
+        (Key::ReplayEstimate, Lang::En) => "About {size} with the video settings.",
+        (Key::ReplayEstimate, Lang::Fr) => "Environ {size} avec les réglages vidéo.",
+        (Key::ReplayEstimateRam, Lang::En) => "About {size} with the video settings: kept in RAM.",
+        (Key::ReplayEstimateRam, Lang::Fr) => {
+            "Environ {size} avec les réglages vidéo : gardé en RAM."
+        }
+        (Key::ReplayEstimateDisk, Lang::En) => {
+            "About {size} with the video settings: kept on the disk, too big for the RAM."
+        }
+        (Key::ReplayEstimateDisk, Lang::Fr) => {
+            "Environ {size} avec les réglages vidéo : gardé sur le disque, trop gros pour la RAM."
+        }
     }
 }
 

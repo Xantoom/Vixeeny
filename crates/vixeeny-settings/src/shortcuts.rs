@@ -25,7 +25,8 @@ fn list_mut(hotkeys: &mut Hotkeys, action: ActionId) -> &mut Vec<String> {
         ActionId::CaptureScrolling => &mut hotkeys.capture_scrolling,
         ActionId::RecordToggle => &mut hotkeys.record_toggle,
         ActionId::RecordPause => &mut hotkeys.record_pause,
-        ActionId::ReplayToggle => &mut hotkeys.replay_toggle,
+        // Watching for games has no shortcut of its own (never listed).
+        ActionId::ReplayToggle | ActionId::ReplayWatch => &mut hotkeys.replay_toggle,
         ActionId::ReplaySave => &mut hotkeys.replay_save,
         ActionId::OverlayToggle => &mut hotkeys.overlay_toggle,
         ActionId::OpenSettings => &mut hotkeys.open_settings,
