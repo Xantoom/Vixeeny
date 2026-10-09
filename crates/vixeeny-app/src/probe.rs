@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Hardware encoder probe (plan 6.3). `vixeeny-app --probe` is the child process that opens the
-//! trial sessions and prints the result as TOML; `--probe-report` runs it (through the cache)
+//! Hardware encoder probe (plan 6.3). `vixeeny-app --probe` is the child process that asks the
+//! GPU drivers what their encoders can do and prints the result as TOML; `--probe-report` runs it (through the cache)
 //! and prints a readable report, for the 🧪 check against the vendor documentation.
 
 use std::time::Duration;
@@ -40,7 +40,8 @@ pub fn child() -> anyhow::Result<()> {
     use vixeeny_encode::ffmpeg_probe::FfmpegProber;
     let registry = Registry::builtin()?;
     let prober = FfmpegProber::new(adapters());
-    let result = vixeeny_encode::probe::probe(&registry, &prober, &vixeeny_encode::probe::identity());
+    let result =
+        vixeeny_encode::probe::probe(&registry, &prober, &vixeeny_encode::probe::identity());
     print!("{}", vixeeny_encode::probe::to_toml(&result)?);
     Ok(())
 }

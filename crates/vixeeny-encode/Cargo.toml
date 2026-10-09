@@ -18,13 +18,17 @@ toml.workspace = true
 vixeeny-common = { path = "../vixeeny-common" }
 # Prebuilt shared FFmpeg (FFMPEG_DIR); its DLLs must be next to the executable.
 ffmpeg-next = { version = "9.0.0", default-features = false, features = ["codec", "format", "software-scaling", "software-resampling", "filter"] }
-# The D3D11 video processor that converts captured frames on the GPU.
+# The D3D11 video processor that converts captured frames on the GPU, and the encoder
+# capability queries of the drivers (driver_caps).
 windows = { workspace = true, features = [
+    "Win32_Devices_DeviceAndDriverInstallation",
     "Win32_Foundation",
     "Win32_Graphics_Direct3D",
     "Win32_Graphics_Direct3D11",
     "Win32_Graphics_Dxgi",
     "Win32_Graphics_Dxgi_Common",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Registry",
 ] }
 
 [dev-dependencies]

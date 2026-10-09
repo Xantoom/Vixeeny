@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Hardware probing (plan 6.3). For every hardware encoder and every GPU of its vendor, a trial
-//! session is opened for each declared pixel format (256×256, then 3840×2160, with and without
-//! HDR). Only what succeeds is offered. The work is done by a [`Prober`], so it can be tested
-//! with fake adapters; the real one is `ffmpeg_probe`.
+//! Hardware probing (plan 6.3). The driver of every GPU is asked what its video encoder can do
+//! (codecs, 10-bit, 4:2:2 / 4:4:4, largest picture): nothing is encoded, so the GPU is left
+//! alone. Only a driver that cannot answer (a runtime older than the query) gets trial sessions
+//! instead: one per declared pixel format (256×256, then 3840×2160, with and without HDR).
+//! Software encoders always get a trial session (it only takes the CPU). The work is done by a
+//! [`Prober`], so it can be tested with fake adapters; the real one is `ffmpeg_probe`.
 //!
 //! The probe runs in a child process (`vixeeny-app --probe`, see [`run_child`]) so that a driver
 //! crash cannot take the app down; its result is cached in `hw_cache.toml`.
@@ -14,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-use crate::registry::{Chroma, Encoder, Kind, PixelFormatSpec, Registry, Vendor};
+use crate::registry::{Chroma, Encoder, Family, Kind, PixelFormatSpec, Registry, Vendor};
 
 pub const SMALL: (u32, u32) = (256, 256);
 pub const UHD: (u32, u32) = (3840, 2160);
@@ -87,9 +89,31 @@ impl ProbeResult {
     }
 }
 
+/// What a GPU's encoder can do for one codec, as its driver describes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DriverCaps {
+    pub family: Family,
+    pub ten_bit: bool,
+    /// The chroma subsamplings it accepts (4:2:0 always).
+    pub chroma: Vec<Chroma>,
+    /// The largest picture (width, height).
+    pub max: (u32, u32),
+}
+
+impl DriverCaps {
+    fn accepts(&self, format: &PixelFormatSpec) -> bool {
+        (format.depth <= 8 || self.ten_bit) && self.chroma.contains(&format.chroma)
+    }
+}
+
 /// What the probe needs from the OS and FFmpeg.
 pub trait Prober {
     fn adapters(&self) -> Vec<Adapter>;
+    /// Whether FFmpeg has `encoder` built in.
+    fn built_in(&self, encoder: &Encoder) -> bool;
+    /// The encoders of `adapter`'s GPU as its driver describes them, one entry per codec. `Err`
+    /// when the driver cannot be asked: the probe then opens trial sessions.
+    fn driver_caps(&self, adapter: &Adapter) -> Result<Vec<DriverCaps>, String>;
     /// Opens a trial session and encodes one frame. `adapter` is the GPU to use, if any.
     fn try_open(
         &self,
@@ -113,7 +137,28 @@ fn candidate_adapters<'a>(encoder: &Encoder, adapters: &'a [Adapter]) -> Vec<Opt
     }
 }
 
-fn probe_formats(
+/// The formats `caps` accepts, among those the registry declares.
+fn described_formats(encoder: &Encoder, caps: &[DriverCaps]) -> Vec<FormatProbe> {
+    let Some(caps) = caps.iter().find(|c| c.family == encoder.family) else {
+        return Vec::new();
+    };
+    let uhd = caps.max.0 >= UHD.0 && caps.max.1 >= UHD.1;
+    encoder
+        .pixel_formats
+        .iter()
+        .filter(|f| caps.accepts(f))
+        .map(|f| FormatProbe {
+            depth: f.depth,
+            chroma: f.chroma,
+            uhd,
+            // HDR10 is signalling on a 10-bit stream.
+            hdr: encoder.hdr && f.depth >= 10,
+        })
+        .collect()
+}
+
+/// Trial sessions, for software encoders and drivers that cannot describe themselves.
+fn tried_formats(
     encoder: &Encoder,
     adapter: Option<&Adapter>,
     prober: &dyn Prober,
@@ -170,16 +215,38 @@ pub fn identity() -> String {
 }
 
 /// The way the probe works: bumped when a change of it must run it again everywhere.
-pub const PROBE_REVISION: u32 = 1;
+pub const PROBE_REVISION: u32 = 2;
 
 /// Probes every encoder. `version` is what the answer depends on besides the machine (see
 /// [`identity`]), part of the cache key.
 pub fn probe(registry: &Registry, prober: &dyn Prober, version: &str) -> ProbeResult {
     let adapters = prober.adapters();
+    // One question per GPU, whatever the number of its encoders.
+    let described: Vec<Result<Vec<DriverCaps>, String>> = adapters
+        .iter()
+        .map(|a| {
+            if a.software || a.vendor == Vendor::None {
+                Ok(Vec::new())
+            } else {
+                prober.driver_caps(a).inspect_err(|e| {
+                    tracing::warn!("{}: the driver cannot describe its encoders ({e})", a.name);
+                })
+            }
+        })
+        .collect();
     let mut encoders = Vec::new();
     for encoder in registry.encoders() {
+        if !prober.built_in(encoder) {
+            continue;
+        }
         for adapter in candidate_adapters(encoder, &adapters) {
-            let formats = probe_formats(encoder, adapter, prober);
+            let caps = adapter
+                .and_then(|a| adapters.iter().position(|b| b == a))
+                .map(|i| &described[i]);
+            let formats = match caps {
+                Some(Ok(caps)) => described_formats(encoder, caps),
+                _ => tried_formats(encoder, adapter, prober),
+            };
             if !formats.is_empty() {
                 encoders.push(EncoderProbe {
                     id: encoder.id.clone(),

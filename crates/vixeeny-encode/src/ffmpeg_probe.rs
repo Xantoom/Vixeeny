@@ -7,10 +7,11 @@ use std::str::FromStr;
 use ffmpeg_next::format::Pixel;
 use ffmpeg_next::{Dictionary, Packet, Rational, codec, color, encoder, ffi, frame};
 
-use crate::probe::{Adapter, Prober};
+use crate::probe::{Adapter, DriverCaps, Prober};
 use crate::registry::{Encoder, Kind, ParamType, PixelFormatSpec, Registry};
 
-/// Opens trial sessions with the encoders of the linked FFmpeg.
+/// Asks the GPU drivers what their encoders can do; opens trial sessions with the encoders of the
+/// linked FFmpeg for the rest.
 pub struct FfmpegProber {
     adapters: Vec<Adapter>,
 }
@@ -32,6 +33,20 @@ fn pixel(name: &str) -> Result<Pixel, String> {
 impl Prober for FfmpegProber {
     fn adapters(&self) -> Vec<Adapter> {
         self.adapters.clone()
+    }
+
+    fn built_in(&self, encoder: &Encoder) -> bool {
+        encoder::find_by_name(&encoder.ffmpeg_encoder).is_some()
+    }
+
+    #[cfg(windows)]
+    fn driver_caps(&self, adapter: &Adapter) -> Result<Vec<DriverCaps>, String> {
+        crate::driver_caps::query(adapter)
+    }
+
+    #[cfg(not(windows))]
+    fn driver_caps(&self, _adapter: &Adapter) -> Result<Vec<DriverCaps>, String> {
+        Err("no capability query on this system".into())
     }
 
     fn try_open(

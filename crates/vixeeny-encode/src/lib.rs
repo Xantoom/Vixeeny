@@ -5,6 +5,8 @@
 pub mod clock;
 #[cfg(windows)]
 pub mod d3d_convert;
+#[cfg(windows)]
+pub mod driver_caps;
 pub mod hdr;
 pub mod probe;
 pub mod registry;

@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use vixeeny_common::config::Video;
 
 use crate::probe::{
-    Adapter, EncoderProbe, FormatProbe, ProbeResult, Prober, cache_key, cached_or_probe, from_toml,
-    probe, to_toml, vendor_from_pci,
+    Adapter, DriverCaps, EncoderProbe, FormatProbe, ProbeResult, Prober, cache_key,
+    cached_or_probe, from_toml, probe, to_toml, vendor_from_pci,
 };
 use crate::registry::{
     Chroma, Container, Encoder, Family, Kind, PixelFormatSpec, Registry, Vendor,
@@ -369,15 +369,49 @@ fn gpu(index: u32, name: &str, vendor_id: u32, driver: &str) -> Adapter {
 /// (encoder id, adapter index, size, hdr)
 type Call = (String, Option<u32>, (u32, u32), bool);
 
-/// Which (encoder, adapter) pairs open, and what they accept.
+/// Which (encoder, adapter) pairs open, and what they accept. The drivers describe the same
+/// thing as the trial sessions find, unless `old_drivers` (they cannot be asked).
 struct Fake {
     adapters: Vec<Adapter>,
     calls: RefCell<Vec<Call>>,
+    old_drivers: bool,
 }
 
 impl Prober for Fake {
     fn adapters(&self) -> Vec<Adapter> {
         self.adapters.clone()
+    }
+
+    fn built_in(&self, _encoder: &Encoder) -> bool {
+        true
+    }
+
+    fn driver_caps(&self, adapter: &Adapter) -> Result<Vec<DriverCaps>, String> {
+        if self.old_drivers {
+            return Err("too old".into());
+        }
+        let caps = |family, ten_bit, chroma: &[Chroma], max| DriverCaps {
+            family,
+            ten_bit,
+            chroma: chroma.to_vec(),
+            max,
+        };
+        let all = [Chroma::C420, Chroma::C444];
+        Ok(match (adapter.vendor, adapter.index) {
+            (Vendor::Nvidia, 0) => vec![
+                caps(Family::H264, false, &all, (8192, 8192)),
+                caps(Family::Hevc, true, &all, (8192, 8192)),
+                caps(Family::Av1, true, &[Chroma::C420], (8192, 8192)),
+            ],
+            // The old card: H.264 8-bit only, nothing at 4K.
+            (Vendor::Nvidia, _) => vec![caps(Family::H264, false, &all, (2048, 2048))],
+            // The iGPU: no 10-bit, so no HDR.
+            (Vendor::Intel, _) => [Family::H264, Family::Hevc, Family::Av1, Family::Vp9]
+                .into_iter()
+                .map(|f| caps(f, false, &[Chroma::C420], (4096, 4096)))
+                .collect(),
+            _ => Vec::new(),
+        })
     }
 
     fn try_open(
@@ -420,6 +454,7 @@ fn multi_gpu() -> Fake {
             gpu(0, "Microsoft Basic Render Driver", 0x1414, "10.0"),
         ],
         calls: RefCell::default(),
+        old_drivers: false,
     }
 }
 
@@ -429,58 +464,34 @@ fn find<'a>(r: &'a ProbeResult, id: &str, adapter: Option<u32>) -> Option<&'a En
         .find(|e| e.id == id && e.adapter == adapter)
 }
 
-#[test]
-fn probing_associates_each_encoder_with_its_gpu() {
-    let fake = multi_gpu();
-    let result = probe(&registry(), &fake, "0.1");
-
+/// What both ways of probing must find on `multi_gpu`.
+fn check_multi_gpu(result: &ProbeResult) {
     // NVIDIA: both cards listed, with their own capabilities.
-    let new = find(&result, "nvenc_hevc", Some(0)).unwrap_or_else(|| panic!("RTX missing"));
+    let new = find(result, "nvenc_hevc", Some(0)).unwrap_or_else(|| panic!("RTX missing"));
     assert!(
         new.formats
             .iter()
             .any(|f| f.depth == 10 && f.chroma == Chroma::C420 && f.uhd && f.hdr)
     );
     assert!(
-        find(&result, "nvenc_hevc", Some(1)).is_none(),
+        find(result, "nvenc_hevc", Some(1)).is_none(),
         "old card cannot do HEVC"
     );
-    let old = find(&result, "nvenc_h264", Some(1)).unwrap_or_else(|| panic!("GTX missing"));
+    let old = find(result, "nvenc_h264", Some(1)).unwrap_or_else(|| panic!("GTX missing"));
     assert!(old.formats.iter().all(|f| !f.uhd));
-    assert!(find(&result, "nvenc_av1", Some(1)).is_none());
-    assert!(find(&result, "nvenc_av1", Some(0)).is_some());
+    assert!(find(result, "nvenc_av1", Some(1)).is_none());
+    assert!(find(result, "nvenc_av1", Some(0)).is_some());
 
     // Intel: only the iGPU, no HDR.
-    let qsv = find(&result, "qsv_hevc", Some(0)).unwrap_or_else(|| panic!("iGPU missing"));
+    let qsv = find(result, "qsv_hevc", Some(0)).unwrap_or_else(|| panic!("iGPU missing"));
     assert!(qsv.formats.iter().all(|f| !f.hdr));
     // AMD: no AMD adapter, so no AMF entry at all.
     assert!(result.encoders.iter().all(|e| !e.id.starts_with("amf_")));
-    // The software renderer is never used, and software encoders run once.
-    assert!(
-        fake.calls
-            .borrow()
-            .iter()
-            .all(|(id, a, ..)| !(id.starts_with("nvenc") && *a == Some(2)))
-    );
     assert_eq!(
         result.encoders.iter().filter(|e| e.id == "libx264").count(),
         1
     );
-    assert!(find(&result, "libx264", None).is_some());
-    // Hardware encoders are tried at 256×256 first; 4K only after that worked.
-    let calls = fake.calls.borrow();
-    let first = calls
-        .iter()
-        .position(|c| c.0 == "nvenc_h264" && c.1 == Some(1))
-        .unwrap_or(0);
-    assert_eq!(calls[first].2, (256, 256));
-    // HDR is only attempted for encoders and formats declared for it.
-    assert!(
-        calls
-            .iter()
-            .filter(|c| c.3)
-            .all(|c| c.0 != "nvenc_h264" && c.0 != "libx264")
-    );
+    assert!(find(result, "libx264", None).is_some());
     // Vulkan and VAAPI do not exist on Windows.
     assert!(
         result
@@ -491,10 +502,58 @@ fn probing_associates_each_encoder_with_its_gpu() {
 }
 
 #[test]
+fn probing_asks_the_drivers_and_never_opens_a_hardware_session() {
+    let fake = multi_gpu();
+    let result = probe(&registry(), &fake, "0.1");
+    check_multi_gpu(&result);
+    // Only the software encoders were tried.
+    assert!(
+        fake.calls
+            .borrow()
+            .iter()
+            .all(|(id, a, ..)| id.starts_with("lib") && a.is_none()),
+        "{:?}",
+        fake.calls.borrow()
+    );
+}
+
+#[test]
+fn drivers_that_cannot_be_asked_get_trial_sessions() {
+    let fake = Fake {
+        old_drivers: true,
+        ..multi_gpu()
+    };
+    let result = probe(&registry(), &fake, "0.1");
+    check_multi_gpu(&result);
+    // The software renderer is never used.
+    assert!(
+        fake.calls
+            .borrow()
+            .iter()
+            .all(|(id, a, ..)| !(id.starts_with("nvenc") && *a == Some(2)))
+    );
+    // Hardware encoders are tried at 256×256 first; 4K only after that worked.
+    let calls = fake.calls.borrow();
+    let first = calls
+        .iter()
+        .position(|c| c.0 == "nvenc_h264" && c.1 == Some(1))
+        .unwrap_or_else(|| panic!("the old card was not tried"));
+    assert_eq!(calls[first].2, (256, 256));
+    // HDR is only attempted for encoders and formats declared for it.
+    assert!(
+        calls
+            .iter()
+            .filter(|c| c.3)
+            .all(|c| c.0 != "nvenc_h264" && c.0 != "libx264")
+    );
+}
+
+#[test]
 fn a_system_without_a_gpu_only_offers_software() {
     let fake = Fake {
         adapters: vec![],
         calls: RefCell::default(),
+        old_drivers: false,
     };
     let result = probe(&registry(), &fake, "0.1");
     assert!(result.encoders.iter().all(|e| e.id.starts_with("lib")));
