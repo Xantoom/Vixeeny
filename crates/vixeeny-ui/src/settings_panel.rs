@@ -1080,16 +1080,16 @@ impl SettingsPanel {
                         text: text.as_str().into(),
                         shown: shortcut_label(text, lang).into(),
                         slot: slot as i32,
-                        taken: windows(text) || other(text),
+                        tip: if windows(text) {
+                            tr(Key::ShortcutWindows, lang)
+                        } else if other(text) {
+                            tr(Key::ShortcutTaken, lang)
+                        } else {
+                            ""
+                        }
+                        .into(),
                     })
                     .collect();
-                let unusable = if slots.iter().any(|t| windows(t)) {
-                    tr(Key::ShortcutWindows, lang)
-                } else if slots.iter().any(|t| other(t)) {
-                    tr(Key::ShortcutTaken, lang)
-                } else {
-                    ""
-                };
                 ShortcutRow {
                     group: starts_group(action),
                     label: action_label(action, lang).into(),
@@ -1097,7 +1097,7 @@ impl SettingsPanel {
                     error: errors
                         .iter()
                         .find(|(row, _)| *row == i)
-                        .map_or_else(|| unusable.into(), |(_, e)| e.as_str().into()),
+                        .map_or_else(SharedString::new, |(_, e)| e.as_str().into()),
                 }
             })
             .collect();

@@ -1213,18 +1213,10 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::UiSearchNone, Lang::Fr) => "Aucun réglage ne correspond à « {query} ».",
         (Key::UiSearchTitle, Lang::En) => "Search",
         (Key::UiSearchTitle, Lang::Fr) => "Recherche",
-        (Key::ShortcutTaken, Lang::En) => {
-            "Already taken by another program (or by Windows): it does not work here."
-        }
-        (Key::ShortcutTaken, Lang::Fr) => {
-            "Déjà pris par un autre logiciel (ou par Windows) : il ne fonctionne pas ici."
-        }
-        (Key::ShortcutWindows, Lang::En) => {
-            "Windows keeps this shortcut for itself: choose another one."
-        }
-        (Key::ShortcutWindows, Lang::Fr) => {
-            "Windows garde ce raccourci pour lui : choisissez-en un autre."
-        }
+        (Key::ShortcutTaken, Lang::En) => "Already used by another program",
+        (Key::ShortcutTaken, Lang::Fr) => "Déjà utilisé par un autre logiciel",
+        (Key::ShortcutWindows, Lang::En) => "Reserved by Windows",
+        (Key::ShortcutWindows, Lang::Fr) => "Réservé par Windows",
     }
 }
 

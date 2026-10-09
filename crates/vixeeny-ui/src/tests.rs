@@ -291,14 +291,21 @@ fn shortcuts_that_cannot_work_are_marked() {
     // The region capture (row 0) is taken by another program.
     panel.set_taken_shortcuts(vec!["PrintScreen".into()]);
     let row = w.get_shortcuts().row_data(0).unwrap();
-    assert!(row.keys.row_data(0).unwrap().taken);
-    assert!(row.error.contains("another program"), "{}", row.error);
+    // Red, the reason on hover only: no text under the action.
+    assert!(
+        row.keys
+            .row_data(0)
+            .unwrap()
+            .tip
+            .contains("another program")
+    );
+    assert!(row.error.is_empty());
     // One that Windows keeps.
     w.invoke_shortcut_record(5, 1);
     panel.captured(settings_panel::Captured::Combination("Win+Alt+R".into()));
     let row = w.get_shortcuts().row_data(5).unwrap();
-    assert!(row.keys.row_data(1).unwrap().taken);
-    assert!(row.error.contains("Windows"), "{}", row.error);
+    assert!(row.keys.row_data(1).unwrap().tip.contains("Windows"));
+    assert!(row.keys.row_data(0).unwrap().tip.is_empty());
     settings_render(&panel, "9-settings-shortcuts-taken");
 }
 

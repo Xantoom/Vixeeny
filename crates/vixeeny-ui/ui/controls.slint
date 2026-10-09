@@ -874,16 +874,6 @@ export component ScreenPicker inherits Rectangle {
         border-width: 2px;
         border-color: Theme.stroke-strong;
         background: Theme.control;
-        Text {
-            x: 0px;
-            width: parent.width;
-            height: parent.height;
-            text: root.current >= 0 && root.current < root.options.length ? root.options[root.current] : "";
-            color: Theme.text-2;
-            font-size: 12px;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-        }
         for i in 4 : Rectangle {
             property <bool> chosen: i == root.current;
             // Edges: bars along the middle of each side; corners: small windows.
