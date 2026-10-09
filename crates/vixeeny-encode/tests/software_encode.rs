@@ -353,3 +353,57 @@ fn software_audio_encoders_in_every_container() {
         }
     }
 }
+
+/// The probe no longer tries software encoders: each one offers every pixel format the registry
+/// declares, so each of them must encode.
+#[test]
+fn software_encoders_encode_every_declared_pixel_format() {
+    let _ = ffmpeg::init();
+    let registry = vixeeny_encode::registry::Registry::builtin().unwrap();
+    for e in registry
+        .encoders()
+        .filter(|e| e.kind == vixeeny_encode::registry::Kind::Software)
+    {
+        let options = VIDEO
+            .iter()
+            .find(|(name, ..)| *name == e.ffmpeg_encoder)
+            .map_or("", |v| v.2);
+        for spec in &e.pixel_formats {
+            let pix: Pixel = spec.ffmpeg.parse().unwrap();
+            let codec = encoder::find_by_name(&e.ffmpeg_encoder).unwrap();
+            let mut ctx = codec::context::Context::new_with_codec(codec)
+                .encoder()
+                .video()
+                .unwrap();
+            ctx.set_width(W);
+            ctx.set_height(H);
+            ctx.set_format(pix);
+            ctx.set_time_base(Rational(1, FPS));
+            ctx.set_frame_rate(Some(Rational(FPS, 1)));
+            let label = format!("{} {}", e.id, spec.ffmpeg);
+            let mut venc = ctx
+                .open_with(opts(options))
+                .unwrap_or_else(|err| panic!("{label}: {err}"));
+            let mut packets = 0;
+            let mut pkt = Packet::empty();
+            for i in 0..10 {
+                // Zero is a valid sample at every depth (an uninitialised buffer is not).
+                let mut f = frame::Video::new(pix, W, H);
+                for plane in 0..f.planes() {
+                    f.data_mut(plane).fill(0);
+                }
+                f.set_pts(Some(i));
+                venc.send_frame(&f)
+                    .unwrap_or_else(|err| panic!("{label}: {err}"));
+                while venc.receive_packet(&mut pkt).is_ok() {
+                    packets += 1;
+                }
+            }
+            venc.send_eof().unwrap();
+            while venc.receive_packet(&mut pkt).is_ok() {
+                packets += 1;
+            }
+            assert!(packets > 0, "{label}: no packet");
+        }
+    }
+}
