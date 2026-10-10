@@ -658,6 +658,9 @@ fn with_mica_the_window_leaves_its_background_to_it() {
     let nav = at(100, 600);
     assert_eq!((nav.r, nav.g, nav.b), (0, 0, 0));
     let card = at(600, 140);
-    assert!(card.r > 0 && card.r < 0x1c, "a veil, not the opaque card: {card:?}");
+    assert!(
+        card.r > 0 && card.r < 0x1c,
+        "a veil, not the opaque card: {card:?}"
+    );
     panel.window().global::<Theme>().set_mica(false);
 }
