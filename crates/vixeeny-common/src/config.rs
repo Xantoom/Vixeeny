@@ -9,11 +9,16 @@ use serde::{Deserialize, Serialize};
 use crate::ipc::ActionId;
 
 /// Schema version written by this build. Bump it and add a migration to [`MIGRATIONS`].
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 
 /// `MIGRATIONS[n]` upgrades a table from schema `n + 1` to `n + 2`.
 pub type Migration = fn(&mut toml::Table);
-pub const MIGRATIONS: &[Migration] = &[v1_fragmented_mp4, v2_single_profile, v3_naming_per_kind];
+pub const MIGRATIONS: &[Migration] = &[
+    v1_fragmented_mp4,
+    v2_single_profile,
+    v3_naming_per_kind,
+    v4_widget_display,
+];
 
 /// 0.9 → 1.0: MP4 recordings are fragmented (a recording cut short still plays), and the cursor
 /// is left out of videos unless asked for again.
@@ -77,6 +82,19 @@ fn v3_naming_per_kind(table: &mut toml::Table) {
         .map(|kind| (kind.to_owned(), toml::Value::Table(one.clone())))
         .collect();
     paths.insert("naming".into(), naming.into());
+}
+
+/// 1.0: the widget's "hide when idle" switch becomes the second of three ways to show it.
+fn v4_widget_display(table: &mut toml::Table) {
+    let Some(widget) = table
+        .get_mut("recording_widget")
+        .and_then(|w| w.as_table_mut())
+    else {
+        return;
+    };
+    if widget.remove("auto_hide").and_then(|v| v.as_bool()) == Some(true) {
+        widget.insert("display".into(), "fade".into());
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -511,8 +529,15 @@ impl Default for Audio {
 #[serde(default)]
 pub struct RecordingWidget {
     pub enabled: bool,
+    /// `top_left`, `top_center`, `top_right`, `bottom_left`, `bottom_center`, `bottom_right`, or
+    /// `custom`: at [`RecordingWidget::custom`].
     pub corner: String,
-    pub auto_hide: bool,
+    /// The custom place: how far across the free room of the screen the widget is, from its
+    /// left and top edges (0 to 1). Set by dragging the widget or in the settings.
+    pub custom: (f32, f32),
+    /// `always`, `fade` (it fades after 3 s and comes back under the pointer) or `alerts` (it
+    /// only shows while something goes wrong).
+    pub display: String,
     /// The widget warns when the free space of the videos' disk falls under this share of it,
     /// in percent (0: never).
     pub disk_alert_percent: u8,
@@ -523,7 +548,8 @@ impl Default for RecordingWidget {
         Self {
             enabled: true,
             corner: "top_left".into(),
-            auto_hide: false,
+            custom: (0.5, 0.0),
+            display: "always".into(),
             disk_alert_percent: 5,
         }
     }
@@ -746,6 +772,20 @@ mod tests {
         let cfg = Config::default();
         let again = Config::from_toml(&cfg.to_toml().unwrap()).unwrap();
         assert_eq!(again, cfg);
+    }
+
+    #[test]
+    fn the_widget_that_hid_when_idle_now_fades() {
+        let text = "schema_version = 4\n[recording_widget]\nauto_hide = true\n";
+        assert_eq!(
+            Config::from_toml(text).unwrap().recording_widget.display,
+            "fade"
+        );
+        let text = "schema_version = 4\n[recording_widget]\nauto_hide = false\n";
+        assert_eq!(
+            Config::from_toml(text).unwrap().recording_widget.display,
+            "always"
+        );
     }
 
     #[test]

@@ -30,6 +30,7 @@ impl Widget {
     ) -> anyhow::Result<Self> {
         let (x, y, w, h) = corner_geometry(
             &settings.corner,
+            settings.custom,
             (
                 monitor.work.x,
                 monitor.work.y,
@@ -42,7 +43,7 @@ impl Widget {
         command
             .arg("--widget")
             .args([x.to_string(), y.to_string(), w.to_string(), h.to_string()])
-            .arg(if settings.auto_hide { "1" } else { "0" })
+            .arg(&settings.display)
             .arg(monitor.dpi.to_string())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -102,10 +103,10 @@ impl Drop for Widget {
     }
 }
 
-/// `--widget <x> <y> <width> <height> <auto_hide 0|1> <dpi>`: the widget process.
+/// `--widget <x> <y> <width> <height> <always|fade|alerts> <dpi>`: the widget process.
 pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     use std::rc::Rc;
-    use vixeeny_overlay::widget::{Widget as Bar, WidgetEvent};
+    use vixeeny_overlay::widget::{Display, Widget as Bar, WidgetEvent};
 
     let num = |i: usize| -> anyhow::Result<i64> {
         args.get(i)
@@ -118,7 +119,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
         num(2)? as u32,
         num(3)? as u32,
     );
-    let auto_hide = args.get(4).is_some_and(|a| a == "1");
+    let display = Display::from_name(args.get(4).map_or("", String::as_str));
     let dpi = num(5)? as u32;
 
     vixeeny_platform::ensure_dpi_aware();
@@ -127,11 +128,26 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
         ..vixeeny_overlay::Look::default()
     };
     // Out of the captures from its creation, never stealing the keyboard.
-    let bar = Rc::new(Bar::new((x, y, w, h), dpi, look, auto_hide)?);
-    bar.on_event(|event| {
+    let bar = Rc::new(Bar::new((x, y, w, h), dpi, look, display)?);
+    bar.on_event(move |event| {
         let press = match event {
             WidgetEvent::TogglePause => FromWidget::TogglePause,
             WidgetEvent::Stop => FromWidget::Stop,
+            // Kept as a place on the screen it was dropped on, for the next recordings.
+            WidgetEvent::Moved(x, y) => {
+                let centre = (x + w as i32 / 2, y + h as i32 / 2);
+                let Some(work) = vixeeny_platform::monitors().ok().and_then(|list| {
+                    vixeeny_platform::monitor_at(&list, centre.0, centre.1).map(|m| m.work)
+                }) else {
+                    return;
+                };
+                let (fx, fy) = crate::widget_math::custom_place(
+                    (x, y),
+                    (work.x, work.y, work.width, work.height),
+                    dpi,
+                );
+                FromWidget::Moved(fx, fy)
+            }
         };
         let mut out = std::io::stdout().lock();
         let _ = out.write_all(press.to_line().as_bytes());

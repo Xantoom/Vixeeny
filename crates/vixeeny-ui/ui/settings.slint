@@ -17,7 +17,8 @@ export struct SettingRow {
     // A list as wide as its longest choice needs, in pixels (0: the usual width).
     wide: int,
     // 0 toggle, 1 choice, 2 number, 3 text, 4 folder, 5 info, 6 level meter, 8 slider,
-    // 9 expander (`on`: open), 10 choice of a screen edge, 11 choice of a screen corner
+    // 9 expander (`on`: open), 10 choice of a screen edge, 11 choice of a place on the screen
+    // (its own place, if any, in `min` and `max`: thousandths across and down, else -1)
     kind: int,
     enabled: bool,
     on: bool,
@@ -209,7 +210,11 @@ component SettingLine inherits GroupRow {
         corners: root.entry.kind == 11;
         options: root.entry.options;
         current: root.entry.selected;
+        // A place of the user's: `min`, `max` (see the row's kind 11).
+        custom-x: root.entry.kind == 11 ? root.entry.min : -1;
+        custom-y: root.entry.kind == 11 ? root.entry.max : -1;
         selected(i) => { root.chosen(i); }
+        placed(x, y) => { root.text-edited("custom:" + x + ":" + y); }
     }
     if root.entry.kind == 2 : NumberBox {
         value: root.entry.num;

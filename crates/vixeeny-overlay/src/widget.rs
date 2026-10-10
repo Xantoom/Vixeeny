@@ -32,6 +32,29 @@ use crate::window::Pointer;
 pub enum WidgetEvent {
     TogglePause,
     Stop,
+    /// The user dragged the widget there (its window's top-left corner, physical pixels).
+    Moved(i32, i32),
+}
+
+/// When the widget is on screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Display {
+    Always,
+    /// It fades after a few seconds and comes back under the pointer.
+    Fade,
+    /// Only while something goes wrong (see [`Alert`]).
+    Alerts,
+}
+
+impl Display {
+    /// `always`, `fade` or `alerts` (the config's words); anything else is `Always`.
+    pub fn from_name(name: &str) -> Self {
+        match name {
+            "fade" => Self::Fade,
+            "alerts" => Self::Alerts,
+            _ => Self::Always,
+        }
+    }
 }
 
 /// `HH:MM:SS`.
@@ -310,6 +333,10 @@ struct Inner {
     popup: Popup,
     piece: Piece<WidgetLook>,
     auto_hide: bool,
+    /// Only on screen while something goes wrong.
+    alerts_only: bool,
+    /// On screen (it is withdrawn while there is no alert, with `alerts_only`).
+    shown: Cell<bool>,
     animate: bool,
     clock: Cell<Clock>,
     look: RefCell<WidgetLook>,
@@ -363,6 +390,52 @@ impl Inner {
         };
         if let Err(e) = set {
             tracing::warn!("recording widget: {e}");
+        }
+    }
+
+    /// Puts the window on screen, rising into place.
+    fn appear(&self) -> Result<()> {
+        if self.shown.replace(true) {
+            return Ok(());
+        }
+        let gfx = &self.gfx;
+        let rise = 6.0 * self.u;
+        scene::set_offset(
+            &self.piece.visual,
+            0.0,
+            if self.animate { rise } else { 0.0 },
+        )?;
+        self.opacity.set(1.0);
+        self.faded.set(false);
+        if let Some(effect) = &self.piece.effect {
+            // SAFETY: plain property call.
+            unsafe { effect.SetOpacity2(if self.animate { 0.0 } else { 1.0 })? };
+        }
+        self.refresh();
+        self.popup.show(gfx)?;
+        if self.animate
+            && let Some(effect) = &self.piece.effect
+        {
+            // SAFETY: plain property calls with animations of the same device.
+            unsafe {
+                self.piece
+                    .visual
+                    .SetOffsetY(&scene::ease_out(gfx, rise, 0.0, RISE)?)?;
+                effect.SetOpacity(&scene::ease_out(gfx, 0.0, 1.0, RISE)?)?;
+                gfx.dcomp.Commit()?;
+            }
+        }
+        if self.auto_hide {
+            self.timer(FADE_TIMER, Some(FADE_AFTER_MS));
+        }
+        Ok(())
+    }
+
+    /// Takes the window off the screen: nothing to see, nothing to click.
+    fn withdraw(&self) {
+        if self.shown.replace(false) {
+            self.hide_tip();
+            self.popup.withdraw();
         }
     }
 
@@ -591,8 +664,18 @@ impl Inner {
             }
             WM_LBUTTONUP => {
                 // Taken before the release, which reports a loss of the mouse.
-                self.drag.set(None);
+                let dragged = self.drag.take();
                 let pressed = self.press.take();
+                if let Some((_, from)) = dragged {
+                    let mut r = RECT::default();
+                    // SAFETY: a valid out-pointer, a window of this thread.
+                    if unsafe { GetWindowRect(self.popup.hwnd, &mut r) }.is_ok()
+                        && (r.left, r.top) != from
+                        && let Some(f) = self.on_event.borrow().as_ref()
+                    {
+                        f(WidgetEvent::Moved(r.left, r.top));
+                    }
+                }
                 // SAFETY: plain call.
                 let _ = unsafe { ReleaseCapture() };
                 let at = widget_at(self.u, x, y, alert);
@@ -631,7 +714,7 @@ impl Widget {
         geometry: (i32, i32, u32, u32),
         dpi: u32,
         look: Look,
-        auto_hide: bool,
+        display: Display,
     ) -> Result<Self> {
         let gfx = Gfx::new()?;
         let u = dpi.max(48) as f32 / 96.0;
@@ -645,7 +728,9 @@ impl Widget {
             u,
             popup,
             piece,
-            auto_hide,
+            auto_hide: display == Display::Fade,
+            alerts_only: display == Display::Alerts,
+            shown: Cell::new(false),
             animate: look.animations,
             clock: Cell::new(Clock::new(Instant::now())),
             look: RefCell::new(WidgetLook {
@@ -693,6 +778,16 @@ impl Widget {
         let inner = &self.inner;
         let before = std::mem::replace(&mut inner.look.borrow_mut().alert, alert);
         *inner.alert_text.borrow_mut() = text.to_owned();
+        if inner.alerts_only && !inner.closed.get() {
+            if alert == Alert::None {
+                // Unless it is in the user's hands.
+                if inner.drag.get().is_none() {
+                    inner.withdraw();
+                }
+            } else if let Err(e) = inner.appear() {
+                tracing::warn!("recording widget: {e}");
+            }
+        }
         if alert > before {
             inner.wake();
         }
@@ -704,38 +799,13 @@ impl Widget {
         inner.refresh();
     }
 
-    /// Shows the bar, rising into place, and runs until [`Widget::close`].
+    /// Shows the bar, rising into place (with [`Display::Alerts`], once something goes wrong),
+    /// and runs until [`Widget::close`].
     pub fn run(&self) -> Result<()> {
         let inner = &self.inner;
-        let gfx = &inner.gfx;
-        let rise = 6.0 * inner.u;
-        scene::set_offset(
-            &inner.piece.visual,
-            0.0,
-            if inner.animate { rise } else { 0.0 },
-        )?;
-        if let Some(effect) = &inner.piece.effect {
-            // SAFETY: plain property call.
-            unsafe { effect.SetOpacity2(if inner.animate { 0.0 } else { 1.0 })? };
-        }
         inner.tick();
-        inner.refresh();
-        inner.popup.show(gfx)?;
-        if inner.animate
-            && let Some(effect) = &inner.piece.effect
-        {
-            // SAFETY: plain property calls with animations of the same device.
-            unsafe {
-                inner
-                    .piece
-                    .visual
-                    .SetOffsetY(&scene::ease_out(gfx, rise, 0.0, RISE)?)?;
-                effect.SetOpacity(&scene::ease_out(gfx, 0.0, 1.0, RISE)?)?;
-                gfx.dcomp.Commit()?;
-            }
-        }
-        if inner.auto_hide {
-            inner.timer(FADE_TIMER, Some(FADE_AFTER_MS));
+        if !inner.alerts_only || inner.look.borrow().alert != Alert::None {
+            inner.appear()?;
         }
         popup::pump_while(|| !inner.closed.get());
         inner.hide_tip();

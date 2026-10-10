@@ -2,7 +2,7 @@
 source: crates/vixeeny-common/src/config.rs
 expression: "Config::default().to_toml().unwrap()"
 ---
-schema_version = 4
+schema_version = 5
 
 [general]
 language = "auto"
@@ -112,7 +112,11 @@ tracks = []
 [recording_widget]
 enabled = true
 corner = "top_left"
-auto_hide = false
+custom = [
+    0.5,
+    0.0,
+]
+display = "always"
 disk_alert_percent = 5
 
 [replay]

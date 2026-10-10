@@ -865,15 +865,22 @@ export component SearchBox inherits Rectangle {
     accessible-label: root.placeholder;
 }
 
-// A small screen to click on: an edge (left, right, top, bottom) or a corner (top left, top
-// right, bottom left, bottom right) of it, the chosen one in the accent colour.
+// A small screen to click on: an edge (left, right, top, bottom) of it, or a place for a small
+// window (top left, top centre, top right, bottom left, bottom centre, bottom right, then one of
+// the user's: a click or a drag anywhere else puts it there). The chosen one is in the accent
+// colour.
 export component ScreenPicker inherits Rectangle {
-    // false: the four edges; true: the four corners.
+    // false: the four edges; true: the six places and the user's own.
     in property <bool> corners;
-    // The names of the four places, in the order above.
+    // The names of the places, in the order above.
     in property <[string]> options;
     in property <int> current: -1;
+    // The user's place, in thousandths of the room across and down (-1: none yet).
+    in property <int> custom-x: -1;
+    in property <int> custom-y: -1;
     callback selected(int);
+    // A place of the user's, in thousandths of the room across and down.
+    callback placed(int, int);
 
     width: 176px;
     height: 112px;
@@ -887,22 +894,36 @@ export component ScreenPicker inherits Rectangle {
         border-width: 2px;
         border-color: Theme.stroke-strong;
         background: Theme.control;
-        for i in 4 : Rectangle {
+        // The size of a small window, and the room it has inside the screen.
+        property <length> win-w: 34px;
+        property <length> win-h: 20px;
+        property <length> room-w: self.width - self.win-w - 16px;
+        property <length> room-h: self.height - self.win-h - 16px;
+        // While pressed, where the user's window goes (thousandths).
+        property <int> drag-x: round(clamp((anywhere.mouse-x - 8px - self.win-w / 2) / self.room-w, 0, 1) * 1000);
+        property <int> drag-y: round(clamp((anywhere.mouse-y - 8px - self.win-h / 2) / self.room-h, 0, 1) * 1000);
+        anywhere := TouchArea {
+            enabled: root.corners;
+            mouse-cursor: root.corners ? pointer : default;
+            clicked => { root.placed(parent.drag-x, parent.drag-y); }
+        }
+        for i in root.corners ? 6 : 4 : Rectangle {
             property <bool> chosen: i == root.current;
-            // Edges: bars along the middle of each side; corners: small windows.
+            // Edges: bars along the middle of each side; places: small windows.
             property <length> bar: 6px;
             property <length> long-h: parent.width * 0.42;
             property <length> long-v: parent.height * 0.46;
+            property <int> column: mod(i, 3);
             x: root.corners
-                ? (mod(i, 2) == 0 ? 8px : parent.width - self.width - 8px)
+                ? (self.column == 0 ? 8px : self.column == 1 ? (parent.width - self.width) / 2 : parent.width - self.width - 8px)
                 : (i == 0 ? 6px : i == 1 ? parent.width - self.width - 6px : (parent.width - self.width) / 2);
             y: root.corners
-                ? (i < 2 ? 8px : parent.height - self.height - 8px)
+                ? (i < 3 ? 8px : parent.height - self.height - 8px)
                 : (i == 2 ? 6px : i == 3 ? parent.height - self.height - 6px : (parent.height - self.height) / 2);
-            width: root.corners ? 34px : (i < 2 ? self.bar : self.long-h);
-            height: root.corners ? 20px : (i < 2 ? self.long-v : self.bar);
+            width: root.corners ? parent.win-w : (i < 2 ? self.bar : self.long-h);
+            height: root.corners ? parent.win-h : (i < 2 ? self.long-v : self.bar);
             border-radius: root.corners ? 4px : 3px;
-            background: self.chosen ? Theme.accent
+            background: self.chosen && !anywhere.pressed ? Theme.accent
                 : (zone.has-hover ? Theme.text-2 : Theme.stroke-strong);
             animate background { duration: Theme.t-fast; }
             zone := TouchArea {
@@ -917,6 +938,20 @@ export component ScreenPicker inherits Rectangle {
             accessible-role: button;
             accessible-label: i < root.options.length ? root.options[i] : "";
             accessible-checked: self.chosen;
+        }
+        // The user's window: where it is, or where the pointer drags it.
+        if root.corners && (anywhere.pressed || (root.current == 6 && root.custom-x >= 0)) : Rectangle {
+            property <int> fx: anywhere.pressed ? parent.drag-x : root.custom-x;
+            property <int> fy: anywhere.pressed ? parent.drag-y : root.custom-y;
+            x: 8px + parent.room-w * self.fx / 1000;
+            y: 8px + parent.room-h * self.fy / 1000;
+            width: parent.win-w;
+            height: parent.win-h;
+            border-radius: 4px;
+            background: Theme.accent;
+            accessible-role: button;
+            accessible-label: 6 < root.options.length ? root.options[6] : "";
+            accessible-checked: true;
         }
     }
     Rectangle {

@@ -389,7 +389,9 @@ fn plan(config: &Config, allow_gpu: bool, replay: bool) -> anyhow::Result<Plan> 
     }
 
     let extension = container.extension();
-    let mut folder = None;
+    let mut folder = replay
+        .then(|| vixeeny_common::paths::expand_user_dir(&config.paths.replays))
+        .flatten();
     let (namer, save_as): (Namer, Option<SaveNamer>) = if replay {
         let config = config.clone();
         let monitor = monitor.clone();
@@ -523,6 +525,21 @@ fn start_session(config: &Config, replay: bool) -> anyhow::Result<Handle> {
     }
 }
 
+/// The user dropped the widget somewhere: the next recordings put it there.
+fn keep_widget_place(place: (f32, f32)) {
+    let Some(path) = vixeeny_common::paths::config_file() else {
+        return;
+    };
+    // An unreadable file is left alone rather than replaced by the defaults.
+    let Ok(mut config) = Config::load(&path) else {
+        return;
+    };
+    config.recording_widget.corner = "custom".into();
+    config.recording_widget.custom = place;
+    crate::settings::save(&config);
+    tracing::debug!("widget moved to {place:?}");
+}
+
 /// What the widget's warning sign watches during a recording.
 struct Watch {
     folder: Option<PathBuf>,
@@ -555,10 +572,11 @@ impl Watcher {
         }
     }
 
-    fn check(&mut self, recorder: &Recorder, widget: &mut crate::widget::Widget) {
+    /// The alert, when it changed since the last call.
+    fn check(&mut self, recorder: &Recorder) -> Option<(Alert, String)> {
         let now = std::time::Instant::now();
         if now - self.counted < LOST_EVERY {
-            return;
+            return None;
         }
         self.counted = now;
         self.health.lost_frames = recorder.stats().queue_dropped.load(Ordering::Relaxed)
@@ -572,13 +590,19 @@ impl Watcher {
                 .and_then(vixeeny_platform::machine::disk_space);
         }
         let alert = self.health.alert(self.watch.disk_percent, self.watch.lang);
-        if alert != self.shown {
-            if alert.0 > self.shown.0 {
-                tracing::info!("recording widget alert: {:?}", alert.0);
-            }
-            widget.alert(alert.0, &alert.1);
-            self.shown = alert;
+        if alert == self.shown {
+            return None;
         }
+        if alert.0 > self.shown.0 {
+            tracing::info!("recording alert: {:?}", alert.0);
+        }
+        self.shown = alert.clone();
+        Some(alert)
+    }
+
+    /// The disk is under the alert's share of free space.
+    fn disk_low(&self) -> bool {
+        self.health.disk_low(self.watch.disk_percent)
     }
 }
 
@@ -646,6 +670,7 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
             let _ = presses.send(match press {
                 FromWidget::TogglePause => Ctl::TogglePause,
                 FromWidget::Stop => Ctl::Stop,
+                FromWidget::Moved(x, y) => return keep_widget_place((x, y)),
             });
         })
         .inspect_err(|e| tracing::warn!("recording widget: {e:#}"))
@@ -657,9 +682,10 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
     let thread_state = Arc::clone(&state);
     // The GPU parts must outlive the recording (the device the textures live on).
     let save_as = plan.save_as;
-    let watch = plan.widget.as_ref().map(|settings| Watch {
+    // The widget's warning sign, or a notification for a replay (it has no widget).
+    let watch = (plan.widget.is_some() || save_as.is_some()).then(|| Watch {
         folder: plan.folder.clone(),
-        disk_percent: settings.disk_alert_percent,
+        disk_percent: plan.notice.recording_widget.disk_alert_percent,
         lang: crate::lang(&plan.notice.general.language),
         gpu_lost,
     });
@@ -673,7 +699,8 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
                 gpu_frames.as_ref(),
                 recorder,
                 rig,
-                widget.map(|w| (w, watch)),
+                widget,
+                watch,
                 save_as,
                 origin,
                 &rx,
@@ -756,7 +783,8 @@ fn record_loop(
     #[cfg(windows)] gpu_frames: Option<&std::sync::mpsc::Receiver<(i64, HwFrame)>>,
     recorder: Recorder,
     mut rig: Option<Rig>,
-    widget: Option<(crate::widget::Widget, Option<Watch>)>,
+    mut widget: Option<crate::widget::Widget>,
+    watch: Option<Watch>,
     mut save_as: Option<SaveNamer>,
     origin: i64,
     ctl: &Receiver<Ctl>,
@@ -764,8 +792,9 @@ fn record_loop(
     notice: &Config,
 ) -> anyhow::Result<vixeeny_encode::recorder::Summary> {
     let now = || vixeeny_platform::monotonic_ns() - origin;
-    let (mut widget, watch) = widget.unzip();
-    let mut watch = watch.flatten().map(Watcher::new);
+    let mut watch = watch.map(Watcher::new);
+    // A replay tells about a filling disk once.
+    let mut disk_told = false;
     let mut paused = false;
     let mut failure = None;
     // The widget shows the recorded time: pauses do not count.
@@ -841,8 +870,20 @@ fn record_loop(
         if let Some(rig) = &mut rig {
             rig.pump(now(), &recorder);
         }
-        if let (Some(w), Some(watcher)) = (&mut widget, &mut watch) {
-            watcher.check(&recorder, w);
+        if let Some(watcher) = &mut watch
+            && let Some((level, text)) = watcher.check(&recorder)
+        {
+            if let Some(w) = &mut widget {
+                w.alert(level, &text);
+            } else if save_as.is_some() && watcher.disk_low() && !disk_told {
+                disk_told = true;
+                let free = watcher.health.disk.map_or(0, |(free, _)| free);
+                let lang = watcher.watch.lang;
+                let text =
+                    vixeeny_common::i18n::tr(vixeeny_common::i18n::Key::ToastReplayDiskLow, lang)
+                        .replace("{size}", &vixeeny_common::i18n::size_label(free, lang));
+                crate::toast::notify(notice, &Toast::Failed(Failed::DiskLow, text));
+            }
         }
         // The widget counts by itself; a resync every few seconds keeps it honest.
         if !paused && let Some(w) = &mut widget {

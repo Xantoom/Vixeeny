@@ -116,6 +116,14 @@ fn settings_apply_immediately() {
     panel.select_section(Section::Overlay);
     w.invoke_row_chosen("overlay_edge".into(), 0); // left, right, top, bottom
     assert_eq!(panel.config().overlay.edge, "left");
+    // The widget: a preset, then a place clicked on the little screen.
+    w.invoke_row_chosen("widget_corner".into(), 4); // top left, centre, right, bottom…
+    assert_eq!(panel.config().recording_widget.corner, "bottom_center");
+    w.invoke_row_text("widget_corner".into(), "custom:300:700".into());
+    let c = panel.config();
+    assert_eq!(c.recording_widget.corner, "custom");
+    assert_eq!(c.recording_widget.custom, (0.3, 0.7));
+    settings_render(&panel, "9-page-overlay-custom");
 
     // Unknown ids and out-of-range choices are ignored.
     let before = seen.borrow().len();

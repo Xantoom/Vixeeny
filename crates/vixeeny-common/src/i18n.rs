@@ -81,7 +81,6 @@ pub enum Key {
     SetCornerTr,
     SetCornerBl,
     SetCornerBr,
-    SetWidgetHide,
     SetAudioRouting,
     SetRouteEach,
     SetRouteMix,
@@ -291,6 +290,16 @@ pub enum Key {
     ToastMenuOpen,
     ToastMenuReveal,
     ToastMenuClose,
+    SetCornerTc,
+    SetCornerBc,
+    SetCornerCustom,
+    SetWidgetDisplay,
+    OptDisplayAlways,
+    OptDisplayFade,
+    OptDisplayAlerts,
+    ToastDiskLow,
+    ToastReplayDiskLow,
+    SetWidgetPlaceHint,
 }
 
 impl Key {
@@ -364,7 +373,6 @@ impl Key {
         Self::SetCornerTr,
         Self::SetCornerBl,
         Self::SetCornerBr,
-        Self::SetWidgetHide,
         Self::SetAudioRouting,
         Self::SetRouteEach,
         Self::SetRouteMix,
@@ -574,6 +582,16 @@ impl Key {
         Self::ToastMenuOpen,
         Self::ToastMenuReveal,
         Self::ToastMenuClose,
+        Self::SetCornerTc,
+        Self::SetCornerBc,
+        Self::SetCornerCustom,
+        Self::SetWidgetDisplay,
+        Self::OptDisplayAlways,
+        Self::OptDisplayFade,
+        Self::OptDisplayAlerts,
+        Self::ToastDiskLow,
+        Self::ToastReplayDiskLow,
+        Self::SetWidgetPlaceHint,
     ];
 }
 
@@ -752,8 +770,8 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::SetSplitMinutes, Lang::Fr) => "Durée de chaque partie (minutes)",
         (Key::SetWidget, Lang::En) => "Recording widget",
         (Key::SetWidget, Lang::Fr) => "Widget d'enregistrement",
-        (Key::SetWidgetCorner, Lang::En) => "Widget corner",
-        (Key::SetWidgetCorner, Lang::Fr) => "Coin du widget",
+        (Key::SetWidgetCorner, Lang::En) => "Widget position",
+        (Key::SetWidgetCorner, Lang::Fr) => "Position du widget",
         (Key::SetCornerTl, Lang::En) => "Top left",
         (Key::SetCornerTl, Lang::Fr) => "Haut gauche",
         (Key::SetCornerTr, Lang::En) => "Top right",
@@ -762,8 +780,6 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::SetCornerBl, Lang::Fr) => "Bas gauche",
         (Key::SetCornerBr, Lang::En) => "Bottom right",
         (Key::SetCornerBr, Lang::Fr) => "Bas droite",
-        (Key::SetWidgetHide, Lang::En) => "Hide the widget when idle",
-        (Key::SetWidgetHide, Lang::Fr) => "Masquer le widget au repos",
         (Key::SetAudioRouting, Lang::En) => "Track routing",
         (Key::SetAudioRouting, Lang::Fr) => "Routage des pistes",
         (Key::SetRouteEach, Lang::En) => "One track per source",
@@ -1226,6 +1242,34 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::ToastMenuReveal, Lang::Fr) => "Afficher dans l'Explorateur de fichiers",
         (Key::ToastMenuClose, Lang::En) => "Close",
         (Key::ToastMenuClose, Lang::Fr) => "Fermer",
+        (Key::SetCornerTc, Lang::En) => "Top centre",
+        (Key::SetCornerTc, Lang::Fr) => "Haut centre",
+        (Key::SetCornerBc, Lang::En) => "Bottom centre",
+        (Key::SetCornerBc, Lang::Fr) => "Bas centre",
+        (Key::SetCornerCustom, Lang::En) => "Custom",
+        (Key::SetCornerCustom, Lang::Fr) => "Personnalisée",
+        (Key::SetWidgetDisplay, Lang::En) => "Show the widget",
+        (Key::SetWidgetDisplay, Lang::Fr) => "Afficher le widget",
+        (Key::OptDisplayAlways, Lang::En) => "Always",
+        (Key::OptDisplayAlways, Lang::Fr) => "Toujours",
+        (Key::OptDisplayFade, Lang::En) => "Fades after 3 s",
+        (Key::OptDisplayFade, Lang::Fr) => "S'estompe après 3 s",
+        (Key::OptDisplayAlerts, Lang::En) => "Only when something goes wrong",
+        (Key::OptDisplayAlerts, Lang::Fr) => "Seulement en cas de problème",
+        (Key::ToastDiskLow, Lang::En) => "Disk almost full",
+        (Key::ToastDiskLow, Lang::Fr) => "Disque presque plein",
+        (Key::ToastReplayDiskLow, Lang::En) => {
+            "{size} free on the replays' disk: the next replays may fail."
+        }
+        (Key::ToastReplayDiskLow, Lang::Fr) => {
+            "{size} libres sur le disque des replays : les prochains replays pourraient échouer."
+        }
+        (Key::SetWidgetPlaceHint, Lang::En) => {
+            "Click anywhere on the screen for a place of your own, or drag the widget during a recording."
+        }
+        (Key::SetWidgetPlaceHint, Lang::Fr) => {
+            "Clique n'importe où sur l'écran pour une position personnalisée, ou déplace le widget pendant un enregistrement."
+        }
     }
 }
 

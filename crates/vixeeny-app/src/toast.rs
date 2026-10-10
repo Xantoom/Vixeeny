@@ -36,6 +36,8 @@ pub enum Failed {
     Replay,
     /// An audio source went away during a recording.
     Audio,
+    /// The replays' disk is almost full: a warning, before the saves fail.
+    DiskLow,
 }
 
 impl Saved {
@@ -63,6 +65,7 @@ impl Failed {
             Self::Recording => "recording",
             Self::Replay => "replay",
             Self::Audio => "audio",
+            Self::DiskLow => "disk-low",
         }
     }
 
@@ -72,6 +75,7 @@ impl Failed {
             Self::Recording => Key::ToastRecordingFailed,
             Self::Replay => Key::ToastReplayFailed,
             Self::Audio => Key::ToastAudioLost,
+            Self::DiskLow => Key::ToastDiskLow,
         }
     }
 }
@@ -99,6 +103,7 @@ impl Toast {
             "failed-recording" => failed(Failed::Recording),
             "failed-replay" => failed(Failed::Replay),
             "failed-audio" => failed(Failed::Audio),
+            "failed-disk-low" => failed(Failed::DiskLow),
             "update" => Some(Self::Update(text.to_owned())),
             _ => None,
         }
@@ -252,7 +257,9 @@ fn content_of(toast: &Toast) -> ToastContent {
             heading: tr(kind.title(), lang).into(),
             body: message.clone(),
             thumb: None,
-            error: true,
+            // A filling disk is a warning: the replay still runs.
+            error: *kind != Failed::DiskLow,
+            warning: *kind == Failed::DiskLow,
             dark,
             action_label: tr(Key::ToastOpenSettings, lang).into(),
             ..ToastContent::default()

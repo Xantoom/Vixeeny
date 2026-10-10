@@ -153,6 +153,14 @@ impl Popup {
         window::set_cloak(self.hwnd, true);
     }
 
+    /// Takes the window off the screen until the next [`Popup::show`]: unlike [`Popup::hide`],
+    /// it no longer takes the clicks where it was.
+    pub fn withdraw(&self) {
+        window::set_cloak(self.hwnd, true);
+        // SAFETY: plain call on a window of this thread.
+        let _ = unsafe { ShowWindow(self.hwnd, windows::Win32::UI::WindowsAndMessaging::SW_HIDE) };
+    }
+
     /// Asks for a `WM_MOUSELEAVE` when the pointer leaves the window.
     pub fn track_leave(&self) {
         let mut t = TRACKMOUSEEVENT {

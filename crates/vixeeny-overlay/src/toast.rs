@@ -32,6 +32,8 @@ pub struct ToastContent {
     /// Width, height, RGBA.
     pub thumb: Option<(u32, u32, Vec<u8>)>,
     pub error: bool,
+    /// Something to know, not a failure: amber.
+    pub warning: bool,
     pub dark: bool,
     /// The button; empty for none.
     pub action_label: String,
@@ -235,7 +237,13 @@ pub fn paint_card(
     }
     c.fill_round(card, radius, t.flyout)?;
     // The colour of the kind, along the left edge: accent for news, red for a failure.
-    let kind = if content.error { t.danger } else { t.accent };
+    let kind = if content.error {
+        t.danger
+    } else if content.warning {
+        t.warning
+    } else {
+        t.accent
+    };
     c.push_round_clip(card, radius)?;
     let stripe = c.fill_rect(rect(cx, cy, 3.0 * u, ch), kind);
     c.pop_layer();
@@ -261,6 +269,8 @@ pub fn paint_card(
         _ => {
             let icon = if content.error {
                 icons::ERROR
+            } else if content.warning {
+                icons::WARNING
             } else {
                 icons::CHECKMARK_CIRCLE
             };

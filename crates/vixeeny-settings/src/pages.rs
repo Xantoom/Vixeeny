@@ -145,30 +145,76 @@ pub fn overlay(env: &Env, config: &Config) -> Vec<Row> {
         ),
     ];
     if config.recording_widget.enabled {
-        rows.push(crate::picked(
-            crate::Picker::Corner,
-            choice(
-                "widget_corner",
-                t(Key::SetWidgetCorner),
-                vec![
-                    opt("top_left", t(Key::SetCornerTl)),
-                    opt("top_right", t(Key::SetCornerTr)),
-                    opt("bottom_left", t(Key::SetCornerBl)),
-                    opt("bottom_right", t(Key::SetCornerBr)),
-                ],
-                |c| c.recording_widget.corner.clone(),
-                |c, v| c.recording_widget.corner = v,
+        rows.push(hinted(
+            crate::picked(
+                crate::Picker::Corner,
+                choice(
+                    "widget_corner",
+                    t(Key::SetWidgetCorner),
+                    vec![
+                        opt("top_left", t(Key::SetCornerTl)),
+                        opt("top_center", t(Key::SetCornerTc)),
+                        opt("top_right", t(Key::SetCornerTr)),
+                        opt("bottom_left", t(Key::SetCornerBl)),
+                        opt("bottom_center", t(Key::SetCornerBc)),
+                        opt("bottom_right", t(Key::SetCornerBr)),
+                        opt("custom", t(Key::SetCornerCustom)),
+                    ],
+                    |c| widget_place(&c.recording_widget),
+                    set_widget_place,
+                ),
             ),
+            t(Key::SetWidgetPlaceHint),
         ));
-        rows.push(toggle(
-            "widget_hide",
-            t(Key::SetWidgetHide),
-            |c| c.recording_widget.auto_hide,
-            |c, v| c.recording_widget.auto_hide = v,
+        rows.push(choice(
+            "widget_display",
+            t(Key::SetWidgetDisplay),
+            vec![
+                opt("always", t(Key::OptDisplayAlways)),
+                opt("fade", t(Key::OptDisplayFade)),
+                opt("alerts", t(Key::OptDisplayAlerts)),
+            ],
+            |c| c.recording_widget.display.clone(),
+            |c, v| c.recording_widget.display = v,
         ));
-        rows.push(disk_alert(env, config));
     }
+    // The widget's warning sign, and a notification during a replay.
+    rows.push(disk_alert(env, config));
     rows
+}
+
+/// The widget's place as the picker reads it: a preset, or `custom:<x>:<y>` in thousandths of
+/// the room across and down.
+fn widget_place(widget: &vixeeny_common::config::RecordingWidget) -> String {
+    if widget.corner == "custom" {
+        let thousandths = |f: f32| (f.clamp(0.0, 1.0) * 1000.0).round() as u32;
+        format!(
+            "custom:{}:{}",
+            thousandths(widget.custom.0),
+            thousandths(widget.custom.1)
+        )
+    } else {
+        widget.corner.clone()
+    }
+}
+
+/// A preset, `custom` (the place kept), or `custom:<x>:<y>` (a place clicked in the picker).
+fn set_widget_place(c: &mut Config, value: String) {
+    let widget = &mut c.recording_widget;
+    let mut parts = value.split(':');
+    let corner = parts.next().unwrap_or_default().to_owned();
+    if corner == "custom" {
+        let mut part = || {
+            parts
+                .next()
+                .and_then(|p| p.parse::<u32>().ok())
+                .map(|n| n.min(1000) as f32 / 1000.0)
+        };
+        if let (Some(x), Some(y)) = (part(), part()) {
+            widget.custom = (x, y);
+        }
+    }
+    widget.corner = corner;
 }
 
 /// The free space under which the widget warns, in percent of the videos' disk, each with what

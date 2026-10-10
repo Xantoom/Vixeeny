@@ -133,7 +133,8 @@ pub enum Picker {
     List,
     /// Left, right, top, bottom: an edge of the screen.
     Edge,
-    /// Top left, top right, bottom left, bottom right: a corner of the screen.
+    /// The top and bottom corners and middles of the screen, then a place of the user's (its
+    /// value `custom:<x>:<y>`, thousandths of the room across and down).
     Corner,
 }
 
@@ -172,7 +173,12 @@ impl Row {
         let value = match (&self.kind, value) {
             (Kind::Toggle, v @ Value::Bool(_)) => v,
             (Kind::Choice(options), Value::Text(t)) => {
-                if !options.iter().any(|o| o.value == t && !o.heading) {
+                // A place of the corner picker carries where it is: `custom:<x>:<y>`.
+                let chosen = match t.split_once(':') {
+                    Some((value, _)) if self.picker == Picker::Corner => value,
+                    _ => t.as_str(),
+                };
+                if !options.iter().any(|o| o.value == chosen && !o.heading) {
                     return Err(Invalid);
                 }
                 Value::Text(t)
@@ -731,6 +737,35 @@ mod tests {
 
     fn has(section: Section, c: &Config, id: &str) -> bool {
         rows(section, &env(), c).iter().any(|r| r.id == id)
+    }
+
+    #[test]
+    fn the_widget_goes_to_a_preset_or_a_place_of_the_user_s() {
+        let mut c = Config::default();
+        let place = rows(Section::Overlay, &env(), &c)
+            .into_iter()
+            .find(|r| r.id == "widget_corner")
+            .unwrap();
+        place
+            .apply(&mut c, Value::Text("bottom_center".into()))
+            .unwrap();
+        assert_eq!(c.recording_widget.corner, "bottom_center");
+        // A click in the picker: a place, read back as it was given.
+        place
+            .apply(&mut c, Value::Text("custom:250:1000".into()))
+            .unwrap();
+        assert_eq!(c.recording_widget.corner, "custom");
+        assert_eq!(c.recording_widget.custom, (0.25, 1.0));
+        assert_eq!(place.value(&c), Value::Text("custom:250:1000".into()));
+        // Back to a preset, then to the place kept.
+        place.apply(&mut c, Value::Text("top_left".into())).unwrap();
+        place.apply(&mut c, Value::Text("custom".into())).unwrap();
+        assert_eq!(c.recording_widget.custom, (0.25, 1.0));
+        assert!(
+            place
+                .apply(&mut c, Value::Text("middle:1:2".into()))
+                .is_err()
+        );
     }
 
     #[test]

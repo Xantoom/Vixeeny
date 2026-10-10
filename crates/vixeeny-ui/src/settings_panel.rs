@@ -533,9 +533,20 @@ fn row_model(row: &Row, config: &Config) -> SettingRow {
                 Picker::Edge => 10,
                 Picker::Corner => 11,
             };
+            // The corner picker's own place: `custom:<x>:<y>`, drawn where it is (`min`, `max`:
+            // thousandths across and down, -1 for none).
+            let (value, place) = match t.split_once(':') {
+                Some((value, place)) if row.picker == Picker::Corner => (value, Some(place)),
+                _ => (t.as_str(), None),
+            };
+            let place = place.and_then(|p| {
+                let (x, y) = p.split_once(':')?;
+                Some((x.parse::<i32>().ok()?, y.parse::<i32>().ok()?))
+            });
+            (out.min, out.max) = place.unwrap_or((-1, -1));
             out.selected = options
                 .iter()
-                .position(|o| o.value == t)
+                .position(|o| o.value == value)
                 .map_or(-1, |i| i as i32);
             out.options = strings(options.iter().map(|o| o.label.clone()));
             // About 7.5 px a character at 14 px, plus the margins and the chevron.

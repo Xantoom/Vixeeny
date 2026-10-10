@@ -8,27 +8,56 @@ pub use vixeeny_overlay::widget::{Alert, HEIGHT, WIDTH};
 /// Gap from the window to the screen edge at 96 DPI (the bar is 16 px from it).
 pub const MARGIN: u32 = 6;
 
-/// Top-left corner and size, in physical pixels, of the widget in `corner` of a monitor
-/// (`x, y, width, height` of the monitor in physical pixels; `dpi` 96 = 100 %).
-pub fn corner_geometry(
-    corner: &str,
-    monitor: (i32, i32, u32, u32),
-    dpi: u32,
-) -> (i32, i32, u32, u32) {
+/// Where the widget's window can be on a monitor's work area (`x, y, width, height`, physical
+/// pixels; `dpi` 96 = 100 %): its left-most and right-most x, its top-most and lowest y, and
+/// its size.
+fn room(work: (i32, i32, u32, u32), dpi: u32) -> ((i32, i32), (i32, i32), (u32, u32)) {
     let scale = |v: u32| (u64::from(v) * u64::from(dpi.max(48)) / 96) as u32;
     let (w, h, m) = (scale(WIDTH), scale(HEIGHT), scale(MARGIN));
-    let (mx, my, mw, mh) = monitor;
+    let (mx, my, mw, mh) = work;
     let left = mx + m as i32;
-    let right = mx + mw as i32 - w as i32 - m as i32;
+    let right = (mx + mw as i32 - w as i32 - m as i32).max(left);
     let top = my + m as i32;
-    let bottom = my + mh as i32 - h as i32 - m as i32;
-    let (x, y) = match corner {
-        "top_right" => (right, top),
-        "bottom_left" => (left, bottom),
-        "bottom_right" => (right, bottom),
-        _ => (left, top),
+    let bottom = (my + mh as i32 - h as i32 - m as i32).max(top);
+    ((left, right), (top, bottom), (w, h))
+}
+
+/// Top-left corner and size, in physical pixels, of the widget at `corner` of a monitor's work
+/// area (`custom`: at `custom`, fractions of the room across and down, see
+/// [`vixeeny_common::config::RecordingWidget::custom`]).
+pub fn corner_geometry(
+    corner: &str,
+    custom: (f32, f32),
+    work: (i32, i32, u32, u32),
+    dpi: u32,
+) -> (i32, i32, u32, u32) {
+    let ((left, right), (top, bottom), (w, h)) = room(work, dpi);
+    let along =
+        |lo: i32, hi: i32, f: f32| lo + ((hi - lo) as f32 * f.clamp(0.0, 1.0)).round() as i32;
+    let (fx, fy) = match corner {
+        "top_center" => (0.5, 0.0),
+        "top_right" => (1.0, 0.0),
+        "bottom_left" => (0.0, 1.0),
+        "bottom_center" => (0.5, 1.0),
+        "bottom_right" => (1.0, 1.0),
+        "custom" => custom,
+        _ => (0.0, 0.0),
     };
-    (x, y, w, h)
+    (along(left, right, fx), along(top, bottom, fy), w, h)
+}
+
+/// The custom place of a widget whose window is at `(x, y)` on the monitor of `work`: the
+/// inverse of [`corner_geometry`], to the thousandth.
+pub fn custom_place(at: (i32, i32), work: (i32, i32, u32, u32), dpi: u32) -> (f32, f32) {
+    let ((left, right), (top, bottom), _) = room(work, dpi);
+    let part = |v: i32, lo: i32, hi: i32| {
+        if hi <= lo {
+            return 0.0;
+        }
+        let f = ((v - lo) as f32 / (hi - lo) as f32).clamp(0.0, 1.0);
+        (f * 1000.0).round() / 1000.0
+    };
+    (part(at.0, left, right), part(at.1, top, bottom))
 }
 
 /// A message from the recorder to the widget.
@@ -121,6 +150,14 @@ pub struct Health {
 }
 
 impl Health {
+    /// The disk has less than `disk_percent` % free (never with 0).
+    pub fn disk_low(&self, disk_percent: u8) -> bool {
+        self.disk.is_some_and(|(free, total)| {
+            disk_percent > 0
+                && u128::from(free) * 100 < u128::from(total) * u128::from(disk_percent)
+        })
+    }
+
     /// The alert for this health, with a disk alert under `disk_percent` % free (0: none).
     pub fn alert(&self, disk_percent: u8, lang: Lang) -> (Alert, String) {
         let mut level = Alert::None;
@@ -131,9 +168,8 @@ impl Health {
                 tr(Key::WidgetFramesLost, lang).replace("{n}", &self.lost_frames.to_string()),
             );
         }
-        if let Some((free, total)) = self.disk
-            && disk_percent > 0
-            && u128::from(free) * 100 < u128::from(total) * u128::from(disk_percent)
+        if let Some((free, _)) = self.disk
+            && self.disk_low(disk_percent)
         {
             level = if free < DISK_CRITICAL {
                 Alert::Critical
@@ -147,26 +183,41 @@ impl Health {
 }
 
 /// A button press, from the widget to the recorder.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FromWidget {
     TogglePause,
     Stop,
+    /// The user moved the widget: its new custom place (see [`custom_place`]).
+    Moved(f32, f32),
 }
 
 impl FromWidget {
-    pub fn to_line(self) -> &'static str {
+    pub fn to_line(self) -> String {
         match self {
-            Self::TogglePause => "pause\n",
-            Self::Stop => "stop\n",
+            Self::TogglePause => "pause\n".into(),
+            Self::Stop => "stop\n".into(),
+            Self::Moved(x, y) => format!("moved {x} {y}\n"),
         }
     }
 
     pub fn parse(line: &str) -> Option<Self> {
-        match line.trim() {
-            "pause" => Some(Self::TogglePause),
-            "stop" => Some(Self::Stop),
-            _ => None,
-        }
+        let mut parts = line.split_whitespace();
+        let press = match parts.next()? {
+            "pause" => Self::TogglePause,
+            "stop" => Self::Stop,
+            "moved" => {
+                let mut f = || {
+                    parts
+                        .next()?
+                        .parse::<f32>()
+                        .ok()
+                        .filter(|f| (0.0..=1.0).contains(f))
+                };
+                Self::Moved(f()?, f()?)
+            }
+            _ => return None,
+        };
+        parts.next().is_none().then_some(press)
     }
 }
 
@@ -177,24 +228,57 @@ mod tests {
     #[test]
     fn corners_hug_the_edges_with_a_margin_scaled_by_dpi() {
         let monitor = (1920, 0, 2560, 1440); // a second monitor to the right
-        assert_eq!(corner_geometry("top_left", monitor, 96), (1926, 6, 216, 60));
         assert_eq!(
-            corner_geometry("top_right", monitor, 96),
+            corner_geometry("top_left", (0.0, 0.0), monitor, 96),
+            (1926, 6, 216, 60)
+        );
+        assert_eq!(
+            corner_geometry("top_right", (0.0, 0.0), monitor, 96),
             (1920 + 2560 - 216 - 6, 6, 216, 60)
         );
         assert_eq!(
-            corner_geometry("bottom_left", monitor, 96),
+            corner_geometry("bottom_left", (0.0, 0.0), monitor, 96),
             (1926, 1440 - 60 - 6, 216, 60)
         );
         assert_eq!(
-            corner_geometry("bottom_right", monitor, 96),
+            corner_geometry("bottom_right", (0.0, 0.0), monitor, 96),
             (1920 + 2560 - 222, 1440 - 66, 216, 60)
         );
         // 200 % scaling doubles everything; an unknown corner is the default one.
         assert_eq!(
-            corner_geometry("???", (0, 0, 3840, 2160), 192),
+            corner_geometry("???", (0.0, 0.0), (0, 0, 3840, 2160), 192),
             (12, 12, 432, 120)
         );
+    }
+
+    #[test]
+    fn the_middles_and_a_custom_place_share_the_room_left() {
+        let work = (0, 0, 1920, 1032); // above a 48-pixel taskbar
+        // 1920 - 216 - 2 × 6 = 1692 pixels of room across, 1032 - 60 - 12 = 960 down.
+        assert_eq!(
+            corner_geometry("top_center", (0.0, 0.0), work, 96),
+            (852, 6, 216, 60)
+        );
+        assert_eq!(
+            corner_geometry("bottom_center", (0.0, 0.0), work, 96),
+            (852, 966, 216, 60)
+        );
+        assert_eq!(
+            corner_geometry("custom", (0.25, 0.5), work, 96),
+            (429, 486, 216, 60)
+        );
+        // A place out of range stays on the screen.
+        assert_eq!(
+            corner_geometry("custom", (3.0, -1.0), work, 96),
+            (1698, 6, 216, 60)
+        );
+        // Dropped somewhere: the same place comes back, on another screen too.
+        let place = custom_place((429, 486), work, 96);
+        assert_eq!(place, (0.25, 0.5));
+        let big = (1920, 0, 3840, 2112);
+        let (x, y, ..) = corner_geometry("custom", place, big, 192);
+        assert_eq!(custom_place((x, y), big, 192), place);
+        assert_eq!(custom_place((-500, 99_999), work, 96), (0.0, 1.0));
     }
 
     #[test]
@@ -214,8 +298,15 @@ mod tests {
         ] {
             assert_eq!(ToWidget::parse(&m.to_line()), Some(m.clone()));
         }
-        for b in [FromWidget::TogglePause, FromWidget::Stop] {
-            assert_eq!(FromWidget::parse(b.to_line()), Some(b));
+        for b in [
+            FromWidget::TogglePause,
+            FromWidget::Stop,
+            FromWidget::Moved(0.25, 1.0),
+        ] {
+            assert_eq!(FromWidget::parse(&b.to_line()), Some(b));
+        }
+        for bad in ["moved", "moved 0.5", "moved 2 0", "moved a b", "stop now"] {
+            assert_eq!(FromWidget::parse(bad), None, "{bad}");
         }
         for bad in [
             "",
