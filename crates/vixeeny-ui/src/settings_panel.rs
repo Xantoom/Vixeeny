@@ -505,7 +505,6 @@ fn row_model(row: &Row, config: &Config) -> SettingRow {
         label: row.label.as_str().into(),
         warning: row.warning.as_str().into(),
         info: row.info.as_str().into(),
-        wide: 0,
         kind: 5,
         enabled: row.enabled(),
         on: false,
@@ -549,13 +548,6 @@ fn row_model(row: &Row, config: &Config) -> SettingRow {
                 .position(|o| o.value == value)
                 .map_or(-1, |i| i as i32);
             out.options = strings(options.iter().map(|o| o.label.clone()));
-            // About 7.5 px a character at 14 px, plus the margins and the chevron.
-            let longest = options
-                .iter()
-                .map(|o| o.label.chars().count())
-                .max()
-                .unwrap_or(0);
-            out.wide = (longest as f32 * 7.5 + 60.0).min(440.0) as i32;
             if options.iter().any(|o| o.heading) {
                 out.headings = ModelRc::from(Rc::new(VecModel::from(
                     options.iter().map(|o| o.heading).collect::<Vec<_>>(),

@@ -14,8 +14,6 @@ export struct SettingRow {
     info: string,
     // Behind a warning sign beside the label (empty: nothing wrong).
     warning: string,
-    // A list as wide as its longest choice needs, in pixels (0: the usual width).
-    wide: int,
     // 0 toggle, 1 choice, 2 number, 3 text, 4 folder, 5 info, 6 level meter, 8 slider,
     // 9 expander (`on`: open), 10 choice of a screen edge, 11 choice of a place on the screen
     // (its own place, if any, in `min` and `max`: thousandths across and down, else -1)
@@ -114,7 +112,7 @@ export struct ShortcutRow {
     // Starts a new group of actions (shown apart from the one above).
     group: bool,
     label: string,
-    // Always the three slots.
+    // Always the two slots.
     keys: [ShortcutKey],
     error: string,
 }
@@ -197,8 +195,9 @@ component SettingLine inherits GroupRow {
         toggled(v) => { root.toggled(v); }
     }
     if root.entry.kind == 1 : ComboBox {
-        // As wide as its longest choice (estimated from its length), so nothing is cut.
-        width: max(240px, root.entry.wide * 1px);
+        // Every value of the page has the same width; a long choice is cut here, whole in the
+        // list.
+        width: Theme.value-w;
         options: root.entry.options;
         headings: root.entry.headings;
         current: root.entry.selected;
@@ -217,6 +216,7 @@ component SettingLine inherits GroupRow {
         placed(x, y) => { root.text-edited("custom:" + x + ":" + y); }
     }
     if root.entry.kind == 2 : NumberBox {
+        width: Theme.value-w;
         value: root.entry.num;
         lo: root.entry.min;
         hi: root.entry.max;
@@ -227,7 +227,7 @@ component SettingLine inherits GroupRow {
     if root.entry.kind == 8 : HorizontalLayout {
         spacing: 12px;
         Slider {
-            width: 200px;
+            width: Theme.value-w - 48px;
             value: root.entry.num;
             lo: root.entry.min;
             hi: root.entry.max;
@@ -245,7 +245,7 @@ component SettingLine inherits GroupRow {
         }
     }
     if root.entry.kind == 3 : TextBox {
-        width: 280px;
+        width: Theme.value-w;
         text: root.entry.text;
         enabled: root.entry.enabled;
         accepted(s) => { root.text-edited(s); }
@@ -327,7 +327,7 @@ component ShortcutField inherits Rectangle {
     accessible-label: root.key.text != "" ? root.key.text : root.t.add-shortcut;
 }
 
-// One action of the shortcuts table: its name (and what went wrong) on the left, its three
+// One action of the shortcuts table: its name (and what went wrong) on the left, its two
 // shortcuts in the columns on the right.
 component ShortcutLine inherits Rectangle {
     in property <ShortcutRow> entry;
@@ -349,7 +349,7 @@ component ShortcutLine inherits Rectangle {
     info := VerticalLayout {
         x: 16px;
         y: (parent.height - self.preferred-height) / 2;
-        width: root.width - 44px - 3 * root.key-w;
+        width: root.width - 44px - 2 * root.key-w;
         height: self.preferred-height;
         spacing: 2px;
         Text {
@@ -366,7 +366,7 @@ component ShortcutLine inherits Rectangle {
         }
     }
     for key[k] in root.entry.keys : ShortcutField {
-        x: root.width - 16px - (3 - k) * root.key-w;
+        x: root.width - 16px - (2 - k) * root.key-w;
         y: (parent.height - self.height) / 2;
         width: root.key-w - 8px;
         key: key;
@@ -721,12 +721,12 @@ export component SettingsWindow inherits Window {
                 }
             }
 
-            // ---- shortcuts: a table, one row per action and a column per shortcut (three at
+            // ---- shortcuts: a table, one row per action and a column per shortcut (two at
             // most)
             if root.section == 6 && !root.searching : Rectangle {
                 width: parent.width;
                 height: parent.height;
-                property <length> key-w: max(150px, min(210px, (page.column - 220px) / 3));
+                property <length> key-w: max(180px, min(240px, (page.column - 220px) / 2));
                 ScrollArea {
                     width: parent.width - 8px;
                     height: parent.height;
@@ -734,7 +734,7 @@ export component SettingsWindow inherits Window {
                         x: 24px;
                         width: page.column;
                         alignment: start;
-                        spacing: 4px;
+                        spacing: 8px;
                         padding-bottom: 32px;
                         for sc[i] in root.shortcuts : VerticalLayout {
                             padding-top: sc.group && i > 0 ? 20px : 0px;

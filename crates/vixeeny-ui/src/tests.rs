@@ -625,3 +625,4 @@ fn info_tooltip_stays_while_the_pointer_moves_on_its_dot() {
     }
     window.dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: 1.0 });
 }
+

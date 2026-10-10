@@ -300,11 +300,21 @@ export component ComboBox inherits Rectangle {
         mouse-cursor: pointer;
         clicked => { menu.show(); }
     }
+    // The widest choice, measured (never shown): the list fits it whole.
+    Rectangle {
+        width: 0px;
+        height: 0px;
+        visible: false;
+        measure := VerticalLayout {
+            for option in root.options : Text { text: option; font-size: 14px; }
+        }
+    }
     menu := PopupWindow {
-        // The list is at least as wide as the box, wider when the choices need it.
-        x: 0;
+        // At least as wide as the box, wider when a choice needs it: then it grows to the left,
+        // its right edge on the box's (the boxes sit at the right of the page).
+        x: root.width - self.width;
         y: root.height + 2px;
-        width: max(root.width, 220px);
+        width: max(root.width, measure.preferred-width + 40px);
         height: min(root.options.length * 40px + 8px, 420px);
         Rectangle {
             // Unfolds from the box when it opens.
@@ -352,7 +362,6 @@ export component ComboBox inherits Rectangle {
                         font-size: parent.head ? 12px : 14px;
                         font-weight: parent.head ? 600 : 400;
                         vertical-alignment: parent.head ? bottom : center;
-                        overflow: elide;
                     }
                     item := TouchArea {
                         enabled: !parent.head;
@@ -517,13 +526,9 @@ export component NavItem inherits Rectangle {
 
 // Rows that belong together: each is a card of its own, a few pixels apart.
 export component Group inherits VerticalLayout {
-    spacing: 4px;
+    spacing: 8px;
 }
 
-// A setting, as a card: a title (and a line of explanation) on the left, the control on the
-// right; narrower than `stack-under`, the control goes under the text. The text wraps, and the
-// height follows it.
-// A small "i" (or, with `alert`, a warning sign): its text shows while the pointer rests on it.
 // The tooltip under the pointer. The window draws it above everything (`TipLayer`): a popup
 // would take the pointer from what it belongs to, and close again at once.
 export global Tip {
@@ -563,6 +568,7 @@ export component TipLayer inherits Rectangle {
     }
 }
 
+// A small "i" (or, with `alert`, a warning sign): its text shows while the pointer rests on it.
 export component InfoTip inherits Rectangle {
     in property <string> text;
     in property <bool> alert: false;
@@ -610,6 +616,9 @@ export component InfoTip inherits Rectangle {
     accessible-label: root.text;
 }
 
+// A setting, as a card: a title (and a line of explanation) on the left, the control on the
+// right; narrower than `stack-under`, the control goes under the text. The text wraps, and the
+// height follows it.
 export component GroupRow inherits Rectangle {
     in property <string> title;
     in property <string> description;
@@ -641,7 +650,7 @@ export component GroupRow inherits Rectangle {
         : max(120px, root.width - 2 * root.pad - root.lead - ctl.preferred-width - 24px);
     property <length> body: root.stacked ? txt.preferred-height + 10px + ctl.preferred-height
         : max(txt.preferred-height, ctl.preferred-height);
-    property <length> natural: max(60px, root.body + 26px);
+    property <length> natural: max(64px, root.body + 32px);
     property <bool> grown: !root.unfold;
     // A row made already leaving starts shown, then folds (the change is what animates).
     property <bool> folded: false;
