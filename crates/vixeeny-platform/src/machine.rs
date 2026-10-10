@@ -240,6 +240,25 @@ fn shares_memory(adapter: &IDXGIAdapter1) -> Option<bool> {
     Some(data.UMA.as_bool())
 }
 
+/// `(free, total)` bytes of the disk that holds `dir` (or the nearest folder above it that
+/// exists), as this user may fill it.
+pub fn disk_space(dir: &std::path::Path) -> Option<(u64, u64)> {
+    let dir = dir.ancestors().find(|d| d.is_dir())?;
+    let path = HSTRING::from(dir.as_os_str());
+    let (mut free, mut total) = (0u64, 0u64);
+    // SAFETY: a NUL-terminated path and valid out-pointers.
+    unsafe {
+        GetDiskFreeSpaceExW(
+            PCWSTR(path.as_ptr()),
+            Some(&raw mut free),
+            Some(&raw mut total),
+            None,
+        )
+    }
+    .ok()?;
+    Some((free, total))
+}
+
 /// The letters of the fixed disks, with their sizes and the model of the disk under them.
 fn disks() -> Vec<Disk> {
     // SAFETY: no arguments.
@@ -538,5 +557,14 @@ mod tests {
         let cpu = m.cpu.unwrap_or_else(|| panic!("no processor"));
         assert!(!cpu.name.is_empty() && cpu.cores >= 1 && cpu.threads >= cpu.cores);
         assert!(m.ram_bytes > 0);
+    }
+
+    #[test]
+    fn the_free_space_of_a_folder_yet_to_be_made_is_its_disk_s() {
+        let dir = std::env::temp_dir()
+            .join("vixeeny-not-there")
+            .join("deeper");
+        let (free, total) = super::disk_space(&dir).expect("the temp disk");
+        assert!(total > 0 && free <= total, "{free} / {total}");
     }
 }

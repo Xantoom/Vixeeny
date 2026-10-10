@@ -307,18 +307,25 @@ fn the_notification_draws_with_a_thumbnail_and_as_an_error() {
 }
 
 #[test]
-fn the_recording_widget_draws_both_states() {
-    use crate::widget::{WidgetLook, WidgetTarget, paint_widget, widget_surface};
+fn the_recording_widget_draws_its_states_and_alerts() {
+    use crate::widget::widget_surface;
+    use crate::widget::{Alert, AlertTip, WidgetLook, WidgetTarget, paint_alert_tip, paint_widget};
     let gfx = Gfx::new().expect("graphics devices");
     let t = Theme::new(Look::default());
     let mut drawn = Vec::new();
-    for (name, paused) in [("recording", false), ("paused", true)] {
+    for (name, paused, alert) in [
+        ("recording", false, Alert::None),
+        ("paused", true, Alert::None),
+        ("warning", false, Alert::Warning),
+        ("critical", true, Alert::Critical),
+    ] {
         let u = 1.25;
         let (w, h) = widget_surface(u);
         let look = WidgetLook {
             paused,
             time: "01:02:05".into(),
             pulse: true,
+            alert,
             hover: Some(WidgetTarget::Stop),
             held: None,
         };
@@ -331,8 +338,9 @@ fn the_recording_widget_draws_both_states() {
         save(&format!("widget-{name}"), w, h, &pixels);
         drawn.push(pixels);
     }
-    // Red dot vs. amber dot, pause vs. play.
+    // Red dot vs. pause sign; with and without the warning sign.
     assert_ne!(drawn[0], drawn[1]);
+    assert_ne!(drawn[0], drawn[2]);
     assert!(
         drawn[0]
             .as_chunks::<4>()
@@ -340,6 +348,21 @@ fn the_recording_widget_draws_both_states() {
             .iter()
             .any(|p| p[2] > 200 && p[1] < 80)
     );
+    let tip = AlertTip::new(
+        &gfx,
+        1.25,
+        "42 frame(s) lost: the encoder cannot keep up\nDisk almost full: 3.1 GB free",
+    )
+    .expect("laid out");
+    assert_eq!(tip.text.lines, 2);
+    let (w, h) = tip.size;
+    let pixels = gfx
+        .render(w, h, |c| {
+            backdrop(c, w, h)?;
+            paint_alert_tip(c, &t, 1.25, &tip)
+        })
+        .expect("drawn");
+    save("widget-tip", w, h, &pixels);
 }
 
 #[test]

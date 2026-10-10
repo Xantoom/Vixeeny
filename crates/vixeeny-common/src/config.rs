@@ -513,6 +513,9 @@ pub struct RecordingWidget {
     pub enabled: bool,
     pub corner: String,
     pub auto_hide: bool,
+    /// The widget warns when the free space of the videos' disk falls under this share of it,
+    /// in percent (0: never).
+    pub disk_alert_percent: u8,
 }
 
 impl Default for RecordingWidget {
@@ -521,6 +524,7 @@ impl Default for RecordingWidget {
             enabled: true,
             corner: "top_left".into(),
             auto_hide: false,
+            disk_alert_percent: 5,
         }
     }
 }

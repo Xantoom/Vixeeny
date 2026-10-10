@@ -113,6 +113,7 @@ tracks = []
 enabled = true
 corner = "top_left"
 auto_hide = false
+disk_alert_percent = 5
 
 [replay]
 enabled = false

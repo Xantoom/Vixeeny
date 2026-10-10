@@ -166,9 +166,57 @@ pub fn overlay(env: &Env, config: &Config) -> Vec<Row> {
             |c| c.recording_widget.auto_hide,
             |c, v| c.recording_widget.auto_hide = v,
         ));
+        rows.push(disk_alert(env, config));
     }
     rows
 }
+
+/// The free space under which the widget warns, in percent of the videos' disk, each with what
+/// it is in bytes on that disk.
+fn disk_alert(env: &Env, config: &Config) -> Row {
+    let total = vixeeny_common::paths::expand_user_dir(&config.paths.videos).and_then(|dir| {
+        let dir = dir.to_string_lossy().to_uppercase();
+        env.machine
+            .disks
+            .iter()
+            .find(|d| dir.starts_with(&d.letter.to_uppercase()))
+            .map(|d| d.bytes)
+    });
+    let mut options = vec![opt("0", env.t(Key::OptDiskAlertOff))];
+    for pct in DISK_ALERTS {
+        let size = total.map_or_else(String::new, |bytes| {
+            vixeeny_common::i18n::size_label(bytes / 100 * u64::from(pct), env.lang)
+        });
+        let label = env
+            .t(Key::OptDiskAlert)
+            .replace("{pct}", &pct.to_string())
+            .replace(" ({size})", if size.is_empty() { "" } else { " ({size})" })
+            .replace("{size}", &size);
+        options.push(opt(&pct.to_string(), label));
+    }
+    choice(
+        "disk_alert",
+        env.t(Key::SetDiskAlert),
+        options,
+        |c| {
+            let pct = c.recording_widget.disk_alert_percent;
+            // A value from an older list: the nearest offered one.
+            if pct == 0 {
+                "0".into()
+            } else {
+                DISK_ALERTS
+                    .into_iter()
+                    .min_by_key(|p| p.abs_diff(pct))
+                    .unwrap_or(5)
+                    .to_string()
+            }
+        },
+        |c, v| c.recording_widget.disk_alert_percent = v.parse().unwrap_or(0),
+    )
+}
+
+/// The thresholds offered for the disk alert, in percent.
+const DISK_ALERTS: [u8; 6] = [1, 2, 5, 10, 15, 20];
 
 /// Screenshots: where they go, their format, what they show.
 pub fn image(env: &Env, config: &Config) -> Vec<Row> {
@@ -1379,20 +1427,10 @@ fn replay_estimate(env: &Env, config: &Config) -> Option<String> {
         _ if replay::fits_in_ram(bytes, env.machine.ram_bytes) => Key::ReplayEstimateRam,
         _ => Key::ReplayEstimateDisk,
     };
-    Some(env.t(key).replace("{size}", &size_label(bytes, env.lang)))
-}
-
-/// A file size: megabytes below a gigabyte, gigabytes with one decimal above.
-fn size_label(bytes: u64, lang: vixeeny_common::i18n::Lang) -> String {
-    let fr = lang == vixeeny_common::i18n::Lang::Fr;
-    if bytes < 1 << 30 {
-        let mb = (bytes >> 20).max(1);
-        format!("{mb} {}", if fr { "Mo" } else { "MB" })
-    } else {
-        let gb = format!("{:.1}", bytes as f64 / f64::from(1u32 << 30));
-        let gb = if fr { gb.replace('.', ",") } else { gb };
-        format!("{gb} {}", if fr { "Go" } else { "GB" })
-    }
+    Some(
+        env.t(key)
+            .replace("{size}", &vixeeny_common::i18n::size_label(bytes, env.lang)),
+    )
 }
 
 /// The settings of the updates page (the state of the update is drawn by the page).

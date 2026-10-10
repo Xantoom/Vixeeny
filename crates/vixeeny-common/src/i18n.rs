@@ -283,6 +283,14 @@ pub enum Key {
     ShortcutWindows,
     UiReport,
     AboutReportReady,
+    SetDiskAlert,
+    OptDiskAlertOff,
+    OptDiskAlert,
+    WidgetFramesLost,
+    WidgetDiskLow,
+    ToastMenuOpen,
+    ToastMenuReveal,
+    ToastMenuClose,
 }
 
 impl Key {
@@ -558,6 +566,14 @@ impl Key {
         Self::ShortcutWindows,
         Self::UiReport,
         Self::AboutReportReady,
+        Self::SetDiskAlert,
+        Self::OptDiskAlertOff,
+        Self::OptDiskAlert,
+        Self::WidgetFramesLost,
+        Self::WidgetDiskLow,
+        Self::ToastMenuOpen,
+        Self::ToastMenuReveal,
+        Self::ToastMenuClose,
     ];
 }
 
@@ -589,6 +605,19 @@ impl Lang {
             .iter()
             .find_map(|var| std::env::var(var).ok().filter(|v| !v.is_empty()))
             .map_or(Self::En, |tag| Self::from_tag(&tag))
+    }
+}
+
+/// A size in bytes: megabytes below a gigabyte, gigabytes with one decimal above.
+pub fn size_label(bytes: u64, lang: Lang) -> String {
+    let fr = lang == Lang::Fr;
+    if bytes < 1 << 30 {
+        let mb = (bytes >> 20).max(1);
+        format!("{mb} {}", if fr { "Mo" } else { "MB" })
+    } else {
+        let gb = format!("{:.1}", bytes as f64 / f64::from(1u32 << 30));
+        let gb = if fr { gb.replace('.', ",") } else { gb };
+        format!("{gb} {}", if fr { "Go" } else { "GB" })
     }
 }
 
@@ -1181,6 +1210,22 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::AboutReportReady, Lang::Fr) => {
             "Rapport prêt, sans données personnelles : glisse le fichier sélectionné dans la page GitHub."
         }
+        (Key::SetDiskAlert, Lang::En) => "Warn when the disk is almost full",
+        (Key::SetDiskAlert, Lang::Fr) => "Alerter quand le disque est presque plein",
+        (Key::OptDiskAlertOff, Lang::En) => "Never",
+        (Key::OptDiskAlertOff, Lang::Fr) => "Jamais",
+        (Key::OptDiskAlert, Lang::En) => "Below {pct} % free ({size})",
+        (Key::OptDiskAlert, Lang::Fr) => "Sous {pct} % libres ({size})",
+        (Key::WidgetFramesLost, Lang::En) => "{n} frame(s) lost: the encoder cannot keep up",
+        (Key::WidgetFramesLost, Lang::Fr) => "{n} image(s) perdue(s) : l'encodeur ne suit pas",
+        (Key::WidgetDiskLow, Lang::En) => "Disk almost full: {size} free",
+        (Key::WidgetDiskLow, Lang::Fr) => "Disque presque plein : {size} libres",
+        (Key::ToastMenuOpen, Lang::En) => "Open the image",
+        (Key::ToastMenuOpen, Lang::Fr) => "Ouvrir l'image",
+        (Key::ToastMenuReveal, Lang::En) => "Show in File Explorer",
+        (Key::ToastMenuReveal, Lang::Fr) => "Afficher dans l'Explorateur de fichiers",
+        (Key::ToastMenuClose, Lang::En) => "Close",
+        (Key::ToastMenuClose, Lang::Fr) => "Fermer",
     }
 }
 

@@ -6,13 +6,13 @@
 use crate::toast::{Failed, Saved, Toast, failure_text};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crate::audio_rig::Rig;
-use crate::widget_math::FromWidget;
+use crate::widget_math::{Alert, FromWidget, Health};
 use anyhow::Context;
 use vixeeny_common::config::{self, Config};
 use vixeeny_common::ipc::RecState;
@@ -181,6 +181,8 @@ struct Plan {
     mic_denoise: bool,
     /// The widget to show.
     widget: Option<vixeeny_common::config::RecordingWidget>,
+    /// The folder the files go to (the disk the widget watches).
+    folder: Option<PathBuf>,
     /// The settings, for the notifications that end a session.
     notice: Config,
 }
@@ -387,6 +389,7 @@ fn plan(config: &Config, allow_gpu: bool, replay: bool) -> anyhow::Result<Plan> 
     }
 
     let extension = container.extension();
+    let mut folder = None;
     let (namer, save_as): (Namer, Option<SaveNamer>) = if replay {
         let config = config.clone();
         let monitor = monitor.clone();
@@ -395,6 +398,7 @@ fn plan(config: &Config, allow_gpu: bool, replay: bool) -> anyhow::Result<Plan> 
         (Box::new(|_| PathBuf::new()), Some(save))
     } else {
         let first = output_file(config, false, &monitor, output_size, extension)?;
+        folder = first.parent().map(PathBuf::from);
         let namer = Box::new(move |part: u32| {
             if part == 0 {
                 return first.clone();
@@ -419,6 +423,7 @@ fn plan(config: &Config, allow_gpu: bool, replay: bool) -> anyhow::Result<Plan> 
         mic_denoise: profile.audio.mic_noise_reduction,
         widget: (config.recording_widget.enabled && !replay)
             .then(|| config.recording_widget.clone()),
+        folder,
         notice: config.clone(),
     })
 }
@@ -518,12 +523,73 @@ fn start_session(config: &Config, replay: bool) -> anyhow::Result<Handle> {
     }
 }
 
+/// What the widget's warning sign watches during a recording.
+struct Watch {
+    folder: Option<PathBuf>,
+    disk_percent: u8,
+    lang: vixeeny_common::i18n::Lang,
+    gpu_lost: Arc<AtomicU64>,
+}
+
+/// How often the lost frames are counted, and the free space read.
+const LOST_EVERY: Duration = Duration::from_secs(1);
+const DISK_EVERY: Duration = Duration::from_secs(5);
+
+/// Tells the widget when the [`Health`] of the recording changes.
+struct Watcher {
+    watch: Watch,
+    health: Health,
+    shown: (Alert, String),
+    counted: std::time::Instant,
+    measured: Option<std::time::Instant>,
+}
+
+impl Watcher {
+    fn new(watch: Watch) -> Self {
+        Self {
+            watch,
+            health: Health::default(),
+            shown: (Alert::None, String::new()),
+            counted: std::time::Instant::now(),
+            measured: None,
+        }
+    }
+
+    fn check(&mut self, recorder: &Recorder, widget: &mut crate::widget::Widget) {
+        let now = std::time::Instant::now();
+        if now - self.counted < LOST_EVERY {
+            return;
+        }
+        self.counted = now;
+        self.health.lost_frames = recorder.stats().queue_dropped.load(Ordering::Relaxed)
+            + self.watch.gpu_lost.load(Ordering::Relaxed);
+        if self.watch.disk_percent > 0 && self.measured.is_none_or(|t| now - t >= DISK_EVERY) {
+            self.measured = Some(now);
+            self.health.disk = self
+                .watch
+                .folder
+                .as_deref()
+                .and_then(vixeeny_platform::machine::disk_space);
+        }
+        let alert = self.health.alert(self.watch.disk_percent, self.watch.lang);
+        if alert != self.shown {
+            if alert.0 > self.shown.0 {
+                tracing::info!("recording widget alert: {:?}", alert.0);
+            }
+            widget.alert(alert.0, &alert.1);
+            self.shown = alert;
+        }
+    }
+}
+
 /// Frames the GPU sink may queue for the recording thread.
 const GPU_BACKLOG: usize = 4;
 
 fn launch(plan: Plan) -> anyhow::Result<Handle> {
     // The recording's time zero: video and audio timestamps are relative to it.
     let origin = vixeeny_platform::monotonic_ns();
+    // Frames the GPU path could not hand over: lost, like those the encoder refuses.
+    let gpu_lost = Arc::new(AtomicU64::new(0));
     let (stream, gpu_frames) = {
         let target = vixeeny_capture::StreamTarget::Monitor(plan.monitor.clone());
         let (stream, gpu_frames) = match &plan.gpu {
@@ -534,6 +600,7 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
             Some(gpu) => {
                 let (tx, rx) = std::sync::mpsc::sync_channel::<(i64, HwFrame)>(GPU_BACKLOG);
                 let pipeline = Arc::clone(&gpu.pipeline);
+                let lost = Arc::clone(&gpu_lost);
                 let crop = plan.config.crop;
                 let sink: vixeeny_capture::TextureSink =
                     Box::new(move |texture, content, time_ns| {
@@ -545,8 +612,11 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
                             bottom: (top + height) as i32,
                         };
                         // A refused conversion (pool exhausted, GPU busy) is a dropped frame.
-                        if let Ok(frame) = pipeline.convert(texture, rect) {
-                            let _ = tx.try_send((time_ns, frame));
+                        let sent = pipeline
+                            .convert(texture, rect)
+                            .is_ok_and(|frame| tx.try_send((time_ns, frame)).is_ok());
+                        if !sent {
+                            lost.fetch_add(1, Ordering::Relaxed);
                         }
                     });
                 let capture = vixeeny_capture::GpuCapture {
@@ -587,6 +657,12 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
     let thread_state = Arc::clone(&state);
     // The GPU parts must outlive the recording (the device the textures live on).
     let save_as = plan.save_as;
+    let watch = plan.widget.as_ref().map(|settings| Watch {
+        folder: plan.folder.clone(),
+        disk_percent: settings.disk_alert_percent,
+        lang: crate::lang(&plan.notice.general.language),
+        gpu_lost,
+    });
     let notice = plan.notice;
     let keep_alive = KeepAlive(plan.gpu);
     let thread = std::thread::Builder::new()
@@ -597,7 +673,7 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
                 gpu_frames.as_ref(),
                 recorder,
                 rig,
-                widget,
+                widget.map(|w| (w, watch)),
                 save_as,
                 origin,
                 &rx,
@@ -680,7 +756,7 @@ fn record_loop(
     #[cfg(windows)] gpu_frames: Option<&std::sync::mpsc::Receiver<(i64, HwFrame)>>,
     recorder: Recorder,
     mut rig: Option<Rig>,
-    mut widget: Option<crate::widget::Widget>,
+    widget: Option<(crate::widget::Widget, Option<Watch>)>,
     mut save_as: Option<SaveNamer>,
     origin: i64,
     ctl: &Receiver<Ctl>,
@@ -688,6 +764,8 @@ fn record_loop(
     notice: &Config,
 ) -> anyhow::Result<vixeeny_encode::recorder::Summary> {
     let now = || vixeeny_platform::monotonic_ns() - origin;
+    let (mut widget, watch) = widget.unzip();
+    let mut watch = watch.flatten().map(Watcher::new);
     let mut paused = false;
     let mut failure = None;
     // The widget shows the recorded time: pauses do not count.
@@ -762,6 +840,9 @@ fn record_loop(
         }
         if let Some(rig) = &mut rig {
             rig.pump(now(), &recorder);
+        }
+        if let (Some(w), Some(watcher)) = (&mut widget, &mut watch) {
+            watcher.check(&recorder, w);
         }
         // The widget counts by itself; a resync every few seconds keeps it honest.
         if !paused && let Some(w) = &mut widget {

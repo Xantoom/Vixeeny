@@ -12,7 +12,7 @@ use anyhow::Context;
 use vixeeny_common::config::RecordingWidget;
 use vixeeny_platform::MonitorInfo;
 
-use crate::widget_math::{FromWidget, ToWidget, corner_geometry};
+use crate::widget_math::{Alert, FromWidget, ToWidget, corner_geometry};
 
 /// The recorder's end: owns the child process.
 pub struct Widget {
@@ -69,10 +69,18 @@ impl Widget {
     }
 
     pub fn state(&mut self, paused: bool, elapsed: Duration) {
-        let msg = ToWidget::State {
+        self.send(&ToWidget::State {
             paused,
             elapsed_ms: elapsed.as_millis() as u64,
-        };
+        });
+    }
+
+    /// What goes wrong, and the words of the warning sign's tooltip.
+    pub fn alert(&mut self, level: Alert, text: &str) {
+        self.send(&ToWidget::Alert(level, text.to_owned()));
+    }
+
+    fn send(&mut self, msg: &ToWidget) {
         let _ = self.stdin.write_all(msg.to_line().as_bytes());
         let _ = self.stdin.flush();
     }
@@ -138,6 +146,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
             ToWidget::State { paused, elapsed_ms } => {
                 bar.set_state(paused, Duration::from_millis(elapsed_ms));
             }
+            ToWidget::Alert(level, text) => bar.set_alert(level, &text),
             ToWidget::Quit => bar.close(),
         }
     })?;
