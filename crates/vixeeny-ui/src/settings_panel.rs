@@ -814,6 +814,39 @@ impl SettingsPanel {
         std::mem::forget(timer);
     }
 
+    /// Every second, `read` gets the settings the window shows and may return others (written
+    /// by another program): the window then shows those, without reporting a change.
+    pub fn watch_config(&self, read: impl Fn(&Config) -> Option<Config> + 'static) {
+        let (weak, state) = (self.window.as_weak(), self.state.clone());
+        let timer = slint::Timer::default();
+        timer.start(
+            slint::TimerMode::Repeated,
+            std::time::Duration::from_secs(1),
+            move || {
+                let Some(window) = weak.upgrade() else {
+                    return;
+                };
+                let shown = state.config.borrow().clone();
+                if let Some(config) = read(&shown).filter(|c| *c != shown) {
+                    let panel = SettingsPanel {
+                        window,
+                        state: state.clone(),
+                    };
+                    let language = shown.general.language != config.general.language;
+                    *state.config.borrow_mut() = config;
+                    if language {
+                        panel.relabel();
+                    } else {
+                        panel.rebuild_env();
+                    }
+                    panel.refresh();
+                }
+            },
+        );
+        // Runs as long as the window: the program ends with it.
+        std::mem::forget(timer);
+    }
+
     /// Called with the microphone to measure (`mic` or `mic:<id>`) while the audio page shows
     /// its level, and with `None` when it stops showing it. The host then measures it and
     /// reports through [`SettingsPanel::set_mic_level`].

@@ -44,6 +44,52 @@ fn load_config() -> Config {
         .unwrap_or_default()
 }
 
+/// The settings file as this window last read or wrote it.
+struct OnDisk {
+    config: Config,
+    /// Its time and size then, to notice another program writing it.
+    stamp: Option<(std::time::SystemTime, u64)>,
+}
+
+impl OnDisk {
+    fn stamp() -> Option<(std::time::SystemTime, u64)> {
+        let meta = std::fs::metadata(vixeeny_common::paths::config_file()?).ok()?;
+        Some((meta.modified().ok()?, meta.len()))
+    }
+
+    fn read() -> Self {
+        Self {
+            stamp: Self::stamp(),
+            config: load_config(),
+        }
+    }
+
+    /// Reads the file again if another program wrote it (one that cannot be read is ignored).
+    fn refresh(&mut self) {
+        let stamp = Self::stamp();
+        if stamp == self.stamp {
+            return;
+        }
+        self.stamp = stamp;
+        if let Some(config) =
+            vixeeny_common::paths::config_file().and_then(|path| Config::load(&path).ok())
+        {
+            self.config = config;
+        }
+    }
+
+    /// Saves `ours` over what the file holds now: the changes made elsewhere since it was read
+    /// stay, unless `ours` changed the same settings.
+    fn write(&mut self, ours: &Config) {
+        let base = self.config.clone();
+        self.refresh();
+        let merged = vixeeny_common::config::merge(&base, ours, &self.config);
+        save(&merged);
+        self.config = merged;
+        self.stamp = Self::stamp();
+    }
+}
+
 /// Writes the settings, then tells the daemon to reload them (off the UI thread).
 pub fn save(config: &Config) {
     let Some(path) = vixeeny_common::paths::config_file() else {
@@ -314,15 +360,30 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     let saving = vixeeny_ui::slint::Timer::default();
     let unsaved = Rc::new(RefCell::new(None::<Config>));
     let pending = Rc::clone(&unsaved);
+    // Others write the file too (the widget keeps the place it was dragged to): the window
+    // shows what they wrote and keeps it when it saves.
+    let file = Rc::new(RefCell::new(OnDisk::read()));
+    panel.watch_config({
+        let (file, pending) = (Rc::clone(&file), Rc::clone(&unsaved));
+        move |shown| {
+            if pending.borrow().is_some() {
+                return None; // the save to come merges them
+            }
+            let mut file = file.borrow_mut();
+            file.refresh();
+            (file.config != *shown).then(|| file.config.clone())
+        }
+    });
+    let writer = Rc::clone(&file);
     panel.on_change(move |config| {
         *pending.borrow_mut() = Some(config.clone());
-        let pending = Rc::clone(&pending);
+        let (pending, writer) = (Rc::clone(&pending), Rc::clone(&writer));
         saving.start(
             vixeeny_ui::slint::TimerMode::SingleShot,
             SAVE_DELAY,
             move || {
                 if let Some(config) = pending.borrow_mut().take() {
-                    save(&config);
+                    writer.borrow_mut().write(&config);
                 }
             },
         );
@@ -444,7 +505,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     });
     let result = panel.window().run().map_err(|e| anyhow::anyhow!("{e}"));
     if let Some(config) = unsaved.borrow_mut().take() {
-        save(&config);
+        file.borrow_mut().write(&config);
         // `save` tells the daemon from a thread: give it the moment it needs.
         std::thread::sleep(std::time::Duration::from_millis(300));
     }

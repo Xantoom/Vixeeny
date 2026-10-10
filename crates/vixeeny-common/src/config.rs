@@ -684,9 +684,62 @@ impl Config {
     }
 }
 
+/// Three-way merge: what `ours` changed from `base`, applied over `theirs` (the file as another
+/// program left it since `base` was read). A setting both changed keeps `ours`.
+pub fn merge(base: &Config, ours: &Config, theirs: &Config) -> Config {
+    fn value(c: &Config) -> Option<toml::Value> {
+        toml::Value::try_from(c).ok()
+    }
+    fn walk(base: &toml::Value, ours: &toml::Value, theirs: &toml::Value) -> toml::Value {
+        match (base, ours, theirs) {
+            (toml::Value::Table(b), toml::Value::Table(o), toml::Value::Table(t)) => {
+                let mut out = t.clone();
+                for (key, mine) in o {
+                    let merged = match (b.get(key), t.get(key)) {
+                        (Some(b), Some(t)) => walk(b, mine, t),
+                        // Ours alone has it, or the base did not: what we set wins.
+                        _ => mine.clone(),
+                    };
+                    out.insert(key.clone(), merged);
+                }
+                toml::Value::Table(out)
+            }
+            _ if ours != base => ours.clone(),
+            _ => theirs.clone(),
+        }
+    }
+    let (Some(b), Some(o), Some(t)) = (value(base), value(ours), value(theirs)) else {
+        return ours.clone();
+    };
+    walk(&b, &o, &t).try_into().unwrap_or_else(|_| ours.clone())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_merge_keeps_both_sides_changes() {
+        let base = Config::default();
+        // The settings window changed the theme; the widget, moved, changed its place.
+        let mut ours = base.clone();
+        ours.general.theme = "dark".into();
+        let mut theirs = base.clone();
+        theirs.recording_widget.corner = "custom".into();
+        theirs.recording_widget.custom = (0.3, 0.7);
+        let merged = merge(&base, &ours, &theirs);
+        assert_eq!(merged.general.theme, "dark");
+        assert_eq!(merged.recording_widget.corner, "custom");
+        assert_eq!(merged.recording_widget.custom, (0.3, 0.7));
+        // Both changed the same setting: ours wins.
+        ours.recording_widget.corner = "bottom_right".into();
+        assert_eq!(
+            merge(&base, &ours, &theirs).recording_widget.corner,
+            "bottom_right"
+        );
+        // Nothing changed on our side: theirs as it is.
+        assert_eq!(merge(&base, &base, &theirs), theirs);
+    }
 
     #[test]
     fn default_roundtrips() {
