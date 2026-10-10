@@ -540,6 +540,46 @@ pub fn style_window(id: WindowId, dark: bool, caption: [u8; 3]) -> Result<()> {
     result.map_err(|e| PlatformError::Os(e.to_string()))
 }
 
+/// Puts Mica, the backdrop of Windows 11 (22H2 and later), behind the whole window: what the
+/// window leaves transparent shows it. False where Windows has none (the window stays as it is).
+pub fn mica(id: WindowId) -> bool {
+    use windows::Win32::Graphics::Dwm::{
+        DWM_BB_BLURREGION, DWM_BB_ENABLE, DWM_BLURBEHIND, DwmEnableBlurBehindWindow,
+    };
+    use windows::Win32::Graphics::Gdi::{CreateRectRgn, DeleteObject};
+    // DWMWA_SYSTEMBACKDROP_TYPE = 38, DWMSBT_MAINWINDOW = 2.
+    let hwnd = hwnd_of(id);
+    let kind = 2u32;
+    // SAFETY: `kind` is a live u32 of the size the attribute wants.
+    let backdrop = unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWINDOWATTRIBUTE(38),
+            (&raw const kind).cast(),
+            std::mem::size_of::<u32>() as u32,
+        )
+    };
+    if backdrop.is_err() {
+        return false;
+    }
+    // DWM then follows the alpha of the window's pixels. (Not by extending the frame over the
+    // window: Windows would draw its title band and buttons over the window's own.) The empty
+    // region blurs nothing.
+    // SAFETY: plain GDI and DWM calls on a live window; the region is deleted after use.
+    unsafe {
+        let none = CreateRectRgn(0, 0, -1, -1);
+        let behind = DWM_BLURBEHIND {
+            dwFlags: DWM_BB_ENABLE | DWM_BB_BLURREGION,
+            fEnable: TRUE,
+            hRgnBlur: none,
+            fTransitionOnMaximized: false.into(),
+        };
+        let done = DwmEnableBlurBehindWindow(hwnd, &raw const behind);
+        let _ = DeleteObject(none.into());
+        done.is_ok()
+    }
+}
+
 /// The user's locale tag (`fr-FR`), for the `auto` language.
 pub fn user_locale() -> Option<String> {
     use windows::Win32::Globalization::GetUserDefaultLocaleName;

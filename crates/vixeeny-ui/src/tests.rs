@@ -644,3 +644,23 @@ fn info_tooltip_stays_while_the_pointer_moves_on_its_dot() {
     }
     window.dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: 1.0 });
 }
+
+// Behind Mica the window's background lets it through a little (black here, so darker) and the
+// cards only veil it.
+#[test]
+fn with_mica_the_window_lets_it_through() {
+    use vixeeny_settings::Section;
+    let (panel, _) = settings_panel();
+    panel.select_section(Section::Video);
+    panel.window().global::<Theme>().set_mica(true);
+    let shot = settings_render(&panel, "9-settings-mica");
+    let at = |x: usize, y: usize| shot.as_slice()[y * 1040 + x];
+    let nav = at(100, 600);
+    assert!(
+        nav.r > 0 && nav.r < 0x14,
+        "the background, see-through: {nav:?}"
+    );
+    let card = at(600, 140);
+    assert!(card.r > nav.r, "a veil over it: {card:?}");
+    panel.window().global::<Theme>().set_mica(false);
+}
