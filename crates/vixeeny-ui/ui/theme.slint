@@ -11,14 +11,12 @@ export global Theme {
     in property <float> motion: 1.0;
     // The icon of the program, for title bars, task bars and the like (set by the host).
     in property <image> app-icon;
-    // Mica (Windows 11) is behind the window: the window is see-through, the cards veil it.
-    in property <bool> mica: false;
 
     // ---- surfaces
-    out property <color> bg: mica ? transparent : (dark ? #141416 : #f6f6f7);
-    out property <color> card: mica ? (dark ? #ffffff0d : #ffffffb3) : (dark ? #1c1c1f : #ffffff);
-    out property <color> card-hover: mica ? (dark ? #ffffff14 : #ffffffd9) : (dark ? #222226 : #fafafb);
-    out property <color> card-pressed: mica ? (dark ? #ffffff08 : #ffffff80) : (dark ? #19191c : #f3f3f4);
+    out property <color> bg: dark ? #141416 : #f6f6f7;
+    out property <color> card: dark ? #1c1c1f : #ffffff;
+    out property <color> card-hover: dark ? #222226 : #fafafb;
+    out property <color> card-pressed: dark ? #19191c : #f3f3f4;
     out property <color> flyout: dark ? #232327 : #ffffff;
     out property <color> stroke: dark ? #ffffff0f : #0000000f;
     out property <color> stroke-strong: dark ? #ffffff24 : #00000024;

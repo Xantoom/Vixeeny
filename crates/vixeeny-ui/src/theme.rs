@@ -103,10 +103,10 @@ pub fn when_native<C: ComponentHandle + 'static>(window: &C, f: impl Fn(u64) + '
 }
 
 /// Sets the `Theme` of `window`.
-pub fn apply<C>(window: &C, look: Look)
+pub fn apply<'a, C>(window: &'a C, look: Look)
 where
     C: ComponentHandle + 'static,
-    for<'a> Theme<'a>: slint::Global<'a, C>,
+    Theme<'a>: slint::Global<'a, C>,
 {
     let theme = window.global::<Theme>();
     theme.set_dark(look.dark);
@@ -121,22 +121,15 @@ where
     #[cfg(feature = "desktop")]
     if let Some(dresser) = DRESSER.get() {
         let dresser = *dresser;
-        let weak = window.as_weak();
-        when_native(window, move |handle| {
-            let mica = dresser(handle, look);
-            if let Some(window) = weak.upgrade() {
-                window.global::<Theme>().set_mica(mica);
-            }
-        });
+        when_native(window, move |handle| dresser(handle, look));
     }
 }
 
 /// What the host does to a native window once it exists (the title bar of Windows 11 follows the
-/// theme), true when it put Mica behind it. Set once at start-up; every window that gets a
-/// [`Look`] is dressed with it.
-static DRESSER: std::sync::OnceLock<fn(u64, Look) -> bool> = std::sync::OnceLock::new();
+/// theme). Set once at start-up; every window that gets a [`Look`] is dressed with it.
+static DRESSER: std::sync::OnceLock<fn(u64, Look)> = std::sync::OnceLock::new();
 
-pub fn set_dresser(f: fn(u64, Look) -> bool) {
+pub fn set_dresser(f: fn(u64, Look)) {
     let _ = DRESSER.set(f);
 }
 

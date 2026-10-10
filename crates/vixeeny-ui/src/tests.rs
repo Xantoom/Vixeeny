@@ -644,23 +644,3 @@ fn info_tooltip_stays_while_the_pointer_moves_on_its_dot() {
     }
     window.dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: 1.0 });
 }
-
-// Behind Mica the window draws no background of its own (it shows through, black here) and the
-// cards only veil it.
-#[test]
-fn with_mica_the_window_leaves_its_background_to_it() {
-    use vixeeny_settings::Section;
-    let (panel, _) = settings_panel();
-    panel.select_section(Section::Video);
-    panel.window().global::<Theme>().set_mica(true);
-    let shot = settings_render(&panel, "9-settings-mica");
-    let at = |x: usize, y: usize| shot.as_slice()[y * 1040 + x];
-    let nav = at(100, 600);
-    assert_eq!((nav.r, nav.g, nav.b), (0, 0, 0));
-    let card = at(600, 140);
-    assert!(
-        card.r > 0 && card.r < 0x1c,
-        "a veil, not the opaque card: {card:?}"
-    );
-    panel.window().global::<Theme>().set_mica(false);
-}
