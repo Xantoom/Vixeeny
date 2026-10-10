@@ -125,10 +125,14 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
 
     /// Applies settings that live outside the process (OS autostart).
     pub fn apply_config(&mut self) {
+        self.apply_autostart();
+        self.apply_hotkeys();
+    }
+
+    fn apply_autostart(&self) {
         if let Err(e) = autostart::apply(self.config.general.autostart) {
             tracing::warn!("cannot update autostart: {e}");
         }
-        self.apply_hotkeys();
     }
 
     /// Starts watching for full-screen games if the replay is on (once, when the daemon
@@ -295,18 +299,28 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
             return;
         };
         match Config::load(path) {
+            // Nothing to redo: the settings window asks after every change it saves.
+            Ok(config) if config == self.config => {}
             Ok(config) => {
+                let old = std::mem::replace(&mut self.config, config);
                 // The app follows the replay being turned on or off (and reads the settings).
-                let replay = self.config.replay.enabled || config.replay.enabled;
-                self.config = config;
-                if replay {
+                if old.replay.enabled || self.config.replay.enabled {
                     self.tx.send(Event::Action(ActionId::ReplayWatch));
                 }
-                self.lang = Lang::resolve(&self.config.general.language, self.os_locale.as_deref());
-                self.tray.set_language(self.lang);
-                self.tray
-                    .set_recording(self.core.recording_state(), self.lang);
-                self.apply_config();
+                if old.general.language != self.config.general.language {
+                    self.lang =
+                        Lang::resolve(&self.config.general.language, self.os_locale.as_deref());
+                    self.tray.set_language(self.lang);
+                    self.tray
+                        .set_recording(self.core.recording_state(), self.lang);
+                }
+                if old.general.autostart != self.config.general.autostart {
+                    self.apply_autostart();
+                }
+                // Registering them again would also repeat the warning about a taken shortcut.
+                if old.hotkeys != self.config.hotkeys {
+                    self.apply_hotkeys();
+                }
                 tracing::info!("config reloaded");
             }
             // Keep running with the previous settings.
@@ -593,6 +607,61 @@ mod tests {
         assert!(applied.contains(&(ActionId::RecordToggle, "Ctrl+Shift+R".into())));
         assert!(!applied.iter().any(|(a, _)| *a == ActionId::OpenSettings));
         assert!(log.lock().unwrap().iter().any(|l| l.starts_with("notify")));
+    }
+
+    #[test]
+    fn a_reload_redoes_only_what_changed() {
+        let (tx, rx) = channel();
+        let events = EventTx::new(tx, Arc::new(NoWake));
+        let tray = FakeTray::default();
+        let log = tray.log.clone();
+        let hk = FakeHotkeys {
+            refuse: true,
+            ..Default::default()
+        };
+        let applied = hk.applied.clone();
+        let dir = std::env::temp_dir().join(format!("vixeeny-reload-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        let mut config = Config::default();
+        config.save(&path).unwrap();
+        let mut rt = Runtime::new(
+            config.clone(),
+            Some(path.clone()),
+            None,
+            tray,
+            Box::new(hk),
+            FakeSpawner {
+                fail: false,
+                spawned: Arc::default(),
+            },
+            AppLink::default(),
+            events,
+            rx,
+        );
+        let notified = || {
+            log.lock()
+                .unwrap()
+                .iter()
+                .filter(|l| l.starts_with("notify"))
+                .count()
+        };
+
+        // A slider moved: the shortcuts stay registered, the taken one is not reported again.
+        config.image.jpeg.quality = 42;
+        config.save(&path).unwrap();
+        rt.reload_config();
+        assert!(applied.lock().unwrap().is_empty());
+        assert_eq!(notified(), 0);
+        assert_eq!(rt.config, config);
+
+        // A shortcut changed: they are registered again.
+        config.hotkeys.open_settings = vec!["Ctrl+Alt+O".into()];
+        config.save(&path).unwrap();
+        rt.reload_config();
+        assert!(!applied.lock().unwrap().is_empty());
+        assert_eq!(notified(), 1);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

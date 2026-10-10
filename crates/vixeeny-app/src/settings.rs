@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The settings window (plan 5.13), a process of its own (`vixeeny-app --settings`)
-//! so the recording hotkeys keep working while it is open. Every change is saved at once and the
-//! daemon is asked to reload.
+//! so the recording hotkeys keep working while it is open. Changes are saved as soon as they stop
+//! for a moment, and the daemon is asked to reload.
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use anyhow::Context;
@@ -20,6 +22,8 @@ use vixeeny_updater::state::State as UpdateState;
 const REPO: &str = "https://github.com/Xantoom/Vixeeny";
 /// Marks the settings window so that a second launch can bring it forward.
 const SETTINGS_TAG: &str = "Vixeeny.Settings";
+/// Quiet time after the last change before it is saved.
+const SAVE_DELAY: std::time::Duration = std::time::Duration::from_millis(300);
 
 /// Starts the settings window in its own process (on the updates page with `updates`).
 pub fn spawn(updates: bool) -> anyhow::Result<()> {
@@ -305,8 +309,23 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     });
 
     let weak = panel.window().as_weak();
+    // Saved once the changes stop for a moment: a slider sends one per step, and each save
+    // makes the daemon reload. Closing the window saves what is left.
+    let saving = vixeeny_ui::slint::Timer::default();
+    let unsaved = Rc::new(RefCell::new(None::<Config>));
+    let pending = Rc::clone(&unsaved);
     panel.on_change(move |config| {
-        save(config);
+        *pending.borrow_mut() = Some(config.clone());
+        let pending = Rc::clone(&pending);
+        saving.start(
+            vixeeny_ui::slint::TimerMode::SingleShot,
+            SAVE_DELAY,
+            move || {
+                if let Some(config) = pending.borrow_mut().take() {
+                    save(&config);
+                }
+            },
+        );
         let look = look_of(config);
         if let Some(w) = weak.upgrade() {
             vixeeny_ui::theme::apply(&w, look);
@@ -429,7 +448,13 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
             tracing::warn!("{e}");
         }
     });
-    panel.window().run().map_err(|e| anyhow::anyhow!("{e}"))
+    let result = panel.window().run().map_err(|e| anyhow::anyhow!("{e}"));
+    if let Some(config) = unsaved.borrow_mut().take() {
+        save(&config);
+        // `save` tells the daemon from a thread: give it the moment it needs.
+        std::thread::sleep(std::time::Duration::from_millis(300));
+    }
+    result
 }
 
 fn now() -> u64 {
