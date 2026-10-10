@@ -540,6 +540,37 @@ pub fn style_window(id: WindowId, dark: bool, caption: [u8; 3]) -> Result<()> {
     result.map_err(|e| PlatformError::Os(e.to_string()))
 }
 
+/// Puts Mica, the backdrop of Windows 11 (22H2 and later), behind the whole window: what the
+/// window leaves transparent shows it. False where Windows has none (the window stays as it is).
+pub fn mica(id: WindowId) -> bool {
+    use windows::Win32::Graphics::Dwm::DwmExtendFrameIntoClientArea;
+    use windows::Win32::UI::Controls::MARGINS;
+    // DWMWA_SYSTEMBACKDROP_TYPE = 38, DWMSBT_MAINWINDOW = 2.
+    let hwnd = hwnd_of(id);
+    let kind = 2u32;
+    // SAFETY: `kind` is a live u32 of the size the attribute wants.
+    let backdrop = unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWINDOWATTRIBUTE(38),
+            (&raw const kind).cast(),
+            std::mem::size_of::<u32>() as u32,
+        )
+    };
+    if backdrop.is_err() {
+        return false;
+    }
+    // The whole window is "frame": its transparent pixels show the backdrop.
+    let all = MARGINS {
+        cxLeftWidth: -1,
+        cxRightWidth: -1,
+        cyTopHeight: -1,
+        cyBottomHeight: -1,
+    };
+    // SAFETY: `all` lives through the call.
+    unsafe { DwmExtendFrameIntoClientArea(hwnd, &raw const all) }.is_ok()
+}
+
 /// The user's locale tag (`fr-FR`), for the `auto` language.
 pub fn user_locale() -> Option<String> {
     use windows::Win32::Globalization::GetUserDefaultLocaleName;

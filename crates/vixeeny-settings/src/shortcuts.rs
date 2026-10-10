@@ -148,10 +148,7 @@ mod tests {
             .iter()
             .find(|(a, _)| *a == ActionId::ReplaySave)
             .unwrap();
-        assert_eq!(
-            save.1,
-            ["Ctrl+Shift+S".to_owned(), String::new()]
-        );
+        assert_eq!(save.1, ["Ctrl+Shift+S".to_owned(), String::new()]);
     }
 
     #[test]

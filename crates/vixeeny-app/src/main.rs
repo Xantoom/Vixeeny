@@ -481,11 +481,9 @@ fn init_look() {
         .unwrap_or_default();
     vixeeny_ui::theme::set_default(settings::look_of(&config));
     vixeeny_ui::theme::set_dresser(|handle, look| {
-        let _ = vixeeny_platform::style_window(
-            vixeeny_platform::WindowId(handle),
-            look.dark,
-            look.caption(),
-        );
+        let id = vixeeny_platform::WindowId(handle);
+        let _ = vixeeny_platform::style_window(id, look.dark, look.caption());
+        vixeeny_platform::mica(id)
     });
 }
 

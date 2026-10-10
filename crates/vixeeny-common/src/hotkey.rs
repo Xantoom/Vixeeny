@@ -332,9 +332,7 @@ mod tests {
     #[test]
     fn at_most_two_per_action() {
         let mut k = Hotkeys::default();
-        k.open_settings = ["Ctrl+1", "Ctrl+2", "Ctrl+3"]
-            .map(String::from)
-            .into();
+        k.open_settings = ["Ctrl+1", "Ctrl+2", "Ctrl+3"].map(String::from).into();
         let r = resolve(&k);
         let count = r
             .bindings

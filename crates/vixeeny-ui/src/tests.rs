@@ -598,8 +598,8 @@ fn the_wizard_walks_its_steps_and_relabels_in_the_chosen_language() {
 // popup took the pointer from the dot and closed again at the next move.
 #[test]
 fn info_tooltip_stays_while_the_pointer_moves_on_its_dot() {
-    use slint::platform::WindowEvent;
     use slint::LogicalPosition;
+    use slint::platform::WindowEvent;
     use vixeeny_settings::Section;
     let (panel, _) = settings_panel();
     panel.select_section(Section::Overlay);
@@ -609,20 +609,55 @@ fn info_tooltip_stays_while_the_pointer_moves_on_its_dot() {
     let base = settings_render_at(&panel, "tip-base", size);
     let changed = |name: &str| {
         let shot = settings_render_at(&panel, name, size);
-        shot.as_slice().iter().zip(base.as_slice()).filter(|(a, b)| a != b).count()
+        shot.as_slice()
+            .iter()
+            .zip(base.as_slice())
+            .filter(|(a, b)| a != b)
+            .count()
     };
     let move_to = |x: f32, y: f32| {
-        window.dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(x, y) });
+        window.dispatch_event(WindowEvent::PointerMoved {
+            position: LogicalPosition::new(x, y),
+        });
     };
     // The glyph, the ring, inside the dot off the glyph, and the margin around it.
-    for (x, y) in [(354.0, 173.0), (348.5, 173.0), (354.0, 168.0), (350.0, 169.0), (359.5, 177.5)] {
+    for (x, y) in [
+        (354.0, 173.0),
+        (348.5, 173.0),
+        (354.0, 168.0),
+        (350.0, 169.0),
+        (359.5, 177.5),
+    ] {
         for dx in [0.0, 0.5, 1.0, 1.5] {
             move_to(x + dx, y);
-            assert!(changed("tip-on") > 20_000, "no tooltip at ({}, {y})", x + dx);
+            assert!(
+                changed("tip-on") > 20_000,
+                "no tooltip at ({}, {y})",
+                x + dx
+            );
         }
         move_to(600.0, 600.0);
-        assert!(changed("tip-off") < 2_000, "the tooltip stays away from the dot");
+        assert!(
+            changed("tip-off") < 2_000,
+            "the tooltip stays away from the dot"
+        );
     }
     window.dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: 1.0 });
 }
 
+// Behind Mica the window draws no background of its own (it shows through, black here) and the
+// cards only veil it.
+#[test]
+fn with_mica_the_window_leaves_its_background_to_it() {
+    use vixeeny_settings::Section;
+    let (panel, _) = settings_panel();
+    panel.select_section(Section::Video);
+    panel.window().global::<Theme>().set_mica(true);
+    let shot = settings_render(&panel, "9-settings-mica");
+    let at = |x: usize, y: usize| shot.as_slice()[y * 1040 + x];
+    let nav = at(100, 600);
+    assert_eq!((nav.r, nav.g, nav.b), (0, 0, 0));
+    let card = at(600, 140);
+    assert!(card.r > 0 && card.r < 0x1c, "a veil, not the opaque card: {card:?}");
+    panel.window().global::<Theme>().set_mica(false);
+}
