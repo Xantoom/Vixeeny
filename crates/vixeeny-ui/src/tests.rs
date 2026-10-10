@@ -593,3 +593,35 @@ fn the_wizard_walks_its_steps_and_relabels_in_the_chosen_language() {
     assert!(panel.is_finished());
     assert!(!panel.choices().general.autostart);
 }
+
+// The tooltip of an "i" shows anywhere on its dot, and stays while the pointer moves on it: a
+// popup took the pointer from the dot and closed again at the next move.
+#[test]
+fn info_tooltip_stays_while_the_pointer_moves_on_its_dot() {
+    use slint::platform::WindowEvent;
+    use slint::LogicalPosition;
+    use vixeeny_settings::Section;
+    let (panel, _) = settings_panel();
+    panel.select_section(Section::Overlay);
+    let window = WINDOW.with(Rc::clone);
+    window.dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: 2.0 });
+    let size = (2080, 1440);
+    let base = settings_render_at(&panel, "tip-base", size);
+    let changed = |name: &str| {
+        let shot = settings_render_at(&panel, name, size);
+        shot.as_slice().iter().zip(base.as_slice()).filter(|(a, b)| a != b).count()
+    };
+    let move_to = |x: f32, y: f32| {
+        window.dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(x, y) });
+    };
+    // The glyph, the ring, inside the dot off the glyph, and the margin around it.
+    for (x, y) in [(354.0, 173.0), (348.5, 173.0), (354.0, 168.0), (350.0, 169.0), (359.5, 177.5)] {
+        for dx in [0.0, 0.5, 1.0, 1.5] {
+            move_to(x + dx, y);
+            assert!(changed("tip-on") > 20_000, "no tooltip at ({}, {y})", x + dx);
+        }
+        move_to(600.0, 600.0);
+        assert!(changed("tip-off") < 2_000, "the tooltip stays away from the dot");
+    }
+    window.dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: 1.0 });
+}

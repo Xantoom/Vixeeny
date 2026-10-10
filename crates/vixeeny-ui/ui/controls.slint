@@ -524,6 +524,45 @@ export component Group inherits VerticalLayout {
 // right; narrower than `stack-under`, the control goes under the text. The text wraps, and the
 // height follows it.
 // A small "i" (or, with `alert`, a warning sign): its text shows while the pointer rests on it.
+// The tooltip under the pointer. The window draws it above everything (`TipLayer`): a popup
+// would take the pointer from what it belongs to, and close again at once.
+export global Tip {
+    // Empty while none shows.
+    in-out property <string> text;
+    // What it belongs to, in window coordinates: it goes under it (above near the bottom).
+    in-out property <length> left;
+    in-out property <length> top;
+    in-out property <length> bottom;
+}
+
+// The tooltip of the window, its last child.
+export component TipLayer inherits Rectangle {
+    if Tip.text != "" : Rectangle {
+        property <length> gap: 8px;
+        property <bool> up: Tip.bottom + self.gap + self.height > root.height - 8px;
+        x: clamp(Tip.left, 8px, max(8px, root.width - self.width - 8px));
+        y: self.up ? Tip.top - self.gap - self.height : Tip.bottom + self.gap;
+        width: min(340px, body.preferred-width + 28px);
+        height: body.preferred-height + 24px;
+        background: Theme.flyout;
+        border-radius: Theme.radius-flyout;
+        border-width: 1px;
+        border-color: Theme.stroke-strong;
+        drop-shadow-blur: 16px;
+        drop-shadow-color: #00000040;
+        drop-shadow-offset-y: 4px;
+        body := Text {
+            x: 14px;
+            y: 12px;
+            width: parent.width - 28px;
+            text: Tip.text;
+            color: Theme.text;
+            font-size: 13px;
+            wrap: word-wrap;
+        }
+    }
+}
+
 export component InfoTip inherits Rectangle {
     in property <string> text;
     in property <bool> alert: false;
@@ -548,6 +587,8 @@ export component InfoTip inherits Rectangle {
         horizontal-alignment: center;
         vertical-alignment: center;
     }
+    // Where its tooltip goes from, in the window.
+    property <length> left: root.absolute-position.x - 12px;
     area := TouchArea {
         // A little larger than the dot, easier to rest on.
         x: -4px;
@@ -556,34 +597,12 @@ export component InfoTip inherits Rectangle {
         height: parent.height + 8px;
         changed has-hover => {
             if self.has-hover {
-                tip.show();
-            } else {
-                tip.close();
-            }
-        }
-    }
-    tip := PopupWindow {
-        close-policy: no-auto-close;
-        x: -12px;
-        y: root.height + 8px;
-        width: 340px;
-        height: body.preferred-height + 24px;
-        Rectangle {
-            background: Theme.flyout;
-            border-radius: Theme.radius-flyout;
-            border-width: 1px;
-            border-color: Theme.stroke-strong;
-            drop-shadow-blur: 16px;
-            drop-shadow-color: #00000040;
-            drop-shadow-offset-y: 4px;
-            body := Text {
-                x: 14px;
-                y: 12px;
-                width: parent.width - 28px;
-                text: root.text;
-                color: Theme.text;
-                font-size: 13px;
-                wrap: word-wrap;
+                Tip.text = root.text;
+                Tip.left = root.left;
+                Tip.top = root.absolute-position.y;
+                Tip.bottom = root.absolute-position.y + root.height;
+            } else if Tip.left == root.left && Tip.top == root.absolute-position.y {
+                Tip.text = "";
             }
         }
     }
