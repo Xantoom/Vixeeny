@@ -151,17 +151,35 @@ pub(crate) struct RawFrame {
     pub data: Vec<u8>,
 }
 
-/// IEEE 754 half → single precision.
+/// IEEE 754 half → single precision (exact: every half is a float).
 pub(crate) fn f16_to_f32(h: u16) -> f32 {
-    let sign = if h & 0x8000 != 0 { -1.0 } else { 1.0 };
-    let exp = i32::from((h >> 10) & 0x1F);
-    let frac = f32::from(h & 0x3FF);
+    let sign = u32::from(h & 0x8000) << 16;
+    let exp = u32::from((h >> 10) & 0x1F);
+    let mant = u32::from(h & 0x3FF);
     match exp {
-        0 => sign * frac * 2f32.powi(-24),
-        0x1F if frac == 0.0 => sign * f32::INFINITY,
-        0x1F => f32::NAN,
-        _ => sign * (1.0 + frac / 1024.0) * 2f32.powi(exp - 15),
+        // Subnormal: mant × 2⁻²⁴.
+        0 => {
+            let v = mant as f32 * (1.0 / 16_777_216.0);
+            if sign == 0 { v } else { -v }
+        }
+        0x1F => f32::from_bits(sign | 0x7F80_0000 | (mant << 13)),
+        _ => f32::from_bits(sign | ((exp + 112) << 23) | (mant << 13)),
     }
+}
+
+/// Rows of RGBA half floats (`stride` bytes apart) → tightly packed RGBA floats, over every core.
+pub(crate) fn halves_to_f32(data: &[u8], stride: usize, width: usize, height: usize) -> Vec<f32> {
+    use rayon::prelude::*;
+
+    let mut out = vec![0.0; width * height * 4];
+    out.par_chunks_mut(width * 4)
+        .zip(data.par_chunks(stride))
+        .for_each(|(out, row)| {
+            for (o, h) in out.iter_mut().zip(row[..width * 8].as_chunks::<2>().0) {
+                *o = f16_to_f32(u16::from_le_bytes(*h));
+            }
+        });
+    out
 }
 
 type FrameHandler = TypedEventHandler<Direct3D11CaptureFramePool, windows::core::IInspectable>;
@@ -241,17 +259,12 @@ impl StillBackend for WgcBackend {
     ) -> Result<HdrFrame, CaptureError> {
         let item = monitor_item(monitor)?;
         let raw = self.grab_item(&item, cursor, DirectXPixelFormat::R16G16B16A16Float)?;
-        let row_bytes = raw.width as usize * 8;
-        let mut rgba = Vec::with_capacity(raw.width as usize * raw.height as usize * 4);
-        for y in 0..raw.height as usize {
-            let row = &raw.data[y * raw.stride..y * raw.stride + row_bytes];
-            rgba.extend(
-                row.as_chunks::<2>()
-                    .0
-                    .iter()
-                    .map(|h| f16_to_f32(u16::from_le_bytes(*h))),
-            );
-        }
+        let rgba = halves_to_f32(
+            &raw.data,
+            raw.stride,
+            raw.width as usize,
+            raw.height as usize,
+        );
         Ok(HdrFrame {
             width: raw.width,
             height: raw.height,
@@ -285,5 +298,17 @@ mod tests {
         assert!(f16_to_f32(0x7C00).is_infinite());
         assert!(f16_to_f32(0x7E00).is_nan());
         assert!(f16_to_f32(0x0001) > 0.0); // smallest subnormal
+        assert_eq!(f16_to_f32(0x8001), -(2f32.powi(-24)));
+    }
+
+    #[test]
+    fn padded_rows_of_halves() {
+        // Two pixels per row, a 4-byte row padding.
+        let one = 0x3C00u16.to_le_bytes();
+        let two = 0x4000u16.to_le_bytes();
+        let row = |h: [u8; 2]| [[h; 8].concat(), vec![0xFF; 4]].concat();
+        let data = [row(one), row(two)].concat();
+        let out = super::halves_to_f32(&data, 20, 2, 2);
+        assert_eq!(out, [[1.0; 8], [2.0; 8]].concat());
     }
 }

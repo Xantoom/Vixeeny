@@ -77,14 +77,25 @@ pub fn tonemap_pixel(rgb: [f32; 3], params: &ToneMapParams) -> [f32; 3] {
 }
 
 /// Converts a whole frame: `rgba` has 4 floats per pixel (alpha ignored), the result is
-/// 8-bit BGRA with opaque alpha.
+/// 8-bit BGRA with opaque alpha. Spread over every core: a 4K frame takes 200 ms on one.
 pub fn tonemap_frame(rgba: &[f32], params: &ToneMapParams) -> Vec<u8> {
-    let mut out = Vec::with_capacity(rgba.len());
-    for px in rgba.as_chunks::<4>().0 {
-        let [r, g, b] = tonemap_pixel([px[0], px[1], px[2]], params);
-        let q = |v: f32| (v * 255.0 + 0.5) as u8;
-        out.extend_from_slice(&[q(b), q(g), q(r), 255]);
-    }
+    use rayon::prelude::*;
+
+    let mut out = vec![0; rgba.len()];
+    out.par_chunks_mut(4 * 4096)
+        .zip(rgba.par_chunks(4 * 4096))
+        .for_each(|(out, rgba)| {
+            for (o, px) in out
+                .as_chunks_mut::<4>()
+                .0
+                .iter_mut()
+                .zip(rgba.as_chunks::<4>().0)
+            {
+                let [r, g, b] = tonemap_pixel([px[0], px[1], px[2]], params);
+                let q = |v: f32| (v * 255.0 + 0.5) as u8;
+                *o = [q(b), q(g), q(r), 255];
+            }
+        });
     out
 }
 

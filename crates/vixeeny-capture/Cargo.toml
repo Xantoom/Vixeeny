@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+rayon.workspace = true
 thiserror.workspace = true
 vixeeny-common = { path = "../vixeeny-common" }
 vixeeny-platform = { path = "../vixeeny-platform" }

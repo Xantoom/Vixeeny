@@ -46,8 +46,10 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{BOOL, Interface, w};
 
 use crate::wgc::{
-    FRAME_TIMEOUT, d3d_device, f16_to_f32, frame_handler, monitor_item, os, winrt_device,
+    FRAME_TIMEOUT, d3d_device, frame_handler, halves_to_f32, monitor_item, os, winrt_device,
 };
+use rayon::prelude::*;
+
 use crate::{BYTES_PER_PIXEL, CaptureError, CpuFrame};
 
 /// The frozen screens go by themselves after this, whatever happens to the app.
@@ -462,17 +464,7 @@ impl FrozenPixels {
     /// scRGB floats, 4 per pixel (an HDR screen).
     pub fn to_scrgb(&self) -> Vec<f32> {
         let (w, h) = (self.screen.width as usize, self.screen.height as usize);
-        let mut out = Vec::with_capacity(w * h * 4);
-        for row in self.data.chunks(self.stride).take(h) {
-            out.extend(
-                row[..w * 8]
-                    .as_chunks::<2>()
-                    .0
-                    .iter()
-                    .map(|v| f16_to_f32(u16::from_le_bytes(*v))),
-            );
-        }
-        out
+        halves_to_f32(&self.data, self.stride, w, h)
     }
 
     /// 8-bit BGRA. An HDR screen is scaled so that its SDR white (`sdr_white_nits`) is white,
@@ -492,13 +484,20 @@ impl FrozenPixels {
             };
             (srgb * 255.0 + 0.5) as u8
         };
-        let bgra = self
-            .to_scrgb()
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .flat_map(|[r, g, b, _]| [encode(*b), encode(*g), encode(*r), 255])
-            .collect();
+        let scrgb = self.to_scrgb();
+        let mut bgra = vec![0; scrgb.len()];
+        bgra.par_chunks_mut(4 * 4096)
+            .zip(scrgb.par_chunks(4 * 4096))
+            .for_each(|(out, px)| {
+                for (o, [r, g, b, _]) in out
+                    .as_chunks_mut::<4>()
+                    .0
+                    .iter_mut()
+                    .zip(px.as_chunks::<4>().0)
+                {
+                    *o = [encode(*b), encode(*g), encode(*r), 255];
+                }
+            });
         CpuFrame::from_raw(w, h, w as usize * BYTES_PER_PIXEL, bgra)
     }
 }

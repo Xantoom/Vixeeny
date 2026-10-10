@@ -29,6 +29,7 @@ auto-launch = "0.6.0"
 windows = "0.62.2"
 tiny-skia = "0.12.0"
 fontdue = "0.9.4"
+rayon = "1.12.0"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

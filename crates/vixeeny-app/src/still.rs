@@ -234,9 +234,16 @@ pub fn run<B: StillBackend>(
     metadata: &dyn Fn(&str) -> ExeMetadata,
 ) -> Result<PathBuf, StillError> {
     let target = target_for(action, snap)?;
+    let started = std::time::Instant::now();
     let frame = capturer.grab(&target, options)?;
+    let grabbed = started.elapsed();
     let image = Bgra::new(frame.width, frame.height, frame.stride, &frame.data);
-    save_image(action, snap, dest, output, metadata, &image)
+    let path = save_image(action, snap, dest, output, metadata, &image)?;
+    tracing::info!(
+        "grabbed in {grabbed:?}, encoded and written in {:?}",
+        started.elapsed() - grabbed
+    );
+    Ok(path)
 }
 
 /// Encodes `image` and writes it under the configured name. Shared by the direct captures and

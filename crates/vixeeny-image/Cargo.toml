@@ -14,6 +14,7 @@ libwebp-sys = "0.14.4"
 moxcms = "0.9.1"
 oxipng = { version = "10.2.1", default-features = false, features = ["parallel"] }
 png.workspace = true
+rayon.workspace = true
 thiserror.workspace = true
 
 [features]

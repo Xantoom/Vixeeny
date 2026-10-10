@@ -5641,6 +5641,7 @@ dependencies = [
 name = "vixeeny-capture"
 version = "0.9.17"
 dependencies = [
+ "rayon",
  "thiserror 2.0.21",
  "vixeeny-common",
  "vixeeny-platform",
@@ -5694,6 +5695,7 @@ name = "vixeeny-encode"
 version = "0.9.17"
 dependencies = [
  "ffmpeg-next",
+ "rayon",
  "serde",
  "thiserror 2.0.21",
  "toml",
@@ -5716,6 +5718,7 @@ dependencies = [
  "oxipng",
  "pkg-config",
  "png",
+ "rayon",
  "thiserror 2.0.21",
 ]
 
