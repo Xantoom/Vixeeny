@@ -508,7 +508,13 @@ impl Worker {
             flags |= codec::Flags::GLOBAL_HEADER;
         }
         ctx.set_flags(flags);
-        let encoder = ctx.open_with(dictionary(&cfg.options))?;
+        let mut options = dictionary(&cfg.options);
+        // FFmpeg's default is one thread: libvpx then encodes on a single core and x265 one
+        // frame at a time. Zero lets each encoder use the whole CPU (x264 does by itself).
+        if options.get("threads").is_none() {
+            options.set("threads", "0");
+        }
+        let encoder = ctx.open_with(options)?;
 
         let mut worker = Self {
             cfr: Cfr::new(cfg.fps),
