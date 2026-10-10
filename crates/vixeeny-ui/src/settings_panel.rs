@@ -274,7 +274,7 @@ fn ui_texts(lang: Lang) -> UiTexts {
         github: t(Key::UiGithub),
         logs: t(Key::UiLogs),
         licenses: t(Key::UiLicenses),
-        copy_info: t(Key::UiCopyInfo),
+        report: t(Key::UiReport),
         change: t(Key::UiChange),
         show: t(Key::UiShow),
         remove: t(Key::UiRemove),

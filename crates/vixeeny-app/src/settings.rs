@@ -387,19 +387,13 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
                 (Section::About, "github") => {
                     let _ = vixeeny_platform::open_path(REPO);
                 }
-                (Section::About, "copy-info") => {
+                (Section::About, "report") => {
                     let handle = handle.clone();
                     // The hardware probe may need a few seconds the first time.
                     std::thread::spawn(move || {
-                        let config = load_config();
-                        let probe = crate::probe::current(false).ok();
-                        let text = crate::sysinfo::format(&crate::sysinfo::collect(
-                            &config,
-                            probe.as_ref(),
-                        ));
-                        let message = match vixeeny_platform::clipboard::copy_text(&text) {
-                            Ok(()) => tr(Key::AboutInfoCopied, lang).to_owned(),
-                            Err(e) => e.to_string(),
+                        let message = match crate::report::create(&load_config()) {
+                            Ok(_) => tr(Key::AboutReportReady, lang).to_owned(),
+                            Err(e) => format!("{e:#}"),
                         };
                         handle.set_extra(message);
                     });

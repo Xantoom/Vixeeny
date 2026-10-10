@@ -5,8 +5,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for testing Vixeeny. In the app: **Settings → About → Copy system info**, then paste it below.
-        From a terminal: `vixeeny-app --system-info`.
+        Thanks for testing Vixeeny. In the app, **Settings → About → Report a problem** opens this
+        form with the system info filled in, and selects a report file in the Explorer: drop it in
+        the Logs field. Without the app: `vixeeny-app --system-info` prints the system info.
   - type: textarea
     id: what
     attributes:
@@ -24,12 +25,11 @@ body:
     id: sysinfo
     attributes:
       label: System info
-      description: Paste the output of "Copy system info".
-      render: markdown
+      description: Filled in by "Report a problem" (or the output of `vixeeny-app --system-info`).
     validations:
       required: true
   - type: textarea
     id: logs
     attributes:
       label: Logs
-      description: The newest file of the logs folder (Settings → About → Open the logs folder), if the problem is a crash or an error message.
+      description: Drop the Vixeeny-report-….txt file that "Report a problem" selected. It holds the logs of the last days, without your user name or folders.

@@ -22,6 +22,7 @@ real machines are what we need**: other GPUs, other monitor layouts, other scali
 ## Reporting
 
 Open an [issue](https://github.com/Xantoom/Vixeeny/issues/new/choose) — "Bug report" for a
-problem, "Beta feedback" to say how it went (including "everything worked"). Paste the output of
-**Settings → About → Copy system info**: it lists the version, system, displays, GPUs and
-encoders, and nothing personal.
+problem, "Beta feedback" to say how it went (including "everything worked"). For a problem,
+**Settings → About → Report a problem** opens the bug form with the system info (version,
+system, displays, GPUs, encoders) filled in and selects a report file with the logs of the last
+days: drop it in the form. Neither holds your user name or folders.

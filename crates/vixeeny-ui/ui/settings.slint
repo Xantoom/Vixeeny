@@ -128,7 +128,7 @@ export struct UiTexts {
     github: string,
     logs: string,
     licenses: string,
-    copy-info: string,
+    report: string,
     change: string,
     show: string,
     remove: string,
@@ -811,7 +811,7 @@ export component SettingsWindow inherits Window {
                             Button { icon: Icons.github; text: root.t.github; clicked => { root.page-action("github", ""); } }
                             Button { icon: Icons.folder-open; text: root.t.logs; clicked => { root.page-action("logs", ""); } }
                             Button { icon: Icons.document; text: root.t.licenses; clicked => { root.page-action("licenses", ""); } }
-                            Button { icon: Icons.copy; text: root.t.copy-info; clicked => { root.page-action("copy-info", ""); } }
+                            Button { icon: Icons.bug; text: root.t.report; clicked => { root.page-action("report", ""); } }
                         }
                         if root.extra != "" : Text {
                             text: root.extra;

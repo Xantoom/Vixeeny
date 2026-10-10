@@ -111,8 +111,6 @@ pub enum Key {
     SetProblems,
     UiGithub,
     UiLogs,
-    UiCopyInfo,
-    AboutInfoCopied,
     ActCaptureRegion,
     ActCaptureWindow,
     ActCaptureFullscreen,
@@ -283,6 +281,8 @@ pub enum Key {
     UiSearchTitle,
     ShortcutTaken,
     ShortcutWindows,
+    UiReport,
+    AboutReportReady,
 }
 
 impl Key {
@@ -386,8 +386,6 @@ impl Key {
         Self::SetProblems,
         Self::UiGithub,
         Self::UiLogs,
-        Self::UiCopyInfo,
-        Self::AboutInfoCopied,
         Self::ActCaptureRegion,
         Self::ActCaptureWindow,
         Self::ActCaptureFullscreen,
@@ -558,6 +556,8 @@ impl Key {
         Self::UiSearchTitle,
         Self::ShortcutTaken,
         Self::ShortcutWindows,
+        Self::UiReport,
+        Self::AboutReportReady,
     ];
 }
 
@@ -797,10 +797,6 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::SetProblems, Lang::Fr) => "Problèmes avec ces réglages",
         (Key::UiGithub, Lang::En) => "GitHub page",
         (Key::UiGithub, Lang::Fr) => "Page GitHub",
-        (Key::UiCopyInfo, Lang::En) => "Copy system info",
-        (Key::UiCopyInfo, Lang::Fr) => "Copier les infos système",
-        (Key::AboutInfoCopied, Lang::En) => "Copied. No personal data included.",
-        (Key::AboutInfoCopied, Lang::Fr) => "Copié. Aucune donnée personnelle incluse.",
         (Key::UiLogs, Lang::En) => "Open the logs folder",
         (Key::UiLogs, Lang::Fr) => "Ouvrir le dossier des logs",
         (Key::ActCaptureRegion, Lang::En) => "Capture a region",
@@ -1177,6 +1173,14 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::ShortcutTaken, Lang::Fr) => "Déjà utilisé par un autre logiciel",
         (Key::ShortcutWindows, Lang::En) => "Reserved by Windows",
         (Key::ShortcutWindows, Lang::Fr) => "Réservé par Windows",
+        (Key::UiReport, Lang::En) => "Report a problem",
+        (Key::UiReport, Lang::Fr) => "Signaler un problème",
+        (Key::AboutReportReady, Lang::En) => {
+            "Report ready, without personal data: drop the selected file into the GitHub page."
+        }
+        (Key::AboutReportReady, Lang::Fr) => {
+            "Rapport prêt, sans données personnelles : glisse le fichier sélectionné dans la page GitHub."
+        }
     }
 }
 

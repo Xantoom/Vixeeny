@@ -51,5 +51,6 @@ the images (`cargo test -p vixeeny-ui`).
 
 ## Reporting a bug
 
-Use the issue templates and paste **Settings → About → Copy system info**
-(or `vixeeny-app --system-info`). See [docs/BETA.md](docs/BETA.md).
+Use **Settings → About → Report a problem**: it opens the bug form with the system info and
+selects the report file (logs of the last days) to drop in it. Without the app:
+`vixeeny-app --system-info`. See [docs/BETA.md](docs/BETA.md).

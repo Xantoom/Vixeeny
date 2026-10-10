@@ -13,6 +13,7 @@ mod clipboard;
 mod probe;
 mod record;
 mod region;
+mod report;
 mod scroll;
 mod settings;
 mod side;

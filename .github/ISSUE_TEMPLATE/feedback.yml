@@ -24,5 +24,4 @@ body:
   - type: textarea
     id: sysinfo
     attributes:
-      label: System info (Settings → About → Copy system info)
-      render: markdown
+      label: System info (`vixeeny-app --system-info`, or the block "Report a problem" puts in a bug report)
