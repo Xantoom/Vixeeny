@@ -3,6 +3,7 @@
 //! later milestones, the video pipeline. See README.md.
 
 pub mod clock;
+mod convert;
 #[cfg(windows)]
 pub mod d3d_convert;
 #[cfg(windows)]

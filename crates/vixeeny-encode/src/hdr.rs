@@ -6,6 +6,8 @@
 
 use std::sync::OnceLock;
 
+use rayon::prelude::*;
+
 /// 10 000 nits in scRGB units (1.0 = 80 nits).
 const PEAK: f32 = 10_000.0 / 80.0;
 
@@ -98,19 +100,21 @@ pub fn scrgb_half_to_pq(src: &[u8], width: u32, height: u32, stride: usize) -> O
     // Half → f32 table: one lookup per channel instead of a bit shuffle.
     static HALF: OnceLock<Vec<f32>> = OnceLock::new();
     let half = HALF.get_or_init(|| (0..=u16::MAX).map(f16_to_f32).collect());
-    let mut out = Vec::with_capacity(w * h * 6);
-    for y in 0..h {
-        let row = &src[y * stride..y * stride + w * 8];
-        for px in row.as_chunks::<8>().0 {
-            let r = half[usize::from(u16::from_le_bytes([px[0], px[1]]))];
-            let g = half[usize::from(u16::from_le_bytes([px[2], px[3]]))];
-            let b = half[usize::from(u16::from_le_bytes([px[4], px[5]]))];
-            for row in M {
-                let v = row[0] * r + row[1] * g + row[2] * b;
-                out.extend_from_slice(&table.code(v).to_le_bytes());
+    // One row per task, over every core: a 4K frame is 25 million samples.
+    let mut out = vec![0; w * h * 6];
+    out.par_chunks_mut(w * 6)
+        .zip(src.par_chunks(stride))
+        .for_each(|(out, row)| {
+            let pixels = row[..w * 8].as_chunks::<8>().0;
+            for (o, px) in out.as_chunks_mut::<6>().0.iter_mut().zip(pixels) {
+                let r = half[usize::from(u16::from_le_bytes([px[0], px[1]]))];
+                let g = half[usize::from(u16::from_le_bytes([px[2], px[3]]))];
+                let b = half[usize::from(u16::from_le_bytes([px[4], px[5]]))];
+                for (o, m) in o.as_chunks_mut::<2>().0.iter_mut().zip(M) {
+                    *o = table.code(m[0] * r + m[1] * g + m[2] * b).to_le_bytes();
+                }
             }
-        }
-    }
+        });
     Some(out)
 }
 

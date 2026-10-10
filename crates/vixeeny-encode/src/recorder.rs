@@ -22,6 +22,7 @@ use ffmpeg_next::{Dictionary, Packet, Rational, codec, color, encoder, ffi, form
 
 use crate::audio::{AudioEncoder, AudioTrackConfig, SAMPLE_RATE};
 use crate::clock::{Cfr, Emit, Fps};
+use crate::convert;
 use crate::gpu::{GpuPipeline, HwFrame};
 use crate::registry::{Chroma, Encoder};
 use crate::replay::{Ring, Snapshot, Storage};
@@ -430,7 +431,7 @@ struct Worker {
     codec: ffmpeg_next::Codec,
     pix: Pixel,
     enc_tb: Rational,
-    scaler: Option<(scaling::Context, (u32, u32, FrameFormat))>,
+    converter: Option<convert::Converter>,
     /// Downloaded GPU frames (NV12 / P010) to the encoder's planar format: a reshuffle, no
     /// colour conversion.
     unpack: Option<(scaling::Context, Pixel)>,
@@ -530,7 +531,7 @@ impl Worker {
             codec,
             pix,
             enc_tb,
-            scaler: None,
+            converter: None,
             unpack: None,
             last: None,
             out: None,
@@ -867,10 +868,9 @@ impl Worker {
         let (ow, oh) = self.cfg.output_size;
         let (left, top, width, height) =
             crate::validate::center_crop((src.width, src.height), self.cfg.crop);
-        let key = (width, height, src.format);
         // Half-float HDR frames become 16-bit PQ RGB first; swscale does the rest.
         let hdr16;
-        let (input_pix, bytes, stride, bpp) = match src.format {
+        let (format, bytes, stride, bpp) = match src.format {
             FrameFormat::Bgra8 => (Pixel::BGRA, &src.data[..], src.stride, 4),
             FrameFormat::ScRgbHalf => {
                 hdr16 = crate::hdr::scrgb_half_to_pq(&src.data, src.width, src.height, src.stride)
@@ -878,51 +878,23 @@ impl Worker {
                 (Pixel::RGB48LE, &hdr16[..], src.width as usize * 6, 6)
             }
         };
-        if self.scaler.as_ref().is_none_or(|(_, k)| *k != key) {
-            let mut ctx = scaling::Context::get(
-                input_pix,
-                width,
-                height,
-                self.pix,
-                ow,
-                oh,
-                scaling::Flags::BICUBIC,
-            )?;
-            let matrix = if self.cfg.hdr {
-                ffi::SWS_CS_BT2020
-            } else {
-                ffi::SWS_CS_ITU709
-            };
-            // SAFETY: `ctx` is a live swscale context; the coefficient tables are static.
-            // Source RGB is full range, the output limited range, as the stream is tagged.
-            unsafe {
-                let table = ffi::sws_getCoefficients(matrix);
-                ffi::sws_setColorspaceDetails(
-                    ctx.as_mut_ptr(),
-                    table,
-                    1,
-                    table,
-                    0,
-                    0,
-                    1 << 16,
-                    1 << 16,
-                );
-            }
-            self.scaler = Some((ctx, key));
-        }
-        let mut input = frame::Video::new(input_pix, width, height);
-        let dst_stride = input.stride(0);
-        let row = width as usize * bpp;
-        for y in 0..height as usize {
-            let from = (y + top as usize) * stride + left as usize * bpp;
-            let line = bytes
-                .get(from..from + row)
-                .ok_or_else(|| RecordError::Config("frame buffer too small".into()))?;
-            input.data_mut(0)[y * dst_stride..y * dst_stride + row].copy_from_slice(line);
+        // The crop starts that many bytes in.
+        let start = top as usize * stride + left as usize * bpp;
+        let rows = convert::Rows {
+            bytes: bytes
+                .get(start..)
+                .ok_or_else(|| RecordError::Config("frame buffer too small".into()))?,
+            stride,
+            width,
+            height,
+            format,
+        };
+        if self.converter.is_none() {
+            self.converter = Some(convert::Converter::new()?);
         }
         let mut output = frame::Video::new(self.pix, ow, oh);
-        if let Some((ctx, _)) = &mut self.scaler {
-            ctx.run(&input, &mut output)?;
+        if let Some(converter) = &mut self.converter {
+            converter.run(&rows, &mut output, self.cfg.hdr)?;
         }
         Ok(output)
     }
