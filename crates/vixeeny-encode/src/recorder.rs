@@ -5,8 +5,9 @@
 //! on key frames. Everything runs on a dedicated worker thread behind a bounded queue, so a slow
 //! encoder drops input frames (counted) instead of stalling the capture.
 //!
-//! This is the CPU path: frames come as BGRA in RAM and hardware encoders are fed from system
-//! memory. The GPU path (Windows: D3D11 frames straight to NVENC/AMF/QSV) plugs in above this.
+//! Frames come either as BGRA in RAM (the CPU path: converted here) or already converted on the
+//! GPU ([`crate::gpu`]): handed to NVENC / AMF / QSV as they are, downloaded for a software
+//! encoder.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -430,6 +431,9 @@ struct Worker {
     pix: Pixel,
     enc_tb: Rational,
     scaler: Option<(scaling::Context, (u32, u32, FrameFormat))>,
+    /// Downloaded GPU frames (NV12 / P010) to the encoder's planar format: a reshuffle, no
+    /// colour conversion.
+    unpack: Option<(scaling::Context, Pixel)>,
     last: Option<Last>,
     out: Option<Output>,
     audio: Vec<AudioTrack>,
@@ -527,6 +531,7 @@ impl Worker {
             pix,
             enc_tb,
             scaler: None,
+            unpack: None,
             last: None,
             out: None,
             audio: Vec::new(),
@@ -814,10 +819,48 @@ impl Worker {
 
     /// Software frames are converted and scaled here; GPU frames already are.
     fn prepare(&mut self, input: Input) -> Result<Last, RecordError> {
-        Ok(match input {
-            Input::Cpu(frame) => Last::Sw(self.convert(&frame)?),
-            Input::Hw(frame) => Last::Hw(frame),
+        let feed = self.cfg.gpu.as_ref().map(|g| g.feed());
+        Ok(match (input, feed) {
+            (Input::Cpu(frame), _) => Last::Sw(self.convert(&frame)?),
+            (Input::Hw(frame), Some(crate::gpu::Feed::Qsv)) => {
+                let gpu = self.cfg.gpu.as_ref().ok_or(RecordError::Worker)?;
+                Last::Hw(gpu.to_qsv(&frame)?)
+            }
+            (Input::Hw(frame), Some(crate::gpu::Feed::Download)) => {
+                Last::Sw(self.download(&frame)?)
+            }
+            (Input::Hw(frame), _) => Last::Hw(frame),
         })
+    }
+
+    /// A GPU frame in system memory, in the encoder's pixel format.
+    fn download(&mut self, frame: &HwFrame) -> Result<frame::Video, RecordError> {
+        let gpu = self.cfg.gpu.as_ref().ok_or(RecordError::Worker)?;
+        let got = gpu.download(frame)?;
+        if got.format() == self.pix {
+            return Ok(got);
+        }
+        if self
+            .unpack
+            .as_ref()
+            .is_none_or(|(_, from)| *from != got.format())
+        {
+            let ctx = scaling::Context::get(
+                got.format(),
+                got.width(),
+                got.height(),
+                self.pix,
+                got.width(),
+                got.height(),
+                scaling::Flags::POINT,
+            )?;
+            self.unpack = Some((ctx, got.format()));
+        }
+        let mut out = frame::Video::new(self.pix, got.width(), got.height());
+        if let Some((ctx, _)) = &mut self.unpack {
+            ctx.run(&got, &mut out)?;
+        }
+        Ok(out)
     }
 
     fn convert(&mut self, src: &VideoFrame) -> Result<frame::Video, RecordError> {

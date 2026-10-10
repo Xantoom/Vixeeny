@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Screen recording (plan 5.9): the capture stream feeds the recorder, on a thread of its own so
-//! the action loop keeps answering the daemon. This is the CPU path; the target is the monitor
-//! under the cursor.
+//! the action loop keeps answering the daemon. Frames are converted on the GPU when possible
+//! (see `try_gpu`), on the CPU otherwise; the target is the monitor under the cursor.
 
 use crate::toast::{Failed, Saved, Toast, failure_text};
 use std::path::PathBuf;
@@ -19,7 +19,7 @@ use vixeeny_common::ipc::RecState;
 use vixeeny_encode::audio::{AudioCodec, AudioTrackConfig};
 use vixeeny_encode::clock::Fps;
 use vixeeny_encode::d3d_convert as d3d;
-use vixeeny_encode::gpu::{GpuPipeline, HwFrame, Source as GpuSource};
+use vixeeny_encode::gpu::{Feed, GpuPipeline, HwFrame, Source as GpuSource};
 use vixeeny_encode::probe::ProbeResult;
 use vixeeny_encode::recorder::{
     FrameFormat, OutputContainer, RecordConfig, Recorder, Split, VideoFrame,
@@ -198,45 +198,62 @@ struct KeepAlive(#[allow(dead_code)] Option<GpuParts>);
 // used, by the recording thread.
 unsafe impl Send for KeepAlive {}
 
-/// The GPU path: NVENC / AMF read D3D11 textures converted by the video processor. `None` (with
-/// the reason logged) when the encoder or the machine cannot do it: the CPU path then records.
+/// The GPU path: the video processor converts the captured textures; NVENC / AMF read them as
+/// they are, QSV through a QSV view, software encoders get them downloaded (4:2:0 only). `None`
+/// (with the reason logged) when the encoder or the machine cannot do it: the CPU path then
+/// records.
 fn try_gpu(
     encoder: &Encoder,
     config: &RecordConfig,
     source: (u32, u32),
     source_hdr: bool,
 ) -> Option<GpuParts> {
+    let feed = vixeeny_encode::gpu::feed(encoder)?;
     if std::env::var_os("VIXEENY_NO_GPU").is_some()
-        || !vixeeny_encode::gpu::supports(encoder)
         || config.chroma != Chroma::C420
         || !matches!(config.depth, 8 | 10)
     {
         return None;
     }
+    // The encoder's GPU; a software encoder takes the default one.
     let vendor = match encoder.vendor {
         Vendor::Nvidia => Some(0x10DE),
         Vendor::Amd => Some(0x1002),
-        _ => None,
+        Vendor::Intel => Some(0x8086),
+        Vendor::None => None,
     };
-    let built = d3d::create_device(vendor).and_then(|(device, context)| {
-        GpuPipeline::new(
-            &device,
-            &context,
-            GpuSource {
-                size: source,
-                hdr: source_hdr,
-            },
-            config.output_size,
-            config.fps,
-            config.hdr,
-            config.depth == 10 || config.hdr,
-        )
-        .map(|pipeline| GpuParts {
-            pipeline: Arc::new(pipeline),
-            device,
-            context,
+    let build = |feed: Feed| {
+        d3d::create_device(vendor).and_then(|(device, context)| {
+            GpuPipeline::new(
+                &device,
+                &context,
+                GpuSource {
+                    size: source,
+                    hdr: source_hdr,
+                },
+                config.output_size,
+                config.fps,
+                config.hdr,
+                config.depth == 10 || config.hdr,
+                feed,
+            )
+            .map(|pipeline| GpuParts {
+                pipeline: Arc::new(pipeline),
+                device,
+                context,
+            })
+            .map_err(|e| e.to_string())
         })
-        .map_err(|e| e.to_string())
+    };
+    // QSV surfaces need a texture array the driver may refuse: the frames are then downloaded
+    // (QSV takes NV12 / P010 from memory), still converted on the GPU.
+    let built = build(feed).or_else(|e| {
+        if feed == Feed::Qsv {
+            tracing::warn!("QSV surfaces unavailable ({e}); downloading the frames");
+            build(Feed::Download)
+        } else {
+            Err(e)
+        }
     });
     match built {
         Ok(parts) => Some(parts),
