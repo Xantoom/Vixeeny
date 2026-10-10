@@ -602,7 +602,7 @@ fn info_tooltip_stays_while_the_pointer_moves_on_its_dot() {
     use slint::platform::WindowEvent;
     use vixeeny_settings::Section;
     let (panel, _) = settings_panel();
-    panel.select_section(Section::Overlay);
+    panel.select_section(Section::Video);
     let window = WINDOW.with(Rc::clone);
     window.dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: 2.0 });
     let size = (2080, 1440);
@@ -622,11 +622,11 @@ fn info_tooltip_stays_while_the_pointer_moves_on_its_dot() {
     };
     // The glyph, the ring, inside the dot off the glyph, and the margin around it.
     for (x, y) in [
-        (354.0, 173.0),
-        (348.5, 173.0),
-        (354.0, 168.0),
-        (350.0, 169.0),
-        (359.5, 177.5),
+        (337.0, 285.0),
+        (331.5, 285.0),
+        (337.0, 280.0),
+        (333.0, 281.0),
+        (342.5, 289.5),
     ] {
         for dx in [0.0, 0.5, 1.0, 1.5] {
             move_to(x + dx, y);

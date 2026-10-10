@@ -27,40 +27,13 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
     // The encoder's own options are `p:<key>`.
     let key = id;
     let template = id.starts_with("template:");
-    let folder_kind = id.strip_prefix("sub_");
     if template {
         return pick(
             "The name of each file. {app} is the game in full screen, or Desktop when there is none; {date} and {time} are when it was taken.\n\nRecommended: {app}_{date}_{time}.",
             "Le nom de chaque fichier. {app} est le jeu en plein écran, ou Desktop s'il n'y en a pas ; {date} et {time} le moment de la capture.\n\nRecommandé : {app}_{date}_{time}.",
         );
     }
-    if folder_kind.is_some() {
-        return pick(
-            "Puts the files of each game in a folder of its own, named after it.",
-            "Range les fichiers de chaque jeu dans un dossier à son nom.",
-        );
-    }
     match key {
-        "autostart" => pick(
-            "Vixeeny starts with Windows, so its shortcuts work right away.\n\nRecommended: on.",
-            "Vixeeny démarre avec Windows, pour que ses raccourcis marchent tout de suite.\n\nRecommandé : activé.",
-        ),
-        "notifications" => pick(
-            "A notification when a capture or a recording is saved, to open it in one click.",
-            "Une notification quand une capture ou un enregistrement est enregistré, pour l'ouvrir en un clic.",
-        ),
-        "sounds" => pick(
-            "A short sound confirms captures and recordings.",
-            "Un petit son confirme les captures et les enregistrements.",
-        ),
-        "overlay_edge" => pick(
-            "The edge of the screen the side strip comes out of.",
-            "Le bord de l'écran d'où sort le bandeau latéral.",
-        ),
-        "widget" => pick(
-            "A small window shows the length of the recording and lets you pause or stop it.",
-            "Une petite fenêtre montre la durée de l'enregistrement et permet de le mettre en pause ou de l'arrêter.",
-        ),
         "image_format" => {
             let encoder = image_encoder(&config.image.format);
             let (en, f) = match config.image.format.as_str() {
@@ -115,10 +88,6 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
             "10 bits keeps gradients smooth and is needed for HDR.\n\nRecommended: 10 bits.",
             "Le 10 bits garde des dégradés propres et sert au HDR.\n\nRecommandé : 10 bits.",
         ),
-        "clipboard" => pick(
-            "Each capture is also copied, ready to paste in a message.",
-            "Chaque capture est aussi copiée, prête à coller dans un message.",
-        ),
         "image_hdr" | "hdr" => pick(
             "Keeps the HDR of the screen. Off, the picture is converted to SDR, which looks right everywhere.",
             "Garde le HDR de l'écran. Désactivé, l'image est convertie en SDR, qui s'affiche bien partout.",
@@ -126,14 +95,6 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
         "aspect" => pick(
             "Records only the middle of a wide screen in 16:9, the format of video sites and TVs.",
             "N'enregistre que le milieu d'un écran large en 16:9, le format des sites vidéo et des télés.",
-        ),
-        "resolution" => pick(
-            "The size of the video. Lower makes lighter files, but less sharp.\n\nRecommended: the screen's.",
-            "La taille de la vidéo. Plus bas = fichiers plus légers mais moins nets.\n\nRecommandé : celle de l'écran.",
-        ),
-        "fps" => pick(
-            "Images per second. 60 is smooth for games; more needs a fast encoder and makes larger files.\n\nRecommended: 60.",
-            "Images par seconde. 60 est fluide pour les jeux ; plus demande un encodeur rapide et fait des fichiers plus gros.\n\nRecommandé : 60.",
         ),
         "encoder_kind" => pick(
             "Hardware: the graphics card encodes, without slowing the game. Software: the processor does it, slower.\n\nRecommended: hardware.",
@@ -150,10 +111,6 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
         "container" => pick(
             "Fragmented MP4 plays everywhere and a recording cut short (crash, full disk) still plays. MKV holds any audio.\n\nRecommended: MP4.",
             "Le MP4 fragmenté se lit partout et un enregistrement interrompu (plantage, disque plein) reste lisible. Le MKV accepte tous les sons.\n\nRecommandé : MP4.",
-        ),
-        "split" => pick(
-            "Starts a new file past a size or a length, for the disks and sites that limit them.",
-            "Commence un nouveau fichier au-delà d'une taille ou d'une durée, pour les disques et les sites qui les limitent.",
         ),
         "chroma" => pick(
             "4:2:0 is what every player reads. 4:4:4 keeps the colour of fine text, but few players read it and files are larger.\n\nRecommended: 4:2:0.",
@@ -266,14 +223,6 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
             "How often a complete image is stored. 0 lets Vixeeny choose (every 2 seconds), which keeps seeking quick.\n\nRecommended: 0.",
             "La fréquence des images complètes. 0 laisse Vixeeny choisir (toutes les 2 secondes), ce qui garde l'avance rapide fluide.\n\nRecommandé : 0.",
         ),
-        "p:tune" => pick(
-            "Adjusts the encoder to a kind of picture.\n\nRecommended: auto.",
-            "Adapte l'encodeur à un type d'image.\n\nRecommandé : auto.",
-        ),
-        "p:row-mt" => pick(
-            "Uses more processor cores.\n\nRecommended: on.",
-            "Utilise plus de cœurs du processeur.\n\nRecommandé : activé.",
-        ),
         "audio_capture" => pick(
             "All the PC sound: everything you hear. Only the recorded program: the game alone, without Discord or music.\n\nRecommended: all the PC sound.",
             "Tout le son du PC : tout ce que vous entendez. Seulement le programme enregistré : le jeu seul, sans Discord ni musique.\n\nRecommandé : tout le son du PC.",
@@ -285,14 +234,6 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
         "audio_denoise" => pick(
             "Removes the steady noise of the microphone (fan, hum).\n\nRecommended: on.",
             "Enlève le bruit continu du micro (ventilateur, souffle).\n\nRecommandé : activé.",
-        ),
-        "capture_volume" => pick(
-            "Makes the recorded sound louder or quieter than you hear it, the microphone apart.\n\nRecommended: 100 %.",
-            "Rend le son enregistré plus fort ou plus faible que ce que vous entendez, le micro à part.\n\nRecommandé : 100 %.",
-        ),
-        "mic_volume" => pick(
-            "Your voice against the game: lower it if it covers the game, raise it if it is lost.\n\nRecommended: 100 %, then adjust with the level above.",
-            "Votre voix face au jeu : baissez si elle couvre le jeu, montez si elle se perd.\n\nRecommandé : 100 %, puis ajustez avec le niveau au-dessus.",
         ),
         "mic_level" => pick(
             "What the microphone hears now. Speak normally: the bar should reach the middle without turning red.",
@@ -309,10 +250,6 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
         "audio_bitrate" => pick(
             "Higher keeps more detail. 160 kbit/s cannot be told from the original.\n\nRecommended: 160 kbit/s.",
             "Plus haut garde plus de détails. 160 kbit/s est indiscernable de l'original.\n\nRecommandé : 160 kbit/s.",
-        ),
-        "audio_vbr" => pick(
-            "Variable spends bits where the sound needs them.\n\nRecommended: variable.",
-            "Le variable met le débit là où le son en a besoin.\n\nRecommandé : variable.",
         ),
         "audio_channels" => pick(
             "Stereo suits headphones and speakers. 5.1 and 7.1 keep surround sound, in MKV only.\n\nRecommended: stereo.",
