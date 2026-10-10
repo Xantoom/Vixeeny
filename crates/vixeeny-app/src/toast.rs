@@ -219,6 +219,24 @@ fn content_of(toast: &Toast) -> ToastContent {
         vixeeny_platform::system_prefers_dark(),
     );
     match toast {
+        // A screenshot: its picture says it all.
+        Toast::Saved(Saved::Image, path)
+            if let Some(thumb) = crate::thumbnail::thumbnail(path, 640) =>
+        {
+            ToastContent {
+                thumb: Some(thumb),
+                dark,
+                picture_only: true,
+                menu: [
+                    Key::ToastMenuOpen,
+                    Key::ToastMenuReveal,
+                    Key::ToastMenuClose,
+                ]
+                .map(|k| tr(k, lang).to_owned())
+                .to_vec(),
+                ..ToastContent::default()
+            }
+        }
         Toast::Saved(kind, path) => ToastContent {
             heading: tr(kind.title(), lang).into(),
             body: path
@@ -228,6 +246,7 @@ fn content_of(toast: &Toast) -> ToastContent {
             error: false,
             dark,
             action_label: tr(Key::ToastOpenFolder, lang).into(),
+            ..ToastContent::default()
         },
         Toast::Failed(kind, message) => ToastContent {
             heading: tr(kind.title(), lang).into(),
@@ -236,6 +255,7 @@ fn content_of(toast: &Toast) -> ToastContent {
             error: true,
             dark,
             action_label: tr(Key::ToastOpenSettings, lang).into(),
+            ..ToastContent::default()
         },
         Toast::Update(text) => ToastContent {
             heading: "Vixeeny".into(),
@@ -244,6 +264,7 @@ fn content_of(toast: &Toast) -> ToastContent {
             error: false,
             dark,
             action_label: tr(Key::UpdateView, lang).into(),
+            ..ToastContent::default()
         },
     }
 }

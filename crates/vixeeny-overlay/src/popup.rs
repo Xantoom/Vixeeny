@@ -165,6 +165,19 @@ impl Popup {
         let _ = unsafe { TrackMouseEvent(&mut t) };
     }
 
+    /// The pointer is over the window.
+    pub fn has_pointer(&self) -> bool {
+        use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, GetWindowRect};
+        let (mut at, mut r) = (POINT::default(), RECT::default());
+        // SAFETY: valid out-pointers, a window of this thread.
+        unsafe {
+            GetCursorPos(&mut at).is_ok()
+                && GetWindowRect(self.hwnd, &mut r).is_ok()
+                && (r.left..r.right).contains(&at.x)
+                && (r.top..r.bottom).contains(&at.y)
+        }
+    }
+
     /// Posts [`WM_POPUP`] with `wparam` to the window, to be handled on a later turn of the loop.
     pub fn post(&self, wparam: usize) {
         // SAFETY: plain call on a window of this thread.
@@ -211,6 +224,79 @@ pub fn keep_inside(at: (i32, i32), size: (i32, i32), area: RECT) -> (i32, i32) {
         fit(at.0, size.0, area.left, area.right),
         fit(at.1, size.1, area.top, area.bottom),
     )
+}
+
+/// Shows the system's context menu of `items` under the pointer, for the window `owner`, the
+/// last item set apart (a "Close"), in the dark or light theme. Returns the chosen item. The
+/// window that had the keyboard gets it back unless an item was chosen.
+pub fn context_menu(owner: HWND, items: &[String], dark: bool) -> Option<usize> {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        AppendMenuW, CreatePopupMenu, DestroyMenu, GetCursorPos, GetForegroundWindow, MF_SEPARATOR,
+        MF_STRING, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, WM_NULL,
+    };
+    menu_theme(dark);
+    // SAFETY: plain menu calls; the menu is destroyed before returning, the strings outlive the
+    // calls that read them.
+    unsafe {
+        let menu = CreatePopupMenu().ok()?;
+        let labels: Vec<windows::core::HSTRING> = items.iter().map(|i| i.into()).collect();
+        for (i, label) in labels.iter().enumerate() {
+            if i + 1 == labels.len() && i > 0 {
+                let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
+            }
+            let _ = AppendMenuW(
+                menu,
+                MF_STRING,
+                i + 1,
+                windows::core::PCWSTR(label.as_ptr()),
+            );
+        }
+        let mut at = POINT::default();
+        let _ = GetCursorPos(&mut at);
+        // The menu closes on a click elsewhere only when its window is in the foreground.
+        let before = GetForegroundWindow();
+        let _ = SetForegroundWindow(owner);
+        let chosen = TrackPopupMenu(
+            menu,
+            TPM_RETURNCMD | TPM_RIGHTBUTTON,
+            at.x,
+            at.y,
+            None,
+            owner,
+            None,
+        )
+        .0 as usize;
+        let _ = PostMessageW(Some(owner), WM_NULL, WPARAM(0), LPARAM(0));
+        let _ = DestroyMenu(menu);
+        if chosen == 0 && !before.is_invalid() {
+            let _ = SetForegroundWindow(before);
+        }
+        chosen.checked_sub(1)
+    }
+}
+
+/// Puts the menus of this process in the dark or light theme. Windows only exposes this through
+/// two unnamed functions of uxtheme (`SetPreferredAppMode`, `FlushMenuThemes`, Windows 10 1903
+/// and later); without them the menus stay light.
+fn menu_theme(dark: bool) {
+    use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
+    type SetMode = unsafe extern "system" fn(i32) -> i32;
+    type Flush = unsafe extern "system" fn();
+    // SAFETY: uxtheme stays loaded; the ordinals have had these signatures since 1903.
+    unsafe {
+        let Ok(lib) = LoadLibraryW(windows::core::w!("uxtheme.dll")) else {
+            return;
+        };
+        let set = GetProcAddress(lib, windows::core::PCSTR(135 as *const u8));
+        let flush = GetProcAddress(lib, windows::core::PCSTR(136 as *const u8));
+        if let (Some(set), Some(flush)) = (set, flush) {
+            let set: SetMode = std::mem::transmute(set);
+            let flush: Flush = std::mem::transmute(flush);
+            // 2: force dark, 3: force light.
+            set(if dark { 2 } else { 3 });
+            flush();
+        }
+    }
 }
 
 pub fn set_pointer(p: Pointer) {

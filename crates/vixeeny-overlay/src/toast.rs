@@ -2,7 +2,8 @@
 //! The notification (plan 5.14), after the Windows 11 ones, drawn natively: a card in the corner
 //! of the screen with the thumbnail of the capture, a title and the whole text. Clicking the card
 //! opens the file, its button the folder (or the settings for an error). It slides in, never
-//! takes the keyboard, and goes by itself after a while unless the pointer is on it.
+//! takes the keyboard, and goes by itself after a while unless the pointer is on it. A screenshot
+//! shows as its picture alone for 3 s: a click opens it, a right-click offers a menu.
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
@@ -11,7 +12,7 @@ use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
 use windows::Win32::UI::WindowsAndMessaging::{
     KillTimer, SetTimer, WM_CAPTURECHANGED, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP,
-    WM_MOUSEMOVE, WM_SETCURSOR, WM_TIMER,
+    WM_MOUSEMOVE, WM_RBUTTONUP, WM_SETCURSOR, WM_TIMER,
 };
 use windows::core::Result;
 
@@ -34,14 +35,18 @@ pub struct ToastContent {
     pub dark: bool,
     /// The button; empty for none.
     pub action_label: String,
+    /// Only the picture (a screenshot): no text, a shorter life, and a right-click menu.
+    pub picture_only: bool,
+    /// The right-click menu: open, show in the folder, close.
+    pub menu: Vec<String>,
 }
 
 /// What the user did with the card.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToastEvent {
-    /// The card itself was clicked.
+    /// The card itself was clicked (or "Open" in its menu).
     Activated,
-    /// The button was clicked.
+    /// The button was clicked (or "Show in the folder" in its menu).
     Action,
 }
 
@@ -66,6 +71,10 @@ const PAD_LEFT: f32 = 18.0;
 const THUMB: f32 = 76.0;
 const ICON: f32 = 24.0;
 const LIFETIME_MS: u32 = 7000;
+/// A picture-only card goes sooner: it only says "done".
+const PICTURE_LIFETIME_MS: u32 = 3000;
+/// The largest picture-only card, logical pixels.
+const PICTURE_MAX: (f32, f32) = (320.0, 200.0);
 /// Lines of the body at most: a longer message is cut (the logs hold all of it).
 const BODY_LINES: u32 = 4;
 const ENTER: f64 = 0.26;
@@ -96,6 +105,11 @@ impl CardLayout {
     /// The card for `content` at `dpi`: as wide as a Windows notification, as high as its text.
     pub fn new(gfx: &Gfx, content: &ToastContent, dpi: u32) -> Result<Self> {
         let u = dpi.max(48) as f32 / 96.0;
+        if content.picture_only
+            && let Some((w, h, _)) = &content.thumb
+        {
+            return Self::picture(gfx, (*w, *h), u);
+        }
         let card_w = (WIDTH - 2.0 * SIDE) * u;
         let picture_side = if content.thumb.is_some() { THUMB } else { ICON };
         let text_x = (PAD_LEFT + picture_side + PAD) * u;
@@ -146,6 +160,29 @@ impl CardLayout {
         })
     }
 
+    /// The card of a picture alone: the picture's shape, as large as fits [`PICTURE_MAX`].
+    fn picture(gfx: &Gfx, (w, h): (u32, u32), u: f32) -> Result<Self> {
+        let scale = (PICTURE_MAX.0 / w.max(1) as f32).min(PICTURE_MAX.1 / h.max(1) as f32);
+        let card_w = (w as f32 * scale).max(48.0).round() * u;
+        let card_h = (h as f32 * scale).max(48.0).round() * u;
+        let (x0, y0) = (SIDE * u, ABOVE * u);
+        let card = (x0, y0, card_w, card_h);
+        let empty = || gfx.paragraph("", 12.0 * u, false, 1.0);
+        Ok(Self {
+            u,
+            size: (
+                (card_w + 2.0 * SIDE * u).ceil() as u32,
+                (card_h + (ABOVE + BELOW) * u).ceil() as u32,
+            ),
+            card,
+            picture: card,
+            heading: (empty()?, (x0, y0)),
+            body: (empty()?, (x0, y0)),
+            button: None,
+            close: (0.0, 0.0, 0.0, 0.0),
+        })
+    }
+
     pub fn at(&self, x: f32, y: f32, hovered: bool) -> CardTarget {
         let inside = |(bx, by, bw, bh): Box2| x >= bx && x < bx + bw && y >= by && y < by + bh;
         if !inside(self.card) {
@@ -182,6 +219,20 @@ pub fn paint_card(
     let card = rect(cx, cy, cw, ch);
     let radius = 10.0 * u;
     c.shadow(card, radius, 16.0 * u, 4.0 * u, Rgba::hex(0x000000, 0x60))?;
+    if content.picture_only
+        && let Some(bitmap) = thumb
+    {
+        // The picture alone; the accent around it while the pointer is on it.
+        c.push_round_clip(card, radius)?;
+        let drawn = c.picture(bitmap, card);
+        c.pop_layer();
+        drawn?;
+        return if look.hovered {
+            c.stroke_round(card, radius, 2.0 * u, t.accent)
+        } else {
+            c.stroke_round(card, radius, 1.0, t.stroke_strong)
+        };
+    }
     c.fill_round(card, radius, t.flyout)?;
     // The colour of the kind, along the left edge: accent for news, red for a failure.
     let kind = if content.error { t.danger } else { t.accent };
@@ -292,7 +343,12 @@ impl Card {
         // SAFETY: plain timer calls on a window of this thread.
         unsafe {
             if on {
-                SetTimer(Some(self.popup.hwnd), LIFETIME_TIMER, LIFETIME_MS, None);
+                let ms = if self.content.picture_only {
+                    PICTURE_LIFETIME_MS
+                } else {
+                    LIFETIME_MS
+                };
+                SetTimer(Some(self.popup.hwnd), LIFETIME_TIMER, ms, None);
             } else {
                 let _ = KillTimer(Some(self.popup.hwnd), LIFETIME_TIMER);
             }
@@ -347,7 +403,12 @@ impl Shared {
                 return Some(LRESULT(0));
             }
             WM_SETCURSOR if (lparam.0 & 0xffff) == 1 => {
-                let hand = matches!(look.hover, Some(CardTarget::Button | CardTarget::Close));
+                let hand = match look.hover {
+                    Some(CardTarget::Button | CardTarget::Close) => true,
+                    // A picture alone opens with a click anywhere on it.
+                    Some(CardTarget::Card) => card.content.picture_only,
+                    _ => false,
+                };
                 popup::set_pointer(if hand { Pointer::Hand } else { Pointer::Arrow });
                 return Some(LRESULT(1));
             }
@@ -372,6 +433,27 @@ impl Shared {
             }
             // Another window took the mouse: its release will not come here.
             WM_CAPTURECHANGED => card.press.set(None),
+            WM_RBUTTONUP if !card.content.menu.is_empty() => {
+                card.set_timer(false);
+                let chosen =
+                    popup::context_menu(card.popup.hwnd, &card.content.menu, card.content.dark);
+                let event = match chosen {
+                    Some(0) => Some(Some(ToastEvent::Activated)),
+                    Some(1) => Some(Some(ToastEvent::Action)),
+                    Some(_) => Some(None),
+                    None => None,
+                };
+                if let Some(event) = event {
+                    self.finish(id, event);
+                    return Some(LRESULT(0));
+                }
+                // Dismissed: the card stays while the pointer is on it, then goes.
+                if !card.popup.has_pointer() {
+                    look.hovered = false;
+                    look.hover = None;
+                    card.set_timer(true);
+                }
+            }
             WM_LBUTTONUP => {
                 // Taken before the release, which reports a loss of the mouse.
                 let pressed = card.press.take();

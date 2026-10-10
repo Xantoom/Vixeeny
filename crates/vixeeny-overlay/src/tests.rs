@@ -398,3 +398,63 @@ fn a_dragged_window_stays_whole_on_its_screen() {
     // Wider than the screen: pinned to its left edge.
     assert_eq!(keep_inside((500, 500), (4000, 60), work), (0, 500));
 }
+
+#[test]
+fn a_screenshot_notification_is_its_picture_alone() {
+    use crate::toast::{CardLayout, CardLook, CardTarget, ToastContent, paint_card};
+    let gfx = Gfx::new().expect("graphics devices");
+    // A wide screenshot (16:9) as its 640-pixel thumbnail.
+    let (w, h) = (640u32, 360u32);
+    let blue = [[200u8, 120, 40, 255]; 640 * 360].concat();
+    let content = ToastContent {
+        thumb: Some((w, h, blue)),
+        dark: true,
+        picture_only: true,
+        menu: vec!["Open".into(), "Show".into(), "Close".into()],
+        ..ToastContent::default()
+    };
+    let l = CardLayout::new(&gfx, &content, 120).expect("laid out");
+    let (_, _, cw, ch) = l.card;
+    // As large as fits 320×200 at 125 %, with the picture's shape.
+    assert!(
+        (cw / l.u - 320.0).abs() < 1.0 && (ch / l.u - 180.0).abs() < 1.0,
+        "{cw}×{ch}"
+    );
+    let (cx, cy, _, _) = l.card;
+    assert_eq!(
+        l.at(cx + cw - 3.0, cy + 3.0, true),
+        CardTarget::Card,
+        "no close button"
+    );
+    let t = Theme::new(Look {
+        dark: true,
+        ..Look::default()
+    });
+    let bitmap = gfx.rgba_bitmap(w, h, content.thumb.as_ref().unwrap().2.as_slice());
+    let bitmap = bitmap.expect("bitmap");
+    let (sw, sh) = l.size;
+    let pixels = gfx
+        .render(sw, sh, |c| {
+            backdrop(c, sw, sh)?;
+            paint_card(
+                c,
+                &t,
+                &content,
+                &l,
+                Some(&bitmap),
+                &CardLook {
+                    hovered: true,
+                    hover: Some(CardTarget::Card),
+                    held: None,
+                },
+            )
+        })
+        .expect("drawn");
+    save("toast-picture", sw, sh, &pixels);
+    let o = (((cy + ch / 2.0) as u32 * sw + (cx + cw / 2.0) as u32) * 4) as usize;
+    assert_eq!(
+        &pixels[o..o + 3],
+        &[40, 120, 200],
+        "the picture fills the card"
+    );
+}
