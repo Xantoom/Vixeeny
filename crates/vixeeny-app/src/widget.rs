@@ -31,10 +31,10 @@ impl Widget {
         let (x, y, w, h) = corner_geometry(
             &settings.corner,
             (
-                monitor.rect.x,
-                monitor.rect.y,
-                monitor.rect.width,
-                monitor.rect.height,
+                monitor.work.x,
+                monitor.work.y,
+                monitor.work.width,
+                monitor.work.height,
             ),
             monitor.dpi,
         );

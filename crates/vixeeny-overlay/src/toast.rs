@@ -10,8 +10,8 @@ use std::rc::{Rc, Weak};
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
 use windows::Win32::UI::WindowsAndMessaging::{
-    KillTimer, SetTimer, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
-    WM_SETCURSOR, WM_TIMER,
+    KillTimer, SetTimer, WM_CAPTURECHANGED, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP,
+    WM_MOUSEMOVE, WM_SETCURSOR, WM_TIMER,
 };
 use windows::core::Result;
 
@@ -45,18 +45,13 @@ pub enum ToastEvent {
     Action,
 }
 
-/// Where the card goes: the bottom-right corner of a monitor, `margin` physical pixels from the
-/// edges (the taskbar is not known here, so the margin includes room for it).
-pub fn corner(
-    monitor: (i32, i32, u32, u32),
-    size: (u32, u32),
-    margin: u32,
-    taskbar: u32,
-) -> (i32, i32) {
-    let (x, y, w, h) = monitor;
+/// Where the card goes: the bottom-right corner of the work area of a monitor (what the taskbar
+/// leaves free), `margin` physical pixels from its edges.
+pub fn corner(work: (i32, i32, u32, u32), size: (u32, u32), margin: u32) -> (i32, i32) {
+    let (x, y, w, h) = work;
     (
         x + w as i32 - size.0 as i32 - margin as i32,
-        y + h as i32 - size.1 as i32 - (margin + taskbar) as i32,
+        y + h as i32 - size.1 as i32 - margin as i32,
     )
 }
 
@@ -71,6 +66,8 @@ const PAD_LEFT: f32 = 18.0;
 const THUMB: f32 = 76.0;
 const ICON: f32 = 24.0;
 const LIFETIME_MS: u32 = 7000;
+/// Lines of the body at most: a longer message is cut (the logs hold all of it).
+const BODY_LINES: u32 = 4;
 const ENTER: f64 = 0.26;
 
 /// What is under the pointer.
@@ -104,7 +101,7 @@ impl CardLayout {
         let text_x = (PAD_LEFT + picture_side + PAD) * u;
         let text_w = card_w - text_x - PAD * u;
         let heading = gfx.paragraph(&content.heading, 14.0 * u, true, text_w)?;
-        let body = gfx.paragraph(&content.body, 12.0 * u, false, text_w)?;
+        let body = gfx.paragraph_lines(&content.body, 12.0 * u, false, text_w, BODY_LINES)?;
         let gap = 3.0 * u;
         let (x0, y0) = (SIDE * u, ABOVE * u);
         let top = y0 + PAD * u;
@@ -373,11 +370,15 @@ impl Shared {
                 unsafe { SetCapture(card.popup.hwnd) };
                 card.press.set(Some(card.layout.at(x, y, look.hovered)));
             }
+            // Another window took the mouse: its release will not come here.
+            WM_CAPTURECHANGED => card.press.set(None),
             WM_LBUTTONUP => {
+                // Taken before the release, which reports a loss of the mouse.
+                let pressed = card.press.take();
                 // SAFETY: plain call.
                 let _ = unsafe { ReleaseCapture() };
                 let at = card.layout.at(x, y, look.hovered);
-                if card.press.take() == Some(at) {
+                if pressed == Some(at) {
                     let event = match at {
                         CardTarget::Card => Some(Some(ToastEvent::Activated)),
                         CardTarget::Button => Some(Some(ToastEvent::Action)),
@@ -420,13 +421,14 @@ impl Toasts {
         self.shared.current.borrow().is_none()
     }
 
-    /// Shows a card in the bottom-right corner of `monitor` (physical pixels, at `dpi`), in the
+    /// Shows a card in the bottom-right corner of `work`, the work area of a monitor (physical
+    /// pixels, at `dpi`), in the
     /// place of the one on screen (whose `done` is not called). `done` learns what the user did
     /// (`None`: the card went by itself or was closed) once the card is gone.
     pub fn show(
         &self,
         content: &ToastContent,
-        monitor: (i32, i32, u32, u32),
+        work: (i32, i32, u32, u32),
         dpi: u32,
         animate: bool,
         done: impl FnOnce(Option<ToastEvent>) + 'static,
@@ -435,7 +437,7 @@ impl Toasts {
         let gfx = &shared.gfx;
         let layout = CardLayout::new(gfx, content, dpi)?;
         let u = layout.u;
-        let (x, y) = corner(monitor, layout.size, (16.0 * u) as u32, (48.0 * u) as u32);
+        let (x, y) = corner(work, layout.size, (12.0 * u) as u32);
         let popup = Popup::new(gfx, (x, y, layout.size.0, layout.size.1), false, false)?;
         let piece = Piece::new(gfx, true)?;
         scene::add(&popup.root, &piece.visual)?;
@@ -507,11 +509,9 @@ mod tests {
 
     #[test]
     fn the_card_sits_in_the_bottom_right_corner() {
-        assert_eq!(corner((0, 0, 1920, 1080), (360, 96), 16, 48), (1544, 920));
-        // A second monitor to the left keeps its own corner.
-        assert_eq!(
-            corner((-1920, 0, 1920, 1080), (360, 96), 16, 48),
-            (-376, 920)
-        );
+        // Above a 48-pixel taskbar.
+        assert_eq!(corner((0, 0, 1920, 1032), (360, 96), 16), (1544, 920));
+        // A second monitor to the left keeps its own corner; a taskbar on top moves nothing.
+        assert_eq!(corner((-1920, 40, 1920, 1040), (360, 96), 16), (-376, 968));
     }
 }

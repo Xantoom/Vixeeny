@@ -308,6 +308,17 @@ impl Session {
         None
     }
 
+    /// Ends a gesture the window could not see the end of (it lost the mouse) where the pointer
+    /// last was. A zone finished this way waits for a real release to run its automatic command.
+    pub fn interrupt(&mut self) {
+        if self.target.is_none() {
+            return;
+        }
+        let auto = self.auto_command.take();
+        let _ = self.pointer_up(self.cursor, Modifiers::default());
+        self.auto_command = auto;
+    }
+
     /// Validates the text typed in the field opened by the Text tool.
     pub fn commit_text(&mut self, text: &str) {
         if let Some(at) = self.text_input.take() {

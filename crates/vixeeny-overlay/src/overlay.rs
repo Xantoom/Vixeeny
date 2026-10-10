@@ -12,14 +12,15 @@ use windows::Win32::Graphics::Dwm::DwmFlush;
 use windows::Win32::Graphics::Gdi::ValidateRect;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyState, ReleaseCapture, SetCapture, SetFocus, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent,
-    VK_BACK, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_LEFT, VK_NEXT,
+    VK_BACK, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_LEFT, VK_MENU, VK_NEXT,
     VK_PRIOR, VK_RETURN, VK_RIGHT, VK_SHIFT, VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     DestroyWindow, DispatchMessageW, GetMessageW, KillTimer, MSG, SW_HIDE, SW_SHOW,
     SW_SHOWNOACTIVATE, SetCursor, SetForegroundWindow, SetTimer, ShowWindow, TranslateMessage,
-    WM_CHAR, WM_CLOSE, WM_DPICHANGED, WM_ERASEBKGND, WM_KEYDOWN, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN,
-    WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_PAINT, WM_SETCURSOR, WM_SYSKEYDOWN, WM_TIMER,
+    WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_DPICHANGED, WM_ERASEBKGND, WM_KEYDOWN,
+    WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_PAINT,
+    WM_SETCURSOR, WM_SYSKEYDOWN, WM_TIMER,
 };
 
 use crate::gfx::{self, Gfx};
@@ -535,6 +536,12 @@ impl Shared {
                 self.run_command(Command::Close);
                 return Some(LRESULT(0));
             }
+            // Another window took the mouse (Alt+Tab, the Start menu…) in the middle of a press:
+            // its release will not come here.
+            WM_CAPTURECHANGED => {
+                self.lost_mouse();
+                return Some(LRESULT(0));
+            }
             _ => {}
         }
         if self.busy.get() || self.closing.get() {
@@ -692,12 +699,27 @@ impl Shared {
         self.refresh();
     }
 
+    /// Drops the press in progress; a drawing or a zone ends where the pointer last was.
+    fn lost_mouse(&self) {
+        let press = self.ui.borrow_mut().press.take();
+        if press.is_none() {
+            return;
+        }
+        if press == Some(Press::Image)
+            && let Ok(mut session) = self.session.try_borrow_mut()
+        {
+            session.interrupt();
+        }
+        self.refresh();
+    }
+
     fn pointer_released(&self, i: usize, x: f32, y: f32) {
         let pane = &self.panes[i];
+        // The press is taken first: releasing the mouse reports a loss of it (`lost_mouse`).
+        let press = self.ui.borrow_mut().press.take();
         // SAFETY: plain call.
         let _ = unsafe { ReleaseCapture() };
         let hit = self.hit(pane, x, y);
-        let press = self.ui.borrow_mut().press.take();
         match press {
             Some(Press::Button(k)) if hit == Some(Hover::Button(k)) => {
                 self.ui.borrow_mut().hover = hit;
@@ -817,9 +839,15 @@ impl Shared {
 
     /// A key went down; `false` when it was not for the editor.
     fn key(&self, vk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY) -> bool {
-        let ctrl = key_down(VK_CONTROL);
+        let alt = key_down(VK_MENU);
+        let held_ctrl = key_down(VK_CONTROL);
+        // AltGr reaches programs as Ctrl+Alt: it types characters (€, @…), it is no shortcut.
+        let ctrl = held_ctrl && !alt;
         let shift = key_down(VK_SHIFT);
         if self.ui.borrow().typing {
+            if alt && !held_ctrl {
+                return false; // Alt+F4 and the like
+            }
             self.edit_key(vk, ctrl);
             return true;
         }

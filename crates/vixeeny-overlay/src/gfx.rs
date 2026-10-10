@@ -373,7 +373,41 @@ impl Gfx {
             layout,
             width: m.widthIncludingTrailingWhitespace,
             height: m.height,
+            lines: m.lineCount,
         })
+    }
+
+    /// [`Gfx::paragraph`] on `max_lines` lines at most: a longer text is cut, ending with "…".
+    pub fn paragraph_lines(
+        &self,
+        text: &str,
+        size: f32,
+        bold: bool,
+        width: f32,
+        max_lines: u32,
+    ) -> Result<Paragraph> {
+        let whole = self.paragraph(text, size, bold, width)?;
+        if whole.lines <= max_lines {
+            return Ok(whole);
+        }
+        let cut = |chars: usize| {
+            let end = text
+                .char_indices()
+                .nth(chars)
+                .map_or(text.len(), |(i, _)| i);
+            format!("{}…", text[..end].trim_end())
+        };
+        // The most characters that still fit.
+        let (mut fits, mut over) = (0, text.chars().count());
+        while over - fits > 1 {
+            let mid = usize::midpoint(fits, over);
+            if self.paragraph(&cut(mid), size, bold, width)?.lines <= max_lines {
+                fits = mid;
+            } else {
+                over = mid;
+            }
+        }
+        self.paragraph(&cut(fits), size, bold, width)
     }
 
     /// An RGBA picture (straight alpha, `w`×`h`) as a Direct2D bitmap.
@@ -526,6 +560,7 @@ pub struct Paragraph {
     pub layout: IDWriteTextLayout,
     pub width: f32,
     pub height: f32,
+    pub lines: u32,
 }
 
 /// Drawing on a Direct2D context, in pixels.

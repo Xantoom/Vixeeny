@@ -64,6 +64,7 @@ mod tests {
             id: MonitorId(id),
             name: format!("DISPLAY{id}"),
             rect: PhysicalRect::new(x, y, w, h),
+            work: PhysicalRect::new(x, y, w, h),
             primary: id == 1,
             dpi,
             hdr: None,

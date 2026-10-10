@@ -12,10 +12,12 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::mpsc;
 
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::DirectComposition::{IDCompositionTarget, IDCompositionVisual2};
 use windows::Win32::Graphics::Dwm::DwmFlush;
-use windows::Win32::Graphics::Gdi::ValidateRect;
+use windows::Win32::Graphics::Gdi::{
+    GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, ValidateRect,
+};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     SetFocus, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent,
 };
@@ -184,6 +186,31 @@ pub const NO_ACTIVATE: LRESULT = LRESULT(MA_NOACTIVATE as isize);
 /// The answer to `msg` common to the popups that never take the keyboard, if any.
 pub fn passive(msg: u32) -> Option<LRESULT> {
     (msg == WM_MOUSEACTIVATE).then_some(NO_ACTIVATE)
+}
+
+/// The part of the monitor nearest to `p` that the taskbar and the docked bars leave free.
+pub fn work_area_at(p: POINT) -> Option<RECT> {
+    let mut info = MONITORINFO {
+        cbSize: size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: plain calls; `info` is a valid, sized out-pointer.
+    unsafe {
+        let monitor = MonitorFromPoint(p, MONITOR_DEFAULTTONEAREST);
+        GetMonitorInfoW(monitor, &mut info)
+            .as_bool()
+            .then_some(info.rcWork)
+    }
+}
+
+/// The top-left corner that keeps a `size` window at `at` inside `area` (pinned to its top-left
+/// corner when larger).
+pub fn keep_inside(at: (i32, i32), size: (i32, i32), area: RECT) -> (i32, i32) {
+    let fit = |v: i32, len: i32, lo: i32, hi: i32| v.min(hi - len).max(lo);
+    (
+        fit(at.0, size.0, area.left, area.right),
+        fit(at.1, size.1, area.top, area.bottom),
+    )
 }
 
 pub fn set_pointer(p: Pointer) {

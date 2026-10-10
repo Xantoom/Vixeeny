@@ -113,6 +113,7 @@ pub fn monitors() -> Result<Vec<MonitorInfo>> {
             id: MonitorId(handle.0 as usize as u64),
             name: String::from_utf16_lossy(&info.szDevice[..name_len]),
             rect: rect_of(info.monitorInfo.rcMonitor),
+            work: rect_of(info.monitorInfo.rcWork),
             primary: info.monitorInfo.dwFlags & MONITORINFOF_PRIMARY != 0,
             dpi: dpi_x,
             hdr: hdr_info(MonitorId(handle.0 as usize as u64)),

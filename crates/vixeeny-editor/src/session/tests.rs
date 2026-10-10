@@ -386,3 +386,21 @@ fn a_click_on_a_window_also_settles_the_zone() {
     s.pointer_down(p(110.0, 10.0), NO);
     assert_eq!(s.pointer_up(p(180.0, 80.0), NO), Some(Command::Scroll));
 }
+
+#[test]
+fn an_interrupted_gesture_ends_where_the_pointer_was_and_waits_for_a_release() {
+    let mut s = session().with_auto_command(Command::Scroll);
+    s.pointer_down(p(110.0, 10.0), NO);
+    s.pointer_move(p(180.0, 80.0), NO);
+    s.interrupt();
+    assert!(!s.in_gesture());
+    assert_eq!(s.zone(), Some(Rect::new(110.0, 10.0, 70.0, 70.0)));
+    // The pointer moves on without a button: the zone stays.
+    s.pointer_move(p(150.0, 50.0), NO);
+    assert_eq!(s.zone(), Some(Rect::new(110.0, 10.0, 70.0, 70.0)));
+    // The scrolling capture starts on a release the user makes.
+    s.pointer_down(p(120.0, 20.0), NO);
+    assert_eq!(s.pointer_up(p(120.0, 20.0), NO), Some(Command::Scroll));
+    // Nothing in progress: nothing happens.
+    s.interrupt();
+}

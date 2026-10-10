@@ -286,6 +286,7 @@ mod tests {
             id: MonitorId(id),
             name: format!("D{id}"),
             rect: PhysicalRect::new(x, 0, w, 100),
+            work: PhysicalRect::new(x, 0, w, 100),
             primary: id == 1,
             dpi: 96,
             hdr: None,

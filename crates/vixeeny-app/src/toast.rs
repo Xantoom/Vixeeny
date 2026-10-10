@@ -5,7 +5,7 @@
 //! once and reads the next cards on its standard input: a card costs no new process. It ends with
 //! the process that started it (its input closes), once its card is gone.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use vixeeny_common::config::Config;
 use vixeeny_common::i18n::Key;
@@ -206,12 +206,6 @@ fn decode_line(line: &str) -> Option<Toast> {
     Toast::from_args(kind, &text)
 }
 
-/// The folder that holds `path`.
-fn folder_of(path: &Path) -> PathBuf {
-    path.parent()
-        .map_or_else(|| path.to_owned(), Path::to_owned)
-}
-
 /// What the card shows, in the current language and theme.
 fn content_of(toast: &Toast) -> ToastContent {
     use vixeeny_common::i18n::tr;
@@ -254,7 +248,8 @@ fn content_of(toast: &Toast) -> ToastContent {
     }
 }
 
-/// Shows the card for `toast` in the bottom-right corner of the main monitor; `act` runs once it
+/// Shows the card for `toast` in the bottom-right corner of the main monitor, above its taskbar;
+/// `act` runs once it
 /// is gone.
 fn show(toasts: &Toasts, toast: Toast) -> anyhow::Result<()> {
     let content = content_of(&toast);
@@ -267,10 +262,10 @@ fn show(toasts: &Toasts, toast: Toast) -> anyhow::Result<()> {
     toasts.show(
         &content,
         (
-            monitor.rect.x,
-            monitor.rect.y,
-            monitor.rect.width,
-            monitor.rect.height,
+            monitor.work.x,
+            monitor.work.y,
+            monitor.work.width,
+            monitor.work.height,
         ),
         monitor.dpi,
         vixeeny_platform::animations_enabled(),
@@ -286,10 +281,7 @@ fn act(event: Option<ToastEvent>, toast: &Toast) {
             let _ = vixeeny_platform::open_path(&path.display().to_string());
         }
         (Some(ToastEvent::Action), Toast::Saved(_, path)) => {
-            let _ = std::process::Command::new("explorer.exe")
-                .arg(format!("/select,{}", path.display()))
-                .spawn();
-            let _ = folder_of(path);
+            let _ = vixeeny_platform::reveal(&path.display().to_string());
         }
         (Some(_), Toast::Failed(..)) => crate::open_settings(),
         (Some(_), Toast::Update(_)) => {
@@ -394,10 +386,5 @@ mod tests {
         assert_eq!(hint(&anyhow::anyhow!("something else")), None);
         let text = failure_text(&anyhow::anyhow!("boom"), vixeeny_common::i18n::Lang::En);
         assert_eq!(text, "boom");
-    }
-
-    #[test]
-    fn the_folder_of_a_file_is_its_parent() {
-        assert_eq!(folder_of(Path::new("a/b.png")), PathBuf::from("a"));
     }
 }

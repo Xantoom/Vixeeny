@@ -68,6 +68,8 @@ pub struct MonitorInfo {
     pub name: String,
     /// Position and size in the virtual desktop, physical pixels.
     pub rect: PhysicalRect,
+    /// The part of `rect` the taskbar and the docked bars leave free.
+    pub work: PhysicalRect,
     pub primary: bool,
     /// Effective DPI (96 = 100 %).
     pub dpi: u32,
@@ -146,6 +148,7 @@ mod tests {
             id: MonitorId(id),
             name: format!("DISPLAY{id}"),
             rect: PhysicalRect::new(x, y, w, h),
+            work: PhysicalRect::new(x, y, w, h),
             primary: id == 1,
             dpi,
             hdr: None,

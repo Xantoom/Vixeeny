@@ -341,3 +341,37 @@ fn the_recording_widget_draws_both_states() {
             .any(|p| p[2] > 200 && p[1] < 80)
     );
 }
+
+#[test]
+fn a_long_notification_text_is_cut_on_its_last_line() {
+    let gfx = Gfx::new().expect("graphics devices");
+    let text = "word ".repeat(400);
+    let whole = gfx.paragraph(&text, 12.0, false, 250.0).expect("laid out");
+    assert!(whole.lines > 4);
+    let cut = gfx
+        .paragraph_lines(&text, 12.0, false, 250.0, 4)
+        .expect("laid out");
+    assert_eq!(cut.lines, 4);
+    assert!(cut.height < whole.height / 4.0);
+    let short = gfx
+        .paragraph_lines("a few words", 12.0, false, 250.0, 4)
+        .expect("laid out");
+    assert_eq!(short.lines, 1);
+}
+
+#[test]
+fn a_dragged_window_stays_whole_on_its_screen() {
+    use crate::popup::keep_inside;
+    use windows::Win32::Foundation::RECT;
+    let work = RECT {
+        left: 0,
+        top: 0,
+        right: 1920,
+        bottom: 1032,
+    };
+    assert_eq!(keep_inside((100, 200), (300, 60), work), (100, 200));
+    assert_eq!(keep_inside((1800, 1000), (300, 60), work), (1620, 972));
+    assert_eq!(keep_inside((-50, -9), (300, 60), work), (0, 0));
+    // Wider than the screen: pinned to its left edge.
+    assert_eq!(keep_inside((500, 500), (4000, 60), work), (0, 500));
+}

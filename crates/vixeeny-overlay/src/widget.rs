@@ -14,8 +14,8 @@ use windows::Win32::Foundation::{LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
 use windows::Win32::UI::WindowsAndMessaging::{
     GetCursorPos, GetWindowRect, KillTimer, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetTimer,
-    SetWindowPos, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_SETCURSOR,
-    WM_TIMER,
+    SetWindowPos, WM_CAPTURECHANGED, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
+    WM_SETCURSOR, WM_TIMER,
 };
 use windows::core::Result;
 
@@ -352,19 +352,30 @@ impl Inner {
             WM_MOUSEMOVE => {
                 if let Some((start, (wx, wy))) = self.drag.get() {
                     let mut now = POINT::default();
-                    // SAFETY: plain calls; `now` is a valid out-pointer.
-                    unsafe {
-                        if GetCursorPos(&mut now).is_ok() {
-                            let _ = SetWindowPos(
+                    let mut r = RECT::default();
+                    // SAFETY: valid out-pointers, a window of this thread.
+                    let known = unsafe {
+                        GetCursorPos(&mut now).is_ok()
+                            && GetWindowRect(self.popup.hwnd, &mut r).is_ok()
+                    };
+                    if known {
+                        // Whole, on the screen under the pointer.
+                        let at = (wx + now.x - start.x, wy + now.y - start.y);
+                        let size = (r.right - r.left, r.bottom - r.top);
+                        let (x, y) = popup::work_area_at(now)
+                            .map_or(at, |area| popup::keep_inside(at, size, area));
+                        // SAFETY: plain call on a window of this thread.
+                        let _ = unsafe {
+                            SetWindowPos(
                                 self.popup.hwnd,
                                 None,
-                                wx + now.x - start.x,
-                                wy + now.y - start.y,
+                                x,
+                                y,
                                 0,
                                 0,
                                 SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
-                            );
-                        }
+                            )
+                        };
                     }
                     return Some(LRESULT(0));
                 }
@@ -402,12 +413,19 @@ impl Inner {
                     }
                 }
             }
+            // Another window took the mouse: its release will not come here.
+            WM_CAPTURECHANGED => {
+                self.drag.set(None);
+                self.press.set(None);
+            }
             WM_LBUTTONUP => {
+                // Taken before the release, which reports a loss of the mouse.
+                self.drag.set(None);
+                let pressed = self.press.take();
                 // SAFETY: plain call.
                 let _ = unsafe { ReleaseCapture() };
-                self.drag.set(None);
                 let at = widget_at(self.u, x, y);
-                if self.press.take() == Some(at) {
+                if pressed == Some(at) {
                     let event = match at {
                         WidgetTarget::Pause => Some(WidgetEvent::TogglePause),
                         WidgetTarget::Stop => Some(WidgetEvent::Stop),

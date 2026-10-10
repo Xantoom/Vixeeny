@@ -16,8 +16,9 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     VK_RIGHT, VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    KillTimer, PostMessageW, SetTimer, WA_INACTIVE, WM_ACTIVATE, WM_CLOSE, WM_KEYDOWN,
-    WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_SETCURSOR, WM_TIMER,
+    KillTimer, PostMessageW, SetTimer, WA_INACTIVE, WM_ACTIVATE, WM_CAPTURECHANGED, WM_CLOSE,
+    WM_KEYDOWN, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_SETCURSOR,
+    WM_TIMER,
 };
 use windows::core::Result;
 
@@ -950,10 +951,13 @@ impl Inner {
                 unsafe { SetCapture(self.popup.hwnd) };
                 self.model.borrow_mut().pointer_down(x, y);
             }
+            // Another window took the mouse: its release will not come here.
+            WM_CAPTURECHANGED => self.model.borrow_mut().press = None,
             WM_LBUTTONUP => {
+                // Before the release, which reports a loss of the mouse.
+                self.model.borrow_mut().pointer_up(x, y);
                 // SAFETY: plain call.
                 let _ = unsafe { ReleaseCapture() };
-                self.model.borrow_mut().pointer_up(x, y);
             }
             WM_KEYDOWN => {
                 let shift = key_down(VK_SHIFT);
