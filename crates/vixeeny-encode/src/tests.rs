@@ -307,6 +307,8 @@ fn resolution_settings() {
     assert_eq!(output_size("source", (2560, 1440)), Some((2560, 1440)));
     assert_eq!(output_size("1080p", (2560, 1440)), Some((1920, 1080)));
     assert_eq!(output_size("720p", (3440, 1440)), Some((1720, 720)));
+    // Never larger than the screen.
+    assert_eq!(output_size("2160p", (2560, 1440)), Some((2560, 1440)));
     assert_eq!(output_size("1280x720", (1, 1)), Some((1280, 720)));
     assert_eq!(output_size("0x720", (1, 1)), None);
     assert_eq!(output_size("p", (1, 1)), None);

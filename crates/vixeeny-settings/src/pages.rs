@@ -667,11 +667,12 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
         rows.push(aspect);
     }
     let (_, _, cw, ch) = validate::center_crop(screen, validate::aspect(&profile.aspect));
+    // The screen's size first, then only smaller ones: a height the screen does not reach (a
+    // setting from a larger screen) records at the screen's size, and shows as it.
     let mut sizes = vec![opt("source", size_name((cw, ch)))];
     for height in [2160u32, 1440, 1080, 720, 480] {
-        let value = format!("{height}p");
-        // Only smaller than the screen (the setting of another machine stays listed).
-        if height < ch || profile.resolution == value {
+        if height < ch {
+            let value = format!("{height}p");
             let size = validate::output_size(&value, (cw, ch)).unwrap_or((cw, ch));
             sizes.push(opt(&value, size_name(size)));
         }
@@ -680,7 +681,13 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
         "resolution",
         t(Key::SetResolution),
         sizes,
-        |c| c.video.resolution.clone(),
+        move |c| {
+            let value = c.video.resolution.clone();
+            match value.strip_suffix('p').and_then(|h| h.parse::<u32>().ok()) {
+                Some(h) if h >= ch => "source".to_owned(),
+                _ => value,
+            }
+        },
         |c, v| c.video.resolution = v,
     ));
     // Above 60 fps only what a monitor shows.

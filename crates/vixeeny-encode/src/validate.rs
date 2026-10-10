@@ -88,14 +88,17 @@ const fn max_sample_rate(family: Family) -> u64 {
     }
 }
 
-/// Output size of a `resolution` setting: `source`, `2160p`…`720p` (the ratio is kept), or
-/// `WxH`.
+/// Output size of a `resolution` setting: `source`, `2160p`…`720p` (the ratio is kept, never
+/// larger than the source: 2160p of a 1440p screen is 1440p), or `WxH`.
 pub fn output_size(setting: &str, source: (u32, u32)) -> Option<(u32, u32)> {
     if setting == "source" {
         return Some(source);
     }
     if let Some(lines) = setting.strip_suffix('p') {
         let h: u32 = lines.parse().ok().filter(|h| *h > 0)?;
+        if h >= source.1 {
+            return Some(source);
+        }
         // To the nearest even width (854 × 480 for 16:9).
         let w = (u64::from(source.0) * u64::from(h) + u64::from(source.1.max(1)))
             / (2 * u64::from(source.1.max(1)))

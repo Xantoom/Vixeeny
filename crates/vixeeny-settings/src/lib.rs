@@ -1029,6 +1029,16 @@ mod tests {
                 "854 × 480"
             ]
         );
+        // The screen's own height, set by name (or a larger screen's): the screen's size, once.
+        c.video.resolution = "2160p".into();
+        let video = rows(Section::Video, &uhd, &c);
+        assert_eq!(options(&video, "resolution").len(), 5);
+        let qhd = env().with_machine(screen(2560, 1440));
+        let video = rows(Section::Video, &qhd, &c);
+        assert_eq!(options(&video, "resolution")[0], "2560 × 1440 (QHD)");
+        assert_eq!(options(&video, "resolution").len(), 4);
+        assert!(matches!(row(&video, "resolution").value(&c), Value::Text(v) if v == "source"));
+        c.video.resolution = "source".into();
         // 16:9: nothing to choose.
         assert!(!video.iter().any(|r| r.id == "aspect"));
         assert!(!video.iter().any(|r| r.id == "ten_bit"));
