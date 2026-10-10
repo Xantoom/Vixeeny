@@ -8,7 +8,7 @@ pub mod clipboard;
 mod geometry;
 mod time;
 pub use geometry::{PhysicalRect, virtual_bounds};
-pub use time::{LocalTime, local_time};
+pub use time::{LocalTime, local_time, os_version, utc_offset_minutes};
 
 pub mod machine;
 mod windows_impl;
@@ -17,8 +17,9 @@ pub use windows_impl::{
     attach_console, cursor_position, ensure_dpi_aware, exe_icon, exe_metadata, focus_tagged_window,
     foreground_window, gpu_adapters, hdr_active, hdr_info, max_refresh_hz, monitors, monotonic_ns,
     on_click_outside, on_foreground_change, on_process_exit, open_path, process_alive,
-    process_path, set_app_id, single_instance, style_window, system_accent, system_prefers_dark,
-    tag_window, top_level_windows, user_locale, wait_for_composition, window_info,
+    process_path, reveal, set_app_id, single_instance, style_window, system_accent,
+    system_prefers_dark, tag_window, top_level_windows, user_locale, wait_for_composition,
+    window_info,
 };
 
 /// A graphics adapter as the OS reports it (the encoder probe derives its own view from it).

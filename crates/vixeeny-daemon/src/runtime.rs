@@ -321,7 +321,7 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
                 if old.hotkeys != self.config.hotkeys {
                     self.apply_hotkeys();
                 }
-                tracing::info!("config reloaded");
+                tracing::debug!("config reloaded");
             }
             // Keep running with the previous settings.
             Err(e) => tracing::warn!("config not reloaded: {e}"),

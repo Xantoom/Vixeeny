@@ -222,7 +222,7 @@ pub fn run(
         .map_err(|_| anyhow::anyhow!("the capture thread panicked"))?;
     ran.map_err(|e| anyhow::anyhow!("window: {e}"))?;
     let Some(stitched) = result? else {
-        tracing::info!("scrolling capture cancelled");
+        tracing::debug!("scrolling capture cancelled");
         return Ok(());
     };
     if stitched.truncated {
@@ -244,12 +244,8 @@ pub fn run(
     );
     let path =
         crate::region::save_bgra(config, &snapshot, ActionId::CaptureScrolling, &bitmap, None)?;
-    tracing::info!(
-        "saved {} ({}x{})",
-        path.display(),
-        frame.width,
-        frame.height
-    );
+    tracing::info!("scrolling capture saved ({}x{})", frame.width, frame.height);
+    tracing::debug!("saved {}", path.display());
     if config.image.copy_to_clipboard
         && let Err(e) = crate::region::copy_bgra(config, &bitmap)
     {

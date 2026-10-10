@@ -9,6 +9,7 @@ use ffmpeg_next::{codec, format, frame, media, software::scaling};
 /// side, or `None` when the file has no video or cannot be decoded.
 pub fn video_thumbnail(path: &Path, max_side: u32) -> Option<(u32, u32, Vec<u8>)> {
     ffmpeg_next::init().ok()?;
+    crate::ffmpeg_log::install();
     let mut input = format::input(path).ok()?;
     let stream = input.streams().best(media::Type::Video)?;
     let index = stream.index();

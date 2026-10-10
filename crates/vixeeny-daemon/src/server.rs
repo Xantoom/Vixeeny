@@ -123,7 +123,7 @@ fn connection(stream: Stream, id: u64, tx: &EventTx, link: &AppLink) -> Result<(
             ipc::write_msg(&mut send, &ControlReply::Ok)
         }
         Hello::App { pid } => {
-            tracing::info!("app connected (pid {pid}, connection {id})");
+            tracing::debug!("app connected (pid {pid}, connection {id})");
             link.install(id, send);
             tx.send(Event::AppConnected);
             let result = loop {

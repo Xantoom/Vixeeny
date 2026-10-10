@@ -234,7 +234,7 @@ impl Recorder {
             .name("vixeeny-record".into())
             .spawn(move || {
                 let _ = ffmpeg_next::init();
-                ffmpeg_next::log::set_level(ffmpeg_next::log::Level::Error);
+                crate::ffmpeg_log::install();
                 let worker = match Worker::open(config, namer, worker_stats) {
                     Ok(w) => {
                         let _ = ready_tx.send(Ok(()));

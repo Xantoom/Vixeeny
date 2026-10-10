@@ -44,7 +44,7 @@ impl Freezer for GpuFreezer {
             }
             match freeze::freeze(self.gpu.as_ref()?, &monitors) {
                 Ok(frozen) => {
-                    tracing::info!(
+                    tracing::debug!(
                         "{} screen(s) frozen in {:?}",
                         frozen.screens.len(),
                         started.elapsed()

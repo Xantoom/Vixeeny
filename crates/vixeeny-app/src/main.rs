@@ -29,11 +29,37 @@ use vixeeny_common::config::Config;
 use vixeeny_common::ipc::{self, ActionId, AppToDaemon, DaemonToApp, Endpoint, Hello};
 
 fn main() {
-    vixeeny_common::logging::init("vixeeny-app");
+    // The helper processes share the file: `settings`, `probe`, `toast`… say which one runs.
+    let program = std::env::args()
+        .nth(1)
+        .and_then(|a| a.strip_prefix("--").map(str::to_owned))
+        .filter(|a| a != "action" && a != "frozen")
+        .unwrap_or_else(|| "app".into());
+    vixeeny_common::logging::init(
+        "vixeeny-app",
+        &program,
+        log_clock,
+        &vixeeny_platform::os_version(),
+    );
     if let Err(e) = run() {
         tracing::error!("fatal: {e:#}");
         eprintln!("vixeeny-app: {e:#}");
         std::process::exit(1);
+    }
+}
+
+/// The local time for the log lines.
+fn log_clock() -> vixeeny_common::logging::Stamp {
+    let t = vixeeny_platform::local_time();
+    vixeeny_common::logging::Stamp {
+        year: t.year,
+        month: t.month,
+        day: t.day,
+        hour: t.hour,
+        minute: t.minute,
+        second: t.second,
+        millisecond: t.millisecond,
+        offset_minutes: vixeeny_platform::utc_offset_minutes(),
     }
 }
 
@@ -69,7 +95,7 @@ fn perform(action: ActionId, config: &Config, frozen: Option<ipc::Frozen>) {
         CaptureFullscreen | CaptureWindow | CaptureAllMonitors => {
             match direct_capture(action, config) {
                 Ok(path) => {
-                    tracing::info!("saved {}", path.display());
+                    tracing::debug!("saved {}", path.display());
                     toast::notify(config, &toast::Toast::Saved(toast::Saved::Image, path));
                 }
                 Err(e) => {
@@ -80,7 +106,7 @@ fn perform(action: ActionId, config: &Config, frozen: Option<ipc::Frozen>) {
                 }
             }
         }
-        other => tracing::info!("action {other:?} is not implemented yet"),
+        other => tracing::debug!("action {other:?} is not implemented yet"),
     }
 }
 
@@ -132,7 +158,7 @@ fn direct_capture(action: ActionId, config: &Config) -> anyhow::Result<std::path
         (format, &settings),
         &vixeeny_platform::exe_metadata,
     )?;
-    tracing::info!("direct capture took {:?}", started.elapsed());
+    tracing::info!("screenshot taken in {:?}", started.elapsed());
     Ok(path)
 }
 
@@ -358,7 +384,13 @@ impl Recording {
         }
         match record::start_replay(config) {
             Ok(handle) => {
-                tracing::info!("full-screen game ({}): replay started", game.title);
+                // The program, not the window title (which may be personal).
+                let exe = game
+                    .exe_path
+                    .as_deref()
+                    .and_then(|p| std::path::Path::new(p).file_name())
+                    .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+                tracing::info!("full-screen program ({exe}): replay started");
                 self.replay = Some(handle);
                 self.replay_game = Some(game.pid);
                 if let Some(look) = self.look.clone() {
@@ -395,7 +427,7 @@ impl Recording {
             ActionId::ReplaySave => {
                 match &self.replay {
                     Some(replay) => replay.save(),
-                    None => tracing::info!("replay save ignored: the buffer is not running"),
+                    None => tracing::debug!("replay save ignored: the buffer is not running"),
                 }
                 return;
             }
@@ -477,6 +509,8 @@ fn run() -> anyhow::Result<()> {
         Some("--update") => return update::run_child(&args[1..]),
         Some("--system-info") => {
             vixeeny_platform::attach_console();
+            // The displays in physical pixels, as the settings window reports them.
+            vixeeny_platform::ensure_dpi_aware();
             let config = vixeeny_common::paths::config_file()
                 .and_then(|path| Config::load(&path).ok())
                 .unwrap_or_default();

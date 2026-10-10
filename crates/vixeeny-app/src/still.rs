@@ -239,7 +239,7 @@ pub fn run<B: StillBackend>(
     let grabbed = started.elapsed();
     let image = Bgra::new(frame.width, frame.height, frame.stride, &frame.data);
     let path = save_image(action, snap, dest, output, metadata, &image)?;
-    tracing::info!(
+    tracing::debug!(
         "grabbed in {grabbed:?}, encoded and written in {:?}",
         started.elapsed() - grabbed
     );

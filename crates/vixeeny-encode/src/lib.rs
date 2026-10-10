@@ -15,6 +15,7 @@ pub mod validate;
 
 pub mod audio;
 pub mod denoise;
+pub mod ffmpeg_log;
 pub mod ffmpeg_probe;
 pub mod gpu;
 pub mod recorder;

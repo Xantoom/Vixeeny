@@ -79,7 +79,7 @@ pub fn output_command(
             };
             Some(match save(config, snapshot, action, &img, chosen) {
                 Ok(path) => {
-                    tracing::info!("saved {}", path.display());
+                    tracing::debug!("saved {}", path.display());
                     if config.image.copy_to_clipboard
                         && let Err(e) = copy_to_clipboard(config, &img)
                     {
@@ -258,7 +258,7 @@ fn frozen_desktop(
 
 pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Result<()> {
     let started = Instant::now();
-    tracing::info!(
+    tracing::debug!(
         "zone capture ({mode:?}) starting{}",
         if frozen.is_some() {
             " on the frozen screens"
@@ -271,7 +271,7 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
     let monitors = vixeeny_platform::monitors()?;
     let cursor = vixeeny_platform::cursor_position()?;
     let foreground = vixeeny_platform::foreground_window()?;
-    tracing::info!(
+    tracing::debug!(
         "{} monitor(s) after {:?}",
         monitors.len(),
         started.elapsed()
@@ -299,7 +299,7 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
                 .context("unexpected capture buffer")?
         }
     };
-    tracing::info!(
+    tracing::debug!(
         "screen read ({}x{}) after {:?}",
         base.width,
         base.height,
@@ -388,11 +388,11 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
     )
     .map_err(|e| anyhow::anyhow!("cannot create the editor window: {e}"))?;
     overlay.set_tips(&tips);
-    tracing::info!("editor ready after {:?}", started.elapsed());
+    tracing::debug!("editor ready after {:?}", started.elapsed());
     // The windows appear with their content, over the frozen screens, which then go.
     let shown = thaw.clone();
     overlay.on_first_frame(move |_| {
-        tracing::info!("editor on screen after {:?}", started.elapsed());
+        tracing::debug!("editor on screen after {:?}", started.elapsed());
         shown.release();
     });
     let result = overlay.run(cursor);

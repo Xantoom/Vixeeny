@@ -670,6 +670,34 @@ pub fn open_path(path: &str) -> Result<()> {
     }
 }
 
+/// Opens the folder of `path` in the Explorer with the file selected.
+pub fn reveal(path: &str) -> Result<()> {
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    use windows::core::{PCWSTR, w};
+    let args: Vec<u16> = format!("/select,\"{path}\"")
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    // SAFETY: every string is NUL-terminated and outlives the call.
+    let result = unsafe {
+        ShellExecuteW(
+            None,
+            w!("open"),
+            w!("explorer.exe"),
+            PCWSTR(args.as_ptr()),
+            None,
+            SW_SHOWNORMAL,
+        )
+    };
+    // Values above 32 mean success.
+    if result.0 as usize > 32 {
+        Ok(())
+    } else {
+        Err(PlatformError::Os(format!("cannot show {path}")))
+    }
+}
+
 /// Looks up the DXGI output of `monitor`: `(is HDR, peak nits, GDI device name)`.
 fn dxgi_output(monitor: MonitorId) -> Option<(bool, f32, [u16; 32])> {
     // SAFETY: plain DXGI enumeration; every interface is reference counted by the bindings.
@@ -877,12 +905,19 @@ pub fn attach_console() {
         CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_WRITE, OPEN_EXISTING,
     };
     use windows::Win32::System::Console::{
-        ATTACH_PARENT_PROCESS, AttachConsole, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE, SetStdHandle,
+        ATTACH_PARENT_PROCESS, AttachConsole, GetStdHandle, STD_ERROR_HANDLE, STD_HANDLE,
+        STD_OUTPUT_HANDLE, SetStdHandle,
     };
     use windows::core::w;
     // SAFETY: console attachment and handle replacement have no memory-safety preconditions;
     // the handle opened here is intentionally kept for the life of the process.
     unsafe {
+        // Output redirected to a file or a pipe (`> report.txt`) stays there.
+        let missing = |which: STD_HANDLE| GetStdHandle(which).is_ok_and(|h| h.is_invalid());
+        let (out_missing, err_missing) = (missing(STD_OUTPUT_HANDLE), missing(STD_ERROR_HANDLE));
+        if !out_missing && !err_missing {
+            return;
+        }
         if AttachConsole(ATTACH_PARENT_PROCESS).is_err() {
             return;
         }
@@ -895,8 +930,12 @@ pub fn attach_console() {
             FILE_ATTRIBUTE_NORMAL,
             None,
         ) {
-            let _ = SetStdHandle(STD_OUTPUT_HANDLE, out);
-            let _ = SetStdHandle(STD_ERROR_HANDLE, out);
+            if out_missing {
+                let _ = SetStdHandle(STD_OUTPUT_HANDLE, out);
+            }
+            if err_missing {
+                let _ = SetStdHandle(STD_ERROR_HANDLE, out);
+            }
         }
     }
 }
@@ -1033,13 +1072,20 @@ mod tests {
             .spawn()
             .unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
-        assert!(super::on_process_exit(child.id(), move || tx.send(()).unwrap()));
-        assert!(rx.recv_timeout(Duration::from_millis(200)).is_err(), "still running");
+        assert!(super::on_process_exit(child.id(), move || tx
+            .send(())
+            .unwrap()));
+        assert!(
+            rx.recv_timeout(Duration::from_millis(200)).is_err(),
+            "still running"
+        );
         child.wait().unwrap();
         rx.recv_timeout(Duration::from_secs(5)).unwrap();
         // A process already gone: at once.
         let (tx, rx) = std::sync::mpsc::channel();
-        assert!(super::on_process_exit(child.id(), move || tx.send(()).unwrap()));
+        assert!(super::on_process_exit(child.id(), move || tx
+            .send(())
+            .unwrap()));
         rx.recv_timeout(Duration::from_secs(5)).unwrap();
     }
 

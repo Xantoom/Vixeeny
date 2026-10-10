@@ -117,7 +117,7 @@ fn with_target(audio: &config::Audio) -> config::Audio {
             !lower.starts_with("vixeeny") && lower != "explorer.exe"
         });
     let source = exe.map_or_else(|| "system".to_owned(), |exe| format!("app:{exe}"));
-    tracing::info!("the recorded program's sound: {source}");
+    tracing::debug!("the recorded program's sound: {source}");
     let swap = |list: &mut Vec<String>| {
         for s in list.iter_mut().filter(|s| *s == config::TARGET_SOURCE) {
             s.clone_from(&source);
@@ -609,7 +609,16 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
             thread_state.store(IDLE, Ordering::Release);
             match result {
                 Ok(summary) => {
-                    tracing::info!("recording finished: {summary:?}");
+                    // The file names stay out of the log at this level: they are the user's.
+                    tracing::info!(
+                        "recording finished: {} frame(s) in {} file(s), {} repeated, {} dropped \
+                         (clock), {} dropped (encoder behind)",
+                        summary.frames,
+                        summary.files.len(),
+                        summary.repeated,
+                        summary.dropped_by_clock,
+                        summary.dropped_by_queue
+                    );
                     if let Some(file) = summary.files.first() {
                         let saved = Toast::Saved(Saved::Recording, file.clone());
                         crate::toast::notify(&notice, &saved);
@@ -642,8 +651,7 @@ fn save_replay(recorder: &Recorder, next_path: &mut SaveNamer, notice: &Config) 
             std::thread::spawn(move || match save.wait() {
                 Ok(path) => {
                     tracing::info!(
-                        "replay saved: {} ({seconds:.1} s, {:.2} s to write)",
-                        path.display(),
+                        "replay saved ({seconds:.1} s, {:.2} s to write)",
                         started.elapsed().as_secs_f64()
                     );
                     crate::toast::notify(&notice, &Toast::Saved(Saved::Replay, path));

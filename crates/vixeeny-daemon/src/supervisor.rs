@@ -76,7 +76,7 @@ impl Spawner for ProcessSpawner {
             command.arg("--frozen").arg(frozen.to_arg());
         }
         let mut child = command.spawn()?;
-        tracing::info!(
+        tracing::debug!(
             "started {} (pid {}, launch {id})",
             self.app_path.display(),
             child.id()

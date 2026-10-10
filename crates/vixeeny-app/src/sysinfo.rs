@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! "Copy system info" (plan M23): the block a bug report starts with. It holds what the
+//! The system info (plan M23): the block a bug report starts with ("Report a problem"). It holds what the
 //! maintainers need to reproduce a problem — version, system, display, GPUs, encoders — and
 //! nothing personal: no user name, no folder, no file name.
 
@@ -47,20 +47,8 @@ pub fn format(info: &Info) -> String {
     out
 }
 
-fn first_line(command: &str, args: &[&str]) -> Option<String> {
-    let mut command = std::process::Command::new(command);
-    command.args(args).stdin(std::process::Stdio::null());
-    std::os::windows::process::CommandExt::creation_flags(&mut command, 0x0800_0000); // no window
-    let output = command.output().ok()?;
-    let text = String::from_utf8_lossy(&output.stdout);
-    text.lines()
-        .map(str::trim)
-        .find(|l| !l.is_empty())
-        .map(str::to_owned)
-}
-
 fn os_name() -> String {
-    first_line("cmd", &["/C", "ver"]).unwrap_or_else(|| "Windows".into())
+    vixeeny_platform::os_version()
 }
 
 /// Collects the report of this machine. `probe` is the hardware probe (cached or fresh).
