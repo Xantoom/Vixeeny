@@ -408,6 +408,89 @@ pub fn on_click_outside(id: WindowId, clicked: Box<dyn Fn()>) -> Option<OutsideC
     }
 }
 
+/// Calls `changed` on a thread of its own each time another window comes to the foreground,
+/// for as long as the program runs. `false` when Windows refused the hook.
+pub fn on_foreground_change(changed: impl Fn() + Send + 'static) -> bool {
+    use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        DispatchMessageW, EVENT_SYSTEM_FOREGROUND, GetMessageW, MSG, WINEVENT_OUTOFCONTEXT,
+        WINEVENT_SKIPOWNPROCESS,
+    };
+    thread_local! {
+        static CHANGED: std::cell::RefCell<Option<Box<dyn Fn()>>> =
+            const { std::cell::RefCell::new(None) };
+    }
+    unsafe extern "system" fn event(
+        _: HWINEVENTHOOK,
+        _: u32,
+        _: HWND,
+        _: i32,
+        _: i32,
+        _: u32,
+        _: u32,
+    ) {
+        CHANGED.with(|c| {
+            if let Some(changed) = &*c.borrow() {
+                changed();
+            }
+        });
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    let spawned = std::thread::Builder::new()
+        .name("foreground".into())
+        .spawn(move || {
+            CHANGED.with(|c| *c.borrow_mut() = Some(Box::new(changed)));
+            // SAFETY: an out-of-context hook calls `event` from this thread's message loop
+            // below, which runs until the program ends.
+            let hook = unsafe {
+                SetWinEventHook(
+                    EVENT_SYSTEM_FOREGROUND,
+                    EVENT_SYSTEM_FOREGROUND,
+                    None,
+                    Some(event),
+                    0,
+                    0,
+                    WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS,
+                )
+            };
+            let _ = tx.send(!hook.is_invalid());
+            if hook.is_invalid() {
+                return;
+            }
+            let mut msg = MSG::default();
+            // SAFETY: a plain message loop on this thread.
+            while unsafe { GetMessageW(&mut msg, None, 0, 0) }.as_bool() {
+                // SAFETY: `msg` was filled by `GetMessageW`.
+                unsafe { DispatchMessageW(&msg) };
+            }
+        })
+        .is_ok();
+    spawned && rx.recv().unwrap_or(false)
+}
+
+/// Calls `ended` on a thread of its own when process `pid` ends (at once if it already has).
+/// `false` when no thread could be started.
+pub fn on_process_exit(pid: u32, ended: impl FnOnce() + Send + 'static) -> bool {
+    use windows::Win32::System::Threading::{INFINITE, PROCESS_SYNCHRONIZE, WaitForSingleObject};
+    // SAFETY: the handle is waited on, then closed, by the thread that receives it.
+    let process = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, false, pid) }.ok();
+    let process = process.map(|h| h.0 as usize);
+    std::thread::Builder::new()
+        .name("process-exit".into())
+        .spawn(move || {
+            if let Some(h) = process {
+                let h = HANDLE(h as *mut c_void);
+                // SAFETY: `h` is a live process handle owned by this thread.
+                unsafe {
+                    WaitForSingleObject(h, INFINITE);
+                    let _ = CloseHandle(h);
+                }
+            }
+            ended();
+        })
+        .is_ok()
+}
+
 /// The accent colour the user chose in Windows (`[r, g, b]`).
 pub fn system_accent() -> Option<[u8; 3]> {
     use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
@@ -937,6 +1020,29 @@ pub fn exe_icon(path: &str, size: u32) -> Option<(u32, u32, Vec<u8>)> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_foreground_can_be_watched() {
+        assert!(super::on_foreground_change(|| {}));
+    }
+
+    #[test]
+    fn the_end_of_a_process_is_reported() {
+        use std::time::Duration;
+        let mut child = std::process::Command::new("cmd")
+            .args(["/c", "ping -n 2 127.0.0.1 >nul"])
+            .spawn()
+            .unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        assert!(super::on_process_exit(child.id(), move || tx.send(()).unwrap()));
+        assert!(rx.recv_timeout(Duration::from_millis(200)).is_err(), "still running");
+        child.wait().unwrap();
+        rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        // A process already gone: at once.
+        let (tx, rx) = std::sync::mpsc::channel();
+        assert!(super::on_process_exit(child.id(), move || tx.send(()).unwrap()));
+        rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    }
+
     #[test]
     fn a_program_icon_is_read_with_its_transparency() {
         let windir = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());

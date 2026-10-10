@@ -5,7 +5,7 @@
 //! program also runs the settings, the notifications, the recording widget and the updates, each
 //! as a process of its own (see the `--` modes of `run`).
 
-use std::sync::mpsc::{RecvTimeoutError, channel};
+use std::sync::mpsc::{RecvTimeoutError, Sender, channel};
 use std::time::Duration;
 
 mod audio_rig;
@@ -311,7 +311,20 @@ struct Recording {
     declined: Option<u32>,
     /// When the foreground was last looked at.
     watched: Option<std::time::Instant>,
+    /// Asks the main loop to look at the foreground again (the game closed).
+    look: Option<Sender<Wake>>,
 }
+
+/// What wakes the main loop.
+enum Wake {
+    Daemon(DaemonToApp),
+    /// Another window came to the foreground, or the game of the replay closed.
+    Look,
+}
+
+/// While the replay is on, the foreground is looked at when it changes, and this often in case a
+/// game went full screen after taking the focus.
+const LOOK_AGAIN: Duration = Duration::from_secs(3);
 
 impl Recording {
     /// `(recording, replay buffer)` is running.
@@ -319,18 +332,10 @@ impl Recording {
         (self.handle.is_some(), self.replay.is_some())
     }
 
-    fn active(&self) -> bool {
-        self.handle.is_some() || self.replay.is_some()
-    }
-
     /// With the replay on: starts it when a full-screen game comes to the foreground, stops it
-    /// when that game closes. Looks once a second at most, unless `now`.
+    /// when that game closes. Looks every [`LOOK_AGAIN`] at most, unless `now`.
     fn watch(&mut self, config: &Config, now: bool) {
-        if !now
-            && self
-                .watched
-                .is_some_and(|t| t.elapsed() < Duration::from_secs(1))
-        {
+        if !now && self.watched.is_some_and(|t| t.elapsed() < LOOK_AGAIN) {
             return;
         }
         self.watched = Some(std::time::Instant::now());
@@ -356,6 +361,11 @@ impl Recording {
                 tracing::info!("full-screen game ({}): replay started", game.title);
                 self.replay = Some(handle);
                 self.replay_game = Some(game.pid);
+                if let Some(look) = self.look.clone() {
+                    vixeeny_platform::on_process_exit(game.pid, move || {
+                        let _ = look.send(Wake::Look);
+                    });
+                }
             }
             Err(e) => {
                 tracing::error!("cannot start the replay buffer: {e:#}");
@@ -503,6 +513,7 @@ fn run() -> anyhow::Result<()> {
     ipc::write_msg(&mut send, &AppToDaemon::Ready)?;
 
     let (tx, rx) = channel();
+    let look = tx.clone();
     std::thread::Builder::new()
         .name("ipc-read".into())
         .spawn(move || {
@@ -515,7 +526,7 @@ fn run() -> anyhow::Result<()> {
                 {
                     vixeeny_capture::freeze::release(&frozen);
                 }
-                if tx.send(msg).is_err() {
+                if tx.send(Wake::Daemon(msg)).is_err() {
                     break;
                 }
             }
@@ -525,7 +536,10 @@ fn run() -> anyhow::Result<()> {
         "vixeeny-app {} started for {first_action:?}",
         env!("CARGO_PKG_VERSION")
     );
-    let mut recording = Recording::default();
+    let mut recording = Recording {
+        look: Some(look.clone()),
+        ..Recording::default()
+    };
     // The daemon started this process for an action: it comes on the command line, not over the
     // connection (it is not queued on the daemon's side).
     let mut actions = Actions {
@@ -534,16 +548,33 @@ fn run() -> anyhow::Result<()> {
         send: &mut send,
     };
     actions.run(first_action, first_frozen)?;
+    let mut hooked = false;
+    // Only what the daemon sends counts as activity: not the foreground changing.
+    let mut idle_from = std::time::Instant::now();
     loop {
-        // While recording, or while the replay waits for a game, the app must not exit as idle;
-        // it polls instead.
-        let wait = if recording.active() || config.replay.enabled {
+        // While recording, the app polls the recording's state; while the replay is on, it
+        // waits for a game. It does not exit as idle meanwhile.
+        let polling = recording.handle.is_some();
+        let watching = config.replay.enabled || recording.replay.is_some();
+        if watching && !hooked {
+            let look = look.clone();
+            hooked = vixeeny_platform::on_foreground_change(move || {
+                let _ = look.send(Wake::Look);
+            });
+        }
+        if polling || watching {
+            idle_from = std::time::Instant::now();
+        }
+        let wait = if polling {
             Duration::from_millis(200)
+        } else if watching {
+            LOOK_AGAIN
         } else {
-            idle
+            idle.saturating_sub(idle_from.elapsed())
         };
         match rx.recv_timeout(wait) {
-            Ok(DaemonToApp::RunAction { action, frozen }) => {
+            Ok(Wake::Daemon(DaemonToApp::RunAction { action, frozen })) => {
+                idle_from = std::time::Instant::now();
                 Actions {
                     config: &mut config,
                     recording: &mut recording,
@@ -551,17 +582,21 @@ fn run() -> anyhow::Result<()> {
                 }
                 .run(action, frozen)?;
             }
-            Err(RecvTimeoutError::Timeout) if recording.active() || config.replay.enabled => {
+            Ok(Wake::Look) => recording.watch(&config, true),
+            Err(RecvTimeoutError::Timeout) if polling || watching => {
                 recording.watch(&config, false);
                 recording.report(&mut send)?;
             }
-            Ok(DaemonToApp::ConfigChanged) => {}
+            Ok(Wake::Daemon(DaemonToApp::ConfigChanged)) => {}
             // The daemon asked us to stop, or went away.
-            Ok(DaemonToApp::Shutdown) | Err(RecvTimeoutError::Disconnected) => return Ok(()),
-            Err(RecvTimeoutError::Timeout) => {
+            Ok(Wake::Daemon(DaemonToApp::Shutdown)) | Err(RecvTimeoutError::Disconnected) => {
+                return Ok(());
+            }
+            Err(RecvTimeoutError::Timeout) if idle_from.elapsed() >= idle => {
                 ipc::write_msg(&mut send, &AppToDaemon::Idle)?;
                 return Ok(());
             }
+            Err(RecvTimeoutError::Timeout) => {}
         }
     }
 }
