@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The shortcuts table (plan 5.13, section 3): three slots per action, checked as they are typed.
+//! The shortcuts table (plan 5.13, section 3): two slots per action, checked as they are typed.
 
 use vixeeny_common::config::{Config, Hotkeys};
 use vixeeny_common::hotkey::{Hotkey, MAX_PER_ACTION};
@@ -140,7 +140,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_table_has_three_slots_per_action_with_the_defaults_filled_in() {
+    fn the_table_has_two_slots_per_action_with_the_defaults_filled_in() {
         let config = Config::default();
         let table = table(&config);
         assert_eq!(table.len(), 11);
@@ -150,7 +150,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             save.1,
-            ["Ctrl+Shift+S".to_owned(), String::new(), String::new()]
+            ["Ctrl+Shift+S".to_owned(), String::new()]
         );
     }
 

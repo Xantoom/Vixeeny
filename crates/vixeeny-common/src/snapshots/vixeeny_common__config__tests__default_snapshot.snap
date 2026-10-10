@@ -2,7 +2,7 @@
 source: crates/vixeeny-common/src/config.rs
 expression: "Config::default().to_toml().unwrap()"
 ---
-schema_version = 5
+schema_version = 6
 
 [general]
 language = "auto"

@@ -159,7 +159,7 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
                 ProblemKind::Invalid(e) => tracing::warn!("shortcut `{text}` for {action:?}: {e}"),
                 ProblemKind::TooMany => {
                     tracing::warn!(
-                        "shortcut `{text}` for {action:?} ignored: at most 3 per action"
+                        "shortcut `{text}` for {action:?} ignored: at most 2 per action"
                     );
                 }
                 ProblemKind::Duplicate => {

@@ -10,8 +10,8 @@ use std::fmt;
 use crate::config::Hotkeys;
 use crate::ipc::ActionId;
 
-/// CA-HK-1: 0 to 3 shortcuts per action.
-pub const MAX_PER_ACTION: usize = 3;
+/// 0 to 2 shortcuts per action.
+pub const MAX_PER_ACTION: usize = 2;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct Modifiers {
@@ -330,9 +330,9 @@ mod tests {
     }
 
     #[test]
-    fn at_most_three_per_action() {
+    fn at_most_two_per_action() {
         let mut k = Hotkeys::default();
-        k.open_settings = ["Ctrl+1", "Ctrl+2", "Ctrl+3", "Ctrl+4"]
+        k.open_settings = ["Ctrl+1", "Ctrl+2", "Ctrl+3"]
             .map(String::from)
             .into();
         let r = resolve(&k);
@@ -341,12 +341,12 @@ mod tests {
             .iter()
             .filter(|(a, _)| *a == ActionId::OpenSettings)
             .count();
-        assert_eq!(count, 3);
+        assert_eq!(count, 2);
         assert_eq!(
             r.problems,
             vec![Problem {
                 action: ActionId::OpenSettings,
-                text: "Ctrl+4".into(),
+                text: "Ctrl+3".into(),
                 kind: ProblemKind::TooMany
             }]
         );

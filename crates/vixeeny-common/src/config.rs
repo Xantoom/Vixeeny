@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::ipc::ActionId;
 
 /// Schema version written by this build. Bump it and add a migration to [`MIGRATIONS`].
-pub const SCHEMA_VERSION: u32 = 5;
+pub const SCHEMA_VERSION: u32 = 6;
 
 /// `MIGRATIONS[n]` upgrades a table from schema `n + 1` to `n + 2`.
 pub type Migration = fn(&mut toml::Table);
@@ -18,6 +18,7 @@ pub const MIGRATIONS: &[Migration] = &[
     v2_single_profile,
     v3_naming_per_kind,
     v4_widget_display,
+    v5_two_shortcuts,
 ];
 
 /// 0.9 → 1.0: MP4 recordings are fragmented (a recording cut short still plays), and the cursor
@@ -94,6 +95,16 @@ fn v4_widget_display(table: &mut toml::Table) {
     };
     if widget.remove("auto_hide").and_then(|v| v.as_bool()) == Some(true) {
         widget.insert("display".into(), "fade".into());
+    }
+}
+
+/// 1.0: two shortcuts per action, no longer three (the third is dropped).
+fn v5_two_shortcuts(table: &mut toml::Table) {
+    let Some(hotkeys) = table.get_mut("hotkeys").and_then(|h| h.as_table_mut()) else {
+        return;
+    };
+    for list in hotkeys.iter_mut().filter_map(|(_, v)| v.as_array_mut()) {
+        list.truncate(crate::hotkey::MAX_PER_ACTION);
     }
 }
 
@@ -856,6 +867,15 @@ mod tests {
         // Without them, the defaults.
         let cfg = Config::from_toml("schema_version = 3\n[paths]\nimages = \"x\"\n").unwrap();
         assert_eq!(cfg.paths.naming, PerKindNaming::default());
+    }
+
+    #[test]
+    fn a_third_shortcut_is_dropped() {
+        let cfg = Config::from_toml(
+            "schema_version = 5\n[hotkeys]\nopen_settings = [\"Ctrl+1\", \"Ctrl+2\", \"Ctrl+3\"]\n",
+        )
+        .unwrap();
+        assert_eq!(cfg.hotkeys.open_settings, ["Ctrl+1", "Ctrl+2"]);
     }
 
     #[test]
