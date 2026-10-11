@@ -1347,21 +1347,20 @@ mod tests {
     }
 
     #[test]
-    fn settings_explain_themselves_and_name_the_image_encoder() {
+    fn settings_explain_themselves_and_recommend_only_numbers() {
         let mut c = Config::default();
         c.video.preset = "custom".into();
         let video = rows(Section::Video, &with_nvenc(), &c);
-        assert!(
-            row(&video, "encoder_kind")
-                .info
-                .contains("Recommended: hardware")
-        );
-        assert!(row(&video, "p:preset").info.contains("P5"));
+        assert!(row(&video, "encoder_kind").info.starts_with("Hardware:"));
+        assert!(!row(&video, "encoder_kind").info.contains("Recommended"));
+        assert!(row(&video, "p:preset").info.contains("Recommended: P5"));
         assert!(row(&video, "p:rc.quality").info.contains("Recommended: 23"));
         // A setting with nothing to add has no "i".
         assert!(row(&video, "video_cursor").info.is_empty());
+        assert!(row(&video, "preset").info.is_empty());
         c.image.format = "jpeg".into();
         let image = rows(Section::Image, &env(), &c);
-        assert!(row(&image, "image_format").info.contains("jpegli"));
+        assert!(row(&image, "image_format").info.starts_with("Light files"));
+        assert!(row(&image, "jpeg_quality").info.is_empty());
     }
 }

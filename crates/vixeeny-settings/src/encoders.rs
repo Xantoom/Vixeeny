@@ -120,10 +120,10 @@ pub fn param_label(key: &str, lang: Lang) -> String {
         "rc.mode" => ("Rate control", "Contrôle du débit"),
         "rc.bitrate" => ("Bitrate (kbit/s)", "Débit (kbit/s)"),
         "rc.maxrate" => ("Maximum bitrate (kbit/s)", "Débit maximal (kbit/s)"),
-        "preset" => ("Speed / quality preset", "Préréglage vitesse / qualité"),
-        "tune" => ("Tuning", "Optimisation"),
+        "preset" => ("Encoder preset", "Preset de l'encodeur"),
+        "tune" => ("Tune", "Tune"),
         "quality" => ("Quality preset", "Préréglage de qualité"),
-        "multipass" => ("Two-pass encoding", "Encodage en deux passes"),
+        "multipass" => ("Multipass", "Multipasse"),
         "keyint" => (
             "Key-frame interval (frames, 0 = auto)",
             "Intervalle d'images clés (images, 0 = auto)",
@@ -143,24 +143,12 @@ pub fn param_label(key: &str, lang: Lang) -> String {
             "Quantification adaptative (VBAQ)",
         ),
         "preanalysis" => ("Pre-analysis", "Pré-analyse"),
-        "row-mt" => ("Multi-threaded rows", "Lignes multi-thread"),
-        "deadline" => ("Quality / speed", "Qualité / vitesse"),
-        "cpu-used" => (
-            "Speed (-8 = slowest, 8 = fastest)",
-            "Vitesse (-8 = la plus lente, 8 = la plus rapide)",
-        ),
+        "row-mt" => ("Row multithreading", "Multithread par lignes"),
+        "deadline" => ("Deadline", "Deadline"),
+        "cpu-used" => ("cpu-used (-8 to 8)", "cpu-used (-8 à 8)"),
         other => return other.to_owned(),
     };
     if lang == Lang::Fr { fr } else { en }.to_owned()
-}
-
-/// The hint of the quality and quantizer sliders.
-pub fn lower_is_better(lang: Lang) -> &'static str {
-    if lang == Lang::Fr {
-        "Plus bas = meilleure image, fichiers plus gros."
-    } else {
-        "Lower = better picture, larger files."
-    }
 }
 
 /// The label of a numbered preset (SVT-AV1).

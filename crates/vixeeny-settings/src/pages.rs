@@ -365,15 +365,12 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
                     |c, v| c.image.webp.quality = v as u8,
                 ));
             }
-            rows.push(hinted(
-                slider(
-                    "webp_effort",
-                    t(Key::SetEffort),
-                    (0, 6, 1),
-                    |c| i64::from(c.image.webp.effort),
-                    |c, v| c.image.webp.effort = v as u8,
-                ),
-                t(Key::SetEffortHint),
+            rows.push(slider(
+                "webp_effort",
+                t(Key::SetEffort),
+                (0, 6, 1),
+                |c| i64::from(c.image.webp.effort),
+                |c, v| c.image.webp.effort = v as u8,
             ));
         }
         "avif" => {
@@ -391,15 +388,12 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
                 |c| c.image.avif.depth.to_string(),
                 |c, v| c.image.avif.depth = v.parse().unwrap_or(10),
             ));
-            rows.push(hinted(
-                slider(
-                    "avif_speed",
-                    t(Key::SetAvifSpeed),
-                    (0, 10, 1),
-                    |c| i64::from(c.image.avif.speed),
-                    |c, v| c.image.avif.speed = v as u8,
-                ),
-                t(Key::SetAvifSpeedHint),
+            rows.push(slider(
+                "avif_speed",
+                t(Key::SetAvifSpeed),
+                (0, 10, 1),
+                |c| i64::from(c.image.avif.speed),
+                |c, v| c.image.avif.speed = v as u8,
             ));
         }
         "jxl" => {
@@ -418,15 +412,12 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
                     |c, v| c.image.jxl.quality = v as u8,
                 ));
             }
-            rows.push(hinted(
-                slider(
-                    "jxl_effort",
-                    t(Key::SetEffort),
-                    (1, 9, 1),
-                    |c| i64::from(c.image.jxl.effort),
-                    |c, v| c.image.jxl.effort = v as u8,
-                ),
-                t(Key::SetEffortHint),
+            rows.push(slider(
+                "jxl_effort",
+                t(Key::SetEffort),
+                (1, 9, 1),
+                |c| i64::from(c.image.jxl.effort),
+                |c, v| c.image.jxl.effort = v as u8,
             ));
         }
         _ => {}
@@ -534,19 +525,16 @@ fn custom_rows(env: &Env, config: &Config, encoder: &str) -> (Vec<Row>, Vec<Row>
         } else {
             "Quality"
         };
-        rows.push(hinted(
-            param_row(
-                format!("p:{key}"),
-                label.into(),
-                Kind::Slider {
-                    min: q.min,
-                    max: q.max,
-                    step: 1,
-                },
-                key.into(),
-                q.default.to_string(),
-            ),
-            encoders::lower_is_better(lang).into(),
+        rows.push(param_row(
+            format!("p:{key}"),
+            label.into(),
+            Kind::Slider {
+                min: q.min,
+                max: q.max,
+                step: 1,
+            },
+            key.into(),
+            q.default.to_string(),
         ));
     } else {
         let (min, max) = BITRATE_RANGE;

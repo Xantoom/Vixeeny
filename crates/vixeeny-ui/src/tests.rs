@@ -631,11 +631,11 @@ fn info_tooltip_stays_while_the_pointer_moves_on_its_dot() {
     };
     // The glyph, the ring, inside the dot off the glyph, and the margin around it.
     for (x, y) in [
-        (337.0, 285.0),
-        (331.5, 285.0),
-        (337.0, 280.0),
-        (333.0, 281.0),
-        (342.5, 289.5),
+        (396.0, 285.0),
+        (390.5, 285.0),
+        (396.0, 280.0),
+        (392.0, 281.0),
+        (401.5, 289.5),
     ] {
         for dx in [0.0, 0.5, 1.0, 1.5] {
             move_to(x + dx, y);
