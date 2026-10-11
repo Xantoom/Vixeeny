@@ -212,11 +212,24 @@ fn update_view(lang: Lang) -> UpdateView {
             detail: if state.checked_at == 0 {
                 tr(Key::UpdateNever, lang).into()
             } else {
-                String::new()
+                tr(Key::UpdateChecked, lang).replace("{when}", &moment(state.checked_at, lang))
             },
             progress: 0.0,
             action: tr(Key::SetCheckNow, lang).into(),
         },
+    }
+}
+
+/// A moment as the user reads it, in local time: `11/10/2026 à 14:32`, `2026-10-11, 14:32`.
+fn moment(unix: u64, lang: Lang) -> String {
+    let offset = i64::from(vixeeny_platform::utc_offset_minutes()) * 60;
+    let t = vixeeny_platform::LocalTime::from_unix_utc(unix.saturating_add_signed(offset), 0);
+    match lang {
+        Lang::Fr => format!(
+            "{:02}/{:02}/{} à {:02}:{:02}",
+            t.day, t.month, t.year, t.hour, t.minute
+        ),
+        _ => format!("{}, {:02}:{:02}", t.date(), t.hour, t.minute),
     }
 }
 

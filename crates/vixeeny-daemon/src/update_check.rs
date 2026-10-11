@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The daily update check (plan 10.2). The network client lives in the app: the daemon only
-//! starts `vixeeny-app --update background` once a day (a windowed program, so nothing shows)
-//! and the app checks, downloads and installs, or tells the user, by the settings.
+//! The update check (plan 10.2). The network client lives in the app: the daemon only starts
+//! `vixeeny-app --update background` every 12 hours (a windowed program, so nothing shows) and
+//! the app checks and downloads, or tells the user. At its start the daemon has the app install
+//! a version downloaded before (`--update pending`).
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -10,7 +11,7 @@ use vixeeny_common::config::Config;
 
 /// First check this long after the start, so it never competes with it.
 const FIRST_DELAY: Duration = Duration::from_secs(90);
-const PERIOD: Duration = Duration::from_secs(24 * 3600);
+const PERIOD: Duration = Duration::from_secs(12 * 3600);
 
 fn app_next_to_daemon() -> Option<PathBuf> {
     let path = std::env::current_exe()
@@ -28,6 +29,16 @@ pub fn spawn(config_path: Option<PathBuf>) {
         .name("update-check".into())
         .stack_size(128 * 1024)
         .spawn(move || {
+            // A version downloaded before goes in now (this daemon stops, the new one starts).
+            match std::process::Command::new(&app)
+                .args(["--update", "pending"])
+                .spawn()
+            {
+                Ok(mut child) => {
+                    let _ = child.wait();
+                }
+                Err(e) => tracing::warn!("cannot start the pending update: {e}"),
+            }
             std::thread::sleep(FIRST_DELAY);
             loop {
                 let enabled = config_path

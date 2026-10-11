@@ -778,9 +778,21 @@ mod tests {
         assert!(has(Section::Overlay, &c, "widget_corner"));
         c.recording_widget.enabled = false;
         assert!(!has(Section::Overlay, &c, "widget_corner"));
-        assert!(has(Section::Updates, &c, "auto_update"));
-        c.general.check_updates = false;
-        assert!(!has(Section::Updates, &c, "auto_update"));
+    }
+
+    #[test]
+    fn one_switch_checks_and_installs_updates() {
+        let mut c = Config::default();
+        let updates = rows(Section::Updates, &env(), &c);
+        assert_eq!(updates.len(), 1);
+        assert!(matches!(
+            row(&updates, "auto_update").value(&c),
+            Value::Bool(true)
+        ));
+        row(&updates, "auto_update")
+            .apply(&mut c, Value::Bool(false))
+            .unwrap();
+        assert!(!c.general.check_updates && !c.general.auto_update);
     }
 
     #[test]

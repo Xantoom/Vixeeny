@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! `vixeeny-app --update background`: the daily check the daemon starts. With automatic updates
-//! on, a new version is downloaded, verified and installed without a word (Vixeeny restarts by
-//! itself, after the end of a recording if one runs); otherwise the user is told once.
+//! `vixeeny-app --update background`: the check the daemon starts every 12 hours. With automatic
+//! updates on, a new version is downloaded and verified without a word, and installed at the next
+//! start of Vixeeny (or by the Restart button of the settings); otherwise the user is told once.
+//!
+//! `vixeeny-app --update pending`: run by the daemon as it starts; installs a downloaded version
+//! (the daemon stops, the new one starts).
 //!
 //! `vixeeny-app --update install [--settings]`: installs the downloaded version (the Restart
 //! button of the settings), then shows the settings again.
@@ -15,6 +18,13 @@ use vixeeny_updater::state::{self, State};
 pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     match args.first().map(String::as_str) {
         Some("background") => background(),
+        Some("pending") => match client::ready() {
+            Some(version) => {
+                tracing::info!("installing {version}, downloaded before");
+                client::install(None)
+            }
+            None => Ok(()),
+        },
         Some("install") => {
             let reopen = args
                 .iter()
@@ -40,7 +50,7 @@ fn background() -> anyhow::Result<()> {
     tracing::info!("version {} is available", release.version);
     if config.general.auto_update {
         client::download(&mut |_, _| {})?;
-        return client::install(None);
+        return Ok(());
     }
     // Told once per version.
     let Some(path) = state::file() else {

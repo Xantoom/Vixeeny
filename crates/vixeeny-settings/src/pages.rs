@@ -1487,20 +1487,16 @@ fn replay_estimate(env: &Env, config: &Config) -> Option<String> {
 }
 
 /// The settings of the updates page (the state of the update is drawn by the page).
-pub fn updates(env: &Env, config: &Config) -> Vec<Row> {
-    let mut rows = vec![toggle(
-        "check_updates",
-        env.t(Key::SetCheckUpdates),
-        |c| c.general.check_updates,
-        |c, v| c.general.check_updates = v,
-    )];
-    if config.general.check_updates {
-        rows.push(toggle(
-            "auto_update",
-            env.t(Key::SetAutoUpdate),
-            |c| c.general.auto_update,
-            |c, v| c.general.auto_update = v,
-        ));
-    }
-    rows
+/// One switch: checking and installing go together (a check every 12 hours, the download in
+/// the background, the installation at the next start).
+pub fn updates(env: &Env, _config: &Config) -> Vec<Row> {
+    vec![toggle(
+        "auto_update",
+        env.t(Key::SetAutoUpdate),
+        |c| c.general.check_updates && c.general.auto_update,
+        |c, v| {
+            c.general.check_updates = v;
+            c.general.auto_update = v;
+        },
+    )]
 }

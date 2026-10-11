@@ -656,6 +656,8 @@ export component SettingsWindow inherits Window {
                             description: root.update-detail;
                             glyph: root.update-state == 5 ? Icons.error
                                 : (root.update-state == 0 ? Icons.checkmark-circle : Icons.download);
+                            // Up to date: green.
+                            tint: root.update-state == 0 ? Theme.success : Theme.text;
                             if root.update-state == 3 || root.update-state == 6 : ProgressBar {
                                 width: 160px;
                                 value: root.update-state == 6 ? 1 : root.update-progress;

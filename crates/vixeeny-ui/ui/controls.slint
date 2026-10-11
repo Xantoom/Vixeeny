@@ -633,6 +633,8 @@ export component GroupRow inherits Rectangle {
     in property <image> icon;
     in property <bool> has-icon: false;
     in property <string> glyph;
+    // The colour of the glyph and the title (green for "all is well", for instance).
+    in property <color> tint: Theme.text;
     // A row that appears on a page already shown (a setting that only makes sense with the
     // one above): it unfolds from nothing instead of popping in.
     in property <bool> unfold: false;
@@ -696,7 +698,7 @@ export component GroupRow inherits Rectangle {
         y: (root.natural - self.height) / 2;
         data: root.glyph;
         size: 20px;
-        tint: Theme.text;
+        tint: root.tint;
         opacity: root.dimmed ? 0.45 : 1.0;
     }
     txt := VerticalLayout {
@@ -712,7 +714,7 @@ export component GroupRow inherits Rectangle {
             spacing: 6px;
             Text {
                 text: root.title;
-                color: Theme.text;
+                color: root.tint;
                 font-size: 14px;
                 wrap: word-wrap;
             }

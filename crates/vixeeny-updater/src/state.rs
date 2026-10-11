@@ -66,9 +66,9 @@ impl State {
             .filter(|r| crate::release::is_newer(current, &r.version))
     }
 
-    /// A check is due once a day.
+    /// A check is due every 12 hours.
     pub fn due(&self, now: u64) -> bool {
-        now.saturating_sub(self.checked_at) >= 24 * 3600
+        now.saturating_sub(self.checked_at) >= 12 * 3600
     }
 }
 

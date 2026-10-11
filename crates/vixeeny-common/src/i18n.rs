@@ -105,7 +105,6 @@ pub enum Key {
     SetReplayStart,
     SetReplayDuration,
     SetTemplate,
-    SetCheckUpdates,
     SetCheckNow,
     SetProblems,
     UiGithub,
@@ -300,6 +299,7 @@ pub enum Key {
     ToastDiskLow,
     ToastReplayDiskLow,
     SetWidgetPlaceHint,
+    UpdateChecked,
 }
 
 impl Key {
@@ -397,7 +397,6 @@ impl Key {
         Self::SetReplayStart,
         Self::SetReplayDuration,
         Self::SetTemplate,
-        Self::SetCheckUpdates,
         Self::SetCheckNow,
         Self::SetProblems,
         Self::UiGithub,
@@ -592,6 +591,7 @@ impl Key {
         Self::ToastDiskLow,
         Self::ToastReplayDiskLow,
         Self::SetWidgetPlaceHint,
+        Self::UpdateChecked,
     ];
 }
 
@@ -834,8 +834,6 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::SetReplayDuration, Lang::Fr) => "Durée",
         (Key::SetTemplate, Lang::En) => "File name",
         (Key::SetTemplate, Lang::Fr) => "Nom des fichiers",
-        (Key::SetCheckUpdates, Lang::En) => "Check for updates",
-        (Key::SetCheckUpdates, Lang::Fr) => "Rechercher les mises à jour",
         (Key::SetCheckNow, Lang::En) => "Check now",
         (Key::SetCheckNow, Lang::Fr) => "Vérifier maintenant",
         (Key::SetProblems, Lang::En) => "Problems with these settings",
@@ -984,16 +982,16 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::UpdateDownloading, Lang::Fr) => "Téléchargement de la version {version}…",
         (Key::UpdateReady, Lang::En) => "Version {version} is ready",
         (Key::UpdateReady, Lang::Fr) => "La version {version} est prête",
-        (Key::UpdateReadyHint, Lang::En) => "Restart Vixeeny to finish.",
-        (Key::UpdateReadyHint, Lang::Fr) => "Redémarrez Vixeeny pour terminer.",
+        (Key::UpdateReadyHint, Lang::En) => "It installs at the next start of Vixeeny.",
+        (Key::UpdateReadyHint, Lang::Fr) => "Elle s'installera au prochain démarrage de Vixeeny.",
         (Key::UpdateRestart, Lang::En) => "Restart",
         (Key::UpdateRestart, Lang::Fr) => "Redémarrer",
         (Key::UpdateView, Lang::En) => "View",
         (Key::UpdateView, Lang::Fr) => "Voir",
         (Key::UpdateNever, Lang::En) => "Never checked",
         (Key::UpdateNever, Lang::Fr) => "Jamais vérifié",
-        (Key::SetAutoUpdate, Lang::En) => "Install updates automatically",
-        (Key::SetAutoUpdate, Lang::Fr) => "Installer les mises à jour automatiquement",
+        (Key::SetAutoUpdate, Lang::En) => "Check for and install updates automatically",
+        (Key::SetAutoUpdate, Lang::Fr) => "Vérifier et installer les mises à jour automatiquement",
         (Key::OptAuto, Lang::En) => "Automatic",
         (Key::OptAuto, Lang::Fr) => "Automatique",
         (Key::OptFlac, Lang::En) => "FLAC (lossless)",
@@ -1270,6 +1268,8 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::SetWidgetPlaceHint, Lang::Fr) => {
             "Clique n'importe où sur l'écran pour une position personnalisée, ou déplace le widget pendant un enregistrement."
         }
+        (Key::UpdateChecked, Lang::En) => "Last checked: {when}",
+        (Key::UpdateChecked, Lang::Fr) => "Dernière vérification : {when}",
     }
 }
 

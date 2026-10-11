@@ -535,11 +535,20 @@ fn the_updates_and_about_pages_show_what_the_host_gives_them() {
     panel.set_update(&settings_panel::UpdateView {
         stage: settings_panel::UpdateStage::Ready,
         title: "Version 1.3.0 is ready".into(),
-        detail: "Restart Vixeeny to finish. It takes a second.".into(),
+        detail: "It installs at the next start of Vixeeny.".into(),
         progress: 1.0,
         action: "Restart".into(),
     });
     settings_render(&panel, "9-settings-updates-ready");
+    // Up to date: the card is green.
+    panel.set_update(&settings_panel::UpdateView {
+        stage: settings_panel::UpdateStage::Idle,
+        title: "Vixeeny is up to date".into(),
+        detail: "Last checked: 2026-10-11, 14:32".into(),
+        progress: 0.0,
+        action: "Check now".into(),
+    });
+    settings_render(&panel, "9-settings-updates-current");
 }
 
 #[test]
