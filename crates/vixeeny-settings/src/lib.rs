@@ -816,17 +816,17 @@ mod tests {
         };
         let mut c = Config::default();
         let slow = env();
-        assert_eq!(rates(&slow, &c), ["24", "30", "60"]);
+        assert_eq!(rates(&slow, &c), ["30", "60"]);
         let fast = env().with_display(Display {
             hdr: true,
             max_refresh: 144,
         });
-        assert_eq!(rates(&fast, &c), ["24", "30", "60", "90", "120", "144"]);
+        assert_eq!(rates(&fast, &c), ["30", "60", "120"]);
         let fps = |e: &Env, c: &Config| row(&rows(Section::Video, e, c), "fps").value(c);
         assert_eq!(fps(&slow, &c), Value::Text("60".into()));
         // A rate this machine does not offer shows as the closest one offered.
         c.video.fps = 144;
-        assert_eq!(fps(&fast, &c), Value::Text("144".into()));
+        assert_eq!(fps(&fast, &c), Value::Text("120".into()));
         assert_eq!(fps(&slow, &c), Value::Text("60".into()));
         // HDR: offered only while Windows shows it.
         c.video.hdr = "keep_hdr".into();
@@ -1181,6 +1181,8 @@ mod tests {
         assert_eq!(row(&audio, "mic_on").value(&c), Value::Bool(false));
         assert!(!has_in(&audio, "mic_device"));
         assert!(!has_in(&audio, "mic_level"));
+        // One track: nothing to route.
+        assert!(!has_in(&audio, "audio_routing"));
         // On: the Windows default, then the one picked.
         row(&audio, "mic_on")
             .apply(&mut c, Value::Bool(true))
@@ -1188,6 +1190,10 @@ mod tests {
         assert_eq!(c.video.audio.sources, ["system", "mic"]);
         let audio = rows(Section::Audio, &e, &c);
         assert!(has_in(&audio, "mic_level"));
+        match &row(&audio, "audio_routing").kind {
+            Kind::Choice(o) => assert_eq!(o.len(), 2),
+            _ => panic!("audio_routing is a choice"),
+        }
         match &row(&audio, "mic_device").kind {
             Kind::Choice(o) => assert_eq!(
                 o.iter().map(|o| o.label.as_str()).collect::<Vec<_>>(),
@@ -1353,14 +1359,19 @@ mod tests {
         let video = rows(Section::Video, &with_nvenc(), &c);
         assert!(row(&video, "encoder_kind").info.starts_with("Hardware:"));
         assert!(!row(&video, "encoder_kind").info.contains("Recommended"));
-        assert!(row(&video, "p:preset").info.contains("Recommended: P5"));
+        assert!(
+            row(&video, "p:preset")
+                .info
+                .contains("Recommended here: P5")
+        );
+        assert!(row(&video, "p:preset").info.contains("P6 and P7"));
         assert!(row(&video, "p:rc.quality").info.contains("Recommended: 23"));
         // A setting with nothing to add has no "i".
         assert!(row(&video, "video_cursor").info.is_empty());
         assert!(row(&video, "preset").info.is_empty());
         c.image.format = "jpeg".into();
         let image = rows(Section::Image, &env(), &c);
-        assert!(row(&image, "image_format").info.starts_with("Light files"));
+        assert!(row(&image, "image_format").info.is_empty());
         assert!(row(&image, "jpeg_quality").info.is_empty());
     }
 }

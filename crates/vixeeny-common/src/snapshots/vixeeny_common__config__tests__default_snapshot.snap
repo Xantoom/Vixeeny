@@ -56,7 +56,7 @@ hdr = "tonemap_sdr"
 copy_to_clipboard = false
 
 [image.png]
-compression = "fast"
+compression = "default"
 optimize = 0
 
 [image.jpeg]

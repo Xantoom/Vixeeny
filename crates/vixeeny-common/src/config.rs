@@ -345,7 +345,7 @@ pub struct Png {
 impl Default for Png {
     fn default() -> Self {
         Self {
-            compression: "fast".into(),
+            compression: "default".into(),
             optimize: 0,
         }
     }

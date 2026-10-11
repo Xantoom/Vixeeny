@@ -164,8 +164,7 @@ pub fn numbered_preset_label(min: i64, max: i64, lang: Lang) -> String {
 pub fn value_label(key: &str, value: &str, lang: Lang) -> String {
     let pair = match (key, value) {
         (_, "auto") => ("Auto", "Auto"),
-        // NVENC: P1 to P7. Above P5 the encoder struggles with 4K at 60 fps.
-        ("preset", "p5") => ("P5 (recommended)", "P5 (recommandé)"),
+        // NVENC: P1 to P7.
         ("preset", p) if p.len() == 2 && p.starts_with('p') => return p.to_uppercase(),
         // x264, x265, Quick Sync.
         ("preset", "ultrafast") => ("Ultra fast", "Ultra rapide"),

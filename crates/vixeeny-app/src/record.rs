@@ -310,10 +310,8 @@ fn plan(config: &Config, allow_gpu: bool, replay: bool) -> anyhow::Result<Plan> 
             .collect()
     } else {
         encoder
-            .presets
-            .get(preset)
-            .iter()
-            .map(|(k, v)| (k.clone(), v.to_ffmpeg()))
+            .preset_options(preset, output_size, profile.fps)
+            .into_iter()
             .collect()
     };
     let (mut audio, unknown) = vixeeny_audio::plan_tracks(&with_target(&profile.audio));

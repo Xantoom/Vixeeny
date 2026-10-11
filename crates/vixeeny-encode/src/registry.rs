@@ -405,6 +405,109 @@ impl Encoder {
         options
     }
 
+    /// The speed option that keeps up with `pixel_rate` (width × height × frames a second), and
+    /// its value: the slowest (best) one the encoder still sustains while a game runs. A
+    /// recent encoder (AV1 hardware: RTX 40, RX 7000, Arc and later) affords one step more.
+    pub fn speed_for(&self, pixel_rate: u64) -> Option<(&'static str, String)> {
+        // 1080p60, 1440p60 (1080p120), 4K60 (1440p120), 4K120 (1440p240), above.
+        const TIERS: [u64; 4] = [130_000_000, 260_000_000, 520_000_000, 1_000_000_000];
+        let tier = TIERS.iter().filter(|t| pixel_rate > **t).count();
+        let av1 = self.family == Family::Av1;
+        let (key, steps): (&str, [&str; 5]) = match self.id.as_str() {
+            // P6 and P7 add little and cost a lot; P1 and P2 split a frame across the encoders
+            // of the large cards (4K at a high rate).
+            i if i.starts_with("nvenc") && av1 => ("preset", ["p6", "p5", "p4", "p3", "p2"]),
+            i if i.starts_with("nvenc") => ("preset", ["p5", "p5", "p4", "p3", "p2"]),
+            i if i.starts_with("amf") && av1 => (
+                "quality",
+                ["quality", "quality", "quality", "balanced", "speed"],
+            ),
+            i if i.starts_with("amf") => (
+                "quality",
+                ["quality", "quality", "balanced", "speed", "speed"],
+            ),
+            i if i.starts_with("qsv") && av1 => {
+                ("preset", ["slow", "medium", "medium", "fast", "veryfast"])
+            }
+            i if i.starts_with("qsv") => {
+                ("preset", ["medium", "medium", "fast", "faster", "veryfast"])
+            }
+            // Software encoders share the processor with the game.
+            "libx264" => (
+                "preset",
+                [
+                    "veryfast",
+                    "superfast",
+                    "ultrafast",
+                    "ultrafast",
+                    "ultrafast",
+                ],
+            ),
+            "libx265" => (
+                "preset",
+                [
+                    "superfast",
+                    "ultrafast",
+                    "ultrafast",
+                    "ultrafast",
+                    "ultrafast",
+                ],
+            ),
+            "libsvtav1" => ("preset", ["10", "11", "12", "13", "13"]),
+            "libvpx_vp9" => ("cpu-used", ["6", "7", "8", "8", "8"]),
+            _ => return None,
+        };
+        Some((key, steps[tier].to_owned()))
+    }
+
+    /// The FFmpeg options of a simple preset for a recording of `size` at `fps`: the encoder's
+    /// speed follows the number of pixels to encode, and from 4K on the quality scale eases a
+    /// little (the same look, much lighter files).
+    pub fn preset_options(
+        &self,
+        preset: PresetName,
+        (width, height): (u32, u32),
+        fps: u32,
+    ) -> BTreeMap<String, String> {
+        let mut options: BTreeMap<String, String> = self
+            .presets
+            .get(preset)
+            .iter()
+            .map(|(k, v)| (k.clone(), v.to_ffmpeg()))
+            .collect();
+        let rate = u64::from(width) * u64::from(height) * u64::from(fps.max(1));
+        // The fast preset keeps its own speed.
+        if preset != PresetName::Performance
+            && let Some((key, value)) = self.speed_for(rate)
+            && let Some(param) = self.params.iter().find(|p| p.key == key)
+            && options.contains_key(&param.ffmpeg_option)
+        {
+            options.insert(param.ffmpeg_option.clone(), value);
+        }
+        if height >= 2000 {
+            let scale = &self.rate_control.quality;
+            // One step of a 0-51 scale, as much on the others.
+            let ease = ((scale.max - scale.min) as f64 / 51.0).round().max(1.0) as i64;
+            let quality_options: Vec<String> = self
+                .rate_control
+                .modes
+                .get(&RateMode::Quality)
+                .into_iter()
+                .flatten()
+                .filter(|(_, v)| v.to_ffmpeg().contains("{quality}"))
+                .map(|(k, _)| k.clone())
+                .collect();
+            for key in quality_options {
+                if let Some(value) = options.get_mut(&key)
+                    && let Ok(n) = value.parse::<i64>()
+                {
+                    *value = (n + ease).clamp(scale.min, scale.max).to_string();
+                }
+            }
+        }
+        options
+    }
+
     pub fn supports_format(&self, depth: u8, chroma: Chroma) -> bool {
         self.pixel_formats
             .iter()

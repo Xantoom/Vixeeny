@@ -740,3 +740,27 @@ fn a_wide_screen_is_cropped_in_its_middle() {
     );
     assert_eq!(center_crop((1920, 1080), None), (0, 0, 1920, 1080));
 }
+
+#[test]
+fn simple_presets_follow_the_resolution_and_frame_rate() {
+    use crate::registry::PresetName;
+    let r = registry();
+    let av1 = r.get("nvenc_av1").unwrap();
+    let opts = |size, fps| av1.preset_options(PresetName::Quality, size, fps);
+    // 1080p60: one step slower than the registry; 4K60: faster, and a lighter quality scale.
+    assert_eq!(opts((1920, 1080), 60)["preset"], "p6");
+    assert_eq!(opts((1920, 1080), 60)["cq"], "24");
+    assert_eq!(opts((3840, 2160), 60)["preset"], "p4");
+    assert_eq!(opts((3840, 2160), 60)["cq"], "25");
+    assert_eq!(opts((3840, 2160), 144)["preset"], "p2");
+    // The fast preset keeps its own speed.
+    assert_eq!(
+        av1.preset_options(PresetName::Performance, (1920, 1080), 60)["preset"],
+        "p2"
+    );
+    // Software: a speed the processor sustains beside the game.
+    let x264 = r.get("libx264").unwrap();
+    assert_eq!(x264.speed_for(1920 * 1080 * 60).unwrap().1, "veryfast");
+    assert_eq!(x264.speed_for(3840 * 2160 * 60).unwrap().1, "ultrafast");
+    assert!(r.encoders().all(|e| e.speed_for(1).is_some()));
+}

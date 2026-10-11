@@ -47,10 +47,20 @@ export struct SearchHit {
     section: int,
 }
 
-// A line of the sheet of this computer, on the general page.
-export struct PcLine {
-    label: string,
-    value: string,
+// A card of this computer, on the general page.
+export struct PcTile {
+    // 0 processor, 1 graphics, 2 memory, 3 screen, 4 disk
+    kind: int,
+    title: string,
+    detail: string,
+    // What the part is, while the pointer rests on the card.
+    tip: string,
+    // A disk's used share, 0 to 1 (-1: none).
+    used: float,
+    // A screen's width over its height, its number, and whether it is the main one.
+    aspect: float,
+    badge: string,
+    primary: bool,
 }
 
 // Chevrons, 20x20: the open expander's, and the one that leads to a setting found.
@@ -59,38 +69,143 @@ global Glyphs {
     out property <string> chevron-up: "M15.35 12.85A0.5 0.5 0 0 1 14.65 12.85L10 8.21L5.35 12.85A0.5 0.5 0 0 1 4.65 12.15L9.65 7.15A0.5 0.5 0 0 1 10.35 7.15L15.35 12.15A0.5 0.5 0 0 1 15.35 12.85Z";
 }
 
-// This computer at a glance: one card, two columns of short lines (one on a narrow page).
-component PcSheet inherits Rectangle {
-    in property <[PcLine]> lines;
-    property <int> cols: root.width < 600px ? 1 : 2;
-    property <length> pad: 16px;
-    property <length> line-h: 46px;
-    property <length> col-w: (root.width - 2 * root.pad - (root.cols - 1) * 24px) / root.cols;
-    height: 2 * 12px + ceil(root.lines.length / root.cols) * root.line-h;
+// One part of this computer: its icon (a screen: its outline, to scale), a figure or a name,
+// a short line; a disk, how full it is.
+component PcCard inherits Rectangle {
+    in property <PcTile> tile;
     border-radius: Theme.radius-card;
     border-width: 1px;
     border-color: Theme.stroke;
     background: Theme.card;
-    for line[i] in root.lines : VerticalLayout {
-        x: root.pad + mod(i, root.cols) * (root.col-w + 24px);
-        y: 12px + floor(i / root.cols) * root.line-h;
-        width: root.col-w;
-        height: root.line-h;
-        alignment: center;
-        spacing: 1px;
-        Text {
-            text: line.label;
-            color: Theme.text-3;
-            font-size: 12px;
-            overflow: elide;
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 14px;
+        Rectangle {
+            width: 40px;
+            if root.tile.kind != 3 : Icon {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                size: 24px;
+                tint: Theme.accent;
+                data: root.tile.kind == 0 ? Icons.cpu
+                    : root.tile.kind == 1 ? Icons.gpu
+                    : root.tile.kind == 2 ? Icons.ram
+                    : Icons.drive;
+            }
+            // The screen, drawn to its shape; the main one filled.
+            if root.tile.kind == 3 : Rectangle {
+                property <float> aspect: max(root.tile.aspect, 0.5);
+                width: min(40px, 26px * self.aspect);
+                height: self.width / self.aspect;
+                border-radius: 3px;
+                border-width: 1.5px;
+                border-color: root.tile.primary ? Theme.accent : Theme.text-3;
+                background: root.tile.primary ? Theme.accent-soft : transparent;
+                Text {
+                    text: root.tile.badge;
+                    color: root.tile.primary ? Theme.accent : Theme.text-3;
+                    font-size: 11px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
         }
-        Text {
-            text: line.value;
-            color: Theme.text;
-            font-size: 13px;
-            overflow: elide;
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            HorizontalLayout {
+                spacing: 12px;
+                Text {
+                    text: root.tile.title;
+                    color: Theme.text;
+                    font-size: 14px;
+                    font-weight: 600;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+                // A disk: what is free, beside its letter.
+                if root.tile.used >= 0 : Text {
+                    text: root.tile.detail;
+                    color: Theme.text-3;
+                    font-size: 12px;
+                    vertical-alignment: center;
+                }
+            }
+            if root.tile.used >= 0 : Rectangle {
+                height: 12px;
+                Rectangle {
+                    y: 5px;
+                    height: 4px;
+                    border-radius: 2px;
+                    background: Theme.control-stroke;
+                    Rectangle {
+                        x: 0px;
+                        width: parent.width * clamp(root.tile.used, 0, 1);
+                        border-radius: 2px;
+                        // Nearly full: amber.
+                        background: root.tile.used > 0.9 ? Theme.warning : Theme.accent;
+                    }
+                }
+            }
+            if root.tile.used < 0 && root.tile.detail != "" : Text {
+                text: root.tile.detail;
+                color: Theme.text-3;
+                font-size: 12px;
+                overflow: elide;
+            }
         }
     }
+    touch := TouchArea {
+        changed has-hover => {
+            if self.has-hover && root.tile.tip != "" {
+                Tip.text = root.tile.tip;
+                Tip.left = root.absolute-position.x;
+                Tip.top = root.absolute-position.y;
+                Tip.bottom = root.absolute-position.y + root.height;
+            } else if Tip.left == root.absolute-position.x && Tip.top == root.absolute-position.y {
+                Tip.text = "";
+            }
+        }
+    }
+    accessible-role: AccessibleRole.text;
+    accessible-label: root.tile.tip + ": " + root.tile.title + " " + root.tile.detail;
+}
+
+// Cards side by side, the last row sharing its width.
+component PcTiles inherits Rectangle {
+    in property <[PcTile]> tiles;
+    in property <length> tile-h: 64px;
+    property <length> gap: 8px;
+    property <int> n: root.tiles.length;
+    // As many as fit, then as even rows as can be (four: two and two, not three and one).
+    property <int> fit: max(1, min(root.n, floor((root.width + root.gap) / (240px + root.gap))));
+    property <int> rows: ceil(root.n / root.fit);
+    property <int> cols: ceil(root.n / root.rows);
+    height: root.rows * root.tile-h + (root.rows - 1) * root.gap;
+    for tile[i] in root.tiles : PcCard {
+        property <int> line: floor(i / root.cols);
+        // The cards of this row.
+        property <int> count: min(root.cols, root.n - self.line * root.cols);
+        property <length> w: (root.width - (self.count - 1) * root.gap) / self.count;
+        x: mod(i, root.cols) * (self.w + root.gap);
+        y: self.line * (root.tile-h + root.gap);
+        width: self.w;
+        height: root.tile-h;
+        tile: tile;
+    }
+}
+
+// This computer at a glance: its parts, its screens, its disks.
+component PcSheet inherits VerticalLayout {
+    in property <[PcTile]> parts;
+    in property <[PcTile]> screens;
+    in property <[PcTile]> disks;
+    spacing: 8px;
+    if root.parts.length > 0 : PcTiles { tiles: root.parts; }
+    if root.screens.length > 0 : PcTiles { tiles: root.screens; }
+    if root.disks.length > 0 : PcTiles { tiles: root.disks; }
 }
 
 // Rows shown together; the next group stands apart.
@@ -410,7 +525,9 @@ export component SettingsWindow inherits Window {
     in-out property <int> section: 0;
     in property <[SettingGroup]> groups;
     // The general page: this computer, above the settings.
-    in property <[PcLine]> pc-lines;
+    in property <[PcTile]> pc-parts;
+    in property <[PcTile]> pc-screens;
+    in property <[PcTile]> pc-disks;
     // A message above the groups (problems with the video settings).
     in property <string> notice;
     in property <[ShortcutRow]> shortcuts;
@@ -648,7 +765,11 @@ export component SettingsWindow inherits Window {
                         kind: 1;
                         text: root.notice;
                     }
-                    if root.section == 0 && root.pc-lines.length > 0 : PcSheet { lines: root.pc-lines; }
+                    if root.section == 0 && root.pc-parts.length + root.pc-screens.length + root.pc-disks.length > 0 : PcSheet {
+                        parts: root.pc-parts;
+                        screens: root.pc-screens;
+                        disks: root.pc-disks;
+                    }
                     // Where the update stands, and what to do about it.
                     if root.section == 7 : Group {
                         GroupRow {

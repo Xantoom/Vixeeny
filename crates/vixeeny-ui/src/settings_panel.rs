@@ -19,7 +19,7 @@ use vixeeny_settings::{
 
 use crate::theme::{self, Look};
 use crate::{
-    LineItem, PcLine, SearchHit, SettingGroup, SettingRow, SettingsWindow, ShortcutKey,
+    LineItem, PcTile, SearchHit, SettingGroup, SettingRow, SettingsWindow, ShortcutKey,
     ShortcutRow, UiTexts,
 };
 
@@ -246,14 +246,27 @@ pub struct SettingsPanel {
     state: Rc<State>,
 }
 
-/// The sheet of this computer, for the general page.
-fn pc_lines(lines: &[vixeeny_settings::machine::Line]) -> ModelRc<PcLine> {
+/// Cards of this computer, for the general page.
+fn pc_tiles(tiles: &[vixeeny_settings::machine::Tile]) -> ModelRc<PcTile> {
+    use vixeeny_settings::machine::TileKind;
     ModelRc::from(Rc::new(VecModel::from(
-        lines
+        tiles
             .iter()
-            .map(|l| PcLine {
-                label: l.label.as_str().into(),
-                value: l.value.as_str().into(),
+            .map(|t| PcTile {
+                kind: match t.kind {
+                    TileKind::Cpu => 0,
+                    TileKind::Gpu => 1,
+                    TileKind::Ram => 2,
+                    TileKind::Screen => 3,
+                    TileKind::Disk => 4,
+                },
+                title: t.title.as_str().into(),
+                detail: t.detail.as_str().into(),
+                tip: t.tip.as_str().into(),
+                used: t.used.unwrap_or(-1.0),
+                aspect: t.aspect,
+                badge: t.badge.as_str().into(),
+                primary: t.primary,
             })
             .collect::<Vec<_>>(),
     )))
@@ -1066,9 +1079,11 @@ impl SettingsPanel {
         let overview = if section == Section::General {
             vixeeny_settings::machine::overview(&env)
         } else {
-            Vec::new()
+            Default::default()
         };
-        self.window.set_pc_lines(pc_lines(&overview));
+        self.window.set_pc_parts(pc_tiles(&overview.parts));
+        self.window.set_pc_screens(pc_tiles(&overview.screens));
+        self.window.set_pc_disks(pc_tiles(&overview.disks));
         let notice = if section == Section::Video {
             video_problems(&config, (1920, 1080), env.lang).join("\n")
         } else {

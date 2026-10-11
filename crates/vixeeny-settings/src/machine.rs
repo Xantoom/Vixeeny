@@ -56,13 +56,55 @@ pub struct Screen {
     pub hz: u32,
 }
 
-/// One line of the sheet: what the part is, and what it is.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Line {
-    /// `Processor`, `Screen 2`.
-    pub label: String,
-    /// Its name and figures, on one line.
-    pub value: String,
+/// What a tile shows: its icon (or, for a screen, its outline).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TileKind {
+    Cpu,
+    Gpu,
+    Ram,
+    Screen,
+    Disk,
+}
+
+/// One card of the general page: a figure or a name, and a short line under it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Tile {
+    pub kind: TileKind,
+    pub title: String,
+    pub detail: String,
+    /// What the part is, while the pointer rests on the card (`Processor`, `Screen 1 (main)`).
+    pub tip: String,
+    /// A disk's used share, 0 to 1.
+    pub used: Option<f32>,
+    /// A screen's width over its height.
+    pub aspect: f32,
+    /// A screen's number, the main one stands out.
+    pub badge: String,
+    pub primary: bool,
+}
+
+impl Tile {
+    fn new(kind: TileKind, title: String, detail: String, tip: String) -> Self {
+        Self {
+            kind,
+            title,
+            detail,
+            tip,
+            used: None,
+            aspect: 0.0,
+            badge: String::new(),
+            primary: false,
+        }
+    }
+}
+
+/// The cards of the general page: the parts, the screens, the disks (each empty until the host
+/// has read the machine).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Overview {
+    pub parts: Vec<Tile>,
+    pub screens: Vec<Tile>,
+    pub disks: Vec<Tile>,
 }
 
 /// A size the way the OS shows memory: binary gigabytes, whole.
@@ -115,39 +157,61 @@ fn joined(parts: &[&str]) -> String {
         .join(" · ")
 }
 
-/// The sheet of the general page, part by part (empty until the host has read the machine).
-pub fn overview(env: &Env) -> Vec<Line> {
+/// The cards of the general page.
+pub fn overview(env: &Env) -> Overview {
     let m = &env.machine;
     let lang = env.lang;
     let t = |k| tr(k, lang).to_owned();
-    let mut lines = Vec::new();
-    let mut line = |label: String, value: String| lines.push(Line { label, value });
+    let mut o = Overview::default();
     if let Some(cpu) = &m.cpu {
         let cores = t(Key::PcCores)
             .replace("{cores}", &cpu.cores.to_string())
             .replace("{threads}", &cpu.threads.to_string());
-        line(t(Key::PcCpu), joined(&[&short_name(&cpu.name), &cores]));
+        o.parts.push(Tile::new(
+            TileKind::Cpu,
+            short_name(&cpu.name),
+            cores,
+            t(Key::PcCpu),
+        ));
     }
     for gpu in &m.gpus {
-        let (label, memory) = if gpu.integrated {
+        let (tip, memory) = if gpu.integrated {
             (t(Key::PcIgpu), String::new())
         } else if gpu.memory_bytes > 0 {
             (t(Key::PcGpu), memory(gpu.memory_bytes, lang))
         } else {
             (t(Key::PcGpu), String::new())
         };
-        line(label, joined(&[&short_name(&gpu.name), &memory]));
+        o.parts
+            .push(Tile::new(TileKind::Gpu, short_name(&gpu.name), memory, tip));
     }
     if m.ram_bytes > 0 {
-        line(t(Key::PcRam), memory(m.ram_bytes, lang));
+        o.parts.push(Tile::new(
+            TileKind::Ram,
+            memory(m.ram_bytes, lang),
+            String::new(),
+            t(Key::PcRam),
+        ));
     }
     for s in &m.screens {
-        let mut label = t(Key::PcScreenN).replace("{n}", &s.number.to_string());
+        let mut tip = t(Key::PcScreenN).replace("{n}", &s.number.to_string());
         if s.primary {
-            label = format!("{label} ({})", t(Key::PcPrimary));
+            tip = format!("{tip} ({})", t(Key::PcPrimary));
         }
-        let size = format!("{}×{}", s.width, s.height);
-        line(label, joined(&[&s.name, &size, &format!("{} Hz", s.hz)]));
+        let mut tile = Tile::new(
+            TileKind::Screen,
+            format!("{} × {}", s.width, s.height),
+            format!("{} Hz", s.hz),
+            joined(&[&tip, &s.name]),
+        );
+        tile.aspect = if s.height > 0 {
+            s.width as f32 / s.height as f32
+        } else {
+            16.0 / 9.0
+        };
+        tile.badge = s.number.to_string();
+        tile.primary = s.primary;
+        o.screens.push(tile);
     }
     for d in &m.disks {
         let name = if d.label.is_empty() {
@@ -158,12 +222,17 @@ pub fn overview(env: &Env) -> Vec<Line> {
         let free = t(Key::PcFree)
             .replace("{free}", &capacity(d.free_bytes, lang))
             .replace("{total}", &capacity(d.bytes, lang));
-        line(
-            t(Key::PcDriveN).replace("{letter}", &d.letter),
-            joined(&[name, &free]),
+        let mut tile = Tile::new(
+            TileKind::Disk,
+            d.letter.clone(),
+            free,
+            joined(&[&t(Key::PcDriveN).replace("{letter}", &d.letter), name]),
         );
+        tile.used =
+            (d.bytes > 0).then(|| 1.0 - (d.free_bytes.min(d.bytes) as f64 / d.bytes as f64) as f32);
+        o.disks.push(tile);
     }
-    lines
+    o
 }
 
 #[cfg(test)]
@@ -228,25 +297,35 @@ mod tests {
             ],
         });
         let o = overview(&env);
-        let value = |label: &str| {
-            o.iter()
-                .find(|l| l.label == label)
-                .map(|l| l.value.clone())
-                .unwrap_or_else(|| panic!("{label}"))
+        let shown = |tiles: &[Tile]| {
+            tiles
+                .iter()
+                .map(|t| format!("{} | {} | {}", t.title, t.detail, t.tip))
+                .collect::<Vec<_>>()
         };
         assert_eq!(
-            value("Processor"),
-            "AMD Ryzen 7 9800X3D · 8 cores, 16 threads"
+            shown(&o.parts),
+            [
+                "AMD Ryzen 7 9800X3D | 8 cores, 16 threads | Processor",
+                "NVIDIA GeForce RTX 5080 | 16 GB | Graphics card",
+                "AMD Radeon Graphics |  | Integrated graphics",
+                "64 GB |  | Memory (RAM)",
+            ]
         );
-        assert_eq!(value("Graphics card"), "NVIDIA GeForce RTX 5080 · 16 GB");
-        assert_eq!(value("Integrated graphics"), "AMD Radeon Graphics");
-        assert_eq!(value("Memory (RAM)"), "64 GB");
         assert_eq!(
-            value("Screen 1 (main)"),
-            "Odyssey G80SH · 3840×2160 · 240 Hz"
+            shown(&o.screens),
+            [
+                "3840 × 2160 | 240 Hz | Screen 1 (main) · Odyssey G80SH",
+                "3440 × 1440 | 144 Hz | Screen 2 · LG ULTRAWIDE",
+            ]
         );
-        assert_eq!(value("Screen 2"), "LG ULTRAWIDE · 3440×1440 · 144 Hz");
-        assert_eq!(value("Drive C:"), "CT2000T500SSD8 · 1 TB free of 2 TB");
-        assert!(overview(&Env::new(Lang::En, "1.0.0")).is_empty());
+        assert!(o.screens[0].primary && !o.screens[1].primary);
+        assert!((o.screens[1].aspect - 2.389).abs() < 0.01);
+        assert_eq!(
+            shown(&o.disks),
+            ["C: | 1 TB free of 2 TB | Drive C: · CT2000T500SSD8"]
+        );
+        assert!((o.disks[0].used.unwrap() - 0.5).abs() < 0.01);
+        assert_eq!(overview(&Env::new(Lang::En, "1.0.0")), Overview::default());
     }
 }

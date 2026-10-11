@@ -30,7 +30,7 @@ fn split_join(kind: &str, amount: i64) -> String {
 }
 
 /// The frame rates a recording can have (those above the fastest monitor are not offered).
-const FRAME_RATES: [u32; 8] = [24, 30, 60, 90, 120, 144, 165, 240];
+const FRAME_RATES: [u32; 3] = [30, 60, 120];
 
 /// The offered frame rate closest to `fps` (a setting from another machine or an older list).
 fn fps_option(fps: u32, offered: &[u32]) -> u32 {
@@ -293,10 +293,8 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
             "image_format",
             t(Key::SetImageFormat),
             vec![
-                crate::heading(t(Key::OptGroupCompatible)),
                 opt("png", "PNG"),
                 opt("jpeg", "JPEG"),
-                crate::heading(t(Key::OptGroupModern)),
                 opt("webp", "WebP"),
                 opt("avif", "AVIF"),
                 opt("jxl", "JPEG XL"),
@@ -881,6 +879,14 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
 }
 
 /// The screen recordings are measured on: the main one (1920 × 1080 until it is known).
+/// The pixels a second a recording encodes, with these settings on the main screen.
+pub(crate) fn pixel_rate(env: &Env, config: &Config) -> u64 {
+    let (_, _, cw, ch) =
+        validate::center_crop(main_screen(env), validate::aspect(&config.video.aspect));
+    let (w, h) = validate::output_size(&config.video.resolution, (cw, ch)).unwrap_or((cw, ch));
+    u64::from(w) * u64::from(h) * u64::from(config.video.fps.max(1))
+}
+
 pub(crate) fn main_screen(env: &Env) -> (u32, u32) {
     let screens = &env.machine.screens;
     screens
@@ -1245,23 +1251,30 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
 
     // ---- the tracks and their codec
     rows.push(header("h_tracks"));
-    rows.push(choice(
-        "audio_routing",
-        t(Key::SetAudioRouting),
-        vec![
+    // Only with more than one source: one source makes one track either way.
+    if config.video.audio.sources.len() > 1 {
+        let mut routes = vec![
             opt("one_track_per_source", t(Key::SetRouteEach)),
             opt("mix_all", t(Key::SetRouteMix)),
-            opt("advanced", t(Key::SetRouteAdvanced)),
-        ],
-        |c| c.video.audio.routing.clone(),
-        |c, v| c.video.audio.routing = v,
-    ));
+        ];
+        // Written by hand in the settings file: listed only while it is the setting.
+        if config.video.audio.routing == "advanced" {
+            routes.push(opt("advanced", t(Key::SetRouteAdvanced)));
+        }
+        rows.push(choice(
+            "audio_routing",
+            t(Key::SetAudioRouting),
+            routes,
+            |c| c.video.audio.routing.clone(),
+            |c, v| c.video.audio.routing = v,
+        ));
+    }
     let auto = auto_audio_codec(env, config);
     rows.push(choice(
         "audio_codec",
         t(Key::SetAudioCodec),
         vec![
-            crate::heading(t(Key::OptGroupCompressed)),
+            // Opus with AV1 and VP9, AAC with the rest.
             opt(
                 "auto",
                 format!(
@@ -1270,7 +1283,8 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
                     if auto == "opus" { "Opus" } else { "AAC" }
                 ),
             ),
-            opt("aac", "AAC"),
+            crate::heading(t(Key::OptGroupCompressed)),
+            opt("aac", format!("AAC ({})", t(Key::OptRecommended))),
             opt("opus", "Opus"),
             crate::heading(t(Key::OptGroupLossless)),
             opt("flac", t(Key::OptFlac)),

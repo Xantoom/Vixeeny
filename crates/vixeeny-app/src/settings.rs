@@ -388,6 +388,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
         }
     });
     let writer = Rc::clone(&file);
+    let shown_look = std::cell::Cell::new(look);
     panel.on_change(move |config| {
         *pending.borrow_mut() = Some(config.clone());
         let (pending, writer) = (Rc::clone(&pending), Rc::clone(&writer));
@@ -400,8 +401,12 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
                 }
             },
         );
+        // Only when the look changes: dressing the window again (icon, title bar, Mica) on
+        // every change made the switches stutter.
         let look = look_of(config);
-        if let Some(w) = weak.upgrade() {
+        if shown_look.replace(look) != look
+            && let Some(w) = weak.upgrade()
+        {
             vixeeny_ui::theme::apply(&w, look);
         }
     });

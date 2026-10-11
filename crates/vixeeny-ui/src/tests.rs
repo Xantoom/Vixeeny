@@ -162,7 +162,7 @@ fn the_video_page_edits_the_current_profile_and_reports_problems() {
     panel.select_section(Section::Video);
     settings_render(&panel, "9-settings-video");
     let w = panel.window();
-    w.invoke_row_chosen("fps".into(), 1); // 24, 30, 60 (and more on a fast monitor)
+    w.invoke_row_chosen("fps".into(), 0); // 30, 60 (and 120 on a fast monitor)
     assert_eq!(panel.config().video.fps, 30);
     w.invoke_row_chosen("split".into(), 1);
     assert_eq!(panel.config().video.split.mode, "size:2048");
@@ -201,7 +201,7 @@ fn rows_that_appear_on_the_same_page_unfold() {
     panel.select_section(Section::Image);
     assert!(fresh(&panel).is_empty(), "a new page does not unfold");
     // JPEG brings its own options in: they unfold, the rows already there do not.
-    panel.window().invoke_row_chosen("image_format".into(), 2); // (title), PNG, JPEG
+    panel.window().invoke_row_chosen("image_format".into(), 1); // PNG, JPEG
     let unfolded = fresh(&panel);
     assert!(
         unfolded.contains(&"jpeg_quality".to_owned()),
