@@ -1081,7 +1081,8 @@ impl SettingsPanel {
         } else {
             Default::default()
         };
-        self.window.set_pc_parts(pc_tiles(&overview.parts));
+        self.window.set_pc_system(pc_tiles(&overview.system));
+        self.window.set_pc_gpus(pc_tiles(&overview.gpus));
         self.window.set_pc_screens(pc_tiles(&overview.screens));
         self.window.set_pc_disks(pc_tiles(&overview.disks));
         let notice = if section == Section::Video {

@@ -745,22 +745,33 @@ fn a_wide_screen_is_cropped_in_its_middle() {
 fn simple_presets_follow_the_resolution_and_frame_rate() {
     use crate::registry::PresetName;
     let r = registry();
+    let preset = |id: &str, (w, h): (u64, u64), fps: u64| {
+        r.get(id).unwrap().speed_for(w * h * fps).unwrap().1
+    };
+    // P5 wherever one encoder keeps up: up to 4K at 60 FPS in HEVC and AV1.
+    for id in ["nvenc_hevc", "nvenc_av1"] {
+        assert_eq!(preset(id, (1920, 1080), 60), "p5");
+        assert_eq!(preset(id, (2560, 1440), 120), "p5");
+        assert_eq!(preset(id, (3840, 2160), 60), "p5");
+        // 4K at 120: split between the encoders of the large cards.
+        assert_eq!(preset(id, (3840, 2160), 120), "p2");
+    }
+    assert_eq!(preset("nvenc_h264", (2560, 1440), 60), "p5");
+    assert_eq!(preset("nvenc_h264", (3840, 2160), 60), "p4");
+    assert_eq!(preset("amf_av1", (3840, 2160), 60), "quality");
+    assert_eq!(preset("amf_av1", (3840, 2160), 120), "balanced");
+    assert_eq!(preset("libx264", (1920, 1080), 60), "veryfast");
+    assert_eq!(preset("libx264", (3840, 2160), 60), "ultrafast");
+    assert!(r.encoders().all(|e| e.speed_for(1).is_some()));
+    // The registry's presets, at that speed; from 4K on, the quality scale eases a step.
     let av1 = r.get("nvenc_av1").unwrap();
     let opts = |size, fps| av1.preset_options(PresetName::Quality, size, fps);
-    // 1080p60: one step slower than the registry; 4K60: faster, and a lighter quality scale.
-    assert_eq!(opts((1920, 1080), 60)["preset"], "p6");
     assert_eq!(opts((1920, 1080), 60)["cq"], "24");
-    assert_eq!(opts((3840, 2160), 60)["preset"], "p4");
     assert_eq!(opts((3840, 2160), 60)["cq"], "25");
-    assert_eq!(opts((3840, 2160), 144)["preset"], "p2");
+    assert_eq!(opts((3840, 2160), 120)["preset"], "p2");
     // The fast preset keeps its own speed.
     assert_eq!(
         av1.preset_options(PresetName::Performance, (1920, 1080), 60)["preset"],
         "p2"
     );
-    // Software: a speed the processor sustains beside the game.
-    let x264 = r.get("libx264").unwrap();
-    assert_eq!(x264.speed_for(1920 * 1080 * 60).unwrap().1, "veryfast");
-    assert_eq!(x264.speed_for(3840 * 2160 * 60).unwrap().1, "ultrafast");
-    assert!(r.encoders().all(|e| e.speed_for(1).is_some()));
 }

@@ -643,15 +643,27 @@ fn programs(apps: Vec<vixeeny_audio::AppInfo>) -> Vec<vixeeny_settings::AudioEnt
 
 /// What this computer is made of, for the general page.
 fn machine() -> vixeeny_settings::Machine {
-    use vixeeny_settings::machine::{Cpu, Disk, Gpu, Screen};
+    use vixeeny_settings::machine::{Cpu, Disk, Gpu, Module, Screen};
     let m = vixeeny_platform::machine::machine();
     vixeeny_settings::Machine {
         cpu: m.cpu.map(|c| Cpu {
             name: c.name,
             cores: c.cores,
             threads: c.threads,
+            base_mhz: c.base_mhz,
+            boost_mhz: c.boost_mhz,
         }),
         ram_bytes: m.ram_bytes,
+        modules: m
+            .modules
+            .into_iter()
+            .map(|r| Module {
+                bytes: r.bytes,
+                kind: r.kind,
+                mts: r.mts,
+                cl: r.cl,
+            })
+            .collect(),
         gpus: m
             .gpus
             .into_iter()

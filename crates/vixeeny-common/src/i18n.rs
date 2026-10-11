@@ -296,6 +296,7 @@ pub enum Key {
     ToastReplayDiskLow,
     SetWidgetPlaceHint,
     UpdateChecked,
+    PcLocalDisk,
 }
 
 impl Key {
@@ -584,6 +585,7 @@ impl Key {
         Self::ToastReplayDiskLow,
         Self::SetWidgetPlaceHint,
         Self::UpdateChecked,
+        Self::PcLocalDisk,
     ];
 }
 
@@ -1250,6 +1252,8 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         }
         (Key::UpdateChecked, Lang::En) => "Last checked: {when}",
         (Key::UpdateChecked, Lang::Fr) => "Dernière vérification : {when}",
+        (Key::PcLocalDisk, Lang::En) => "Local Disk",
+        (Key::PcLocalDisk, Lang::Fr) => "Disque local",
     }
 }
 

@@ -105,9 +105,9 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
             )?;
             if nvenc {
                 text.push_str(if fr {
-                    "\n\nP6 et P7 : gain à peine visible, pour beaucoup plus de calcul. En 4K ou au-delà de 60 FPS, l'encodeur ne suit plus.\nP1 et P2 : partagent chaque image entre les encodeurs des grandes cartes, pour la 4K à haute fréquence."
+                    "\n\nP6 et P7 : deux à trois fois plus de calcul que P5, pour une différence à peine mesurable.\nP1 et P2 : en 4K, partagent chaque image entre les encodeurs des grandes cartes (4K à 120 FPS)."
                 } else {
-                    "\n\nP6 and P7: a barely visible gain for much more computing. In 4K or above 60 FPS, the encoder falls behind.\nP1 and P2: share each frame between the encoders of large cards, for 4K at a high rate."
+                    "\n\nP6 and P7: two to three times the computing of P5, for a barely measurable difference.\nP1 and P2: in 4K, share each frame between the encoders of large cards (4K at 120 FPS)."
                 });
             }
             if let Some(r) = recommended {

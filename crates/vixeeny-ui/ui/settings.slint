@@ -144,8 +144,9 @@ component PcCard inherits Rectangle {
                         x: 0px;
                         width: parent.width * clamp(root.tile.used, 0, 1);
                         border-radius: 2px;
-                        // Nearly full: amber.
-                        background: root.tile.used > 0.9 ? Theme.warning : Theme.accent;
+                        // Under 20 % free: amber; under 5 %: red.
+                        background: root.tile.used > 0.95 ? Theme.danger
+                            : root.tile.used > 0.8 ? Theme.warning : Theme.accent;
                     }
                 }
             }
@@ -173,15 +174,17 @@ component PcCard inherits Rectangle {
     accessible-label: root.tile.tip + ": " + root.tile.title + " " + root.tile.detail;
 }
 
-// Cards side by side, the last row sharing its width.
+// Cards side by side on one row (`max-rows`: on more when they do not fit), the last row
+// sharing its width.
 component PcTiles inherits Rectangle {
     in property <[PcTile]> tiles;
-    in property <length> tile-h: 64px;
+    in property <int> max-rows: 1;
+    property <length> tile-h: 64px;
     property <length> gap: 8px;
     property <int> n: root.tiles.length;
-    // As many as fit, then as even rows as can be (four: two and two, not three and one).
+    // As many as fit, then as even rows as can be (four on two rows: two and two).
     property <int> fit: max(1, min(root.n, floor((root.width + root.gap) / (240px + root.gap))));
-    property <int> rows: ceil(root.n / root.fit);
+    property <int> rows: min(root.max-rows, ceil(root.n / root.fit));
     property <int> cols: ceil(root.n / root.rows);
     height: root.rows * root.tile-h + (root.rows - 1) * root.gap;
     for tile[i] in root.tiles : PcCard {
@@ -197,15 +200,20 @@ component PcTiles inherits Rectangle {
     }
 }
 
-// This computer at a glance: its parts, its screens, its disks.
+// This computer at a glance: processor and memory, graphics, screens, disks.
 component PcSheet inherits VerticalLayout {
-    in property <[PcTile]> parts;
+    in property <[PcTile]> system;
+    in property <[PcTile]> gpus;
     in property <[PcTile]> screens;
     in property <[PcTile]> disks;
     spacing: 8px;
-    if root.parts.length > 0 : PcTiles { tiles: root.parts; }
+    if root.system.length > 0 : PcTiles { tiles: root.system; }
+    if root.gpus.length > 0 : PcTiles { tiles: root.gpus; }
     if root.screens.length > 0 : PcTiles { tiles: root.screens; }
-    if root.disks.length > 0 : PcTiles { tiles: root.disks; }
+    if root.disks.length > 0 : PcTiles {
+        tiles: root.disks;
+        max-rows: 2;
+    }
 }
 
 // Rows shown together; the next group stands apart.
@@ -525,7 +533,8 @@ export component SettingsWindow inherits Window {
     in-out property <int> section: 0;
     in property <[SettingGroup]> groups;
     // The general page: this computer, above the settings.
-    in property <[PcTile]> pc-parts;
+    in property <[PcTile]> pc-system;
+    in property <[PcTile]> pc-gpus;
     in property <[PcTile]> pc-screens;
     in property <[PcTile]> pc-disks;
     // A message above the groups (problems with the video settings).
@@ -765,8 +774,9 @@ export component SettingsWindow inherits Window {
                         kind: 1;
                         text: root.notice;
                     }
-                    if root.section == 0 && root.pc-parts.length + root.pc-screens.length + root.pc-disks.length > 0 : PcSheet {
-                        parts: root.pc-parts;
+                    if root.section == 0 && root.pc-system.length + root.pc-gpus.length + root.pc-screens.length + root.pc-disks.length > 0 : PcSheet {
+                        system: root.pc-system;
+                        gpus: root.pc-gpus;
                         screens: root.pc-screens;
                         disks: root.pc-disks;
                     }

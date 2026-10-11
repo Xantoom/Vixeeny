@@ -320,7 +320,7 @@ pub struct Image {
 impl Default for Image {
     fn default() -> Self {
         Self {
-            format: "png".into(),
+            format: "jpeg".into(),
             show_cursor: false,
             hdr: "tonemap_sdr".into(),
             copy_to_clipboard: false,

@@ -200,11 +200,11 @@ fn rows_that_appear_on_the_same_page_unfold() {
     };
     panel.select_section(Section::Image);
     assert!(fresh(&panel).is_empty(), "a new page does not unfold");
-    // JPEG brings its own options in: they unfold, the rows already there do not.
-    panel.window().invoke_row_chosen("image_format".into(), 1); // PNG, JPEG
+    // PNG brings its own options in: they unfold, the rows already there do not.
+    panel.window().invoke_row_chosen("image_format".into(), 0); // PNG, JPEG
     let unfolded = fresh(&panel);
     assert!(
-        unfolded.contains(&"jpeg_quality".to_owned()),
+        unfolded.contains(&"png_compression".to_owned()),
         "{unfolded:?}"
     );
     assert!(!unfolded.contains(&"image_format".to_owned()));
@@ -428,33 +428,37 @@ fn every_page_of_the_settings_renders() {
         ],
     });
     {
-        use vixeeny_settings::machine::{Cpu, Disk, Gpu, Machine, Screen};
+        use vixeeny_settings::machine::{Cpu, Disk, Gpu, Machine, Module, Screen};
         panel.set_machine(Machine {
             cpu: Some(Cpu {
                 name: "AMD Ryzen 7 9800X3D 8-Core Processor".into(),
                 cores: 8,
                 threads: 16,
+                base_mhz: 4700,
+                boost_mhz: 0,
             }),
             ram_bytes: 64 << 30,
-            gpus: vec![
-                Gpu {
-                    name: "NVIDIA GeForce RTX 5080".into(),
-                    integrated: false,
-                    memory_bytes: 16 << 30,
-                },
-                Gpu {
-                    name: "AMD Radeon(TM) Graphics".into(),
-                    integrated: true,
-                    memory_bytes: 0,
-                },
+            modules: vec![
+                Module {
+                    bytes: 32 << 30,
+                    kind: "DDR5".into(),
+                    mts: 6000,
+                    cl: 30,
+                };
+                2
             ],
+            gpus: vec![Gpu {
+                name: "NVIDIA GeForce RTX 5080".into(),
+                integrated: false,
+                memory_bytes: 16 << 30,
+            }],
             disks: vec![
                 Disk {
                     letter: "C:".into(),
                     label: String::new(),
                     model: "CT2000T500SSD8".into(),
                     bytes: 2_000_398_934_016,
-                    free_bytes: 612_000_000_000,
+                    free_bytes: 312_000_000_000,
                 },
                 Disk {
                     letter: "D:".into(),

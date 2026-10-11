@@ -50,7 +50,7 @@ replays = false
 [paths.app_names]
 
 [image]
-format = "png"
+format = "jpeg"
 show_cursor = false
 hdr = "tonemap_sdr"
 copy_to_clipboard = false

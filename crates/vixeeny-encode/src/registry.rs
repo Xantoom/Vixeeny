@@ -406,58 +406,86 @@ impl Encoder {
     }
 
     /// The speed option that keeps up with `pixel_rate` (width × height × frames a second), and
-    /// its value: the slowest (best) one the encoder still sustains while a game runs. A
-    /// recent encoder (AV1 hardware: RTX 40, RX 7000, Arc and later) affords one step more.
+    /// its value: the best one that still keeps up, with a margin, while a game runs.
+    ///
+    /// NVENC: frames a second at 1080p of one encoder (NVIDIA, NVENC Application Note, Video
+    /// Codec SDK 13.1, high-quality tuning; the oldest generation that has the codec: Turing for
+    /// H.264 and HEVC, Ada for AV1). P5 at most: P6 and P7 cost two to three times more for a
+    /// difference VMAF hardly measures. P1 and P2 split each frame between the encoders of the
+    /// large cards (4K and above), so 4K at 120 FPS takes P2.
     pub fn speed_for(&self, pixel_rate: u64) -> Option<(&'static str, String)> {
-        // 1080p60, 1440p60 (1080p120), 4K60 (1440p120), 4K120 (1440p240), above.
-        const TIERS: [u64; 4] = [130_000_000, 260_000_000, 520_000_000, 1_000_000_000];
-        let tier = TIERS.iter().filter(|t| pixel_rate > **t).count();
-        let av1 = self.family == Family::Av1;
-        let (key, steps): (&str, [&str; 5]) = match self.id.as_str() {
-            // P6 and P7 add little and cost a lot; P1 and P2 split a frame across the encoders
-            // of the large cards (4K at a high rate).
-            i if i.starts_with("nvenc") && av1 => ("preset", ["p6", "p5", "p4", "p3", "p2"]),
-            i if i.starts_with("nvenc") => ("preset", ["p5", "p5", "p4", "p3", "p2"]),
-            i if i.starts_with("amf") && av1 => (
-                "quality",
-                ["quality", "quality", "quality", "balanced", "speed"],
-            ),
-            i if i.starts_with("amf") => (
-                "quality",
-                ["quality", "quality", "balanced", "speed", "speed"],
-            ),
-            i if i.starts_with("qsv") && av1 => {
-                ("preset", ["slow", "medium", "medium", "fast", "veryfast"])
-            }
-            i if i.starts_with("qsv") => {
-                ("preset", ["medium", "medium", "fast", "faster", "veryfast"])
-            }
-            // Software encoders share the processor with the game.
-            "libx264" => (
-                "preset",
-                [
-                    "veryfast",
-                    "superfast",
-                    "ultrafast",
-                    "ultrafast",
-                    "ultrafast",
-                ],
-            ),
-            "libx265" => (
-                "preset",
-                [
-                    "superfast",
-                    "ultrafast",
-                    "ultrafast",
-                    "ultrafast",
-                    "ultrafast",
-                ],
-            ),
-            "libsvtav1" => ("preset", ["10", "11", "12", "13", "13"]),
-            "libvpx_vp9" => ("cpu-used", ["6", "7", "8", "8", "8"]),
-            _ => return None,
+        // In frames of 1080p a second, with a third to spare (clocks drop under a game's load,
+        // the quality presets add a quarter-resolution pass).
+        let needed = pixel_rate as f64 / (1920.0 * 1080.0) * 1.3;
+        let pick = |key: &'static str, steps: &[(&str, f64)]| {
+            let value = steps
+                .iter()
+                .find(|(_, fps)| *fps >= needed)
+                .or(steps.last())
+                .map(|(v, _)| (*v).to_owned())?;
+            Some((key, value))
         };
-        Some((key, steps[tier].to_owned()))
+        let nvenc = self.id.starts_with("nvenc");
+        let amf = self.id.starts_with("amf");
+        let qsv = self.id.starts_with("qsv");
+        match (self.family, self.id.as_str()) {
+            (Family::H264, _) if nvenc => pick(
+                "preset",
+                &[
+                    ("p5", 264.0),
+                    ("p4", 430.0),
+                    ("p3", 602.0),
+                    ("p2", 715.0),
+                    ("p1", 833.0),
+                ],
+            ),
+            (Family::Hevc, _) if nvenc => pick(
+                "preset",
+                &[
+                    ("p5", 334.0),
+                    ("p4", 440.0),
+                    ("p3", 552.0),
+                    ("p2", 735.0),
+                    ("p1", 920.0),
+                ],
+            ),
+            (Family::Av1, _) if nvenc => pick(
+                "preset",
+                &[
+                    ("p5", 440.0),
+                    ("p4", 495.0),
+                    ("p3", 549.0),
+                    ("p2", 645.0),
+                    ("p1", 741.0),
+                ],
+            ),
+            // AMD and Intel publish no such figures: their media engines are rated for 4K at
+            // 60 FPS, so the best preset up to that, one step faster above.
+            _ if amf => pick(
+                "quality",
+                &[("quality", 312.0), ("balanced", 624.0), ("speed", f64::MAX)],
+            ),
+            _ if qsv => pick(
+                "preset",
+                &[("medium", 312.0), ("fast", 624.0), ("veryfast", f64::MAX)],
+            ),
+            // Software encoders share the processor with the game.
+            (_, "libx264") => pick(
+                "preset",
+                &[
+                    ("veryfast", 78.0),
+                    ("superfast", 156.0),
+                    ("ultrafast", f64::MAX),
+                ],
+            ),
+            (_, "libx265") => pick("preset", &[("superfast", 78.0), ("ultrafast", f64::MAX)]),
+            (_, "libsvtav1") => pick(
+                "preset",
+                &[("10", 78.0), ("11", 156.0), ("12", 312.0), ("13", f64::MAX)],
+            ),
+            (_, "libvpx_vp9") => pick("cpu-used", &[("6", 78.0), ("7", 156.0), ("8", f64::MAX)]),
+            _ => None,
+        }
     }
 
     /// The FFmpeg options of a simple preset for a recording of `size` at `fps`: the encoder's

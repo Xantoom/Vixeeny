@@ -771,9 +771,9 @@ mod tests {
     #[test]
     fn rows_that_do_not_apply_are_left_out() {
         let mut c = Config::default();
-        assert!(!has(Section::Image, &c, "jpeg_quality"));
-        c.image.format = "jpeg".into();
         assert!(has(Section::Image, &c, "jpeg_quality"));
+        c.image.format = "png".into();
+        assert!(!has(Section::Image, &c, "jpeg_quality"));
         assert!(!has(Section::Image, &c, "avif_depth"));
         assert!(has(Section::Overlay, &c, "widget_corner"));
         c.recording_widget.enabled = false;

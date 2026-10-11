@@ -27,10 +27,12 @@ use windows::Win32::System::Ioctl::{
     IOCTL_STORAGE_QUERY_PROPERTY, PropertyStandardQuery, STORAGE_DEVICE_DESCRIPTOR,
     STORAGE_DEVICE_NUMBER, STORAGE_PROPERTY_QUERY, StorageDeviceProperty,
 };
-use windows::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RegGetValueW};
+use windows::Win32::System::Registry::{
+    HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RegGetValueW,
+};
 use windows::Win32::System::SystemInformation::{
-    GetLogicalProcessorInformationEx, GetPhysicallyInstalledSystemMemory, GlobalMemoryStatusEx,
-    MEMORYSTATUSEX, RelationProcessorCore,
+    GetLogicalProcessorInformationEx, GetPhysicallyInstalledSystemMemory, GetSystemFirmwareTable,
+    GlobalMemoryStatusEx, MEMORYSTATUSEX, RSMB, RelationProcessorCore,
 };
 use windows::Win32::System::WindowsProgramming::DRIVE_FIXED;
 use windows::core::{HSTRING, PCWSTR, w};
@@ -40,6 +42,8 @@ pub struct Machine {
     pub cpu: Option<Cpu>,
     /// Installed memory, in bytes (0: unknown).
     pub ram_bytes: u64,
+    /// The memory sticks (empty when the firmware does not list them).
+    pub modules: Vec<Module>,
     pub gpus: Vec<Gpu>,
     pub disks: Vec<Disk>,
     pub screens: Vec<Screen>,
@@ -50,6 +54,21 @@ pub struct Cpu {
     pub name: String,
     pub cores: u32,
     pub threads: u32,
+    /// Base and maximum (boost) frequencies, in MHz (0: unknown).
+    pub base_mhz: u32,
+    pub boost_mhz: u32,
+}
+
+/// A memory stick, as the firmware describes it (SMBIOS).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Module {
+    pub bytes: u64,
+    /// `DDR5`, `DDR4`... (empty when unknown).
+    pub kind: String,
+    /// The speed it runs at, in MT/s (0: unknown).
+    pub mts: u32,
+    /// Its CAS latency, read from the maker's part number (0: unknown).
+    pub cl: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -92,6 +111,7 @@ pub fn machine() -> Machine {
     Machine {
         cpu: cpu(),
         ram_bytes: ram_bytes(),
+        modules: modules(),
         gpus: gpus(),
         disks: disks(),
         screens: screens(),
@@ -121,11 +141,47 @@ fn cpu() -> Option<Cpu> {
     // Some processors pad their name with spaces.
     let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
     let threads = std::thread::available_parallelism().map_or(0, |n| n.get() as u32);
+    let (base, boost) = frequencies();
     Some(Cpu {
         name,
         cores: cores().unwrap_or(threads),
         threads,
+        base_mhz: base,
+        boost_mhz: boost,
     })
+}
+
+/// `(base, boost)` in MHz. Windows gives the base; only Intel processors tell their maximum
+/// (CPUID leaf 0x16), AMD keeps it in registers a program cannot read.
+fn frequencies() -> (u32, u32) {
+    let mut mhz = 0u32;
+    let mut size = size_of::<u32>() as u32;
+    // SAFETY: `mhz` holds `size` bytes; RRF_RT_REG_DWORD checks the type.
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            w!(r"HARDWARE\DESCRIPTION\System\CentralProcessor\0"),
+            w!("~MHz"),
+            RRF_RT_REG_DWORD,
+            None,
+            Some((&raw mut mhz).cast()),
+            Some(&raw mut size),
+        )
+    };
+    let base = if status == ERROR_SUCCESS { mhz } else { 0 };
+    #[cfg(target_arch = "x86_64")]
+    {
+        use std::arch::x86_64::__cpuid;
+        let vendor = __cpuid(0);
+        let intel = (vendor.ebx, vendor.edx, vendor.ecx) == (0x756e_6547, 0x4965_6e69, 0x6c65_746e);
+        if intel && vendor.eax >= 0x16 {
+            // Within the leaves the processor reports.
+            let leaf = __cpuid(0x16);
+            let (b, max) = (leaf.eax & 0xffff, leaf.ebx & 0xffff);
+            return (if b > 0 { b } else { base }, max);
+        }
+    }
+    (base, 0)
 }
 
 /// The physical cores (each record of the list is one core).
@@ -170,6 +226,136 @@ pub fn ram_bytes() -> u64 {
         Ok(()) => kib * 1024,
         Err(_) => 0,
     }
+}
+
+/// The memory sticks, from the SMBIOS tables of the firmware (type 17: memory device).
+fn modules() -> Vec<Module> {
+    // SAFETY: a first call without a buffer asks for the size.
+    let size = unsafe { GetSystemFirmwareTable(RSMB, 0, None) };
+    if size == 0 {
+        return Vec::new();
+    }
+    let mut raw = vec![0u8; size as usize];
+    // SAFETY: `raw` holds `size` bytes.
+    if unsafe { GetSystemFirmwareTable(RSMB, 0, Some(&mut raw)) } != size {
+        return Vec::new();
+    }
+    // RawSMBIOSData: 4 bytes of version, the length of the tables, the tables.
+    let Some(len) = raw
+        .get(4..8)
+        .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    else {
+        return Vec::new();
+    };
+    let tables = &raw[8..raw.len().min(8 + len as usize)];
+    smbios_modules(tables)
+}
+
+fn smbios_modules(tables: &[u8]) -> Vec<Module> {
+    let mut out = Vec::new();
+    let mut at = 0usize;
+    while at + 4 <= tables.len() {
+        let kind = tables[at];
+        let length = tables[at + 1] as usize;
+        if length < 4 || at + length > tables.len() {
+            break;
+        }
+        let formatted = &tables[at..at + length];
+        // The strings follow, ended by an empty one.
+        let mut end = at + length;
+        while end + 1 < tables.len() && (tables[end] != 0 || tables[end + 1] != 0) {
+            end += 1;
+        }
+        let strings: Vec<&[u8]> = tables[at + length..end].split(|b| *b == 0).collect();
+        let string = |index: u8| {
+            (index > 0)
+                .then(|| strings.get(index as usize - 1))
+                .flatten()
+                .map(|s| String::from_utf8_lossy(s).trim().to_owned())
+                .unwrap_or_default()
+        };
+        let word = |o: usize| {
+            formatted
+                .get(o..o + 2)
+                .map_or(0, |b| u16::from_le_bytes([b[0], b[1]]))
+        };
+        let dword = |o: usize| {
+            formatted
+                .get(o..o + 4)
+                .map_or(0, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        };
+        match kind {
+            17 => {
+                let size = word(0x0C);
+                let bytes = match size {
+                    0 | 0xFFFF => 0,
+                    0x7FFF => u64::from(dword(0x1C) & 0x7FFF_FFFF) << 20,
+                    s if s & 0x8000 != 0 => u64::from(s & 0x7FFF) << 10,
+                    s => u64::from(s) << 20,
+                };
+                // An empty slot.
+                if bytes > 0 {
+                    let kind = match formatted.get(0x12) {
+                        Some(0x18) => "DDR3",
+                        Some(0x1A) => "DDR4",
+                        Some(0x1B) => "LPDDR",
+                        Some(0x1D) => "LPDDR3",
+                        Some(0x1E) => "LPDDR4",
+                        Some(0x22) => "DDR5",
+                        Some(0x23) => "LPDDR5",
+                        _ => "",
+                    };
+                    let rated = match word(0x15) {
+                        0xFFFF => dword(0x54),
+                        s => u32::from(s),
+                    };
+                    let configured = match word(0x20) {
+                        0xFFFF => dword(0x58),
+                        s => u32::from(s),
+                    };
+                    let part = formatted.get(0x1A).map_or_else(String::new, |i| string(*i));
+                    out.push(Module {
+                        bytes,
+                        kind: kind.to_owned(),
+                        mts: if configured > 0 { configured } else { rated },
+                        cl: latency(&part),
+                    });
+                }
+            }
+            127 => break,
+            _ => {}
+        }
+        at = end + 2;
+    }
+    out
+}
+
+/// The CAS latency the maker writes in its part number after the speed: `F5-6000J3038F16G`
+/// (G.Skill), `CMK32GX5M2B6000C30` or `…Z30` (Corsair), `KF560C30-16` (Kingston), `FF3D532G6000HC38A`
+/// (TeamGroup). 0 when the number does not say (sticks sold at the standard timings).
+fn latency(part: &str) -> u32 {
+    let b = part.as_bytes();
+    for i in 0..b.len() {
+        // 3 or 4 digits of speed, a letter or two, 2 digits of latency.
+        let digits = b[i..].iter().take_while(|c| c.is_ascii_digit()).count();
+        if !(3..=4).contains(&digits) || (i > 0 && b[i - 1].is_ascii_digit()) {
+            continue;
+        }
+        let rest = &b[i + digits..];
+        let skip = match rest {
+            [b'H', b'C', ..] | [b'C', b'L', ..] => 2,
+            [b'C' | b'J' | b'U' | b'Z', ..] => 1,
+            _ => continue,
+        };
+        let cl = &rest[skip..];
+        if cl.len() >= 2 && cl[0].is_ascii_digit() && cl[1].is_ascii_digit() {
+            let n = u32::from(cl[0] - b'0') * 10 + u32::from(cl[1] - b'0');
+            if (9..=60).contains(&n) {
+                return n;
+            }
+        }
+    }
+    0
 }
 
 /// The memory free right now, in bytes (`None` when it cannot be read).
@@ -557,6 +743,44 @@ mod tests {
         let cpu = m.cpu.unwrap_or_else(|| panic!("no processor"));
         assert!(!cpu.name.is_empty() && cpu.cores >= 1 && cpu.threads >= cpu.cores);
         assert!(m.ram_bytes > 0);
+    }
+
+    #[test]
+    fn latencies_read_from_part_numbers() {
+        assert_eq!(super::latency("F5-6000J3038F16G"), 30);
+        assert_eq!(super::latency("CMK32GX5M2B6000C30"), 30);
+        assert_eq!(super::latency("KF560C30-16"), 30);
+        assert_eq!(super::latency("CMH32GX5M2B6000Z30"), 30);
+        assert_eq!(super::latency("FF3D532G6000HC38ADC01"), 38);
+        assert_eq!(super::latency("F4-3600C16-16GTZNC"), 16);
+        assert_eq!(super::latency("CP16G4DFRA32A"), 0);
+        assert_eq!(super::latency("M425R2GA3BB0-CQKOD"), 0);
+    }
+
+    #[test]
+    fn memory_sticks_read_from_smbios() {
+        // One type 17 structure (DDR5, 32 GB, 6000 MT/s), then the end (type 127).
+        let mut t = vec![0u8; 0x5C];
+        t[0] = 17;
+        t[1] = 0x5C;
+        t[0x0C..0x0E].copy_from_slice(&0x7FFFu16.to_le_bytes());
+        t[0x1C..0x20].copy_from_slice(&32768u32.to_le_bytes());
+        t[0x12] = 0x22;
+        t[0x15..0x17].copy_from_slice(&4800u16.to_le_bytes());
+        t[0x1A] = 1;
+        t[0x20..0x22].copy_from_slice(&6000u16.to_le_bytes());
+        t.extend_from_slice(b"F5-6000J3038F16G\0\0");
+        t.extend_from_slice(&[127, 4, 0, 0, 0, 0]);
+        let m = super::smbios_modules(&t);
+        assert_eq!(
+            m,
+            [super::Module {
+                bytes: 32 << 30,
+                kind: "DDR5".into(),
+                mts: 6000,
+                cl: 30,
+            }]
+        );
     }
 
     #[test]
