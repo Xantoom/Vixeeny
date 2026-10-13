@@ -53,7 +53,7 @@ export struct PcTile {
     kind: int,
     title: string,
     detail: string,
-    // What the part is, while the pointer rests on the card.
+    // What the part is, for screen readers.
     tip: string,
     // A disk's used share, 0 to 1 (-1: none).
     used: float,
@@ -155,18 +155,6 @@ component PcCard inherits Rectangle {
                 color: Theme.text-3;
                 font-size: 12px;
                 overflow: elide;
-            }
-        }
-    }
-    touch := TouchArea {
-        changed has-hover => {
-            if self.has-hover && root.tile.tip != "" {
-                Tip.text = root.tile.tip;
-                Tip.left = root.absolute-position.x;
-                Tip.top = root.absolute-position.y;
-                Tip.bottom = root.absolute-position.y + root.height;
-            } else if Tip.left == root.absolute-position.x && Tip.top == root.absolute-position.y {
-                Tip.text = "";
             }
         }
     }
@@ -421,7 +409,7 @@ component ShortcutField inherits Rectangle {
                 Tip.left = root.absolute-position.x;
                 Tip.top = root.absolute-position.y;
                 Tip.bottom = root.absolute-position.y + root.height;
-            } else if Tip.left == root.absolute-position.x && Tip.top == root.absolute-position.y {
+            } else if Tip.text == root.key.tip {
                 Tip.text = "";
             }
         }

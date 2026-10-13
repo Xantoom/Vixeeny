@@ -677,3 +677,89 @@ fn with_mica_the_window_lets_it_through() {
     assert!(card.r > nav.r, "a veil over it: {card:?}");
     panel.window().global::<Theme>().set_mica(false);
 }
+
+// An "i" hovered, then the page scrolled under the pointer: the tooltip goes once the pointer
+// leaves, although the dot is no longer where it was shown.
+#[test]
+fn a_tooltip_goes_after_a_scroll() {
+    use slint::LogicalPosition;
+    use slint::platform::{PointerEventButton, WindowEvent};
+    use vixeeny_encode::probe::{EncoderProbe, FormatProbe, ProbeResult};
+    use vixeeny_encode::registry::Chroma;
+    use vixeeny_settings::Section;
+    let (panel, _) = settings_panel();
+    panel.window().set_animated(false);
+    panel.set_probe(
+        Some(ProbeResult {
+            encoders: vec![EncoderProbe {
+                id: "nvenc_h264".into(),
+                adapter: Some(0),
+                formats: vec![FormatProbe {
+                    depth: 8,
+                    chroma: Chroma::C420,
+                    uhd: true,
+                    hdr: false,
+                }],
+            }],
+            ..ProbeResult::default()
+        }),
+        false,
+    );
+    panel.select_section(Section::Video);
+    panel.window().invoke_row_chosen("preset".into(), 2); // custom: the expert settings
+    let window = WINDOW.with(Rc::clone);
+    let size = (1040, 720);
+    let at = |x: f32, y: f32| LogicalPosition::new(x, y);
+    let scroll = |y: f32, dy: f32| {
+        window.dispatch_event(WindowEvent::PointerScrolled {
+            position: at(600.0, y),
+            delta_x: 0.0,
+            delta_y: dy,
+        });
+    };
+    settings_render_at(&panel, "tip-scroll-0", size);
+    window.dispatch_event(WindowEvent::PointerMoved {
+        position: at(600.0, 500.0),
+    });
+    scroll(500.0, -2000.0);
+    settings_render_at(&panel, "tip-scroll-1", size);
+    for event in [
+        WindowEvent::PointerPressed {
+            position: at(600.0, 680.0),
+            button: PointerEventButton::Left,
+        },
+        WindowEvent::PointerReleased {
+            position: at(600.0, 680.0),
+            button: PointerEventButton::Left,
+        },
+    ] {
+        window.dispatch_event(event);
+    }
+    scroll(500.0, -4000.0);
+    settings_render_at(&panel, "tip-scroll-2", size);
+    // Where the pointer ends, without ever resting on an "i".
+    let end = at(327.0 + 49.0 * 5.5, 657.0 - 49.0 * 10.0);
+    window.dispatch_event(WindowEvent::PointerMoved { position: end });
+    scroll(end.y, 100.0);
+    let clean = settings_render_at(&panel, "tip-scroll-3", size);
+    scroll(end.y, -100.0);
+    // The chroma's "i", at the bottom; a little scroll; the pointer goes up to the expander.
+    window.dispatch_event(WindowEvent::PointerMoved {
+        position: at(327.0, 657.0),
+    });
+    scroll(657.0, 100.0);
+    for k in 0..50 {
+        let k = k as f32;
+        window.dispatch_event(WindowEvent::PointerMoved {
+            position: at(327.0 + k * 5.5, 657.0 - k * 10.0),
+        });
+    }
+    let left = settings_render_at(&panel, "tip-scroll-4", size);
+    let differ = left
+        .as_slice()
+        .iter()
+        .zip(clean.as_slice())
+        .filter(|(a, b)| a != b)
+        .count();
+    assert!(differ < 500, "the tooltip stayed ({differ} pixels)");
+}

@@ -89,7 +89,7 @@ pub struct Tile {
     pub kind: TileKind,
     pub title: String,
     pub detail: String,
-    /// What the part is, while the pointer rests on the card (`Processor`, `Screen 1 (main)`).
+    /// What the part is, for screen readers (`Processor`, `Screen 1 (main)`).
     pub tip: String,
     /// A disk's used share, 0 to 1.
     pub used: Option<f32>,

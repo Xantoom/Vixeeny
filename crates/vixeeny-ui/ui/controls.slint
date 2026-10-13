@@ -607,7 +607,8 @@ export component InfoTip inherits Rectangle {
                 Tip.left = root.left;
                 Tip.top = root.absolute-position.y;
                 Tip.bottom = root.absolute-position.y + root.height;
-            } else if Tip.left == root.left && Tip.top == root.absolute-position.y {
+            // Unless another one took the tooltip meanwhile. Not by its place: a scroll moves it.
+            } else if Tip.text == root.text {
                 Tip.text = "";
             }
         }
@@ -799,6 +800,8 @@ export component ScrollArea inherits Rectangle {
     // Back to the top.
     public function to-top() { fl.content-y = 0px; }
     fl := Flickable {
+        // What a tooltip belonged to has moved away from it.
+        changed viewport-y => { Tip.text = ""; }
         @children
     }
     property <bool> scrollable: fl.content-height > root.height + 1px;
