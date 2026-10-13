@@ -523,21 +523,6 @@ fn start_session(config: &Config, replay: bool) -> anyhow::Result<Handle> {
     }
 }
 
-/// The user dropped the widget somewhere: the next recordings put it there.
-fn keep_widget_place(place: (f32, f32)) {
-    let Some(path) = vixeeny_common::paths::config_file() else {
-        return;
-    };
-    // An unreadable file is left alone rather than replaced by the defaults.
-    let Ok(mut config) = Config::load(&path) else {
-        return;
-    };
-    config.recording_widget.corner = "custom".into();
-    config.recording_widget.custom = place;
-    crate::settings::save(&config);
-    tracing::debug!("widget moved to {place:?}");
-}
-
 /// What the widget's warning sign watches during a recording.
 struct Watch {
     folder: Option<PathBuf>,
@@ -668,7 +653,6 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
             let _ = presses.send(match press {
                 FromWidget::TogglePause => Ctl::TogglePause,
                 FromWidget::Stop => Ctl::Stop,
-                FromWidget::Moved(x, y) => return keep_widget_place((x, y)),
             });
         })
         .inspect_err(|e| tracing::warn!("recording widget: {e:#}"))

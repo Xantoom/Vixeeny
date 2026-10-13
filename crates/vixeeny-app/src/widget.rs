@@ -133,21 +133,6 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
         let press = match event {
             WidgetEvent::TogglePause => FromWidget::TogglePause,
             WidgetEvent::Stop => FromWidget::Stop,
-            // Kept as a place on the screen it was dropped on, for the next recordings.
-            WidgetEvent::Moved(x, y) => {
-                let centre = (x + w as i32 / 2, y + h as i32 / 2);
-                let Some(work) = vixeeny_platform::monitors().ok().and_then(|list| {
-                    vixeeny_platform::monitor_at(&list, centre.0, centre.1).map(|m| m.work)
-                }) else {
-                    return;
-                };
-                let (fx, fy) = crate::widget_math::custom_place(
-                    (x, y),
-                    (work.x, work.y, work.width, work.height),
-                    dpi,
-                );
-                FromWidget::Moved(fx, fy)
-            }
         };
         let mut out = std::io::stdout().lock();
         let _ = out.write_all(press.to_line().as_bytes());

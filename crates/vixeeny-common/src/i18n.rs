@@ -1245,10 +1245,10 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
             "{size} libres sur le disque des replays : les prochains replays pourraient échouer."
         }
         (Key::SetWidgetPlaceHint, Lang::En) => {
-            "Click anywhere on the screen for a place of your own, or drag the widget during a recording."
+            "Click anywhere on the screen for a place of your own."
         }
         (Key::SetWidgetPlaceHint, Lang::Fr) => {
-            "Clique n'importe où sur l'écran pour une position personnalisée, ou déplace le widget pendant un enregistrement."
+            "Clique n'importe où sur l'écran pour une position personnalisée."
         }
         (Key::UpdateChecked, Lang::En) => "Last checked: {when}",
         (Key::UpdateChecked, Lang::Fr) => "Dernière vérification : {when}",

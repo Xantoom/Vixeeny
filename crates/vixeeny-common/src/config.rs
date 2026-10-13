@@ -544,7 +544,7 @@ pub struct RecordingWidget {
     /// `custom`: at [`RecordingWidget::custom`].
     pub corner: String,
     /// The custom place: how far across the free room of the screen the widget is, from its
-    /// left and top edges (0 to 1). Set by dragging the widget or in the settings.
+    /// left and top edges (0 to 1). Set in the settings.
     pub custom: (f32, f32),
     /// `always`, `fade` (it fades after 3 s and comes back under the pointer) or `alerts` (it
     /// only shows while something goes wrong).

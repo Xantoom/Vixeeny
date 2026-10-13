@@ -373,8 +373,8 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     let saving = vixeeny_ui::slint::Timer::default();
     let unsaved = Rc::new(RefCell::new(None::<Config>));
     let pending = Rc::clone(&unsaved);
-    // Others write the file too (the widget keeps the place it was dragged to): the window
-    // shows what they wrote and keeps it when it saves.
+    // Others may write the file too: the window shows what they wrote and keeps it when it
+    // saves.
     let file = Rc::new(RefCell::new(OnDisk::read()));
     panel.watch_config({
         let (file, pending) = (Rc::clone(&file), Rc::clone(&unsaved));

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The recording widget (plan 5.9), drawn natively: a small bar with a blinking red dot, the
-//! elapsed time, and the pause / stop buttons; the dotted handle moves it. In pause the dot is
+//! elapsed time, and the pause / stop buttons. It stays where it was put. In pause the dot is
 //! amber and still and the time frozen. With `auto_hide` it fades after 3 s and comes back under
 //! the pointer. It never takes the keyboard and is left out of every screen capture.
 //!
@@ -13,9 +13,8 @@ use std::time::{Duration, Instant};
 use windows::Win32::Foundation::{LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetCursorPos, GetWindowRect, KillTimer, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetTimer,
-    SetWindowPos, WM_CAPTURECHANGED, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
-    WM_SETCURSOR, WM_TIMER,
+    GetWindowRect, KillTimer, SetTimer, WM_CAPTURECHANGED, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN,
+    WM_LBUTTONUP, WM_MOUSEMOVE, WM_SETCURSOR, WM_TIMER,
 };
 use windows::core::Result;
 
@@ -32,8 +31,6 @@ use crate::window::Pointer;
 pub enum WidgetEvent {
     TogglePause,
     Stop,
-    /// The user dragged the widget there (its window's top-left corner, physical pixels).
-    Moved(i32, i32),
 }
 
 /// When the widget is on screen.
@@ -133,7 +130,7 @@ pub enum WidgetTarget {
     /// The warning sign, while something goes wrong.
     Alert,
     Stop,
-    /// The rest of the bar: it moves the widget.
+    /// The rest of the bar.
     Bar,
     Outside,
 }
@@ -349,8 +346,6 @@ struct Inner {
     faded: Cell<bool>,
     /// The opacity it shows, to fade from.
     opacity: Cell<f32>,
-    /// Being moved: the pointer and the window where the drag started.
-    drag: Cell<Option<(POINT, (i32, i32))>>,
     on_event: RefCell<Option<OnEvent>>,
     closed: Cell<bool>,
 }
@@ -540,34 +535,6 @@ impl Inner {
         }
     }
 
-    /// Follows the pointer while the bar is dragged, whole on the screen under the pointer.
-    fn drag_to(&self, (start, (wx, wy)): (POINT, (i32, i32))) {
-        let mut now = POINT::default();
-        let mut r = RECT::default();
-        // SAFETY: valid out-pointers, a window of this thread.
-        let known = unsafe {
-            GetCursorPos(&mut now).is_ok() && GetWindowRect(self.popup.hwnd, &mut r).is_ok()
-        };
-        if !known {
-            return;
-        }
-        let at = (wx + now.x - start.x, wy + now.y - start.y);
-        let size = (r.right - r.left, r.bottom - r.top);
-        let (x, y) = popup::work_area_at(now).map_or(at, |area| popup::keep_inside(at, size, area));
-        // SAFETY: plain call on a window of this thread.
-        let _ = unsafe {
-            SetWindowPos(
-                self.popup.hwnd,
-                None,
-                x,
-                y,
-                0,
-                0,
-                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
-            )
-        };
-    }
-
     fn message(&self, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
         if let Some(r) = popup::passive(msg) {
             return Some(r);
@@ -601,7 +568,6 @@ impl Inner {
             },
             WM_SETCURSOR if (lparam.0 & 0xffff) == 1 => {
                 let pointer = match self.look.borrow().hover {
-                    Some(WidgetTarget::Bar) => Pointer::Zone(vixeeny_editor::CursorHint::Move),
                     Some(WidgetTarget::State | WidgetTarget::Stop) => Pointer::Hand,
                     _ => Pointer::Arrow,
                 };
@@ -609,10 +575,6 @@ impl Inner {
                 return Some(LRESULT(1));
             }
             WM_MOUSEMOVE => {
-                if let Some(drag) = self.drag.get() {
-                    self.drag_to(drag);
-                    return Some(LRESULT(0));
-                }
                 self.popup.track_leave();
                 if !self.hovered.replace(true) {
                     self.timer(FADE_TIMER, None);
@@ -644,38 +606,14 @@ impl Inner {
                 self.hide_tip();
                 let at = widget_at(self.u, x, y, alert);
                 self.press.set(Some(at));
-                if at == WidgetTarget::Bar {
-                    let mut start = POINT::default();
-                    let mut r = RECT::default();
-                    // SAFETY: valid out-pointers, a window of this thread.
-                    let known = unsafe {
-                        GetCursorPos(&mut start).is_ok()
-                            && GetWindowRect(self.popup.hwnd, &mut r).is_ok()
-                    };
-                    if known {
-                        self.drag.set(Some((start, (r.left, r.top))));
-                    }
-                }
             }
             // Another window took the mouse: its release will not come here.
             WM_CAPTURECHANGED => {
-                self.drag.set(None);
                 self.press.set(None);
             }
             WM_LBUTTONUP => {
                 // Taken before the release, which reports a loss of the mouse.
-                let dragged = self.drag.take();
                 let pressed = self.press.take();
-                if let Some((_, from)) = dragged {
-                    let mut r = RECT::default();
-                    // SAFETY: a valid out-pointer, a window of this thread.
-                    if unsafe { GetWindowRect(self.popup.hwnd, &mut r) }.is_ok()
-                        && (r.left, r.top) != from
-                        && let Some(f) = self.on_event.borrow().as_ref()
-                    {
-                        f(WidgetEvent::Moved(r.left, r.top));
-                    }
-                }
                 // SAFETY: plain call.
                 let _ = unsafe { ReleaseCapture() };
                 let at = widget_at(self.u, x, y, alert);
@@ -747,7 +685,6 @@ impl Widget {
             hovered: Cell::new(false),
             faded: Cell::new(false),
             opacity: Cell::new(1.0),
-            drag: Cell::new(None),
             on_event: RefCell::new(None),
             closed: Cell::new(false),
         });
@@ -780,10 +717,7 @@ impl Widget {
         *inner.alert_text.borrow_mut() = text.to_owned();
         if inner.alerts_only && !inner.closed.get() {
             if alert == Alert::None {
-                // Unless it is in the user's hands.
-                if inner.drag.get().is_none() {
-                    inner.withdraw();
-                }
+                inner.withdraw();
             } else if let Err(e) = inner.appear() {
                 tracing::warn!("recording widget: {e}");
             }

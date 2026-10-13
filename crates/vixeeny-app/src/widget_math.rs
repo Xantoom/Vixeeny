@@ -46,20 +46,6 @@ pub fn corner_geometry(
     (along(left, right, fx), along(top, bottom, fy), w, h)
 }
 
-/// The custom place of a widget whose window is at `(x, y)` on the monitor of `work`: the
-/// inverse of [`corner_geometry`], to the thousandth.
-pub fn custom_place(at: (i32, i32), work: (i32, i32, u32, u32), dpi: u32) -> (f32, f32) {
-    let ((left, right), (top, bottom), _) = room(work, dpi);
-    let part = |v: i32, lo: i32, hi: i32| {
-        if hi <= lo {
-            return 0.0;
-        }
-        let f = ((v - lo) as f32 / (hi - lo) as f32).clamp(0.0, 1.0);
-        (f * 1000.0).round() / 1000.0
-    };
-    (part(at.0, left, right), part(at.1, top, bottom))
-}
-
 /// A message from the recorder to the widget.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToWidget {
@@ -187,8 +173,6 @@ impl Health {
 pub enum FromWidget {
     TogglePause,
     Stop,
-    /// The user moved the widget: its new custom place (see [`custom_place`]).
-    Moved(f32, f32),
 }
 
 impl FromWidget {
@@ -196,7 +180,6 @@ impl FromWidget {
         match self {
             Self::TogglePause => "pause\n".into(),
             Self::Stop => "stop\n".into(),
-            Self::Moved(x, y) => format!("moved {x} {y}\n"),
         }
     }
 
@@ -205,16 +188,6 @@ impl FromWidget {
         let press = match parts.next()? {
             "pause" => Self::TogglePause,
             "stop" => Self::Stop,
-            "moved" => {
-                let mut f = || {
-                    parts
-                        .next()?
-                        .parse::<f32>()
-                        .ok()
-                        .filter(|f| (0.0..=1.0).contains(f))
-                };
-                Self::Moved(f()?, f()?)
-            }
             _ => return None,
         };
         parts.next().is_none().then_some(press)
@@ -272,13 +245,6 @@ mod tests {
             corner_geometry("custom", (3.0, -1.0), work, 96),
             (1698, 6, 216, 60)
         );
-        // Dropped somewhere: the same place comes back, on another screen too.
-        let place = custom_place((429, 486), work, 96);
-        assert_eq!(place, (0.25, 0.5));
-        let big = (1920, 0, 3840, 2112);
-        let (x, y, ..) = corner_geometry("custom", place, big, 192);
-        assert_eq!(custom_place((x, y), big, 192), place);
-        assert_eq!(custom_place((-500, 99_999), work, 96), (0.0, 1.0));
     }
 
     #[test]
@@ -298,14 +264,10 @@ mod tests {
         ] {
             assert_eq!(ToWidget::parse(&m.to_line()), Some(m.clone()));
         }
-        for b in [
-            FromWidget::TogglePause,
-            FromWidget::Stop,
-            FromWidget::Moved(0.25, 1.0),
-        ] {
+        for b in [FromWidget::TogglePause, FromWidget::Stop] {
             assert_eq!(FromWidget::parse(&b.to_line()), Some(b));
         }
-        for bad in ["moved", "moved 0.5", "moved 2 0", "moved a b", "stop now"] {
+        for bad in ["moved 0.5 0.5", "stop now"] {
             assert_eq!(FromWidget::parse(bad), None, "{bad}");
         }
         for bad in [
