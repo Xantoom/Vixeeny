@@ -551,6 +551,19 @@ fn run() -> anyhow::Result<()> {
         .name("ipc-read".into())
         .spawn(move || {
             while let Ok(Some(mut msg)) = ipc::read_msg::<_, DaemonToApp>(&mut recv) {
+                // The overlay's shortcut again while the strip is open: it closes, nothing
+                // waits to open it once more.
+                if let DaemonToApp::RunAction {
+                    action: ActionId::OverlayToggle,
+                    frozen,
+                } = &mut msg
+                    && side::dismiss_open()
+                {
+                    if let Some(frozen) = frozen.take() {
+                        vixeeny_capture::freeze::release(&frozen);
+                    }
+                    continue;
+                }
                 // Frozen while another action runs: they would hide it, and the action that
                 // waits for its turn captures the screen itself.
                 if let DaemonToApp::RunAction { frozen, .. } = &mut msg

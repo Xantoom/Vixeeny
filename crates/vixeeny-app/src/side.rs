@@ -2,6 +2,8 @@
 //! The side overlay (plan 5.12), `overlay_toggle`: opens the strip on the edge of the monitor
 //! under the mouse, waits for a pick, and gives it back as an action to run.
 
+use std::sync::Mutex;
+
 use anyhow::Context;
 use vixeeny_common::config::Config;
 use vixeeny_common::i18n::{Key, Lang, tr};
@@ -53,6 +55,21 @@ fn texts(lang: Lang) -> SideTexts {
     }
 }
 
+/// Closes the strip on screen, if any, as a click elsewhere would.
+type Dismiss = Box<dyn Fn() + Send>;
+
+/// Set while the strip is on screen.
+static OPEN: Mutex<Option<Dismiss>> = Mutex::new(None);
+
+/// The overlay's shortcut pressed again while the strip is on screen: it goes away as a click
+/// elsewhere would, rather than waiting to open once more. False when no strip is open.
+pub fn dismiss_open() -> bool {
+    let open = OPEN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    open.as_ref().map(|dismiss| dismiss()).is_some()
+}
+
 /// Shows the overlay until the user picks, dismisses it, or clicks elsewhere.
 pub fn run(
     config: &Config,
@@ -98,14 +115,21 @@ pub fn run(
     // take it, which it does not always do for a window opened by a shortcut: the clicks are
     // watched directly. The strip closes on the next turn of its loop, not inside the hook.
     let dismiss = panel.dismisser();
+    *OPEN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Box::new(panel.dismisser()));
     let mut outside = None;
     let choice = panel.run_with(|handle| {
         outside = vixeeny_platform::on_click_outside(
             vixeeny_platform::WindowId(handle),
             Box::new(dismiss),
         );
-    })?;
+    });
+    *OPEN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     drop(outside);
+    let choice = choice?;
     Ok(Outcome {
         action: choice.map(action_of),
         pinned: panel.pinned(),
