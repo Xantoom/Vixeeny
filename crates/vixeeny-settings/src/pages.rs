@@ -294,7 +294,7 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
             t(Key::SetImageFormat),
             vec![
                 opt("png", "PNG"),
-                opt("jpeg", "JPEG"),
+                opt("jpeg", format!("JPEG ({})", t(Key::OptRecommended))),
                 opt("webp", "WebP"),
                 opt("avif", "AVIF"),
                 opt("jxl", "JPEG XL"),
@@ -491,6 +491,8 @@ fn custom_rows(env: &Env, config: &Config, encoder: &str) -> (Vec<Row>, Vec<Row>
     let mode = spec.rate_mode(&config.video.params);
     let mut rows = Vec::new();
     // Grouped: aiming at a quality, aiming at a bitrate.
+    // The speed that keeps up with these settings (resolution × frame rate).
+    let speed = spec.speed_for(pixel_rate(env, config));
     let mut modes: Vec<Opt> = Vec::new();
     for (bitrate, title) in [(false, Key::OptGroupQuality), (true, Key::OptGroupBitrate)] {
         let group: Vec<Opt> = spec
@@ -564,7 +566,17 @@ fn custom_rows(env: &Env, config: &Config, encoder: &str) -> (Vec<Row>, Vec<Row>
                     param
                         .values
                         .iter()
-                        .map(|v| opt(v, encoders::value_label(&param.key, v, lang)))
+                        .map(|v| {
+                            let label = encoders::value_label(&param.key, v, lang);
+                            if speed
+                                .as_ref()
+                                .is_some_and(|(k, r)| *k == param.key && r == v)
+                            {
+                                opt(v, format!("{label} ({})", env.t(Key::OptRecommended)))
+                            } else {
+                                opt(v, label)
+                            }
+                        })
                         .collect(),
                 ),
             ),

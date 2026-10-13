@@ -1366,6 +1366,16 @@ mod tests {
         );
         assert!(row(&video, "p:preset").info.contains("P6 and P7"));
         assert!(row(&video, "p:rc.quality").info.contains("Recommended: 23"));
+        // The speed that keeps up is marked in the list too, and only it.
+        let Kind::Choice(presets) = &row(&video, "p:preset").kind else {
+            panic!("the preset is a choice");
+        };
+        let marked: Vec<_> = presets
+            .iter()
+            .filter(|o| o.label.contains("recommended"))
+            .map(|o| o.label.as_str())
+            .collect();
+        assert_eq!(marked, ["P5 (recommended)"]);
         // A setting with nothing to add has no "i".
         assert!(row(&video, "video_cursor").info.is_empty());
         assert!(row(&video, "preset").info.is_empty());
