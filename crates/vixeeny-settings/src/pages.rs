@@ -516,7 +516,6 @@ fn custom_rows(env: &Env, config: &Config, encoder: &str) -> (Vec<Row>, Vec<Row>
     }
     let scale = match mode {
         RateMode::Quality => Some((rate_keys::QUALITY, &rc.quality)),
-        RateMode::Cqp => rc.qp.as_ref().map(|q| (rate_keys::QP, q)),
         RateMode::Vbr | RateMode::Cbr => None,
     };
     if let Some((key, q)) = scale {

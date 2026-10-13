@@ -58,19 +58,13 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
             "4:2:0 : lu partout.\n4:4:4 : couleurs plus précises sur le texte fin, mais rarement lu et plus lourd.",
         ),
         "p:rc.mode" => pick(
-            "Constant quality: the quality stays the same, the file size varies.\nConstant QP: simpler, heavier.\nVBR: aims at a size.\nCBR: a fixed size, for streaming.",
-            "Qualité constante : la qualité reste la même, la taille du fichier varie.\nQP constant : plus simple, plus lourd.\nVBR : vise une taille.\nCBR : taille fixe, pour le streaming.",
+            "Target quality: the encoder keeps the picture at the chosen level, the file size follows what is filmed.\nVBR: aims at a size.\nCBR: a fixed size, for streaming.",
+            "Qualité visée : l'encodeur garde l'image au niveau choisi, la taille du fichier suit ce qui est filmé.\nVBR : vise une taille.\nCBR : taille fixe, pour le streaming.",
         ),
-        "p:rc.quality" | "p:rc.qp" => {
+        "p:rc.quality" => {
             let encoder =
                 encoders::resolved(env, &config.video).and_then(|e| encoders::spec(&e.id));
-            let default = encoder.map(|e| {
-                if key == "p:rc.qp" {
-                    e.rate_control.qp.as_ref().map_or(0, |q| q.default)
-                } else {
-                    e.rate_control.quality.default
-                }
-            });
+            let default = encoder.map(|e| e.rate_control.quality.default);
             let base = pick(
                 "Lower is better quality, but much larger files.",
                 "Plus bas = meilleure qualité, mais fichiers beaucoup plus volumineux.",

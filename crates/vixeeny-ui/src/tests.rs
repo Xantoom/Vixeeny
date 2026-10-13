@@ -176,7 +176,7 @@ fn the_video_page_edits_the_current_profile_and_reports_problems() {
     w.invoke_row_chosen("container".into(), 0);
     w.invoke_row_chosen("encoder".into(), 0);
     w.invoke_row_chosen("preset".into(), 2); // best, light, custom
-    w.invoke_row_chosen("p:rc.mode".into(), 4); // Quality: CRF, CQP; Bitrate: VBR, CBR
+    w.invoke_row_chosen("p:rc.mode".into(), 3); // Quality: CRF; Bitrate: VBR, CBR
     assert_eq!(panel.config().video.params["rc.mode"], "vbr");
     // The rows that just appeared, shown at the end of their unfolding.
     panel.window().set_animated(false);

@@ -5,9 +5,8 @@
 #
 # The custom preset is built from `rate_control` and `params`:
 # - `rate_control.quality`: the scale of the constant-quality mode (lower = better);
-# - `rate_control.qp`: the scale of the constant-quantizer mode (`cqp`), when there is one;
-# - `rate_control.modes`: the FFmpeg options of each mode (`quality`, `cqp`, `vbr`, `cbr`),
-#   where `{quality}`, `{qp}`, `{bitrate}`, `{maxrate}` and `{bufsize}` are replaced by the
+# - `rate_control.modes`: the FFmpeg options of each mode (`quality`, `vbr`, `cbr`),
+#   where `{quality}`, `{bitrate}`, `{maxrate}` and `{bufsize}` are replaced by the
 #   user's values (rates in bit/s; the buffer is two seconds of the highest rate);
 # - `params`: the other options, each always written with its value or `default`, except a
 #   value equal to `auto`, which leaves the option to FFmpeg.
@@ -39,9 +38,7 @@ small = { crf = 26, preset = "veryfast" }
 
 [encoder.rate_control]
 quality = { name = "CRF", min = 0, max = 51, default = 23 }
-qp = { name = "QP", min = 0, max = 51, default = 20 }
 modes.quality = { crf = "{quality}" }
-modes.cqp = { qp = "{qp}" }
 modes.vbr = { b = "{bitrate}", maxrate = "{maxrate}", bufsize = "{bufsize}" }
 modes.cbr = { b = "{bitrate}", minrate = "{bitrate}", maxrate = "{bitrate}", bufsize = "{bufsize}" }
 
@@ -113,9 +110,7 @@ small = { crf = 28, preset = "superfast" }
 
 [encoder.rate_control]
 quality = { name = "CRF", min = 0, max = 51, default = 24 }
-qp = { name = "QP", min = 0, max = 51, default = 22 }
 modes.quality = { crf = "{quality}" }
-modes.cqp = { qp = "{qp}" }
 modes.vbr = { b = "{bitrate}", maxrate = "{maxrate}", bufsize = "{bufsize}" }
 modes.cbr = { b = "{bitrate}", minrate = "{bitrate}", maxrate = "{bitrate}", bufsize = "{bufsize}" }
 
@@ -282,9 +277,7 @@ small = { rc = "vbr", cq = 30, preset = "p5", tune = "hq", multipass = "qres", s
 
 [encoder.rate_control]
 quality = { name = "CQ", min = 1, max = 51, default = 23 }
-qp = { name = "QP", min = 0, max = 51, default = 23 }
 modes.quality = { rc = "vbr", cq = "{quality}" }
-modes.cqp = { rc = "constqp", qp = "{qp}" }
 modes.vbr = { rc = "vbr", b = "{bitrate}", maxrate = "{maxrate}", bufsize = "{bufsize}" }
 modes.cbr = { rc = "cbr", b = "{bitrate}", bufsize = "{bufsize}" }
 
@@ -365,9 +358,7 @@ small = { rc = "vbr", cq = 30, preset = "p5", tune = "hq", multipass = "qres", s
 
 [encoder.rate_control]
 quality = { name = "CQ", min = 1, max = 51, default = 23 }
-qp = { name = "QP", min = 0, max = 51, default = 24 }
 modes.quality = { rc = "vbr", cq = "{quality}" }
-modes.cqp = { rc = "constqp", qp = "{qp}" }
 modes.vbr = { rc = "vbr", b = "{bitrate}", maxrate = "{maxrate}", bufsize = "{bufsize}" }
 modes.cbr = { rc = "cbr", b = "{bitrate}", bufsize = "{bufsize}" }
 
@@ -446,9 +437,7 @@ small = { rc = "vbr", cq = 38, preset = "p5", tune = "hq", multipass = "qres", s
 
 [encoder.rate_control]
 quality = { name = "CQ", min = 1, max = 63, default = 30 }
-qp = { name = "QP", min = 0, max = 255, default = 120 }
 modes.quality = { rc = "vbr", cq = "{quality}" }
-modes.cqp = { rc = "constqp", qp = "{qp}" }
 modes.vbr = { rc = "vbr", b = "{bitrate}", maxrate = "{maxrate}", bufsize = "{bufsize}" }
 modes.cbr = { rc = "cbr", b = "{bitrate}", bufsize = "{bufsize}" }
 

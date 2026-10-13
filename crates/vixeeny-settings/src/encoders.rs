@@ -211,17 +211,11 @@ pub fn rate_mode_label(mode: RateMode, encoder: &Encoder, lang: Lang) -> String 
         RateMode::Quality => {
             let scale = &encoder.rate_control.quality.name;
             if fr {
-                format!("Qualité constante ({scale})")
+                format!("Qualité visée ({scale})")
             } else {
-                format!("Constant quality ({scale})")
+                format!("Target quality ({scale})")
             }
         }
-        RateMode::Cqp => if fr {
-            "QP constant (CQP)"
-        } else {
-            "Constant QP (CQP)"
-        }
-        .to_owned(),
         RateMode::Vbr => if fr {
             "Débit variable (VBR)"
         } else {
