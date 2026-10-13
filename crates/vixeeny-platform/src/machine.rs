@@ -95,7 +95,7 @@ pub struct Disk {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Screen {
-    /// 1, 2, 3... in the order of Windows' display numbers.
+    /// 1, 2, 3... as Windows' display settings number them.
     pub number: u32,
     /// The main screen (the taskbar's, at the origin of the desktop).
     pub primary: bool,
@@ -662,7 +662,9 @@ fn screens() -> Vec<Screen> {
         return Vec::new();
     }
     paths.truncate(paths_len as usize);
-    let mut screens: Vec<(u32, Screen)> = paths
+    // Its `DISPLAY` number, and its output: adapter (low, high) and target.
+    type Key = (u32, (u32, i32, u32));
+    let mut screens: Vec<(Key, Screen)> = paths
         .iter()
         .filter_map(|path| {
             let target = &path.targetInfo;
@@ -690,7 +692,7 @@ fn screens() -> Vec<Screen> {
             } else {
                 (f64::from(rate.Numerator) / f64::from(rate.Denominator)).round() as u32
             };
-            // `\\.\DISPLAY2`: the number Windows gives the screen.
+            // `\\.\DISPLAY2`: the same number for the outputs of a duplicated screen.
             let mut gdi = DISPLAYCONFIG_SOURCE_DEVICE_NAME::default();
             gdi.header.r#type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
             gdi.header.size = size_of::<DISPLAYCONFIG_SOURCE_DEVICE_NAME>() as u32;
@@ -704,12 +706,19 @@ fn screens() -> Vec<Screen> {
                 .position(|c| *c == 0)
                 .unwrap_or(0);
             let gdi_name = String::from_utf16_lossy(&gdi.viewGdiDeviceName[..gdi_len]);
-            let order = gdi_name
+            let gdi = gdi_name
                 .trim_start_matches(|c: char| !c.is_ascii_digit())
                 .parse()
                 .unwrap_or(u32::MAX);
+            // The display settings number the screens by their output: its adapter, then its
+            // target (not the `DISPLAY` number, which can differ).
+            let output = (
+                target.adapterId.LowPart,
+                target.adapterId.HighPart,
+                target.id,
+            );
             Some((
-                order,
+                (gdi, output),
                 Screen {
                     number: 0,
                     primary: source.position.x == 0 && source.position.y == 0,
@@ -721,9 +730,10 @@ fn screens() -> Vec<Screen> {
             ))
         })
         .collect();
-    // A screen shown on two outputs (duplicated) is one screen.
-    screens.sort_by_key(|(order, _)| *order);
-    screens.dedup_by_key(|(order, _)| *order);
+    // A screen shown on two outputs (duplicated) is one screen, numbered by its first output.
+    screens.sort_by_key(|((gdi, output), _)| (*gdi, *output));
+    screens.dedup_by_key(|((gdi, _), _)| *gdi);
+    screens.sort_by_key(|((_, output), _)| *output);
     screens
         .into_iter()
         .enumerate()
