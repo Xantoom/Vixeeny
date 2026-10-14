@@ -91,7 +91,7 @@ Contraintes non négociables :
 | macOS | macOS 13 Ventura | Apple Silicon et Intel (binaire universel). |
 | Linux | Noyau et PipeWire récents (PipeWire ≥ 0.3.x épinglé au M0) | Wayland : GNOME, KDE Plasma, compositeurs wlroots (Hyprland, Sway). X11 aussi. |
 
-Carte graphique recommandée au minimum : un encodeur matériel **HEVC**. NVIDIA GeForce GTX 16 / RTX 20 (Turing) — NVENC demande le pilote 610 ou plus (SDK 13.1), que les GTX 900 et 10, arrêtées au 580, n'ont pas ; AMD Radeon RX 400 / 500 (Polaris, VCE 3.4) ; Intel Core 6e génération (Skylake). Le HEVC 10 bits (HDR) demande AMD RX 5000 (VCN 2.0) ou Intel Core 7e génération (Kaby Lake) ; l'AV1, NVIDIA RTX 40, AMD RX 7000 ou Intel Arc. Sans encodeur matériel, l'enregistrement passe par le processeur (x264, SVT-AV1) et peut ralentir le jeu.
+Carte graphique recommandée au minimum : un encodeur matériel **HEVC**. NVIDIA GeForce GTX 950 à 980 Ti (Maxwell 2e génération), pilote 570 ou plus (FFmpeg est compilé avec les en-têtes NVENC du SDK 13.0 : ceux du 13.1 exigent le 610, que les GTX 900 et 10, arrêtées au 580, n'auront pas) ; AMD Radeon RX 400 / 500 (Polaris, VCE 3.4) ; Intel Core 6e génération (Skylake). Le HEVC 10 bits (HDR) demande NVIDIA GTX 10 (Pascal), AMD RX 5000 (VCN 2.0) ou Intel Core 7e génération (Kaby Lake) ; l'AV1, NVIDIA RTX 40, AMD RX 7000 ou Intel Arc. Sans encodeur matériel, l'enregistrement passe par le processeur (x264, SVT-AV1) et peut ralentir le jeu.
 
 ### 2.3 Machine de référence (tests du mainteneur)
 

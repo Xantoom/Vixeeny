@@ -17,8 +17,8 @@ target. The licences are listed in `THIRD-PARTY-LICENSES.txt` inside every packa
 
 ## Graphics card encoders
 
-- NVIDIA: NVENC needs driver 610 or newer (FFmpeg is built with the SDK 13.1 headers). The
-  GTX 900 and 10 series stop at driver 580: they record with the processor instead.
+- NVIDIA: NVENC needs driver 570 or newer. FFmpeg is built with the SDK 13.0 headers: those of
+  13.1 ask for driver 610, which the GTX 900 and 10 series (stopped at 580) will never get.
 - AMD RX 7000, AV1 in 1080p: the encoder works in blocks of 64 × 16 pixels and writes 1082
   lines. The file tells the player to crop the two extra lines (MP4 and MKV); a player that
   ignores it shows a thin black stripe at the bottom. Fixed in hardware on the RX 9000.

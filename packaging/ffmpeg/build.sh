@@ -14,6 +14,10 @@ set -euo pipefail
 IMAGE="ghcr.io/btbn/ffmpeg-builds/win64-gpl-shared-9.0@sha256:e6738cf07c5607353552e8df94e6293604f2af5307898df7ae8c93e2e8e90645"
 # release/9.0, the commit of the BtbN build Vixeeny used before (n9.0.2-22-g46d8f462ee).
 export FFMPEG_COMMIT="46d8f462ee"
+# The NVENC headers of SDK 13.0 (driver 570+) instead of the image's 13.1, which asks for driver
+# 610+ while NVIDIA stopped at 580 for the GTX 900 and 10. FFmpeg uses 13.1 only for hierarchical
+# B-frames in AV1 and a timecode detail, neither of which Vixeeny sets.
+export NV_HEADERS="n13.0.19.0"
 
 OUT="$(realpath -m "${1:?usage: build.sh <out.zip>}")"
 WORK="$(mktemp -d)"
@@ -31,6 +35,12 @@ export FILTERS="abuffer,abuffersink,afftdn,aformat,aresample,anull,buffer,buffer
 cat > "$WORK/build.sh" <<'SCRIPT'
 set -xe
 cd /work
+git clone -q --depth 1 --branch $NV_HEADERS https://github.com/FFmpeg/nv-codec-headers.git nv
+make -C nv install PREFIX=/work/nv-prefix
+export PKG_CONFIG_LIBDIR="/work/nv-prefix/lib/pkgconfig:$PKG_CONFIG_LIBDIR"
+pkg-config --modversion ffnvcodec | grep -q '^13\.0\.'
+# Ahead of the image's own include folder, which configure takes from CFLAGS.
+export CFLAGS="-I/work/nv-prefix/include $CFLAGS"
 git clone --filter=blob:none --no-checkout https://github.com/FFmpeg/FFmpeg.git ffmpeg
 cd ffmpeg
 git checkout -q $FFMPEG_COMMIT
@@ -64,7 +74,7 @@ cp /work/ffmpeg/COPYING.GPLv3 /work/out/LICENSE.txt
 SCRIPT
 
 docker run --rm -u "$(id -u):$(id -g)" -v "$WORK":/work \
-    -e FFMPEG_COMMIT -e ENCODERS -e DECODERS -e MUXERS -e DEMUXERS -e PARSERS -e FILTERS \
+    -e FFMPEG_COMMIT -e NV_HEADERS -e ENCODERS -e DECODERS -e MUXERS -e DEMUXERS -e PARSERS -e FILTERS \
     "$IMAGE" bash /work/build.sh
 ls -la "$WORK/out/bin" "$WORK/out/lib"
 rm -f "$OUT"
