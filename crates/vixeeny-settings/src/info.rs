@@ -57,10 +57,21 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
             "4:2:0: plays everywhere.\n4:4:4: more precise colours on fine text, but rarely read and heavier.",
             "4:2:0 : lu partout.\n4:4:4 : couleurs plus précises sur le texte fin, mais rarement lu et plus lourd.",
         ),
-        "p:rc.mode" => pick(
-            "Target quality: the encoder keeps the picture at the chosen level, the file size follows what is filmed.\nVBR: aims at a size.\nCBR: a fixed size, for streaming.",
-            "Qualité visée : l'encodeur garde l'image au niveau choisi, la taille du fichier suit ce qui est filmé.\nVBR : vise une taille.\nCBR : taille fixe, pour le streaming.",
-        ),
+        "p:rc.mode" => {
+            // The quality mode by the encoder's own name: CRF, CQ, ICQ, CQP.
+            let name = encoders::resolved(env, &config.video)
+                .and_then(|e| encoders::spec(&e.id))
+                .map_or_else(|| "CQ".to_owned(), |e| e.rate_control.quality.name.clone());
+            Some(if fr {
+                format!(
+                    "{name} : l'encodeur garde l'image au niveau choisi, la taille du fichier suit ce qui est filmé.\nVBR : vise une taille.\nCBR : taille fixe, pour le streaming."
+                )
+            } else {
+                format!(
+                    "{name}: the encoder keeps the picture at the chosen level, the file size follows what is filmed.\nVBR: aims at a size.\nCBR: a fixed size, for streaming."
+                )
+            })
+        }
         "p:rc.quality" => {
             let encoder =
                 encoders::resolved(env, &config.video).and_then(|e| encoders::spec(&e.id));

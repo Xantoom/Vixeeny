@@ -204,30 +204,12 @@ pub fn value_label(key: &str, value: &str, lang: Lang) -> String {
     if lang == Lang::Fr { pair.1 } else { pair.0 }.to_owned()
 }
 
-/// The label of a rate mode, with what the encoder calls it (CRF, CQ...).
-pub fn rate_mode_label(mode: RateMode, encoder: &Encoder, lang: Lang) -> String {
-    let fr = lang == Lang::Fr;
+/// The label of a rate mode: what the encoder calls it (CRF, CQ, ICQ, CQP; VBR, CBR).
+pub fn rate_mode_label(mode: RateMode, encoder: &Encoder) -> String {
     match mode {
-        RateMode::Quality => {
-            let scale = &encoder.rate_control.quality.name;
-            if fr {
-                format!("Qualité visée ({scale})")
-            } else {
-                format!("Target quality ({scale})")
-            }
-        }
-        RateMode::Vbr => if fr {
-            "Débit variable (VBR)"
-        } else {
-            "Variable bitrate (VBR)"
-        }
-        .to_owned(),
-        RateMode::Cbr => if fr {
-            "Débit constant (CBR)"
-        } else {
-            "Constant bitrate (CBR)"
-        }
-        .to_owned(),
+        RateMode::Quality => encoder.rate_control.quality.name.clone(),
+        RateMode::Vbr => "VBR".to_owned(),
+        RateMode::Cbr => "CBR".to_owned(),
     }
 }
 

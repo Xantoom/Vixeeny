@@ -490,22 +490,13 @@ fn custom_rows(env: &Env, config: &Config, encoder: &str) -> (Vec<Row>, Vec<Row>
     let rc = &spec.rate_control;
     let mode = spec.rate_mode(&config.video.params);
     let mut rows = Vec::new();
-    // Grouped: aiming at a quality, aiming at a bitrate.
     // The speed that keeps up with these settings (resolution × frame rate).
     let speed = spec.speed_for(pixel_rate(env, config));
-    let mut modes: Vec<Opt> = Vec::new();
-    for (bitrate, title) in [(false, Key::OptGroupQuality), (true, Key::OptGroupBitrate)] {
-        let group: Vec<Opt> = spec
-            .rate_modes()
-            .filter(|m| m.has_bitrate() == bitrate)
-            .map(|m| opt(m.name(), encoders::rate_mode_label(m, spec, lang)))
-            .collect();
-        if !group.is_empty() {
-            modes.push(crate::heading(env.t(title)));
-            modes.extend(group);
-        }
-    }
-    if modes.len() > 2 {
+    let modes: Vec<Opt> = spec
+        .rate_modes()
+        .map(|m| opt(m.name(), encoders::rate_mode_label(m, spec)))
+        .collect();
+    if modes.len() > 1 {
         rows.push(param_row(
             format!("p:{}", rate_keys::MODE),
             param_label(rate_keys::MODE, lang),

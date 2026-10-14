@@ -129,12 +129,13 @@ values = ["auto", "psnr", "ssim", "grain", "fastdecode", "animation"]
 default = "auto"
 auto = "auto"
 
+# x265 refuses more B-frames than its look-ahead holds: 5 frames at ultrafast.
 [[encoder.params]]
 key = "bframes"
 ffmpeg_option = "bf"
 type = "int"
 min = 0
-max = 16
+max = 4
 default = 4
 
 [[encoder.params]]
@@ -508,7 +509,7 @@ performance = { usage = "transcoding", quality = "speed", rc = "cqp", qp_i = 26,
 small = { usage = "transcoding", quality = "quality", rc = "cqp", qp_i = 30, qp_p = 32, qp_b = 32 }
 
 [encoder.rate_control]
-quality = { name = "QP", min = 0, max = 51, default = 24 }
+quality = { name = "CQP", min = 0, max = 51, default = 24 }
 modes.quality = { rc = "cqp", qp_i = "{quality}", qp_p = "{quality}", qp_b = "{quality}" }
 modes.vbr = { rc = "vbr_peak", b = "{bitrate}", maxrate = "{maxrate}", bufsize = "{bufsize}" }
 modes.cbr = { rc = "cbr", b = "{bitrate}", bufsize = "{bufsize}" }
@@ -572,7 +573,7 @@ performance = { usage = "transcoding", quality = "speed", rc = "cqp", qp_i = 26,
 small = { usage = "transcoding", quality = "quality", rc = "cqp", qp_i = 30, qp_p = 32 }
 
 [encoder.rate_control]
-quality = { name = "QP", min = 0, max = 51, default = 24 }
+quality = { name = "CQP", min = 0, max = 51, default = 24 }
 modes.quality = { rc = "cqp", qp_i = "{quality}", qp_p = "{quality}" }
 modes.vbr = { rc = "vbr_peak", b = "{bitrate}", maxrate = "{maxrate}", bufsize = "{bufsize}" }
 modes.cbr = { rc = "cbr", b = "{bitrate}", bufsize = "{bufsize}" }
@@ -628,10 +629,10 @@ performance = { usage = "transcoding", quality = "speed", rc = "cqp", qp_i = 126
 small = { usage = "transcoding", quality = "quality", rc = "cqp", qp_i = 146, qp_p = 150, qp_b = 150 }
 
 [encoder.rate_control]
-quality = { name = "QP", min = 0, max = 255, default = 120 }
+quality = { name = "CQP", min = 0, max = 255, default = 120 }
 modes.quality = { rc = "cqp", qp_i = "{quality}", qp_p = "{quality}", qp_b = "{quality}" }
-modes.vbr = { rc = "vbr_peak", b = "{bitrate}", maxrate = "{maxrate}", bufsize = "{bufsize}" }
-modes.cbr = { rc = "cbr", b = "{bitrate}", bufsize = "{bufsize}" }
+modes.vbr = { rc = "vbr_peak", b = "{bitrate}", maxrate = "{maxrate}", bufsize = "{bufsize}", aq_mode = "caq" }
+modes.cbr = { rc = "cbr", b = "{bitrate}", bufsize = "{bufsize}", aq_mode = "caq" }
 
 [[encoder.params]]
 key = "quality"

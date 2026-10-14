@@ -271,23 +271,30 @@ fn custom_rate_modes_encode() {
     }
 }
 
-/// Opens `enc` with `options` on NV12 frames and encodes a few: `Err` when it refuses.
+/// Opens `enc` with `options` on NV12 frames (or 4:2:0 planes, for an encoder without NV12)
+/// and encodes a few: `Err` when it refuses.
 fn try_encode(enc: &str, options: &str) -> Result<usize, ffmpeg::Error> {
     let codec = encoder::find_by_name(enc).ok_or(ffmpeg::Error::EncoderNotFound)?;
+    let nv12 = codec
+        .video()
+        .ok()
+        .and_then(|v| v.formats())
+        .is_none_or(|mut f| f.any(|p| p == Pixel::NV12));
+    let format = if nv12 { Pixel::NV12 } else { Pixel::YUV420P };
     let mut ctx = codec::context::Context::new_with_codec(codec)
         .encoder()
         .video()?;
     ctx.set_width(W);
     ctx.set_height(H);
-    ctx.set_format(Pixel::NV12);
+    ctx.set_format(format);
     ctx.set_time_base(Rational(1, FPS));
     ctx.set_frame_rate(Some(Rational(FPS, 1)));
     let mut venc = ctx.open_with(opts(options))?;
     let mut packets = 0;
     let mut pkt = Packet::empty();
     for i in 0..30 {
-        let mut f = frame::Video::new(Pixel::NV12, W, H);
-        for plane in 0..2 {
+        let mut f = frame::Video::new(format, W, H);
+        for plane in 0..f.planes() {
             f.data_mut(plane).fill((i * 7 % 256) as u8);
         }
         f.set_pts(Some(i as i64));
@@ -406,4 +413,54 @@ fn software_encoders_encode_every_declared_pixel_format() {
             assert!(packets > 0, "{label}: no packet");
         }
     }
+}
+
+/// Every value of every expert option (each choice, both ends of a range) opens and encodes,
+/// on the software encoders and the hardware ones this machine has.
+#[test]
+fn every_option_value_encodes() {
+    use vixeeny_encode::registry::ParamType;
+    ffmpeg::init().unwrap();
+    let registry = vixeeny_encode::registry::Registry::builtin().unwrap();
+    let join = |o: std::collections::BTreeMap<String, String>| {
+        o.into_iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    let mut failed = Vec::new();
+    for e in registry.encoders() {
+        if let Err(err) = try_encode(&e.ffmpeg_encoder, &join(e.custom_options(&[].into()))) {
+            assert!(
+                e.kind == vixeeny_encode::registry::Kind::Hardware,
+                "{}: {err}",
+                e.id
+            );
+            eprintln!("{}: skipped ({err})", e.id);
+            continue;
+        }
+        for p in &e.params {
+            let values: Vec<String> = match p.kind {
+                ParamType::Enum => p.values.clone(),
+                ParamType::Bool => vec!["0".into(), "1".into()],
+                ParamType::Int | ParamType::Float => [p.min, p.max]
+                    .into_iter()
+                    .flatten()
+                    .map(|v| v.to_string())
+                    .collect(),
+                ParamType::String => Vec::new(),
+            };
+            for v in values {
+                let params = [(p.key.clone(), v.clone())].into();
+                let options = join(e.custom_options(&params));
+                match try_encode(&e.ffmpeg_encoder, &options) {
+                    Ok(30) => {}
+                    Ok(n) => failed.push(format!("{} {}={v}: {n} packets", e.id, p.key)),
+                    Err(err) => failed.push(format!("{} {}={v}: {err}", e.id, p.key)),
+                }
+            }
+        }
+        eprintln!("{}: every option tried", e.id);
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
 }

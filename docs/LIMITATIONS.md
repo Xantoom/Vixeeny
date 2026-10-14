@@ -9,12 +9,19 @@ builds of 0.9.0 and 0.9.1 were dropped in 0.9.2: the project focuses on one syst
 
 ## FFmpeg as shared libraries
 
-The packages ship FFmpeg as DLLs (`avcodec-*.dll`, …) next to the executables, from a pinned
-prebuilt GPL build (see `native/versions.toml`: URL, tag and SHA-256). Linking it statically was
-considered and dropped: it would save some tens of megabytes but cost hours of CI and a build of
-our own to maintain, and the installer is already well under the 120 MB target. The
-corresponding source is available from the pinned build's project; the licences are listed in
-`THIRD-PARTY-LICENSES.txt` inside every package.
+The packages ship FFmpeg as DLLs (`avcodec-*.dll`, …) next to the executables, built by
+`packaging/ffmpeg/build.sh` from a pinned FFmpeg commit inside the pinned BtbN build image, with
+only the parts Vixeeny uses. Linking it statically was considered and dropped: it would save
+some tens of megabytes but cost hours of CI, and the installer is already well under the 120 MB
+target. The licences are listed in `THIRD-PARTY-LICENSES.txt` inside every package.
+
+## Graphics card encoders
+
+- NVIDIA: NVENC needs driver 610 or newer (FFmpeg is built with the SDK 13.1 headers). The
+  GTX 900 and 10 series stop at driver 580: they record with the processor instead.
+- AMD RX 7000, AV1 in 1080p: the encoder works in blocks of 64 × 16 pixels and writes 1082
+  lines. The file tells the player to crop the two extra lines (MP4 and MKV); a player that
+  ignores it shows a thin black stripe at the bottom. Fixed in hardware on the RX 9000.
 
 ## Not signed with a certificate
 

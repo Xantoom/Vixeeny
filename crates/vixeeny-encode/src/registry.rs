@@ -103,7 +103,7 @@ impl RateMode {
 /// The scale of the constant-quality mode (lower is better).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QualityScale {
-    /// What the encoder calls it: CRF, CQ, QP, ICQ.
+    /// What the encoder calls its quality mode: CRF, CQ, ICQ, CQP.
     pub name: String,
     pub min: i64,
     pub max: i64,
