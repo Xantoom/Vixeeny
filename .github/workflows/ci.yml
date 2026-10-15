@@ -49,6 +49,8 @@ jobs:
       # No debug information: less to write and link (a failing test still names its line).
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
+      # LLVM's linker (shipped with Rust) links the many test programs much faster than Microsoft's.
+      CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: rust-lld
       FFMPEG_DIR: ${{ github.workspace }}\native\build\work\ffmpeg-prebuilt
     steps:
       - uses: actions/checkout@v4
@@ -68,8 +70,10 @@ jobs:
           cargo xtask build-native ffmpeg
           "$env:FFMPEG_DIR\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
       - run: cargo test --workspace
+      # Already run above; again for its output. `--workspace` keeps the same features: nothing
+      # is built again (`-p` alone would rebuild the crate and its dependencies).
       - name: Real capture smoke test (output only)
-        run: cargo test -p vixeeny-capture --test wgc_smoke -- --nocapture
+        run: cargo test --workspace --test wgc_smoke -- --nocapture
   deny:
     # cargo-deny runs in a Linux container; it only reads the Windows dependency graph.
     runs-on: ubuntu-latest
@@ -92,20 +96,26 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - uses: ilammy/msvc-dev-cmd@v1
-      - name: Tools (nasm, meson, pkg-config)
-        shell: pwsh
-        run: |
-          choco install nasm pkgconfiglite -y --no-progress
-          "C:\Program Files\NASM" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
-          "C:\ProgramData\chocolatey\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
-          "$env:FFMPEG_DIR\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
-          pip install meson
       - uses: actions/cache/restore@v4
         id: native-cache
         with:
           path: native/build/work
           key: native-windows-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}
           restore-keys: native-windows-
+      - name: Tools (pkg-config)
+        shell: pwsh
+        run: |
+          choco install pkgconfiglite -y --no-progress
+          "C:\ProgramData\chocolatey\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          "$env:FFMPEG_DIR\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      # Only to build the native libraries, which the cache usually holds already.
+      - name: Tools (nasm, meson)
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          choco install nasm -y --no-progress
+          "C:\Program Files\NASM" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          pip install meson
       - uses: actions/download-artifact@v4
         with:
           name: ffmpeg

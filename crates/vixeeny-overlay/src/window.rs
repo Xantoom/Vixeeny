@@ -133,7 +133,10 @@ pub fn create_app_window(
     title: &str,
 ) -> Result<HWND> {
     use windows::Win32::Graphics::Dwm::DWMWA_WINDOW_CORNER_PREFERENCE;
-    use windows::Win32::UI::WindowsAndMessaging::{WS_EX_APPWINDOW, WS_MINIMIZEBOX, WS_SYSMENU};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetSystemMetrics, ICON_BIG, ICON_SMALL, IMAGE_ICON, LR_DEFAULTCOLOR, LoadImageW, SM_CXICON,
+        SM_CXSMICON, SendMessageW, WM_SETICON, WS_EX_APPWINDOW, WS_MINIMIZEBOX, WS_SYSMENU,
+    };
     if !register(POPUP_CLASS, proc, &POPUP_DONE) {
         return Err(windows::core::Error::from_thread());
     }
@@ -156,6 +159,27 @@ pub fn create_app_window(
             None,
         )?;
         set_cloak(hwnd, true);
+        // The executable's icon, for the taskbar and Alt+Tab (the class has none).
+        for (kind, metric) in [(ICON_BIG, SM_CXICON), (ICON_SMALL, SM_CXSMICON)] {
+            let size = GetSystemMetrics(metric);
+            // MAKEINTRESOURCE(1).
+            let name = PCWSTR(std::ptr::without_provenance(1));
+            if let Ok(icon) = LoadImageW(
+                Some(instance()),
+                name,
+                IMAGE_ICON,
+                size,
+                size,
+                LR_DEFAULTCOLOR,
+            ) {
+                SendMessageW(
+                    hwnd,
+                    WM_SETICON,
+                    Some(WPARAM(kind as usize)),
+                    Some(LPARAM(icon.0 as isize)),
+                );
+            }
+        }
         // DWMWCP_ROUND.
         let round = 2_i32;
         let _ = DwmSetWindowAttribute(

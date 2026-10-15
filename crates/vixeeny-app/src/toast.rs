@@ -151,7 +151,8 @@ pub fn failure_text(error: &anyhow::Error, lang: vixeeny_common::i18n::Lang) -> 
 
 /// Shows the card, unless the user turned notifications off. Never blocks.
 pub fn notify(config: &Config, toast: &Toast) {
-    if !config.general.notifications {
+    // The general switch is about captures; a game starting has its own (`replay.notify`).
+    if !config.general.notifications && !matches!(toast, Toast::Replay(..)) {
         return;
     }
     let line = encode_line(&toast.to_args());

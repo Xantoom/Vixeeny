@@ -52,3 +52,8 @@ lto = "thin"
 codegen-units = 1
 strip = true
 panic = "abort"
+
+# The interface's generated code is not where the time goes: built in parallel, it compiles in
+# half the time for a slightly larger program.
+[profile.release.package.vixeeny-ui]
+codegen-units = 16

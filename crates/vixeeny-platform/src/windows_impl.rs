@@ -825,6 +825,43 @@ pub fn set_app_id() -> Result<()> {
         .map_err(|e| os_err("SetCurrentProcessExplicitAppUserModelID", e))
 }
 
+/// Gives `id` the icon of this program's executable (its resource 1), large and small: the
+/// taskbar and Alt+Tab show it. Each size is drawn from the icon file's own images.
+pub fn set_exe_icon(id: WindowId) {
+    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetSystemMetrics, ICON_BIG, ICON_SMALL, IMAGE_ICON, LR_DEFAULTCOLOR, LoadImageW, SM_CXICON,
+        SM_CXSMICON, SendMessageW, WM_SETICON,
+    };
+    // SAFETY: the resource is read from this executable; a missing one makes the call fail.
+    // The icons stay loaded for the life of the process (the window keeps using them).
+    unsafe {
+        let Ok(module) = GetModuleHandleW(None) else {
+            return;
+        };
+        for (kind, metric) in [(ICON_BIG, SM_CXICON), (ICON_SMALL, SM_CXSMICON)] {
+            let size = GetSystemMetrics(metric);
+            let icon = LoadImageW(
+                Some(module.into()),
+                // MAKEINTRESOURCE(1).
+                windows::core::PCWSTR(std::ptr::without_provenance(1)),
+                IMAGE_ICON,
+                size,
+                size,
+                LR_DEFAULTCOLOR,
+            );
+            if let Ok(icon) = icon {
+                SendMessageW(
+                    hwnd_of(id),
+                    WM_SETICON,
+                    Some(WPARAM(kind as usize)),
+                    Some(LPARAM(icon.0 as isize)),
+                );
+            }
+        }
+    }
+}
+
 /// Marks a window of this process with `tag`, so that another process can find it again with
 /// [`focus_tagged_window`] (every window of Vixeeny has the same title).
 pub fn tag_window(id: WindowId, tag: &str) -> Result<()> {

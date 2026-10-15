@@ -535,6 +535,8 @@ fn init_look() {
     vixeeny_ui::theme::set_default(settings::look_of(&config));
     vixeeny_ui::theme::set_dresser(|handle, look| {
         let id = vixeeny_platform::WindowId(handle);
+        // Slint's icon does not reach the taskbar: the executable's own does.
+        vixeeny_platform::set_exe_icon(id);
         let _ = vixeeny_platform::style_window(id, look.dark, look.caption());
         vixeeny_platform::mica(id)
     });

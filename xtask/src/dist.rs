@@ -39,18 +39,34 @@ fn files_under(dir: &Path) -> Result<Vec<PathBuf>> {
     Ok(found)
 }
 
-fn write_zip(stage: &Path, extra: &[(&str, &[u8])], out: &Path) -> Result<()> {
+fn write_zip(stage: &Path, out: &Path) -> Result<()> {
     let mut zip = zip::ZipWriter::new(std::fs::File::create(out)?);
-    let options = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated)
-        .compression_level(Some(9));
     for relative in files_under(stage)? {
         let name = relative.to_string_lossy().replace('\\', "/");
-        zip.start_file(name, options)?;
+        zip.start_file(name, deflated())?;
         zip.write_all(&std::fs::read(stage.join(&relative))?)?;
     }
+    zip.finish()?;
+    Ok(())
+}
+
+fn deflated() -> zip::write::SimpleFileOptions {
+    zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .compression_level(Some(9))
+}
+
+/// A copy of the archive `from` with the files `extra` added: what is already compressed is not
+/// compressed again.
+fn extend_zip(from: &Path, extra: &[(&str, &[u8])], out: &Path) -> Result<()> {
+    std::fs::copy(from, out)?;
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(out)?;
+    let mut zip = zip::ZipWriter::new_append(file)?;
     for (name, data) in extra {
-        zip.start_file(*name, options)?;
+        zip.start_file(*name, deflated())?;
         zip.write_all(data)?;
     }
     zip.finish()?;
@@ -148,9 +164,10 @@ pub fn dist(args: &[String]) -> Result<()> {
     )?;
 
     let base = format!("Vixeeny-{version}-windows-x64");
-    write_zip(&stage, &[], &out.join(format!("{base}.zip")))?;
-    write_zip(
-        &stage,
+    let update = out.join(format!("{base}.zip"));
+    write_zip(&stage, &update)?;
+    extend_zip(
+        &update,
         &[("portable.flag", b"")],
         &out.join(format!("{base}-portable.zip")),
     )?;
@@ -176,4 +193,35 @@ pub fn sums(args: &[String]) -> Result<()> {
     lines.sort_by_key(|l| l.split_once("  ").map(|(_, n)| n.to_owned()));
     std::fs::write(dir.join("SHA256SUMS"), lines.join("\n") + "\n")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_portable_archive_is_the_update_archive_plus_its_flag() -> Result<()> {
+        let dir = std::env::temp_dir().join(format!("vixeeny-dist-{}", std::process::id()));
+        let stage = dir.join("stage");
+        std::fs::create_dir_all(stage.join("sub"))?;
+        std::fs::write(stage.join("a.txt"), "a".repeat(10_000))?;
+        std::fs::write(stage.join("sub").join("b.txt"), "b")?;
+        let (update, portable) = (dir.join("u.zip"), dir.join("p.zip"));
+        write_zip(&stage, &update)?;
+        extend_zip(&update, &[("portable.flag", b"")], &portable)?;
+
+        let mut zip = zip::ZipArchive::new(std::fs::File::open(&portable)?)?;
+        let mut names: Vec<_> = zip.file_names().map(str::to_owned).collect();
+        names.sort();
+        assert_eq!(names, ["a.txt", "portable.flag", "sub/b.txt"]);
+        let mut text = String::new();
+        std::io::Read::read_to_string(&mut zip.by_name("a.txt")?, &mut text)?;
+        assert_eq!(text, "a".repeat(10_000));
+        assert_eq!(
+            zip::ZipArchive::new(std::fs::File::open(&update)?)?.len(),
+            2
+        );
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
 }

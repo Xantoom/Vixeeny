@@ -52,20 +52,27 @@ jobs:
           toolchain: 1.98.1
       - uses: Swatinem/rust-cache@v2
       - uses: ilammy/msvc-dev-cmd@v1
-      - name: Tools (nasm, meson, Inno Setup)
-        shell: pwsh
-        run: |
-          choco install nasm innosetup pkgconfiglite -y --no-progress
-          "C:\Program Files\NASM" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
-          "C:\ProgramData\chocolatey\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
-          "$env:FFMPEG_DIR\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
-          "C:\Program Files (x86)\Inno Setup 6" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
-          pip install meson
       - uses: actions/cache/restore@v4
+        id: native-cache
         with:
           path: native/build/work
           key: native-windows-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}
           restore-keys: native-windows-
+      - name: Tools (Inno Setup, pkg-config)
+        shell: pwsh
+        run: |
+          choco install innosetup pkgconfiglite -y --no-progress
+          "C:\ProgramData\chocolatey\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          "$env:FFMPEG_DIR\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          "C:\Program Files (x86)\Inno Setup 6" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      # Only to build the native libraries, which the cache usually holds already.
+      - name: Tools (nasm, meson)
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          choco install nasm -y --no-progress
+          "C:\Program Files\NASM" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          pip install meson
       - uses: actions/download-artifact@v4
         with:
           name: ffmpeg
@@ -81,9 +88,10 @@ jobs:
       - name: Idle smoke test (20 s)
         continue-on-error: true
         run: target\release\xtask.exe bench-idle --seconds 20
+      # The release build of xtask, built above: its compression is many times faster.
       - name: Package (stage, update archive, portable archive)
         shell: pwsh
-        run: cargo xtask dist --out dist
+        run: target\release\xtask.exe dist --out dist
       - name: Installer
         shell: pwsh
         run: |
@@ -91,7 +99,7 @@ jobs:
           iscc "/DAppVersion=$version" "/DStageDir=$PWD\dist\stage" "/DOutDir=$PWD\dist" packaging\windows\vixeeny.iss
       - name: Checksums
         shell: pwsh
-        run: cargo xtask sums dist
+        run: target\release\xtask.exe sums dist
       - name: Sign (minisign)
         shell: pwsh
         env:
