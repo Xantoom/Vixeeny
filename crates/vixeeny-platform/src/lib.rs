@@ -5,6 +5,7 @@
 //! [`ensure_dpi_aware`] first, otherwise Windows hands out scaled (virtualised) values.
 
 pub mod clipboard;
+pub mod games;
 mod geometry;
 mod time;
 pub use geometry::{PhysicalRect, virtual_bounds};
@@ -16,10 +17,10 @@ pub use windows_impl::{
     APP_ID, InstanceGuard, OutsideClicks, allow_foreground_handoff, animations_enabled,
     attach_console, cursor_position, ensure_dpi_aware, exe_icon, exe_metadata, focus_tagged_window,
     foreground_window, gpu_adapters, hdr_active, hdr_info, max_refresh_hz, mica, monitors,
-    monotonic_ns, on_click_outside, on_foreground_change, on_process_exit, open_path,
-    process_alive, process_path, reveal, set_app_id, single_instance, style_window, system_accent,
-    system_prefers_dark, tag_window, top_level_windows, user_locale, wait_for_composition,
-    window_info,
+    monotonic_ns, on_click_outside, on_dir_change, on_foreground_change, on_process_exit,
+    open_path, process_alive, process_path, reveal, set_app_id, single_instance, style_window,
+    system_accent, system_prefers_dark, tag_window, top_level_windows, user_locale,
+    wait_for_composition, window_info,
 };
 
 /// A graphics adapter as the OS reports it (the encoder probe derives its own view from it).

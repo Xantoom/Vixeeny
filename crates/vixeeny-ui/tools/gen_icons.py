@@ -49,6 +49,8 @@ ICONS = {
     "pin": ("Pin", "regular"), "pin-filled": ("Pin", "filled"),
     "minimize": ("Line Horizontal 1", "regular"), "maximize": ("Maximize", "regular"),
     "restore": ("Square Multiple", "regular"), "move": ("Arrow Move", "regular"),
+    "speaker-mute": ("Speaker Mute", "regular"), "previous": ("Previous", "regular"),
+    "next": ("Next", "regular"), "cut": ("Cut", "regular"), "flash": ("Flash", "regular"),
 }
 
 def fetch(folder, style):

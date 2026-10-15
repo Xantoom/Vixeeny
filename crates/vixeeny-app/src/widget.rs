@@ -91,12 +91,15 @@ impl Drop for Widget {
     fn drop(&mut self) {
         let _ = self.stdin.write_all(ToWidget::Quit.to_line().as_bytes());
         let _ = self.stdin.flush();
-        // It exits by itself; do not leave a pill on screen if it does not.
-        for _ in 0..20 {
-            if matches!(self.child.try_wait(), Ok(Some(_))) {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(50));
+        // It exits by itself (Windows tells when); do not leave a pill on screen if it does not
+        // within a second.
+        let (tx, rx) = std::sync::mpsc::channel();
+        if vixeeny_platform::on_process_exit(self.child.id(), move || {
+            let _ = tx.send(());
+        }) && rx.recv_timeout(Duration::from_secs(1)).is_ok()
+        {
+            let _ = self.child.wait();
+            return;
         }
         let _ = self.child.kill();
         let _ = self.child.wait();

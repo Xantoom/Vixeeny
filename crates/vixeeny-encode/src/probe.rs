@@ -11,7 +11,7 @@
 use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -275,26 +275,19 @@ pub fn run_child(exe: &Path, timeout: Duration) -> Result<ProbeResult, ProbeErro
         .stdout
         .take()
         .ok_or_else(|| ProbeError::Failed("no stdout".into()))?;
-    let reader = std::thread::spawn(move || {
+    // The output ends when the child does: its reader wakes this thread then.
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
         let mut text = String::new();
-        stdout.read_to_string(&mut text).map(|_| text)
+        let _ = tx.send(stdout.read_to_string(&mut text).map(|_| text));
     });
-    let started = Instant::now();
-    let status = loop {
-        match child.try_wait().map_err(ProbeError::Spawn)? {
-            Some(status) => break status,
-            None if started.elapsed() >= timeout => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(ProbeError::Timeout);
-            }
-            None => std::thread::sleep(Duration::from_millis(20)),
-        }
+    let Ok(read) = rx.recv_timeout(timeout) else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(ProbeError::Timeout);
     };
-    let text = reader
-        .join()
-        .map_err(|_| ProbeError::Failed("reader panicked".into()))?
-        .map_err(|e| ProbeError::Output(e.to_string()))?;
+    let status = child.wait().map_err(ProbeError::Spawn)?;
+    let text = read.map_err(|e| ProbeError::Output(e.to_string()))?;
     if !status.success() {
         return Err(ProbeError::Failed(status.to_string()));
     }

@@ -6,7 +6,7 @@
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, bail};
 use vixeeny_common::ipc::{self, ControlReply, ControlRequest, Endpoint, Hello};
@@ -170,28 +170,49 @@ fn control(request: ControlRequest) -> std::io::Result<()> {
         .map_err(std::io::Error::other)
 }
 
-fn daemon_running() -> bool {
-    control(ControlRequest::Ping).is_ok()
-}
-
-/// Asks the daemon to quit until it has (it refuses while a recording runs: the update waits
-/// for the end of the recording).
+/// Asks the daemon to quit, then waits until its process is gone: at once, or at the end of a
+/// recording (the update waits for it). Windows tells when; nothing is asked again.
 fn stop_daemon() -> anyhow::Result<()> {
-    let deadline = Instant::now() + Duration::from_secs(3 * 3600);
-    while daemon_running() {
-        let _ = control(ControlRequest::QuitForUpdate);
-        std::thread::sleep(Duration::from_millis(400));
-        if Instant::now() > deadline {
-            bail!("Vixeeny did not stop");
+    let pid = {
+        let Ok(mut stream) = Endpoint::current_user().connect() else {
+            return Ok(()); // not running
+        };
+        ipc::write_msg(&mut stream, &Hello::Control(ControlRequest::QuitForUpdate))?;
+        match ipc::read_msg::<_, ControlReply>(&mut stream)? {
+            Some(ControlReply::Quitting { pid }) => pid,
+            _ => bail!("Vixeeny did not agree to stop"),
         }
-    }
+    };
+    let (ended, end) = std::sync::mpsc::channel();
+    anyhow::ensure!(
+        vixeeny_platform::on_process_exit(pid, move || {
+            let _ = ended.send(());
+        }),
+        "cannot wait for Vixeeny to stop"
+    );
+    let _ = end.recv();
     Ok(())
 }
 
-fn start_daemon(dir: &Path) -> std::io::Result<()> {
-    std::process::Command::new(dir.join(DAEMON))
-        .spawn()
-        .map(|_| ())
+/// Starts the daemon in `dir`. With `wait`, returns once it says it runs (`Ok(true)`), or
+/// `Ok(false)` if it ended or stayed silent for [`START_TIMEOUT`].
+fn start_daemon(dir: &Path, wait: bool) -> std::io::Result<bool> {
+    let mut command = std::process::Command::new(dir.join(DAEMON));
+    if !wait {
+        return command.spawn().map(|_| true);
+    }
+    let mut child = command.stdout(std::process::Stdio::piped()).spawn()?;
+    let Some(out) = child.stdout.take() else {
+        return Ok(false);
+    };
+    // Its first line, or the end of its output if it stops first.
+    let (said, heard) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut line = String::new();
+        let _ = std::io::BufRead::read_line(&mut std::io::BufReader::new(out), &mut line);
+        let _ = said.send(line.trim() == "ready");
+    });
+    Ok(heard.recv_timeout(START_TIMEOUT).unwrap_or(false))
 }
 
 /// Installs the downloaded version and restarts Vixeeny with it; the previous version comes
@@ -249,22 +270,17 @@ fn install_inner(reopen: Option<ControlRequest>) -> anyhow::Result<()> {
     swap::install(&staged, &dir, &backup).context("cannot replace the files")?;
     let _ = std::fs::remove_dir_all(&staged);
     log(&format!("starting {version}"));
-    start_daemon(&dir)?;
-    let deadline = Instant::now() + START_TIMEOUT;
-    while Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(300));
-        if daemon_running() {
-            // The old programs that still run (this one included) keep the backup busy: what
-            // cannot go now goes at the next start (`clean_up`).
-            let _ = swap::commit(&backup);
-            if let Some(request) = reopen {
-                let _ = control(request);
-            }
-            return Ok(());
+    if start_daemon(&dir, true)? {
+        // The old programs that still run (this one included) keep the backup busy: what
+        // cannot go now goes at the next start (`clean_up`).
+        let _ = swap::commit(&backup);
+        if let Some(request) = reopen {
+            let _ = control(request);
         }
+        return Ok(());
     }
     swap::rollback(&dir, &backup)?;
-    start_daemon(&dir)?;
+    start_daemon(&dir, false)?;
     bail!("the new version did not start; the previous one was restored")
 }
 

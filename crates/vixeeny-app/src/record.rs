@@ -18,6 +18,7 @@ use vixeeny_common::config::{self, Config};
 use vixeeny_common::ipc::RecState;
 use vixeeny_encode::audio::{AudioCodec, AudioTrackConfig};
 use vixeeny_encode::clock::Fps;
+use vixeeny_encode::cut::Reencode;
 use vixeeny_encode::d3d_convert as d3d;
 use vixeeny_encode::gpu::{Feed, GpuPipeline, HwFrame, Source as GpuSource};
 use vixeeny_encode::probe::ProbeResult;
@@ -25,7 +26,7 @@ use vixeeny_encode::recorder::{
     FrameFormat, OutputContainer, RecordConfig, Recorder, Split, VideoFrame,
 };
 use vixeeny_encode::registry::Vendor;
-use vixeeny_encode::registry::{Chroma, Encoder, PresetName, Registry};
+use vixeeny_encode::registry::{Chroma, Encoder, Kind, PresetName, Registry};
 use vixeeny_encode::replay;
 use vixeeny_encode::validate::{self, Context as ValidateContext, Severity};
 
@@ -36,9 +37,25 @@ use vixeeny_capture::VideoStream as Video;
 const TICK: Duration = Duration::from_millis(100);
 
 enum Ctl {
-    Save,
+    /// Writes the replay; `true`: then opens it in the video editor.
+    Save(bool),
     TogglePause,
     Stop,
+}
+
+/// Told each time a recording changes state (paused, resumed, ended): the app reports it then,
+/// instead of looking.
+static ON_CHANGE: std::sync::OnceLock<Box<dyn Fn() + Send + Sync>> = std::sync::OnceLock::new();
+
+/// Sets what is told when a recording changes state (once per process).
+pub fn on_change(f: impl Fn() + Send + Sync + 'static) {
+    let _ = ON_CHANGE.set(Box::new(f));
+}
+
+fn changed() {
+    if let Some(f) = ON_CHANGE.get() {
+        f();
+    }
 }
 
 const IDLE: u8 = 0;
@@ -64,7 +81,13 @@ impl Handle {
 
     /// Replay only: writes the buffer's last seconds to a new file.
     pub fn save(&self) {
-        let _ = self.ctl.send(Ctl::Save);
+        let _ = self.ctl.send(Ctl::Save(false));
+    }
+
+    /// Replay only: writes the buffer's last seconds to a new file, then opens it in the video
+    /// editor.
+    pub fn save_and_edit(&self) {
+        let _ = self.ctl.send(Ctl::Save(true));
     }
 
     pub fn finished(&self) -> bool {
@@ -146,6 +169,48 @@ fn choose_encoder<'a>(
     registry
         .get(&profile.encoder)
         .with_context(|| format!("unknown encoder `{}`", profile.encoder))
+}
+
+/// The encoders that can write a cut part of `clip` again, best first: the one the video
+/// settings record with, then the software one of its family (a GPU encoder may be busy).
+pub fn reencoders(config: &Config, clip: &vixeeny_encode::cut::Clip) -> Vec<Reencode> {
+    let Ok(registry) = Registry::builtin() else {
+        return Vec::new();
+    };
+    let profile = &config.video;
+    let probe = crate::probe::current(false).ok();
+    let chosen = choose_encoder(&registry, profile, probe.as_ref()).ok();
+    let software = chosen.and_then(|chosen| {
+        registry
+            .encoders()
+            .find(|e| e.family == chosen.family && e.kind == Kind::Software)
+    });
+    let size = (clip.width & !1, clip.height & !1);
+    let fps = (1.0 / clip.frame_seconds().max(1e-3)).round() as u32;
+    let preset = PresetName::from_setting(&profile.preset).unwrap_or(PresetName::Balanced);
+    let mut out: Vec<Reencode> = Vec::new();
+    for encoder in chosen.into_iter().chain(software) {
+        if out.iter().any(|r| r.encoder.id == encoder.id) {
+            continue;
+        }
+        let custom = profile.preset == "custom" && encoder.id == profile.encoder;
+        let options = if custom {
+            encoder.custom_options(&profile.params)
+        } else {
+            encoder.preset_options(preset, size, fps.max(1))
+        };
+        let depth = if clip.deep && encoder.supports_format(10, Chroma::C420) {
+            10
+        } else {
+            8
+        };
+        out.push(Reencode {
+            encoder: encoder.clone(),
+            options: options.into_iter().collect(),
+            depth,
+        });
+    }
+    out
 }
 
 fn parse_split(mode: &str) -> Split {
@@ -531,17 +596,19 @@ struct Watch {
     gpu_lost: Arc<AtomicU64>,
 }
 
-/// How often the lost frames are counted, and the free space read.
-const LOST_EVERY: Duration = Duration::from_secs(1);
-const DISK_EVERY: Duration = Duration::from_secs(5);
+/// The free space is read again each time this much more has been written (64 MB: about 10 s
+/// of a high-quality 1440p recording), not on a clock.
+const DISK_EVERY_BYTES: u64 = 64 << 20;
 
 /// Tells the widget when the [`Health`] of the recording changes.
 struct Watcher {
     watch: Watch,
     health: Health,
     shown: (Alert, String),
-    counted: std::time::Instant,
-    measured: Option<std::time::Instant>,
+    /// The frames lost when last counted.
+    lost: Option<u64>,
+    /// The bytes written when the free space was last read.
+    measured: Option<u64>,
 }
 
 impl Watcher {
@@ -550,22 +617,29 @@ impl Watcher {
             watch,
             health: Health::default(),
             shown: (Alert::None, String::new()),
-            counted: std::time::Instant::now(),
+            lost: None,
             measured: None,
         }
     }
 
-    /// The alert, when it changed since the last call.
+    /// The alert, when it changed since the last call. Only what changed is looked at again:
+    /// the frames lost (two counters), the free space once enough more is written.
     fn check(&mut self, recorder: &Recorder) -> Option<(Alert, String)> {
-        let now = std::time::Instant::now();
-        if now - self.counted < LOST_EVERY {
+        let stats = recorder.stats();
+        let lost = stats.queue_dropped.load(Ordering::Relaxed)
+            + self.watch.gpu_lost.load(Ordering::Relaxed);
+        let written = stats.written.load(Ordering::Relaxed);
+        let disk_due = self.watch.disk_percent > 0
+            && self
+                .measured
+                .is_none_or(|at| written.saturating_sub(at) >= DISK_EVERY_BYTES);
+        if self.lost == Some(lost) && !disk_due {
             return None;
         }
-        self.counted = now;
-        self.health.lost_frames = recorder.stats().queue_dropped.load(Ordering::Relaxed)
-            + self.watch.gpu_lost.load(Ordering::Relaxed);
-        if self.watch.disk_percent > 0 && self.measured.is_none_or(|t| now - t >= DISK_EVERY) {
-            self.measured = Some(now);
+        self.lost = Some(lost);
+        self.health.lost_frames = lost;
+        if disk_due {
+            self.measured = Some(written);
             self.health.disk = self
                 .watch
                 .folder
@@ -692,6 +766,7 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
             drop(stream);
             drop(keep_alive);
             thread_state.store(IDLE, Ordering::Release);
+            changed();
             match result {
                 Ok(summary) => {
                     // The file names stay out of the log at this level: they are the user's.
@@ -726,7 +801,7 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
 
 /// Starts writing the replay; the file is finished (and reported) by a thread of its own, so the
 /// recording goes on, and a second save right after does not wait for the first.
-fn save_replay(recorder: &Recorder, next_path: &mut SaveNamer, notice: &Config) {
+fn save_replay(recorder: &Recorder, next_path: &mut SaveNamer, notice: &Config, edit: bool) {
     let started = std::time::Instant::now();
     let save = next_path().and_then(|path| Ok(recorder.save_replay(path)?));
     match save {
@@ -739,7 +814,11 @@ fn save_replay(recorder: &Recorder, next_path: &mut SaveNamer, notice: &Config) 
                         "replay saved ({seconds:.1} s, {:.2} s to write)",
                         started.elapsed().as_secs_f64()
                     );
-                    crate::toast::notify(&notice, &Toast::Saved(Saved::Replay, path));
+                    if edit {
+                        crate::cut::open(&path);
+                    } else {
+                        crate::toast::notify(&notice, &Toast::Saved(Saved::Replay, path));
+                    }
                 }
                 Err(e) => {
                     tracing::error!("cannot save the replay: {e}");
@@ -787,28 +866,32 @@ fn record_loop(
             (at - paused_ns - if paused { at - paused_since } else { 0 }).max(0) as u64,
         )
     };
-    let mut last_shown = Duration::ZERO;
     if let Some(w) = &mut widget {
         w.state(false, Duration::ZERO);
     }
     // A replay can go on for a few seconds after its shortcut: the save waits until then.
     let after = Duration::from_secs(u64::from(notice.replay.after_seconds));
-    let mut save_at: Option<std::time::Instant> = None;
+    // When the waiting save is written, and whether it is then edited.
+    let mut save_at: Option<(std::time::Instant, bool)> = None;
     loop {
-        if save_at.is_some_and(|at| std::time::Instant::now() >= at) {
+        if let Some((at, edit)) = save_at
+            && std::time::Instant::now() >= at
+        {
             save_at = None;
             if let Some(next_path) = &mut save_as {
-                save_replay(&recorder, next_path, notice);
+                save_replay(&recorder, next_path, notice, edit);
             }
         }
         match ctl.try_recv() {
-            Ok(Ctl::Save) => {
+            Ok(Ctl::Save(edit)) => {
                 if let Some(next_path) = &mut save_as {
                     if after.is_zero() {
-                        save_replay(&recorder, next_path, notice);
-                    } else if save_at.is_none() {
-                        // A second press while it waits changes nothing.
-                        save_at = Some(std::time::Instant::now() + after);
+                        save_replay(&recorder, next_path, notice, edit);
+                    } else if let Some((_, editing)) = &mut save_at {
+                        // A second press while it waits only asks for the editor.
+                        *editing |= edit;
+                    } else {
+                        save_at = Some((std::time::Instant::now() + after, edit));
                     }
                 }
             }
@@ -830,20 +913,22 @@ fn record_loop(
                         rig.pause(now());
                     }
                     state.store(PAUSED, Ordering::Release);
+                    changed();
                 } else {
                     recorder.resume(now());
                     if let Some(rig) = &mut rig {
                         rig.resume(now(), &recorder);
                     }
                     state.store(RECORDING, Ordering::Release);
+                    changed();
                 }
             }
             Ok(Ctl::Stop) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                 // The game closed while a save waited: what there is is saved now.
-                if save_at.take().is_some()
+                if let Some((_, edit)) = save_at.take()
                     && let Some(next_path) = &mut save_as
                 {
-                    save_replay(&recorder, next_path, notice);
+                    save_replay(&recorder, next_path, notice, edit);
                 }
                 break;
             }
@@ -865,14 +950,6 @@ fn record_loop(
                     vixeeny_common::i18n::tr(vixeeny_common::i18n::Key::ToastReplayDiskLow, lang)
                         .replace("{size}", &vixeeny_common::i18n::size_label(free, lang));
                 crate::toast::notify(notice, &Toast::Failed(Failed::DiskLow, text));
-            }
-        }
-        // The widget counts by itself; a resync every few seconds keeps it honest.
-        if !paused && let Some(w) = &mut widget {
-            let shown = elapsed(false, now(), paused_ns, paused_since);
-            if shown.saturating_sub(last_shown) >= Duration::from_secs(5) {
-                w.state(false, shown);
-                last_shown = shown;
             }
         }
         if let Some(frames) = gpu_frames {

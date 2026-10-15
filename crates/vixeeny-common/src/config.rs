@@ -203,13 +203,14 @@ pub struct Hotkeys {
     pub record_pause: Vec<String>,
     pub replay_toggle: Vec<String>,
     pub replay_save: Vec<String>,
+    pub replay_edit: Vec<String>,
     pub overlay_toggle: Vec<String>,
     pub open_settings: Vec<String>,
 }
 
 impl Hotkeys {
     /// Every action with the shortcuts configured for it, in [`ActionId::ALL`] order.
-    pub fn bindings(&self) -> [(ActionId, &[String]); 11] {
+    pub fn bindings(&self) -> [(ActionId, &[String]); 12] {
         [
             (ActionId::CaptureRegion, &self.capture_region),
             (ActionId::CaptureWindow, &self.capture_window),
@@ -220,6 +221,7 @@ impl Hotkeys {
             (ActionId::RecordPause, &self.record_pause),
             (ActionId::ReplayToggle, &self.replay_toggle),
             (ActionId::ReplaySave, &self.replay_save),
+            (ActionId::ReplayEdit, &self.replay_edit),
             (ActionId::OverlayToggle, &self.overlay_toggle),
             (ActionId::OpenSettings, &self.open_settings),
         ]
@@ -239,6 +241,7 @@ impl Default for Hotkeys {
             record_pause: one("Ctrl+Shift+P"),
             replay_toggle: Vec::new(),
             replay_save: one("Ctrl+Shift+S"),
+            replay_edit: one("Ctrl+Shift+E"),
             overlay_toggle: one("Ctrl+Shift+O"),
             open_settings: Vec::new(),
         }
@@ -578,6 +581,13 @@ pub struct Replay {
     /// included (0: it stops at the press).
     pub after_seconds: u32,
     pub storage: String,
+    /// The notification when a game starts: `both` (replay on or off), `on` (only when it
+    /// runs) or `none`.
+    pub notify: String,
+    /// Programs that are games even without a sign of it (executable names, lower case).
+    pub always: Vec<String>,
+    /// Programs that are never games, whatever the signs (executable names, lower case).
+    pub never: Vec<String>,
 }
 
 impl Default for Replay {
@@ -587,6 +597,9 @@ impl Default for Replay {
             duration_seconds: 30,
             after_seconds: 0,
             storage: "auto".into(),
+            notify: "both".into(),
+            always: Vec::new(),
+            never: Vec::new(),
         }
     }
 }

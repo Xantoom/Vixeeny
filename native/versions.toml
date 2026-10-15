@@ -6,7 +6,7 @@
 [ffmpeg]
 # Built by packaging/ffmpeg/build.sh from the BtbN GPL image (image and commit pinned there):
 # FFmpeg n9.0.2-22-g46d8f462ee with only what Vixeeny uses (its encoders, decoders, containers and
-# filters), x264, x265, SVT-AV1, libvpx, dav1d, opus, NVENC, AMF and QSV. The CI builds it when its
+# filters), x264, x265, SVT-AV1, libvpx, dav1d, opus, NVENC, AMF, QSV and D3D11VA decoding. The CI builds it when its
 # cache has none (.github/workflows/ffmpeg.yml); `cargo xtask build-native` unpacks the zip.
 tag = "n9.0.2"
 license = "GPL-3.0-or-later (--enable-gpl --enable-version3, no nonfree); bundles x264 and x265 (GPL-2.0-or-later), libvpx and opus (BSD-3-Clause), SVT-AV1 (BSD-3-Clause-Clear) and dav1d (BSD-2-Clause)"

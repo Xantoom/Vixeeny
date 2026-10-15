@@ -16,6 +16,7 @@ mod generated {
 }
 pub use generated::*;
 
+pub mod bell;
 pub mod scroll_panel;
 pub mod settings_panel;
 pub mod theme;

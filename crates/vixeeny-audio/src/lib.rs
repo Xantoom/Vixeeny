@@ -10,6 +10,7 @@
 mod fake;
 mod layout;
 mod mixer;
+mod playback;
 mod routing;
 mod spec;
 mod wasapi;
@@ -17,6 +18,7 @@ mod wasapi;
 pub use fake::FakeAudioSource;
 pub use layout::{convert as convert_layout, track_channels};
 pub use mixer::{Block, Mixer};
+pub use playback::{Speakers, Wake};
 pub use routing::{
     CAPTURE_VOLUME, MIC_VOLUME, TrackMember, TrackPlan, assign_channels, plan_tracks,
 };

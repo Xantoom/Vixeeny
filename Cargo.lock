@@ -5718,6 +5718,7 @@ dependencies = [
  "thiserror 2.0.21",
  "ureq",
  "vixeeny-common",
+ "vixeeny-platform",
  "zip",
 ]
 

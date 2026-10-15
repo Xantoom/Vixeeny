@@ -448,6 +448,48 @@ impl Gfx {
         }
     }
 
+    /// A BGRA picture (opaque, `w`×`h`, rows packed) as a Direct2D bitmap.
+    pub fn bgra_bitmap(&self, w: u32, h: u32, bgra: &[u8]) -> Result<ID2D1Bitmap1> {
+        if bgra.len() != w as usize * h as usize * 4 || w == 0 || h == 0 {
+            return Err(windows::core::Error::from_hresult(
+                windows::Win32::Foundation::E_INVALIDARG,
+            ));
+        }
+        let props = D2D1_BITMAP_PROPERTIES1 {
+            pixelFormat: D2D1_PIXEL_FORMAT {
+                format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                alphaMode: D2D1_ALPHA_MODE_IGNORE,
+            },
+            dpiX: 96.0,
+            dpiY: 96.0,
+            bitmapOptions: D2D1_BITMAP_OPTIONS_NONE,
+            colorContext: std::mem::ManuallyDrop::new(None),
+        };
+        // SAFETY: `bgra` holds `h` rows of `w` BGRA pixels, `w * 4` bytes apart.
+        unsafe {
+            self.dc.CreateBitmap(
+                D2D_SIZE_U {
+                    width: w,
+                    height: h,
+                },
+                Some(bgra.as_ptr().cast()),
+                w * 4,
+                &props,
+            )
+        }
+    }
+
+    /// Replaces the pixels of a bitmap made by [`Gfx::bgra_bitmap`] (same size).
+    pub fn update_bgra(bitmap: &ID2D1Bitmap1, w: u32, h: u32, bgra: &[u8]) -> Result<()> {
+        if bgra.len() != w as usize * h as usize * 4 {
+            return Err(windows::core::Error::from_hresult(
+                windows::Win32::Foundation::E_INVALIDARG,
+            ));
+        }
+        // SAFETY: `bgra` holds the whole bitmap, `w * 4` bytes per row.
+        unsafe { bitmap.CopyFromMemory(None, bgra.as_ptr().cast(), w * 4) }
+    }
+
     /// The x of the caret after `chars` UTF-16 units of `layout`.
     pub fn caret_x(layout: &IDWriteTextLayout, position: u32) -> f32 {
         let (mut x, mut y) = (0.0, 0.0);

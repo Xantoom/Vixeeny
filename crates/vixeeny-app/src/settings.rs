@@ -5,7 +5,7 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use anyhow::Context;
 use vixeeny_common::config::Config;
@@ -100,7 +100,7 @@ pub fn save(config: &Config) {
         tracing::error!("cannot save the settings: {e}");
         return;
     }
-    std::thread::spawn(|| {
+    let telling = std::thread::spawn(|| {
         let result = Endpoint::current_user().connect().and_then(|mut stream| {
             ipc::write_msg(&mut stream, &Hello::Control(ControlRequest::ReloadConfig))
                 .map_err(std::io::Error::other)?;
@@ -112,6 +112,21 @@ pub fn save(config: &Config) {
             tracing::debug!("the daemon was not told about the new settings: {e}");
         }
     });
+    // The last one is enough to wait for: the daemon reads the file as it is then.
+    if let Ok(mut last) = TELLING.lock() {
+        *last = Some(telling);
+    }
+}
+
+/// The thread telling the daemon about the last save.
+static TELLING: Mutex<Option<std::thread::JoinHandle<()>>> = Mutex::new(None);
+
+/// Waits until the daemon has been told about the last save (before the process ends).
+fn finish_saving() {
+    let telling = TELLING.lock().ok().and_then(|mut t| t.take());
+    if let Some(telling) = telling {
+        let _ = telling.join();
+    }
 }
 
 pub fn hardware_lines(lang: Lang, result: &ProbeResult) -> Vec<Line> {
@@ -356,16 +371,36 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     let handle = panel.handle();
     panel.on_meter(meter(handle.clone()));
     // The shortcuts the daemon could not register (it registers them again after each change).
-    panel.watch_taken_shortcuts(|| {
-        vixeeny_common::paths::hotkeys_taken_file()
-            .and_then(|path| std::fs::read_to_string(path).ok())
-            .unwrap_or_default()
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty())
-            .map(str::to_owned)
-            .collect()
-    });
+    // Windows tells when the settings file or the taken shortcuts change.
+    let (config_changed, taken_changed) =
+        (vixeeny_ui::bell::Bell::new(), vixeeny_ui::bell::Bell::new());
+    if let (Some(config_dir), Some(taken)) = (
+        vixeeny_common::paths::config_dir(),
+        vixeeny_common::paths::hotkeys_taken_file(),
+    ) && let Some(taken_dir) = taken.parent()
+    {
+        let bells = [config_changed.clone(), taken_changed.clone()];
+        let watched =
+            vixeeny_platform::on_dir_change(&[config_dir, taken_dir.to_path_buf()], move |i| {
+                bells[i].ring()
+            });
+        if !watched {
+            tracing::warn!("settings: cannot watch the settings folders");
+        }
+    }
+    panel.watch_taken_shortcuts(
+        || {
+            vixeeny_common::paths::hotkeys_taken_file()
+                .and_then(|path| std::fs::read_to_string(path).ok())
+                .unwrap_or_default()
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty())
+                .map(str::to_owned)
+                .collect()
+        },
+        &taken_changed,
+    );
 
     let weak = panel.window().as_weak();
     // Saved once the changes stop for a moment: a slider sends one per step, and each save
@@ -376,17 +411,20 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     // Others may write the file too: the window shows what they wrote and keeps it when it
     // saves.
     let file = Rc::new(RefCell::new(OnDisk::read()));
-    panel.watch_config({
-        let (file, pending) = (Rc::clone(&file), Rc::clone(&unsaved));
-        move |shown| {
-            if pending.borrow().is_some() {
-                return None; // the save to come merges them
+    panel.watch_config(
+        {
+            let (file, pending) = (Rc::clone(&file), Rc::clone(&unsaved));
+            move |shown| {
+                if pending.borrow().is_some() {
+                    return None; // the save to come merges them
+                }
+                let mut file = file.borrow_mut();
+                file.refresh();
+                (file.config != *shown).then(|| file.config.clone())
             }
-            let mut file = file.borrow_mut();
-            file.refresh();
-            (file.config != *shown).then(|| file.config.clone())
-        }
-    });
+        },
+        &config_changed,
+    );
     let writer = Rc::clone(&file);
     let shown_look = std::cell::Cell::new(look);
     panel.on_change(move |config| {
@@ -524,8 +562,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     let result = panel.window().run().map_err(|e| anyhow::anyhow!("{e}"));
     if let Some(config) = unsaved.borrow_mut().take() {
         file.borrow_mut().write(&config);
-        // `save` tells the daemon from a thread: give it the moment it needs.
-        std::thread::sleep(std::time::Duration::from_millis(300));
+        finish_saving();
     }
     result
 }
@@ -767,21 +804,10 @@ fn pause_hotkeys(paused: bool) {
 /// The hardware probe for the video page: the cache if it exists, else a background run whose
 /// answer the page picks up when it is there.
 fn start_probe_watch(panel: &SettingsPanel) {
-    let state: Arc<Mutex<(Option<ProbeResult>, bool)>> =
-        Arc::new(Mutex::new((crate::probe::cached(), false)));
-    if let Ok(mut s) = state.lock()
-        && s.0.is_none()
-    {
-        s.1 = true;
-        let shared = Arc::clone(&state);
-        std::thread::spawn(move || {
-            let result = crate::probe::current(false).ok();
-            if let Ok(mut s) = shared.lock() {
-                *s = (result, false);
-            }
-        });
+    match crate::probe::cached() {
+        Some(cached) => panel.set_probe(Some(cached), false),
+        None => panel.watch_probe(|| crate::probe::current(false).ok()),
     }
-    panel.watch_probe(move || state.lock().map_or((None, false), |s| s.clone()));
 }
 
 /// The welcome assistant, before the very first use of the settings. Closing it counts as
@@ -827,7 +853,6 @@ fn first_run(config: &Config, lang: Lang) -> anyhow::Result<()> {
     });
     let chosen = panel.run().map_err(|e| anyhow::anyhow!("{e}"))?;
     save(&chosen);
-    // `save` tells the daemon from a thread: give it the moment it needs before the process ends.
-    std::thread::sleep(std::time::Duration::from_millis(300));
+    finish_saving();
     Ok(())
 }

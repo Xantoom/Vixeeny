@@ -4,6 +4,7 @@
 
 pub mod clock;
 mod convert;
+pub mod cut;
 #[cfg(windows)]
 pub mod d3d_convert;
 #[cfg(windows)]

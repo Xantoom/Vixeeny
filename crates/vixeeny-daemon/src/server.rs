@@ -120,7 +120,14 @@ fn connection(stream: Stream, id: u64, tx: &EventTx, link: &AppLink) -> Result<(
     match hello {
         Hello::Control(request) => {
             tx.send(Event::Control(request));
-            ipc::write_msg(&mut send, &ControlReply::Ok)
+            let reply = if request == ipc::ControlRequest::QuitForUpdate {
+                ControlReply::Quitting {
+                    pid: std::process::id(),
+                }
+            } else {
+                ControlReply::Ok
+            };
+            ipc::write_msg(&mut send, &reply)
         }
         Hello::App { pid } => {
             tracing::debug!("app connected (pid {pid}, connection {id})");

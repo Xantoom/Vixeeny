@@ -23,7 +23,8 @@ use super::Startup;
 use super::freezer::GpuFreezer;
 use super::hotkeys::Hotkeys;
 use super::tray::Tray;
-use crate::runtime::{Flow, Runtime};
+use crate::core::Event;
+use crate::runtime::{Flow, Games, Runtime};
 use crate::server::{self, EventTx, Waker};
 use crate::supervisor::ProcessSpawner;
 
@@ -47,6 +48,39 @@ impl Waker for WindowWaker {
         // SAFETY: PostMessageW may be called from any thread. If the window is already
         // destroyed the call just fails, which is fine during shutdown.
         let _ = unsafe { PostMessageW(Some(hwnd), WM_WAKE, WPARAM(0), LPARAM(0)) };
+    }
+}
+
+/// The games in the foreground, as Windows reports its changes.
+#[derive(Default)]
+struct ForegroundGames {
+    detector: vixeeny_platform::games::Detector,
+}
+
+impl Games for ForegroundGames {
+    fn hook(&mut self, tx: EventTx) -> bool {
+        let hooked =
+            vixeeny_platform::on_foreground_change(move |w| tx.send(Event::Foreground(w.0)));
+        if !hooked {
+            tracing::warn!("Windows refused the foreground hook: games are not detected");
+        }
+        hooked
+    }
+
+    fn game(
+        &mut self,
+        window: Option<u64>,
+        config: &vixeeny_common::config::Config,
+    ) -> Option<u32> {
+        let lists = vixeeny_platform::games::Lists {
+            always: &config.replay.always,
+            never: &config.replay.never,
+        };
+        match window {
+            Some(w) => self.detector.game_at(vixeeny_platform::WindowId(w), lists),
+            None => self.detector.game_in_front(lists),
+        }
+        .map(|w| w.pid)
     }
 }
 
@@ -152,11 +186,18 @@ pub fn run(startup: Startup) -> anyhow::Result<()> {
         tx,
         receiver,
     )
-    .with_freezer(Box::new(GpuFreezer::new()));
+    .with_freezer(Box::new(GpuFreezer::new()))
+    .with_games(Box::<ForegroundGames>::default());
     runtime.apply_config();
     runtime.start_replay_if_configured();
     runtime.open_wizard_if_first_run();
     RUNTIME.with(|cell| *cell.borrow_mut() = Some(runtime));
+    // Whoever started this daemon with a pipe (the updater) learns that it runs.
+    {
+        use std::io::Write;
+        let mut out = std::io::stdout();
+        let _ = writeln!(out, "ready").and_then(|()| out.flush());
+    }
 
     let mut msg = MSG::default();
     // SAFETY: `msg` is a valid MSG for the duration of the loop; GetMessageW blocks until a

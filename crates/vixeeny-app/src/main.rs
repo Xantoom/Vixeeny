@@ -10,6 +10,7 @@ use std::time::Duration;
 
 mod audio_rig;
 mod clipboard;
+mod cut;
 mod probe;
 mod record;
 mod region;
@@ -252,8 +253,9 @@ fn run_action(
         ActionId::RecordToggle
         | ActionId::RecordPause
         | ActionId::ReplayToggle
-        | ActionId::ReplaySave => recording.handle(action, config),
-        ActionId::ReplayWatch => recording.watch(config, true),
+        | ActionId::ReplaySave
+        | ActionId::ReplayEdit => recording.handle(action, config),
+        ActionId::ReplayWatch => recording.watch(config),
         ActionId::OverlayToggle => return Ok(overlay(config, recording)),
         ActionId::OpenSettings => open_settings(),
         _ => perform(action, config, frozen),
@@ -332,12 +334,15 @@ struct Recording {
     handle: Option<record::Handle>,
     /// The replay buffer (`ReplayToggle`), which runs alongside a recording.
     replay: Option<record::Handle>,
-    /// The game (its process) the replay was started for: the replay stops when it closes.
-    replay_game: Option<u32>,
+    /// The game (its process and executable) the replay was started for: the replay stops when
+    /// it closes.
+    replay_game: Option<(u32, String)>,
     /// A game whose replay the user stopped by hand: it is not started again for it.
     declined: Option<u32>,
-    /// When the foreground was last looked at.
-    watched: Option<std::time::Instant>,
+    /// The last game told about in a notification (once per game).
+    announced: Option<u32>,
+    /// Tells games from other full-screen programs.
+    games: vixeeny_platform::games::Detector,
     /// Asks the main loop to look at the foreground again (the game closed).
     look: Option<Sender<Wake>>,
 }
@@ -345,13 +350,11 @@ struct Recording {
 /// What wakes the main loop.
 enum Wake {
     Daemon(DaemonToApp),
-    /// Another window came to the foreground, or the game of the replay closed.
+    /// The game of the replay closed.
     Look,
+    /// A recording paused, resumed or ended.
+    Recording,
 }
-
-/// While the replay is on, the foreground is looked at when it changes, and this often in case a
-/// game went full screen after taking the focus.
-const LOOK_AGAIN: Duration = Duration::from_secs(3);
 
 impl Recording {
     /// `(recording, replay buffer)` is running.
@@ -359,74 +362,111 @@ impl Recording {
         (self.handle.is_some(), self.replay.is_some())
     }
 
-    /// With the replay on: starts it when a full-screen game comes to the foreground, stops it
-    /// when that game closes. Looks every [`LOOK_AGAIN`] at most, unless `now`.
-    fn watch(&mut self, config: &Config, now: bool) {
-        if !now && self.watched.is_some_and(|t| t.elapsed() < LOOK_AGAIN) {
-            return;
-        }
-        self.watched = Some(std::time::Instant::now());
-        if let Some(pid) = self.replay_game {
-            if !config.replay.enabled || !vixeeny_platform::process_alive(pid) {
+    /// Called when the daemon saw a game come to the foreground, when the replay settings
+    /// changed, and when the replay's game closed. With the replay on: starts it for the game
+    /// in front, stops it when that game closes (or the replay was turned off). Tells about
+    /// each game in a notification, the replay on or off.
+    fn watch(&mut self, config: &Config) {
+        if let Some((pid, exe)) = &self.replay_game {
+            let never = config.replay.never.contains(exe);
+            if !config.replay.enabled || never || !vixeeny_platform::process_alive(*pid) {
                 tracing::info!("the game closed (or the replay was turned off): replay stopped");
+                if never {
+                    self.declined = Some(*pid);
+                }
                 self.replay_game = None;
-                self.replay = None;
+                self.stop_replay();
             }
             return;
         }
-        if !config.replay.enabled || self.replay.is_some() {
-            return;
+        // Turned off in the settings: the buffer goes, its memory or files with it.
+        if !config.replay.enabled {
+            self.stop_replay();
         }
-        let Some(game) = still::game_in_front() else {
+        let Some(game) = self.games.game_in_front(game_lists(config)) else {
             return;
         };
-        if self.declined == Some(game.pid) {
+        let first_look = self.announced != Some(game.pid);
+        self.announced = Some(game.pid);
+        if !config.replay.enabled {
+            if first_look && config.replay.notify == "both" {
+                announce(config, false, &game);
+            }
             return;
         }
+        if self.replay.is_some() || self.declined == Some(game.pid) {
+            return;
+        }
+        if self.start_replay(config, &game) && first_look && config.replay.notify != "none" {
+            announce(config, true, &game);
+        }
+    }
+
+    /// Starts the replay for `game`; `false` (logged) when it cannot.
+    fn start_replay(&mut self, config: &Config, game: &vixeeny_platform::WindowInfo) -> bool {
         match record::start_replay(config) {
             Ok(handle) => {
                 // The program, not the window title (which may be personal).
                 let exe = game
                     .exe_path
                     .as_deref()
-                    .and_then(|p| std::path::Path::new(p).file_name())
-                    .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-                tracing::info!("full-screen program ({exe}): replay started");
+                    .and_then(vixeeny_platform::games::exe_name)
+                    .unwrap_or_default();
+                tracing::info!("full-screen game ({exe}): replay started");
                 self.replay = Some(handle);
-                self.replay_game = Some(game.pid);
+                self.replay_game = Some((game.pid, exe));
+                self.declined = None;
                 if let Some(look) = self.look.clone() {
                     vixeeny_platform::on_process_exit(game.pid, move || {
                         let _ = look.send(Wake::Look);
                     });
                 }
+                true
             }
             Err(e) => {
                 tracing::error!("cannot start the replay buffer: {e:#}");
                 // Not again for this game.
                 self.declined = Some(game.pid);
+                false
             }
+        }
+    }
+
+    /// Stops the buffer: its memory is freed, its files on disk removed.
+    fn stop_replay(&mut self) {
+        if let Some(replay) = self.replay.take() {
+            drop(replay);
+            tracing::info!("replay stopped, its buffer released");
         }
     }
 
     fn handle(&mut self, action: ActionId, config: &Config) {
         match action {
+            // During a game only: stops the replay (it stays off for that game), or starts it
+            // again.
             ActionId::ReplayToggle => {
-                match self.replay.take() {
-                    // Dropping the handle stops the buffer; stopped by hand during a game, it
-                    // stays off for that game.
-                    Some(replay) => {
-                        drop(replay);
-                        self.declined = self.replay_game.take();
+                if self.replay.is_some() {
+                    let game = self.replay_game.take();
+                    self.declined = game.as_ref().map(|(pid, _)| *pid);
+                    self.stop_replay();
+                    if config.replay.notify != "none"
+                        && let Some(window) = vixeeny_platform::foreground_window().ok().flatten()
+                        && game.is_some_and(|(pid, _)| pid == window.pid)
+                    {
+                        announce(config, false, &window);
                     }
-                    None => match record::start_replay(config) {
-                        Ok(handle) => self.replay = Some(handle),
-                        Err(e) => tracing::error!("cannot start the replay buffer: {e:#}"),
-                    },
+                } else if let Some(game) = self.games.game_in_front(game_lists(config)) {
+                    if self.start_replay(config, &game) && config.replay.notify != "none" {
+                        announce(config, true, &game);
+                    }
+                } else {
+                    tracing::debug!("replay toggle ignored: no full-screen game");
                 }
                 return;
             }
-            ActionId::ReplaySave => {
+            ActionId::ReplaySave | ActionId::ReplayEdit => {
                 match &self.replay {
+                    Some(replay) if action == ActionId::ReplayEdit => replay.save_and_edit(),
                     Some(replay) => replay.save(),
                     None => tracing::debug!("replay save ignored: the buffer is not running"),
                 }
@@ -473,6 +513,21 @@ impl Recording {
     }
 }
 
+/// The notification that a game started, the replay running with it or not.
+fn announce(config: &Config, on: bool, game: &vixeeny_platform::WindowInfo) {
+    if let Some(exe) = &game.exe_path {
+        toast::notify(config, &toast::Toast::Replay(on, exe.into()));
+    }
+}
+
+/// The user's word on which programs are games.
+fn game_lists(config: &Config) -> vixeeny_platform::games::Lists<'_> {
+    vixeeny_platform::games::Lists {
+        always: &config.replay.always,
+        never: &config.replay.never,
+    }
+}
+
 /// Light or dark, the system accent, the title-bar styling: what every window of this process
 /// starts from.
 fn init_look() {
@@ -504,6 +559,8 @@ fn run() -> anyhow::Result<()> {
         // A notification card (see `toast`).
         Some("--toast") => return toast::run_child(&args[1..]),
         Some("--toast-host") => return toast::run_host(),
+        // The video editor of the replays (see `cut`).
+        Some("--cut") => return cut::run_child(&args[1..]),
         // The daily update check, and the installation (see `update`).
         Some("--update") => return update::run_child(&args[1..]),
         Some("--system-info") => {
@@ -582,6 +639,12 @@ fn run() -> anyhow::Result<()> {
         "vixeeny-app {} started for {first_action:?}",
         env!("CARGO_PKG_VERSION")
     );
+    {
+        let wake = look.clone();
+        record::on_change(move || {
+            let _ = wake.send(Wake::Recording);
+        });
+    }
     let mut recording = Recording {
         look: Some(look.clone()),
         ..Recording::default()
@@ -594,31 +657,19 @@ fn run() -> anyhow::Result<()> {
         send: &mut send,
     };
     actions.run(first_action, first_frozen)?;
-    let mut hooked = false;
-    // Only what the daemon sends counts as activity: not the foreground changing.
     let mut idle_from = std::time::Instant::now();
     loop {
-        // While recording, the app polls the recording's state; while the replay is on, it
-        // waits for a game. It does not exit as idle meanwhile.
-        let polling = recording.handle.is_some();
-        let watching = config.replay.enabled || recording.replay.is_some();
-        if watching && !hooked {
-            let look = look.clone();
-            hooked = vixeeny_platform::on_foreground_change(move || {
-                let _ = look.send(Wake::Look);
-            });
-        }
-        if polling || watching {
+        // While recording, or while the replay runs with a game, the app stays: it sleeps until
+        // it is told something (the daemon, the recording, Windows). Otherwise it ends once
+        // idle for a while; the daemon, which watches for games, starts it again with one.
+        let busy = recording.handle.is_some() || recording.replay.is_some();
+        let woken = if busy {
             idle_from = std::time::Instant::now();
-        }
-        let wait = if polling {
-            Duration::from_millis(200)
-        } else if watching {
-            LOOK_AGAIN
+            rx.recv().map_err(|_| RecvTimeoutError::Disconnected)
         } else {
-            idle.saturating_sub(idle_from.elapsed())
+            rx.recv_timeout(idle.saturating_sub(idle_from.elapsed()))
         };
-        match rx.recv_timeout(wait) {
+        match woken {
             Ok(Wake::Daemon(DaemonToApp::RunAction { action, frozen })) => {
                 idle_from = std::time::Instant::now();
                 Actions {
@@ -627,22 +678,20 @@ fn run() -> anyhow::Result<()> {
                     send: &mut send,
                 }
                 .run(action, frozen)?;
-            }
-            Ok(Wake::Look) => recording.watch(&config, true),
-            Err(RecvTimeoutError::Timeout) if polling || watching => {
-                recording.watch(&config, false);
                 recording.report(&mut send)?;
             }
+            Ok(Wake::Look) => recording.watch(&config),
+            Ok(Wake::Recording) => recording.report(&mut send)?,
             Ok(Wake::Daemon(DaemonToApp::ConfigChanged)) => {}
             // The daemon asked us to stop, or went away.
             Ok(Wake::Daemon(DaemonToApp::Shutdown)) | Err(RecvTimeoutError::Disconnected) => {
                 return Ok(());
             }
-            Err(RecvTimeoutError::Timeout) if idle_from.elapsed() >= idle => {
+            // Idle for long enough: the memory goes back to the system.
+            Err(RecvTimeoutError::Timeout) => {
                 ipc::write_msg(&mut send, &AppToDaemon::Idle)?;
                 return Ok(());
             }
-            Err(RecvTimeoutError::Timeout) => {}
         }
     }
 }

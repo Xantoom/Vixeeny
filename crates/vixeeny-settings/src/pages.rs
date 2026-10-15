@@ -1432,6 +1432,20 @@ pub fn replay(env: &Env, config: &Config) -> Vec<Row> {
             |c, v| c.replay.after_seconds = v.parse().unwrap_or(0),
         ),
         storage,
+        choice(
+            "replay_notify",
+            t(Key::SetReplayNotify),
+            vec![
+                opt("both", t(Key::OptNotifyBoth)),
+                opt("on", t(Key::OptNotifyOn)),
+                opt("none", t(Key::OptNotifyNone)),
+            ],
+            |c| c.replay.notify.clone(),
+            |c, v| c.replay.notify = v,
+        ),
+    ];
+    rows.extend(game_rows(env, config));
+    rows.extend([
         header("h_folder"),
         folder(
             "dir_replays",
@@ -1445,13 +1459,76 @@ pub fn replay(env: &Env, config: &Config) -> Vec<Row> {
             |c| c.paths.per_app_subfolder.replays,
             |c, v| c.paths.per_app_subfolder.replays = v,
         ),
-    ];
+    ]);
     rows.extend(naming_rows(
         env,
         "replays",
         |c| &c.paths.naming.replays,
         |c| &mut c.paths.naming.replays,
     ));
+    rows
+}
+
+/// The programs open now, and those of the user's lists: each one automatic (the replay
+/// looks for signs of a game), always a game, or never one.
+fn game_rows(env: &Env, config: &Config) -> Vec<Row> {
+    let t = |k| env.t(k);
+    let (games, open) = crate::expander(env, "games", t(Key::HdrGames));
+    let mut rows = vec![header("h_games"), games];
+    if !open {
+        return rows;
+    }
+    let mut programs: Vec<(String, String, Option<crate::Icon>)> = env
+        .audio
+        .programs
+        .iter()
+        .map(|p| (p.id.to_lowercase(), p.name.clone(), p.icon.clone()))
+        .collect();
+    for exe in config.replay.always.iter().chain(&config.replay.never) {
+        if !programs.iter().any(|(id, ..)| id == exe) {
+            programs.push((exe.clone(), exe.trim_end_matches(".exe").to_owned(), None));
+        }
+    }
+    for (exe, name, icon) in programs {
+        let read = exe.clone();
+        let mut r = row(
+            format!("game:{exe}"),
+            name,
+            Kind::Choice(vec![
+                opt("auto", t(Key::OptGameAuto)),
+                opt("always", t(Key::OptGameAlways)),
+                opt("never", t(Key::OptGameNever)),
+            ]),
+            Box::new(move |c| {
+                Value::Text(
+                    if c.replay.always.contains(&read) {
+                        "always"
+                    } else if c.replay.never.contains(&read) {
+                        "never"
+                    } else {
+                        "auto"
+                    }
+                    .into(),
+                )
+            }),
+            Box::new(move |c, v| {
+                let Value::Text(v) = v else {
+                    return Err(Invalid);
+                };
+                c.replay.always.retain(|e| *e != exe);
+                c.replay.never.retain(|e| *e != exe);
+                match v.as_str() {
+                    "always" => c.replay.always.push(exe.clone()),
+                    "never" => c.replay.never.push(exe.clone()),
+                    "auto" => {}
+                    _ => return Err(Invalid),
+                }
+                Ok(())
+            }),
+        );
+        r.icon = icon;
+        rows.push(r);
+    }
     rows
 }
 

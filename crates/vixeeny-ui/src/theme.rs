@@ -76,30 +76,25 @@ pub fn native_handle(window: &slint::Window) -> Option<u64> {
 }
 
 /// Runs `f` with the native handle as soon as the event loop shows the window (the handle does
-/// not exist before). Retries for a moment, as the window may appear a few frames later.
+/// not exist before): the backend wakes this when it creates the window, nothing is polled.
 #[cfg(feature = "desktop")]
 pub fn when_native<C: ComponentHandle + 'static>(window: &C, f: impl Fn(u64) + 'static) {
-    use std::cell::Cell;
-    use std::rc::Rc;
+    use slint::winit_030::WinitWindowAccessor;
+    use slint::winit_030::winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
     let weak = window.as_weak();
-    let tries = Rc::new(Cell::new(0u32));
-    let timer = Rc::new(slint::Timer::default());
-    let keep = timer.clone();
-    timer.start(
-        slint::TimerMode::Repeated,
-        std::time::Duration::from_millis(30),
-        move || {
-            tries.set(tries.get() + 1);
-            let handle = weak.upgrade().and_then(|w| native_handle(w.window()));
-            if let Some(handle) = handle {
-                f(handle);
-                keep.stop();
-            } else if tries.get() > 100 {
-                keep.stop();
-            }
-        },
-    );
-    std::mem::forget(timer);
+    let _ = slint::spawn_local(async move {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let Ok(native) = window.window().winit_window().await else {
+            return;
+        };
+        if let Ok(handle) = native.window_handle()
+            && let RawWindowHandle::Win32(h) = handle.as_raw()
+        {
+            f(h.hwnd.get() as u64);
+        }
+    });
 }
 
 /// Sets the `Theme` of `window`.

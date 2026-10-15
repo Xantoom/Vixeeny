@@ -8,28 +8,29 @@
 //! track asked for); process loopback is stereo. Each packet is dated with the QPC time the driver gives
 //! (100 ns units), the same clock as `vixeeny_platform::monotonic_ns`.
 //!
-//! A source that fails (device unplugged, application gone) reports `Lost` and retries every
-//! second: the track is silent meanwhile and recovers by itself (CA-AUD-2, CA-AUD-3).
+//! A source that fails (device unplugged, application gone) reports `Lost` and tries again each
+//! time Windows reports a device or a new audio session: the track is silent meanwhile and
+//! recovers by itself (CA-AUD-2, CA-AUD-3). Nothing is polled: the capture thread sleeps until
+//! the driver, the device list, the followed process or `stop` wakes it.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
-use std::time::Duration;
 
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
-use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0};
+use windows::Win32::Foundation::{CloseHandle, HANDLE, PROPERTYKEY, WAIT_OBJECT_0};
 use windows::Win32::Media::Audio::{
     AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
     AUDCLNT_STREAMFLAGS_EVENTCALLBACK, AUDCLNT_STREAMFLAGS_LOOPBACK,
     AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, AUDIOCLIENT_ACTIVATION_PARAMS,
     AUDIOCLIENT_ACTIVATION_PARAMS_0, AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK,
-    AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS, ActivateAudioInterfaceAsync, DEVICE_STATE_ACTIVE,
-    IActivateAudioInterfaceAsyncOperation, IActivateAudioInterfaceCompletionHandler,
-    IActivateAudioInterfaceCompletionHandler_Impl, IAudioCaptureClient, IAudioClient,
-    IAudioSessionControl2, IAudioSessionManager2, IMMDevice, IMMDeviceEnumerator,
-    MMDeviceEnumerator, PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE,
-    VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, WAVEFORMATEX, WAVEFORMATEXTENSIBLE,
-    WAVEFORMATEXTENSIBLE_0, eCapture, eConsole, eRender,
+    AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS, ActivateAudioInterfaceAsync, DEVICE_STATE,
+    DEVICE_STATE_ACTIVE, EDataFlow, ERole, IActivateAudioInterfaceAsyncOperation,
+    IActivateAudioInterfaceCompletionHandler, IActivateAudioInterfaceCompletionHandler_Impl,
+    IAudioCaptureClient, IAudioClient, IAudioSessionControl, IAudioSessionControl2,
+    IAudioSessionManager2, IAudioSessionNotification, IAudioSessionNotification_Impl, IMMDevice,
+    IMMDeviceEnumerator, IMMNotificationClient, IMMNotificationClient_Impl, MMDeviceEnumerator,
+    PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE, VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK,
+    WAVEFORMATEX, WAVEFORMATEXTENSIBLE, WAVEFORMATEXTENSIBLE_0, eCapture, eConsole, eRender,
 };
 use windows::Win32::System::Com::StructuredStorage::{PROPVARIANT, PROPVARIANT_0_0};
 use windows::Win32::System::Com::{
@@ -40,11 +41,11 @@ use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
 use windows::Win32::System::Threading::{
-    CreateEventW, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
-    WaitForSingleObject,
+    CreateEventW, INFINITE, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+    QueryFullProcessImageNameW, ResetEvent, SetEvent, WaitForMultipleObjects, WaitForSingleObject,
 };
 use windows::Win32::System::Variant::VT_BLOB;
-use windows::core::{GUID, Interface, PCWSTR, PWSTR, implement};
+use windows::core::{GUID, Interface, PCWSTR, PWSTR, Ref, implement};
 
 use crate::{
     AudioChunk, AudioError, AudioSink, AudioSource, CHANNELS, SAMPLE_RATE, SourceEvent, SourceKind,
@@ -54,7 +55,7 @@ use crate::{
 /// `AUDCLNT_E_DEVICE_INVALIDATED`.
 const DEVICE_INVALIDATED: i32 = 0x8889_0004_u32 as i32;
 
-fn os(what: &str) -> impl FnOnce(windows::core::Error) -> AudioError + '_ {
+pub(crate) fn os(what: &str) -> impl FnOnce(windows::core::Error) -> AudioError + '_ {
     move |e| AudioError::Os(format!("{what}: {e}"))
 }
 
@@ -74,10 +75,10 @@ pub struct AppInfo {
     pub active: bool,
 }
 
-struct ComGuard;
+pub(crate) struct ComGuard;
 
 impl ComGuard {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         // SAFETY: balanced by `CoUninitialize` in `Drop`; an already initialised thread (S_FALSE)
         // is fine, a different apartment model (an error) leaves COM usable as it is.
         let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
@@ -92,7 +93,7 @@ impl Drop for ComGuard {
     }
 }
 
-fn enumerator() -> Result<IMMDeviceEnumerator, AudioError> {
+pub(crate) fn enumerator() -> Result<IMMDeviceEnumerator, AudioError> {
     // SAFETY: standard COM activation of the system's device enumerator.
     unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL) }.map_err(os("enumerator"))
 }
@@ -262,7 +263,7 @@ fn find_process(exe: &str) -> Option<u32> {
 
 /// The capture format: 48 kHz float. More than two channels need the extensible form, with the
 /// speaker mask (FL FR FC LFE BL BR [SL SR]).
-fn wave_format(channels: usize) -> WAVEFORMATEXTENSIBLE {
+pub(crate) fn wave_format(channels: usize) -> WAVEFORMATEXTENSIBLE {
     let bytes_per_frame = (channels * 4) as u16;
     let mut format = WAVEFORMATEX {
         wFormatTag: 3, // WAVE_FORMAT_IEEE_FLOAT
@@ -336,14 +337,19 @@ struct Stream {
     follows_default: bool,
     /// Channels of the samples this stream delivers.
     channels: usize,
+    /// For an application: its process, signalled when it ends.
+    process: Option<HANDLE>,
 }
 
 impl Drop for Stream {
     fn drop(&mut self) {
-        // SAFETY: the client was started by `open`; the event handle is ours.
+        // SAFETY: the client was started by `open`; the handles are ours.
         unsafe {
             let _ = self.client.Stop();
             let _ = CloseHandle(self.event);
+            if let Some(process) = self.process {
+                let _ = CloseHandle(process);
+            }
         }
     }
 }
@@ -405,6 +411,7 @@ fn finish_open(
         device_id,
         follows_default,
         channels,
+        process: None,
     })
 }
 
@@ -489,7 +496,10 @@ fn open_process_loopback(pid: u32) -> Result<Stream, AudioError> {
             .cast::<IAudioClient>()
             .map_err(os("IAudioClient"))?
     };
-    finish_open(client, true, None, false, CHANNELS)
+    let mut stream = finish_open(client, true, None, false, CHANNELS)?;
+    // SAFETY: a plain call; the handle is closed with the stream.
+    stream.process = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, false, pid) }.ok();
+    Ok(stream)
 }
 
 /// The endpoint a speakers/microphone source reads, `None` for an application. The flag says
@@ -580,6 +590,164 @@ pub fn source_channels(kind: &SourceKind, max: usize) -> usize {
         .map_or(CHANNELS, |n| track_channels(n, max))
 }
 
+/// A Windows event shared between threads.
+struct Event(HANDLE);
+
+// SAFETY: an event handle may be waited on and signalled from any thread.
+unsafe impl Send for Event {}
+// SAFETY: as above.
+unsafe impl Sync for Event {}
+
+impl Event {
+    /// `manual`: stays signalled until reset (otherwise one wait consumes it).
+    fn new(manual: bool) -> Result<Self, AudioError> {
+        // SAFETY: a plain call; the handle is closed in `Drop`.
+        unsafe { CreateEventW(None, manual, false, PCWSTR::null()) }
+            .map(Self)
+            .map_err(os("CreateEvent"))
+    }
+
+    fn set(&self) {
+        // SAFETY: a live event.
+        let _ = unsafe { SetEvent(self.0) };
+    }
+
+    fn reset(&self) {
+        // SAFETY: a live event.
+        let _ = unsafe { ResetEvent(self.0) };
+    }
+}
+
+impl Drop for Event {
+    fn drop(&mut self) {
+        // SAFETY: our handle, used by no one any more.
+        let _ = unsafe { CloseHandle(self.0) };
+    }
+}
+
+/// Signals an event when Windows reports a device change or a new audio session.
+#[implement(IMMNotificationClient, IAudioSessionNotification)]
+struct Changes(Arc<Event>);
+
+impl IMMNotificationClient_Impl for Changes_Impl {
+    fn OnDeviceStateChanged(&self, _: &PCWSTR, _: DEVICE_STATE) -> windows::core::Result<()> {
+        self.0.set();
+        Ok(())
+    }
+
+    fn OnDeviceAdded(&self, _: &PCWSTR) -> windows::core::Result<()> {
+        self.0.set();
+        Ok(())
+    }
+
+    fn OnDeviceRemoved(&self, _: &PCWSTR) -> windows::core::Result<()> {
+        self.0.set();
+        Ok(())
+    }
+
+    fn OnDefaultDeviceChanged(
+        &self,
+        _: EDataFlow,
+        role: ERole,
+        _: &PCWSTR,
+    ) -> windows::core::Result<()> {
+        if role == eConsole {
+            self.0.set();
+        }
+        Ok(())
+    }
+
+    fn OnPropertyValueChanged(&self, _: &PCWSTR, _: &PROPERTYKEY) -> windows::core::Result<()> {
+        Ok(())
+    }
+}
+
+impl IAudioSessionNotification_Impl for Changes_Impl {
+    fn OnSessionCreated(&self, _: Ref<'_, IAudioSessionControl>) -> windows::core::Result<()> {
+        self.0.set();
+        Ok(())
+    }
+}
+
+/// What a capture thread listens to besides its stream: the device list, and (while an
+/// application is not playing) the new audio sessions of every output.
+struct Listening {
+    enumerator: IMMDeviceEnumerator,
+    changes: IMMNotificationClient,
+    sessions: Vec<IAudioSessionManager2>,
+    /// Signalled by `changes`.
+    changed: Arc<Event>,
+}
+
+impl Listening {
+    fn new() -> Result<Self, AudioError> {
+        let changed = Arc::new(Event::new(false)?);
+        let changes: IMMNotificationClient = Changes(Arc::clone(&changed)).into();
+        let enumerator = enumerator()?;
+        // SAFETY: unregistered in `Drop`.
+        unsafe { enumerator.RegisterEndpointNotificationCallback(&changes) }
+            .map_err(os("RegisterEndpointNotificationCallback"))?;
+        Ok(Self {
+            enumerator,
+            changes,
+            sessions: Vec::new(),
+            changed,
+        })
+    }
+
+    /// Listens to the sessions that start on the outputs present now (an application that
+    /// starts playing), replacing the previous registrations.
+    fn follow_sessions(&mut self) {
+        self.forget_sessions();
+        let Ok(notify) = self.changes.cast::<IAudioSessionNotification>() else {
+            return;
+        };
+        // SAFETY: live enumerator and collection; each manager is unregistered later. Windows
+        // only reports new sessions once the session list was asked for.
+        unsafe {
+            let Ok(devices) = self
+                .enumerator
+                .EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE)
+            else {
+                return;
+            };
+            for i in 0..devices.GetCount().unwrap_or(0) {
+                let Ok(device) = devices.Item(i) else {
+                    continue;
+                };
+                let Ok(manager) = device.Activate::<IAudioSessionManager2>(CLSCTX_ALL, None) else {
+                    continue;
+                };
+                let _ = manager.GetSessionEnumerator();
+                if manager.RegisterSessionNotification(&notify).is_ok() {
+                    self.sessions.push(manager);
+                }
+            }
+        }
+    }
+
+    fn forget_sessions(&mut self) {
+        let Ok(notify) = self.changes.cast::<IAudioSessionNotification>() else {
+            return;
+        };
+        for manager in self.sessions.drain(..) {
+            // SAFETY: registered by `follow_sessions`.
+            let _ = unsafe { manager.UnregisterSessionNotification(&notify) };
+        }
+    }
+}
+
+impl Drop for Listening {
+    fn drop(&mut self) {
+        self.forget_sessions();
+        // SAFETY: registered by `new`.
+        let _ = unsafe {
+            self.enumerator
+                .UnregisterEndpointNotificationCallback(&self.changes)
+        };
+    }
+}
+
 /// Why a capture loop ended.
 enum Ended {
     Stopped,
@@ -590,13 +758,37 @@ fn capture_loop(
     stream: &Stream,
     kind: &SourceKind,
     sink: &mut dyn AudioSink,
-    stop: &AtomicBool,
+    stop: &Event,
+    changed: &Event,
 ) -> Ended {
-    let mut idle_ticks = 0u32;
-    while !stop.load(Ordering::Acquire) {
-        // SAFETY: the event belongs to the stream.
-        let waited = unsafe { WaitForSingleObject(stream.event, 100) };
-        // Packets (also drained on timeout: a stalled event must not lose data).
+    let mut handles = vec![stream.event, stop.0, changed.0];
+    handles.extend(stream.process);
+    loop {
+        // SAFETY: live handles, owned by the stream, the source and the listener.
+        let waited = unsafe { WaitForMultipleObjects(&handles, false, INFINITE) };
+        match waited.0.wrapping_sub(WAIT_OBJECT_0.0) {
+            0 => {}
+            1 => return Ended::Stopped,
+            2 => {
+                if stream.follows_default && default_changed(stream, kind) {
+                    return Ended::Lost("default device changed".into());
+                }
+                // A device that went away fails here.
+                // SAFETY: a started client.
+                if let Err(e) = unsafe { stream.client.GetCurrentPadding() } {
+                    return Ended::Lost(e.message());
+                }
+                continue;
+            }
+            3 => {
+                let exe = match kind {
+                    SourceKind::Application(exe) => exe.as_str(),
+                    _ => "the application",
+                };
+                return Ended::Lost(format!("{exe} exited"));
+            }
+            _ => return Ended::Lost("wait failed".into()),
+        }
         loop {
             // SAFETY: documented GetNextPacketSize / GetBuffer / ReleaseBuffer sequence; the
             // slice is only read before the buffer is released.
@@ -641,24 +833,7 @@ fn capture_loop(
             };
             sink.on_audio(step);
         }
-        if waited.0 == WAIT_OBJECT_0.0 {
-            idle_ticks = 0;
-            continue;
-        }
-        // Quiet for 100 ms: now and then check that what we follow is still there.
-        idle_ticks += 1;
-        if idle_ticks.is_multiple_of(20) {
-            if stream.follows_default && default_changed(stream, kind) {
-                return Ended::Lost("default device changed".into());
-            }
-            if let SourceKind::Application(exe) = kind
-                && find_process(exe).is_none()
-            {
-                return Ended::Lost(format!("{exe} exited"));
-            }
-        }
     }
-    Ended::Stopped
 }
 
 fn default_changed(stream: &Stream, kind: &SourceKind) -> bool {
@@ -680,7 +855,8 @@ pub struct WasapiSource {
     kind: SourceKind,
     /// The most channels the sink wants (a stereo track gains nothing from 7.1).
     max_channels: usize,
-    stop: Arc<AtomicBool>,
+    /// Set to end the capture thread.
+    stop: Option<Arc<Event>>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -694,23 +870,32 @@ impl WasapiSource {
         Self {
             kind,
             max_channels,
-            stop: Arc::new(AtomicBool::new(false)),
+            stop: None,
             thread: None,
         }
     }
 }
 
-fn run(kind: &SourceKind, max_channels: usize, mut sink: Box<dyn AudioSink>, stop: &AtomicBool) {
+fn run(kind: &SourceKind, max_channels: usize, mut sink: Box<dyn AudioSink>, stop: &Event) {
     let _com = ComGuard::new();
+    let mut listening = match Listening::new() {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::warn!("audio source {kind:?}: no device notifications: {e}");
+            sink.on_event(SourceEvent::Lost(e.to_string()));
+            return;
+        }
+    };
     let mut lost = false;
-    while !stop.load(Ordering::Acquire) {
+    loop {
         let reason = match open(kind, max_channels) {
             Ok(stream) => {
+                listening.forget_sessions();
                 if lost {
                     sink.on_event(SourceEvent::Back);
                     lost = false;
                 }
-                match capture_loop(&stream, kind, sink.as_mut(), stop) {
+                match capture_loop(&stream, kind, sink.as_mut(), stop, &listening.changed) {
                     Ended::Stopped => return,
                     Ended::Lost(reason) => reason,
                 }
@@ -722,12 +907,15 @@ fn run(kind: &SourceKind, max_channels: usize, mut sink: Box<dyn AudioSink>, sto
             sink.on_event(SourceEvent::Lost(reason));
             lost = true;
         }
-        // Try again in a second.
-        for _ in 0..10 {
-            if stop.load(Ordering::Acquire) {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(100));
+        // Try again when a device comes or goes, or (for an application) a session starts.
+        if matches!(kind, SourceKind::Application(_)) {
+            listening.follow_sessions();
+        }
+        // SAFETY: live events.
+        let waited =
+            unsafe { WaitForMultipleObjects(&[stop.0, listening.changed.0], false, INFINITE) };
+        if waited.0 != WAIT_OBJECT_0.0 + 1 {
+            return;
         }
     }
 }
@@ -737,10 +925,13 @@ impl AudioSource for WasapiSource {
         if self.thread.is_some() {
             return Ok(());
         }
-        self.stop.store(false, Ordering::Release);
+        let stop = match &self.stop {
+            Some(stop) => Arc::clone(stop),
+            None => Arc::clone(self.stop.insert(Arc::new(Event::new(true)?))),
+        };
+        stop.reset();
         let kind = self.kind.clone();
         let max_channels = self.max_channels;
-        let stop = Arc::clone(&self.stop);
         let thread = std::thread::Builder::new()
             .name("audio-source".into())
             .spawn(move || run(&kind, max_channels, sink, &stop))
@@ -750,7 +941,9 @@ impl AudioSource for WasapiSource {
     }
 
     fn stop(&mut self) -> Result<(), AudioError> {
-        self.stop.store(true, Ordering::Release);
+        if let Some(stop) = &self.stop {
+            stop.set();
+        }
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }

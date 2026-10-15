@@ -28,6 +28,8 @@ pub enum ActionId {
     RecordPause,
     ReplayToggle,
     ReplaySave,
+    /// Saves the replay, then opens it in the video editor to cut it.
+    ReplayEdit,
     OverlayToggle,
     OpenSettings,
     /// Not a shortcut: keeps the app running while the replay is on, to start it during
@@ -37,7 +39,7 @@ pub enum ActionId {
 
 impl ActionId {
     /// All actions, in a stable order.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::CaptureRegion,
         Self::CaptureWindow,
         Self::CaptureFullscreen,
@@ -47,6 +49,7 @@ impl ActionId {
         Self::RecordPause,
         Self::ReplayToggle,
         Self::ReplaySave,
+        Self::ReplayEdit,
         Self::OverlayToggle,
         Self::OpenSettings,
         Self::ReplayWatch,
@@ -64,6 +67,7 @@ impl ActionId {
             Self::RecordPause => "record-pause",
             Self::ReplayToggle => "replay-toggle",
             Self::ReplaySave => "replay-save",
+            Self::ReplayEdit => "replay-edit",
             Self::OverlayToggle => "overlay-toggle",
             Self::OpenSettings => "open-settings",
             Self::ReplayWatch => "replay-watch",
@@ -198,6 +202,11 @@ pub enum ControlRequest {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ControlReply {
     Ok,
+    /// To [`ControlRequest::QuitForUpdate`]: the daemon's process, which ends now or after
+    /// the recording.
+    Quitting {
+        pid: u32,
+    },
 }
 
 /// First message of every connection.

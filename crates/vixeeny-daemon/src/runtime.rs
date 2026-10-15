@@ -14,6 +14,34 @@ use crate::core::{Core, Effect, Event, SpawnId};
 use crate::server::{AppLink, EventTx};
 use crate::supervisor::Spawner;
 
+/// The daemon watches for games: to have the app run the replay with them, or tell that it is
+/// off.
+fn watches_games(config: &Config) -> bool {
+    config.replay.enabled || config.replay.notify == "both"
+}
+
+/// Finds games in the foreground.
+pub trait Games {
+    /// Has Windows send [`Event::Foreground`] through `tx` at each change in the foreground;
+    /// `false` when it refused.
+    fn hook(&mut self, tx: EventTx) -> bool;
+    /// The process of the full-screen game in `window` (`None`: the foreground now), if it is
+    /// one.
+    fn game(&mut self, window: Option<u64>, config: &Config) -> Option<u32>;
+}
+
+/// No game detection (tests, or a system without it).
+pub struct NoGames;
+
+impl Games for NoGames {
+    fn hook(&mut self, _: EventTx) -> bool {
+        false
+    }
+    fn game(&mut self, _: Option<u64>, _: &Config) -> Option<u32> {
+        None
+    }
+}
+
 /// What the daemon shows in the OS notification area.
 pub trait Tray {
     fn set_recording(&mut self, state: RecState, lang: Lang);
@@ -79,6 +107,11 @@ pub struct Runtime<T: Tray, S: Spawner> {
     /// Frozen screens not handed to the app yet.
     frozen: Option<Frozen>,
     frozen_for: Option<FrozenFor>,
+    games: Box<dyn Games>,
+    /// The foreground is followed (the hook is installed).
+    hooked: bool,
+    /// The last game the app was told about: once per game.
+    last_game: Option<u32>,
 }
 
 impl<T: Tray, S: Spawner> Runtime<T, S> {
@@ -110,7 +143,16 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
             freezer: Box::new(NoFreeze),
             frozen: None,
             frozen_for: None,
+            games: Box::new(NoGames),
+            hooked: false,
+            last_game: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_games(mut self, games: Box<dyn Games>) -> Self {
+        self.games = games;
+        self
     }
 
     #[must_use]
@@ -135,11 +177,28 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
         }
     }
 
-    /// Starts watching for full-screen games if the replay is on (once, when the daemon
-    /// starts): the app starts the replay with a game.
+    /// Starts watching for full-screen games if the replay is on, or to say it is off: the app
+    /// is started with a game (the replay runs, or it says it is off), not before.
     pub fn start_replay_if_configured(&mut self) {
-        if self.config.replay.enabled {
-            self.tx.send(Event::Action(ActionId::ReplayWatch));
+        self.look_for_game(None);
+    }
+
+    /// With games watched: tells the app (starting it) about a game newly in the foreground.
+    /// `true` when it did.
+    fn look_for_game(&mut self, window: Option<u64>) -> bool {
+        if !watches_games(&self.config) {
+            return false;
+        }
+        if !self.hooked {
+            self.hooked = self.games.hook(self.tx.clone());
+        }
+        match self.games.game(window, &self.config) {
+            Some(pid) if self.last_game != Some(pid) => {
+                self.last_game = Some(pid);
+                self.dispatch(Event::Action(ActionId::ReplayWatch));
+                true
+            }
+            _ => false,
         }
     }
 
@@ -194,6 +253,10 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
 
     fn dispatch(&mut self, event: Event) -> Flow {
         tracing::debug!("event: {event:?}");
+        if let Event::Foreground(window) = event {
+            self.look_for_game(Some(window));
+            return Flow::Continue;
+        }
         self.freeze_or_thaw(&event);
         let mut flow = Flow::Continue;
         for effect in self.core.handle(event) {
@@ -303,9 +366,13 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
             Ok(config) if config == self.config => {}
             Ok(config) => {
                 let old = std::mem::replace(&mut self.config, config);
-                // The app follows the replay being turned on or off (and reads the settings).
-                if old.replay.enabled || self.config.replay.enabled {
-                    self.tx.send(Event::Action(ActionId::ReplayWatch));
+                // The replay turned on or off, or other games: the game in front counts again,
+                // and a running app follows (its buffer goes when the replay is off).
+                if old.replay != self.config.replay {
+                    self.last_game = None;
+                    if !self.look_for_game(None) && self.core.app_running() {
+                        self.dispatch(Event::Action(ActionId::ReplayWatch));
+                    }
                 }
                 if old.general.language != self.config.general.language {
                     self.lang =
@@ -447,19 +514,49 @@ mod tests {
         (rt, events, log, spawned)
     }
 
-    #[test]
-    fn the_app_watches_for_games_only_when_the_replay_is_on() {
-        let (mut rt, _, _, spawned) = runtime(false, Config::default());
-        rt.start_replay_if_configured();
-        rt.pump();
-        assert!(spawned.lock().unwrap().is_empty());
+    /// A game (process 7) is in front when the shared flag says so.
+    struct FakeGames(Arc<Mutex<bool>>);
 
-        let mut config = Config::default();
-        config.replay.enabled = true;
-        let (mut rt, _, _, spawned) = runtime(false, config);
-        rt.start_replay_if_configured();
-        rt.pump();
-        assert_eq!(*spawned.lock().unwrap(), vec![(1, ActionId::ReplayWatch)]);
+    impl Games for FakeGames {
+        fn hook(&mut self, _: EventTx) -> bool {
+            true
+        }
+        fn game(&mut self, _: Option<u64>, _: &Config) -> Option<u32> {
+            self.0.lock().unwrap().then_some(7)
+        }
+    }
+
+    #[test]
+    fn the_app_starts_with_a_game_when_the_replay_is_on_or_says_it_is_off() {
+        for (enabled, notify, watched) in [
+            (false, "on", false),
+            (true, "on", true),
+            (false, "both", true),
+            (true, "none", true),
+        ] {
+            let mut config = Config::default();
+            config.replay.enabled = enabled;
+            config.replay.notify = notify.into();
+            let (rt, events, _, spawned) = runtime(false, config);
+            let game = Arc::new(Mutex::new(false));
+            let mut rt = rt.with_games(Box::new(FakeGames(game.clone())));
+            // No game: no app.
+            rt.start_replay_if_configured();
+            rt.pump();
+            assert!(spawned.lock().unwrap().is_empty());
+            // A game comes to the foreground: the app is told, once.
+            *game.lock().unwrap() = true;
+            for _ in 0..2 {
+                events.send(Event::Foreground(1));
+                rt.pump();
+            }
+            let expected = if watched {
+                vec![(1, ActionId::ReplayWatch)]
+            } else {
+                Vec::new()
+            };
+            assert_eq!(*spawned.lock().unwrap(), expected, "{enabled} {notify}");
+        }
     }
 
     #[test]

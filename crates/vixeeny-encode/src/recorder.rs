@@ -162,6 +162,8 @@ pub struct Stats {
     /// Input frames refused because the encoder could not keep up.
     pub queue_dropped: AtomicU64,
     pub encoded: AtomicU64,
+    /// Bytes of video the encoder produced (to a file or the replay buffer).
+    pub written: AtomicU64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -362,7 +364,11 @@ impl Vfr {
 }
 
 /// The encoder's pixel format for a depth and a chroma, from the registry entry.
-fn pixel_format(encoder: &Encoder, depth: u8, chroma: Chroma) -> Result<Pixel, RecordError> {
+pub(crate) fn pixel_format(
+    encoder: &Encoder,
+    depth: u8,
+    chroma: Chroma,
+) -> Result<Pixel, RecordError> {
     let spec = encoder
         .pixel_formats
         .iter()
@@ -946,6 +952,9 @@ impl Worker {
     }
 
     fn write(&mut self, packet: &mut Packet) -> Result<(), RecordError> {
+        self.stats
+            .written
+            .fetch_add(packet.size() as u64, Ordering::Relaxed);
         let video_pts = packet.pts().unwrap_or(0);
         let reached = self.pts_to_samples(video_pts);
         if let Some(ring) = &mut self.ring {

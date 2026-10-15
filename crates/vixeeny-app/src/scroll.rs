@@ -78,10 +78,33 @@ fn panel_rect(monitor: &PhysicalRect, zone: &PhysicalRect, scale: f32) -> (i32, 
     (x as i32, y, width, height)
 }
 
+#[derive(Default)]
 struct Shared {
     started: AtomicBool,
     finish: AtomicBool,
     cancel: AtomicBool,
+    /// Wakes the capture thread waiting for the start.
+    told: (std::sync::Mutex<()>, std::sync::Condvar),
+}
+
+impl Shared {
+    fn tell(&self, flag: &AtomicBool) {
+        let _held = self.told.0.lock();
+        flag.store(true, Ordering::Relaxed);
+        self.told.1.notify_all();
+    }
+
+    /// Sleeps until the start, the finish or the cancel.
+    fn wait_for_start(&self) {
+        let Ok(held) = self.told.0.lock() else {
+            return;
+        };
+        let _held = self.told.1.wait_while(held, |()| {
+            ![&self.started, &self.finish, &self.cancel]
+                .iter()
+                .any(|f| f.load(Ordering::Relaxed))
+        });
+    }
 }
 
 /// Captures until told to finish. Returns the assembled image.
@@ -115,7 +138,7 @@ fn capture_loop(
             return Ok(stitcher.finish());
         }
         if !shared.started.load(Ordering::Relaxed) {
-            std::thread::sleep(Duration::from_millis(30));
+            shared.wait_for_start();
             continue;
         }
         let tick = Instant::now();
@@ -181,11 +204,7 @@ pub fn run(
     let (px, py, pw, ph) = panel_rect(&monitor.rect, &zone, scale);
     panel.set_position(px, py, pw, ph);
 
-    let shared = Arc::new(Shared {
-        started: AtomicBool::new(false),
-        finish: AtomicBool::new(false),
-        cancel: AtomicBool::new(false),
-    });
+    let shared = Arc::new(Shared::default());
     let handle = panel.handle();
     let preview_box = ((PANEL_WIDTH * scale) as u32, ph);
     let worker = {
@@ -209,13 +228,13 @@ pub fn run(
 
     let events = shared.clone();
     let ran = panel.run(move |event| match event {
-        ScrollEvent::Start => events.started.store(true, Ordering::Relaxed),
-        ScrollEvent::Finish => events.finish.store(true, Ordering::Relaxed),
-        ScrollEvent::Cancel => events.cancel.store(true, Ordering::Relaxed),
+        ScrollEvent::Start => events.tell(&events.started),
+        ScrollEvent::Finish => events.tell(&events.finish),
+        ScrollEvent::Cancel => events.tell(&events.cancel),
     });
     // Whatever way the window went away, the worker must stop.
     if !shared.finish.load(Ordering::Relaxed) {
-        shared.cancel.store(true, Ordering::Relaxed);
+        shared.tell(&shared.cancel);
     }
     let result = worker
         .join()

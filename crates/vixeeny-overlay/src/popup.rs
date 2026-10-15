@@ -122,6 +122,35 @@ impl Popup {
         }
     }
 
+    /// A window of its own (taskbar, Alt+Tab) over `geometry`, titled `title`; see
+    /// [`window::create_app_window`]. It takes the keyboard when shown.
+    pub fn new_window(gfx: &Gfx, geometry: (i32, i32, u32, u32), title: &str) -> Result<Self> {
+        let hwnd = window::create_app_window(wndproc, geometry, title)?;
+        // SAFETY: plain creation calls for a window of this thread.
+        let made = unsafe {
+            gfx.dcomp
+                .CreateTargetForHwnd(hwnd, true)
+                .and_then(|target| {
+                    let root = scene::visual(gfx)?;
+                    target.SetRoot(&root)?;
+                    Ok((target, root))
+                })
+        };
+        match made {
+            Ok((target, root)) => Ok(Self {
+                hwnd,
+                _target: target,
+                root,
+                activate: true,
+            }),
+            Err(e) => {
+                // SAFETY: the window was created above by this thread.
+                let _ = unsafe { DestroyWindow(hwnd) };
+                Err(e)
+            }
+        }
+    }
+
     /// Routes the window's messages to `handler`.
     pub fn on_message(&self, handler: impl Fn(u32, WPARAM, LPARAM) -> Option<LRESULT> + 'static) {
         let handler: Handler = Rc::new(handler);

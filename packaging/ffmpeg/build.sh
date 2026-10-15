@@ -24,13 +24,16 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
 # What Vixeeny asks FFmpeg for (crates/vixeeny-encode: codecs/registry.toml, audio.rs, denoise.rs,
-# thumbnail.rs, recorder.rs, and the decoders its tests read the recordings back with).
+# thumbnail.rs, recorder.rs, cut.rs, and the decoders its tests read the recordings back with).
 export ENCODERS="libx264,libx265,libsvtav1,libvpx_vp9,h264_nvenc,hevc_nvenc,av1_nvenc,h264_amf,hevc_amf,av1_amf,h264_qsv,hevc_qsv,av1_qsv,vp9_qsv,aac,aac_mf,libopus,flac,pcm_s16le,pcm_s24le"
 export DECODERS="h264,hevc,av1,libdav1d,vp9,aac,opus,libopus,flac,pcm_s16le,pcm_s24le"
 export MUXERS="mp4,mov,matroska,webm"
 export DEMUXERS="mov,matroska"
 export PARSERS="h264,hevc,av1,vp9,aac,opus,flac"
 export FILTERS="abuffer,abuffersink,afftdn,aformat,aresample,anull,buffer,buffersink,format,null"
+# Decoding on the graphics card, for the preview of the video editor (d3d11va2: the device
+# context API; the plain ones are what FFmpeg falls back to).
+export HWACCELS="h264_d3d11va,h264_d3d11va2,hevc_d3d11va,hevc_d3d11va2,av1_d3d11va,av1_d3d11va2,vp9_d3d11va,vp9_d3d11va2"
 
 cat > "$WORK/build.sh" <<'SCRIPT'
 set -xe
@@ -54,7 +57,7 @@ git checkout -q $FFMPEG_COMMIT
     --enable-libopus \
     --enable-encoder=$ENCODERS --enable-decoder=$DECODERS \
     --enable-muxer=$MUXERS --enable-demuxer=$DEMUXERS --enable-parser=$PARSERS \
-    --enable-bsfs --enable-filter=$FILTERS --enable-protocol=file \
+    --enable-bsfs --enable-filter=$FILTERS --enable-protocol=file --enable-hwaccel=$HWACCELS \
     --extra-cflags="$FF_CFLAGS" --extra-cxxflags="$FF_CXXFLAGS" --extra-libs="$FF_LIBS" \
     --extra-ldflags="$FF_LDFLAGS" --extra-ldexeflags="$FF_LDEXEFLAGS" \
     --cc="$CC" --cxx="$CXX" --ar="$AR" --ranlib="$RANLIB" --nm="$NM" \
@@ -74,7 +77,7 @@ cp /work/ffmpeg/COPYING.GPLv3 /work/out/LICENSE.txt
 SCRIPT
 
 docker run --rm -u "$(id -u):$(id -g)" -v "$WORK":/work \
-    -e FFMPEG_COMMIT -e NV_HEADERS -e ENCODERS -e DECODERS -e MUXERS -e DEMUXERS -e PARSERS -e FILTERS \
+    -e FFMPEG_COMMIT -e NV_HEADERS -e ENCODERS -e DECODERS -e MUXERS -e DEMUXERS -e PARSERS -e FILTERS -e HWACCELS \
     "$IMAGE" bash /work/build.sh
 ls -la "$WORK/out/bin" "$WORK/out/lib"
 rm -f "$OUT"

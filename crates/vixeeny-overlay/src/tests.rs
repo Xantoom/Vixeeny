@@ -9,7 +9,7 @@ use crate::layout::PanelHit;
 use crate::paint::{self, BarLook, FieldLook, PanelLook};
 use crate::theme::{Look, Rgba, Theme};
 
-fn save(name: &str, w: u32, h: u32, bgra: &[u8]) {
+pub fn save(name: &str, w: u32, h: u32, bgra: &[u8]) {
     let Some(dir) = std::env::var_os("VIXEENY_SCREENSHOTS") else {
         return;
     };

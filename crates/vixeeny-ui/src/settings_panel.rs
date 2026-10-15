@@ -312,6 +312,7 @@ pub fn action_label(action: ActionId, lang: Lang) -> &'static str {
             ActionId::RecordPause => Key::ActRecordPause,
             ActionId::ReplayToggle | ActionId::ReplayWatch => Key::ActReplayToggle,
             ActionId::ReplaySave => Key::ActReplaySave,
+            ActionId::ReplayEdit => Key::ActReplayEdit,
             ActionId::OverlayToggle => Key::ActOverlay,
             ActionId::OpenSettings => Key::ActSettings,
         },
@@ -796,60 +797,55 @@ impl SettingsPanel {
         }
     }
 
-    /// Asks `read` for the shortcuts the daemon could not register now, and again every second
-    /// while the window is open.
-    pub fn watch_taken_shortcuts(&self, read: impl Fn() -> Vec<String> + 'static) {
+    /// Asks `read` for the shortcuts the daemon could not register now, and again each time
+    /// `changed` rings (their file changed).
+    pub fn watch_taken_shortcuts(
+        &self,
+        read: impl Fn() -> Vec<String> + 'static,
+        changed: &crate::bell::Bell,
+    ) {
         self.set_taken_shortcuts(read());
         let (weak, state) = (self.window.as_weak(), self.state.clone());
-        let timer = slint::Timer::default();
-        timer.start(
-            slint::TimerMode::Repeated,
-            std::time::Duration::from_secs(1),
-            move || {
-                if let Some(window) = weak.upgrade() {
-                    SettingsPanel {
-                        window,
-                        state: state.clone(),
-                    }
-                    .set_taken_shortcuts(read());
+        changed.on_ring(move || {
+            if let Some(window) = weak.upgrade() {
+                SettingsPanel {
+                    window,
+                    state: state.clone(),
                 }
-            },
-        );
-        // Runs as long as the window: the program ends with it.
-        std::mem::forget(timer);
+                .set_taken_shortcuts(read());
+            }
+        });
     }
 
-    /// Every second, `read` gets the settings the window shows and may return others (written
-    /// by another program): the window then shows those, without reporting a change.
-    pub fn watch_config(&self, read: impl Fn(&Config) -> Option<Config> + 'static) {
+    /// Each time `changed` rings (the settings file changed), `read` gets the settings the
+    /// window shows and may return others (written by another program): the window then shows
+    /// those, without reporting a change.
+    pub fn watch_config(
+        &self,
+        read: impl Fn(&Config) -> Option<Config> + 'static,
+        changed: &crate::bell::Bell,
+    ) {
         let (weak, state) = (self.window.as_weak(), self.state.clone());
-        let timer = slint::Timer::default();
-        timer.start(
-            slint::TimerMode::Repeated,
-            std::time::Duration::from_secs(1),
-            move || {
-                let Some(window) = weak.upgrade() else {
-                    return;
+        changed.on_ring(move || {
+            let Some(window) = weak.upgrade() else {
+                return;
+            };
+            let shown = state.config.borrow().clone();
+            if let Some(config) = read(&shown).filter(|c| *c != shown) {
+                let panel = SettingsPanel {
+                    window,
+                    state: state.clone(),
                 };
-                let shown = state.config.borrow().clone();
-                if let Some(config) = read(&shown).filter(|c| *c != shown) {
-                    let panel = SettingsPanel {
-                        window,
-                        state: state.clone(),
-                    };
-                    let language = shown.general.language != config.general.language;
-                    *state.config.borrow_mut() = config;
-                    if language {
-                        panel.relabel();
-                    } else {
-                        panel.rebuild_env();
-                    }
-                    panel.refresh();
+                let language = shown.general.language != config.general.language;
+                *state.config.borrow_mut() = config;
+                if language {
+                    panel.relabel();
+                } else {
+                    panel.rebuild_env();
                 }
-            },
-        );
-        // Runs as long as the window: the program ends with it.
-        std::mem::forget(timer);
+                panel.refresh();
+            }
+        });
     }
 
     /// Called with the microphone to measure (`mic` or `mic:<id>`) while the audio page shows
@@ -903,7 +899,8 @@ impl SettingsPanel {
         apply: fn(&Self, T),
     ) {
         let slot: std::sync::Arc<std::sync::Mutex<Option<T>>> = std::sync::Arc::default();
-        let filled = slot.clone();
+        let bell = crate::bell::Bell::new();
+        let (filled, ring) = (slot.clone(), bell.clone());
         let started = std::thread::Builder::new()
             .name(name.into())
             .spawn(move || {
@@ -911,29 +908,20 @@ impl SettingsPanel {
                 if let Ok(mut s) = filled.lock() {
                     *s = Some(value);
                 }
+                ring.ring();
             });
         if started.is_err() {
             return;
         }
-        // Looked at a few times a second until the answer is there, then not any more.
-        fn poll<T: Send + 'static>(
-            slot: std::sync::Arc<std::sync::Mutex<Option<T>>>,
-            weak: slint::Weak<SettingsWindow>,
-            state: Rc<State>,
-            apply: fn(&SettingsPanel, T),
-        ) {
+        // The thread wakes this one when its answer is there.
+        let (weak, state) = (self.window.as_weak(), self.state.clone());
+        let _ = slint::spawn_local(async move {
+            bell.rung().await;
             let ready = slot.lock().ok().and_then(|mut s| s.take());
-            match (ready, weak.upgrade()) {
-                (Some(value), Some(window)) => apply(&SettingsPanel { window, state }, value),
-                (None, Some(_)) => {
-                    slint::Timer::single_shot(std::time::Duration::from_millis(40), move || {
-                        poll(slot, weak, state, apply);
-                    });
-                }
-                (_, None) => {}
+            if let (Some(value), Some(window)) = (ready, weak.upgrade()) {
+                apply(&SettingsPanel { window, state }, value);
             }
-        }
-        poll(slot, self.window.as_weak(), self.state.clone(), apply);
+        });
     }
 
     /// The hardware probe: its result once it exists, and whether it is still running.
@@ -949,40 +937,10 @@ impl SettingsPanel {
         *self.state.on_recording.borrow_mut() = Box::new(f);
     }
 
-    /// Looks at `provider` every second while the hardware probe is running, and fills the
-    /// video page once it has an answer. `provider` returns `(result, still running)`.
-    pub fn watch_probe(&self, provider: impl Fn() -> (Option<ProbeResult>, bool) + 'static) {
-        let (weak, state) = (self.window.as_weak(), self.state.clone());
-        let timer = Rc::new(slint::Timer::default());
-        let holder = timer.clone();
-        let first = provider();
-        let running = first.1;
-        self.set_probe(first.0, first.1);
-        if !running {
-            return;
-        }
-        timer.start(
-            slint::TimerMode::Repeated,
-            std::time::Duration::from_millis(900),
-            move || {
-                let _keep = &holder;
-                let (probe, detecting) = provider();
-                if let Some(window) = weak.upgrade() {
-                    *state.probe.borrow_mut() = (probe, detecting);
-                    let panel = SettingsPanel {
-                        window,
-                        state: state.clone(),
-                    };
-                    panel.rebuild_env();
-                    panel.refresh();
-                    if !detecting {
-                        holder.stop();
-                    }
-                }
-            },
-        );
-        // The timer lives as long as the closure above, which the timer itself keeps.
-        std::mem::forget(timer);
+    /// Runs the hardware probe on a thread of its own, and fills the video page with its answer.
+    pub fn watch_probe(&self, run: impl FnOnce() -> Option<ProbeResult> + Send + 'static) {
+        self.set_probe(None, true);
+        self.in_background("probe", run, |panel, probe| panel.set_probe(probe, false));
     }
 
     pub fn select_section(&self, section: Section) {

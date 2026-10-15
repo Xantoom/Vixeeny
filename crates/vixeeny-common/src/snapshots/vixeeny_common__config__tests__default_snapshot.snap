@@ -25,6 +25,7 @@ record_toggle = ["Ctrl+Shift+R"]
 record_pause = ["Ctrl+Shift+P"]
 replay_toggle = []
 replay_save = ["Ctrl+Shift+S"]
+replay_edit = ["Ctrl+Shift+E"]
 overlay_toggle = ["Ctrl+Shift+O"]
 open_settings = []
 
@@ -124,6 +125,9 @@ enabled = false
 duration_seconds = 30
 after_seconds = 0
 storage = "auto"
+notify = "both"
+always = []
+never = []
 
 [overlay]
 edge = "right"

@@ -28,6 +28,7 @@ fn list_mut(hotkeys: &mut Hotkeys, action: ActionId) -> &mut Vec<String> {
         // Watching for games has no shortcut of its own (never listed).
         ActionId::ReplayToggle | ActionId::ReplayWatch => &mut hotkeys.replay_toggle,
         ActionId::ReplaySave => &mut hotkeys.replay_save,
+        ActionId::ReplayEdit => &mut hotkeys.replay_edit,
         ActionId::OverlayToggle => &mut hotkeys.overlay_toggle,
         ActionId::OpenSettings => &mut hotkeys.open_settings,
     }
@@ -143,7 +144,7 @@ mod tests {
     fn the_table_has_two_slots_per_action_with_the_defaults_filled_in() {
         let config = Config::default();
         let table = table(&config);
-        assert_eq!(table.len(), 11);
+        assert_eq!(table.len(), 12);
         let save = table
             .iter()
             .find(|(a, _)| *a == ActionId::ReplaySave)

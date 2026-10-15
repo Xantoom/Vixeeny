@@ -27,6 +27,9 @@ pub enum Event {
         success: bool,
     },
     TrayQuit,
+    /// A window (its handle) came to the foreground, or the one there went full screen or
+    /// left it (the runtime looks for a game).
+    Foreground(u64),
 }
 
 /// Something to do.
@@ -60,11 +63,18 @@ pub struct Core {
     recording: Option<RecState>,
     /// Actions waiting for the app to become ready.
     queued: Vec<ActionId>,
+    /// An update asked to quit during a recording: quit when it ends.
+    update_waiting: bool,
 }
 
 impl Core {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// An app process runs (or is starting).
+    pub fn app_running(&self) -> bool {
+        self.current.is_some()
     }
 
     pub fn recording_state(&self) -> RecState {
@@ -79,11 +89,7 @@ impl Core {
             }
             Event::Control(ControlRequest::Quit) | Event::TrayQuit => self.quit(&mut fx),
             Event::Control(ControlRequest::ReloadConfig) => fx.push(Effect::ReloadConfig),
-            Event::Control(ControlRequest::QuitForUpdate) => {
-                if self.recording_state() == RecState::Idle {
-                    self.quit(&mut fx);
-                }
-            }
+            Event::Control(ControlRequest::QuitForUpdate) => self.update_waiting = true,
             Event::Control(ControlRequest::PauseHotkeys(paused)) => {
                 fx.push(Effect::PauseHotkeys(paused));
             }
@@ -98,6 +104,14 @@ impl Core {
                 self.reset_recording(&mut fx);
             }
             Event::AppExited { id, success } => self.on_exit(id, success, &mut fx),
+            Event::Foreground(_) => {}
+        }
+        if self.update_waiting
+            && self.recording_state() == RecState::Idle
+            && !fx.contains(&Effect::Quit)
+        {
+            self.update_waiting = false;
+            self.quit(&mut fx);
         }
         fx
     }
@@ -326,12 +340,11 @@ mod tests {
             core.handle(Event::Control(ControlRequest::QuitForUpdate))
                 .is_empty()
         );
-        core.handle(Event::App(AppToDaemon::RecordingStateChanged(
-            RecState::Idle,
-        )));
         assert_eq!(
-            core.handle(Event::Control(ControlRequest::QuitForUpdate)),
-            vec![Effect::Quit]
+            core.handle(Event::App(AppToDaemon::RecordingStateChanged(
+                RecState::Idle,
+            ))),
+            vec![Effect::SetRecording(RecState::Idle), Effect::Quit,]
         );
     }
 

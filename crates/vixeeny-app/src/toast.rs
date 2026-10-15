@@ -20,6 +20,9 @@ pub enum Toast {
     Failed(Failed, String),
     /// A new version can be installed (sent by the daemon); a click opens the settings.
     Update(String),
+    /// A game started (its executable): the replay runs with it (`true`) or is off. The
+    /// button tells that it is not a game.
+    Replay(bool, PathBuf),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,6 +92,10 @@ impl Toast {
             }
             Self::Failed(kind, message) => [format!("failed-{}", kind.name()), message.clone()],
             Self::Update(text) => ["update".to_owned(), text.clone()],
+            Self::Replay(on, exe) => [
+                if *on { "replay-on" } else { "replay-off" }.to_owned(),
+                exe.display().to_string(),
+            ],
         }
     }
 
@@ -105,6 +112,8 @@ impl Toast {
             "failed-audio" => failed(Failed::Audio),
             "failed-disk-low" => failed(Failed::DiskLow),
             "update" => Some(Self::Update(text.to_owned())),
+            "replay-on" => Some(Self::Replay(true, PathBuf::from(text))),
+            "replay-off" => Some(Self::Replay(false, PathBuf::from(text))),
             _ => None,
         }
     }
@@ -264,6 +273,25 @@ fn content_of(toast: &Toast) -> ToastContent {
             action_label: tr(Key::ToastOpenSettings, lang).into(),
             ..ToastContent::default()
         },
+        Toast::Replay(on, exe) => {
+            let path = exe.display().to_string();
+            ToastContent {
+                heading: tr(
+                    if *on {
+                        Key::ToastReplayOn
+                    } else {
+                        Key::ToastReplayOff
+                    },
+                    lang,
+                )
+                .into(),
+                body: vixeeny_platform::games::display_name(&path),
+                thumb: vixeeny_platform::exe_icon(&path, 64),
+                dark,
+                action_label: tr(Key::ToastNotAGame, lang).into(),
+                ..ToastContent::default()
+            }
+        }
         Toast::Update(text) => ToastContent {
             heading: "Vixeeny".into(),
             body: text.clone(),
@@ -312,6 +340,8 @@ fn act(event: Option<ToastEvent>, toast: &Toast) {
             let _ = vixeeny_platform::reveal(&path.display().to_string());
         }
         (Some(_), Toast::Failed(..)) => crate::open_settings(),
+        (Some(ToastEvent::Action), Toast::Replay(_, exe)) => never_a_game(exe),
+        (Some(_), Toast::Replay(..)) => {}
         (Some(_), Toast::Update(_)) => {
             if let Err(e) = crate::settings::spawn(true) {
                 tracing::error!("{e:#}");
@@ -319,6 +349,23 @@ fn act(event: Option<ToastEvent>, toast: &Toast) {
         }
         (None, _) => {}
     }
+}
+
+/// "Not a game": the program goes on the replay's "never" list (the replay running for it
+/// stops once the daemon passes the new settings on).
+fn never_a_game(exe: &std::path::Path) {
+    let Some(name) = vixeeny_platform::games::exe_name(&exe.display().to_string()) else {
+        return;
+    };
+    let Some(path) = vixeeny_common::paths::config_file() else {
+        return;
+    };
+    let mut config = Config::load(&path).unwrap_or_default();
+    config.replay.always.retain(|e| *e != name);
+    if !config.replay.never.contains(&name) {
+        config.replay.never.push(name);
+    }
+    crate::settings::save(&config);
 }
 
 /// `--toast <kind> <text>`: shows one card, then does what the user clicked.
@@ -383,6 +430,8 @@ mod tests {
             Toast::Failed(Failed::Recording, "no encoder: \"x\"".into()),
             Toast::Failed(Failed::Audio, "mic: device removed".into()),
             Toast::Update("Version 1.2 is available".into()),
+            Toast::Replay(true, PathBuf::from(r"D:\Games\Hades\Hades.exe")),
+            Toast::Replay(false, PathBuf::from("game.exe")),
         ] {
             let [kind, text] = toast.to_args();
             assert_eq!(Toast::from_args(&kind, &text), Some(toast));

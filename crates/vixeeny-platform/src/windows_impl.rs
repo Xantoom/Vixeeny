@@ -409,30 +409,127 @@ pub fn on_click_outside(id: WindowId, clicked: Box<dyn Fn()>) -> Option<OutsideC
     }
 }
 
-/// Calls `changed` on a thread of its own each time another window comes to the foreground,
-/// for as long as the program runs. `false` when Windows refused the hook.
-pub fn on_foreground_change(changed: impl Fn() + Send + 'static) -> bool {
-    use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook};
-    use windows::Win32::UI::WindowsAndMessaging::{
-        DispatchMessageW, EVENT_SYSTEM_FOREGROUND, GetMessageW, MSG, WINEVENT_OUTOFCONTEXT,
-        WINEVENT_SKIPOWNPROCESS,
+/// Whether a window over `window` covers the whole of `monitor` (both screen rectangles).
+pub fn covers(window: &RECT, monitor: &RECT) -> bool {
+    window.left <= monitor.left
+        && window.top <= monitor.top
+        && window.right >= monitor.right
+        && window.bottom >= monitor.bottom
+}
+
+/// Whether `hwnd` covers its whole monitor.
+fn fills_its_monitor(hwnd: HWND) -> bool {
+    use windows::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MONITOR_DEFAULTTONULL, MONITORINFO, MonitorFromWindow,
     };
-    thread_local! {
-        static CHANGED: std::cell::RefCell<Option<Box<dyn Fn()>>> =
-            const { std::cell::RefCell::new(None) };
+    use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
+    let mut window = RECT::default();
+    let mut info = MONITORINFO {
+        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: valid out-pointers; a window that is gone makes the calls fail.
+    let known = unsafe {
+        let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL);
+        !monitor.is_invalid()
+            && GetWindowRect(hwnd, &mut window).is_ok()
+            && GetMonitorInfoW(monitor, &mut info).as_bool()
+    };
+    known && covers(&window, &info.rcMonitor)
+}
+
+/// Calls `changed` with the window concerned, on a thread of its own, each time a window comes
+/// to the foreground and each time the window in the foreground goes full screen or leaves it
+/// (a game that takes the screen after its splash window), for as long as the program runs.
+/// Nothing is polled: Windows tells. The window comes from Windows' own report: asking for the
+/// foreground later may find another (the taskbar, a moment). `false` when Windows refused
+/// the hook.
+pub fn on_foreground_change(changed: impl Fn(WindowId) + Send + 'static) -> bool {
+    use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook, UnhookWinEvent};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CHILDID_SELF, DispatchMessageW, EVENT_OBJECT_LOCATIONCHANGE, EVENT_SYSTEM_FOREGROUND,
+        GetForegroundWindow, GetMessageW, GetWindowThreadProcessId, MSG, OBJID_WINDOW,
+        WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
+    };
+    /// What the hook thread keeps.
+    struct Watch {
+        changed: Box<dyn Fn(WindowId)>,
+        /// The hook on the moves of the foreground program's windows.
+        moves: Option<HWINEVENTHOOK>,
+        /// The foreground window, and whether it filled its monitor when last seen.
+        front: (HWND, bool),
     }
-    unsafe extern "system" fn event(
+    thread_local! {
+        static WATCH: std::cell::RefCell<Option<Watch>> = const { std::cell::RefCell::new(None) };
+    }
+    /// Follows the moves of `hwnd`'s program only (not every window of the session).
+    fn follow(watch: &mut Watch, hwnd: HWND) {
+        if let Some(old) = watch.moves.take() {
+            // SAFETY: a hook this thread set.
+            let _ = unsafe { UnhookWinEvent(old) };
+        }
+        watch.front = (hwnd, fills_its_monitor(hwnd));
+        let mut pid = 0;
+        // SAFETY: a valid out-pointer.
+        unsafe { GetWindowThreadProcessId(hwnd, Some(&raw mut pid)) };
+        if pid == 0 {
+            return;
+        }
+        // SAFETY: as the foreground hook, called from this thread's message loop.
+        let hook = unsafe {
+            SetWinEventHook(
+                EVENT_OBJECT_LOCATIONCHANGE,
+                EVENT_OBJECT_LOCATIONCHANGE,
+                None,
+                Some(moved),
+                pid,
+                0,
+                WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS,
+            )
+        };
+        watch.moves = (!hook.is_invalid()).then_some(hook);
+    }
+    unsafe extern "system" fn foreground(
         _: HWINEVENTHOOK,
         _: u32,
-        _: HWND,
+        hwnd: HWND,
         _: i32,
         _: i32,
         _: u32,
         _: u32,
     ) {
-        CHANGED.with(|c| {
-            if let Some(changed) = &*c.borrow() {
-                changed();
+        WATCH.with(|w| {
+            if let Some(watch) = &mut *w.borrow_mut() {
+                follow(watch, hwnd);
+                (watch.changed)(WindowId(hwnd.0 as usize as u64));
+            }
+        });
+    }
+    unsafe extern "system" fn moved(
+        _: HWINEVENTHOOK,
+        _: u32,
+        hwnd: HWND,
+        object: i32,
+        child: i32,
+        _: u32,
+        _: u32,
+    ) {
+        // The window itself (not its caret or a part of it).
+        if object != OBJID_WINDOW.0 || child != CHILDID_SELF as i32 {
+            return;
+        }
+        WATCH.with(|w| {
+            let Some(watch) = &mut *w.borrow_mut() else {
+                return;
+            };
+            if hwnd != watch.front.0 {
+                return;
+            }
+            // Told only when it goes full screen or leaves it, not at every move.
+            let full = fills_its_monitor(hwnd);
+            if full != watch.front.1 {
+                watch.front.1 = full;
+                (watch.changed)(WindowId(hwnd.0 as usize as u64));
             }
         });
     }
@@ -440,15 +537,14 @@ pub fn on_foreground_change(changed: impl Fn() + Send + 'static) -> bool {
     let spawned = std::thread::Builder::new()
         .name("foreground".into())
         .spawn(move || {
-            CHANGED.with(|c| *c.borrow_mut() = Some(Box::new(changed)));
-            // SAFETY: an out-of-context hook calls `event` from this thread's message loop
-            // below, which runs until the program ends.
+            // SAFETY: an out-of-context hook calls `foreground` from this thread's message
+            // loop below, which runs until the program ends.
             let hook = unsafe {
                 SetWinEventHook(
                     EVENT_SYSTEM_FOREGROUND,
                     EVENT_SYSTEM_FOREGROUND,
                     None,
-                    Some(event),
+                    Some(foreground),
                     0,
                     0,
                     WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS,
@@ -458,6 +554,14 @@ pub fn on_foreground_change(changed: impl Fn() + Send + 'static) -> bool {
             if hook.is_invalid() {
                 return;
             }
+            let mut watch = Watch {
+                changed: Box::new(changed),
+                moves: None,
+                front: (HWND::default(), false),
+            };
+            // SAFETY: plain call.
+            follow(&mut watch, unsafe { GetForegroundWindow() });
+            WATCH.with(|w| *w.borrow_mut() = Some(watch));
             let mut msg = MSG::default();
             // SAFETY: a plain message loop on this thread.
             while unsafe { GetMessageW(&mut msg, None, 0, 0) }.as_bool() {
@@ -488,6 +592,66 @@ pub fn on_process_exit(pid: u32, ended: impl FnOnce() + Send + 'static) -> bool 
                 }
             }
             ended();
+        })
+        .is_ok()
+}
+
+/// Calls `changed(i)` on a thread of its own each time a file is written, created, renamed or
+/// deleted in `dirs[i]` (not its subfolders), for as long as the program runs. Windows wakes
+/// the thread; nothing is polled. `false` when a folder cannot be watched.
+pub fn on_dir_change(
+    dirs: &[std::path::PathBuf],
+    changed: impl Fn(usize) + Send + 'static,
+) -> bool {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::Foundation::WAIT_OBJECT_0;
+    use windows::Win32::Storage::FileSystem::{
+        FILE_NOTIFY_CHANGE_FILE_NAME, FILE_NOTIFY_CHANGE_LAST_WRITE, FindCloseChangeNotification,
+        FindFirstChangeNotificationW, FindNextChangeNotification,
+    };
+    use windows::Win32::System::Threading::{INFINITE, WaitForMultipleObjects};
+    let mut handles = Vec::with_capacity(dirs.len());
+    for dir in dirs {
+        let _ = std::fs::create_dir_all(dir);
+        let wide: Vec<u16> = dir.as_os_str().encode_wide().chain([0]).collect();
+        // SAFETY: a NUL-terminated path; the handle is closed by the thread below.
+        let watch = unsafe {
+            FindFirstChangeNotificationW(
+                windows::core::PCWSTR(wide.as_ptr()),
+                false,
+                FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE,
+            )
+        };
+        match watch {
+            Ok(h) => handles.push(h.0 as usize),
+            Err(_) => break,
+        }
+    }
+    let close = |handles: &[usize]| {
+        for h in handles {
+            // SAFETY: change notification handles opened above.
+            let _ = unsafe { FindCloseChangeNotification(HANDLE(*h as *mut c_void)) };
+        }
+    };
+    if handles.len() != dirs.len() {
+        close(&handles);
+        return false;
+    }
+    std::thread::Builder::new()
+        .name("dir-change".into())
+        .spawn(move || {
+            let live: Vec<HANDLE> = handles.iter().map(|h| HANDLE(*h as *mut c_void)).collect();
+            loop {
+                // SAFETY: live handles owned by this thread.
+                let waited = unsafe { WaitForMultipleObjects(&live, false, INFINITE) };
+                let i = waited.0.wrapping_sub(WAIT_OBJECT_0.0) as usize;
+                // SAFETY: as above; the notification is armed again for the next change.
+                if i >= live.len() || unsafe { FindNextChangeNotification(live[i]) }.is_err() {
+                    break;
+                }
+                changed(i);
+            }
+            close(&handles);
         })
         .is_ok()
 }
@@ -1102,7 +1266,24 @@ pub fn exe_icon(path: &str, size: u32) -> Option<(u32, u32, Vec<u8>)> {
 mod tests {
     #[test]
     fn the_foreground_can_be_watched() {
-        assert!(super::on_foreground_change(|| {}));
+        assert!(super::on_foreground_change(|_| {}));
+    }
+
+    #[test]
+    fn a_window_is_full_screen_when_it_covers_its_whole_monitor() {
+        let r = |left, top, right, bottom| super::RECT {
+            left,
+            top,
+            right,
+            bottom,
+        };
+        let monitor = r(1920, 0, 4480, 1440);
+        assert!(super::covers(&r(1920, 0, 4480, 1440), &monitor));
+        // Borderless windows often overhang by a few pixels.
+        assert!(super::covers(&r(1912, -8, 4488, 1448), &monitor));
+        // Maximised, the taskbar still shows: not full screen.
+        assert!(!super::covers(&r(1920, 0, 4480, 1392), &monitor));
+        assert!(!super::covers(&r(0, 0, 1920, 1080), &monitor));
     }
 
     #[test]

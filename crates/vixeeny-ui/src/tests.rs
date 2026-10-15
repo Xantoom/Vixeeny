@@ -271,9 +271,13 @@ fn the_search_leads_to_the_setting() {
     w.set_search_text("save repl".into());
     w.invoke_search_edited("save repl".into());
     settings_render(&panel, "9-settings-search");
-    let hits = w.get_search_hits();
-    assert_eq!(hits.row_count(), 1);
-    assert_eq!(hits.row_data(0).unwrap().label, "Save the replay");
+    // Both shortcuts that save the replay, the plain one first.
+    let labels: Vec<String> = w
+        .get_search_hits()
+        .iter()
+        .map(|h| h.label.to_string())
+        .collect();
+    assert_eq!(labels, ["Save the replay", "Save and edit the replay"]);
     // A folded expert setting: its section opens, the row is outlined.
     w.set_search_text(Default::default());
     panel.select_section(Section::Video);

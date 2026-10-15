@@ -125,6 +125,49 @@ pub fn create_popup(
     Ok(hwnd)
 }
 
+/// A cloaked, hidden window of its own over `(x, y, w, h)` (physical pixels): in the taskbar
+/// and Alt+Tab, under the windows that come after it, with rounded corners on Windows 11.
+pub fn create_app_window(
+    proc: WndProc,
+    (x, y, w, h): (i32, i32, u32, u32),
+    title: &str,
+) -> Result<HWND> {
+    use windows::Win32::Graphics::Dwm::DWMWA_WINDOW_CORNER_PREFERENCE;
+    use windows::Win32::UI::WindowsAndMessaging::{WS_EX_APPWINDOW, WS_MINIMIZEBOX, WS_SYSMENU};
+    if !register(POPUP_CLASS, proc, &POPUP_DONE) {
+        return Err(windows::core::Error::from_thread());
+    }
+    let title = windows::core::HSTRING::from(title);
+    // SAFETY: the class is registered; the title outlives the call. Attributes are set on the
+    // window just created.
+    unsafe {
+        let hwnd = CreateWindowExW(
+            WS_EX_APPWINDOW | WS_EX_NOREDIRECTIONBITMAP,
+            POPUP_CLASS,
+            &title,
+            WS_POPUP | WS_SYSMENU | WS_MINIMIZEBOX,
+            x,
+            y,
+            i32::try_from(w).unwrap_or(i32::MAX),
+            i32::try_from(h).unwrap_or(i32::MAX),
+            None,
+            None,
+            Some(instance()),
+            None,
+        )?;
+        set_cloak(hwnd, true);
+        // DWMWCP_ROUND.
+        let round = 2_i32;
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            (&raw const round).cast(),
+            size_of::<i32>() as u32,
+        );
+        Ok(hwnd)
+    }
+}
+
 /// A message-only window, for the messages other threads post.
 pub fn create_message_window(proc: WndProc) -> Result<HWND> {
     if !register(POPUP_CLASS, proc, &POPUP_DONE) {
