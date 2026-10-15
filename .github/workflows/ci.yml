@@ -15,11 +15,15 @@ concurrency:
 jobs:
   ffmpeg:
     uses: ./.github/workflows/ffmpeg.yml
-  check:
+  # Lint and tests run side by side (the repository is public: the minutes cost nothing).
+  # The idle measurement, which needs a release build, runs with the releases.
+  lint:
     needs: ffmpeg
     runs-on: windows-latest
     env:
       FFMPEG_DIR: ${{ github.workspace }}\native\build\work\ffmpeg-prebuilt
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -27,6 +31,8 @@ jobs:
           toolchain: 1.98.1
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      # Compiled crates, the project's own included, kept in GitHub's cache between runs.
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: ilammy/msvc-dev-cmd@v1
       # Every build links FFmpeg, and the tests need its DLLs.
       - uses: actions/download-artifact@v4
@@ -40,14 +46,38 @@ jobs:
           "$env:FFMPEG_DIR\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
       - run: cargo fmt --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
+  test:
+    needs: ffmpeg
+    runs-on: windows-latest
+    env:
+      # No debug information: less to write and link (a failing test still names its line).
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      FFMPEG_DIR: ${{ github.workspace }}\native\build\work\ffmpeg-prebuilt
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+      - uses: Swatinem/rust-cache@v2
+      # Compiled crates, the project's own included, kept in GitHub's cache between runs.
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      - uses: ilammy/msvc-dev-cmd@v1
+      # Every build links FFmpeg, and the tests need its DLLs.
+      - uses: actions/download-artifact@v4
+        with:
+          name: ffmpeg
+          path: native/build/work
+      - name: FFmpeg
+        shell: pwsh
+        run: |
+          cargo xtask build-native ffmpeg
+          "$env:FFMPEG_DIR\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
       - run: cargo test --workspace
       - name: Real capture smoke test (output only)
         run: cargo test -p vixeeny-capture --test wgc_smoke -- --nocapture
-      - name: Idle smoke test (20 s, informational)
-        continue-on-error: true
-        run: |
-          cargo build --release -p vixeeny-daemon -p vixeeny-app -p xtask
-          target\release\xtask.exe bench-idle --seconds 20
   deny:
     # cargo-deny runs in a Linux container; it only reads the Windows dependency graph.
     runs-on: ubuntu-latest
@@ -61,6 +91,8 @@ jobs:
     runs-on: windows-latest
     env:
       FFMPEG_DIR: ${{ github.workspace }}\native\build\work\ffmpeg-prebuilt
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
       LIBCLANG_PATH: C:\Program Files\LLVM\bin
     steps:
       - uses: actions/checkout@v4
@@ -69,6 +101,8 @@ jobs:
           toolchain: 1.98.1
           components: clippy
       - uses: Swatinem/rust-cache@v2
+      # Compiled crates, the project's own included, kept in GitHub's cache between runs.
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: ilammy/msvc-dev-cmd@v1
       - name: Tools (nasm, meson, pkg-config)
         shell: pwsh
