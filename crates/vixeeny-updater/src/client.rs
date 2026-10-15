@@ -35,7 +35,9 @@ fn agent() -> ureq::Agent {
         .into()
 }
 
-/// Downloads `url` (at most `limit` bytes); `progress(done, total)` follows it.
+/// Downloads `url` (at most `limit` bytes); `progress(done, total)` follows it. Each request
+/// has [`agent`]'s minute: a slow connection that runs out of it goes on where it stopped
+/// (an HTTP range), and only a request that got nothing at all fails.
 fn get(
     agent: &ureq::Agent,
     url: &str,
@@ -43,28 +45,50 @@ fn get(
     expected: u64,
     progress: &mut dyn FnMut(u64, u64),
 ) -> anyhow::Result<Vec<u8>> {
-    let response = agent
-        .get(url)
-        .call()
-        .with_context(|| format!("GET {url}"))?;
-    let total = response
-        .headers()
-        .get("content-length")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(expected);
-    let mut reader = response.into_body().into_reader().take(limit);
-    let mut bytes = Vec::with_capacity(usize::try_from(total).unwrap_or(0).min(512 << 20));
+    let mut bytes: Vec<u8> = Vec::new();
+    let mut total = expected;
     let mut chunk = vec![0; 256 * 1024];
     loop {
-        let n = reader.read(&mut chunk)?;
-        if n == 0 {
-            break;
+        let mut request = agent.get(url);
+        if !bytes.is_empty() {
+            request = request.header("Range", format!("bytes={}-", bytes.len()));
         }
-        bytes.extend_from_slice(&chunk[..n]);
-        progress(bytes.len() as u64, total.max(bytes.len() as u64));
+        let response = request.call().with_context(|| format!("GET {url}"))?;
+        if !bytes.is_empty() && response.status().as_u16() != 206 {
+            bytes.clear(); // the server sends the whole file again
+        }
+        let length: Option<u64> = response
+            .headers()
+            .get("content-length")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse().ok());
+        if let Some(length) = length {
+            total = bytes.len() as u64 + length;
+        }
+        anyhow::ensure!(total <= limit, "{url} is larger than expected");
+        if bytes.capacity() == 0 {
+            bytes.reserve(usize::try_from(total).unwrap_or(0).min(512 << 20));
+        }
+        let mut reader = response.into_body().into_reader();
+        let before = bytes.len();
+        let ended = loop {
+            match reader.read(&mut chunk) {
+                Ok(0) => break Ok(()),
+                Ok(n) => {
+                    bytes.extend_from_slice(&chunk[..n]);
+                    anyhow::ensure!(bytes.len() as u64 <= limit, "{url} is larger than expected");
+                    progress(bytes.len() as u64, total.max(bytes.len() as u64));
+                }
+                Err(e) => break Err(e),
+            }
+        };
+        match ended {
+            Ok(()) => return Ok(bytes),
+            // Cut off after some progress: the rest in a new request.
+            Err(_) if bytes.len() > before && (bytes.len() as u64) < total => {}
+            Err(e) => return Err(e).with_context(|| format!("GET {url}")),
+        }
     }
-    Ok(bytes)
 }
 
 fn is_not_found(error: &anyhow::Error) -> bool {
