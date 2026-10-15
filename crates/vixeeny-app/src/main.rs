@@ -339,8 +339,6 @@ struct Recording {
     replay_game: Option<(u32, String)>,
     /// A game whose replay the user stopped by hand: it is not started again for it.
     declined: Option<u32>,
-    /// The last game told about in a notification (once per game).
-    announced: Option<u32>,
     /// Tells games from other full-screen programs.
     games: vixeeny_platform::games::Detector,
     /// Asks the main loop to look at the foreground again (the game closed).
@@ -386,10 +384,9 @@ impl Recording {
         let Some(game) = self.games.game_in_front(game_lists(config)) else {
             return;
         };
-        let first_look = self.announced != Some(game.pid);
-        self.announced = Some(game.pid);
+        // The daemon tells once per game, and again after the replay settings changed.
         if !config.replay.enabled {
-            if first_look && config.replay.notify == "both" {
+            if config.replay.notify == "both" {
                 announce(config, false, &game);
             }
             return;
@@ -397,7 +394,7 @@ impl Recording {
         if self.replay.is_some() || self.declined == Some(game.pid) {
             return;
         }
-        if self.start_replay(config, &game) && first_look && config.replay.notify != "none" {
+        if self.start_replay(config, &game) && config.replay.notify != "none" {
             announce(config, true, &game);
         }
     }
@@ -516,7 +513,8 @@ impl Recording {
 /// The notification that a game started, the replay running with it or not.
 fn announce(config: &Config, on: bool, game: &vixeeny_platform::WindowInfo) {
     if let Some(exe) = &game.exe_path {
-        toast::notify(config, &toast::Toast::Replay(on, exe.into()));
+        let name = vixeeny_platform::games::display_name(exe, &game.title);
+        toast::notify(config, &toast::Toast::Replay(on, exe.into(), name));
     }
 }
 

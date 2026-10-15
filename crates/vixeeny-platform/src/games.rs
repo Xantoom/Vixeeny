@@ -50,6 +50,8 @@ pub struct Facts {
     pub exclusive: bool,
     /// A launcher installed it, or Windows knows it as a game.
     pub installed_game: bool,
+    /// Windows will not say where its executable is: an anti-cheat protects it.
+    pub protected: bool,
 }
 
 /// The user's word: programs that are games even without a sign of it, and programs that never
@@ -69,7 +71,7 @@ pub fn is_game(exe: &str, facts: Facts, lists: Lists<'_>) -> bool {
     if lists.always.iter().any(|e| e == exe) {
         return true;
     }
-    !LAUNCHERS.contains(&exe) && (facts.exclusive || facts.installed_game)
+    !LAUNCHERS.contains(&exe) && (facts.exclusive || facts.installed_game || facts.protected)
 }
 
 /// The executable's file name, lower case, as the lists hold it.
@@ -123,7 +125,13 @@ impl Detector {
         self.game(window, lists)
     }
 
-    fn game(&mut self, window: WindowInfo, lists: Lists<'_>) -> Option<WindowInfo> {
+    /// A game protected by an anti-cheat hides its executable's path: it is then known by its
+    /// file name alone (in `exe_path` too).
+    fn game(&mut self, mut window: WindowInfo, lists: Lists<'_>) -> Option<WindowInfo> {
+        let protected = window.exe_path.is_none();
+        if protected {
+            window.exe_path = Some(crate::process_name(window.pid)?);
+        }
         let path = window.exe_path.clone()?;
         let exe = exe_name(&path)?;
         let monitors = crate::monitors().ok()?;
@@ -138,24 +146,33 @@ impl Detector {
         let facts = Facts {
             full_screen,
             exclusive: exclusive_full_screen(),
-            installed_game: self.signals.installed_game(&path),
+            installed_game: !protected && self.signals.installed_game(&path),
+            protected,
         };
         is_game(&exe, facts, lists).then_some(window)
     }
 }
 
-/// The name a game is shown by: as its executable describes itself, else its file name.
-pub fn display_name(path: &str) -> String {
+/// The name a game is shown by: as its executable describes itself, else the title of its
+/// window, else its file name. An engine's own name, left in the description by the game,
+/// says nothing of it.
+pub fn display_name(path: &str, title: &str) -> String {
+    const ENGINES: &[&str] = &["ue4", "ue5", "unrealgame", "unreal engine", "unity"];
     let meta = crate::exe_metadata(path);
-    meta.product_name
-        .or(meta.file_description)
-        .map(|n| n.trim().to_owned())
-        .filter(|n| !n.is_empty())
-        .unwrap_or_else(|| {
-            Path::new(path)
-                .file_stem()
-                .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
-        })
+    [
+        meta.product_name,
+        meta.file_description,
+        Some(title.to_owned()),
+    ]
+    .into_iter()
+    .flatten()
+    .map(|n| n.trim().to_owned())
+    .find(|n| !n.is_empty() && !ENGINES.contains(&n.to_lowercase().as_str()))
+    .unwrap_or_else(|| {
+        Path::new(path)
+            .file_stem()
+            .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
+    })
 }
 
 /// Where games are installed on this computer, read from the launchers and from Windows.
@@ -211,10 +228,13 @@ impl GameSignals {
         Self { folders, known }
     }
 
-    /// Whether `exe` (a full path) is installed by a launcher or known to Windows as a game.
+    /// Whether `exe` (a full path) is installed by a launcher, known to Windows as a game, or
+    /// made with a game engine.
     pub fn installed_game(&self, exe: &str) -> bool {
-        let exe = normalise_file(exe);
-        self.known.binary_search(&exe).is_ok() || self.folders.iter().any(|f| exe.starts_with(f))
+        let file = normalise_file(exe);
+        self.known.binary_search(&file).is_ok()
+            || self.folders.iter().any(|f| file.starts_with(f))
+            || made_with_an_engine(exe)
     }
 }
 
@@ -343,7 +363,28 @@ const GAME_PUBLISHERS: &[&str] = &[
     "riot games",
     "rockstar games",
     "ubisoft",
+    "kuro technology",
+    "kuro games",
+    "cognosphere",
+    "mihoyo",
+    "hoyoverse",
 ];
+
+/// Whether `exe` (a full path) was made with a game engine: an Unreal Engine game's
+/// executable is `<name>-Win64-Shipping.exe`, a Unity game has the engine's library beside it.
+/// Games that come with their own launcher are found this way.
+fn made_with_an_engine(exe: &str) -> bool {
+    let path = Path::new(exe);
+    let unreal = path
+        .file_stem()
+        .is_some_and(|s| s.to_string_lossy().to_lowercase().ends_with("-shipping"));
+    unreal
+        || path.parent().is_some_and(|dir| {
+            ["UnityPlayer.dll", "GameAssembly.dll"]
+                .iter()
+                .any(|lib| dir.join(lib).is_file())
+        })
+}
 
 /// The install folders of the programs published by [`GAME_PUBLISHERS`], from the list of
 /// installed programs.
@@ -367,11 +408,20 @@ fn publisher_folders() -> Vec<String> {
             let path = format!(r"{key}\{sub}");
             let publisher = string_value(root, &path, "Publisher").unwrap_or_default();
             let publisher = publisher.to_lowercase();
-            if GAME_PUBLISHERS.iter().any(|p| publisher.starts_with(p))
-                && let Some(folder) = string_value(root, &path, "InstallLocation")
-            {
-                folders.push(folder.trim_matches('"').to_owned());
+            if !GAME_PUBLISHERS.iter().any(|p| publisher.contains(p)) {
+                continue;
             }
+            // Some installers leave the location out: the folder of their icon then.
+            let folder = string_value(root, &path, "InstallLocation")
+                .map(|f| f.trim_matches('"').to_owned())
+                .filter(|f| !f.is_empty())
+                .or_else(|| {
+                    let icon = string_value(root, &path, "DisplayIcon")?;
+                    let icon = icon.trim_matches('"');
+                    let file = icon.split(',').next().unwrap_or(icon);
+                    Some(Path::new(file).parent()?.to_string_lossy().into_owned())
+                });
+            folders.extend(folder);
         }
     }
     folders
@@ -498,6 +548,19 @@ mod tests {
     }
 
     #[test]
+    fn a_game_engine_is_a_sign_of_a_game() {
+        assert!(made_with_an_engine(
+            r"C:\Program Files\Wuthering Waves\Wuthering Waves Game\Client\Binaries\Win64\Client-Win64-Shipping.exe"
+        ));
+        assert!(!made_with_an_engine(r"C:\Windows\System32\notepad.exe"));
+        let dir = std::env::temp_dir().join("vixeeny-unity-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("UnityPlayer.dll"), b"").unwrap();
+        assert!(made_with_an_engine(&dir.join("Game.exe").to_string_lossy()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_drive_or_program_files_is_not_a_game_folder() {
         assert!(!specific_enough(r"C:\"));
         assert!(!specific_enough(r"C:\Program Files"));
@@ -511,6 +574,7 @@ mod tests {
             full_screen,
             exclusive,
             installed_game,
+            protected: false,
         }
     }
 
@@ -529,6 +593,12 @@ mod tests {
         assert!(is_game("old.exe", facts(true, true, false), NONE));
         // A game in a window is not recorded.
         assert!(!is_game("hades.exe", facts(false, true, true), NONE));
+        // An anti-cheat hides where it is installed: that is a sign too.
+        let protected = Facts {
+            protected: true,
+            ..facts(true, false, false)
+        };
+        assert!(is_game("client-win64-shipping.exe", protected, NONE));
     }
 
     #[test]

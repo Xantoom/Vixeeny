@@ -95,6 +95,13 @@ fn non_empty(s: Option<&str>) -> Option<&str> {
     s.map(str::trim).filter(|s| !s.is_empty())
 }
 
+/// A game engine's own name, left in the version resource by the game (Unreal's `UE4`): it
+/// says nothing of the game.
+fn not_an_engine(s: Option<&str>) -> Option<&str> {
+    const ENGINES: &[&str] = &["ue4", "ue5", "unrealgame", "unreal engine", "unity"];
+    non_empty(s).filter(|s| !ENGINES.contains(&s.to_lowercase().as_str()))
+}
+
 /// Resolves the display name in the order of plan 5.8: user table, `ProductName`,
 /// `FileDescription`, window title, executable name (unless generic). `None` means unknown:
 /// callers use [`DEFAULT_APP_NAME`]. The result is already sanitised.
@@ -110,8 +117,8 @@ pub fn resolve_app_name(info: &AppInfo<'_>, user_map: &BTreeMap<String, String>)
         }
     }
     let candidates = [
-        non_empty(info.product_name),
-        non_empty(info.file_description),
+        not_an_engine(info.product_name),
+        not_an_engine(info.file_description),
         non_empty(info.window_title),
         stem.filter(|s| !s.is_empty() && !is_generic_exe_name(s)),
     ];
@@ -279,6 +286,13 @@ mod tests {
         );
         let info = AppInfo {
             file_description: Some("  "),
+            ..info
+        };
+        assert_eq!(resolve_app_name(&info, &none).as_deref(), Some("Title"));
+        // An engine's own name (Unreal games say `UE4`) is passed over.
+        let info = AppInfo {
+            product_name: Some("UE4"),
+            file_description: Some("Unreal Engine"),
             ..info
         };
         assert_eq!(resolve_app_name(&info, &none).as_deref(), Some("Title"));

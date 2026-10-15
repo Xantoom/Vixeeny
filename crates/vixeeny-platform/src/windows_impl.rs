@@ -233,6 +233,35 @@ fn exe_path(pid: u32) -> Option<String> {
     }
 }
 
+/// The executable's file name of process `pid`, from the list of processes: it is there even
+/// when the process hides its path (anti-cheat protection).
+pub fn process_name(pid: u32) -> Option<String> {
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
+        TH32CS_SNAPPROCESS,
+    };
+    // SAFETY: a snapshot walked with an entry whose size is set, then closed.
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0).ok()?;
+        let mut entry = PROCESSENTRY32W {
+            dwSize: size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
+        let mut found = None;
+        let mut more = Process32FirstW(snapshot, &mut entry).is_ok();
+        while more {
+            if entry.th32ProcessID == pid {
+                let len = entry.szExeFile.iter().position(|c| *c == 0).unwrap_or(0);
+                found = Some(String::from_utf16_lossy(&entry.szExeFile[..len]));
+                break;
+            }
+            more = Process32NextW(snapshot, &mut entry).is_ok();
+        }
+        let _ = CloseHandle(snapshot);
+        found.filter(|n| !n.is_empty())
+    }
+}
+
 pub fn window_info(id: WindowId) -> Result<Option<WindowInfo>> {
     let hwnd = hwnd_of(id);
     let Some(rect) = frame_rect(hwnd) else {
