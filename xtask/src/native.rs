@@ -407,12 +407,11 @@ fn recipe(ctx: &Ctx, name: &str, src: &Path) -> Result<()> {
             run(src, "cmake", &["--install", &build], &[])
         }
         "libultrahdr" => {
-            let turbo = turbo_prefix(ctx);
-            let include = format!("-DJPEG_INCLUDE_DIR={}", turbo.join("include").display());
-            let library = format!(
-                "-DJPEG_LIBRARY={}",
-                turbo.join("lib/jpeg-static.lib").display()
-            );
+            // Forward slashes: libultrahdr's CMake re-reads these paths as strings, where a
+            // backslash starts an escape.
+            let turbo = turbo_prefix(ctx).to_string_lossy().replace('\\', "/");
+            let include = format!("-DJPEG_INCLUDE_DIR={turbo}/include");
+            let library = format!("-DJPEG_LIBRARY={turbo}/lib/jpeg-static.lib");
             configure_and_build(
                 ctx,
                 src,
