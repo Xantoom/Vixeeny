@@ -41,6 +41,8 @@ pub struct ToastContent {
     pub picture_only: bool,
     /// The right-click menu: open, show in the folder, close.
     pub menu: Vec<String>,
+    /// In the top-right corner (over a game, where its own notifications go), not the bottom.
+    pub top: bool,
 }
 
 /// What the user did with the card.
@@ -52,13 +54,17 @@ pub enum ToastEvent {
     Action,
 }
 
-/// Where the card goes: the bottom-right corner of the work area of a monitor (what the taskbar
-/// leaves free), `margin` physical pixels from its edges.
-pub fn corner(work: (i32, i32, u32, u32), size: (u32, u32), margin: u32) -> (i32, i32) {
+/// Where the card goes: the bottom-right (or `top`-right) corner of the work area of a monitor
+/// (what the taskbar leaves free), `margin` physical pixels from its edges.
+pub fn corner(work: (i32, i32, u32, u32), size: (u32, u32), margin: u32, top: bool) -> (i32, i32) {
     let (x, y, w, h) = work;
     (
         x + w as i32 - size.0 as i32 - margin as i32,
-        y + h as i32 - size.1 as i32 - margin as i32,
+        if top {
+            y + margin as i32
+        } else {
+            y + h as i32 - size.1 as i32 - margin as i32
+        },
     )
 }
 
@@ -513,7 +519,7 @@ impl Toasts {
         self.shared.current.borrow().is_none()
     }
 
-    /// Shows a card in the bottom-right corner of `work`, the work area of a monitor (physical
+    /// Shows a card in the bottom-right (or top-right) corner of `work`, the work area of a monitor (physical
     /// pixels, at `dpi`), in the
     /// place of the one on screen (whose `done` is not called). `done` learns what the user did
     /// (`None`: the card went by itself or was closed) once the card is gone.
@@ -529,8 +535,9 @@ impl Toasts {
         let gfx = &shared.gfx;
         let layout = CardLayout::new(gfx, content, dpi)?;
         let u = layout.u;
-        let (x, y) = corner(work, layout.size, (12.0 * u) as u32);
-        let popup = Popup::new(gfx, (x, y, layout.size.0, layout.size.1), false, false)?;
+        let (x, y) = corner(work, layout.size, (12.0 * u) as u32, content.top);
+        // Never in a capture or a recording: the card is about them, not part of them.
+        let popup = Popup::new(gfx, (x, y, layout.size.0, layout.size.1), false, true)?;
         let piece = Piece::new(gfx, true)?;
         scene::add(&popup.root, &piece.visual)?;
         let thumb = match &content.thumb {
@@ -602,8 +609,20 @@ mod tests {
     #[test]
     fn the_card_sits_in_the_bottom_right_corner() {
         // Above a 48-pixel taskbar.
-        assert_eq!(corner((0, 0, 1920, 1032), (360, 96), 16), (1544, 920));
+        assert_eq!(
+            corner((0, 0, 1920, 1032), (360, 96), 16, false),
+            (1544, 920)
+        );
         // A second monitor to the left keeps its own corner; a taskbar on top moves nothing.
-        assert_eq!(corner((-1920, 40, 1920, 1040), (360, 96), 16), (-376, 968));
+        assert_eq!(
+            corner((-1920, 40, 1920, 1040), (360, 96), 16, false),
+            (-376, 968)
+        );
+        // At the top, under a taskbar on top.
+        assert_eq!(corner((0, 0, 1920, 1032), (360, 96), 16, true), (1544, 16));
+        assert_eq!(
+            corner((-1920, 40, 1920, 1040), (360, 96), 16, true),
+            (-376, 56)
+        );
     }
 }

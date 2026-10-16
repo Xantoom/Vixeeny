@@ -38,3 +38,41 @@ fn grabs_every_monitor_at_physical_size() {
         }
     }
 }
+
+/// The replay films a game's window alone: a window stream delivers its frames, at its size.
+#[test]
+fn streams_a_window_at_its_size() {
+    use std::time::Duration;
+    use vixeeny_capture::{StreamTarget, VideoStream};
+
+    vixeeny_platform::ensure_dpi_aware();
+    let windows = vixeeny_platform::top_level_windows().unwrap_or_default();
+    let Some(window) = windows
+        .iter()
+        .find(|w| w.rect.width >= 200 && w.rect.height >= 200)
+    else {
+        eprintln!("skipped: no window");
+        return;
+    };
+    let stream = match VideoStream::start(&StreamTarget::Window(window.id), false, false) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("skipped: {e}");
+            return;
+        }
+    };
+    match stream.recv(Duration::from_secs(2)) {
+        Ok(Some(captured)) => {
+            let (w, h) = (captured.frame.width, captured.frame.height);
+            eprintln!(
+                "window {:?}: {w}x{h} (frame {:?})",
+                window.title, window.rect
+            );
+            // The capture holds the window's frame, which may differ from its visible rectangle
+            // by its invisible borders.
+            assert!(w.abs_diff(window.rect.width) <= 32 && h.abs_diff(window.rect.height) <= 32);
+        }
+        Ok(None) => eprintln!("no frame within 2 s (nothing changed on screen)"),
+        Err(e) => eprintln!("window capture failed (tolerated on CI): {e}"),
+    }
+}

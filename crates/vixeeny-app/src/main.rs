@@ -365,6 +365,13 @@ impl Recording {
     /// in front, stops it when that game closes (or the replay was turned off). Tells about
     /// each game in a notification, the replay on or off.
     fn watch(&mut self, config: &Config) {
+        // The capture ended by itself (the game's window went, it may have made another): the
+        // replay starts again with the game in front.
+        if self.replay.as_ref().is_some_and(record::Handle::finished) {
+            tracing::info!("the replay's capture ended");
+            self.replay = None;
+            self.replay_game = None;
+        }
         if let Some((pid, exe)) = &self.replay_game {
             let never = config.replay.never.contains(exe);
             if !config.replay.enabled || never || !vixeeny_platform::process_alive(*pid) {
@@ -401,7 +408,7 @@ impl Recording {
 
     /// Starts the replay for `game`; `false` (logged) when it cannot.
     fn start_replay(&mut self, config: &Config, game: &vixeeny_platform::WindowInfo) -> bool {
-        match record::start_replay(config) {
+        match record::start_replay(config, game) {
             Ok(handle) => {
                 // The program, not the window title (which may be personal).
                 let exe = game
@@ -681,7 +688,16 @@ fn run() -> anyhow::Result<()> {
                 recording.report(&mut send)?;
             }
             Ok(Wake::Look) => recording.watch(&config),
-            Ok(Wake::Recording) => recording.report(&mut send)?,
+            Ok(Wake::Recording) => {
+                recording.report(&mut send)?;
+                if recording
+                    .replay
+                    .as_ref()
+                    .is_some_and(record::Handle::finished)
+                {
+                    recording.watch(&config);
+                }
+            }
             Ok(Wake::Daemon(DaemonToApp::ConfigChanged)) => {}
             // The daemon asked us to stop, or went away.
             Ok(Wake::Daemon(DaemonToApp::Shutdown)) | Err(RecvTimeoutError::Disconnected) => {

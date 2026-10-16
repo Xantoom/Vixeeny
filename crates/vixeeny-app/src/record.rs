@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Screen recording (plan 5.9): the capture stream feeds the recorder, on a thread of its own so
 //! the action loop keeps answering the daemon. Frames are converted on the GPU when possible
-//! (see `try_gpu`), on the CPU otherwise; the target is the monitor under the cursor.
+//! (see `try_gpu`), on the CPU otherwise; a recording films the monitor
+//! under the cursor, the replay the game's window alone.
 
 use crate::toast::{Failed, Saved, Toast, failure_text};
 use std::path::PathBuf;
@@ -90,8 +91,10 @@ impl Handle {
         let _ = self.ctl.send(Ctl::Save(true));
     }
 
+    /// The session is over: its thread ended, or is ending (it tells the change just before).
     pub fn finished(&self) -> bool {
-        self.thread.as_ref().is_none_or(JoinHandle::is_finished)
+        self.state.load(Ordering::Acquire) == IDLE
+            || self.thread.as_ref().is_none_or(JoinHandle::is_finished)
     }
 
     /// The state if it changed since the last call.
@@ -233,6 +236,9 @@ type SaveNamer = Box<dyn FnMut() -> anyhow::Result<PathBuf> + Send>;
 struct Plan {
     config: RecordConfig,
     monitor: vixeeny_platform::MonitorInfo,
+    /// Replay only: the game's window, filmed alone (not what covers it, nor the desktop when
+    /// the user switches away). `None`: the whole monitor.
+    window: Option<vixeeny_platform::WindowId>,
     cursor: bool,
     /// The monitor shows HDR and the profile keeps it: frames are scRGB half floats.
     hdr: bool,
@@ -331,15 +337,30 @@ fn try_gpu(
     }
 }
 
-fn plan(config: &Config, allow_gpu: bool, replay: bool) -> anyhow::Result<Plan> {
+fn plan(
+    config: &Config,
+    allow_gpu: bool,
+    replay: bool,
+    game: Option<&vixeeny_platform::WindowInfo>,
+) -> anyhow::Result<Plan> {
     vixeeny_platform::ensure_dpi_aware();
     let monitors = vixeeny_platform::monitors()?;
-    let cursor = vixeeny_platform::cursor_position()?;
-    let monitor = vixeeny_platform::monitor_at(&monitors, cursor.0, cursor.1)
+    // The game's monitor, or the one under the cursor.
+    let (x, y) = match game {
+        Some(g) => (
+            g.rect.x + (g.rect.width / 2) as i32,
+            g.rect.y + (g.rect.height / 2) as i32,
+        ),
+        None => vixeeny_platform::cursor_position()?,
+    };
+    let monitor = vixeeny_platform::monitor_at(&monitors, x, y)
         .or_else(|| monitors.first())
         .context("no monitor")?
         .clone();
-    let source = (monitor.rect.width, monitor.rect.height);
+    let source = match game {
+        Some(g) if g.rect.width >= 2 && g.rect.height >= 2 => (g.rect.width, g.rect.height),
+        _ => (monitor.rect.width, monitor.rect.height),
+    };
 
     // The replay records with the video settings, like a recording.
     let profile = &config.video;
@@ -479,6 +500,7 @@ fn plan(config: &Config, allow_gpu: bool, replay: bool) -> anyhow::Result<Plan> 
     Ok(Plan {
         config: record,
         monitor,
+        window: game.map(|g| g.id),
         cursor: profile.show_cursor,
         hdr,
         namer,
@@ -566,16 +588,24 @@ fn output_file(
 /// the caller can tell the user. The GPU path is tried first; if it cannot start, the same
 /// recording starts on the CPU path.
 pub fn start(config: &Config) -> anyhow::Result<Handle> {
-    start_session(config, false)
+    start_session(config, None)
 }
 
-/// Starts the replay buffer: the same capture and encoder, nothing written until a save.
-pub fn start_replay(config: &Config) -> anyhow::Result<Handle> {
-    start_session(config, true)
+/// Starts the replay buffer for `game`'s window: the same encoder, nothing written until a
+/// save.
+pub fn start_replay(
+    config: &Config,
+    game: &vixeeny_platform::WindowInfo,
+) -> anyhow::Result<Handle> {
+    start_session(config, Some(game))
 }
 
-fn start_session(config: &Config, replay: bool) -> anyhow::Result<Handle> {
-    let first = plan(config, true, replay)?;
+fn start_session(
+    config: &Config,
+    game: Option<&vixeeny_platform::WindowInfo>,
+) -> anyhow::Result<Handle> {
+    let replay = game.is_some();
+    let first = plan(config, true, replay, game)?;
     if first.gpu.is_none() {
         return launch(first);
     }
@@ -583,7 +613,7 @@ fn start_session(config: &Config, replay: bool) -> anyhow::Result<Handle> {
         Ok(handle) => Ok(handle),
         Err(e) => {
             tracing::warn!("GPU recording failed to start ({e:#}); using the CPU path");
-            launch(plan(config, false, replay)?)
+            launch(plan(config, false, replay, game)?)
         }
     }
 }
@@ -672,7 +702,10 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
     // Frames the GPU path could not hand over: lost, like those the encoder refuses.
     let gpu_lost = Arc::new(AtomicU64::new(0));
     let (stream, gpu_frames) = {
-        let target = vixeeny_capture::StreamTarget::Monitor(plan.monitor.clone());
+        let target = match plan.window {
+            Some(window) => vixeeny_capture::StreamTarget::Window(window),
+            None => vixeeny_capture::StreamTarget::Monitor(plan.monitor.clone()),
+        };
         let (stream, gpu_frames) = match &plan.gpu {
             None => (
                 vixeeny_capture::VideoStream::start(&target, plan.cursor, plan.hdr)?,

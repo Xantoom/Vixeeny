@@ -21,7 +21,7 @@ pub enum Toast {
     /// A new version can be installed (sent by the daemon); a click opens the settings.
     Update(String),
     /// A game started (its executable, and the name it is shown by): the replay runs with it
-    /// (`true`) or is off. The button tells that it is not a game.
+    /// (`true`) or is off.
     Replay(bool, PathBuf, String),
 }
 
@@ -296,7 +296,7 @@ fn content_of(toast: &Toast) -> ToastContent {
                 body: name.clone(),
                 thumb: vixeeny_platform::exe_icon(&path, 64),
                 dark,
-                action_label: tr(Key::ToastNotAGame, lang).into(),
+                top: true,
                 ..ToastContent::default()
             }
         }
@@ -312,9 +312,8 @@ fn content_of(toast: &Toast) -> ToastContent {
     }
 }
 
-/// Shows the card for `toast` in the bottom-right corner of the main monitor, above its taskbar;
-/// `act` runs once it
-/// is gone.
+/// Shows the card for `toast` in a corner of the main monitor (see [`ToastContent::top`]);
+/// `act` runs once it is gone.
 fn show(toasts: &Toasts, toast: Toast) -> anyhow::Result<()> {
     let content = content_of(&toast);
     let monitors = vixeeny_platform::monitors()?;
@@ -348,7 +347,6 @@ fn act(event: Option<ToastEvent>, toast: &Toast) {
             let _ = vixeeny_platform::reveal(&path.display().to_string());
         }
         (Some(_), Toast::Failed(..)) => crate::open_settings(),
-        (Some(ToastEvent::Action), Toast::Replay(_, exe, _)) => never_a_game(exe),
         (Some(_), Toast::Replay(..)) => {}
         (Some(_), Toast::Update(_)) => {
             if let Err(e) = crate::settings::spawn(true) {
@@ -357,23 +355,6 @@ fn act(event: Option<ToastEvent>, toast: &Toast) {
         }
         (None, _) => {}
     }
-}
-
-/// "Not a game": the program goes on the replay's "never" list (the replay running for it
-/// stops once the daemon passes the new settings on).
-fn never_a_game(exe: &std::path::Path) {
-    let Some(name) = vixeeny_platform::games::exe_name(&exe.display().to_string()) else {
-        return;
-    };
-    let Some(path) = vixeeny_common::paths::config_file() else {
-        return;
-    };
-    let mut config = Config::load(&path).unwrap_or_default();
-    config.replay.always.retain(|e| *e != name);
-    if !config.replay.never.contains(&name) {
-        config.replay.never.push(name);
-    }
-    crate::settings::save(&config);
 }
 
 /// `--toast <kind> <text>`: shows one card, then does what the user clicked.

@@ -1013,7 +1013,8 @@ impl SidePanel {
         });
         let entries = entries(texts, state);
         let layout = StripLayout::new(state.edge, &entries, dpi, (geometry.2, geometry.3));
-        let popup = Popup::new(&gfx, geometry, true, false)?;
+        // Never in a capture: nor in a recording, a replay or a screen share.
+        let popup = Popup::new(&gfx, geometry, true, true)?;
         let strip = Piece::new(&gfx, true)?;
         scene::add(&popup.root, &strip.visual)?;
         let tip = Piece::new(&gfx, true)?;
