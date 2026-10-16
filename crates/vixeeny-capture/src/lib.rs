@@ -17,7 +17,7 @@ pub use frame::{BYTES_PER_PIXEL, CpuFrame};
 pub use hdr::{HdrCapture, HdrFrame, reference};
 use vixeeny_platform::{HdrInfo, MonitorId, MonitorInfo, PhysicalRect, WindowId, virtual_bounds};
 pub use wgc::WgcBackend;
-pub use wgc_stream::{CapturedFrame, GpuCapture, StreamTarget, TextureSink, VideoStream};
+pub use wgc_stream::{CapturedFrame, GpuCapture, Notify, StreamTarget, TextureSink, VideoStream};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum CaptureTarget {

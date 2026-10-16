@@ -5,6 +5,8 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use vixeeny_editor::{
     BarSide, Color, Command, Key, KeyInput, Modifiers, Point, Rect, Session, Tool, View,
@@ -20,7 +22,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use windows::Win32::UI::WindowsAndMessaging::{
     DestroyWindow, DispatchMessageW, GetMessageW, KillTimer, MSG, SW_HIDE, SW_SHOW,
     SW_SHOWNOACTIVATE, SetCursor, SetForegroundWindow, SetTimer, ShowWindow, TranslateMessage,
-    WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_DPICHANGED, WM_ERASEBKGND, WM_KEYDOWN,
+    WM_APP, WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_DPICHANGED, WM_ERASEBKGND, WM_KEYDOWN,
     WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_PAINT,
     WM_RBUTTONDOWN, WM_SETCURSOR, WM_SYSKEYDOWN, WM_TIMER,
 };
@@ -50,8 +52,36 @@ pub struct OverlayError(#[from] windows::core::Error);
 /// Returns `true` when the overlay should close afterwards.
 type CommandHandler = dyn Fn(Command, &Session) -> bool;
 type FirstFrame = Box<dyn FnOnce(Vec<u64>)>;
-/// Takes a fresh picture of the screens (the overlay's windows hidden).
-type Thaw = dyn Fn() -> Option<vixeeny_editor::RgbaImage>;
+/// A fresh picture of a part of the screens waits in [`Screens::take`].
+const WM_LIVE: u32 = WM_APP + 0x20;
+
+/// The screens as they are now, which the host captures: the editor shows them live.
+pub trait Screens {
+    /// A picture of every screen, the editor's windows hidden (or left out).
+    fn grab(&self) -> Option<vixeeny_editor::RgbaImage>;
+    /// Follows `area` (whole-image pixels: x, y, width, height) of the screens, the editor's
+    /// windows left out, calling [`Wake::wake`] each time a new picture of it waits in
+    /// [`Screens::take`]. `None`: stops.
+    fn watch(&self, area: Option<(u32, u32, u32, u32)>, wake: Wake);
+    /// The newest pictures of the area followed, each with where its top-left corner goes.
+    fn take(&self) -> Vec<(u32, u32, vixeeny_editor::RgbaImage)>;
+}
+
+/// Tells the editor, from any thread, that new pictures of the screens wait.
+#[derive(Clone)]
+pub struct Wake {
+    hwnd: usize,
+    pending: Arc<AtomicBool>,
+}
+
+impl Wake {
+    pub fn wake(&self) {
+        // One message at a time: the editor takes every picture waiting when it comes.
+        if !self.pending.swap(true, Ordering::AcqRel) {
+            post(self.hwnd as u64, WM_LIVE, 0, 0);
+        }
+    }
+}
 
 /// `WM_MOUSELEAVE` (declared with the common controls in the bindings).
 const WM_MOUSELEAVE: u32 = 0x02a3;
@@ -125,8 +155,13 @@ struct Shared {
     panes: Vec<Pane>,
     handler: Box<CommandHandler>,
     tips: RefCell<Vec<String>>,
-    /// Shows the screens live; without it the screens stay frozen.
-    thaw: RefCell<Option<Box<Thaw>>>,
+    /// Shows the screens live; without them the screens stay frozen.
+    screens: RefCell<Option<Box<dyn Screens>>>,
+    /// The editor's windows are left out of captures (live).
+    excluded: Cell<bool>,
+    /// The part of the screens followed, and its wake.
+    watched: Cell<Option<(u32, u32, u32, u32)>>,
+    wake: Wake,
     scrolling: Cell<bool>,
     /// A command is running (a dialog may be up): input waits.
     busy: Cell<bool>,
@@ -169,7 +204,7 @@ fn color_of_hsv(h: f32, s: f32, v: f32) -> Color {
 
 impl Shared {
     fn can_live(&self) -> bool {
-        self.thaw.borrow().is_some() && !self.scrolling.get()
+        self.screens.borrow().is_some() && !self.scrolling.get()
     }
 
     /// The tip of button `k`; a two-tool button adds what a right-click takes.
@@ -307,6 +342,7 @@ impl Shared {
         }
         drop(ui);
         self.update_pointer(&view);
+        self.follow(&view);
         // SAFETY: plain call.
         unsafe { self.gfx.dcomp.Commit() }
     }
@@ -643,6 +679,10 @@ impl Shared {
                 unsafe { SetCursor(Some(window::cursor(shape))) };
                 return Some(LRESULT(1));
             }
+            WM_LIVE => {
+                self.screens_changed();
+                return Some(LRESULT(0));
+            }
             WM_CLOSE => {
                 self.run_command(Command::Close);
                 return Some(LRESULT(0));
@@ -900,9 +940,8 @@ impl Shared {
             }
             Button::Live => {
                 if self.can_live() {
-                    let mut session = self.session.borrow_mut();
-                    let live = !session.is_live();
-                    session.set_live(live);
+                    let live = !self.session.borrow().is_live();
+                    self.set_live(live);
                 }
             }
             Button::Undo => self.session.borrow_mut().undo(),
@@ -1188,25 +1227,87 @@ impl Shared {
             // SAFETY: plain call on a window of this thread.
             let _ = unsafe { ShowWindow(p.hwnd, SW_HIDE) };
         }
+        if self.watched.take().is_some()
+            && let Some(screens) = self.screens.borrow().as_ref()
+        {
+            screens.watch(None, self.wake.clone());
+        }
     }
 
-    /// Live, takes a fresh picture of the screens for the export, the windows hidden meanwhile.
+    /// Follows, live, the part of the screens the annotations take their pixels from.
+    fn follow(&self, view: &View) {
+        let area = if view.live && self.excluded.get() && !self.closing.get() {
+            self.session.borrow().live_area()
+        } else {
+            None
+        };
+        if self.watched.replace(area) != area
+            && let Some(screens) = self.screens.borrow().as_ref()
+        {
+            screens.watch(area, self.wake.clone());
+        }
+    }
+
+    /// Takes the pictures of the screens waiting.
+    fn screens_changed(&self) {
+        self.wake.pending.store(false, Ordering::Release);
+        let parts = match self.screens.borrow().as_ref() {
+            Some(screens) if self.watched.get().is_some() => screens.take(),
+            _ => return,
+        };
+        // A command holds the session (a dialog may be up): the next pictures will do.
+        if parts.is_empty() || self.busy.get() || self.closing.get() {
+            return;
+        }
+        let mut session = self.session.borrow_mut();
+        for (x, y, part) in &parts {
+            session.patch_base(*x, *y, part);
+        }
+        drop(session);
+        self.refresh();
+    }
+
+    /// Shows the screens live, or freezes them as they are now.
+    fn set_live(&self, live: bool) {
+        if live {
+            let mut excluded = true;
+            for p in &self.panes {
+                excluded &= window::set_excluded(p.hwnd, true);
+            }
+            self.excluded.set(excluded);
+        } else {
+            self.thaw();
+            for p in &self.panes {
+                window::set_excluded(p.hwnd, false);
+            }
+            self.excluded.set(false);
+        }
+        self.session.borrow_mut().set_live(live);
+    }
+
+    /// Takes a fresh picture of the screens, the windows hidden meanwhile when they are not
+    /// left out of captures.
     fn thaw(&self) {
-        let thaw = self.thaw.borrow();
-        let Some(thaw) = thaw.as_ref() else {
+        let screens = self.screens.borrow();
+        let Some(screens) = screens.as_ref() else {
             return;
         };
-        for p in &self.panes {
-            window::set_cloak(p.hwnd, true);
+        let hide = !self.excluded.get();
+        if hide {
+            for p in &self.panes {
+                window::set_cloak(p.hwnd, true);
+            }
+            // SAFETY: plain calls; the next frames are composed without the windows.
+            unsafe {
+                let _ = DwmFlush();
+                let _ = DwmFlush();
+            }
         }
-        // SAFETY: plain calls; the next frames are composed without the windows.
-        unsafe {
-            let _ = DwmFlush();
-            let _ = DwmFlush();
-        }
-        let picture = thaw();
-        for p in &self.panes {
-            window::set_cloak(p.hwnd, false);
+        let picture = screens.grab();
+        if hide {
+            for p in &self.panes {
+                window::set_cloak(p.hwnd, false);
+            }
         }
         let Some(picture) = picture else {
             return;
@@ -1323,6 +1424,7 @@ impl Overlay {
             upload_frozen(&gfx, &pane, base)?;
             panes.push(pane);
         }
+        let first_hwnd = panes.first().map_or(0, |p| p.hwnd.0 as usize);
         let shared = Rc::new(Shared {
             gfx,
             theme,
@@ -1337,7 +1439,13 @@ impl Overlay {
             panes,
             handler: Box::new(on_command),
             tips: RefCell::default(),
-            thaw: RefCell::default(),
+            screens: RefCell::default(),
+            excluded: Cell::new(false),
+            watched: Cell::new(None),
+            wake: Wake {
+                hwnd: first_hwnd,
+                pending: Arc::default(),
+            },
             scrolling: Cell::new(false),
             busy: Cell::new(false),
             closing: Cell::new(false),
@@ -1356,10 +1464,10 @@ impl Overlay {
         *self.shared.tips.borrow_mut() = tips.to_vec();
     }
 
-    /// Lets the user show the screens live: `thaw` takes a fresh picture of them (the overlay's
-    /// windows hidden) when the zone is exported.
-    pub fn on_thaw(&self, thaw: impl Fn() -> Option<vixeeny_editor::RgbaImage> + 'static) {
-        *self.shared.thaw.borrow_mut() = Some(Box::new(thaw));
+    /// Lets the user show the screens live, from `screens`: a fresh picture of them is
+    /// exported, and the blurred or pixelated parts follow them.
+    pub fn set_screens(&self, screens: impl Screens + 'static) {
+        *self.shared.screens.borrow_mut() = Some(Box::new(screens));
         self.shared.refresh();
     }
 

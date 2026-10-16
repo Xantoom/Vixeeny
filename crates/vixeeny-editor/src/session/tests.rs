@@ -495,3 +495,34 @@ fn clearing_takes_every_annotation_away() {
     s.undo();
     assert_eq!(s.editor().doc.items.len(), 2);
 }
+
+#[test]
+fn live_a_blurred_zone_follows_the_screens() {
+    let mut s = session();
+    drag(&mut s, p(10.0, 10.0), p(190.0, 90.0));
+    s.set_live(true);
+    s.choose_tool(Some(Tool::Pen));
+    drag(&mut s, p(30.0, 30.0), p(60.0, 60.0));
+    // A pen stroke needs nothing from the screens.
+    assert_eq!(s.live_area(), None);
+    s.choose_tool(Some(Tool::Pixelate));
+    drag(&mut s, p(100.0, 20.0), p(160.0, 80.0));
+    assert_eq!(s.live_area(), Some((10, 10, 180, 80)));
+    s.set_live(false);
+    assert_eq!(s.live_area(), None);
+}
+
+#[test]
+fn a_part_of_the_screens_is_refreshed_in_place() {
+    let mut s = session();
+    drag(&mut s, p(10.0, 10.0), p(190.0, 90.0));
+    let before = s.base().pixel(0, 0);
+    s.patch_base(20, 30, &RgbaImage::filled(5, 4, Color::rgb(0, 255, 0)));
+    // Past the right and bottom edges, a part is cut.
+    s.patch_base(198, 98, &RgbaImage::filled(5, 5, Color::rgb(0, 0, 255)));
+    assert_eq!(s.base().pixel(20, 30), Color::rgb(0, 255, 0));
+    assert_eq!(s.base().pixel(24, 33), Color::rgb(0, 255, 0));
+    assert_eq!(s.base().pixel(199, 99), Color::rgb(0, 0, 255));
+    assert_eq!(s.base().pixel(0, 0), before);
+    assert_ne!(s.base().pixel(25, 30), Color::rgb(0, 255, 0));
+}

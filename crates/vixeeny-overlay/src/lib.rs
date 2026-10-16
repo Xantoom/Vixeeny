@@ -20,7 +20,7 @@ pub mod toast;
 pub mod widget;
 mod window;
 
-pub use overlay::{Overlay, OverlayError, Screen, post};
+pub use overlay::{Overlay, OverlayError, Screen, Screens, Wake, post};
 pub use theme::{Look, dark_theme};
 
 #[cfg(test)]

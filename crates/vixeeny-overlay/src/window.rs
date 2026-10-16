@@ -16,9 +16,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     CS_DBLCLKS, CreateWindowExW, DefWindowProcW, HCURSOR, HWND_MESSAGE, HWND_NOTOPMOST,
     HWND_TOPMOST, IDC_ARROW, IDC_CROSS, IDC_HAND, IDC_SIZEALL, IDC_SIZENESW, IDC_SIZENS,
     IDC_SIZENWSE, IDC_SIZEWE, LoadCursorW, RegisterClassExW, SWP_NOACTIVATE, SWP_NOMOVE,
-    SWP_NOSIZE, SetWindowDisplayAffinity, SetWindowPos, WDA_EXCLUDEFROMCAPTURE, WINDOW_EX_STYLE,
-    WNDCLASSEXW, WS_EX_NOACTIVATE, WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
-    WS_POPUP,
+    SWP_NOSIZE, SetWindowDisplayAffinity, SetWindowPos, WDA_EXCLUDEFROMCAPTURE,
+    WINDOW_DISPLAY_AFFINITY, WINDOW_EX_STYLE, WNDCLASSEXW, WS_EX_NOACTIVATE,
+    WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{BOOL, PCWSTR, Result, w};
 
@@ -228,6 +228,18 @@ pub fn set_cloak(hwnd: HWND, on: bool) {
             size_of::<BOOL>() as u32,
         )
     };
+}
+
+/// Leaves the window out of screen captures (`on`), or puts it back; `false` when Windows
+/// cannot (before Windows 10 2004).
+pub fn set_excluded(hwnd: HWND, on: bool) -> bool {
+    let affinity = if on {
+        WDA_EXCLUDEFROMCAPTURE
+    } else {
+        WINDOW_DISPLAY_AFFINITY(0)
+    };
+    // SAFETY: plain call on a window of this thread.
+    unsafe { SetWindowDisplayAffinity(hwnd, affinity) }.is_ok()
 }
 
 /// Keeps the window above every other one, or lets a dialog come above it.

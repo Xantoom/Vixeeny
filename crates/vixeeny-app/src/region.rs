@@ -345,6 +345,93 @@ fn frozen_desktop(
     Ok((image, hdr))
 }
 
+/// The screens as they are now, for the editor shown live.
+struct LiveScreens {
+    monitors: Vec<MonitorInfo>,
+    /// The top-left corner of the desktop: the editor's image starts there.
+    origin: (i32, i32),
+    keep_hdr: bool,
+    /// The HDR picture exported along (see [`output_command`]).
+    hdr: std::rc::Rc<std::cell::RefCell<Option<HdrCapture>>>,
+    /// The part of each monitor followed, with where it goes in the editor's image.
+    streams: std::cell::RefCell<Vec<(u32, u32, vixeeny_capture::VideoStream)>>,
+}
+
+impl vixeeny_overlay::Screens for LiveScreens {
+    fn grab(&self) -> Option<RgbaImage> {
+        match grab_screens(&self.monitors, self.keep_hdr) {
+            Ok((picture, hdr)) => {
+                *self.hdr.borrow_mut() = hdr;
+                Some(picture)
+            }
+            Err(e) => {
+                tracing::warn!("live screens not read: {e:#}");
+                None
+            }
+        }
+    }
+
+    fn watch(&self, area: Option<(u32, u32, u32, u32)>, wake: vixeeny_overlay::Wake) {
+        let mut streams = self.streams.borrow_mut();
+        streams.clear();
+        let Some((x, y, w, h)) = area else {
+            return;
+        };
+        let (ox, oy) = self.origin;
+        let area = vixeeny_platform::PhysicalRect {
+            x: ox + x as i32,
+            y: oy + y as i32,
+            width: w,
+            height: h,
+        };
+        for monitor in &self.monitors {
+            let Some(part) = monitor.rect.intersection(&area) else {
+                continue;
+            };
+            let target = vixeeny_capture::StreamTarget::Region {
+                monitor: monitor.clone(),
+                rect: vixeeny_platform::PhysicalRect {
+                    x: part.x - monitor.rect.x,
+                    y: part.y - monitor.rect.y,
+                    ..part
+                },
+            };
+            let wake = wake.clone();
+            match vixeeny_capture::VideoStream::start_notify(
+                &target,
+                false,
+                false,
+                Box::new(move || wake.wake()),
+            ) {
+                Ok(stream) => streams.push(((part.x - ox) as u32, (part.y - oy) as u32, stream)),
+                Err(e) => tracing::warn!("live screens not followed: {e}"),
+            }
+        }
+    }
+
+    fn take(&self) -> Vec<(u32, u32, RgbaImage)> {
+        let mut parts = Vec::new();
+        for (x, y, stream) in self.streams.borrow().iter() {
+            // Only the newest picture matters.
+            let mut newest = None;
+            while let Ok(Some(captured)) = stream.recv(std::time::Duration::ZERO) {
+                if let Some(old) = newest.replace(captured.frame) {
+                    stream.buffers().give(old.data);
+                }
+            }
+            if let Some(frame) = newest {
+                if let Some(image) =
+                    RgbaImage::from_bgra(frame.width, frame.height, frame.stride, &frame.data)
+                {
+                    parts.push((*x, *y, image));
+                }
+                stream.buffers().give(frame.data);
+            }
+        }
+        parts
+    }
+}
+
 /// A picture of every screen (HDR screens tone-mapped), and with `keep_hdr` the same as HDR.
 fn grab_screens(
     monitors: &[MonitorInfo],
@@ -499,15 +586,12 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
     .map_err(|e| anyhow::anyhow!("cannot create the editor window: {e}"))?;
     overlay.set_tips(&tips);
     if mode == Mode::Editor {
-        overlay.on_thaw(move || match grab_screens(&live_monitors, keep_hdr) {
-            Ok((picture, hdr)) => {
-                *live_hdr.borrow_mut() = hdr;
-                Some(picture)
-            }
-            Err(e) => {
-                tracing::warn!("live screens not read: {e:#}");
-                None
-            }
+        overlay.set_screens(LiveScreens {
+            monitors: live_monitors,
+            origin: (bounds.x, bounds.y),
+            keep_hdr,
+            hdr: live_hdr,
+            streams: std::cell::RefCell::default(),
         });
     }
     tracing::debug!("editor ready after {:?}", started.elapsed());

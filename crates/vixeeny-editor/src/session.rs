@@ -234,6 +234,44 @@ impl Session {
         true
     }
 
+    /// Live, the part of the screens (whole image pixels) that annotations take their pixels
+    /// from: the zone, while it holds a blur or a pixelation. The host keeps it up to date with
+    /// [`Session::patch_base`]. `None` while nothing needs it, and while the zone is being moved
+    /// or resized.
+    pub fn live_area(&self) -> Option<(u32, u32, u32, u32)> {
+        if !self.live || self.target == Some(Target::Selection) {
+            return None;
+        }
+        let zone = self.selection.rect()?;
+        let effect =
+            |a: &Annotation| matches!(a, Annotation::Blur { .. } | Annotation::Pixelate { .. });
+        let used = self.editor.doc.items.iter().any(|i| effect(&i.annotation))
+            || self.editor.preview().is_some_and(|a| effect(&a));
+        if !used {
+            return None;
+        }
+        let x0 = (zone.x.floor().max(0.0) as u32).min(self.base.width);
+        let y0 = (zone.y.floor().max(0.0) as u32).min(self.base.height);
+        let x1 = ((zone.x + zone.w).ceil().max(0.0) as u32).min(self.base.width);
+        let y1 = ((zone.y + zone.h).ceil().max(0.0) as u32).min(self.base.height);
+        (x1 > x0 && y1 > y0).then_some((x0, y0, x1 - x0, y1 - y0))
+    }
+
+    /// Takes `part`, a fresh picture of the screens, with its top-left corner at `(x, y)`.
+    pub fn patch_base(&mut self, x: u32, y: u32, part: &RgbaImage) {
+        let w = part.width.min(self.base.width.saturating_sub(x)) as usize;
+        if w == 0 {
+            return;
+        }
+        let rows = part.height.min(self.base.height.saturating_sub(y));
+        for row in 0..rows {
+            let from = (row * part.width) as usize * 4;
+            let to = ((y + row) * self.base.width + x) as usize * 4;
+            self.base.data[to..to + w * 4].copy_from_slice(&part.data[from..from + w * 4]);
+        }
+        *self.drawn.borrow_mut() = None;
+    }
+
     /// Removes every annotation (undo brings them back).
     pub fn clear(&mut self) {
         self.text_input = None;
@@ -516,12 +554,12 @@ impl Session {
         self.editor.redo();
     }
 
-    /// The final image: the zone with its annotations. `None` while there is no zone.
     /// The selected zone, in image pixels.
     pub fn zone(&self) -> Option<Rect> {
         self.selection.rect()
     }
 
+    /// The final image: the zone with its annotations. `None` while there is no zone.
     pub fn export(&self) -> Option<RgbaImage> {
         let zone = self.selection.rect()?;
         render_region(

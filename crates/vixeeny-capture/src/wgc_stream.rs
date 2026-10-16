@@ -78,6 +78,9 @@ pub struct CapturedFrame {
 /// there.
 pub type TextureSink = Box<dyn FnMut(&ID3D11Texture2D, (u32, u32), i64) + Send>;
 
+/// Told (on a capture thread) that a frame is waiting in [`VideoStream::recv`].
+pub type Notify = Box<dyn Fn() + Send + Sync>;
+
 /// An existing D3D11 device to capture on, and where the textures go (GPU recording).
 pub struct GpuCapture {
     pub device: ID3D11Device,
@@ -94,6 +97,8 @@ struct Shared {
     region: Option<PhysicalRect>,
     hdr: bool,
     sink: Option<Mutex<TextureSink>>,
+    /// Called once a CPU frame is queued.
+    notify: Option<Notify>,
     last_size: Mutex<SizeInt32>,
     buffers: BufferPool,
 }
@@ -212,6 +217,27 @@ impl VideoStream {
         hdr: bool,
         gpu: Option<GpuCapture>,
     ) -> Result<Self, CaptureError> {
+        Self::open(target, cursor, hdr, gpu, None)
+    }
+
+    /// Like [`start`](Self::start), calling `notify` each time a frame waits in `recv`: the
+    /// consumer reads them when told rather than waiting on `recv`.
+    pub fn start_notify(
+        target: &StreamTarget,
+        cursor: bool,
+        hdr: bool,
+        notify: Notify,
+    ) -> Result<Self, CaptureError> {
+        Self::open(target, cursor, hdr, None, Some(notify))
+    }
+
+    fn open(
+        target: &StreamTarget,
+        cursor: bool,
+        hdr: bool,
+        gpu: Option<GpuCapture>,
+        notify: Option<Notify>,
+    ) -> Result<Self, CaptureError> {
         if !GraphicsCaptureSession::IsSupported().map_err(os("IsSupported"))? {
             return Err(CaptureError::Os(
                 "Windows Graphics Capture is not available".into(),
@@ -283,6 +309,7 @@ impl VideoStream {
             region,
             hdr,
             sink,
+            notify,
             last_size: Mutex::new(size),
             buffers: buffers.clone(),
         });
@@ -390,7 +417,11 @@ fn frame_handler(
                 frame,
             });
             // A full queue drops the frame: the consumer is behind.
-            let _ = tx.try_send(result);
+            if tx.try_send(result).is_ok()
+                && let Some(notify) = &shared.notify
+            {
+                notify();
+            }
             Ok(())
         },
     )
