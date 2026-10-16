@@ -13,7 +13,7 @@ pub type SpawnId = u64;
 pub enum Event {
     /// A second launch of Vixeeny (or a CLI) asked for something.
     Control(ControlRequest),
-    /// A user-triggered action (tray menu, and from M3 global hotkeys).
+    /// A user-triggered action (tray menu or global hotkey).
     Action(ActionId),
     /// The app connected over IPC.
     AppConnected,
@@ -222,11 +222,6 @@ mod tests {
     }
 
     #[test]
-    fn first_action_spawns_the_app() {
-        ready_app();
-    }
-
-    #[test]
     fn actions_while_starting_are_queued_then_delivered() {
         let mut core = Core::new();
         core.handle(Event::Action(ActionId::OpenSettings));
@@ -372,17 +367,12 @@ mod tests {
     }
 
     #[test]
-    fn a_reload_request_from_the_settings_window_reloads_the_config() {
+    fn the_settings_window_or_the_app_has_the_config_reloaded() {
         let mut core = Core::new();
         assert_eq!(
             core.handle(Event::Control(ControlRequest::ReloadConfig)),
             vec![Effect::ReloadConfig]
         );
-    }
-
-    #[test]
-    fn config_changed_triggers_reload() {
-        let mut core = Core::new();
         assert_eq!(
             core.handle(Event::App(AppToDaemon::ConfigChanged)),
             vec![Effect::ReloadConfig]
@@ -391,26 +381,15 @@ mod tests {
 
     #[test]
     fn quit_tells_a_connected_app_to_shut_down() {
+        assert_eq!(
+            Core::new().handle(Event::Control(ControlRequest::Quit)),
+            vec![Effect::Quit]
+        );
         let mut core = ready_app();
         assert_eq!(
             core.handle(Event::TrayQuit),
             vec![Effect::SendToApp(DaemonToApp::Shutdown), Effect::Quit]
         );
-    }
-
-    #[test]
-    fn quit_without_app_just_quits() {
-        let mut core = Core::new();
-        assert_eq!(
-            core.handle(Event::Control(ControlRequest::Quit)),
-            vec![Effect::Quit]
-        );
-    }
-
-    #[test]
-    fn ping_does_nothing() {
-        let mut core = Core::new();
-        assert!(core.handle(Event::Control(ControlRequest::Ping)).is_empty());
     }
 
     #[test]

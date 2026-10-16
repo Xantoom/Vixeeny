@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The settings window (plan 5.13). It owns a copy of the [`Config`], applies every change the
+//! The settings window. It owns a copy of the [`Config`], applies every change the
 //! moment it is made (the host is told through [`SettingsPanel::on_change`]), and leaves what
 //! needs the OS (folders to browse and open, the hardware list) to the host.
 

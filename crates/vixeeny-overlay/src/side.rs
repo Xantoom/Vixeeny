@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The side overlay (plan 5.12): the actions of Vixeeny as a strip of icons on one edge of the
+//! The side overlay: the actions of Vixeeny as a strip of icons on one edge of the
 //! screen, drawn natively. The name of the action under the pointer (or the keyboard) shows
 //! beside the strip. It slides and fades in, takes the arrow keys, Enter and Escape, and goes
 //! away when the user clicks elsewhere, unless it is pinned. Nothing runs while it is still.

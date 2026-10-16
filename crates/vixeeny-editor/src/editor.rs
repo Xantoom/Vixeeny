@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Tool interaction: turns pointer events into edits of the document (plan 5.3). The UI feeds
+//! Tool interaction: turns pointer events into edits of the document. The UI feeds
 //! pointer positions in image pixels and draws [`Editor::preview`] while a gesture is running.
 
 use crate::geometry::{Point, Rect, snap_angle, square_corner};

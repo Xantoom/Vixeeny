@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Windows Graphics Capture, streaming mode (plan 5.9): a capture session that stays open and
+//! Windows Graphics Capture, streaming mode: a capture session that stays open and
 //! delivers every frame with the OS monotonic timestamp (`SystemRelativeTime`, the master clock
 //! of the recording pipeline) as BGRA in RAM. WGC only produces a frame when the content
 //! changes: the consumer repeats the last one to keep a constant frame rate.
@@ -11,6 +11,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, sync_channel};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use vixeeny_common::buffers::BufferPool;
 use vixeeny_platform::{MonitorInfo, PhysicalRect, WindowId};
 use windows::Foundation::TypedEventHandler;
 use windows::Graphics::Capture::{
@@ -94,6 +95,7 @@ struct Shared {
     hdr: bool,
     sink: Option<Mutex<TextureSink>>,
     last_size: Mutex<SizeInt32>,
+    buffers: BufferPool,
 }
 
 // SAFETY: a D3D11 device is free-threaded; the immediate context and the staging texture are
@@ -176,9 +178,10 @@ impl Shared {
             .map_err(os("Map"))?;
         let stride = mapped.RowPitch as usize;
         // SAFETY: a mapped texture exposes `RowPitch * Height` readable bytes until `Unmap`.
-        let data =
-            unsafe { std::slice::from_raw_parts(mapped.pData.cast::<u8>(), stride * h as usize) }
-                .to_vec();
+        let pixels =
+            unsafe { std::slice::from_raw_parts(mapped.pData.cast::<u8>(), stride * h as usize) };
+        let mut data = self.buffers.take(pixels.len());
+        data.extend_from_slice(pixels);
         // SAFETY: matches the successful Map above.
         unsafe { context.Unmap(staging, 0) };
         CpuFrame::from_raw(w, h, stride, data)
@@ -192,6 +195,7 @@ pub struct VideoStream {
     arrived: i64,
     closed: i64,
     rx: Receiver<Result<CapturedFrame, CaptureError>>,
+    buffers: BufferPool,
 }
 
 impl VideoStream {
@@ -270,6 +274,7 @@ impl VideoStream {
             .and_then(|inspectable| inspectable.cast())
             .map_err(os("CreateDirect3D11DeviceFromDXGIDevice"))?;
 
+        let buffers = BufferPool::default();
         let shared = Arc::new(Shared {
             device,
             winrt_device: winrt_device.clone(),
@@ -279,6 +284,7 @@ impl VideoStream {
             hdr,
             sink,
             last_size: Mutex::new(size),
+            buffers: buffers.clone(),
         });
         let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
             &winrt_device,
@@ -312,7 +318,13 @@ impl VideoStream {
             arrived,
             closed,
             rx,
+            buffers,
         })
+    }
+
+    /// Where the pixels of the CPU frames come from: hand them back once used.
+    pub fn buffers(&self) -> BufferPool {
+        self.buffers.clone()
     }
 
     /// The next frame; `Ok(None)` when none arrived within `timeout` (nothing changed on screen).

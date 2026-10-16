@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The recording widget (plan 5.9) as a process of its own: `vixeeny-app --widget …`. The
+//! The recording widget as a process of its own: `vixeeny-app --widget …`. The
 //! recorder starts it and talks to it over its standard input and output (see `widget_math`), so
 //! the app's action loop stays free while the pill is on screen. The widget window is excluded
-//! from every screen capture (CA-REC-5) and never takes the focus.
+//! from every screen capture and never takes the focus.
 
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};

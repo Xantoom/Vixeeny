@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The GPU path of the recorder (plan 5.9): frames are converted and scaled by the D3D11 video
+//! The GPU path of the recorder: frames are converted and scaled by the D3D11 video
 //! processor ([`crate::d3d_convert`]) into textures that FFmpeg's D3D11 frame pool owns. NVENC
 //! and AMF read those textures directly, QSV through a QSV view of the same pool, and software
 //! encoders get them downloaded (NV12 / P010: well under half the bytes of the captured BGRA,

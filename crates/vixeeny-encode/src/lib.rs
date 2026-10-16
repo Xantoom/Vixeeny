@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! vixeeny-encode — the codec registry (plan 6), profile validation, hardware probing and, in
+//! vixeeny-encode — the codec registry, profile validation, hardware probing and, in
 //! later milestones, the video pipeline. See README.md.
 
 pub mod clock;
@@ -25,9 +25,6 @@ pub mod thumbnail;
 
 /// FFmpeg bindings, built against the pinned prebuilt FFmpeg of `native/versions.toml`.
 pub use ffmpeg_next as ffmpeg;
-
-/// Crate name, used by the M0 smoke test.
-pub const CRATE_NAME: &str = "vixeeny-encode";
 
 #[cfg(test)]
 mod tests;

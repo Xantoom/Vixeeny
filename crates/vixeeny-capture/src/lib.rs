@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! vixeeny-capture — screen capture (plan 4.3). M4: single images (`grab`). The streaming side
+//! vixeeny-capture — screen capture: single images (`grab`). The streaming side
 //! (`start`/`stop` with a `FrameSink`) arrives with the video milestones.
 //!
 //! [`Capturer`] holds the target logic (regions, all monitors, DPI) and is tested with
@@ -9,10 +9,12 @@
 mod fake;
 mod frame;
 pub mod freeze;
+mod hdr;
 mod wgc;
 mod wgc_stream;
 pub use fake::FakeBackend;
 pub use frame::{BYTES_PER_PIXEL, CpuFrame};
+pub use hdr::{HdrCapture, HdrFrame, reference};
 use vixeeny_platform::{HdrInfo, MonitorId, MonitorInfo, PhysicalRect, WindowId, virtual_bounds};
 pub use wgc::WgcBackend;
 pub use wgc_stream::{CapturedFrame, GpuCapture, StreamTarget, TextureSink, VideoStream};
@@ -42,14 +44,6 @@ pub struct CaptureOptions {
     pub tonemap: Option<ToneMapFn>,
 }
 
-/// An HDR monitor frame: scRGB, linear BT.709 floats, 4 per pixel (R, G, B, A).
-#[derive(Debug, Clone, PartialEq)]
-pub struct HdrFrame {
-    pub width: u32,
-    pub height: u32,
-    pub rgba: Vec<f32>,
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum CaptureError {
     #[error("unknown monitor")]
@@ -75,15 +69,30 @@ pub trait StillBackend {
         cursor: bool,
     ) -> Result<CpuFrame, CaptureError>;
     /// The whole monitor as scRGB floats. Only called for monitors with `hdr` set.
+    /// `area` (relative to the monitor) limits it to a part, read alone: a zone captured 15
+    /// times a second converts only its own pixels.
     fn grab_monitor_hdr(
         &mut self,
         _monitor: &MonitorInfo,
+        _area: Option<&PhysicalRect>,
         _cursor: bool,
     ) -> Result<HdrFrame, CaptureError> {
         Err(CaptureError::Unsupported)
     }
     /// The whole window content.
     fn grab_window(&mut self, window: WindowId, cursor: bool) -> Result<CpuFrame, CaptureError>;
+    /// The whole window content as scRGB floats. Only called for windows on an HDR monitor.
+    fn grab_window_hdr(
+        &mut self,
+        _window: WindowId,
+        _cursor: bool,
+    ) -> Result<HdrFrame, CaptureError> {
+        Err(CaptureError::Unsupported)
+    }
+    /// The monitor showing most of the window.
+    fn window_monitor(&self, _window: WindowId) -> Option<MonitorId> {
+        None
+    }
 }
 
 pub struct Capturer<B: StillBackend> {
@@ -112,12 +121,16 @@ impl<B: StillBackend> Capturer<B> {
         if let (Some(info), Some(tonemap)) = (monitor.hdr, options.tonemap) {
             let hdr = self
                 .backend
-                .grab_monitor_hdr(monitor, options.show_cursor)?;
-            let bgra = tonemap(&hdr.rgba, &info);
-            let stride = hdr.width as usize * BYTES_PER_PIXEL;
-            return CpuFrame::from_raw(hdr.width, hdr.height, stride, bgra);
+                .grab_monitor_hdr(monitor, None, options.show_cursor)?;
+            return tonemapped(&hdr, &info, tonemap);
         }
         self.backend.grab_monitor(monitor, options.show_cursor)
+    }
+
+    /// The HDR monitor a window is on, if it is on one.
+    fn window_hdr(&self, window: WindowId) -> Option<HdrInfo> {
+        let id = self.backend.window_monitor(window)?;
+        self.monitor(id).ok()?.hdr
     }
 
     pub fn grab(
@@ -132,10 +145,23 @@ impl<B: StillBackend> Capturer<B> {
             }
             CaptureTarget::Region { monitor, rect } => {
                 let monitor = self.monitor(*monitor)?.clone();
-                let frame = self.monitor_frame(&monitor, options)?;
-                frame.crop(rect)
+                if let (Some(info), Some(tonemap)) = (monitor.hdr, options.tonemap) {
+                    let hdr =
+                        self.backend
+                            .grab_monitor_hdr(&monitor, Some(rect), options.show_cursor)?;
+                    return tonemapped(&hdr, &info, tonemap);
+                }
+                self.backend
+                    .grab_monitor(&monitor, options.show_cursor)?
+                    .crop(rect)
             }
-            CaptureTarget::Window(id) => self.backend.grab_window(*id, options.show_cursor),
+            CaptureTarget::Window(id) => match (self.window_hdr(*id), options.tonemap) {
+                (Some(info), Some(tonemap)) => {
+                    let hdr = self.backend.grab_window_hdr(*id, options.show_cursor)?;
+                    tonemapped(&hdr, &info, tonemap)
+                }
+                _ => self.backend.grab_window(*id, options.show_cursor),
+            },
             CaptureTarget::AllMonitors => self.grab_all(options),
         }
     }
@@ -151,4 +177,74 @@ impl<B: StillBackend> Capturer<B> {
         }
         Ok(canvas)
     }
+
+    /// The target as HDR, when it shows an HDR monitor; `None` when it is SDR only (take
+    /// [`grab`](Self::grab) then). With several monitors, the SDR ones are placed at the SDR
+    /// white of the HDR ones, and every monitor's SDR white is brought to the brightest.
+    pub fn grab_hdr(
+        &mut self,
+        target: &CaptureTarget,
+        cursor: bool,
+    ) -> Result<Option<HdrCapture>, CaptureError> {
+        match target {
+            CaptureTarget::Monitor(id) | CaptureTarget::Region { monitor: id, .. } => {
+                let monitor = self.monitor(*id)?.clone();
+                let Some(info) = monitor.hdr else {
+                    return Ok(None);
+                };
+                let area = match target {
+                    CaptureTarget::Region { rect, .. } => Some(rect),
+                    _ => None,
+                };
+                let frame = self.backend.grab_monitor_hdr(&monitor, area, cursor)?;
+                Ok(Some(HdrCapture { frame, info }))
+            }
+            CaptureTarget::Window(id) => {
+                let Some(info) = self.window_hdr(*id) else {
+                    return Ok(None);
+                };
+                let frame = self.backend.grab_window_hdr(*id, cursor)?;
+                Ok(Some(HdrCapture { frame, info }))
+            }
+            CaptureTarget::AllMonitors => self.grab_all_hdr(cursor),
+        }
+    }
+
+    fn grab_all_hdr(&mut self, cursor: bool) -> Result<Option<HdrCapture>, CaptureError> {
+        let Some(info) = reference(&self.monitors) else {
+            return Ok(None);
+        };
+        let bounds =
+            virtual_bounds(self.monitors.iter().map(|m| &m.rect)).ok_or(CaptureError::NoMonitor)?;
+        let mut canvas = HdrFrame::new(bounds.width, bounds.height);
+        for monitor in self.monitors.clone() {
+            let frame = match monitor.hdr {
+                Some(own) => {
+                    let mut frame = self.backend.grab_monitor_hdr(&monitor, None, cursor)?;
+                    frame.scale(info.sdr_white_nits / own.sdr_white_nits.max(1.0));
+                    frame
+                }
+                None => HdrFrame::from_sdr(
+                    &self.backend.grab_monitor(&monitor, cursor)?,
+                    info.sdr_white_nits,
+                ),
+            };
+            let at = monitor.rect.relative_to(&bounds);
+            canvas.blit(&frame, at.x, at.y);
+        }
+        Ok(Some(HdrCapture {
+            frame: canvas,
+            info,
+        }))
+    }
+}
+
+fn tonemapped(
+    hdr: &HdrFrame,
+    info: &HdrInfo,
+    tonemap: ToneMapFn,
+) -> Result<CpuFrame, CaptureError> {
+    let bgra = tonemap(&hdr.rgba, info);
+    let stride = hdr.width as usize * BYTES_PER_PIXEL;
+    CpuFrame::from_raw(hdr.width, hdr.height, stride, bgra)
 }

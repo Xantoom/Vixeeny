@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Start with the Windows session (plan 5.15): the `HKCU\…\Run` entry, through `auto-launch`.
+//! Start with the Windows session: the `HKCU\…\Run` entry, through `auto-launch`.
 
 use auto_launch::AutoLaunchBuilder;
 

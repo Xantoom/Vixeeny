@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Minimal translations for the daemon, which links neither Slint nor gettext (plan 4.1).
+//! Minimal translations for the daemon, which links neither Slint nor gettext.
 //! The app and settings UI use Slint's `@tr()`; only the tray menu and notifications of the
-//! daemon go through this table. French and English are shipped (plan 5.16).
+//! daemon go through this table. French and English are shipped.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lang {
@@ -317,6 +317,18 @@ pub enum Key {
     CutNext,
     CutMute,
     CutClose,
+    TipCopyText,
+    ToastTextCopied,
+    ToastNoText,
+    ToastOcrFailed,
+    ToastOcrNoLanguage,
+    ToastOcrLanguages,
+    CutAnimated,
+    ToastMenuEdit,
+    SetWindowBackdrop,
+    OptBackdropNone,
+    OptBackdropBlur,
+    OptBackdropColour,
 }
 
 impl Key {
@@ -626,6 +638,18 @@ impl Key {
         Self::CutNext,
         Self::CutMute,
         Self::CutClose,
+        Self::TipCopyText,
+        Self::ToastTextCopied,
+        Self::ToastNoText,
+        Self::ToastOcrFailed,
+        Self::ToastOcrNoLanguage,
+        Self::ToastOcrLanguages,
+        Self::CutAnimated,
+        Self::ToastMenuEdit,
+        Self::SetWindowBackdrop,
+        Self::OptBackdropNone,
+        Self::OptBackdropBlur,
+        Self::OptBackdropColour,
     ];
 }
 
@@ -1340,6 +1364,34 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::CutMute, Lang::Fr) => "Son (M)",
         (Key::CutClose, Lang::En) => "Close (Esc)",
         (Key::CutClose, Lang::Fr) => "Fermer (Échap)",
+        (Key::TipCopyText, Lang::En) => "Copy the text (Ctrl+Shift+C)",
+        (Key::TipCopyText, Lang::Fr) => "Copier le texte (Ctrl+Maj+C)",
+        (Key::ToastTextCopied, Lang::En) => "Text copied",
+        (Key::ToastTextCopied, Lang::Fr) => "Texte copié",
+        (Key::ToastNoText, Lang::En) => "No text found",
+        (Key::ToastNoText, Lang::Fr) => "Aucun texte trouvé",
+        (Key::ToastOcrFailed, Lang::En) => "The text could not be read",
+        (Key::ToastOcrFailed, Lang::Fr) => "Le texte n'a pas pu être lu",
+        (Key::ToastOcrNoLanguage, Lang::En) => {
+            "Windows has no language with text recognition: add one in Time & language → Language & region."
+        }
+        (Key::ToastOcrNoLanguage, Lang::Fr) => {
+            "Windows n'a aucune langue avec la reconnaissance de texte : ajoutez-en une dans Heure et langue → Langue et région."
+        }
+        (Key::ToastOcrLanguages, Lang::En) => "Languages",
+        (Key::ToastOcrLanguages, Lang::Fr) => "Langues",
+        (Key::CutAnimated, Lang::En) => "animated",
+        (Key::CutAnimated, Lang::Fr) => "animé",
+        (Key::ToastMenuEdit, Lang::En) => "Edit the image",
+        (Key::ToastMenuEdit, Lang::Fr) => "Modifier l'image",
+        (Key::SetWindowBackdrop, Lang::En) => "Window background",
+        (Key::SetWindowBackdrop, Lang::Fr) => "Fond des fenêtres",
+        (Key::OptBackdropNone, Lang::En) => "None",
+        (Key::OptBackdropNone, Lang::Fr) => "Aucun",
+        (Key::OptBackdropBlur, Lang::En) => "Blurred window",
+        (Key::OptBackdropBlur, Lang::Fr) => "Fenêtre floutée",
+        (Key::OptBackdropColour, Lang::En) => "Accent colour",
+        (Key::OptBackdropColour, Lang::Fr) => "Couleur d'accentuation",
     }
 }
 

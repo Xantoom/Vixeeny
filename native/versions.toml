@@ -1,4 +1,4 @@
-# Pinned native libraries (VIXEENY_PLAN.md sections 3 and 9.1).
+# Pinned native libraries.
 # Every library is fetched by exact commit; `tag` is informational. Versions resolved 2026-10-01.
 #
 # `cargo xtask build-native` reads this file, so keep the keys stable.
@@ -6,41 +6,18 @@
 [ffmpeg]
 # Built by packaging/ffmpeg/build.sh from the BtbN GPL image (image and commit pinned there):
 # FFmpeg n9.0.2-22-g46d8f462ee with only what Vixeeny uses (its encoders, decoders, containers and
-# filters), x264, x265, SVT-AV1, libvpx, dav1d, opus, NVENC, AMF, QSV and D3D11VA decoding. The CI builds it when its
-# cache has none (.github/workflows/ffmpeg.yml); `cargo xtask build-native` unpacks the zip.
+# filters), x264, x265, SVT-AV1 (video and AVIF), libvpx, dav1d, opus, NVENC, AMF, QSV and D3D11VA
+# decoding. The CI builds it when its cache has none (.github/workflows/ffmpeg.yml); `cargo xtask build-native` unpacks the zip.
 tag = "n9.0.2"
-license = "GPL-3.0-or-later (--enable-gpl --enable-version3, no nonfree); bundles x264 and x265 (GPL-2.0-or-later), libvpx and opus (BSD-3-Clause), SVT-AV1 (BSD-3-Clause-Clear) and dav1d (BSD-2-Clause)"
-
-[svt-av1]
-# Official SVT-AV1 (maintainer decision 2026-10-01: Tritium not used).
-url = "https://gitlab.com/AOMediaCodec/SVT-AV1"
-tag = "v4.2.0"
-commit = "9292ec8e32bce26f781f277ec8739b53426c4300"
-license = "BSD-3-Clause-Clear / AOM patent licence"
-
-[dav1d]
-url = "https://github.com/videolan/dav1d"
-tag = "1.5.4"
-commit = "191bdda98ec3c68137754dc97da1db34043d7cd4"
-license = "BSD-2-Clause"
-
-[opus]
-url = "https://github.com/xiph/opus"
-tag = "v1.6.1"
-commit = "a5d6c1b6f4e582df97390f9ac5c6e7c51cbffffe"
-license = "BSD-3-Clause"
+license = "GPL-3.0-or-later (--enable-gpl --enable-version3, no nonfree); bundles x264 and x265 (GPL-2.0-or-later), libvpx and opus (BSD-3-Clause), SVT-AV1 (BSD-3-Clause-Clear, AOM patent licence) and dav1d (BSD-2-Clause)"
 
 [libwebp]
+# Not built here: the libwebp-sys crate compiles its own copy of this release. Listed for its
+# licence (THIRD-PARTY-LICENSES.txt).
 url = "https://github.com/webmproject/libwebp"
 tag = "v1.6.0"
 commit = "b7e29b9d75bd31422b00c2a446d49d7af06c328d"
 license = "BSD-3-Clause"
-
-[libavif]
-url = "https://github.com/AOMediaCodec/libavif"
-tag = "v1.4.2"
-commit = "bd32fb40a3b2028eb555b67f769c57a32ed8a1b4"
-license = "BSD-2-Clause"
 
 [libjxl]
 url = "https://github.com/libjxl/libjxl"
@@ -53,3 +30,18 @@ url = "https://github.com/google/jpegli"
 tag = "HEAD as of 2026-10-01 (no release tags)"
 commit = "031a0077f5799a6041004267fc12b956c1f52a20"
 license = "BSD-3-Clause"
+
+[libjpeg-turbo]
+# The libjpeg of libultrahdr (decoding the SDR picture, encoding the gain map). The JPEG
+# screenshots themselves are jpegli's.
+url = "https://github.com/libjpeg-turbo/libjpeg-turbo"
+tag = "3.1.4.1"
+commit = "9217719d3a58633923b096af4c1d50d304768a64"
+license = "IJG, BSD-3-Clause and zlib"
+
+[libultrahdr]
+# JPEG Ultra HDR: an SDR JPEG with a gain map.
+url = "https://github.com/google/libultrahdr"
+tag = "v2.0.2"
+commit = "e5f5a022fe96fc4dc2ee35c19f733a50df807abe"
+license = "Apache-2.0"

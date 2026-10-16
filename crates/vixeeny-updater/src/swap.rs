@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Replacing the installed files by the new ones, keeping the old ones until the new version has
-//! started (plan 10.2, rollback). Files that are not part of the update (settings, the
+//! started (rollback). Files that are not part of the update (settings, the
 //! `portable.flag` marker) are never touched.
 
-use std::io::{self, Read};
+use std::io;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -27,7 +27,10 @@ pub fn extract(zip_bytes: &[u8], dest: &Path) -> io::Result<()> {
         let Some(relative) = entry.enclosed_name() else {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("unsafe path in the archive: {}", entry.name()),
+                format!(
+                    "unsafe path in the archive: {}",
+                    entry.name().unwrap_or_default()
+                ),
             ));
         };
         let out = dest.join(relative);
@@ -38,9 +41,7 @@ pub fn extract(zip_bytes: &[u8], dest: &Path) -> io::Result<()> {
         if let Some(parent) = out.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let mut data = Vec::new();
-        entry.read_to_end(&mut data)?;
-        std::fs::write(&out, data)?;
+        io::copy(&mut entry, &mut std::fs::File::create(&out)?)?;
     }
     Ok(())
 }

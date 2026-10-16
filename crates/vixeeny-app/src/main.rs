@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #![windows_subsystem = "windows"]
 //! The on-demand side of Vixeeny: the daemon starts it to capture, record or show a window, and
-//! it exits after `general.app_idle_exit_seconds` without activity (plan section 1.2). The same
+//! it exits after `general.app_idle_exit_seconds` without activity. The same
 //! program also runs the settings, the notifications, the recording widget and the updates, each
 //! as a process of its own (see the `--` modes of `run`).
 
@@ -138,8 +138,7 @@ fn direct_capture(action: ActionId, config: &Config) -> anyhow::Result<std::path
     let mut capturer = Capturer::new(backend, snapshot.monitors.clone());
     let options = CaptureOptions {
         show_cursor: false,
-        tonemap: (config.image.hdr == "tonemap_sdr")
-            .then_some(tonemap_hdr as vixeeny_capture::ToneMapFn),
+        tonemap: Some(tonemap_hdr),
     };
     let (format, settings) = image_output(config);
     let copy = |image: &vixeeny_image::Bgra<'_>| {
@@ -157,11 +156,35 @@ fn direct_capture(action: ActionId, config: &Config) -> anyhow::Result<std::path
         &mut capturer,
         &destination,
         options,
-        (format, &settings),
+        still::Output {
+            format,
+            settings: &settings,
+            keep_hdr: keep_hdr(config),
+            backdrop: window_backdrop(config),
+        },
         &vixeeny_platform::exe_metadata,
     )?;
     tracing::info!("screenshot taken in {:?}", started.elapsed());
     Ok(path)
+}
+
+/// What a window capture is set on, by the setting: a blur of the window, or the accent colour
+/// of Windows; nothing by default.
+fn window_backdrop(config: &Config) -> Option<vixeeny_image::backdrop::Backdrop> {
+    use vixeeny_image::backdrop::Backdrop;
+    match config.image.window_backdrop.as_str() {
+        "blur" => Some(Backdrop::Blur),
+        "colour" => Some(Backdrop::Colour(
+            vixeeny_platform::system_accent().unwrap_or([0, 120, 212]),
+        )),
+        _ => None,
+    }
+}
+
+/// On an HDR screen, the user's choice: keep HDR (`keep_hdr`), or convert to SDR. Formats that
+/// cannot hold HDR (WebP) are always converted.
+fn keep_hdr(config: &Config) -> bool {
+    matches!(config.image.hdr.as_str(), "keep_hdr" | "hdr")
 }
 
 /// HDR monitors become SDR through the documented tone mapper (`vixeeny_image::tonemap`).
@@ -248,7 +271,7 @@ fn run_action(
     frozen: Option<ipc::Frozen>,
     config: &mut Config,
     recording: &mut Recording,
-) -> anyhow::Result<Option<ActionId>> {
+) -> Option<ActionId> {
     match action {
         ActionId::RecordToggle
         | ActionId::RecordPause
@@ -256,11 +279,11 @@ fn run_action(
         | ActionId::ReplaySave
         | ActionId::ReplayEdit => recording.handle(action, config),
         ActionId::ReplayWatch => recording.watch(config),
-        ActionId::OverlayToggle => return Ok(overlay(config, recording)),
+        ActionId::OverlayToggle => return overlay(config, recording),
         ActionId::OpenSettings => open_settings(),
         _ => perform(action, config, frozen),
     }
-    Ok(REOPEN_STRIP.take().then_some(ActionId::OverlayToggle))
+    REOPEN_STRIP.take().then_some(ActionId::OverlayToggle)
 }
 
 struct Actions<'a, W: std::io::Write> {
@@ -280,16 +303,11 @@ impl<W: std::io::Write> Actions<'_, W> {
         {
             *self.config = config;
         }
-        let mut next = Some((action, frozen));
-        let mut result = Ok(());
-        while let Some((action, frozen)) = next.take() {
-            match run_action(action, frozen, self.config, self.recording) {
-                Ok(then) => next = then.map(|a| (a, None)),
-                Err(e) => result = Err(e),
-            }
+        let mut next = run_action(action, frozen, self.config, self.recording);
+        while let Some(action) = next {
+            next = run_action(action, None, self.config, self.recording);
         }
         BUSY.store(false, Ordering::Release);
-        result?;
         self.recording.report(self.send)
     }
 }
@@ -568,6 +586,8 @@ fn run() -> anyhow::Result<()> {
         Some("--toast-host") => return toast::run_host(),
         // The video editor of the replays (see `cut`).
         Some("--cut") => return cut::run_child(&args[1..]),
+        // A saved picture in the zone editor (see `region`).
+        Some("--edit") => return region::run_edit(&args[1..]),
         // The daily update check, and the installation (see `update`).
         Some("--update") => return update::run_child(&args[1..]),
         Some("--system-info") => {
@@ -653,7 +673,7 @@ fn run() -> anyhow::Result<()> {
         });
     }
     let mut recording = Recording {
-        look: Some(look.clone()),
+        look: Some(look),
         ..Recording::default()
     };
     // The daemon started this process for an action: it comes on the command line, not over the
@@ -740,12 +760,7 @@ mod tests {
         config.image.format = "bmp".into(); // unknown
         assert_eq!(image_output(&config).0, ImageFormat::Png);
         config.image.format = "avif".into();
-        let expected = if cfg!(feature = "native-codecs") {
-            ImageFormat::Avif
-        } else {
-            ImageFormat::Png
-        };
-        assert_eq!(image_output(&config).0, expected);
+        assert_eq!(image_output(&config).0, ImageFormat::Avif);
         // Every format's own options reach its encoder.
         config.image.png.compression = "high".into();
         config.image.png.optimize = 9;

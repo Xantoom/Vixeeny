@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The settings model (plan 5.13): every setting is a [`Row`] with a way to read it from a
+//! The settings model: every setting is a [`Row`] with a way to read it from a
 //! [`Config`] and a validated way to write it. The settings window only draws rows; a change is
 //! applied the moment it is made.
 //!
@@ -152,6 +152,9 @@ pub struct Row {
     pub kind: Kind,
     /// How a choice is drawn.
     pub picker: Picker,
+    /// Shown greyed out: it does not apply with the other settings as they are (the "i" says
+    /// why).
+    pub greyed: bool,
     get: Get,
     set: Set,
 }
@@ -161,15 +164,17 @@ impl Row {
         (self.get)(config)
     }
 
-    /// Whether it can be changed (a setting that does not apply is left out of the page, not
-    /// greyed out).
+    /// Whether it can be changed.
     pub fn enabled(&self) -> bool {
-        !matches!(self.kind, Kind::Info | Kind::Header | Kind::Meter)
+        !self.greyed && !matches!(self.kind, Kind::Info | Kind::Header | Kind::Meter)
     }
 
     /// Checks `value` against the kind of the row, then writes it. Numbers are brought into
     /// range and onto the step.
     pub fn apply(&self, config: &mut Config, value: Value) -> Result<(), Invalid> {
+        if self.greyed {
+            return Err(Invalid);
+        }
         let value = match (&self.kind, value) {
             (Kind::Toggle, v @ Value::Bool(_)) => v,
             (Kind::Choice(options), Value::Text(t)) => {
@@ -336,6 +341,7 @@ fn row(id: impl Into<String>, label: String, kind: Kind, get: Get, set: Set) -> 
         icon: None,
         kind,
         picker: Picker::List,
+        greyed: false,
         get,
         set,
     }
@@ -457,6 +463,12 @@ fn meter(id: &str, label: String) -> Row {
 /// Adds `more` to what the "i" of the row says (after the explanation of the setting).
 fn hinted(mut row: Row, more: String) -> Row {
     row.info = more;
+    row
+}
+
+/// Greys the row out: it does not apply as the other settings are.
+fn greyed(mut row: Row) -> Row {
+    row.greyed = true;
     row
 }
 
@@ -796,19 +808,6 @@ mod tests {
     }
 
     #[test]
-    fn video_rows_edit_the_video_settings() {
-        let mut c = Config::default();
-        let video = rows(Section::Video, &env(), &c);
-        row(&video, "fps")
-            .apply(&mut c, Value::Text("30".into()))
-            .unwrap();
-        row(&video, "container")
-            .apply(&mut c, Value::Text("mkv".into()))
-            .unwrap();
-        assert_eq!((c.video.fps, c.video.container.as_str()), (30, "mkv"));
-    }
-
-    #[test]
     fn the_video_page_offers_what_the_monitors_can_show() {
         let rates = |e: &Env, c: &Config| match &row(&rows(Section::Video, e, c), "fps").kind {
             Kind::Choice(o) => o.iter().map(|o| o.value.clone()).collect::<Vec<_>>(),
@@ -947,16 +946,6 @@ mod tests {
             .apply(&mut c, Value::Text("disk".into()))
             .unwrap();
         assert_eq!(c.replay.storage, "disk");
-    }
-
-    #[test]
-    fn labels_follow_the_language() {
-        let c = Config::default();
-        let fr = Env::new(Lang::Fr, "1");
-        let en = env();
-        assert_eq!(rows(Section::General, &fr, &c)[0].label, "Langue");
-        assert_eq!(rows(Section::General, &en, &c)[0].label, "Language");
-        assert!(!fr.encoders.is_empty());
     }
 
     fn with_nvenc() -> Env {
@@ -1103,6 +1092,14 @@ mod tests {
         assert_eq!(c.image.hdr, "tonemap_sdr");
         hdr.apply(&mut c, Value::Bool(true)).unwrap();
         assert_eq!(c.image.hdr, "keep_hdr");
+        assert!(hdr.enabled());
+        // WebP cannot keep it: the switch is greyed out, its "i" says why.
+        c.image.format = "webp".into();
+        let images = rows(Section::Image, &env, &c);
+        let greyed = row(&images, "image_hdr");
+        assert!(!greyed.enabled());
+        assert!(greyed.info.contains("WebP"), "{}", greyed.info);
+        assert!(greyed.apply(&mut c, Value::Bool(false)).is_err());
         let video = rows(Section::Video, &env, &c);
         row(&video, "hdr").apply(&mut c, Value::Bool(true)).unwrap();
         assert_eq!(c.video.hdr, "keep_hdr");

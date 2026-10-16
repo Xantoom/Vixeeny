@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The first-run assistant (plan 5.15): language, folders, start-up, hardware.
+//! The first-run assistant: language, folders, start-up, hardware.
 
 use std::cell::RefCell;
 use std::rc::Rc;

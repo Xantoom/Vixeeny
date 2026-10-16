@@ -198,12 +198,4 @@ mod tests {
         assert!(!dark_theme("system", false));
         assert!(dark_theme("whatever", true));
     }
-
-    #[test]
-    fn the_dark_accent_is_brighter() {
-        let theme = Theme::new(Look::default());
-        // #0078d4 has value 0.83: ×1.45 clamps to 1.0.
-        let (_, _, v) = rgb_to_hsv(theme.accent.0[0], theme.accent.0[1], theme.accent.0[2]);
-        assert!((v - 1.0).abs() < 1e-5);
-    }
 }

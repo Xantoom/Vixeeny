@@ -37,6 +37,14 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
             "10 bits avoids bands in gradients.\nNeeded for HDR.",
             "10 bits évite les bandes dans les dégradés.\nNécessaire pour le HDR.",
         ),
+        "window_backdrop" => pick(
+            "Window captures get a margin, rounded corners and a soft shadow, over a blur of the window or the accent colour of Windows.",
+            "Les captures de fenêtre reçoivent une marge, des coins arrondis et une ombre douce, sur un flou de la fenêtre ou la couleur d'accentuation de Windows.",
+        ),
+        "image_hdr" if config.image.format == "webp" => pick(
+            "WebP cannot keep HDR: its pictures are always converted.\nPNG, JPEG, AVIF and JPEG XL can keep it.",
+            "Le WebP ne peut pas garder le HDR : ses images sont toujours converties.\nPNG, JPEG, AVIF et JPEG XL peuvent le garder.",
+        ),
         "image_hdr" | "hdr" => pick(
             "Keeps the HDR colours and brightness of the screen.\nOff: the picture is converted to show right everywhere.",
             "Garde les couleurs et la luminosité HDR de l'écran.\nDésactivé : l'image est convertie pour s'afficher correctement partout.",

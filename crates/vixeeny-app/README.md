@@ -1,5 +1,5 @@
 # vixeeny-app
 
-On-demand app: overlay, editor, recording, settings (M7+).
+On-demand app: overlay, editor, recording, settings.
 
-Part of the [Vixeeny](../../VIXEENY_PLAN.md) workspace.
+Part of the [Vixeeny](../../README.md) workspace.

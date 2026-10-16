@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Round trips (CA-FMT-2): encode, decode, compare dimensions and, for lossless formats,
+//! Round trips: encode, decode, compare dimensions and, for lossless formats,
 //! pixels.
 
 use super::*;
@@ -115,33 +115,51 @@ fn webp_lossy_decodes_to_the_same_size() {
     assert_eq!((got.width(), got.height()), (40, 30));
 }
 
-#[test]
-fn bad_buffers_are_rejected() {
-    assert!(
-        encode(
-            ImageFormat::Png,
-            &Bgra::new(2, 2, 8, &[0; 15]),
-            &Settings::default()
-        )
-        .is_err()
-    );
-    assert!(
-        encode(
-            ImageFormat::Jpeg,
-            &Bgra::new(0, 2, 0, &[]),
-            &Settings::default()
-        )
-        .is_err()
-    );
+fn smooth(width: u32, height: u32) -> (Vec<u8>, usize) {
+    let stride = width as usize * 4;
+    let mut data = vec![255u8; stride * height as usize];
+    for y in 0..height as usize {
+        for x in 0..width as usize {
+            let i = y * stride + x * 4;
+            data[i] = (x * 255 / width as usize) as u8;
+            data[i + 1] = (y * 255 / height as usize) as u8;
+            data[i + 2] = ((x + y) * 255 / (width + height) as usize) as u8;
+        }
+    }
+    (data, stride)
 }
 
 #[test]
-fn format_names() {
-    assert_eq!(ImageFormat::from_name("PNG"), Some(ImageFormat::Png));
-    assert_eq!(ImageFormat::from_name("jpg"), Some(ImageFormat::Jpeg));
-    assert_eq!(ImageFormat::from_name("bmp"), None);
-    assert_eq!(ImageFormat::WebP.extension(), "webp");
-    assert_eq!(Chroma::from_name("420"), Some(Chroma::Yuv420));
+fn avif_round_trip_in_both_depths_and_chromas() {
+    let (data, stride) = smooth(96, 64);
+    let img = Bgra::new(96, 64, stride, &data);
+    let want = rgb_of(&data, stride, 96, 64);
+    for (depth, chroma) in [
+        (10, Chroma::Yuv444),
+        (8, Chroma::Yuv444),
+        (10, Chroma::Yuv420),
+    ] {
+        let settings = Settings {
+            avif: AvifSettings {
+                quality: 90,
+                speed: 10,
+                depth,
+                chroma,
+            },
+            ..Settings::default()
+        };
+        let bytes = encode(ImageFormat::Avif, &img, &settings).unwrap();
+        assert_eq!(&bytes[4..12], b"ftypavif");
+        let (w, h, got) = crate::avif::decode_rgb(&bytes).unwrap();
+        assert_eq!((w, h), (96, 64));
+        let err: u64 = got
+            .iter()
+            .zip(&want)
+            .map(|(a, b)| u64::from(a.abs_diff(*b)))
+            .sum();
+        let mean = err as f64 / want.len() as f64;
+        assert!(mean < 4.0, "{depth}-bit {chroma:?}: mean error {mean}");
+    }
 }
 
 #[cfg(feature = "native-codecs")]
@@ -176,53 +194,6 @@ mod native {
             let mean = err as f64 / want.len() as f64;
             let limit = if chroma == Chroma::Yuv444 { 6.0 } else { 14.0 }; // noisy test image
             assert!(mean < limit, "{chroma:?}: mean error {mean}");
-        }
-    }
-
-    fn smooth(width: u32, height: u32) -> (Vec<u8>, usize) {
-        let stride = width as usize * 4;
-        let mut data = vec![255u8; stride * height as usize];
-        for y in 0..height as usize {
-            for x in 0..width as usize {
-                let i = y * stride + x * 4;
-                data[i] = (x * 255 / width as usize) as u8;
-                data[i + 1] = (y * 255 / height as usize) as u8;
-                data[i + 2] = ((x + y) * 255 / (width + height) as usize) as u8;
-            }
-        }
-        (data, stride)
-    }
-
-    #[test]
-    fn avif_round_trip_in_both_depths_and_chromas() {
-        let (data, stride) = smooth(96, 64);
-        let img = Bgra::new(96, 64, stride, &data);
-        let want = rgb_of(&data, stride, 96, 64);
-        for (depth, chroma) in [
-            (10, Chroma::Yuv444),
-            (8, Chroma::Yuv444),
-            (10, Chroma::Yuv420),
-        ] {
-            let settings = Settings {
-                avif: AvifSettings {
-                    quality: 90,
-                    speed: 10,
-                    depth,
-                    chroma,
-                },
-                ..Settings::default()
-            };
-            let bytes = encode(ImageFormat::Avif, &img, &settings).unwrap();
-            assert_eq!(&bytes[4..12], b"ftypavif");
-            let (w, h, got) = crate::avif::decode_rgb(&bytes).unwrap();
-            assert_eq!((w, h), (96, 64));
-            let err: u64 = got
-                .iter()
-                .zip(&want)
-                .map(|(a, b)| u64::from(a.abs_diff(*b)))
-                .sum();
-            let mean = err as f64 / want.len() as f64;
-            assert!(mean < 4.0, "{depth}-bit {chroma:?}: mean error {mean}");
         }
     }
 

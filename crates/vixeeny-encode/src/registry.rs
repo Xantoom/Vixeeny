@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The codec registry (plan 6.1): everything the application knows about encoders is data in
+//! The codec registry: everything the application knows about encoders is data in
 //! `codecs/registry.toml`, embedded in the binary.
 
 use std::collections::BTreeMap;

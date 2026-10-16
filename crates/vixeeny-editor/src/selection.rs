@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The capture area (plan 5.3 steps 3–5): drawing a zone, resizing and moving it with handles,
+//! The capture area: drawing a zone, resizing and moving it with handles,
 //! window detection, and where the toolbar, size label and magnifier go. Pure geometry; all
 //! coordinates are pixels of the frozen image.
 
@@ -196,11 +196,17 @@ impl Selection {
     }
 
     pub fn pointer_down(&mut self, p: Point) {
+        // Off the image (around a picture shown smaller than the screen): always a new zone,
+        // never the edge or the handle the point would be clamped onto.
+        let outside = self.clamp(p) != p;
         let p = self.clamp(p);
         self.press = Some(p);
         let fresh = self.rests_on_fresh_zone(p);
         self.fresh = None;
-        self.mode = if let (true, Some(original)) = (fresh, self.rect) {
+        self.mode = if outside {
+            self.rect = None;
+            Mode::Drawing { start: p }
+        } else if let (true, Some(original)) = (fresh, self.rect) {
             Mode::Moving { grab: p, original }
         } else if let (Some(handle), Some(original)) = (self.handle_at(p), self.rect) {
             Mode::Resizing { handle, original }
@@ -273,6 +279,11 @@ impl Selection {
     pub fn select_all(&mut self) {
         self.rect = Some(self.bounds);
     }
+
+    /// Keeps every zone within `area` from now on.
+    pub fn limit_to(&mut self, area: Rect) {
+        self.bounds = area;
+    }
 }
 
 fn resize(original: &Rect, handle: Handle, p: Point) -> Rect {
@@ -293,7 +304,7 @@ fn resize(original: &Rect, handle: Handle, p: Point) -> Rect {
 }
 
 /// Where to put a box of `size` next to the zone: below it, else above, else inside at the
-/// bottom — kept within `bounds` (plan 5.3 step 4). `gap` separates box and zone.
+/// bottom — kept within `bounds`. `gap` separates box and zone.
 pub fn place_beside(zone: &Rect, size: (f32, f32), bounds: &Rect, gap: f32) -> Point {
     let x = (zone.right() - size.0).clamp(bounds.x, (bounds.right() - size.0).max(bounds.x));
     let below = zone.bottom() + gap;

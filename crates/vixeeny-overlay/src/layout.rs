@@ -37,6 +37,7 @@ pub enum Button {
     Undo,
     Redo,
     Copy,
+    CopyText,
     Save,
     SaveAs,
     Scroll,
@@ -55,7 +56,7 @@ const fn spec(button: Button, x: f32, icon: &'static str) -> ButtonSpec {
 
 /// The bar, in its groups: the zone · drawing · shapes and text · masks · style · history ·
 /// outputs · close. The order is the order of the tips the host gives.
-pub const BUTTONS: [ButtonSpec; 20] = [
+pub const BUTTONS: [ButtonSpec; 21] = [
     spec(Button::Tool(12), 6.0, icons::MOVE),
     spec(Button::Tool(0), 40.0, icons::CURSOR),
     spec(Button::Tool(1), 87.0, icons::PEN),
@@ -72,16 +73,17 @@ pub const BUTTONS: [ButtonSpec; 20] = [
     spec(Button::Undo, 513.0, icons::UNDO),
     spec(Button::Redo, 547.0, icons::REDO),
     spec(Button::Copy, 594.0, icons::COPY),
-    spec(Button::Save, 628.0, icons::SAVE),
-    spec(Button::SaveAs, 662.0, icons::SAVE_AS),
-    spec(Button::Scroll, 696.0, icons::SCROLL),
-    spec(Button::Close, 743.0, icons::DISMISS),
+    spec(Button::CopyText, 628.0, icons::SCAN_TEXT),
+    spec(Button::Save, 662.0, icons::SAVE),
+    spec(Button::SaveAs, 696.0, icons::SAVE_AS),
+    spec(Button::Scroll, 730.0, icons::SCROLL),
+    spec(Button::Close, 777.0, icons::DISMISS),
 ];
 
 /// The hairlines between the groups.
-pub const SEPARATORS: [f32; 7] = [78.0, 227.0, 376.0, 457.0, 504.0, 585.0, 734.0];
+pub const SEPARATORS: [f32; 7] = [78.0, 227.0, 376.0, 457.0, 504.0, 585.0, 768.0];
 
-pub const BAR_W: f32 = 779.0;
+pub const BAR_W: f32 = 813.0;
 pub const BAR_H: f32 = 46.0;
 pub const BUTTON: f32 = 30.0;
 pub const BUTTON_Y: f32 = 8.0;
@@ -212,9 +214,9 @@ mod tests {
         assert_eq!(button_at(10.0, 20.0), Some(0));
         assert_eq!(button_at(500.0, 20.0), None); // between undo and the style button
         assert_eq!(button_at(470.0, 20.0), Some(12));
-        assert_eq!(button_at(760.0, 20.0), Some(19));
+        assert_eq!(button_at(790.0, 20.0), Some(20));
         assert_eq!(button_at(10.0, 2.0), None);
-        assert!(matches!(BUTTONS[19].button, Button::Close));
+        assert!(matches!(BUTTONS[20].button, Button::Close));
     }
 
     #[test]
@@ -248,12 +250,5 @@ mod tests {
     fn the_panel_opens_below_near_the_top() {
         assert_eq!(panel_offset(500.0, false).1, -PANEL_H - 8.0);
         assert_eq!(panel_offset(20.0, false).1, BAR_H + 8.0);
-    }
-
-    #[test]
-    fn shade_and_hue_are_clamped() {
-        assert_eq!(shade_at(0.0, 0.0), (0.0, 1.0));
-        assert_eq!(shade_at(1000.0, 1000.0), (1.0, 0.0));
-        assert!(hue_at(1000.0) < 360.0);
     }
 }

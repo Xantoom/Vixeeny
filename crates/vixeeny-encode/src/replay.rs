@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The replay buffer (plan 5.11): a ring of encoded packets, in RAM or in temporary files on
+//! The replay buffer: a ring of encoded packets, in RAM or in temporary files on
 //! disk, cut on key frames. Nothing is re-encoded: a save remuxes the last seconds of packets into
 //! a file.
 //!

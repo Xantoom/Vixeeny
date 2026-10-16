@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Notifications (plan 5.14): a card with the thumbnail after a capture, a recording or a replay,
+//! Notifications: a card with the thumbnail after a capture, a recording or a replay,
 //! and a clear message with a way out when something fails. The cards are shown by a process of
 //! their own (`vixeeny-app --toast-host`), so they never hold up the next hotkey. It is started
 //! once and reads the next cards on its standard input: a card costs no new process. It ends with
@@ -18,6 +18,8 @@ pub enum Toast {
     Saved(Saved, PathBuf),
     /// Something failed; the message is already user-facing.
     Failed(Failed, String),
+    /// The text read in a zone is on the clipboard.
+    TextCopied(String),
     /// A new version can be installed (sent by the daemon); a click opens the settings.
     Update(String),
     /// A game started (its executable, and the name it is shown by): the replay runs with it
@@ -41,6 +43,10 @@ pub enum Failed {
     Audio,
     /// The replays' disk is almost full: a warning, before the saves fail.
     DiskLow,
+    /// A zone was read and held no text.
+    NoText,
+    /// The text of a zone could not be read.
+    Ocr,
 }
 
 impl Saved {
@@ -69,6 +75,8 @@ impl Failed {
             Self::Replay => "replay",
             Self::Audio => "audio",
             Self::DiskLow => "disk-low",
+            Self::NoText => "no-text",
+            Self::Ocr => "ocr",
         }
     }
 
@@ -79,6 +87,8 @@ impl Failed {
             Self::Replay => Key::ToastReplayFailed,
             Self::Audio => Key::ToastAudioLost,
             Self::DiskLow => Key::ToastDiskLow,
+            Self::NoText => Key::ToastNoText,
+            Self::Ocr => Key::ToastOcrFailed,
         }
     }
 }
@@ -92,6 +102,7 @@ impl Toast {
             }
             Self::Failed(kind, message) => [format!("failed-{}", kind.name()), message.clone()],
             Self::Update(text) => ["update".to_owned(), text.clone()],
+            Self::TextCopied(text) => ["text-copied".to_owned(), text.clone()],
             // A path holds no `|`.
             Self::Replay(on, exe, name) => [
                 if *on { "replay-on" } else { "replay-off" }.to_owned(),
@@ -112,6 +123,9 @@ impl Toast {
             "failed-replay" => failed(Failed::Replay),
             "failed-audio" => failed(Failed::Audio),
             "failed-disk-low" => failed(Failed::DiskLow),
+            "failed-no-text" => failed(Failed::NoText),
+            "failed-ocr" => failed(Failed::Ocr),
+            "text-copied" => Some(Self::TextCopied(text.to_owned())),
             "update" => Some(Self::Update(text.to_owned())),
             "replay-on" | "replay-off" => {
                 let (exe, name) = text.split_once('|')?;
@@ -251,6 +265,7 @@ fn content_of(toast: &Toast) -> ToastContent {
                 picture_only: true,
                 menu: [
                     Key::ToastMenuOpen,
+                    Key::ToastMenuEdit,
                     Key::ToastMenuReveal,
                     Key::ToastMenuClose,
                 ]
@@ -274,11 +289,21 @@ fn content_of(toast: &Toast) -> ToastContent {
             heading: tr(kind.title(), lang).into(),
             body: message.clone(),
             thumb: None,
-            // A filling disk is a warning: the replay still runs.
-            error: *kind != Failed::DiskLow,
+            // A filling disk is a warning: the replay still runs. A zone without text is no fault.
+            error: !matches!(kind, Failed::DiskLow | Failed::NoText),
             warning: *kind == Failed::DiskLow,
             dark,
-            action_label: tr(Key::ToastOpenSettings, lang).into(),
+            action_label: match kind {
+                Failed::NoText => String::new(),
+                Failed::Ocr => tr(Key::ToastOcrLanguages, lang).into(),
+                _ => tr(Key::ToastOpenSettings, lang).into(),
+            },
+            ..ToastContent::default()
+        },
+        Toast::TextCopied(text) => ToastContent {
+            heading: tr(Key::ToastTextCopied, lang).into(),
+            body: text.clone(),
+            dark,
             ..ToastContent::default()
         },
         Toast::Replay(on, exe, name) => {
@@ -346,6 +371,13 @@ fn act(event: Option<ToastEvent>, toast: &Toast) {
         (Some(ToastEvent::Action), Toast::Saved(_, path)) => {
             let _ = vixeeny_platform::reveal(&path.display().to_string());
         }
+        (Some(ToastEvent::Edit), Toast::Saved(_, path)) => crate::region::open_editor(path),
+        (Some(ToastEvent::Edit), _) => {}
+        (Some(_), Toast::Failed(Failed::NoText, _) | Toast::TextCopied(_)) => {}
+        // The languages page of Windows, where a recognition language is added.
+        (Some(_), Toast::Failed(Failed::Ocr, _)) => {
+            let _ = vixeeny_platform::open_path("ms-settings:regionlanguage");
+        }
         (Some(_), Toast::Failed(..)) => crate::open_settings(),
         (Some(_), Toast::Replay(..)) => {}
         (Some(_), Toast::Update(_)) => {
@@ -412,13 +444,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_toast_survives_the_command_line() {
+    fn a_toast_reaches_the_card_process_intact() {
         for toast in [
-            Toast::Saved(Saved::Image, PathBuf::from(r"C:\Users\x\a b.png")),
+            Toast::Saved(Saved::Image, PathBuf::from(r"C:\Users\x\a b\tc.png")),
             Toast::Saved(Saved::Replay, PathBuf::from("r.mp4")),
-            Toast::Failed(Failed::Recording, "no encoder: \"x\"".into()),
+            Toast::Failed(Failed::Recording, "line one\nline two\\n\r \"x\"".into()),
             Toast::Failed(Failed::Audio, "mic: device removed".into()),
             Toast::Update("Version 1.2 is available".into()),
+            Toast::TextCopied(
+                "Total	12,50 €
+Merci"
+                    .into(),
+            ),
+            Toast::Failed(Failed::NoText, String::new()),
+            Toast::Failed(Failed::Ocr, "no language".into()),
             Toast::Replay(
                 true,
                 PathBuf::from(r"D:\Games\Hades\Hades.exe"),
@@ -430,24 +469,11 @@ mod tests {
                 "Wuthering | Waves".into(),
             ),
         ] {
-            let [kind, text] = toast.to_args();
-            assert_eq!(Toast::from_args(&kind, &text), Some(toast));
-        }
-        assert_eq!(Toast::from_args("nonsense", "x"), None);
-    }
-
-    #[test]
-    fn a_toast_survives_the_line_to_the_card_process() {
-        for toast in [
-            Toast::Saved(Saved::Image, PathBuf::from(r"C:\Users\x\a\tb.png")),
-            Toast::Failed(Failed::Recording, "line one\nline two\\n\r".into()),
-            Toast::Update("Version 1.2".into()),
-        ] {
             let line = encode_line(&toast.to_args());
             assert_eq!(line.matches('\n').count(), 1);
-            assert!(line.ends_with('\n'));
             assert_eq!(decode_line(line.trim_end_matches('\n')), Some(toast));
         }
+        assert_eq!(decode_line("nonsense\tx"), None);
         assert_eq!(decode_line("no tab"), None);
     }
 

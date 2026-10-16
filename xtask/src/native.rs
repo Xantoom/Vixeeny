@@ -28,8 +28,8 @@ fn recipe_rev(name: &str) -> &'static str {
     }
 }
 
-/// Build order matters: libavif links against SVT-AV1 and dav1d.
-const ORDER: &[&str] = &["svt-av1", "dav1d", "libwebp", "libjxl", "jpegli", "libavif"];
+/// The order they are built in.
+const ORDER: &[&str] = &["libjxl", "jpegli", "libjpeg-turbo", "libultrahdr"];
 
 struct Ctx {
     work: PathBuf,
@@ -284,8 +284,15 @@ fn fetch(ctx: &Ctx, name: &str, lib: &Lib) -> Result<PathBuf> {
 }
 
 fn cmake(ctx: &Ctx, src: &Path, sub: &str, extra: &[&str]) -> Result<()> {
+    configure_and_build(ctx, src, sub, extra)?;
+    let build = src.join("vx-build").to_string_lossy().into_owned();
+    run(src, "cmake", &["--install", &build], &[])
+}
+
+fn configure_and_build(ctx: &Ctx, src: &Path, sub: &str, extra: &[&str]) -> Result<()> {
     let build = src.join("vx-build");
     let prefix = format!("-DCMAKE_INSTALL_PREFIX={}", ctx.prefix.display());
+    // A later `-DCMAKE_INSTALL_PREFIX` in `extra` wins.
     let mut args = vec![
         "-S",
         sub,
@@ -298,67 +305,41 @@ fn cmake(ctx: &Ctx, src: &Path, sub: &str, extra: &[&str]) -> Result<()> {
         "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
         "-DBUILD_SHARED_LIBS=OFF",
         &prefix,
-        "-DCMAKE_C_COMPILER=cl",
-        "-DCMAKE_CXX_COMPILER=cl",
     ];
+    let toolchain = compilers()?;
+    args.extend(toolchain.iter().map(String::as_str));
     args.extend_from_slice(extra);
     run(src, "cmake", &args, &[])?;
     let build = build.to_string_lossy().into_owned();
-    run(src, "cmake", &["--build", &build, "-j", &ctx.jobs], &[])?;
-    run(src, "cmake", &["--install", &build], &[])
+    run(src, "cmake", &["--build", &build, "-j", &ctx.jobs], &[])
+}
+
+/// MSVC on Windows. Elsewhere (WSL) the Windows libraries are cross-built with the clang-cl
+/// toolchain of cargo-xwin, so that the Windows tests run from Linux link them too.
+fn compilers() -> Result<Vec<String>> {
+    if cfg!(windows) {
+        return Ok(vec![
+            "-DCMAKE_C_COMPILER=cl".into(),
+            "-DCMAKE_CXX_COMPILER=cl".into(),
+        ]);
+    }
+    let home = std::env::var("HOME").context("HOME")?;
+    let toolchain = Path::new(&home)
+        .join(".cache/cargo-xwin/cmake/clang-cl/x86_64-pc-windows-msvc-toolchain.cmake");
+    if !toolchain.exists() {
+        bail!(
+            "{} is missing: run any `cargo xwin` build once to create it",
+            toolchain.display()
+        );
+    }
+    Ok(vec![format!(
+        "-DCMAKE_TOOLCHAIN_FILE={}",
+        toolchain.display()
+    )])
 }
 
 fn recipe(ctx: &Ctx, name: &str, src: &Path) -> Result<()> {
-    let prefix = ctx.prefix.display().to_string();
     match name {
-        "svt-av1" => cmake(
-            ctx,
-            src,
-            ".",
-            &[
-                "-DBUILD_APPS=OFF",
-                "-DBUILD_DEC=OFF",
-                "-DBUILD_TESTING=OFF",
-                "-DSVT_AV1_LTO=OFF",
-            ],
-        ),
-        "dav1d" => {
-            run(
-                src,
-                "meson",
-                &[
-                    "setup",
-                    "vx-build",
-                    "--prefix",
-                    &prefix,
-                    "--libdir",
-                    "lib",
-                    "--buildtype=release",
-                    "-Ddefault_library=static",
-                    "-Db_vscrt=md",
-                    "-Denable_tools=false",
-                    "-Denable_tests=false",
-                ],
-                &[],
-            )?;
-            run(src, "ninja", &["-C", "vx-build", "install"], &[])
-        }
-        "libwebp" => cmake(
-            ctx,
-            src,
-            ".",
-            &[
-                "-DWEBP_BUILD_ANIM_UTILS=OFF",
-                "-DWEBP_BUILD_CWEBP=OFF",
-                "-DWEBP_BUILD_DWEBP=OFF",
-                "-DWEBP_BUILD_GIF2WEBP=OFF",
-                "-DWEBP_BUILD_IMG2WEBP=OFF",
-                "-DWEBP_BUILD_VWEBP=OFF",
-                "-DWEBP_BUILD_WEBPINFO=OFF",
-                "-DWEBP_BUILD_WEBPMUX=OFF",
-                "-DWEBP_BUILD_EXTRAS=OFF",
-            ],
-        ),
         "libjxl" => cmake(
             ctx,
             src,
@@ -406,19 +387,50 @@ fn recipe(ctx: &Ctx, name: &str, src: &Path) -> Result<()> {
             )?;
             install_jpegli(ctx, src)
         }
-        "libavif" => cmake(
-            ctx,
-            src,
-            ".",
-            &[
-                "-DAVIF_CODEC_SVT=SYSTEM",
-                "-DAVIF_CODEC_DAV1D=SYSTEM",
-                "-DAVIF_LIBYUV=OFF",
-                "-DAVIF_BUILD_APPS=OFF",
-                "-DAVIF_BUILD_TESTS=OFF",
-                &format!("-DCMAKE_PREFIX_PATH={prefix}"),
-            ],
-        ),
+        // Only for libultrahdr, installed apart: its `jpeglib.h` must not shadow jpegli's.
+        "libjpeg-turbo" => {
+            let turbo = format!("-DCMAKE_INSTALL_PREFIX={}", turbo_prefix(ctx).display());
+            configure_and_build(
+                ctx,
+                src,
+                ".",
+                &[
+                    "-DENABLE_SHARED=OFF",
+                    "-DWITH_CRT_DLL=ON",
+                    "-DWITH_TURBOJPEG=OFF",
+                    "-DWITH_TOOLS=OFF",
+                    "-DWITH_TESTS=OFF",
+                    &turbo,
+                ],
+            )?;
+            let build = src.join("vx-build").to_string_lossy().into_owned();
+            run(src, "cmake", &["--install", &build], &[])
+        }
+        "libultrahdr" => {
+            let turbo = turbo_prefix(ctx);
+            let include = format!("-DJPEG_INCLUDE_DIR={}", turbo.join("include").display());
+            let library = format!(
+                "-DJPEG_LIBRARY={}",
+                turbo.join("lib/jpeg-static.lib").display()
+            );
+            configure_and_build(
+                ctx,
+                src,
+                ".",
+                &[
+                    &include,
+                    &library,
+                    "-DUHDR_ENABLE_HEIF=OFF",
+                    "-DUHDR_BUILD_EXAMPLES=OFF",
+                    "-DUHDR_ENABLE_INSTALL=OFF",
+                    // A static build would otherwise force the static CRT (/MT); this switch keeps
+                    // the runtime given below (/MD), like everything else here and the Rust side.
+                    "-DBUILD_FOR_WINUI=ON",
+                    "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL",
+                ],
+            )?;
+            install_ultrahdr(ctx, src)
+        }
         other => bail!("no recipe for {other}"),
     }
 }
@@ -440,5 +452,38 @@ fn install_jpegli(ctx: &Ctx, src: &Path) -> Result<()> {
     let pc_dir = ctx.prefix.join("lib/pkgconfig");
     std::fs::create_dir_all(&pc_dir)?;
     std::fs::write(pc_dir.join("libjpegli.pc"), pc)?;
+    Ok(())
+}
+
+fn turbo_prefix(ctx: &Ctx) -> PathBuf {
+    ctx.work.join("turbo-prefix")
+}
+
+/// libultrahdr installs nothing when cross-built: copy its library, its libjpeg-turbo and its
+/// header, and describe them for pkg-config.
+fn install_ultrahdr(ctx: &Ctx, src: &Path) -> Result<()> {
+    let lib = ctx.prefix.join("lib");
+    for (from, to) in [
+        (src.join("vx-build/uhdr-static.lib"), "uhdr.lib"),
+        (
+            turbo_prefix(ctx).join("lib/jpeg-static.lib"),
+            "uhdr_jpeg.lib",
+        ),
+    ] {
+        std::fs::copy(&from, lib.join(to))
+            .with_context(|| format!("copying {}", from.display()))?;
+    }
+    std::fs::copy(
+        src.join("ultrahdr_api.h"),
+        ctx.prefix.join("include/ultrahdr_api.h"),
+    )
+    .context("copying ultrahdr_api.h")?;
+    let pc = format!(
+        "prefix={p}\nlibdir=${{prefix}}/lib\nincludedir=${{prefix}}/include\n\n\
+         Name: libuhdr\nDescription: libultrahdr, JPEG with an HDR gain map\nVersion: 2.0.2\n\
+         Libs: -L${{libdir}} -luhdr -luhdr_jpeg\nCflags: -I${{includedir}}\n",
+        p = ctx.prefix.display()
+    );
+    std::fs::write(lib.join("pkgconfig/libuhdr.pc"), pc)?;
     Ok(())
 }

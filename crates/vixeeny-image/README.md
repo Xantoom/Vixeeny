@@ -1,5 +1,5 @@
 # vixeeny-image
 
-Image encoding, decoding, conversion, HDR tone-mapping (M5).
+Image encoding, decoding, conversion, HDR tone-mapping.
 
-Part of the [Vixeeny](../../VIXEENY_PLAN.md) workspace.
+Part of the [Vixeeny](../../README.md) workspace.

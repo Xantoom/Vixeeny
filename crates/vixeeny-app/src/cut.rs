@@ -17,6 +17,7 @@ use anyhow::Context;
 use vixeeny_common::config::Config;
 use vixeeny_common::i18n::{Key, Lang, tr};
 use vixeeny_encode::cut::{Clip, Picture, Pictures, Reencode, Sound};
+use vixeeny_image::anim::AnimFormat;
 use vixeeny_overlay::cutter::{Cutter, CutterEvent, CutterHost, CutterTexts, Frames, Waker};
 
 use crate::toast::{Failed, Saved, Toast};
@@ -637,7 +638,8 @@ impl Host {
             .name("cut-export".into())
             .spawn(move || {
                 // The encoders are looked up here, not on the window's thread.
-                let reencoders = if clip.lossless(range.0, range.1) {
+                let reencoders = if clip.lossless(range.0, range.1) || anim_format(&dest).is_some()
+                {
                     Vec::new()
                 } else {
                     crate::record::reencoders(&config, &clip)
@@ -651,7 +653,13 @@ impl Host {
                         waker.wake();
                     }
                 };
-                let result = write(&clip, range, &dest, &reencoders, &tell, &stop);
+                let result = match anim_format(&dest) {
+                    Some(format) => {
+                        let settings = crate::image_output(&config).1;
+                        write_animation(&clip, range, &dest, format, &settings, &tell, &stop)
+                    }
+                    None => write(&clip, range, &dest, &reencoders, &tell, &stop),
+                };
                 let _ = mail.send(Mail::Written(result.map(|()| dest)));
                 waker.wake();
             });
@@ -673,6 +681,17 @@ impl Host {
         let mut dialog = rfd::FileDialog::new()
             .set_title(tr(Key::CutSaveAs, self.lang).trim_end_matches('…'))
             .add_filter(ext.to_uppercase(), &[ext.as_str()]);
+        // The part as an animated picture, to drop in a message or a ticket.
+        let animated = tr(Key::CutAnimated, self.lang);
+        for format in AnimFormat::ALL {
+            let name = format.extension().to_uppercase();
+            let label = if format == AnimFormat::Gif {
+                name
+            } else {
+                format!("{name} ({animated})")
+            };
+            dialog = dialog.add_filter(label, &[format.extension()]);
+        }
         let suggested = cut_name(&self.clip.path);
         if let Some(dir) = suggested.parent() {
             dialog = dialog.set_directory(dir);
@@ -722,7 +741,13 @@ impl Host {
                 match result {
                     Ok(path) => {
                         tracing::info!("cut saved: {}", path.display());
-                        crate::toast::notify(&self.config, &Toast::Saved(Saved::Replay, path));
+                        // An animation is shown as a picture.
+                        let kind = if anim_format(&path).is_some() {
+                            Saved::Image
+                        } else {
+                            Saved::Replay
+                        };
+                        crate::toast::notify(&self.config, &Toast::Saved(kind, path));
                         cutter.close();
                     }
                     Err(e) if e == CANCELLED => {
@@ -771,6 +796,70 @@ fn write(
         return Err(CANCELLED.into());
     }
     Err(last)
+}
+
+/// The animated format `path` asks for, by its extension.
+fn anim_format(path: &Path) -> Option<AnimFormat> {
+    AnimFormat::from_extension(path.extension()?.to_str()?)
+}
+
+/// Writes frames `from..=to` as an animated picture: at most the format's frame rate and size,
+/// in SDR (an HDR clip is tone mapped, as in the preview).
+fn write_animation(
+    clip: &Clip,
+    (from, to): (usize, usize),
+    dest: &Path,
+    format: AnimFormat,
+    settings: &vixeeny_image::Settings,
+    progress: &dyn Fn(f32),
+    cancel: &AtomicBool,
+) -> Result<(), String> {
+    use vixeeny_image::anim::{Animation, fit, pick};
+
+    if from > to || to >= clip.frames.len() {
+        return Err("empty cut".into());
+    }
+    let start = clip.time(from);
+    let ms = |t: f64| ((t - start) * 1000.0).round().max(0.0) as u64;
+    let times: Vec<f64> = (from..=to).map(|i| clip.time(i)).collect();
+    let mut keep = vec![false; times.len()];
+    for i in pick(&times, format.max_fps()) {
+        keep[i] = true;
+    }
+    let size = fit(clip.width, clip.height, format.max_side());
+    // Written aside, then renamed: a cancelled or failed export leaves nothing behind.
+    let tmp = dest.with_extension(format!("{}.part", format.extension()));
+    let result = (|| {
+        let mut animation =
+            Animation::new(format, size.0, size.1, settings, &tmp).map_err(|e| e.to_string())?;
+        let mut pictures = Pictures::open(clip).map_err(|e| e.to_string())?;
+        pictures.seek(from).map_err(|e| e.to_string())?;
+        while let Some((i, picture)) = pictures.read(size).map_err(|e| e.to_string())? {
+            if i > to {
+                break;
+            }
+            if cancel.load(Ordering::SeqCst) {
+                return Err(CANCELLED.to_owned());
+            }
+            if keep[i - from] {
+                animation
+                    .push(&picture.bgra, ms(clip.time(i)))
+                    .map_err(|e| e.to_string())?;
+            }
+            pictures.recycle(picture.bgra);
+            progress((i - from + 1) as f32 / times.len() as f32);
+        }
+        animation
+            .finish(ms(clip.time(to) + clip.frame_seconds()))
+            .map_err(|e| e.to_string())
+    })();
+    match result {
+        Ok(()) => std::fs::rename(&tmp, dest).map_err(|e| e.to_string()),
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            Err(e)
+        }
+    }
 }
 
 /// `<name>-cut.<ext>` beside `original`, numbered when it is taken.
@@ -880,6 +969,136 @@ impl CutterHost for Host {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Two seconds at 30 fps, 320×180, no sound: each frame a grey as bright as its number.
+    fn recording(dir: &Path) -> PathBuf {
+        use vixeeny_encode::recorder::{
+            FrameFormat, OutputContainer, RecordConfig, Recorder, Split, VideoFrame,
+        };
+        use vixeeny_encode::registry::{Chroma, PresetName, Registry};
+        const MS: i64 = 1_000_000;
+        let registry = Registry::builtin().unwrap();
+        let encoder = registry.get("libx264").unwrap().clone();
+        let options = encoder
+            .presets
+            .get(PresetName::Performance)
+            .iter()
+            .map(|(k, v)| (k.clone(), v.to_ffmpeg()))
+            .collect();
+        let cfg = RecordConfig {
+            crop: None,
+            encoder,
+            options,
+            container: OutputContainer::Mp4Hybrid,
+            output_size: (320, 180),
+            fps: vixeeny_encode::clock::Fps::whole(30),
+            depth: 8,
+            chroma: Chroma::C420,
+            hdr: false,
+            split: Split::Off,
+            keyframe_seconds: 1.0,
+            queue: 1_000,
+            vfr: false,
+            audio: vec![],
+            gpu: None,
+            replay_seconds: None,
+            replay_storage: vixeeny_encode::replay::Storage::Ram,
+            files: true,
+            buffers: Default::default(),
+        };
+        let out = dir.join("rec.mp4");
+        let path = out.clone();
+        let rec = Recorder::start(cfg, Box::new(move |_| path.clone())).unwrap();
+        for i in 0..60_usize {
+            let v = (i * 4) as u8;
+            let frame = VideoFrame {
+                width: 320,
+                height: 180,
+                stride: 320 * 4,
+                format: FrameFormat::Bgra8,
+                data: [v, v, v, 255].repeat(320 * 180),
+            };
+            rec.push_frame(i as i64 * 1_000 * MS / 30, frame);
+        }
+        rec.stop(2_000 * MS).unwrap();
+        out
+    }
+
+    #[test]
+    fn a_part_of_a_clip_becomes_an_animation() {
+        let dir = std::env::temp_dir().join(format!("vixeeny-cut-anim-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let clip = match Clip::open(&recording(&dir)) {
+            Ok(clip) => clip,
+            Err(e) => {
+                vixeeny_common::skip_test(format!("no FFmpeg: {e}"));
+                return;
+            }
+        };
+        let settings = vixeeny_image::Settings::default();
+        let cancel = AtomicBool::new(false);
+        let last = std::cell::Cell::new(0.0);
+        // One second (frames 15 to 44) as a GIF: 15 frames at 15 fps.
+        let gif = dir.join("part.gif");
+        write_animation(
+            &clip,
+            (15, 44),
+            &gif,
+            AnimFormat::Gif,
+            &settings,
+            &|p| last.set(p),
+            &cancel,
+        )
+        .unwrap();
+        assert!((last.get() - 1.0).abs() < 1e-6);
+        let mut options = gif::DecodeOptions::new();
+        options.set_color_output(gif::ColorOutput::Indexed);
+        let mut decoder = options
+            .read_info(std::fs::File::open(&gif).unwrap())
+            .unwrap();
+        let (mut frames, mut hundredths) = (0, 0_u32);
+        while let Some(frame) = decoder.read_next_frame().unwrap() {
+            frames += 1;
+            hundredths += u32::from(frame.delay);
+            assert_eq!((frame.width, frame.height), (320, 180));
+        }
+        assert_eq!((frames, hundredths), (15, 100));
+        // WebP keeps the clip's 30 fps; nothing is left beside the file.
+        let webp = dir.join("part.webp");
+        write_animation(
+            &clip,
+            (0, 59),
+            &webp,
+            AnimFormat::WebP,
+            &settings,
+            &|_| {},
+            &cancel,
+        )
+        .unwrap();
+        assert!(std::fs::metadata(&webp).unwrap().len() > 0);
+        assert_eq!(anim_format(&webp), Some(AnimFormat::WebP));
+        // Cancelled: no file, no leftover.
+        cancel.store(true, Ordering::SeqCst);
+        let gone = dir.join("gone.avif");
+        let result = write_animation(
+            &clip,
+            (0, 59),
+            &gone,
+            AnimFormat::Avif,
+            &settings,
+            &|_| {},
+            &cancel,
+        );
+        assert_eq!(result, Err(CANCELLED.to_owned()));
+        let left: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name())
+            .collect();
+        assert_eq!(left.len(), 3, "{left:?}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn a_cut_is_named_after_its_replay_and_never_overwrites_one() {

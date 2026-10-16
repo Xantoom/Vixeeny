@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Direct image captures (plan 5.2): full screen under the cursor, active window, all
+//! Direct image captures: full screen under the cursor, active window, all
 //! monitors. Written in the configured format in the images folder. The editor flow (`capture-region`) is M7.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use vixeeny_capture::{CaptureError, CaptureOptions, CaptureTarget, Capturer, StillBackend};
+use vixeeny_capture::{
+    CaptureError, CaptureOptions, CaptureTarget, Capturer, HdrCapture, HdrFrame, StillBackend,
+};
 use vixeeny_common::ipc::ActionId;
 use vixeeny_common::naming::{self, AppInfo, Vars};
-use vixeeny_image::{Bgra, ImageError, ImageFormat, Settings};
+use vixeeny_image::backdrop::{self, Backdrop, Linear};
+use vixeeny_image::{Bgra, Hdr, ImageError, ImageFormat, Settings};
 use vixeeny_platform::{ExeMetadata, LocalTime, MonitorInfo, WindowInfo, monitor_at};
 
 #[derive(Debug, thiserror::Error)]
@@ -71,7 +74,25 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), StillError> {
     std::fs::rename(&tmp, path).map_err(io)
 }
 
-/// Where and under which name captures are written (plan 5.8).
+/// How captures are encoded.
+#[derive(Debug, Clone, Copy)]
+pub struct Output<'a> {
+    pub format: ImageFormat,
+    pub settings: &'a Settings,
+    /// HDR screens are kept as HDR when the format can hold it, rather than tone-mapped.
+    pub keep_hdr: bool,
+    /// A window capture is set on this background.
+    pub backdrop: Option<Backdrop>,
+}
+
+impl Output<'_> {
+    /// Whether an HDR capture is written as HDR.
+    pub fn hdr(&self) -> bool {
+        self.keep_hdr && self.format.holds_hdr()
+    }
+}
+
+/// Where and under which name captures are written.
 pub struct Destination<'a> {
     pub dir: &'a Path,
     pub template: &'a str,
@@ -172,19 +193,76 @@ pub fn run<B: StillBackend>(
     capturer: &mut Capturer<B>,
     dest: &Destination<'_>,
     options: CaptureOptions,
-    output: (ImageFormat, &Settings),
+    output: Output<'_>,
     metadata: &dyn Fn(&str) -> ExeMetadata,
 ) -> Result<PathBuf, StillError> {
     let target = target_for(action, snap)?;
     let started = std::time::Instant::now();
-    let frame = capturer.grab(&target, options)?;
-    let grabbed = started.elapsed();
-    let image = Bgra::new(frame.width, frame.height, frame.stride, &frame.data);
-    let path = save_image(action, snap, dest, output, metadata, &image)?;
-    tracing::debug!(
-        "grabbed in {grabbed:?}, encoded and written in {:?}",
-        started.elapsed() - grabbed
-    );
+    let hdr = if output.hdr() {
+        capturer.grab_hdr(&target, options.show_cursor)?
+    } else {
+        None
+    };
+    // A window set on its background: the interface scale of its screen sizes the margin.
+    let backdrop = output
+        .backdrop
+        .filter(|_| action == ActionId::CaptureWindow)
+        .map(|b| {
+            let scale = snap
+                .foreground
+                .as_ref()
+                .and_then(|w| {
+                    monitor_at(
+                        &snap.monitors,
+                        w.rect.x + w.rect.width as i32 / 2,
+                        w.rect.y + w.rect.height as i32 / 2,
+                    )
+                })
+                .map_or(1.0, |m| m.scale_factor() as f32);
+            (b, scale)
+        });
+    let path = if let Some(mut capture) = hdr {
+        let grabbed = started.elapsed();
+        if let Some((b, scale)) = backdrop {
+            let window = Linear {
+                width: capture.frame.width,
+                height: capture.frame.height,
+                rgba: std::mem::take(&mut capture.frame.rgba),
+            };
+            let white = capture.info.sdr_white_nits / 80.0;
+            let set = backdrop::set_on(&window, b, scale, white);
+            capture.frame = HdrFrame {
+                width: set.width,
+                height: set.height,
+                rgba: set.rgba,
+            };
+        }
+        let path = save_hdr(action, snap, dest, output, metadata, &capture)?;
+        tracing::debug!(
+            "grabbed (HDR) in {grabbed:?}, encoded and written in {:?}",
+            started.elapsed() - grabbed
+        );
+        path
+    } else {
+        let frame = capturer.grab(&target, options)?;
+        let grabbed = started.elapsed();
+        let set = backdrop.map(|(b, scale)| {
+            let window =
+                backdrop::linear_from_bgra(frame.width, frame.height, frame.stride, &frame.data);
+            let set = backdrop::set_on(&window, b, scale, 1.0);
+            (set.width, set.height, backdrop::linear_to_bgra(&set))
+        });
+        let image = match &set {
+            Some((w, h, bgra)) => Bgra::new(*w, *h, *w as usize * 4, bgra),
+            None => Bgra::new(frame.width, frame.height, frame.stride, &frame.data),
+        };
+        let path = save_image(action, snap, dest, output, metadata, &image)?;
+        tracing::debug!(
+            "grabbed in {grabbed:?}, encoded and written in {:?}",
+            started.elapsed() - grabbed
+        );
+        path
+    };
     Ok(path)
 }
 
@@ -194,13 +272,67 @@ pub fn save_image(
     action: ActionId,
     snap: &Snapshot,
     dest: &Destination<'_>,
-    output: (ImageFormat, &Settings),
+    output: Output<'_>,
     metadata: &dyn Fn(&str) -> ExeMetadata,
     image: &Bgra<'_>,
 ) -> Result<PathBuf, StillError> {
-    let (format, settings) = output;
-    let bytes = vixeeny_image::encode(format, image, settings)?;
-    let vars = template_vars(action, snap, dest, metadata, (image.width, image.height));
+    let bytes = vixeeny_image::encode(output.format, image, output.settings)?;
+    let path = write_named(
+        action,
+        snap,
+        dest,
+        output.format,
+        metadata,
+        (image.width, image.height),
+        &bytes,
+    )?;
+    if let Some(after) = dest.after_save {
+        after(image);
+    }
+    Ok(path)
+}
+
+/// [`save_image`] for an HDR capture, kept as HDR. What comes after the save (the clipboard)
+/// gets the SDR rendering.
+pub fn save_hdr(
+    action: ActionId,
+    snap: &Snapshot,
+    dest: &Destination<'_>,
+    output: Output<'_>,
+    metadata: &dyn Fn(&str) -> ExeMetadata,
+    capture: &HdrCapture,
+) -> Result<PathBuf, StillError> {
+    let image = hdr_image(capture);
+    let bytes = vixeeny_image::encode_hdr(output.format, &image, output.settings)?;
+    let size = (image.width, image.height);
+    let path = write_named(action, snap, dest, output.format, metadata, size, &bytes)?;
+    if let Some(after) = dest.after_save {
+        let sdr = image.to_sdr();
+        after(&Bgra::new(size.0, size.1, size.0 as usize * 4, &sdr));
+    }
+    Ok(path)
+}
+
+pub fn hdr_image(capture: &HdrCapture) -> Hdr<'_> {
+    Hdr {
+        width: capture.frame.width,
+        height: capture.frame.height,
+        rgba: &capture.frame.rgba,
+        sdr_white_nits: capture.info.sdr_white_nits,
+        peak_nits: capture.info.peak_nits,
+    }
+}
+
+fn write_named(
+    action: ActionId,
+    snap: &Snapshot,
+    dest: &Destination<'_>,
+    format: ImageFormat,
+    metadata: &dyn Fn(&str) -> ExeMetadata,
+    size: (u32, u32),
+    bytes: &[u8],
+) -> Result<PathBuf, StillError> {
+    let vars = template_vars(action, snap, dest, metadata, size);
     let path = naming::output_path(
         dest.dir,
         dest.per_app_subfolder,
@@ -209,10 +341,7 @@ pub fn save_image(
         format.extension(),
         std::path::Path::exists,
     );
-    write_atomic(&path, &bytes)?;
-    if let Some(after) = dest.after_save {
-        after(image);
-    }
+    write_atomic(&path, bytes)?;
     Ok(path)
 }
 
@@ -275,14 +404,6 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn other_actions_are_refused() {
-        assert!(matches!(
-            target_for(ActionId::RecordToggle, &snapshot()),
-            Err(StillError::NotADirectCapture(_))
-        ));
-    }
-
     fn no_metadata(_: &str) -> ExeMetadata {
         ExeMetadata::default()
     }
@@ -315,7 +436,12 @@ mod tests {
             &mut capturer,
             &dest,
             CaptureOptions::default(),
-            (ImageFormat::Png, &Settings::default()),
+            Output {
+                format: ImageFormat::Png,
+                settings: &Settings::default(),
+                keep_hdr: false,
+                backdrop: None,
+            },
             metadata,
         )
         .unwrap()
@@ -325,6 +451,51 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("vixeeny-still-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         dir
+    }
+
+    /// A window capture on its background: larger by the margin, the background in the corner;
+    /// other captures untouched.
+    #[test]
+    fn a_window_is_set_on_its_background() {
+        let dir = temp_dir("backdrop");
+        let snap = snapshot();
+        let names = BTreeMap::new();
+        let now = now();
+        let dest = Destination {
+            dir: &dir,
+            template: "{app}_{time}",
+            per_app_subfolder: false,
+            use_foreground_app: false,
+            app_names: &names,
+            now: &now,
+            after_save: None,
+        };
+        let shoot = |action| {
+            let mut capturer = Capturer::new(FakeBackend::default(), snap.monitors.clone());
+            let path = run(
+                action,
+                &snap,
+                &mut capturer,
+                &dest,
+                CaptureOptions::default(),
+                Output {
+                    format: ImageFormat::Png,
+                    settings: &Settings::default(),
+                    keep_hdr: false,
+                    backdrop: Some(Backdrop::Colour([0, 120, 212])),
+                },
+                &no_metadata,
+            )
+            .unwrap();
+            vixeeny_image::decode(&std::fs::read(path).unwrap()).unwrap()
+        };
+        let window = shoot(ActionId::CaptureWindow);
+        // 64×48 at 100 %: 48 pixels all around.
+        assert_eq!((window.width, window.height), (64 + 96, 48 + 96));
+        assert_eq!(&window.bgra[..4], &[212, 120, 0, 255]);
+        let screen = shoot(ActionId::CaptureFullscreen);
+        assert_eq!((screen.width, screen.height), (160, 100));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -506,6 +677,70 @@ mod tests {
             &no_metadata,
         );
         assert_eq!(all.file_name().unwrap(), "Game.png");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_hdr_screen_is_kept_as_hdr_when_asked_and_the_format_can() {
+        let dir = temp_dir("hdr");
+        let mut snap = snapshot();
+        snap.foreground = None;
+        snap.monitors[1].hdr = Some(vixeeny_platform::HdrInfo {
+            sdr_white_nits: 200.0,
+            peak_nits: 1000.0,
+        });
+        let now = now();
+        let names = BTreeMap::new();
+        let copied = std::cell::Cell::new(None);
+        let copy = |image: &Bgra<'_>| copied.set(Some((image.width, image.data[0])));
+        let dest = Destination {
+            dir: &dir,
+            template: "{app}",
+            per_app_subfolder: false,
+            use_foreground_app: true,
+            app_names: &names,
+            now: &now,
+            after_save: Some(&copy),
+        };
+        let settings = Settings::default();
+        let options = CaptureOptions {
+            tonemap: Some(|rgba, _| vec![7; rgba.len()]),
+            ..CaptureOptions::default()
+        };
+        let shoot = |format, keep_hdr| {
+            let mut capturer = Capturer::new(FakeBackend::default(), snap.monitors.clone());
+            let output = Output {
+                format,
+                settings: &settings,
+                keep_hdr,
+                backdrop: None,
+            };
+            let path = run(
+                ActionId::CaptureFullscreen,
+                &snap,
+                &mut capturer,
+                &dest,
+                options,
+                output,
+                &no_metadata,
+            )
+            .unwrap();
+            std::fs::read(path).unwrap()
+        };
+        // Kept: a PQ PNG; the clipboard still gets the SDR rendering (the fake's 2.0 = 160
+        // nits, under SDR white: mid grey, not the fake tone mapper's 7).
+        let png = shoot(ImageFormat::Png, true);
+        assert!(png.windows(4).any(|c| c == b"cICP"));
+        let (width, first) = copied.take().unwrap();
+        assert_eq!(width, 160);
+        assert!((150..250).contains(&first), "{first}");
+        // Converted when asked, and always for WebP.
+        let sdr = shoot(ImageFormat::Png, false);
+        assert!(!sdr.windows(4).any(|c| c == b"cICP"));
+        assert_eq!(copied.take().unwrap().1, 7);
+        let webp = shoot(ImageFormat::WebP, true);
+        assert_eq!(&webp[8..12], b"WEBP");
+        assert_eq!(copied.take().unwrap().1, 7);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

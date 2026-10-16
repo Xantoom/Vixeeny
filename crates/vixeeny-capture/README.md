@@ -1,5 +1,5 @@
 # vixeeny-capture
 
-Image and video capture, `CaptureSource` trait (M4, M12).
+Image and video capture, `CaptureSource` trait.
 
-Part of the [Vixeeny](../../VIXEENY_PLAN.md) workspace.
+Part of the [Vixeeny](../../README.md) workspace.

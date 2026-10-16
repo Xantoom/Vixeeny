@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! SHA-256 and minisign checks (plan 9.4): a file whose signature or sum is wrong is refused.
+//! SHA-256 and minisign checks: a file whose signature or sum is wrong is refused.
 
 use sha2::{Digest, Sha256};
 

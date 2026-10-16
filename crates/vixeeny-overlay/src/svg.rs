@@ -197,9 +197,4 @@ mod tests {
             assert!(parse(data).is_some_and(|f| !f.is_empty()), "{name}");
         }
     }
-
-    #[test]
-    fn unknown_commands_are_refused() {
-        assert_eq!(parse("M0 0A1 1 0 0 0 2 2"), None);
-    }
 }

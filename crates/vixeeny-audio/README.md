@@ -1,5 +1,5 @@
 # vixeeny-audio
 
-System, per-application and microphone audio capture (M13).
+System, per-application and microphone audio capture.
 
-Part of the [Vixeeny](../../VIXEENY_PLAN.md) workspace.
+Part of the [Vixeeny](../../README.md) workspace.

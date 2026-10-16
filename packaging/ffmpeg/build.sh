@@ -24,10 +24,11 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
 # What Vixeeny asks FFmpeg for (crates/vixeeny-encode: codecs/registry.toml, audio.rs, denoise.rs,
-# thumbnail.rs, recorder.rs, cut.rs, and the decoders its tests read the recordings back with).
+# thumbnail.rs, recorder.rs, cut.rs, and the decoders its tests read the recordings back with)
+# and crates/vixeeny-image (AVIF: libsvtav1, libdav1d, the avif muxer and the mov demuxer).
 export ENCODERS="libx264,libx265,libsvtav1,libvpx_vp9,h264_nvenc,hevc_nvenc,av1_nvenc,h264_amf,hevc_amf,av1_amf,h264_qsv,hevc_qsv,av1_qsv,vp9_qsv,aac,aac_mf,libopus,flac,pcm_s16le,pcm_s24le"
 export DECODERS="h264,hevc,av1,libdav1d,vp9,aac,opus,libopus,flac,pcm_s16le,pcm_s24le"
-export MUXERS="mp4,mov,matroska,webm"
+export MUXERS="mp4,mov,matroska,webm,avif"
 export DEMUXERS="mov,matroska"
 export PARSERS="h264,hevc,av1,vp9,aac,opus,flac"
 export FILTERS="abuffer,abuffersink,afftdn,aformat,aresample,anull,buffer,buffersink,format,null"

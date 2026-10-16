@@ -276,7 +276,8 @@ pub fn context_menu(owner: HWND, items: &[String], dark: bool) -> Option<usize> 
     // calls that read them.
     unsafe {
         let menu = CreatePopupMenu().ok()?;
-        let labels: Vec<windows::core::HSTRING> = items.iter().map(|i| i.into()).collect();
+        let labels: Vec<windows::core::HSTRING> =
+            items.iter().map(std::convert::Into::into).collect();
         for (i, label) in labels.iter().enumerate() {
             if i + 1 == labels.len() && i > 0 {
                 let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! One Print Screen session (plan 5.3): the frozen image, the zone, the tools and the commands.
+//! One Print Screen session: the frozen image, the zone, the tools and the commands.
 //! Everything the UI needs is read from [`Session::view`]; everything the user does goes
 //! through the `pointer_*`, `key` and `choose_*` methods. No UI toolkit is involved.
 
@@ -13,7 +13,7 @@ use crate::render::{RgbaImage, render_region};
 use crate::selection::{CursorHint, Selection, magnifier_position, magnifier_source, place_beside};
 
 /// Size of the toolbar, in image pixels (the UI lays out its content to fit).
-pub const TOOLBAR_SIZE: (f32, f32) = (779.0, 46.0);
+pub const TOOLBAR_SIZE: (f32, f32) = (813.0, 46.0);
 /// Source pixels shown by the magnifier, per side, and the on-screen zoom factor.
 pub const MAGNIFIER_SIDE: u32 = 11;
 pub const MAGNIFIER_ZOOM: f32 = 10.0;
@@ -28,6 +28,8 @@ const DRAW_MARGIN: f32 = 8.0;
 pub enum Command {
     /// Copy the result to the clipboard, then close.
     Copy,
+    /// Read the text of the result and copy it, then close.
+    CopyText,
     /// Save with the default folder and format.
     Save,
     /// Ask for a folder and a format.
@@ -174,6 +176,14 @@ impl Session {
             .copied()
             .min_by(|a, b| distance(a).total_cmp(&distance(b)))
             .unwrap_or_else(|| Rect::new(0.0, 0.0, self.base.width as f32, self.base.height as f32))
+    }
+
+    /// A picture shown inside the image (`area`, image pixels) rather than the whole of it: the
+    /// zone starts as the picture and never leaves it.
+    pub fn within(mut self, area: Rect) -> Self {
+        self.selection.limit_to(area);
+        self.selection.select_all();
+        self
     }
 
     /// Issues `command` as soon as the first zone is validated (the scrolling capture).
@@ -344,6 +354,7 @@ impl Session {
             }
             Key::Escape => Some(Command::Close),
             Key::Char(c) if ctrl => match c.to_ascii_lowercase() {
+                'c' if shift => Some(Command::CopyText),
                 'c' => Some(Command::Copy),
                 's' if shift => Some(Command::SaveAs),
                 's' => Some(Command::Save),

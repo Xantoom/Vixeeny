@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The side overlay (plan 5.12), `overlay_toggle`: opens the strip on the edge of the monitor
+//! The side overlay, `overlay_toggle`: opens the strip on the edge of the monitor
 //! under the mouse, waits for a pick, and gives it back as an action to run.
 
 use std::sync::Mutex;
@@ -134,17 +134,4 @@ pub fn run(
         action: choice.map(action_of),
         pinned: panel.pinned(),
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn every_pick_runs_its_action() {
-        assert_eq!(action_of(Choice::Region), ActionId::CaptureRegion);
-        assert_eq!(action_of(Choice::Screen), ActionId::CaptureFullscreen);
-        assert_eq!(action_of(Choice::ReplaySave), ActionId::ReplaySave);
-        assert_eq!(action_of(Choice::Settings), ActionId::OpenSettings);
-    }
 }

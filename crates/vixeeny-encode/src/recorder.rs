@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The recording pipeline (plan 4.4, 5.9): frames with a monotonic timestamp go through the
+//! The recording pipeline: frames with a monotonic timestamp go through the
 //! constant-frame-rate clock ([`crate::clock`]), colour conversion and scaling, an encoder opened
 //! from the registry, and a muxer (MKV, hybrid or fragmented MP4, WebM) that can split the output
 //! on key frames. Everything runs on a dedicated worker thread behind a bounded queue, so a slow
@@ -128,12 +128,14 @@ pub struct RecordConfig {
     pub audio: Vec<AudioTrackConfig>,
     /// Hardware encoders that read D3D11 frames (Windows): frames come from `push_hw`.
     pub gpu: Option<Arc<GpuPipeline>>,
-    /// Keep the last seconds of encoded packets in RAM for [`Recorder::save_replay`] (plan 5.11).
+    /// Keep the last seconds of encoded packets in RAM for [`Recorder::save_replay`].
     pub replay_seconds: Option<u32>,
     /// Where the replay keeps its packets.
     pub replay_storage: Storage,
     /// Write files. A replay-only session has none: the namer is never called.
     pub files: bool,
+    /// Where the pixels of [`VideoFrame`]s go once converted (the capture reuses them).
+    pub buffers: vixeeny_common::buffers::BufferPool,
 }
 
 /// How the pixels of a [`VideoFrame`] are laid out.
@@ -155,7 +157,7 @@ pub struct VideoFrame {
     pub data: Vec<u8>,
 }
 
-/// Live counters, readable while recording (the "frames lost" figure of CA-REC-1).
+/// Live counters, readable while recording (the "frames lost" figure).
 #[derive(Debug, Default)]
 pub struct Stats {
     pub pushed: AtomicU64,
@@ -438,6 +440,8 @@ struct Worker {
     pix: Pixel,
     enc_tb: Rational,
     converter: Option<convert::Converter>,
+    /// HDR frames as 16-bit PQ RGB, kept from one frame to the next.
+    hdr16: Vec<u8>,
     /// Downloaded GPU frames (NV12 / P010) to the encoder's planar format: a reshuffle, no
     /// colour conversion.
     unpack: Option<(scaling::Context, Pixel)>,
@@ -538,6 +542,7 @@ impl Worker {
             pix,
             enc_tb,
             converter: None,
+            hdr16: Vec::new(),
             unpack: None,
             last: None,
             out: None,
@@ -828,7 +833,11 @@ impl Worker {
     fn prepare(&mut self, input: Input) -> Result<Last, RecordError> {
         let feed = self.cfg.gpu.as_ref().map(|g| g.feed());
         Ok(match (input, feed) {
-            (Input::Cpu(frame), _) => Last::Sw(self.convert(&frame)?),
+            (Input::Cpu(frame), _) => {
+                let converted = self.convert(&frame)?;
+                self.cfg.buffers.give(frame.data);
+                Last::Sw(converted)
+            }
             (Input::Hw(frame), Some(crate::gpu::Feed::Qsv)) => {
                 let gpu = self.cfg.gpu.as_ref().ok_or(RecordError::Worker)?;
                 Last::Hw(gpu.to_qsv(&frame)?)
@@ -875,13 +884,18 @@ impl Worker {
         let (left, top, width, height) =
             crate::validate::center_crop((src.width, src.height), self.cfg.crop);
         // Half-float HDR frames become 16-bit PQ RGB first; swscale does the rest.
-        let hdr16;
         let (format, bytes, stride, bpp) = match src.format {
             FrameFormat::Bgra8 => (Pixel::BGRA, &src.data[..], src.stride, 4),
             FrameFormat::ScRgbHalf => {
-                hdr16 = crate::hdr::scrgb_half_to_pq(&src.data, src.width, src.height, src.stride)
-                    .ok_or_else(|| RecordError::Config("frame buffer too small".into()))?;
-                (Pixel::RGB48LE, &hdr16[..], src.width as usize * 6, 6)
+                crate::hdr::scrgb_half_to_pq(
+                    &src.data,
+                    src.width,
+                    src.height,
+                    src.stride,
+                    &mut self.hdr16,
+                )
+                .ok_or_else(|| RecordError::Config("frame buffer too small".into()))?;
+                (Pixel::RGB48LE, &self.hdr16[..], src.width as usize * 6, 6)
             }
         };
         // The crop starts that many bytes in.
@@ -898,7 +912,19 @@ impl Worker {
         if self.converter.is_none() {
             self.converter = Some(convert::Converter::new()?);
         }
-        let mut output = frame::Video::new(self.pix, ow, oh);
+        // The previous frame is reused once the encoder holds no reference to it any more.
+        let mut output = match self.last.take() {
+            Some(Last::Sw(frame))
+                if (frame.format(), frame.width(), frame.height()) == (self.pix, ow, oh)
+                    && writable(&frame) =>
+            {
+                frame
+            }
+            last => {
+                self.last = last;
+                frame::Video::new(self.pix, ow, oh)
+            }
+        };
         if let Some(converter) = &mut self.converter {
             converter.run(&rows, &mut output, self.cfg.hdr)?;
         }
@@ -1135,4 +1161,10 @@ pub fn faststart(path: &Path) -> Result<(), RecordError> {
             Err(e)
         }
     }
+}
+
+/// Nobody else (the encoder) holds a reference to the pixels of `frame`.
+fn writable(frame: &frame::Video) -> bool {
+    // SAFETY: a live frame; the call only reads the reference counts of its buffers.
+    unsafe { ffi::av_frame_is_writable(frame.as_ptr().cast_mut()) > 0 }
 }

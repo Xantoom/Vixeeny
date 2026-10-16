@@ -18,7 +18,7 @@ rayon.workspace = true
 toml.workspace = true
 vixeeny-common = { path = "../vixeeny-common" }
 # Prebuilt shared FFmpeg (FFMPEG_DIR); its DLLs must be next to the executable.
-ffmpeg-next = { version = "9.0.0", default-features = false, features = ["codec", "format", "software-scaling", "software-resampling", "filter"] }
+ffmpeg-next = { workspace = true, features = ["software-resampling", "filter"] }
 # The D3D11 video processor that converts captured frames on the GPU, and the encoder
 # capability queries of the drivers (driver_caps).
 windows = { workspace = true, features = [
@@ -34,5 +34,4 @@ windows = { workspace = true, features = [
 
 [dev-dependencies]
 vixeeny-audio = { path = "../vixeeny-audio" }
-vixeeny-platform = { path = "../vixeeny-platform" }
 

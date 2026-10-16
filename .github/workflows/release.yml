@@ -22,7 +22,7 @@ jobs:
     outputs:
       build: ${{ steps.check.outputs.build }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: check
         env:
           GH_TOKEN: ${{ github.token }}
@@ -46,13 +46,13 @@ jobs:
       FFMPEG_DIR: ${{ github.workspace }}\native\build\work\ffmpeg-prebuilt
       LIBCLANG_PATH: C:\Program Files\LLVM\bin
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.98.1
+          toolchain: 1.99.1
       - uses: Swatinem/rust-cache@v2
       - uses: ilammy/msvc-dev-cmd@v1
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v6
         id: native-cache
         with:
           path: native/build/work
@@ -65,15 +65,14 @@ jobs:
           "C:\ProgramData\chocolatey\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
           "$env:FFMPEG_DIR\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
           "C:\Program Files (x86)\Inno Setup 6" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
-      # Only to build the native libraries, which the cache usually holds already.
-      - name: Tools (nasm, meson)
+      # Only to build the native libraries (libjpeg-turbo's SIMD), which the cache usually holds.
+      - name: Tools (nasm)
         if: steps.native-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           choco install nasm -y --no-progress
           "C:\Program Files\NASM" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
-          pip install meson
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: ffmpeg
           path: native/build/work
@@ -117,7 +116,7 @@ jobs:
             }
           }
           Remove-Item "$env:RUNNER_TEMP\minisign.key"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: vixeeny-windows
           path: |

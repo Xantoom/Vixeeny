@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The frozen screen of a zone capture (plan 5.3), done on the GPU by the daemon the moment the
+//! The frozen screen of a zone capture, done on the GPU by the daemon the moment the
 //! shortcut is pressed: every monitor is captured at once (Windows Graphics Capture), the frame
 //! is copied into a texture shared with the app and shown 1:1 by a borderless top-most window
 //! with its own flip-model swap chain (HDR monitors keep their HDR content: half floats in
@@ -48,9 +48,8 @@ use windows::core::{BOOL, Interface, w};
 use crate::wgc::{
     FRAME_TIMEOUT, d3d_device, frame_handler, halves_to_f32, monitor_item, os, winrt_device,
 };
-use rayon::prelude::*;
 
-use crate::{BYTES_PER_PIXEL, CaptureError, CpuFrame};
+use crate::{CaptureError, HdrFrame};
 
 /// The frozen screens go by themselves after this, whatever happens to the app.
 const SAFETY_TIMEOUT_MS: u32 = 10_000;
@@ -453,52 +452,14 @@ pub fn freeze(gpu: &Gpu, monitors: &[MonitorInfo]) -> Result<Frozen, CaptureErro
     })
 }
 
-/// A frozen monitor read back by the app: BGRA 8-bit, or RGBA half floats when `screen.hdr`.
-pub struct FrozenPixels {
-    pub screen: FrozenScreen,
-    pub stride: usize,
-    pub data: Vec<u8>,
-}
-
-impl FrozenPixels {
-    /// scRGB floats, 4 per pixel (an HDR screen).
-    pub fn to_scrgb(&self) -> Vec<f32> {
-        let (w, h) = (self.screen.width as usize, self.screen.height as usize);
-        halves_to_f32(&self.data, self.stride, w, h)
-    }
-
-    /// 8-bit BGRA. An HDR screen is scaled so that its SDR white (`sdr_white_nits`) is white,
-    /// brighter parts are clipped.
-    pub fn to_bgra(self, sdr_white_nits: f32) -> Result<CpuFrame, CaptureError> {
-        let (w, h) = (self.screen.width, self.screen.height);
-        if !self.screen.hdr {
-            return CpuFrame::from_raw(w, h, self.stride, self.data);
-        }
-        let gain = 80.0 / sdr_white_nits.max(1.0);
-        let encode = |linear: f32| -> u8 {
-            let v = (linear * gain).clamp(0.0, 1.0);
-            let srgb = if v <= 0.003_130_8 {
-                v * 12.92
-            } else {
-                1.055 * v.powf(1.0 / 2.4) - 0.055
-            };
-            (srgb * 255.0 + 0.5) as u8
-        };
-        let scrgb = self.to_scrgb();
-        let mut bgra = vec![0; scrgb.len()];
-        bgra.par_chunks_mut(4 * 4096)
-            .zip(scrgb.par_chunks(4 * 4096))
-            .for_each(|(out, px)| {
-                for (o, [r, g, b, _]) in out
-                    .as_chunks_mut::<4>()
-                    .0
-                    .iter_mut()
-                    .zip(px.as_chunks::<4>().0)
-                {
-                    *o = [encode(*b), encode(*g), encode(*r), 255];
-                }
-            });
-        CpuFrame::from_raw(w, h, w as usize * BYTES_PER_PIXEL, bgra)
+/// The rows of a frozen HDR screen (RGBA half floats, `stride` bytes apart, as [`read_with`]
+/// hands them) as scRGB.
+pub fn scrgb(screen: &FrozenScreen, rows: &[u8], stride: usize) -> HdrFrame {
+    let (w, h) = (screen.width, screen.height);
+    HdrFrame {
+        width: w,
+        height: h,
+        rgba: halves_to_f32(rows, stride, w as usize, h as usize),
     }
 }
 
@@ -607,19 +568,6 @@ fn stage(
     Ok(staging)
 }
 
-/// Reads the shared textures into memory (see [`read_with`]).
-pub fn read(frozen: &Frozen) -> Result<Vec<FrozenPixels>, CaptureError> {
-    let mut out = Vec::with_capacity(frozen.screens.len());
-    read_with(frozen, |screen, rows, stride| {
-        out.push(FrozenPixels {
-            screen: *screen,
-            stride,
-            data: rows.to_vec(),
-        });
-    })?;
-    Ok(out)
-}
-
 /// Asks the daemon to remove the frozen screens (in the app, once its windows cover them).
 pub fn release(frozen: &Frozen) {
     if let Some(screen) = frozen.screens.first() {
@@ -638,7 +586,7 @@ mod tests {
     #[test]
     fn shared_textures_are_read_back() {
         let Ok(gpu) = Gpu::new() else {
-            eprintln!("no Direct3D device here; skipped");
+            vixeeny_common::skip_test("no Direct3D device");
             return;
         };
         let (w, h) = (3u32, 2u32);
@@ -687,32 +635,33 @@ mod tests {
                 window: 0,
             }],
         };
-        let read = read(&frozen).unwrap();
-        let frame = read.into_iter().next().unwrap().to_bgra(80.0).unwrap();
-        assert_eq!(frame.pixel(2, 1), [20, 21, 22, 23]);
-        assert_eq!(frame.pixel(0, 0), [0, 1, 2, 3]);
+        let mut read: Vec<u8> = Vec::new();
+        read_with(&frozen, |_, rows, stride| {
+            read.extend(
+                (0..h as usize).flat_map(|y| &rows[y * stride..y * stride + w as usize * 4]),
+            )
+        })
+        .unwrap();
+        let at = |x: usize, y: usize| &read[(y * w as usize + x) * 4..][..4];
+        assert_eq!(at(2, 1), [20, 21, 22, 23]);
+        assert_eq!(at(0, 0), [0, 1, 2, 3]);
     }
 
     #[test]
-    fn hdr_white_becomes_sdr_white() {
+    fn frozen_hdr_screens_read_as_scrgb() {
         let one = 0x3C00u16.to_le_bytes(); // 1.0
         let half = 0x3800u16.to_le_bytes(); // 0.5
-        let data = [one, half, [0, 0], one].concat();
-        let pixels = FrozenPixels {
-            screen: FrozenScreen {
-                x: 0,
-                y: 0,
-                width: 1,
-                height: 1,
-                texture: 0,
-                hdr: true,
-                window: 0,
-            },
-            stride: 8,
-            data,
+        // One pixel, then row padding.
+        let rows = [one, half, [0, 0], one, [9, 9], [9, 9], [9, 9], [9, 9]].concat();
+        let screen = FrozenScreen {
+            x: 0,
+            y: 0,
+            width: 1,
+            height: 1,
+            texture: 0,
+            hdr: true,
+            window: 0,
         };
-        // SDR white at 80 nits: 1.0 is white, 0.5 linear is sRGB 188.
-        let frame = pixels.to_bgra(80.0).unwrap();
-        assert_eq!(frame.pixel(0, 0), [0, 188, 255, 255]);
+        assert_eq!(scrgb(&screen, &rows, 16).rgba, vec![1.0, 0.5, 0.0, 1.0]);
     }
 }

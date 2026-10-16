@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The shortcuts table (plan 5.13, section 3): two slots per action, checked as they are typed.
+//! The shortcuts table: two slots per action, checked as they are typed.
 
 use vixeeny_common::config::{Config, Hotkeys};
 use vixeeny_common::hotkey::{Hotkey, MAX_PER_ACTION};

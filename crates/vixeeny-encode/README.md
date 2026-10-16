@@ -1,5 +1,5 @@
 # vixeeny-encode
 
-Video/audio pipeline, codec registry, GPU probing, muxing, replay (M11-M15).
+Video/audio pipeline, codec registry, GPU probing, muxing, replay.
 
-Part of the [Vixeeny](../../VIXEENY_PLAN.md) workspace.
+Part of the [Vixeeny](../../README.md) workspace.

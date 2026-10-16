@@ -1,7 +1,5 @@
 # Known limitations
 
-See section 8 of [VIXEENY_PLAN.md](../VIXEENY_PLAN.md).
-
 ## Windows only
 
 Vixeeny runs on Windows 10 and 11, x64. The macOS and Linux

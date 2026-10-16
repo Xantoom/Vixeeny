@@ -329,7 +329,7 @@ mod tests {
 
     #[test]
     fn a_source_clock_running_fast_stays_within_20_ms_for_an_hour() {
-        // CA-REC-4: the device clock gains 50 ppm; the track must not drift from the master clock.
+        // the device clock gains 50 ppm; the track must not drift from the master clock.
         let mut m = Mixer::new(&[1.0], 0);
         let mut emitted = 0usize;
         let drift = 1.000_05f64;

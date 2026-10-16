@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! From the profile's `[audio]` section to tracks (plan 5.10): "one source = one track" (default),
+//! From the profile's `[audio]` section to tracks: "one source = one track" (default),
 //! "mix everything" into one, or the advanced mode where the user names the tracks.
 
 use vixeeny_common::config::Audio;

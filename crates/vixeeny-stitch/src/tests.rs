@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! CA-SCR-1: synthetic pages scrolled in many ways must reassemble pixel-exactly.
+//! synthetic pages scrolled in many ways must reassemble pixel-exactly.
 
 use super::*;
 
@@ -222,4 +222,37 @@ fn preview_fits_the_box() {
     st.push(&s.frame(100)).unwrap();
     let t = st.preview(32, 50).unwrap();
     assert!(t.width <= 32 && t.height <= 50);
+}
+
+/// A layer of another size per pixel: each pixel's bytes twice.
+fn doubled(data: &[u8]) -> Vec<u8> {
+    data.as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|p| [*p, *p].concat())
+        .collect()
+}
+
+#[test]
+fn a_layer_follows_the_rows_kept() {
+    let p = page(400, &[(120, 140)]);
+    let s = screen(&p, 100, 12, 8);
+    let mut st = Stitcher::new(Config::default());
+    for o in [0, 30, 70, 50, 110, 160, 200, 170] {
+        let frame = s.frame(o);
+        st.push_layered(&frame, Some(&doubled(&frame.data)))
+            .unwrap();
+    }
+    let out = st.finish().unwrap();
+    assert_eq!(out.frame.data, expected(&s, 200));
+    assert_eq!(out.layer.unwrap(), doubled(&out.frame.data));
+    // One frame without its layer: no layer at all rather than a wrong one.
+    let mut st = Stitcher::new(Config::default());
+    for (i, o) in [0, 30, 60].into_iter().enumerate() {
+        let frame = s.frame(o);
+        let layer = doubled(&frame.data);
+        st.push_layered(&frame, (i != 1).then_some(layer.as_slice()))
+            .unwrap();
+    }
+    assert!(st.finish().unwrap().layer.is_none());
 }

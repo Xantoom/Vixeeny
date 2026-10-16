@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The control window of a scrolling capture (plan 5.7).
+//! The control window of a scrolling capture.
 
 use slint::{ComponentHandle, Image, Rgba8Pixel, SharedPixelBuffer, Weak};
 

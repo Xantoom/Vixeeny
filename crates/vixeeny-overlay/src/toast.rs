@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The notification (plan 5.14), after the Windows 11 ones, drawn natively: a card in the corner
+//! The notification, after the Windows 11 ones, drawn natively: a card in the corner
 //! of the screen with the thumbnail of the capture, a title and the whole text. Clicking the card
 //! opens the file, its button the folder (or the settings for an error). It slides in, never
 //! takes the keyboard, and goes by itself after a while unless the pointer is on it. A screenshot
@@ -39,7 +39,7 @@ pub struct ToastContent {
     pub action_label: String,
     /// Only the picture (a screenshot): no text, a shorter life, and a right-click menu.
     pub picture_only: bool,
-    /// The right-click menu: open, show in the folder, close.
+    /// The right-click menu: open, edit, show in the folder, close.
     pub menu: Vec<String>,
     /// In the top-right corner (over a game, where its own notifications go), not the bottom.
     pub top: bool,
@@ -52,6 +52,8 @@ pub enum ToastEvent {
     Activated,
     /// The button was clicked (or "Show in the folder" in its menu).
     Action,
+    /// "Edit" in its menu.
+    Edit,
 }
 
 /// Where the card goes: the bottom-right (or `top`-right) corner of the work area of a monitor
@@ -455,7 +457,8 @@ impl Shared {
                     popup::context_menu(card.popup.hwnd, &card.content.menu, card.content.dark);
                 let event = match chosen {
                     Some(0) => Some(Some(ToastEvent::Activated)),
-                    Some(1) => Some(Some(ToastEvent::Action)),
+                    Some(1) => Some(Some(ToastEvent::Edit)),
+                    Some(2) => Some(Some(ToastEvent::Action)),
                     Some(_) => Some(None),
                     None => None,
                 };

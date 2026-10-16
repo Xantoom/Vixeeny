@@ -94,6 +94,7 @@ fn config(registry: &Registry, id: &str, depth: u8) -> RecordConfig {
         replay_seconds: None,
         replay_storage: vixeeny_encode::replay::Storage::Ram,
         files: true,
+        buffers: Default::default(),
     }
 }
 
@@ -174,7 +175,7 @@ fn record_gpu(
     ) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("no GPU video processor here ({e}): skipped");
+            vixeeny_common::skip_test(format!("no GPU video processor ({e})"));
             return None;
         }
     };
@@ -229,12 +230,14 @@ fn a_software_encoder_records_downloaded_gpu_frames_with_the_right_colours() {
 #[test]
 fn nvenc_reads_the_gpu_frames_directly_when_present() {
     let Ok((device, context)) = d3d::create_device(Some(0x10DE)) else {
+        vixeeny_common::skip_test("no Direct3D device");
         return;
     };
     let registry = Registry::builtin().unwrap();
     let probe_ok = vixeeny_encode::ffmpeg::encoder::find_by_name("h264_nvenc").is_some()
         && registry.get("nvenc_h264").is_some();
     if !probe_ok {
+        vixeeny_common::skip_test("no NVENC in FFmpeg");
         return;
     }
     // Machines without an NVIDIA GPU fall back to the default adapter: skip them.
@@ -247,6 +250,7 @@ fn nvenc_reads_the_gpu_frames_directly_when_present() {
         unsafe { adapter.GetDesc() }.unwrap().VendorId == 0x10DE
     };
     if !nvidia {
+        vixeeny_common::skip_test("no NVIDIA card");
         return;
     }
     assert_colour(

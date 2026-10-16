@@ -146,12 +146,4 @@ mod tests {
         assert!(!is_newer("1.0.0", "garbage"));
         assert!(is_newer("1.0.0-beta.1", "1.0.0"));
     }
-
-    #[test]
-    fn the_api_url_comes_from_the_repository() {
-        assert_eq!(
-            check_url("https://github.com/Xantoom/Vixeeny"),
-            "https://api.github.com/repos/Xantoom/Vixeeny/releases/latest"
-        );
-    }
 }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Validation of a recording profile against the registry (plan 6.4) and the choice of the
+//! Validation of a recording profile against the registry and the choice of the
 //! `auto` encoder. Pure functions: no FFmpeg, no OS.
 
 use vixeeny_common::config::Video;

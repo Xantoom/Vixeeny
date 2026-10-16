@@ -5,7 +5,7 @@ system tray and answers to global shortcuts; nothing runs on screen until you as
 
 - **Screenshots** — region, window, full screen, all monitors, scrolling; the screens freeze
   while you choose, then an editor to annotate, save or copy. PNG, JPEG (jpegli), WebP, AVIF,
-  JPEG XL.
+  JPEG XL; HDR screens kept as HDR (PQ; Ultra HDR for JPEG) or converted to SDR.
 - **Screen recording** — hardware encoders (NVENC, AMF, QuickSync) or software, H.264 / HEVC /
   AV1, several audio tracks, replay buffer.
 - **Quiet updates** — downloaded and installed in the background (or with one click in
@@ -31,5 +31,4 @@ cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && ca
 ```
 
 Release builds need the pinned native libraries (`cargo xtask build-native`); see
-[CONTRIBUTING.md](CONTRIBUTING.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and the design
-in [VIXEENY_PLAN.md](VIXEENY_PLAN.md).
+[CONTRIBUTING.md](CONTRIBUTING.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).

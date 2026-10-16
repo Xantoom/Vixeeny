@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The recording widget (plan 5.9), drawn natively: a small bar with a blinking red dot, the
+//! The recording widget, drawn natively: a small bar with a blinking red dot, the
 //! elapsed time, and the pause / stop buttons. It stays where it was put. In pause the dot is
 //! amber and still and the time frozen. With `auto_hide` it fades after 3 s and comes back under
 //! the pointer. It never takes the keyboard and is left out of every screen capture.

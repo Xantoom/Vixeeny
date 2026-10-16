@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The recording pipeline end to end with synthetic frames and a simulated clock:
-//! CA-REC-2 (crash-safe hybrid MP4), CA-REC-3 (pause), CA-REC-6 (every software encoder × every
-//! allowed container gives a readable file), constant frame rate, scaling, splitting.
+//! crash-safe hybrid MP4, pause, every software encoder × every allowed container gives a
+//! readable file, constant frame rate, scaling, splitting.
 //! Needs the native build: `cargo xtask build-native ffmpeg`.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -83,6 +83,7 @@ fn config(registry: &Registry, id: &str, container: OutputContainer, fps: u32) -
         replay_seconds: None,
         replay_storage: vixeeny_encode::replay::Storage::Ram,
         files: true,
+        buffers: Default::default(),
     }
 }
 
@@ -141,7 +142,6 @@ fn record(cfg: RecordConfig, dir: &Path, n: usize) -> vixeeny_encode::recorder::
 
 #[test]
 fn every_software_encoder_in_every_allowed_container_is_readable() {
-    // CA-REC-6 for what runs everywhere.
     let registry = Registry::builtin().unwrap();
     let dir = scratch("matrix");
     for id in ["libx264", "libx265", "libsvtav1", "libvpx_vp9"] {
@@ -210,7 +210,6 @@ fn output_is_constant_frame_rate_whatever_the_input_timing() {
 
 #[test]
 fn pause_leaves_no_hole_and_the_duration_excludes_it() {
-    // CA-REC-3.
     let registry = Registry::builtin().unwrap();
     let dir = scratch("pause");
     let rec = Recorder::start(
@@ -420,7 +419,7 @@ fn hybrid_mp4_ends_classic_and_fragmented_mp4_stays_fragmented() {
 
 #[test]
 fn a_hybrid_recording_cut_short_is_readable_up_to_the_last_fragment() {
-    // CA-REC-2: the file of a recording still in progress (what a crash leaves behind) opens and
+    // the file of a recording still in progress (what a crash leaves behind) opens and
     // holds every fragment written so far. The copy is taken while the recorder is running.
     let registry = Registry::builtin().unwrap();
     let dir = scratch("crash");
@@ -829,7 +828,7 @@ fn several_tracks_each_get_their_own_named_stream() {
 
 #[test]
 fn audio_and_video_agree_on_time_zero_when_the_first_frame_is_late() {
-    // CA-REC-4 (offset part): the first video frame arrives 200 ms after the clock origin; the
+    // the first video frame arrives 200 ms after the clock origin; the
     // audio of those 200 ms is cut so that both streams start together.
     let registry = Registry::builtin().unwrap();
     let dir = scratch("audio-sync");
@@ -878,7 +877,7 @@ fn splitting_keeps_audio_in_every_part() {
 
 #[test]
 fn a_drifting_source_through_the_mixer_stays_in_sync_with_the_video() {
-    // CA-REC-4 (automated part): a fake source whose clock runs 100 ppm fast, mixed by the track
+    // a fake source whose clock runs 100 ppm fast, mixed by the track
     // mixer, recorded with the video; the audio ends where the recording ends.
     use vixeeny_audio::{FakeAudioSource, Mixer};
     let registry = Registry::builtin().unwrap();

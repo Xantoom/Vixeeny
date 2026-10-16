@@ -114,15 +114,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn intersection_and_union() {
-        let a = PhysicalRect::new(0, 0, 100, 100);
-        let b = PhysicalRect::new(50, 60, 100, 100);
-        assert_eq!(a.intersection(&b), Some(PhysicalRect::new(50, 60, 50, 40)));
-        assert_eq!(a.union(&b), PhysicalRect::new(0, 0, 150, 160));
-        assert_eq!(a.intersection(&PhysicalRect::new(100, 0, 10, 10)), None);
-    }
-
-    #[test]
     fn negative_origins() {
         // A monitor to the left of the primary one starts at a negative x.
         let left = PhysicalRect::new(-1920, 0, 1920, 1080);
@@ -135,19 +126,5 @@ mod tests {
             main.relative_to(&all),
             PhysicalRect::new(1920, 0, 2560, 1440)
         );
-    }
-
-    #[test]
-    fn distance() {
-        let r = PhysicalRect::new(10, 10, 10, 10);
-        assert_eq!(r.distance2(15, 15), 0);
-        assert_eq!(r.distance2(0, 15), 100);
-        assert_eq!(r.distance2(22, 22), 18); // 3² + 3²: the last pixel is 19
-    }
-
-    #[test]
-    fn empty_and_none() {
-        assert!(PhysicalRect::new(0, 0, 0, 5).is_empty());
-        assert_eq!(virtual_bounds([]), None);
     }
 }

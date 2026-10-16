@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The settings window (plan 5.13), a process of its own (`vixeeny-app --settings`)
+//! The settings window, a process of its own (`vixeeny-app --settings`)
 //! so the recording hotkeys keep working while it is open. Changes are saved as soon as they stop
 //! for a moment, and the daemon is asked to reload.
 

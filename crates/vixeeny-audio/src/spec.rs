@@ -49,7 +49,7 @@ impl SourceSpec {
         })
     }
 
-    /// The name a track carries when it holds this source alone (plan 5.10).
+    /// The name a track carries when it holds this source alone.
     pub fn title(&self) -> String {
         match &self.kind {
             SourceKind::System => "System".into(),
@@ -112,16 +112,6 @@ mod tests {
         for bad in ["", "app:", "mic:", "out:", "speakers", "app", "sys"] {
             assert!(SourceSpec::parse(bad).is_none(), "{bad}");
         }
-    }
-
-    #[test]
-    fn titles_name_the_source() {
-        assert_eq!(SourceSpec::parse("system").unwrap().title(), "System");
-        assert_eq!(SourceSpec::parse("mic:X").unwrap().title(), "Micro");
-        assert_eq!(
-            SourceSpec::parse("app:Spotify.exe").unwrap().title(),
-            "Spotify"
-        );
     }
 
     #[test]

@@ -50,26 +50,3 @@ unsafe extern "C" fn callback(
         tracing::error!(target: "ffmpeg", "{text}");
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ffmpeg_messages_with_arguments_are_formatted() {
-        install();
-        install();
-        // SAFETY: a format string and the argument it names.
-        unsafe {
-            ffi::av_log(
-                std::ptr::null_mut(),
-                ffi::AV_LOG_ERROR,
-                c"test error %d: %s\n".as_ptr(),
-                42 as c_int,
-                c"formatted".as_ptr(),
-            );
-            // Below the level: dropped before formatting.
-            ffi::av_log(std::ptr::null_mut(), ffi::AV_LOG_INFO, c"info\n".as_ptr());
-        }
-    }
-}

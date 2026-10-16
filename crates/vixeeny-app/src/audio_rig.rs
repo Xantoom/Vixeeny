@@ -188,7 +188,7 @@ impl Rig {
                     }
                 }
                 Msg::Event(source, SourceEvent::Lost(reason)) => {
-                    // The track stays silent until the source returns (CA-AUD-2, CA-AUD-3).
+                    // The track stays silent until the source returns.
                     let name = self
                         .sources
                         .get(source)

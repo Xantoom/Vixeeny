@@ -18,4 +18,4 @@ does to them are plain code the tests drive; the tests also draw them off screen
 seconds, draws a zone, opens the style panel and saves what the screen shows: the check that
 the visual tree really composes (the tests run with hidden windows).
 
-Part of the [Vixeeny](../../VIXEENY_PLAN.md) workspace.
+Part of the [Vixeeny](../../README.md) workspace.

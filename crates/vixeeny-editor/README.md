@@ -1,5 +1,5 @@
 # vixeeny-editor
 
-Annotation editor model, pure logic (M7).
+Annotation editor model, pure logic.
 
-Part of the [Vixeeny](../../VIXEENY_PLAN.md) workspace.
+Part of the [Vixeeny](../../README.md) workspace.

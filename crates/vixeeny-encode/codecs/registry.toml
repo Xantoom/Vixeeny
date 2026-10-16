@@ -1,4 +1,4 @@
-# Codec registry (plan section 6). One entry per encoder; presets are plain FFmpeg options.
+# Codec registry. One entry per encoder; presets are plain FFmpeg options.
 # Vixeeny records to files: what only serves streaming (low-latency tunings and usages) is left
 # out. Software encoders must keep up with a game in real time: their presets are fast ones.
 # Checked against the real encoders by `cargo xtask verify-registry`.

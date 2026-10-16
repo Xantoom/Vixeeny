@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Scrolling capture (plan 5.7): the user picked a zone and scrolls the content; this module
+//! Scrolling capture: the user picked a zone and scrolls the content; this module
 //! captures the zone about 15 times a second, assembles the frames and saves the long image.
 //!
 //! The result opens in the editor (scrolling view, whole image selected) unless
@@ -10,13 +10,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
-use vixeeny_capture::{CaptureOptions, CaptureTarget, Capturer, CpuFrame};
+use vixeeny_capture::{CaptureOptions, CaptureTarget, Capturer, CpuFrame, HdrCapture, HdrFrame};
 use vixeeny_common::config::Config;
+use vixeeny_common::half;
 use vixeeny_common::i18n::{Key, Lang, tr};
 use vixeeny_common::ipc::ActionId;
 use vixeeny_editor::{RgbaImage, Session};
 use vixeeny_image::Bgra;
-use vixeeny_platform::{MonitorInfo, PhysicalRect};
+use vixeeny_platform::{HdrInfo, MonitorInfo, PhysicalRect};
 use vixeeny_stitch::{Frame, Push, Stitched, Stitcher};
 use vixeeny_ui::scroll_panel::{ScrollEvent, ScrollPanel, ScrollTexts};
 
@@ -44,6 +45,46 @@ fn tight(frame: &CpuFrame) -> Option<Frame> {
         data.extend_from_slice(frame.row(y));
     }
     Frame::new(frame.width, frame.height, data)
+}
+
+/// What is matched (its SDR rendering, BGRA) and what is kept with it (RGB half floats).
+fn hdr_frame(capture: &HdrCapture) -> Option<(Frame, Vec<u8>)> {
+    let bgra = crate::tonemap_hdr(&capture.frame.rgba, &capture.info);
+    let frame = Frame::new(capture.frame.width, capture.frame.height, bgra)?;
+    let layer = capture
+        .frame
+        .rgba
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|px| {
+            px[..3]
+                .iter()
+                .flat_map(|c| half::from_f32(*c).to_le_bytes())
+        })
+        .collect();
+    Some((frame, layer))
+}
+
+/// The long picture as HDR, from the layer of RGB half floats.
+fn hdr_picture(frame: &Frame, layer: &[u8], info: HdrInfo) -> HdrCapture {
+    let rgba = layer
+        .as_chunks::<6>()
+        .0
+        .iter()
+        .flat_map(|px| {
+            let c = |i: usize| half::to_f32(u16::from_le_bytes([px[i], px[i + 1]]));
+            [c(0), c(2), c(4), 1.0]
+        })
+        .collect();
+    HdrCapture {
+        frame: HdrFrame {
+            width: frame.width,
+            height: frame.height,
+            rgba,
+        },
+        info,
+    }
 }
 
 /// BGRA → RGBA for the preview.
@@ -107,22 +148,26 @@ impl Shared {
     }
 }
 
-/// Captures until told to finish. Returns the assembled image.
+/// Captures until told to finish. Returns the assembled image, and the levels of its HDR
+/// layer when HDR is kept (`keep_hdr`) on an HDR screen.
+#[allow(clippy::too_many_arguments)]
 fn capture_loop(
     shared: &Shared,
     monitors: Vec<MonitorInfo>,
     target: CaptureTarget,
+    keep_hdr: bool,
     max_height: u32,
     lang: Lang,
     preview: &vixeeny_ui::scroll_panel::ScrollHandle,
     preview_box: (u32, u32),
-) -> anyhow::Result<Option<Stitched>> {
+) -> anyhow::Result<Option<(Stitched, Option<HdrInfo>)>> {
     let backend = vixeeny_capture::WgcBackend::new()?;
     let mut capturer = Capturer::new(backend, monitors);
     let options = CaptureOptions {
         show_cursor: false,
-        tonemap: None,
+        tonemap: Some(crate::tonemap_hdr),
     };
+    let mut hdr_info = None;
     let mut stitcher = Stitcher::new(vixeeny_stitch::Config {
         max_height,
         ..Default::default()
@@ -135,16 +180,30 @@ fn capture_loop(
             return Ok(None);
         }
         if shared.finish.load(Ordering::Relaxed) {
-            return Ok(stitcher.finish());
+            return Ok(stitcher.finish().map(|s| (s, hdr_info)));
         }
         if !shared.started.load(Ordering::Relaxed) {
             shared.wait_for_start();
             continue;
         }
         let tick = Instant::now();
-        let grabbed = capturer.grab(&target, options)?;
-        let frame = tight(&grabbed).context("unexpected frame")?;
-        match stitcher.push(&frame)? {
+        let hdr = if keep_hdr {
+            capturer.grab_hdr(&target, false)?
+        } else {
+            None
+        };
+        let (frame, layer) = match hdr {
+            Some(capture) => {
+                hdr_info = Some(capture.info);
+                let (frame, layer) = hdr_frame(&capture).context("unexpected frame")?;
+                (frame, Some(layer))
+            }
+            None => {
+                let grabbed = capturer.grab(&target, options)?;
+                (tight(&grabbed).context("unexpected frame")?, None)
+            }
+        };
+        match stitcher.push_layered(&frame, layer.as_deref())? {
             Push::Lost => lost = true,
             Push::Added { .. } | Push::First => lost = false,
             Push::Full if !warned_full => {
@@ -211,6 +270,7 @@ pub fn run(
         let shared = shared.clone();
         let monitors = snapshot.monitors.clone();
         let max_height = config.scrolling.max_height.max(100);
+        let keep_hdr = crate::keep_hdr(config) && crate::image_output(config).0.holds_hdr();
         std::thread::Builder::new()
             .name("scroll-capture".into())
             .spawn(move || {
@@ -218,6 +278,7 @@ pub fn run(
                     &shared,
                     monitors,
                     target,
+                    keep_hdr,
                     max_height,
                     lang,
                     &handle,
@@ -240,7 +301,7 @@ pub fn run(
         .join()
         .map_err(|_| anyhow::anyhow!("the capture thread panicked"))?;
     ran.map_err(|e| anyhow::anyhow!("window: {e}"))?;
-    let Some(stitched) = result? else {
+    let Some((stitched, hdr_info)) = result? else {
         tracing::debug!("scrolling capture cancelled");
         return Ok(());
     };
@@ -248,8 +309,19 @@ pub fn run(
         tracing::warn!("scrolling capture cut at {} px", stitched.frame.height);
     }
     let frame = stitched.frame;
+    let hdr = stitched
+        .layer
+        .zip(hdr_info)
+        .map(|(layer, info)| hdr_picture(&frame, &layer, info));
     if config.scrolling.annotate {
-        match annotate(config, snapshot.clone(), &monitor, scale, &frame) {
+        match annotate(
+            config,
+            snapshot.clone(),
+            &monitor,
+            scale,
+            &frame,
+            hdr.as_ref(),
+        ) {
             Ok(()) => return Ok(()),
             // Saving what was captured beats losing it.
             Err(e) => tracing::error!("editor: {e:#}, saving directly"),
@@ -261,8 +333,14 @@ pub fn run(
         frame.width as usize * 4,
         &frame.data,
     );
-    let path =
-        crate::region::save_bgra(config, &snapshot, ActionId::CaptureScrolling, &bitmap, None)?;
+    let path = crate::region::save_bgra(
+        config,
+        &snapshot,
+        ActionId::CaptureScrolling,
+        &bitmap,
+        hdr.as_ref(),
+        None,
+    )?;
     tracing::info!("scrolling capture saved ({}x{})", frame.width, frame.height);
     tracing::debug!("saved {}", path.display());
     if config.image.copy_to_clipboard
@@ -280,7 +358,9 @@ fn annotate(
     monitor: &MonitorInfo,
     scale: f32,
     frame: &Frame,
+    hdr: Option<&HdrCapture>,
 ) -> anyhow::Result<()> {
+    let hdr = hdr.cloned();
     let base = RgbaImage::from_bgra(
         frame.width,
         frame.height,
@@ -311,6 +391,7 @@ fn annotate(
                 ActionId::CaptureScrolling,
                 command,
                 session,
+                hdr.as_ref(),
             )
             .unwrap_or(false)
         },
@@ -321,4 +402,38 @@ fn annotate(
     overlay
         .run((monitor.rect.x, monitor.rect.y))
         .map_err(|e| anyhow::anyhow!("editor window: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The HDR layer carried by the stitcher gives back the captured light, beside an SDR
+    /// rendering of the same size.
+    #[test]
+    fn hdr_layer_round_trips() {
+        let info = HdrInfo {
+            sdr_white_nits: 240.0,
+            peak_nits: 1000.0,
+        };
+        let rgba: Vec<f32> = (0..8 * 4)
+            .flat_map(|i| [i as f32 * 0.25, 1.0, 6.5, 1.0])
+            .collect();
+        let capture = HdrCapture {
+            frame: HdrFrame {
+                width: 8,
+                height: 4,
+                rgba: rgba.clone(),
+            },
+            info,
+        };
+        let (frame, layer) = hdr_frame(&capture).unwrap();
+        assert_eq!((frame.width, frame.height), (8, 4));
+        assert_eq!(layer.len(), 8 * 4 * 6);
+        let back = hdr_picture(&frame, &layer, info);
+        assert_eq!(back.info, info);
+        for (a, b) in back.frame.rgba.iter().zip(&rgba) {
+            assert!((a - b).abs() <= b.abs() * 1e-3, "{a} vs {b}");
+        }
+    }
 }

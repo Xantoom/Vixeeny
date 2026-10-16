@@ -22,11 +22,6 @@ pub enum SourceFormat {
 }
 
 impl SourceFormat {
-    /// Whether this build can read the format (AVIF needs `native-codecs`).
-    pub const fn available(self) -> bool {
-        !matches!(self, Self::Avif) || cfg!(feature = "native-codecs")
-    }
-
     /// The format of `bytes`, from the magic numbers.
     pub fn sniff(bytes: &[u8]) -> Option<Self> {
         let starts = |p: &[u8]| bytes.starts_with(p);
@@ -66,6 +61,10 @@ pub fn decode(bytes: &[u8]) -> Result<Decoded, ImageError> {
     match SourceFormat::sniff(bytes).ok_or_else(|| bad("unrecognised image format"))? {
         SourceFormat::Jxl => decode_jxl(bytes),
         SourceFormat::Avif => decode_avif(bytes),
+        SourceFormat::Png => match decode_png_pq(bytes)? {
+            Some(decoded) => Ok(decoded),
+            None => decode_with_image(bytes),
+        },
         _ => decode_with_image(bytes),
     }
 }
@@ -86,6 +85,62 @@ fn decode_with_image(bytes: &[u8]) -> Result<Decoded, ImageError> {
         rgba.into_raw(),
         profile.as_deref(),
     ))
+}
+
+/// A PNG whose `cICP` chunk says BT.2020 / PQ (what Vixeeny writes for HDR), tone-mapped to SDR;
+/// `None` for every other PNG.
+fn decode_png_pq(bytes: &[u8]) -> Result<Option<Decoded>, ImageError> {
+    let mut decoder = png::Decoder::new(Cursor::new(bytes));
+    decoder.set_transformations(png::Transformations::EXPAND);
+    let mut reader = decoder.read_info().map_err(bad)?;
+    let pq = reader
+        .info()
+        .coding_independent_code_points
+        .is_some_and(|c| c.color_primaries == 9 && c.transfer_function == 16);
+    if !pq {
+        return Ok(None);
+    }
+    let mut buf = vec![
+        0;
+        reader
+            .output_buffer_size()
+            .ok_or_else(|| bad("image too large"))?
+    ];
+    let info = reader.next_frame(&mut buf).map_err(bad)?;
+    let (width, height) = (info.width, info.height);
+    let samples = &buf[..info.buffer_size()];
+    let signal: Vec<[f32; 3]> = match (info.color_type, info.bit_depth) {
+        (png::ColorType::Rgb, png::BitDepth::Sixteen) => samples
+            .as_chunks::<6>()
+            .0
+            .iter()
+            .map(|p| {
+                let c = |i: usize| f32::from(u16::from_be_bytes([p[i], p[i + 1]])) / 65535.0;
+                [c(0), c(2), c(4)]
+            })
+            .collect(),
+        (png::ColorType::Rgb, png::BitDepth::Eight) => samples
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .map(|p| p.map(|c| f32::from(c) / 255.0))
+            .collect(),
+        (png::ColorType::Grayscale, png::BitDepth::Sixteen) => samples
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|p| [f32::from(u16::from_be_bytes(*p)) / 65535.0; 3])
+            .collect(),
+        (png::ColorType::Grayscale, png::BitDepth::Eight) => {
+            samples.iter().map(|&c| [f32::from(c) / 255.0; 3]).collect()
+        }
+        _ => return Ok(None),
+    };
+    Ok(Some(Decoded {
+        width,
+        height,
+        bgra: crate::hdr::pq_to_sdr(width, height, &signal),
+    }))
 }
 
 fn decode_jxl(bytes: &[u8]) -> Result<Decoded, ImageError> {
@@ -121,32 +176,9 @@ fn decode_jxl(bytes: &[u8]) -> Result<Decoded, ImageError> {
     Ok(finish(w as u32, h as u32, rgba, None))
 }
 
-#[cfg(feature = "native-codecs")]
 fn decode_avif(bytes: &[u8]) -> Result<Decoded, ImageError> {
     let d = crate::avif::decode(bytes)?;
-    let mut picture = image::RgbaImage::from_raw(d.width, d.height, d.rgba)
-        .map(DynamicImage::ImageRgba8)
-        .ok_or_else(|| bad("inconsistent AVIF buffer"))?;
-    for _ in 0..d.rotation {
-        picture = picture.rotate270(); // anti-clockwise
-    }
-    match d.mirror {
-        Some(0) => picture = picture.flipv(),
-        Some(_) => picture = picture.fliph(),
-        None => {}
-    }
-    let rgba = picture.into_rgba8();
-    Ok(finish(
-        rgba.width(),
-        rgba.height(),
-        rgba.into_raw(),
-        d.icc.as_deref(),
-    ))
-}
-
-#[cfg(not(feature = "native-codecs"))]
-fn decode_avif(_: &[u8]) -> Result<Decoded, ImageError> {
-    Err(ImageError::Unavailable(crate::ImageFormat::Avif))
+    Ok(finish(d.width, d.height, d.rgba, None))
 }
 
 /// Profile → sRGB, then alpha flattened on white, then BGRA.

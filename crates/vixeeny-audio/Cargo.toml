@@ -29,3 +29,7 @@ windows = { workspace = true, features = [
     "Win32_System_Variant",
     "Win32_UI_Shell_PropertiesSystem",
 ] }
+
+[package.metadata.cargo-shear]
+# Named by the `implement` macro, never in the code.
+ignored = ["windows-core"]

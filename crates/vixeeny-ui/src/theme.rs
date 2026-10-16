@@ -62,19 +62,6 @@ pub const fn font() -> &'static str {
     "Segoe UI Variable Text"
 }
 
-/// The native window handle (`HWND`) once the window is shown.
-#[cfg(feature = "desktop")]
-pub fn native_handle(window: &slint::Window) -> Option<u64> {
-    use slint::winit_030::WinitWindowAccessor;
-    use slint::winit_030::winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
-    window
-        .with_winit_window(|w| match w.window_handle().ok()?.as_raw() {
-            RawWindowHandle::Win32(h) => Some(h.hwnd.get() as u64),
-            _ => None,
-        })
-        .flatten()
-}
-
 /// Runs `f` with the native handle as soon as the event loop shows the window (the handle does
 /// not exist before): the backend wakes this when it creates the window, nothing is polled.
 #[cfg(feature = "desktop")]

@@ -26,7 +26,8 @@ Windows program; from Linux or WSL the workspace can be checked and its tests ru
 x86_64-pc-windows-msvc …`).
 
 Release builds also need the image libraries: `cargo xtask build-native` from a Visual Studio
-developer prompt (it builds SVT-AV1, dav1d and the image libraries; see `native/versions.toml`),
+developer prompt with NASM on the `PATH` (it builds libjxl, jpegli, libjpeg-turbo and
+libultrahdr; see `native/versions.toml`),
 then set `PKG_CONFIG_PATH=native\build\work\prefix\lib\pkgconfig` and build `vixeeny-app`
 with `--features native-codecs`. `cargo xtask dist` gathers the release files.
 
@@ -45,8 +46,6 @@ the images (`cargo test -p vixeeny-ui`).
 - **Text for users** lives in `crates/vixeeny-common/src/i18n.rs` (English and French);
   see [docs/TRANSLATING.md](docs/TRANSLATING.md). A new codec is data: see
   [docs/ADDING_A_CODEC.md](docs/ADDING_A_CODEC.md).
-- **Decisions and deviations** from [VIXEENY_PLAN.md](VIXEENY_PLAN.md) go in its journal (the
-  table at the end), with the reason.
 - Commits: a short imperative subject (`feat(editor): …`, `fix: …`, `docs: …`).
 
 ## Reporting a bug

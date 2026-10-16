@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! M1 demo: every software video encoder × every allowed container (plan 13.2) encodes
+//! Every software video encoder × every allowed container encodes
 //! 100 synthetic frames; every audio encoder × allowed container encodes 1 s of sine.
 //! Each output is demuxed again and its packet count / codec checked. The custom preset of each
 //! encoder is also tried in every rate mode (the hardware ones when this machine has them).

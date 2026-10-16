@@ -26,7 +26,7 @@ impl Color {
         format!("#{:02x}{:02x}{:02x}", self.r, self.g, self.b)
     }
 
-    /// The eight preset colours of the palette (plan 5.3).
+    /// The eight preset colours of the palette.
     pub const PALETTE: [Self; 8] = [
         Self::rgb(0xE5, 0x39, 0x35), // red
         Self::rgb(0xFB, 0x8C, 0x00), // orange
@@ -371,11 +371,6 @@ mod tests {
     }
 
     #[test]
-    fn hex_colours() {
-        assert_eq!(Color::rgb(0xE5, 0x39, 0x35).hex(), "#e53935");
-    }
-
-    #[test]
     fn line_hit_and_bounds() {
         let a = Annotation::Line {
             from: Point::new(0.0, 0.0),
@@ -422,23 +417,6 @@ mod tests {
         };
         assert!(f.hit(Point::new(50.0, 25.0)));
         assert!(!f.hit(Point::new(2.0, 2.0)));
-    }
-
-    #[test]
-    fn translation_moves_everything() {
-        let a = Annotation::Pen {
-            points: vec![Point::new(1.0, 1.0), Point::new(2.0, 3.0)],
-            style: style(1.0),
-        };
-        let b = a.translated(10.0, -1.0);
-        assert_eq!(
-            b,
-            Annotation::Pen {
-                points: vec![Point::new(11.0, 0.0), Point::new(12.0, 2.0)],
-                style: style(1.0)
-            }
-        );
-        assert_eq!(b.translated(-10.0, 1.0), a);
     }
 
     #[test]

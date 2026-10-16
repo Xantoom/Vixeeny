@@ -23,15 +23,15 @@ jobs:
     env:
       FFMPEG_DIR: ${{ github.workspace }}\native\build\work\ffmpeg-prebuilt
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.98.1
+          toolchain: 1.99.1
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - uses: ilammy/msvc-dev-cmd@v1
       # Every build links FFmpeg, and the tests need its DLLs.
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: ffmpeg
           path: native/build/work
@@ -53,14 +53,14 @@ jobs:
       CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: rust-lld
       FFMPEG_DIR: ${{ github.workspace }}\native\build\work\ffmpeg-prebuilt
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.98.1
+          toolchain: 1.99.1
       - uses: Swatinem/rust-cache@v2
       - uses: ilammy/msvc-dev-cmd@v1
       # Every build links FFmpeg, and the tests need its DLLs.
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: ffmpeg
           path: native/build/work
@@ -78,25 +78,25 @@ jobs:
     # cargo-deny runs in a Linux container; it only reads the Windows dependency graph.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: EmbarkStudios/cargo-deny-action@v2
   native:
-    # FFmpeg (the `ffmpeg` job), and SVT-AV1, dav1d and the image libraries built
-    # with MSVC for libavif and the image crates. The same build as a release, without packaging.
+    # FFmpeg (the `ffmpeg` job), and libjxl and jpegli built with MSVC for the image codecs.
+    # The same build as a release, without packaging.
     needs: ffmpeg
     runs-on: windows-latest
     env:
       FFMPEG_DIR: ${{ github.workspace }}\native\build\work\ffmpeg-prebuilt
       LIBCLANG_PATH: C:\Program Files\LLVM\bin
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.98.1
+          toolchain: 1.99.1
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - uses: ilammy/msvc-dev-cmd@v1
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v6
         id: native-cache
         with:
           path: native/build/work
@@ -108,22 +108,21 @@ jobs:
           choco install pkgconfiglite -y --no-progress
           "C:\ProgramData\chocolatey\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
           "$env:FFMPEG_DIR\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
-      # Only to build the native libraries, which the cache usually holds already.
-      - name: Tools (nasm, meson)
+      # Only to build the native libraries (libjpeg-turbo's SIMD), which the cache usually holds.
+      - name: Tools (nasm)
         if: steps.native-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           choco install nasm -y --no-progress
           "C:\Program Files\NASM" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
-          pip install meson
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: ffmpeg
           path: native/build/work
       - run: cargo xtask build-native
       # Saved only when the libraries changed: an unchanged copy (750 MB) would only push the
       # other caches out of the 10 GB GitHub keeps per repository.
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@v6
         if: steps.native-cache.outputs.cache-hit != 'true'
         with:
           path: native/build/work
@@ -132,7 +131,7 @@ jobs:
         env:
           PKG_CONFIG_PATH: ${{ github.workspace }}\native\build\work\prefix\lib\pkgconfig
         run: cargo clippy -p vixeeny-app --features native-codecs --all-targets -- -D warnings
-      - name: Image codecs (AVIF, JPEG XL)
+      - name: Image codecs (JPEG, Ultra HDR, JPEG XL)
         env:
           PKG_CONFIG_PATH: ${{ github.workspace }}\native\build\work\prefix\lib\pkgconfig
         run: cargo test -p vixeeny-image --features native-codecs

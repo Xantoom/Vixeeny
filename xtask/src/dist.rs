@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! `cargo xtask dist [--out <dir>]` (Windows release layout, plan 10.1) and
+//! `cargo xtask dist [--out <dir>]` (Windows release layout) and
 //! `cargo xtask sums <dir>`.
 //!
 //! `dist` expects `cargo build --release` to have produced the two programs, and gathers them
@@ -211,7 +211,10 @@ mod tests {
         extend_zip(&update, &[("portable.flag", b"")], &portable)?;
 
         let mut zip = zip::ZipArchive::new(std::fs::File::open(&portable)?)?;
-        let mut names: Vec<_> = zip.file_names().map(str::to_owned).collect();
+        let mut names: Vec<_> = zip
+            .file_names()
+            .map(|n| n.map(std::borrow::Cow::into_owned))
+            .collect::<Result<_, _>>()?;
         names.sort();
         assert_eq!(names, ["a.txt", "portable.flag", "sub/b.txt"]);
         let mut text = String::new();

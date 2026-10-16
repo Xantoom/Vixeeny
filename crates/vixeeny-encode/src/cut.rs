@@ -16,6 +16,7 @@ use ffmpeg_next::software::resampling;
 use ffmpeg_next::util::channel_layout::ChannelLayout;
 use ffmpeg_next::util::format::sample::{Sample, Type as SampleType};
 use ffmpeg_next::{Dictionary, Packet, Rational, codec, color, encoder, ffi, format, frame, media};
+use vixeeny_common::colour;
 
 use crate::recorder::RecordError;
 use crate::registry::{Chroma, Encoder};
@@ -142,16 +143,6 @@ impl Clip {
     /// The length of the clip, its last frame included.
     pub fn duration(&self) -> f64 {
         self.time(self.frames.len().saturating_sub(1)) + self.frame_seconds()
-    }
-
-    /// The frame shown at `t` seconds.
-    pub fn frame_at(&self, t: f64) -> usize {
-        let first = self.frames.first().map_or(0, |f| f.pts);
-        let pts = first
-            + (t * f64::from(self.time_base.1) / f64::from(self.time_base.0.max(1))).round() as i64;
-        self.frames
-            .partition_point(|f| f.pts <= pts)
-            .saturating_sub(1)
     }
 
     /// The key frame at or before frame `i`.
@@ -329,7 +320,8 @@ impl Drop for Scaler {
 
 /// HDR (BT.2020 primaries, PQ) to SDR (BT.709, sRGB) for the preview: the reference white
 /// (203 nits, BT.2408) becomes SDR white, what is brighter rolls off up to the peak instead of
-/// being clipped, colours keep their hue (the curve scales the three channels alike).
+/// being clipped, colours keep their hue (the curve scales the three channels alike) and those
+/// wider than BT.709 are desaturated just enough to fit, not clipped.
 pub struct ToneMap {
     /// PQ code (12 bits) → linear light, 1.0 at the reference white.
     linear: Vec<f32>,
@@ -341,8 +333,6 @@ pub struct ToneMap {
 const REFERENCE_WHITE: f64 = 203.0;
 /// The brightest a clip is taken to be (most HDR games and monitors), nits.
 const PEAK: f64 = 1000.0;
-/// Below this (relative to the white) light is kept as it is.
-const KNEE: f32 = 0.8;
 
 /// BT.2020 to BT.709, linear light (ITU-R BT.2087).
 const BT2020_TO_709: [[f32; 3]; 3] = [
@@ -382,27 +372,18 @@ impl ToneMap {
         Self { linear, srgb }
     }
 
-    /// The roll-off: `m` (linear, 1.0 the white) to 0..1, the same below the knee.
-    fn curve(m: f32) -> f32 {
-        if m <= KNEE {
-            return m;
-        }
-        // Extended Reinhard over what is above the knee, the peak reaching 1.
-        let span = 1.0 - KNEE;
-        let x = (m - KNEE) / span;
-        let peak = (PEAK / REFERENCE_WHITE) as f32;
-        let xw = (peak - KNEE) / span;
-        let y = (x * (1.0 + x / (xw * xw)) / (1.0 + x)).min(1.0);
-        KNEE + span * y
-    }
-
     /// One pixel: PQ codes (16 bits, full range) to sRGB BGRA.
     pub fn pixel(&self, rgb: [u16; 3]) -> [u8; 4] {
         let lin = rgb.map(|c| self.linear[usize::from(c >> 4)]);
-        let [r, g, b] =
-            BT2020_TO_709.map(|row| (row[0] * lin[0] + row[1] * lin[1] + row[2] * lin[2]).max(0.0));
+        let [r, g, b] = colour::into_gamut(
+            BT2020_TO_709.map(|row| row[0] * lin[0] + row[1] * lin[1] + row[2] * lin[2]),
+        );
         let m = r.max(g).max(b);
-        let scale = if m > KNEE { Self::curve(m) / m } else { 1.0 };
+        let scale = if m > colour::KNEE {
+            colour::roll_off(m, (PEAK / REFERENCE_WHITE) as f32) / m
+        } else {
+            1.0
+        };
         let code = |v: f32| self.srgb[((v * scale).min(1.0) * 4095.0) as usize];
         [code(b), code(g), code(r), 255]
     }
@@ -410,7 +391,7 @@ impl ToneMap {
     /// A picture of `w`×`h` RGB48 (rows `stride` bytes apart) to packed BGRA in `bgra`, on
     /// every core.
     fn run(&self, data: &[u8], stride: usize, w: usize, h: usize, bgra: &mut [u8]) {
-        let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+        let threads = std::thread::available_parallelism().map_or(4, std::num::NonZero::get);
         let rows = h.div_ceil(threads).max(1);
         std::thread::scope(|s| {
             for (chunk, out) in bgra.chunks_mut(rows * w * 4).enumerate() {
@@ -479,7 +460,10 @@ fn video_decoder(
             ffmpeg_next::decoder::find(context.id())
         };
         if let Some(codec) = codec
-            && let Ok(decoder) = context.decoder().open_as(codec).and_then(|o| o.video())
+            && let Ok(decoder) = context
+                .decoder()
+                .open_as(codec)
+                .and_then(ffmpeg_next::decoder::Opened::video)
         {
             return Ok((decoder, true));
         }
@@ -1284,15 +1268,5 @@ mod tests {
         assert!(c.lossless(0, 3));
         // Frames 0..=1 need packet 2, which comes after packet 1 (shown last).
         assert!(!c.lossless(0, 1));
-    }
-
-    #[test]
-    fn frames_are_found_by_their_time() {
-        let c = clip(&[(10, true, 0), (11, false, 1), (12, false, 2)]);
-        assert_eq!(c.frame_at(0.0), 0);
-        assert_eq!(c.frame_at(1.0 / 60.0), 1);
-        assert_eq!(c.frame_at(10.0), 2);
-        assert!((c.time(2) - 2.0 / 60.0).abs() < 1e-9);
-        assert!((c.duration() - 3.0 / 60.0).abs() < 1e-9);
     }
 }

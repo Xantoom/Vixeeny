@@ -1,5 +1,5 @@
 # vixeeny-updater
 
-Update check, download, signature verification, replacement (M18).
+Update check, download, signature verification, replacement.
 
-Part of the [Vixeeny](../../VIXEENY_PLAN.md) workspace.
+Part of the [Vixeeny](../../README.md) workspace.

@@ -901,20 +901,6 @@ impl Canvas<'_> {
         }
         Ok(())
     }
-
-    /// Clips what follows to `r` until [`Canvas::pop_clip`].
-    pub fn push_clip(&self, r: D2D_RECT_F) {
-        // SAFETY: plain state call, paired with `pop_clip`.
-        unsafe {
-            self.dc
-                .PushAxisAlignedClip(&r, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-        }
-    }
-
-    pub fn pop_clip(&self) {
-        // SAFETY: pairs a `push_clip`.
-        unsafe { self.dc.PopAxisAlignedClip() };
-    }
 }
 
 /// An opaque 1×1 surface of colour `c`, to be scaled into rectangles by its visual.

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Putting an image on the clipboard (plan 5.3, CA-ED-2): a `PNG` entry for browsers, Discord and
+//! Putting an image on the clipboard: a `PNG` entry for browsers, Discord and
 //! most editors, and a `CF_DIBV5` bitmap for everything else (Paint, Office). Both are lossless.
 //! In another format (JPEG, WebP…), the encoded file goes on instead of the `PNG` entry, as a file
 //! (`CF_HDROP`: browsers and Discord upload it as it is, Explorer pastes it) and, for JPEG, as
@@ -120,6 +120,12 @@ fn with_clipboard(
     result
 }
 
+/// Text (the words read in a zone).
+pub fn copy_text(text: &str) -> crate::Result<()> {
+    const CF_UNICODETEXT: u32 = 13;
+    with_clipboard(|put| put(CF_UNICODETEXT, &utf16_z(text)))
+}
+
 /// What goes on the clipboard with an image.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ImageClip<'a> {
@@ -166,12 +172,6 @@ pub fn copy_image(width: u32, height: u32, bgra: &[u8], clip: ImageClip<'_>) -> 
         }
         put(CF_DIBV5, &dibv5(width, height, bgra))
     })
-}
-
-/// Plain text, as `CF_UNICODETEXT`.
-pub fn copy_text(text: &str) -> crate::Result<()> {
-    const CF_UNICODETEXT: u32 = 13;
-    with_clipboard(|put| put(CF_UNICODETEXT, &utf16_z(text)))
 }
 
 #[cfg(test)]

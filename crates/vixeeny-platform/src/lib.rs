@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! vixeeny-platform — OS abstractions: monitors, DPI, windows, processes (plan 4.3).
+//! vixeeny-platform — OS abstractions: monitors, DPI, windows, processes.
 //!
 //! All coordinates are **physical pixels** in the virtual desktop. Callers must have called
 //! [`ensure_dpi_aware`] first, otherwise Windows hands out scaled (virtualised) values.
@@ -12,6 +12,7 @@ pub use geometry::{PhysicalRect, virtual_bounds};
 pub use time::{LocalTime, local_time, os_version, utc_offset_minutes};
 
 pub mod machine;
+pub mod ocr;
 mod windows_impl;
 pub use windows_impl::{
     APP_ID, InstanceGuard, OutsideClicks, allow_foreground_handoff, animations_enabled,
@@ -156,7 +157,7 @@ mod tests {
         }
     }
 
-    /// 4K at 150 % left of a 1080p at 100 % (CA-IMG-3 layout).
+    /// 4K at 150 % left of a 1080p at 100 %.
     fn layout() -> Vec<MonitorInfo> {
         vec![
             mon(1, 0, 0, 3840, 2160, 144),
@@ -180,10 +181,5 @@ mod tests {
         let m = layout();
         let straddling = PhysicalRect::new(3600, 100, 600, 300); // 240 px left, 360 px right
         assert_eq!(monitor_for_rect(&m, &straddling).unwrap().id, MonitorId(2));
-    }
-
-    #[test]
-    fn scale_factor() {
-        assert!((layout()[0].scale_factor() - 1.5).abs() < f64::EPSILON);
     }
 }

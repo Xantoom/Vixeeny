@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Hardware probing (plan 6.3). The driver of every GPU is asked what its video encoder can do
+//! Hardware probing. The driver of every GPU is asked what its video encoder can do
 //! (codecs, 10-bit, 4:2:2 / 4:4:4, largest picture). Nothing is ever encoded: no heavy work
 //! happens outside a recording. A GPU whose driver cannot answer offers no hardware encoder;
 //! software encoders built into FFmpeg offer what the registry declares. The work is done by a

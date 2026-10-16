@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! vixeeny-image — image encoding (plan 5.4) and HDR → SDR tone mapping.
+//! vixeeny-image — image encoding and HDR → SDR tone mapping.
 //!
 //! Input is always opaque 8-bit BGRA ([`Bgra`], what the capture layer hands over). Every
 //! encoder embeds an sRGB colour description and no other metadata.
 
-#[cfg(feature = "native-codecs")]
+pub mod anim;
 mod avif;
+pub mod backdrop;
 mod decode;
+mod hdr;
 mod icc;
 #[cfg(feature = "native-codecs")]
 mod jpegli;
@@ -15,9 +17,12 @@ mod jxl;
 mod pixels;
 mod png_enc;
 pub mod tonemap;
+#[cfg(feature = "native-codecs")]
+mod ultrahdr;
 mod webp;
 
 pub use decode::{Decoded, SourceFormat, decode};
+pub use hdr::Hdr;
 pub use pixels::Bgra;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -40,12 +45,17 @@ impl ImageFormat {
         }
     }
 
-    /// Whether this build can encode the format (JPEG, AVIF and JPEG XL need `native-codecs`).
+    /// Whether this build can encode the format (JPEG and JPEG XL need `native-codecs`).
     pub const fn available(self) -> bool {
         match self {
-            Self::Png | Self::WebP => true,
-            Self::Jpeg | Self::Avif | Self::Jxl => cfg!(feature = "native-codecs"),
+            Self::Png | Self::WebP | Self::Avif => true,
+            Self::Jpeg | Self::Jxl => cfg!(feature = "native-codecs"),
         }
+    }
+
+    /// Whether the format can keep HDR (WebP is 8-bit sRGB only).
+    pub const fn holds_hdr(self) -> bool {
+        !matches!(self, Self::WebP) && self.available()
     }
 
     /// Parses the `image.format` setting.
@@ -210,6 +220,8 @@ pub enum ImageError {
     Icc(String),
     #[error("avif: {0}")]
     Avif(String),
+    #[error("gif: {0}")]
+    Gif(String),
     #[error("cannot read the image: {0}")]
     Decode(String),
     #[error("jpeg xl: {0}")]
@@ -230,19 +242,37 @@ pub fn encode(
         ImageFormat::WebP => webp::encode(image, &settings.webp),
         #[cfg(feature = "native-codecs")]
         ImageFormat::Jpeg => jpegli::encode(image, &settings.jpeg),
-        #[cfg(feature = "native-codecs")]
         ImageFormat::Avif => avif::encode(image, &settings.avif),
         #[cfg(feature = "native-codecs")]
         ImageFormat::Jxl => jxl::encode(image, &settings.jxl),
         #[cfg(not(feature = "native-codecs"))]
-        ImageFormat::Jpeg | ImageFormat::Avif | ImageFormat::Jxl => {
-            Err(ImageError::Unavailable(format))
-        }
+        ImageFormat::Jpeg | ImageFormat::Jxl => Err(ImageError::Unavailable(format)),
+    }
+}
+
+/// Encodes an HDR picture as HDR (BT.2020 / PQ; JPEG as Ultra HDR: an SDR picture with a gain
+/// map). [`ImageFormat::holds_hdr`] says which formats can.
+pub fn encode_hdr(
+    format: ImageFormat,
+    image: &Hdr<'_>,
+    settings: &Settings,
+) -> Result<Vec<u8>, ImageError> {
+    image.validate()?;
+    match format {
+        ImageFormat::Png => png_enc::encode_hdr(image, &settings.png),
+        ImageFormat::Avif => avif::encode_hdr(image, &settings.avif),
+        #[cfg(feature = "native-codecs")]
+        ImageFormat::Jxl => jxl::encode_hdr(image, &settings.jxl),
+        #[cfg(feature = "native-codecs")]
+        ImageFormat::Jpeg => ultrahdr::encode(image, &settings.jpeg),
+        _ => Err(ImageError::Unavailable(format)),
     }
 }
 
 #[cfg(test)]
 mod decode_tests;
+#[cfg(test)]
+mod hdr_tests;
 #[cfg(test)]
 mod tests;
 

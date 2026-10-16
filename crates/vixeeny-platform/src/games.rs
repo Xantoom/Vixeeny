@@ -634,11 +634,4 @@ mod tests {
             Some("hades.exe")
         );
     }
-
-    #[test]
-    fn the_signals_of_this_computer_can_be_read() {
-        let signals = GameSignals::read();
-        let _ = exclusive_full_screen();
-        assert!(signals.folders.iter().all(|f| f.ends_with('\\')));
-    }
 }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The update check (plan 10.2). The network client lives in the app: the daemon only starts
+//! The update check. The network client lives in the app: the daemon only starts
 //! `vixeeny-app --update background` (a windowed program, so nothing shows) a moment after its
 //! own start and after each wake from sleep, which Windows reports (nothing is timed in
 //! between); the app checks and downloads, or tells the user. At its start the daemon has the

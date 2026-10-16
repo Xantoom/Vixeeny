@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Screen recording (plan 5.9): the capture stream feeds the recorder, on a thread of its own so
+//! Screen recording: the capture stream feeds the recorder, on a thread of its own so
 //! the action loop keeps answering the daemon. Frames are converted on the GPU when possible
 //! (see `try_gpu`), on the CPU otherwise; a recording films the monitor
 //! under the cursor, the replay the game's window alone.
@@ -462,6 +462,7 @@ fn plan(
         }),
         replay_storage: storage,
         files: !replay,
+        buffers: Default::default(),
     };
     let gpu = if allow_gpu {
         try_gpu(&record.encoder, &record, source, hdr)
@@ -580,7 +581,7 @@ fn output_file(
         destination.template,
         &vars,
         extension,
-        |p| p.exists(),
+        std::path::Path::exists,
     ))
 }
 
@@ -751,7 +752,10 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
         };
         (stream, gpu_frames)
     };
-    let recorder = Recorder::start(plan.config, plan.namer)?;
+    let mut config = plan.config;
+    // The CPU frames come back to the capture once converted.
+    config.buffers = stream.buffers();
+    let recorder = Recorder::start(config, plan.namer)?;
     let (ctl, rx) = channel();
     // The widget is a nicety: without it the recording goes on (hotkeys still work).
     let widget = plan.widget.as_ref().and_then(|settings| {

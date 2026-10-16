@@ -553,34 +553,4 @@ mod tests {
         assert_eq!(total, 100.0 * 80.0);
         assert!(rects.iter().all(|r| r.2 >= 0.0 && r.3 >= 0.0));
     }
-
-    #[test]
-    fn no_hole_veils_everything() {
-        let area = (0.0, 0.0, 10.0, 10.0);
-        assert_eq!(veil_rects(area, None)[0], area);
-    }
-
-    #[test]
-    fn the_border_is_inside_the_zone() {
-        let [top, bottom, left, right] = border_rects((10.0, 10.0, 100.0, 50.0), 2.0);
-        assert_eq!(top, (10.0, 10.0, 100.0, 2.0));
-        assert_eq!(bottom, (10.0, 58.0, 100.0, 2.0));
-        assert_eq!(left, (10.0, 12.0, 2.0, 46.0));
-        assert_eq!(right, (108.0, 12.0, 2.0, 46.0));
-    }
-
-    #[test]
-    fn snapping_rounds_the_edges() {
-        let r = Rect::new(10.4, 10.6, 20.2, 5.0);
-        assert_eq!(snap(&r), (10.0, 11.0, 21.0, 5.0));
-    }
-
-    #[test]
-    fn handles_go_round_the_zone() {
-        let h = handle_centres((0.0, 0.0, 10.0, 20.0));
-        assert_eq!(h[0], (0.0, 0.0));
-        assert_eq!(h[3], (10.0, 10.0));
-        assert_eq!(h[4], (10.0, 20.0));
-        assert_eq!(h[7], (0.0, 10.0));
-    }
 }

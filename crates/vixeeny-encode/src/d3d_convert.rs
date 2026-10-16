@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! GPU colour conversion and scaling (plan 5.9, Windows): a D3D11 video processor turns the
+//! GPU colour conversion and scaling (Windows): a D3D11 video processor turns the
 //! captured BGRA8 (or scRGB half-float, HDR) texture into NV12 / P010 in another texture, with
 //! the BT.709 or BT.2020/PQ matrix. Nothing crosses the PCIe bus: the output texture goes to the
 //! hardware encoder as it is (see `gpu`).

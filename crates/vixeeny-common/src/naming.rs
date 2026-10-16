@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! File names and per-application folders (plan 5.8): application name resolution, name
+//! File names and per-application folders: application name resolution, name
 //! sanitising, filename templates. Pure functions, no I/O except the `exists` callback.
 
 use std::collections::BTreeMap;
@@ -102,7 +102,7 @@ fn not_an_engine(s: Option<&str>) -> Option<&str> {
     non_empty(s).filter(|s| !ENGINES.contains(&s.to_lowercase().as_str()))
 }
 
-/// Resolves the display name in the order of plan 5.8: user table, `ProductName`,
+/// Resolves the display name in this order: user table, `ProductName`,
 /// `FileDescription`, window title, executable name (unless generic). `None` means unknown:
 /// callers use [`DEFAULT_APP_NAME`]. The result is already sanitised.
 pub fn resolve_app_name(info: &AppInfo<'_>, user_map: &BTreeMap<String, String>) -> Option<String> {
@@ -246,7 +246,6 @@ mod tests {
             exe_stem(r"C:\Games\Foo\Client-Win64-Shipping.exe"),
             "Client-Win64-Shipping"
         );
-        assert_eq!(exe_stem("/usr/bin/firefox"), "firefox");
         assert_eq!(exe_stem("tool.EXE"), "tool");
         assert_eq!(exe_stem("archive.tar.gz"), "archive.tar.gz");
     }

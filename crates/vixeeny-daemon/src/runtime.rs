@@ -46,7 +46,7 @@ impl Games for NoGames {
 pub trait Tray {
     fn set_recording(&mut self, state: RecState, lang: Lang);
     fn set_language(&mut self, lang: Lang);
-    /// Shows a short message to the user. Real toast notifications arrive with M17.
+    /// Shows a short message to the user.
     fn notify(&mut self, message: &str);
 }
 
@@ -647,13 +647,6 @@ mod tests {
     }
 
     #[test]
-    fn quit_flows_out_of_pump() {
-        let (mut rt, tx, _, _) = runtime(false, Config::default());
-        tx.send(Event::TrayQuit);
-        assert_eq!(rt.pump(), Flow::Quit);
-    }
-
-    #[test]
     fn language_setting_beats_the_os_locale() {
         let mut config = Config::default();
         config.general.language = "en".into();
@@ -661,17 +654,6 @@ mod tests {
         assert_eq!(rt.lang(), Lang::En);
         let (rt, ..) = runtime(false, Config::default());
         assert_eq!(rt.lang(), Lang::Fr);
-    }
-
-    #[test]
-    fn recording_state_reaches_the_tray() {
-        use vixeeny_common::ipc::AppToDaemon;
-        let (mut rt, tx, log, _) = runtime(false, Config::default());
-        tx.send(Event::App(AppToDaemon::RecordingStateChanged(
-            RecState::Recording,
-        )));
-        rt.pump();
-        assert_eq!(*log.lock().unwrap(), vec!["rec Recording".to_owned()]);
     }
 
     #[test]

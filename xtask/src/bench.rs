@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! `cargo xtask bench-idle [--seconds N] [--daemon PATH]`: measures NF-1 (idle CPU, wake-ups)
-//! and NF-2 (idle memory) of the daemon. Defaults to the 10 minutes of the plan.
+//! `cargo xtask bench-idle [--seconds N] [--daemon PATH]`: measures the idle CPU, wake-ups
+//! and memory of the daemon. Defaults to 10 minutes.
 
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -89,15 +89,15 @@ fn measure(pid: u32, seconds: u64, child: &mut std::process::Child) -> Result<()
 
     println!("\nover {elapsed:.0} s:");
     println!(
-        "  NF-1 CPU        {cpu_percent:.3} % (limit {LIMIT_CPU_PERCENT} %)        {}",
+        "  CPU             {cpu_percent:.3} % (limit {LIMIT_CPU_PERCENT} %)        {}",
         verdict(cpu_percent <= LIMIT_CPU_PERCENT)
     );
     println!(
-        "  NF-1 wake-ups   {wakeups:.1} /min (limit {LIMIT_WAKEUPS_PER_MIN})        {}",
+        "  wake-ups        {wakeups:.1} /min (limit {LIMIT_WAKEUPS_PER_MIN})        {}",
         verdict(wakeups < LIMIT_WAKEUPS_PER_MIN)
     );
     println!(
-        "  NF-2 private    {:.1} MiB (limit {:.0})        {}",
+        "  private         {:.1} MiB (limit {:.0})        {}",
         mib(end.private_bytes),
         mib(LIMIT_PRIVATE_BYTES),
         verdict(end.private_bytes < LIMIT_PRIVATE_BYTES)

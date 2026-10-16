@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Daemon ↔ app IPC (plan 4.6): `postcard` messages with a 4-byte little-endian length prefix
+//! Daemon ↔ app IPC: `postcard` messages with a 4-byte little-endian length prefix
 //! over a local socket (named pipe on Windows, Unix socket elsewhere).
 //!
 //! The daemon owns the listener. Binding it is also the single-instance lock: if another
@@ -178,7 +178,7 @@ pub enum AppToDaemon {
     RecordingStateChanged(RecState),
     /// The app is about to exit.
     Idle,
-    /// The UI saved the config; the daemon re-reads it. (Added to the plan's 4.6 list.)
+    /// The UI saved the config; the daemon re-reads it.
     ConfigChanged,
 }
 
@@ -415,15 +415,11 @@ mod tests {
     }
 
     #[test]
-    fn truncated_payload_is_an_error() {
+    fn a_cut_or_garbled_message_is_an_error() {
         let mut buf = Vec::new();
         write_msg(&mut buf, &Hello::Control(ControlRequest::Ping)).unwrap();
         buf.pop();
         assert!(read_msg::<_, Hello>(&mut Cursor::new(buf)).is_err());
-    }
-
-    #[test]
-    fn garbage_payload_is_an_error() {
         let mut buf = 3u32.to_le_bytes().to_vec();
         buf.extend_from_slice(&[0xff, 0xff, 0xff]);
         assert!(read_msg::<_, Hello>(&mut Cursor::new(buf)).is_err());

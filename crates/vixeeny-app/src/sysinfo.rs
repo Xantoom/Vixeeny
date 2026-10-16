@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The system info (plan M23): the block a bug report starts with ("Report a problem"). It holds what the
+//! The system info: the block a bug report starts with ("Report a problem"). It holds what the
 //! maintainers need to reproduce a problem — version, system, display, GPUs, encoders — and
 //! nothing personal: no user name, no folder, no file name.
 

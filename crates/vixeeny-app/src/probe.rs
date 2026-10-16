@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Hardware encoder probe (plan 6.3). `vixeeny-app --probe` is the child process that asks the
+//! Hardware encoder probe. `vixeeny-app --probe` is the child process that asks the
 //! GPU drivers what their encoders can do and prints the result as TOML; `--probe-report` runs
 //! it (through the cache) and prints a readable report, for the 🧪 check against the vendor
 //! documentation.

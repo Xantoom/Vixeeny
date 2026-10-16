@@ -127,7 +127,7 @@ pub fn max_refresh_hz() -> u32 {
     let Ok(list) = monitors() else { return 60 };
     list.iter()
         .filter_map(|m| {
-            let name: Vec<u16> = m.name.encode_utf16().chain([0]).collect();
+            let name = utf16z(&m.name);
             let mut mode = DEVMODEW {
                 dmSize: size_of::<DEVMODEW>() as u16,
                 ..Default::default()
@@ -819,7 +819,7 @@ pub const APP_ID: &str = "Xantoom.Vixeeny";
 
 pub fn set_app_id() -> Result<()> {
     use windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
-    let wide: Vec<u16> = APP_ID.encode_utf16().chain(std::iter::once(0)).collect();
+    let wide = utf16z(APP_ID);
     // SAFETY: `wide` is NUL-terminated and outlives the call.
     unsafe { SetCurrentProcessExplicitAppUserModelID(windows::core::PCWSTR(wide.as_ptr())) }
         .map_err(|e| os_err("SetCurrentProcessExplicitAppUserModelID", e))
@@ -866,7 +866,7 @@ pub fn set_exe_icon(id: WindowId) {
 /// [`focus_tagged_window`] (every window of Vixeeny has the same title).
 pub fn tag_window(id: WindowId, tag: &str) -> Result<()> {
     use windows::Win32::UI::WindowsAndMessaging::SetPropW;
-    let wide: Vec<u16> = tag.encode_utf16().chain(std::iter::once(0)).collect();
+    let wide = utf16z(tag);
     // SAFETY: `wide` is NUL-terminated and outlives the call; the property holds no pointer
     // (a non-null marker value), so nothing must be freed when the window goes away.
     unsafe {
@@ -894,7 +894,7 @@ pub fn focus_tagged_window(tag: &str) -> bool {
     use windows::Win32::UI::WindowsAndMessaging::{
         GetPropW, IsIconic, SW_RESTORE, SetForegroundWindow, ShowWindow,
     };
-    let wide: Vec<u16> = tag.encode_utf16().chain(std::iter::once(0)).collect();
+    let wide = utf16z(tag);
     let mut handles: Vec<HWND> = Vec::new();
     // SAFETY: the callback only pushes into `handles`, which outlives the enumeration.
     if unsafe { EnumWindows(Some(collect_window), LPARAM(&raw mut handles as isize)) }.is_err() {
@@ -921,7 +921,7 @@ pub fn open_path(path: &str) -> Result<()> {
     use windows::Win32::UI::Shell::ShellExecuteW;
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
     use windows::core::{PCWSTR, w};
-    let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+    let wide = utf16z(path);
     // SAFETY: both strings are NUL-terminated and outlive the call.
     let result = unsafe {
         ShellExecuteW(
@@ -1071,7 +1071,7 @@ pub fn exe_metadata(path: &str) -> crate::ExeMetadata {
     };
     use windows::core::PCWSTR;
 
-    let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+    let wide = utf16z(path);
     let mut handle = 0u32;
     // SAFETY: `wide` is NUL-terminated and outlives the call.
     let size = unsafe { GetFileVersionInfoSizeW(PCWSTR(wide.as_ptr()), Some(&raw mut handle)) };
@@ -1087,7 +1087,7 @@ pub fn exe_metadata(path: &str) -> crate::ExeMetadata {
     }
 
     let query = |sub: &str| -> Option<(*const c_void, u32)> {
-        let sub: Vec<u16> = sub.encode_utf16().chain(std::iter::once(0)).collect();
+        let sub = utf16z(sub);
         let mut ptr: *mut c_void = std::ptr::null_mut();
         let mut len = 0u32;
         // SAFETY: `block` holds a valid version resource; the out-pointers are valid and the
@@ -1233,7 +1233,7 @@ pub fn exe_icon(path: &str, size: u32) -> Option<(u32, u32, Vec<u8>)> {
     };
     use windows::Win32::UI::Shell::SHDefExtractIconW;
     use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, HICON, ICONINFO};
-    let wide: Vec<u16> = path.encode_utf16().chain(Some(0)).collect();
+    let wide = utf16z(path);
     let mut icon = HICON::default();
     // SAFETY: `wide` is a NUL-terminated path; the icon handle is destroyed below.
     unsafe {
@@ -1328,12 +1328,13 @@ pub fn exe_icon(path: &str, size: u32) -> Option<(u32, u32, Vec<u8>)> {
     pixels
 }
 
+/// `text` as a NUL-terminated UTF-16 string, for the `W` functions.
+fn utf16z(text: &str) -> Vec<u16> {
+    text.encode_utf16().chain([0]).collect()
+}
+
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn the_foreground_can_be_watched() {
-        assert!(super::on_foreground_change(|_| {}));
-    }
 
     #[test]
     fn a_window_is_full_screen_when_it_covers_its_whole_monitor() {

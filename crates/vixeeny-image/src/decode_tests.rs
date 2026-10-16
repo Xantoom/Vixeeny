@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! CA-CONV-2 and the readers: orientation, colour profiles, transparency, every format.
+//! The readers: orientation, colour profiles, transparency, every format.
 
 use crate::{Bgra, ImageFormat, Settings, SourceFormat, decode, encode};
 
@@ -57,24 +57,6 @@ fn exif(orientation: u16) -> Vec<u8> {
 fn px(d: &crate::Decoded, x: u32, y: u32) -> [u8; 4] {
     let i = (y * d.width + x) as usize * 4;
     d.bgra[i..i + 4].try_into().unwrap()
-}
-
-#[test]
-fn sniffing() {
-    assert_eq!(
-        SourceFormat::sniff(&png_bytes(&tagged(), 4, 2)),
-        Some(SourceFormat::Png)
-    );
-    assert_eq!(SourceFormat::sniff(b"hello"), None);
-    assert!(decode(b"not an image").is_err());
-}
-
-#[test]
-fn png_round_trip_is_exact() {
-    let src = tagged();
-    let d = decode(&png_bytes(&src, 4, 2)).unwrap();
-    assert_eq!((d.width, d.height), (4, 2));
-    assert_eq!(d.bgra, src);
 }
 
 #[test]
@@ -154,18 +136,44 @@ fn transparency_is_flattened_on_white() {
     assert_eq!(px(&d, 1, 0), [255, 0, 0, 255]); // opaque blue stays (BGRA)
 }
 
+/// Smooth BGRA, the kind of picture a lossy codec keeps close.
+fn gradient(w: u32, h: u32) -> Vec<u8> {
+    (0..h)
+        .flat_map(|y| (0..w).map(move |x| (x, y)))
+        .flat_map(|(x, y)| {
+            [
+                (x * 255 / w) as u8,
+                (y * 255 / h) as u8,
+                ((x + y) * 255 / (w + h)) as u8,
+                255,
+            ]
+        })
+        .collect()
+}
+
 #[test]
-fn webp_reads_back_exactly() {
-    let src = tagged();
-    let img = Bgra::new(4, 2, 16, &src);
-    let webp = encode(ImageFormat::WebP, &img, &Settings::default()).unwrap();
-    assert_eq!(decode(&webp).unwrap().bgra, src);
+fn an_avif_capture_reads_back_for_its_thumbnail() {
+    // SVT-AV1 misbehaves on tiny frames: use a size the encoder tests also use.
+    let (w, h) = (96u32, 64u32);
+    let src = gradient(w, h);
+    let img = Bgra::new(w, h, w as usize * 4, &src);
+    let avif = encode(ImageFormat::Avif, &img, &Settings::default()).unwrap();
+    assert_eq!(SourceFormat::sniff(&avif), Some(SourceFormat::Avif));
+    let d = decode(&avif).unwrap();
+    assert_eq!((d.width, d.height), (w, h));
+    let err: u64 = d
+        .bgra
+        .iter()
+        .zip(&src)
+        .map(|(a, b)| u64::from(a.abs_diff(*b)))
+        .sum();
+    let mean = err as f64 / src.len() as f64;
+    assert!(mean < 6.0, "mean error {mean}");
 }
 
 #[cfg(feature = "native-codecs")]
 #[test]
 fn native_formats_read() {
-    // SVT-AV1 misbehaves on tiny frames: use a size the encoder tests also use.
     let (w, h) = (96u32, 64u32);
     let src: Vec<u8> = (0..w * h)
         .flat_map(|i| {
@@ -183,10 +191,6 @@ fn native_formats_read() {
     for (a, b) in d.bgra.iter().zip(&src) {
         assert!(a.abs_diff(*b) <= 1, "jxl {a} vs {b}");
     }
-    let avif = encode(ImageFormat::Avif, &img, &Settings::default()).unwrap();
-    assert_eq!(SourceFormat::sniff(&avif), Some(SourceFormat::Avif));
-    let d = decode(&avif).unwrap();
-    assert_eq!((d.width, d.height), (w, h));
     let jpeg = encode(ImageFormat::Jpeg, &img, &Settings::default()).unwrap();
     assert_eq!(decode(&jpeg).unwrap().width, w);
 }

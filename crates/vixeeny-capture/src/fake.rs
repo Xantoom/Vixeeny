@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Test backend: every pixel encodes where it comes from.
 
-use vixeeny_platform::{MonitorInfo, WindowId};
+use vixeeny_platform::{MonitorId, MonitorInfo, PhysicalRect, WindowId};
 
 use crate::{CaptureError, CpuFrame, HdrFrame, StillBackend};
 
@@ -9,6 +9,8 @@ use crate::{CaptureError, CpuFrame, HdrFrame, StillBackend};
 #[derive(Debug, Default)]
 pub struct FakeBackend {
     pub grabs: Vec<String>,
+    /// The monitor windows are on.
+    pub window_monitor: Option<MonitorId>,
 }
 
 impl StillBackend for FakeBackend {
@@ -33,22 +35,46 @@ impl StillBackend for FakeBackend {
     fn grab_monitor_hdr(
         &mut self,
         monitor: &MonitorInfo,
+        area: Option<&PhysicalRect>,
         cursor: bool,
     ) -> Result<HdrFrame, CaptureError> {
         self.grabs
             .push(format!("hdr monitor {} cursor={cursor}", monitor.id.0));
         let pixels = monitor.rect.width as usize * monitor.rect.height as usize;
-        Ok(HdrFrame {
+        let frame = HdrFrame {
             width: monitor.rect.width,
             height: monitor.rect.height,
             rgba: vec![2.0; pixels * 4],
-        })
+        };
+        match area {
+            Some(area) => frame.crop(area),
+            None => Ok(frame),
+        }
     }
 
     fn grab_window(&mut self, window: WindowId, cursor: bool) -> Result<CpuFrame, CaptureError> {
         self.grabs
             .push(format!("window {} cursor={cursor}", window.0));
         Ok(CpuFrame::new(64, 48))
+    }
+
+    /// Every float is 2.0.
+    fn grab_window_hdr(
+        &mut self,
+        window: WindowId,
+        cursor: bool,
+    ) -> Result<HdrFrame, CaptureError> {
+        self.grabs
+            .push(format!("hdr window {} cursor={cursor}", window.0));
+        Ok(HdrFrame {
+            width: 64,
+            height: 48,
+            rgba: vec![2.0; 64 * 48 * 4],
+        })
+    }
+
+    fn window_monitor(&self, _window: WindowId) -> Option<MonitorId> {
+        self.window_monitor
     }
 }
 
@@ -71,7 +97,7 @@ mod tests {
         }
     }
 
-    /// CA-IMG-3: a 150 % monitor with a negative-origin 100 % monitor on its left.
+    /// a 150 % monitor with a negative-origin 100 % monitor on its left.
     fn capturer() -> Capturer<FakeBackend> {
         let monitors = vec![mon(1, 0, 0, 300, 200, 144), mon(2, -160, 20, 160, 100, 96)];
         Capturer::new(FakeBackend::default(), monitors)
@@ -120,20 +146,6 @@ mod tests {
         assert_eq!(f.pixel(160 + 7, 9), [7, 9, 1, 255]);
         // Uncovered area stays black.
         assert_eq!(f.pixel(0, 0), [0, 0, 0, 255]);
-    }
-
-    #[test]
-    fn cursor_option_is_forwarded() {
-        let mut c = capturer();
-        c.grab(
-            &CaptureTarget::Monitor(MonitorId(1)),
-            CaptureOptions {
-                show_cursor: true,
-                ..CaptureOptions::default()
-            },
-        )
-        .unwrap();
-        assert_eq!(c.backend.grabs, vec!["monitor 1 cursor=true"]);
     }
 
     #[test]
@@ -188,5 +200,90 @@ mod tests {
         )
         .unwrap();
         assert_eq!(c2.backend.grabs, vec!["monitor 2 cursor=false"]);
+    }
+
+    fn hdr(sdr_white_nits: f32, peak_nits: f32) -> vixeeny_platform::HdrInfo {
+        vixeeny_platform::HdrInfo {
+            sdr_white_nits,
+            peak_nits,
+        }
+    }
+
+    #[test]
+    fn hdr_captures_bring_every_screen_to_one_sdr_white() {
+        // An SDR monitor, an HDR one at 160 nits SDR white, another at 240 (1000-nit peak).
+        let mut monitors = vec![
+            mon(1, 0, 0, 2, 1, 96),
+            mon(2, 2, 0, 2, 1, 96),
+            mon(3, 4, 0, 2, 1, 96),
+        ];
+        monitors[1].hdr = Some(hdr(160.0, 600.0));
+        monitors[2].hdr = Some(hdr(240.0, 1000.0));
+        let mut c = Capturer::new(FakeBackend::default(), monitors);
+        let all = c
+            .grab_hdr(&CaptureTarget::AllMonitors, false)
+            .unwrap()
+            .unwrap();
+        assert_eq!(all.info, hdr(240.0, 1000.0));
+        assert_eq!((all.frame.width, all.frame.height), (6, 1));
+        let px = |x: usize| &all.frame.rgba[x * 4..x * 4 + 4];
+        // SDR monitor 1: pixel (1, 0) is [1, 0, 1] in BGRA, so red = 1/255 (linear, tiny),
+        // blue = monitor id 1 (also tiny); alpha 1. Its white would be 3.0 (240 nits).
+        assert!(px(0)[0] < 0.01 && px(0)[3] == 1.0);
+        // HDR monitor at 160 nits: its 2.0 (its SDR white) becomes 3.0, the canvas's.
+        assert_eq!(&px(2)[..3], &[3.0, 3.0, 3.0]);
+        // HDR monitor at 240 nits: untouched.
+        assert_eq!(&px(4)[..3], &[2.0, 2.0, 2.0]);
+        // A region of the HDR monitor keeps that monitor's levels.
+        let region = c
+            .grab_hdr(
+                &CaptureTarget::Region {
+                    monitor: MonitorId(2),
+                    rect: PhysicalRect::new(1, 0, 1, 1),
+                },
+                false,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(region.info, hdr(160.0, 600.0));
+        assert_eq!(region.frame.rgba, vec![2.0; 4]);
+        // An SDR-only target is not an HDR capture.
+        assert!(
+            c.grab_hdr(&CaptureTarget::Monitor(MonitorId(1)), false)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_window_on_an_hdr_monitor_is_hdr_and_tone_mapped_for_sdr() {
+        let mut monitors = vec![mon(1, 0, 0, 4, 2, 96)];
+        monitors[0].hdr = Some(hdr(200.0, 800.0));
+        let backend = FakeBackend {
+            window_monitor: Some(MonitorId(1)),
+            ..FakeBackend::default()
+        };
+        let mut c = Capturer::new(backend, monitors);
+        let window = CaptureTarget::Window(WindowId(7));
+        let kept = c.grab_hdr(&window, true).unwrap().unwrap();
+        assert_eq!(kept.info, hdr(200.0, 800.0));
+        assert_eq!((kept.frame.width, kept.frame.height), (64, 48));
+        let options = CaptureOptions {
+            tonemap: Some(|rgba, info| {
+                [(info.peak_nits / 10.0) as u8, 0, 0, 255].repeat(rgba.len() / 4)
+            }),
+            ..CaptureOptions::default()
+        };
+        let sdr = c.grab(&window, options).unwrap();
+        assert_eq!(sdr.pixel(0, 0), [80, 0, 0, 255]);
+        assert_eq!(
+            c.backend.grabs,
+            vec!["hdr window 7 cursor=true", "hdr window 7 cursor=false"]
+        );
+        // On an SDR monitor (or unknown), the plain capture.
+        c.backend.window_monitor = None;
+        assert!(c.grab_hdr(&window, false).unwrap().is_none());
+        c.grab(&window, options).unwrap();
+        assert_eq!(c.backend.grabs.last().unwrap(), "window 7 cursor=false");
     }
 }

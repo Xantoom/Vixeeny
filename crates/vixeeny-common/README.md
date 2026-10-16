@@ -1,5 +1,5 @@
 # vixeeny-common
 
-Shared types, config, IPC, errors, i18n keys (M2+).
+Shared types, config, IPC, errors, i18n keys.
 
-Part of the [Vixeeny](../../VIXEENY_PLAN.md) workspace.
+Part of the [Vixeeny](../../README.md) workspace.

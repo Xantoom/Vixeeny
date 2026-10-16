@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! With the `native-codecs` feature: find the natively built libavif / libjxl through
+//! With the `native-codecs` feature: find the natively built libjxl / jpegli / libultrahdr through
 //! pkg-config (static) and generate their bindings.
 #![allow(clippy::expect_used)]
 
@@ -14,7 +14,7 @@ fn native() {
 
     println!("cargo:rerun-if-env-changed=PKG_CONFIG_PATH");
     let mut includes = Vec::new();
-    for lib in ["libavif", "libjxl", "libjxl_threads", "libjpegli"] {
+    for lib in ["libjxl", "libjxl_threads", "libjpegli", "libuhdr"] {
         let found = pkg_config::Config::new()
             .statik(true)
             .probe(lib)
@@ -26,16 +26,15 @@ fn native() {
     let mut builder = bindgen::Builder::default()
         .header_contents(
             "wrapper.h",
-            "#include <avif/avif.h>\n#include <jxl/encode.h>\n#include <jxl/decode.h>\n#include <jxl/thread_parallel_runner.h>\n#include <stdio.h>\n#include <jpeglib.h>\n",
+            "#include <jxl/encode.h>\n#include <jxl/decode.h>\n#include <jxl/thread_parallel_runner.h>\n#include <stdio.h>\n#include <jpeglib.h>\n#include <ultrahdr_api.h>\n",
         )
-        .allowlist_function("avif.*")
-        .allowlist_type("avif.*")
-        .allowlist_var("AVIF_.*")
         .allowlist_function("Jxl.*")
         .allowlist_type("Jxl.*")
         .allowlist_var("JXL_.*")
         .allowlist_type("j_compress_ptr|jpeg_.*|J[A-Z_]+|JSAMPARRAY|boolean")
         .allowlist_var("JPEG_LIB_VERSION|JCS_.*|TRUE|FALSE")
+        .allowlist_function("uhdr_.*")
+        .allowlist_type("uhdr_.*")
         .derive_default(true)
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()));
     for dir in includes {
@@ -44,7 +43,7 @@ fn native() {
     let out = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
     builder
         .generate()
-        .expect("bindgen failed on the libavif/libjxl headers")
+        .expect("bindgen failed on the libjxl/jpegli/libultrahdr headers")
         .write_to_file(out.join("native.rs"))
         .expect("writing bindings");
 }

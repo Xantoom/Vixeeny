@@ -26,13 +26,16 @@ vixeeny-ui = { path = "../vixeeny-ui", features = ["desktop"] }
 rfd = { version = "0.17.2", default-features = false }
 png.workspace = true
 
+[dev-dependencies]
+gif = "0.14.2"
+
 [features]
-# AVIF and JPEG XL output; needs the natively built libraries (see vixeeny-image).
+# JPEG and JPEG XL output; needs the natively built libraries (see vixeeny-image).
 native-codecs = ["vixeeny-image/native-codecs"]
 
 # The Windows resource (icon, version information) of the executable.
 [build-dependencies]
-winresource = "0.1.31"
+winresource.workspace = true
 
 [lints]
 workspace = true

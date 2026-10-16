@@ -17,11 +17,8 @@ fn main() -> Result<()> {
         Some("dist") => dist::dist(&args.collect::<Vec<_>>()),
         Some("icons") => icons::run(),
         Some("sums") => dist::sums(&args.collect::<Vec<_>>()),
-        Some("bench-latency" | "test-hw") => {
-            bail!("task not implemented yet (see VIXEENY_PLAN.md section 11)")
-        }
         _ => bail!(
-            "usage: cargo xtask <build-native [lib…]|dist [--out dir]|icons|sums <dir>|verify-registry|bench-idle|bench-latency|test-hw>"
+            "usage: cargo xtask <build-native [lib…]|dist [--out dir]|icons|sums <dir>|verify-registry|bench-idle>"
         ),
     }
 }

@@ -94,7 +94,7 @@ impl crate::runtime::Tray for Tray {
     }
 
     fn notify(&mut self, message: &str) {
-        // Toast notifications arrive with M17; until then the tooltip is the only feedback.
+        // The daemon draws no notification of its own: the tooltip carries the message.
         if let Err(e) = self.tray.set_tooltip(Some(message)) {
             tracing::warn!("cannot change the tray tooltip: {e}");
         }

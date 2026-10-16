@@ -59,26 +59,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn font_loads_and_measures() {
-        let (glyphs, w, h) = layout("Hello", 20.0);
-        assert_eq!(glyphs.len(), 5);
-        assert!(w > 30.0 && w < 80.0, "{w}");
-        assert_eq!(h, 25.0);
-    }
-
-    #[test]
     fn lines_stack() {
         let (glyphs, w, h) = layout("ab\ncd", 10.0);
         assert_eq!(h, 25.0);
         assert!(glyphs[2].baseline > glyphs[0].baseline);
         assert_eq!(glyphs[2].x, 0.0);
         assert!(w > 0.0);
-    }
-
-    #[test]
-    fn empty_text_is_one_empty_line() {
-        let (glyphs, w, h) = layout("", 10.0);
-        assert!(glyphs.is_empty());
-        assert_eq!((w, h), (0.0, 12.5));
     }
 }

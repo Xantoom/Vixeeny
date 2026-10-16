@@ -1,7 +1,6 @@
 # Architecture
 
-The design and its reasons are in [VIXEENY_PLAN.md](../VIXEENY_PLAN.md) (section 4 and the
-decision log at the end); this page is the map. Vixeeny is a Windows program (10 and 11, x64).
+This page is the map of the code. Vixeeny is a Windows program (10 and 11, x64).
 
 ## Two programs
 

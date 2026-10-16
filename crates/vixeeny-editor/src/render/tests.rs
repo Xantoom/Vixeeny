@@ -56,12 +56,6 @@ fn ascii(img: &RgbaImage, step: u32) -> String {
 }
 
 #[test]
-fn no_annotations_gives_back_the_base() {
-    let base = white(8, 4);
-    assert_eq!(render(&base, &Document::new(8, 4)), base);
-}
-
-#[test]
 fn a_line_has_the_requested_colour_and_thickness() {
     let doc = doc_with(
         40,

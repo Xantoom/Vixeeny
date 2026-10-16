@@ -3,9 +3,8 @@
 Every user-facing string of Vixeeny lives in one file:
 [`crates/vixeeny-common/src/i18n.rs`](../crates/vixeeny-common/src/i18n.rs). The settings window,
 the overlay, the notifications and the daemon's tray menu all read it, so there is nothing to
-translate anywhere else. (The plan mentions `.po` files and `@tr()`: the project uses this Rust
-table instead, which the daemon can use without linking Slint or gettext, and which the compiler
-checks for completeness.)
+translate anywhere else. The daemon uses this table without linking Slint or gettext, and the
+compiler checks it for completeness.
 
 French and English are shipped. English is the fallback for any other language.
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! vixeeny-editor — the annotation editor's model (plan 5.3): annotations, undo/redo, tool
+//! vixeeny-editor — the annotation editor's model: annotations, undo/redo, tool
 //! interaction and rendering to pixels. No UI, no OS: everything is testable.
 
 pub mod geometry;

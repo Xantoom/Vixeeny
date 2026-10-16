@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Keyboard shortcuts as written in the config (`Ctrl+Shift+R`): parsing, canonical form,
-//! limits and conflicts (plan 5.1). No OS code here; the daemon registers the result.
+//! limits and conflicts. No OS code here; the daemon registers the result.
 //!
 //! Key names inside [`Hotkey::code`] follow the W3C `KeyboardEvent.code` names (`KeyR`,
 //! `Digit5`, `F5`, `PrintScreen`), which is what the registration backends use.
@@ -202,7 +202,7 @@ pub enum ProblemKind {
     TooMany,
     /// Listed twice for the same action.
     Duplicate,
-    /// Already bound to another action (blocking, plan 5.1).
+    /// Already bound to another action (blocking).
     Conflict(ActionId),
 }
 

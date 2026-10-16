@@ -10,7 +10,7 @@
 //!
 //! A source that fails (device unplugged, application gone) reports `Lost` and tries again each
 //! time Windows reports a device or a new audio session: the track is silent meanwhile and
-//! recovers by itself (CA-AUD-2, CA-AUD-3). Nothing is polled: the capture thread sleeps until
+//! recovers by itself. Nothing is polled: the capture thread sleeps until
 //! the driver, the device list, the followed process or `stop` wakes it.
 
 use std::sync::Arc;

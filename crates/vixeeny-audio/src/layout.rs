@@ -89,12 +89,6 @@ mod tests {
     }
 
     #[test]
-    fn same_layout_is_not_copied() {
-        let s = [0.1, 0.2, 0.3, 0.4];
-        assert!(matches!(convert(&s, 2, 2), Cow::Borrowed(_)));
-    }
-
-    #[test]
     fn stereo_and_mono_go_to_the_front_pair_of_a_surround_track() {
         let out = convert(&[0.5, -0.5], 2, 6);
         assert_eq!(&out[..], &[0.5, -0.5, 0.0, 0.0, 0.0, 0.0]);

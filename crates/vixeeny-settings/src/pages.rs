@@ -434,15 +434,32 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
             |c| c.image.show_cursor,
             |c, v| c.image.show_cursor = v,
         ),
+        choice(
+            "window_backdrop",
+            t(Key::SetWindowBackdrop),
+            vec![
+                opt("none", t(Key::OptBackdropNone)),
+                opt("blur", t(Key::OptBackdropBlur)),
+                opt("colour", t(Key::OptBackdropColour)),
+            ],
+            |c| c.image.window_backdrop.clone(),
+            |c, v| c.image.window_backdrop = v,
+        ),
     ]);
     // Only when Windows shows HDR: there is nothing to keep otherwise.
     if env.display.hdr {
-        rows.push(toggle(
+        let hdr = toggle(
             "image_hdr",
             t(Key::SetHdrEnable),
-            |c| matches!(c.image.hdr.as_str(), "keep_hdr" | "hdr"),
+            |c| hdr_on(&c.image.hdr),
             |c, v| c.image.hdr = if v { "keep_hdr" } else { "tonemap_sdr" }.into(),
-        ));
+        );
+        // WebP has no HDR: its pictures are always converted.
+        rows.push(if config.image.format == "webp" {
+            crate::greyed(hdr)
+        } else {
+            hdr
+        });
     }
     rows
 }

@@ -1,6 +1,6 @@
 ; Vixeeny installer (Inno Setup 6). Built by the release workflow:
 ;   iscc /DAppVersion=0.5.0 /DStageDir=dist\stage /DOutDir=dist packaging\windows\vixeeny.iss
-; Per-user, no administrator rights (plan 10.1).
+; Per-user, no administrator rights.
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"

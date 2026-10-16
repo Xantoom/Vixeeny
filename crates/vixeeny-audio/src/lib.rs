@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Audio capture and mixing for recordings (plan 5.10).
+//! Audio capture and mixing for recordings.
 //!
 //! Every source delivers 48 kHz, 32-bit float samples in 2, 6 or 8 channels (the OS converts the
 //! sample rate; the channel count is the device's own, see [`layout`]), each chunk dated

@@ -12,7 +12,7 @@ fn grabs_every_monitor_at_physical_size() {
     let monitors = match vixeeny_platform::monitors() {
         Ok(m) if !m.is_empty() => m,
         other => {
-            eprintln!("skipped: no monitors ({other:?})");
+            vixeeny_common::skip_test(format!("no monitors ({other:?})"));
             return;
         }
     };
@@ -22,7 +22,7 @@ fn grabs_every_monitor_at_physical_size() {
     let backend = match WgcBackend::new() {
         Ok(b) => b,
         Err(e) => {
-            eprintln!("skipped: {e}");
+            vixeeny_common::skip_test(&e);
             return;
         }
     };
@@ -34,7 +34,7 @@ fn grabs_every_monitor_at_physical_size() {
                 eprintln!("grabbed {} in {:?}", m.name, t.elapsed());
                 assert_eq!((frame.width, frame.height), (m.rect.width, m.rect.height));
             }
-            Err(e) => eprintln!("capture failed (tolerated on CI): {e}"),
+            Err(e) => vixeeny_common::skip_test(format!("capture failed: {e}")),
         }
     }
 }
@@ -51,13 +51,13 @@ fn streams_a_window_at_its_size() {
         .iter()
         .find(|w| w.rect.width >= 200 && w.rect.height >= 200)
     else {
-        eprintln!("skipped: no window");
+        vixeeny_common::skip_test("no window");
         return;
     };
     let stream = match VideoStream::start(&StreamTarget::Window(window.id), false, false) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("skipped: {e}");
+            vixeeny_common::skip_test(&e);
             return;
         }
     };
@@ -74,5 +74,58 @@ fn streams_a_window_at_its_size() {
         }
         Ok(None) => eprintln!("no frame within 2 s (nothing changed on screen)"),
         Err(e) => eprintln!("window capture failed (tolerated on CI): {e}"),
+    }
+}
+
+/// An HDR screen read as scRGB, its windows too; an SDR-only setup has no HDR capture.
+#[test]
+fn hdr_screens_are_captured_as_scrgb() {
+    vixeeny_platform::ensure_dpi_aware();
+    let monitors = vixeeny_platform::monitors().unwrap_or_default();
+    let backend = match WgcBackend::new() {
+        Ok(b) => b,
+        Err(e) => {
+            vixeeny_common::skip_test(&e);
+            return;
+        }
+    };
+    let mut capturer = Capturer::new(backend, monitors.clone());
+    let all = capturer
+        .grab_hdr(&CaptureTarget::AllMonitors, false)
+        .unwrap();
+    let Some(all) = all else {
+        assert!(monitors.iter().all(|m| m.hdr.is_none()));
+        eprintln!("no HDR screen");
+        return;
+    };
+    eprintln!("HDR desktop {:?}", all.info);
+    assert!(all.frame.rgba.iter().all(|v| v.is_finite()));
+    for m in monitors.iter().filter(|m| m.hdr.is_some()) {
+        let one = capturer
+            .grab_hdr(&CaptureTarget::Monitor(m.id), false)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            (one.frame.width, one.frame.height),
+            (m.rect.width, m.rect.height)
+        );
+    }
+    let on_hdr = vixeeny_platform::top_level_windows()
+        .unwrap_or_default()
+        .into_iter()
+        .find(|w| {
+            w.rect.width >= 200
+                && vixeeny_platform::monitor_at(&monitors, w.rect.x + 100, w.rect.y + 100)
+                    .is_some_and(|m| m.hdr.is_some())
+        });
+    if let Some(window) = on_hdr {
+        match capturer.grab_hdr(&CaptureTarget::Window(window.id), false) {
+            Ok(Some(c)) => eprintln!(
+                "HDR window {:?}: {}x{}",
+                window.title, c.frame.width, c.frame.height
+            ),
+            Ok(None) => eprintln!("window {:?} is mostly on an SDR screen", window.title),
+            Err(e) => eprintln!("window capture failed (tolerated): {e}"),
+        }
     }
 }

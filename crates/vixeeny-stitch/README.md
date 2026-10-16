@@ -1,5 +1,5 @@
 # vixeeny-stitch
 
-Scrolling-capture stitching, pure logic (M9).
+Scrolling-capture stitching, pure logic.
 
-Part of the [Vixeeny](../../VIXEENY_PLAN.md) workspace.
+Part of the [Vixeeny](../../README.md) workspace.

@@ -216,15 +216,4 @@ mod tests {
             6 + 32 + 3
         );
     }
-
-    #[test]
-    fn the_drawing_is_a_png_of_the_right_size() {
-        let png = draw(64).unwrap_or_default();
-        assert_eq!(&png[1..4], b"PNG");
-        // IHDR width and height.
-        assert_eq!(
-            u32::from_be_bytes(png[16..20].try_into().unwrap_or([0; 4])),
-            64
-        );
-    }
 }

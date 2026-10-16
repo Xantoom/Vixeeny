@@ -671,7 +671,7 @@ impl Shared {
         ui.pointer_pane = Some(i);
         match hit {
             Some(Hover::Button(k)) => ui.press = Some(Press::Button(k)),
-            Some(Hover::Bar) | Some(Hover::Panel(PanelHit::Background)) => {}
+            Some(Hover::Bar | Hover::Panel(PanelHit::Background)) => {}
             Some(Hover::Panel(hit @ (PanelHit::Shade | PanelHit::Hue))) => {
                 ui.press = Some(Press::Picking(hit));
                 drop(ui);
@@ -761,6 +761,7 @@ impl Shared {
             Button::Undo => self.session.borrow_mut().undo(),
             Button::Redo => self.session.borrow_mut().redo(),
             Button::Copy => return self.run_command(Command::Copy),
+            Button::CopyText => return self.run_command(Command::CopyText),
             Button::Save => return self.run_command(Command::Save),
             Button::SaveAs => return self.run_command(Command::SaveAs),
             Button::Scroll => return self.run_command(Command::Scroll),
@@ -1002,6 +1003,15 @@ impl Shared {
         }
     }
 
+    /// Hides the windows for good: the overlay is closing.
+    fn hide(&self) {
+        self.closing.set(true);
+        for p in &self.panes {
+            // SAFETY: plain call on a window of this thread.
+            let _ = unsafe { ShowWindow(p.hwnd, SW_HIDE) };
+        }
+    }
+
     /// Hands `command` to the host; `true` when the overlay closed.
     fn run_command(&self, command: Command) -> bool {
         if self.busy.replace(true) {
@@ -1014,6 +1024,10 @@ impl Shared {
                 window::set_topmost(p.hwnd, false);
             }
         }
+        // Reading the text takes a moment: the editor goes at once, the result follows it.
+        if command == Command::CopyText {
+            self.hide();
+        }
         let close = (self.handler)(command, &self.session.borrow());
         if dialog {
             for p in &self.panes {
@@ -1022,11 +1036,7 @@ impl Shared {
         }
         self.busy.set(false);
         if close {
-            self.closing.set(true);
-            for p in &self.panes {
-                // SAFETY: plain call on a window of this thread.
-                let _ = unsafe { ShowWindow(p.hwnd, SW_HIDE) };
-            }
+            self.hide();
         } else {
             self.refresh();
         }

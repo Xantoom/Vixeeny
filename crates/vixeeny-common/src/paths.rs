@@ -11,7 +11,7 @@ fn dirs() -> Option<ProjectDirs> {
 }
 
 /// `<folder of the executable>/data` when a `portable.flag` file sits next to the executable
-/// (the portable zip, plan 10.1): settings and logs then travel with the folder.
+/// (the portable zip): settings and logs then travel with the folder.
 pub fn portable_dir() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     portable_dir_of(exe.parent()?)
@@ -40,7 +40,7 @@ pub fn config_file() -> Option<PathBuf> {
     config_dir().map(|d| d.join("config.toml"))
 }
 
-/// Cached result of the hardware encoder probe (plan 6.3).
+/// Cached result of the hardware encoder probe.
 pub fn hw_cache_file() -> Option<PathBuf> {
     config_dir().map(|d| d.join("hw_cache.toml"))
 }

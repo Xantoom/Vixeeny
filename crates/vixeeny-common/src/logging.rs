@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Log files (plan 0.3): `<log dir>/<name>.<local date>.log`, one line per event in local time
+//! Log files: `<log dir>/<name>.<local date>.log`, one line per event in local time
 //! with its UTC offset, so that a user's "around 11 pm" matches. Light even after years of daily
 //! use: a week of files per program, at most [`DAY_LIMIT`] bytes a day, and a line repeated in a
 //! row is written once with a count. `RUST_LOG` overrides the `info` default. The writer is

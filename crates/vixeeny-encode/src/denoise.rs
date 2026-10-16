@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Microphone noise reduction (plan 5.10): FFmpeg's `afftdn` (FFT denoiser) in a filter graph.
+//! Microphone noise reduction: FFmpeg's `afftdn` (FFT denoiser) in a filter graph.
 //! Stereo 48 kHz f32 in, the same out. The filter keeps a little audio inside (a few tens of
 //! milliseconds), so `process` may return fewer or more samples than it was given; the caller
 //! places the output on its own timeline.

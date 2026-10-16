@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The master clock side of the pipeline (plan 4.4): captured frames carry the OS monotonic time;
+//! The master clock side of the pipeline: captured frames carry the OS monotonic time;
 //! the output is a constant frame rate. Late frames are repeated, early ones dropped, and a pause
 //! removes its duration from the media time so the file has no hole. Pure, so it is tested with
-//! made-up timelines (CA-REC-3).
+//! made-up timelines.
 
 /// A frame rate as a fraction (`60/1`, `30000/1001`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

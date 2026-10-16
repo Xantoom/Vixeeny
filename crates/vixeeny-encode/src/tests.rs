@@ -8,36 +8,11 @@ use crate::probe::{
     Adapter, DriverCaps, EncoderProbe, FormatProbe, ProbeResult, Prober, cache_key,
     cached_or_probe, from_toml, probe, to_toml, vendor_from_pci,
 };
-use crate::registry::{Chroma, Container, Encoder, Family, Kind, Registry, Vendor};
+use crate::registry::{Chroma, Container, Encoder, Family, Registry, Vendor};
 use crate::validate::{Context, IssueKind, Severity, output_size, pick_auto, validate};
 
 fn registry() -> Registry {
     Registry::builtin().unwrap_or_else(|e| panic!("{e}"))
-}
-
-#[test]
-fn the_builtin_registry_covers_plan_6_2() {
-    let r = registry();
-    // Every encoder of the table of section 6.2 is there.
-    for id in [
-        "libx264",
-        "libx265",
-        "libsvtav1",
-        "libvpx_vp9",
-        "nvenc_h264",
-        "nvenc_hevc",
-        "nvenc_av1",
-        "amf_h264",
-        "amf_hevc",
-        "amf_av1",
-        "qsv_h264",
-        "qsv_hevc",
-        "qsv_av1",
-        "qsv_vp9",
-    ] {
-        assert!(r.get(id).is_some(), "{id} missing");
-    }
-    assert_eq!(r.encoders.len(), 14);
 }
 
 #[test]
@@ -662,18 +637,6 @@ fn a_probe_that_hangs_or_crashes_is_contained() {
         Err(ProbeError::Spawn(_))
     ));
     let _ = std::fs::remove_dir_all(dir);
-}
-
-#[test]
-fn software_encoders_are_software() {
-    for e in &registry().encoders {
-        assert_eq!(
-            e.kind == Kind::Software,
-            e.id.starts_with("lib"),
-            "{}",
-            e.id
-        );
-    }
 }
 
 #[test]

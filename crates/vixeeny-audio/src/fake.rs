@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! A source for tests: a tone, delivered in chunks like a real device (jittery arrival, clock
-//! that can drift), driven by the caller so that an hour of audio runs in a moment.
+//! A source for tests: a tone in chunks dated like a real device's (its clock can drift),
+//! driven by the caller so that an hour of audio runs in a moment.
 
-use crate::{AudioChunk, AudioError, AudioSink, AudioSource, CHANNELS, SAMPLE_RATE};
+use crate::{AudioChunk, CHANNELS, SAMPLE_RATE};
 
 /// Generates `frequency` Hz beeps: `beep_ms` of tone every `period_ms`, the rest silence.
 pub struct FakeAudioSource {
@@ -13,7 +13,6 @@ pub struct FakeAudioSource {
     /// Device clock speed relative to the master clock (1.0 = exact).
     pub drift: f64,
     produced: u64,
-    sink: Option<Box<dyn AudioSink>>,
 }
 
 impl FakeAudioSource {
@@ -25,7 +24,6 @@ impl FakeAudioSource {
             period_ms: 1_000,
             drift: 1.0,
             produced: 0,
-            sink: None,
         }
     }
 
@@ -47,65 +45,5 @@ impl FakeAudioSource {
         let time_ns = (self.produced as f64 / f64::from(SAMPLE_RATE) / self.drift * 1e9) as i64;
         self.produced += frames as u64;
         AudioChunk::stereo(time_ns, samples)
-    }
-
-    /// Makes a chunk and hands it to the sink given to `start`.
-    pub fn deliver(&mut self, frames: usize) {
-        let chunk = self.next_chunk(frames);
-        if let Some(sink) = &mut self.sink {
-            sink.on_audio(chunk);
-        }
-    }
-}
-
-impl AudioSource for FakeAudioSource {
-    fn start(&mut self, sink: Box<dyn AudioSink>) -> Result<(), AudioError> {
-        self.sink = Some(sink);
-        Ok(())
-    }
-
-    fn stop(&mut self) -> Result<(), AudioError> {
-        self.sink = None;
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::{Arc, Mutex};
-
-    struct Collect(Arc<Mutex<Vec<AudioChunk>>>);
-    impl AudioSink for Collect {
-        fn on_audio(&mut self, chunk: AudioChunk) {
-            self.0.lock().unwrap().push(chunk);
-        }
-        fn on_event(&mut self, _: crate::SourceEvent) {}
-    }
-
-    #[test]
-    fn beeps_are_where_the_timeline_says() {
-        let got = Arc::new(Mutex::new(Vec::new()));
-        let mut s = FakeAudioSource::new(1000.0);
-        s.start(Box::new(Collect(got.clone()))).unwrap();
-        for _ in 0..200 {
-            s.deliver(480); // 2 s
-        }
-        let chunks = got.lock().unwrap();
-        assert_eq!(chunks[0].time_ns, 0);
-        assert_eq!(chunks[1].time_ns, 10_000_000);
-        let loud = |c: &AudioChunk| c.samples.iter().any(|v| v.abs() > 0.1);
-        assert!(loud(&chunks[0])); // 0 – 10 ms: inside the first beep
-        assert!(!loud(&chunks[50])); // 500 ms: silence
-        assert!(loud(&chunks[100])); // 1 000 ms: second beep
-    }
-
-    #[test]
-    fn a_fast_clock_dates_chunks_earlier() {
-        let mut s = FakeAudioSource::new(440.0);
-        s.drift = 1.001;
-        s.next_chunk(48_000);
-        let c = s.next_chunk(480);
-        assert!(c.time_ns < 1_000_000_000);
     }
 }

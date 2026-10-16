@@ -11,6 +11,12 @@ repository.workspace = true
 thiserror.workspace = true
 windows = { workspace = true, features = [
     "Data_Xml_Dom",
+    "Foundation_Collections",
+    "Globalization",
+    "Graphics_Imaging",
+    "Media_Ocr",
+    "Security_Cryptography",
+    "Storage_Streams",
     "UI_Notifications",
     "Win32_Devices_Display",
     "Win32_Foundation",

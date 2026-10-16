@@ -8,7 +8,7 @@
 use std::sync::mpsc::{Sender, channel};
 use std::time::Duration;
 
-use vixeeny_platform::{MonitorInfo, WindowId};
+use vixeeny_platform::{MonitorId, MonitorInfo, PhysicalRect, WindowId};
 use windows::Foundation::TypedEventHandler;
 use windows::Graphics::Capture::{
     Direct3D11CaptureFramePool, GraphicsCaptureItem, GraphicsCaptureSession,
@@ -23,7 +23,7 @@ use windows::Win32::Graphics::Direct3D11::{
     D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
 };
 use windows::Win32::Graphics::Dxgi::{IDXGIAdapter, IDXGIDevice};
-use windows::Win32::Graphics::Gdi::HMONITOR;
+use windows::Win32::Graphics::Gdi::{HMONITOR, MONITOR_DEFAULTTONULL, MonitorFromWindow};
 use windows::Win32::System::WinRT::Direct3D11::{
     CreateDirect3D11DeviceFromDXGIDevice, IDirect3DDxgiInterfaceAccess,
 };
@@ -101,6 +101,33 @@ impl WgcBackend {
         let _ = pool.Close();
         result
     }
+
+    /// The item (or `area` of it) in scRGB: the half floats Windows composes HDR screens in.
+    fn grab_hdr(
+        &self,
+        item: &GraphicsCaptureItem,
+        area: Option<&PhysicalRect>,
+        cursor: bool,
+    ) -> Result<HdrFrame, CaptureError> {
+        let raw = self.grab_item(item, cursor, DirectXPixelFormat::R16G16B16A16Float)?;
+        let whole = PhysicalRect::new(0, 0, raw.width, raw.height);
+        let area = area.copied().unwrap_or(whole);
+        if area.is_empty() || whole.intersection(&area) != Some(area) {
+            return Err(CaptureError::InvalidRegion);
+        }
+        let start = area.y as usize * raw.stride + area.x as usize * 8;
+        let rgba = halves_to_f32(
+            &raw.data[start..],
+            raw.stride,
+            area.width as usize,
+            area.height as usize,
+        );
+        Ok(HdrFrame {
+            width: area.width,
+            height: area.height,
+            rgba,
+        })
+    }
 }
 
 /// GPU → CPU through a staging texture.
@@ -151,22 +178,6 @@ pub(crate) struct RawFrame {
     pub data: Vec<u8>,
 }
 
-/// IEEE 754 half → single precision (exact: every half is a float).
-pub(crate) fn f16_to_f32(h: u16) -> f32 {
-    let sign = u32::from(h & 0x8000) << 16;
-    let exp = u32::from((h >> 10) & 0x1F);
-    let mant = u32::from(h & 0x3FF);
-    match exp {
-        // Subnormal: mant × 2⁻²⁴.
-        0 => {
-            let v = mant as f32 * (1.0 / 16_777_216.0);
-            if sign == 0 { v } else { -v }
-        }
-        0x1F => f32::from_bits(sign | 0x7F80_0000 | (mant << 13)),
-        _ => f32::from_bits(sign | ((exp + 112) << 23) | (mant << 13)),
-    }
-}
-
 /// Rows of RGBA half floats (`stride` bytes apart) → tightly packed RGBA floats, over every core.
 pub(crate) fn halves_to_f32(data: &[u8], stride: usize, width: usize, height: usize) -> Vec<f32> {
     use rayon::prelude::*;
@@ -176,7 +187,7 @@ pub(crate) fn halves_to_f32(data: &[u8], stride: usize, width: usize, height: us
         .zip(data.par_chunks(stride))
         .for_each(|(out, row)| {
             for (o, h) in out.iter_mut().zip(row[..width * 8].as_chunks::<2>().0) {
-                *o = f16_to_f32(u16::from_le_bytes(*h));
+                *o = vixeeny_common::half::to_f32(u16::from_le_bytes(*h));
             }
         });
     out
@@ -255,52 +266,47 @@ impl StillBackend for WgcBackend {
     fn grab_monitor_hdr(
         &mut self,
         monitor: &MonitorInfo,
+        area: Option<&PhysicalRect>,
         cursor: bool,
     ) -> Result<HdrFrame, CaptureError> {
-        let item = monitor_item(monitor)?;
-        let raw = self.grab_item(&item, cursor, DirectXPixelFormat::R16G16B16A16Float)?;
-        let rgba = halves_to_f32(
-            &raw.data,
-            raw.stride,
-            raw.width as usize,
-            raw.height as usize,
-        );
-        Ok(HdrFrame {
-            width: raw.width,
-            height: raw.height,
-            rgba,
-        })
+        self.grab_hdr(&monitor_item(monitor)?, area, cursor)
     }
 
     fn grab_window(&mut self, window: WindowId, cursor: bool) -> Result<CpuFrame, CaptureError> {
-        let interop =
-            factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>().map_err(os("interop"))?;
-        let hwnd = HWND(window.0 as usize as *mut _);
-        // SAFETY: a stale or invalid window handle makes the call fail.
-        let item: GraphicsCaptureItem =
-            unsafe { interop.CreateForWindow(hwnd) }.map_err(os("CreateForWindow"))?;
+        let item = window_item(window)?;
         let raw = self.grab_item(&item, cursor, DirectXPixelFormat::B8G8R8A8UIntNormalized)?;
         CpuFrame::from_raw(raw.width, raw.height, raw.stride, raw.data)
     }
+
+    fn grab_window_hdr(
+        &mut self,
+        window: WindowId,
+        cursor: bool,
+    ) -> Result<HdrFrame, CaptureError> {
+        self.grab_hdr(&window_item(window)?, None, cursor)
+    }
+
+    fn window_monitor(&self, window: WindowId) -> Option<MonitorId> {
+        // SAFETY: a stale window handle gives a null monitor.
+        let monitor = unsafe { MonitorFromWindow(hwnd(window), MONITOR_DEFAULTTONULL) };
+        (!monitor.is_invalid()).then_some(MonitorId(monitor.0 as usize as u64))
+    }
+}
+
+fn hwnd(window: WindowId) -> HWND {
+    HWND(window.0 as usize as *mut _)
+}
+
+/// The capture item of a window.
+fn window_item(window: WindowId) -> Result<GraphicsCaptureItem, CaptureError> {
+    let interop =
+        factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>().map_err(os("interop"))?;
+    // SAFETY: a stale or invalid window handle makes the call fail.
+    unsafe { interop.CreateForWindow(hwnd(window)) }.map_err(os("CreateForWindow"))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::f16_to_f32;
-
-    #[test]
-    fn half_floats() {
-        assert_eq!(f16_to_f32(0x3C00), 1.0);
-        assert_eq!(f16_to_f32(0xC000), -2.0);
-        assert_eq!(f16_to_f32(0x0000), 0.0);
-        assert_eq!(f16_to_f32(0x3555), 0.333_251_95);
-        assert_eq!(f16_to_f32(0x7BFF), 65504.0);
-        assert!(f16_to_f32(0x7C00).is_infinite());
-        assert!(f16_to_f32(0x7E00).is_nan());
-        assert!(f16_to_f32(0x0001) > 0.0); // smallest subnormal
-        assert_eq!(f16_to_f32(0x8001), -(2f32.powi(-24)));
-    }
-
     #[test]
     fn padded_rows_of_halves() {
         // Two pixels per row, a 4-byte row padding.

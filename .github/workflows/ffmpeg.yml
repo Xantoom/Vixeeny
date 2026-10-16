@@ -8,16 +8,16 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: dist/ffmpeg.zip
           key: ffmpeg-${{ hashFiles('packaging/ffmpeg/build.sh') }}
       - name: Build
         if: steps.cache.outputs.cache-hit != 'true'
         run: packaging/ffmpeg/build.sh dist/ffmpeg.zip
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ffmpeg
           path: dist/ffmpeg.zip

@@ -8,7 +8,10 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+ffmpeg-next.workspace = true
+gif = "0.14.2"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp"] }
+imagequant = "4.4.1"
 jxl-oxide = { version = "0.12.6", features = ["moxcms"] }
 libwebp-sys = "0.14.4"
 moxcms = "0.9.1"
@@ -16,9 +19,10 @@ oxipng = { version = "10.2.1", default-features = false, features = ["parallel"]
 png.workspace = true
 rayon.workspace = true
 thiserror.workspace = true
+vixeeny-common = { path = "../vixeeny-common" }
 
 [features]
-# JPEG (jpegli), AVIF (libavif + SVT-AV1) and JPEG XL (libjxl) through the natively built libraries
+# JPEG (jpegli) and JPEG XL (libjxl) through the natively built libraries
 # (`cargo xtask build-native`; PKG_CONFIG_PATH must point at its prefix).
 native-codecs = ["dep:pkg-config", "dep:bindgen"]
 

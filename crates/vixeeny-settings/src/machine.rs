@@ -228,14 +228,16 @@ fn aspect(width: u32, height: u32) -> Option<String> {
     let name = known
         .iter()
         .find(|(k, _)| (r - k).abs() / k < 0.03)
-        .map(|(_, n)| (*n).to_owned())
-        .unwrap_or_else(|| {
-            let (mut a, mut b) = (long, short);
-            while b != 0 {
-                (a, b) = (b, a % b);
-            }
-            format!("{}:{}", long / a, short / a)
-        });
+        .map_or_else(
+            || {
+                let (mut a, mut b) = (long, short);
+                while b != 0 {
+                    (a, b) = (b, a % b);
+                }
+                format!("{}:{}", long / a, short / a)
+            },
+            |(_, n)| (*n).to_owned(),
+        );
     if name == "16:9" && width > height {
         return None;
     }
@@ -468,7 +470,7 @@ mod tests {
         );
         assert!((o.disks[0].used.unwrap() - 0.5).abs() < 0.01);
         // An Intel processor tells its boost; sticks of mixed sizes are listed one by one.
-        let mut m = env.machine.clone();
+        let mut m = env.machine;
         if let Some(c) = m.cpu.as_mut() {
             (c.base_mhz, c.boost_mhz) = (3600, 5800);
         }

@@ -15,7 +15,7 @@ use crate::core::Event;
 use crate::runtime::HotkeyBackend;
 use crate::server::EventTx;
 
-/// RegisterHotKey-based shortcuts: they fire while a game has the focus (CA-HK-2), except for
+/// RegisterHotKey-based shortcuts: they fire while a game has the focus, except for
 /// games that grab the keyboard exclusively. No hook, no polling: the shortcut arrives as a
 /// message on the daemon's own loop.
 pub struct Hotkeys {
@@ -56,7 +56,7 @@ fn to_global(hotkey: &Hotkey) -> Result<HotKey, String> {
     mods.set(Modifiers::CONTROL, m.ctrl);
     mods.set(Modifiers::ALT, m.alt);
     mods.set(Modifiers::SHIFT, m.shift);
-    mods.set(Modifiers::SUPER, m.meta);
+    mods.set(Modifiers::META, m.meta);
     Ok(HotKey::new(Some(mods), code))
 }
 

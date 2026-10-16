@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #![windows_subsystem = "windows"]
-//! The always-on Vixeeny daemon (plan section 1.2).
+//! The always-on Vixeeny daemon.
 
 use vixeeny_common::config::Config;
 use vixeeny_common::ipc::{BindError, ControlRequest, Endpoint};
