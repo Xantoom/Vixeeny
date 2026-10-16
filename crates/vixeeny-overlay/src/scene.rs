@@ -6,7 +6,8 @@
 //! ├─ content (image pixels: offset by the window's area and the scroll)
 //! │  ├─ frozen tiles · annotated tiles
 //! │  ├─ veil (4 rectangles around the zone, one opacity) · border (4) · handles (8)
-//! │  └─ size label · magnifier · text field
+//! │  ├─ outline of the selected annotation (4)
+//! │  └─ size label · magnifier · text field · size ring
 //! ├─ scroll bar
 //! └─ toolbar · style panel · tip
 //! ```
@@ -193,6 +194,8 @@ pub struct Piece<L> {
     pub look: RefCell<Option<L>>,
     /// Where it is (window or image pixels), `None` while hidden.
     pub at: Cell<Option<(f32, f32)>>,
+    /// The opacity it goes to (pieces that fade).
+    opacity: Cell<f32>,
 }
 
 impl<L: PartialEq + Clone> Piece<L> {
@@ -215,6 +218,7 @@ impl<L: PartialEq + Clone> Piece<L> {
             surface: RefCell::new(None),
             look: RefCell::new(None),
             at: Cell::new(None),
+            opacity: Cell::new(1.0),
         })
     }
 
@@ -267,6 +271,7 @@ impl<L: PartialEq + Clone> Piece<L> {
             return Ok(());
         };
         let _ = x;
+        self.opacity.set(1.0);
         // SAFETY: plain property calls with animations of the same device.
         unsafe {
             if motion {
@@ -280,6 +285,27 @@ impl<L: PartialEq + Clone> Piece<L> {
             }
         }
         Ok(())
+    }
+}
+
+impl<L> Piece<L> {
+    /// Takes the piece to `to` opacity (a quick fade, or at once without motion).
+    pub fn fade(&self, gfx: &Gfx, to: f32, motion: bool) -> Result<()> {
+        let Some(effect) = &self.effect else {
+            return Ok(());
+        };
+        let from = self.opacity.replace(to);
+        if from == to {
+            return Ok(());
+        }
+        // SAFETY: plain property calls with an animation of the same device.
+        unsafe {
+            if motion {
+                effect.SetOpacity(&ease_out(gfx, from, to, 0.15)?)
+            } else {
+                effect.SetOpacity2(to)
+            }
+        }
     }
 }
 
@@ -374,9 +400,12 @@ pub struct Pane {
     pub border: [IDCompositionVisual2; 4],
     pub handles: [IDCompositionVisual2; 8],
     pub handles_at: Cell<Option<Px>>,
+    pub outline: [IDCompositionVisual2; 4],
     pub label: Piece<String>,
     pub magnifier: Piece<vixeeny_editor::MagnifierView>,
     pub field: Piece<FieldLook>,
+    /// The size of what the tool draws, shown while the wheel changes it (its diameter).
+    pub brush: Piece<u32>,
     pub scrollbar: IDCompositionVisual2,
     pub toolbar: Piece<BarLook>,
     pub panel: Piece<PanelLook>,
@@ -440,12 +469,20 @@ impl Pane {
             add(&content, &v)?;
             handles.push(v);
         }
+        let mut outline = Vec::with_capacity(4);
+        for _ in 0..4 {
+            let v = solid_visual(gfx, &solids.accent)?;
+            add(&content, &v)?;
+            outline.push(v);
+        }
         let label = Piece::new(gfx, false)?;
         add(&content, &label.visual)?;
         let magnifier = Piece::new(gfx, false)?;
         add(&content, &magnifier.visual)?;
         let field = Piece::new(gfx, false)?;
         add(&content, &field.visual)?;
+        let brush = Piece::new(gfx, false)?;
+        add(&content, &brush.visual)?;
         let scrollbar = solid_visual(gfx, &solids.scrollbar)?;
         add(&root, &scrollbar)?;
         let toolbar = Piece::new(gfx, true)?;
@@ -456,9 +493,10 @@ impl Pane {
         add(&root, &tip.visual)?;
         // SAFETY: plain property call.
         unsafe { target.SetRoot(&root)? };
-        let (Ok(border), Ok(handles)) = (
+        let (Ok(border), Ok(handles), Ok(outline)) = (
             <[IDCompositionVisual2; 4]>::try_from(border),
             <[IDCompositionVisual2; 8]>::try_from(handles),
+            <[IDCompositionVisual2; 4]>::try_from(outline),
         ) else {
             return Err(windows::core::Error::from_hresult(
                 windows::Win32::Foundation::E_FAIL,
@@ -481,9 +519,11 @@ impl Pane {
             border,
             handles,
             handles_at: Cell::new(None),
+            outline,
             label,
             magnifier,
             field,
+            brush,
             scrollbar,
             toolbar,
             panel,

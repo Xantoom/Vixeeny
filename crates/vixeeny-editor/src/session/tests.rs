@@ -84,7 +84,7 @@ fn the_toolbar_and_magnifier_stay_on_one_monitor() {
     assert!(m.position.x + m.size <= 1000.0, "{:?}", m.position);
     s.pointer_up(p(990.0, 300.0), NO);
     let bar = s.view().toolbar.expect("toolbar");
-    assert!(bar.x + TOOLBAR_SIZE.0 <= 1000.0, "{bar:?}");
+    assert!(bar.at.x + TOOLBAR_SIZE.0 <= 1000.0, "{bar:?}");
 }
 
 #[test]
@@ -298,11 +298,15 @@ fn nothing_to_export_without_a_zone() {
 fn eyedropper_changes_the_colour() {
     let mut s = session();
     drag(&mut s, p(10.0, 10.0), p(190.0, 90.0));
+    s.choose_tool(Some(Tool::Pen));
     s.choose_tool(Some(Tool::Eyedropper));
     s.pointer_down(p(150.0, 50.0), NO);
     s.pointer_up(p(150.0, 50.0), NO);
     assert_eq!(s.view().color, Color::rgb(0, 0, 255));
     assert_eq!(s.view().recent_colors, [Color::rgb(0, 0, 255)]);
+    // Back to the pen, and nothing was drawn.
+    assert_eq!(s.tool(), Some(Tool::Pen));
+    assert!(s.editor().doc.items.is_empty());
 }
 
 #[test]
@@ -327,8 +331,8 @@ fn the_toolbar_stays_on_screen() {
     drag(&mut s, p(0.0, 0.0), p(200.0, 100.0));
     let t = s.view().toolbar.unwrap();
     // the image is smaller than the toolbar: it is clamped to the corner
-    assert_eq!(t.x, 0.0);
-    assert!(t.y >= 0.0);
+    assert_eq!(t.at.x, 0.0);
+    assert!(t.at.y >= 0.0);
 }
 
 #[test]
@@ -403,4 +407,70 @@ fn an_interrupted_gesture_ends_where_the_pointer_was_and_waits_for_a_release() {
     assert_eq!(s.pointer_up(p(120.0, 20.0), NO), Some(Command::Scroll));
     // Nothing in progress: nothing happens.
     s.interrupt();
+}
+
+#[test]
+fn the_zone_tool_moves_an_annotation_pressed_on_and_the_zone_else() {
+    let mut s = session();
+    drag(&mut s, p(10.0, 10.0), p(190.0, 90.0));
+    s.choose_tool(Some(Tool::Rect));
+    s.set_filled(true);
+    drag(&mut s, p(30.0, 30.0), p(60.0, 60.0));
+    s.choose_tool(None);
+    // The outline takes in the stroke (4 px wide).
+    assert_eq!(s.view().selected, Some(Rect::new(28.0, 28.0, 34.0, 34.0)));
+    // On the rectangle: it moves, the zone stays.
+    s.pointer_down(p(40.0, 40.0), NO);
+    s.pointer_move(p(50.0, 45.0), NO);
+    assert_eq!(s.view().selected, Some(Rect::new(38.0, 33.0, 34.0, 34.0)));
+    s.pointer_up(p(50.0, 45.0), NO);
+    let Annotation::Rect { rect, .. } = &s.editor().doc.items[0].annotation else {
+        panic!()
+    };
+    assert_eq!((rect.x, rect.y), (40.0, 35.0));
+    assert_eq!(s.view().selection, Some(Rect::new(10.0, 10.0, 180.0, 80.0)));
+    // Arrows nudge it.
+    s.key(KeyInput {
+        key: Key::Right,
+        ctrl: false,
+        shift: false,
+    });
+    assert_eq!(s.view().selected, Some(Rect::new(39.0, 33.0, 34.0, 34.0)));
+    // Elsewhere in the zone: the zone moves and nothing stays selected.
+    drag(&mut s, p(150.0, 50.0), p(155.0, 50.0));
+    assert_eq!(s.view().selection, Some(Rect::new(15.0, 10.0, 180.0, 80.0)));
+    assert_eq!(s.view().selected, None);
+}
+
+#[test]
+fn a_drawing_tool_shows_no_selection_outline() {
+    let mut s = session();
+    drag(&mut s, p(10.0, 10.0), p(190.0, 90.0));
+    s.choose_tool(Some(Tool::Rect));
+    s.pointer_down(p(30.0, 30.0), NO);
+    s.pointer_move(p(60.0, 60.0), NO);
+    assert!(s.view().drawing);
+    s.pointer_up(p(60.0, 60.0), NO);
+    let v = s.view();
+    assert!(!v.drawing && v.selected.is_none());
+}
+
+#[test]
+fn the_wheel_sizes_what_the_tool_draws() {
+    let mut s = session();
+    assert_eq!(s.brush(), None);
+    s.choose_tool(Some(Tool::Pen));
+    let start = s.brush().unwrap();
+    s.grow(3);
+    assert_eq!(s.brush(), Some(start + 3.0));
+    s.grow(-100);
+    assert_eq!(s.brush(), Some(1.0));
+    s.grow(100);
+    assert_eq!(s.brush(), Some(40.0));
+    // Large sizes take larger steps.
+    s.set_width(32.0);
+    s.grow(-1);
+    assert_eq!(s.view().width, 28.0);
+    s.choose_tool(Some(Tool::Text));
+    assert_eq!(s.brush(), Some(s.editor().settings.text_size));
 }

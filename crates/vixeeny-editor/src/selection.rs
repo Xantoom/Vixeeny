@@ -303,20 +303,77 @@ fn resize(original: &Rect, handle: Handle, p: Point) -> Rect {
     Rect::from_corners(Point::new(l, t), Point::new(r, b))
 }
 
-/// Where to put a box of `size` next to the zone: below it, else above, else inside at the
-/// bottom — kept within `bounds`. `gap` separates box and zone.
-pub fn place_beside(zone: &Rect, size: (f32, f32), bounds: &Rect, gap: f32) -> Point {
-    let x = (zone.right() - size.0).clamp(bounds.x, (bounds.right() - size.0).max(bounds.x));
-    let below = zone.bottom() + gap;
-    let above = zone.y - gap - size.1;
-    let y = if below + size.1 <= bounds.bottom() {
-        below
-    } else if above >= bounds.y {
-        above
-    } else {
-        (zone.bottom() - size.1 - gap).max(bounds.y)
+/// Which side of the zone the toolbar is on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BarSide {
+    Above,
+    Below,
+    /// Upright, right of the zone.
+    Right,
+    /// Upright, left of the zone.
+    Left,
+    /// Inside the zone, at its top: there is no room around it.
+    Inside,
+}
+
+impl BarSide {
+    /// The bar stands upright (its buttons one under the other).
+    pub fn upright(self) -> bool {
+        matches!(self, Self::Right | Self::Left)
+    }
+}
+
+/// Where the toolbar goes: its top-left corner and the side of the zone it is on.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BarPlace {
+    pub at: Point,
+    pub side: BarSide,
+}
+
+/// Places a toolbar of `size` (lying; upright it is turned) by the zone: centred above it, else
+/// centred below, else upright on its right, else on its left (each only when the whole bar is
+/// on the monitor `screen` gives for the middle of that side), else inside at its top. Along its
+/// length the bar slides to stay on the monitor.
+pub fn place_toolbar(
+    zone: &Rect,
+    size: (f32, f32),
+    screen: impl Fn(Point) -> Rect,
+    gap: f32,
+) -> BarPlace {
+    let (w, h) = size;
+    let centre = |from: f32, length: f32, lo: f32, hi: f32| {
+        (from - length / 2.0).clamp(lo, (hi - length).max(lo))
     };
-    Point::new(x, y)
+    let (cx, cy) = (zone.x + zone.w / 2.0, zone.y + zone.h / 2.0);
+    let lying = |s: &Rect| centre(cx, w, s.x, s.right());
+    let place = |x: f32, y: f32, side: BarSide| BarPlace {
+        at: Point::new(x, y),
+        side,
+    };
+    let s = screen(Point::new(cx, zone.y));
+    let y = zone.y - gap - h;
+    if y >= s.y && w <= s.w {
+        return place(lying(&s), y, BarSide::Above);
+    }
+    let s = screen(Point::new(cx, zone.bottom()));
+    let y = zone.bottom() + gap;
+    if y + h <= s.bottom() && w <= s.w {
+        return place(lying(&s), y, BarSide::Below);
+    }
+    // Upright: `h` wide, `w` tall.
+    let s = screen(Point::new(zone.right(), cy));
+    let x = zone.right() + gap;
+    if x + h <= s.right() && w <= s.h {
+        return place(x, centre(cy, w, s.y, s.bottom()), BarSide::Right);
+    }
+    let s = screen(Point::new(zone.x, cy));
+    let x = zone.x - gap - h;
+    if x >= s.x && w <= s.h {
+        return place(x, centre(cy, w, s.y, s.bottom()), BarSide::Left);
+    }
+    let s = screen(Point::new(cx, zone.y));
+    let y = (zone.y + gap).clamp(s.y, (s.bottom() - h).max(s.y));
+    place(lying(&s), y, BarSide::Inside)
 }
 
 /// The square of source pixels shown by the magnifier: `side` pixels centred on the cursor,
@@ -577,21 +634,75 @@ mod tests {
     }
 
     #[test]
-    fn toolbar_goes_below_then_above_then_inside() {
-        let bounds = Rect::new(0.0, 0.0, 1000.0, 600.0);
+    fn the_toolbar_goes_above_below_right_left_then_inside() {
+        let screen = Rect::new(0.0, 0.0, 1000.0, 600.0);
+        let on = |_: Point| screen;
         let size = (300.0, 40.0);
-        // plenty of room below
-        let zone = Rect::new(100.0, 100.0, 400.0, 200.0);
-        assert_eq!(place_beside(&zone, size, &bounds, 8.0), p(200.0, 308.0));
-        // zone touches the bottom: above
-        let zone = Rect::new(100.0, 300.0, 400.0, 300.0);
-        assert_eq!(place_beside(&zone, size, &bounds, 8.0), p(200.0, 252.0));
-        // zone is the whole screen: inside, at the bottom
-        let zone = bounds;
-        assert_eq!(place_beside(&zone, size, &bounds, 8.0), p(700.0, 552.0));
-        // right-aligned but never off-screen on the left
-        let zone = Rect::new(0.0, 100.0, 100.0, 50.0);
-        assert_eq!(place_beside(&zone, size, &bounds, 8.0).x, 0.0);
+        let at = |zone: Rect| place_toolbar(&zone, size, on, 8.0);
+        // Room above: centred over the zone.
+        let b = at(Rect::new(100.0, 100.0, 400.0, 200.0));
+        assert_eq!((b.at, b.side), (p(150.0, 52.0), BarSide::Above));
+        // One pixel short above: below.
+        let b = at(Rect::new(100.0, 47.0, 400.0, 200.0));
+        assert_eq!((b.at, b.side), (p(150.0, 255.0), BarSide::Below));
+        assert_eq!(
+            at(Rect::new(100.0, 48.0, 400.0, 200.0)).side,
+            BarSide::Above
+        );
+        // Neither above nor below: upright on the right, centred on the zone's middle.
+        let b = at(Rect::new(100.0, 20.0, 400.0, 560.0));
+        assert_eq!((b.at, b.side), (p(508.0, 150.0), BarSide::Right));
+        // Nor on the right: on the left.
+        let b = at(Rect::new(500.0, 20.0, 480.0, 560.0));
+        assert_eq!((b.at, b.side), (p(452.0, 150.0), BarSide::Left));
+        // The whole screen: inside, at the top, centred.
+        let b = at(screen);
+        assert_eq!((b.at, b.side), (p(350.0, 8.0), BarSide::Inside));
+    }
+
+    #[test]
+    fn the_toolbar_slides_along_to_stay_on_its_screen() {
+        let screen = Rect::new(0.0, 0.0, 1000.0, 600.0);
+        let b = place_toolbar(
+            &Rect::new(0.0, 300.0, 100.0, 50.0),
+            (300.0, 40.0),
+            |_| screen,
+            8.0,
+        );
+        assert_eq!((b.at.x, b.side), (0.0, BarSide::Above));
+        let b = place_toolbar(
+            &Rect::new(950.0, 300.0, 50.0, 50.0),
+            (300.0, 40.0),
+            |_| screen,
+            8.0,
+        );
+        assert_eq!(b.at.x, 700.0);
+        // Upright near the top of the screen.
+        let b = place_toolbar(
+            &Rect::new(100.0, 10.0, 400.0, 580.0),
+            (300.0, 40.0),
+            |_| screen,
+            8.0,
+        );
+        assert!(
+            b.side.upright() && b.at.y >= 0.0 && b.at.y + 300.0 <= 600.0,
+            "{b:?}"
+        );
+    }
+
+    #[test]
+    fn each_side_is_judged_on_its_own_monitor() {
+        // Two screens stacked: the zone's top is on the upper one, its bottom on the lower one.
+        let upper = Rect::new(0.0, 0.0, 1000.0, 600.0);
+        let lower = Rect::new(0.0, 600.0, 1000.0, 600.0);
+        let screen = |q: Point| if q.y < 600.0 { upper } else { lower };
+        let b = place_toolbar(
+            &Rect::new(100.0, 20.0, 400.0, 1000.0),
+            (300.0, 40.0),
+            screen,
+            8.0,
+        );
+        assert_eq!((b.at.y, b.side), (1028.0, BarSide::Below));
     }
 
     #[test]

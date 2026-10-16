@@ -3,7 +3,7 @@
 //! size label, the magnifier, a handle of the zone and the text field. Each piece is drawn whole
 //! into its own surface, only when it changes.
 
-use vixeeny_editor::{Color, MagnifierView};
+use vixeeny_editor::{Color, MagnifierView, Tool};
 use windows::Win32::Graphics::Direct2D::Common::D2D_RECT_F;
 use windows::Win32::Graphics::Direct2D::{
     D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_LAYER_OPTIONS1_NONE, D2D1_LAYER_PARAMETERS1,
@@ -13,9 +13,9 @@ use windows::core::{Interface, Result};
 use windows_numerics::Matrix3x2;
 
 use crate::gfx::{Align, Canvas, Font, Gfx, rect};
-use crate::layout::{self, BAR_H, BAR_W, BUTTON, BUTTON_Y, Button, PanelHit, SHADOW};
+use crate::icons;
+use crate::layout::{self, BUTTON, Button, Kit, PanelForm, PanelHit, Picks, SHADOW};
 use crate::theme::{Rgba, Theme, hsv_to_rgb};
-use crate::{icons, layout::BUTTONS};
 
 pub fn rgba(c: Color) -> Rgba {
     Rgba([
@@ -29,11 +29,13 @@ pub fn rgba(c: Color) -> Rgba {
 /// What the toolbar shows; it is drawn again only when this changes.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BarLook {
-    /// Index into [`layout::TOOLS`].
-    pub tool: usize,
+    /// The tool in hand (`None`: the zone).
+    pub tool: Option<Tool>,
+    /// What the two-tool buttons take (their icon shows it).
+    pub picks: Picks,
+    pub upright: bool,
     pub color: Color,
     pub can_undo: bool,
-    pub can_redo: bool,
     pub style_open: bool,
     /// Button under the pointer, and the one being pressed.
     pub hover: Option<usize>,
@@ -41,10 +43,11 @@ pub struct BarLook {
 }
 
 /// Size in pixels of the toolbar's surface (the bar and room for its shadow).
-pub fn bar_surface(u: f32) -> (u32, u32) {
+pub fn bar_surface(u: f32, upright: bool) -> (u32, u32) {
+    let (w, h) = layout::bar_size(upright);
     (
-        (BAR_W * u + 2.0 * SHADOW * u).ceil() as u32,
-        (BAR_H * u + 2.0 * SHADOW * u).ceil() as u32,
+        (w * u + 2.0 * SHADOW * u).ceil() as u32,
+        (h * u + 2.0 * SHADOW * u).ceil() as u32,
     )
 }
 
@@ -123,36 +126,47 @@ fn floating_box(
 
 pub fn toolbar(c: &Canvas<'_>, t: &Theme, u: f32, look: &BarLook) -> Result<()> {
     let (ox, oy) = (SHADOW * u, SHADOW * u);
-    let bar = rect(ox, oy, BAR_W * u, BAR_H * u);
+    let (w, h) = layout::bar_size(look.upright);
+    let bar = rect(ox, oy, w * u, h * u);
     floating_box(c, t, bar, 12.0 * u, 0.94, Rgba::hex(0x000000, 0x60))?;
-    for x in layout::SEPARATORS {
-        c.fill_rect(rect(ox + x * u, oy + 11.0 * u, 1.0, 24.0 * u), t.divider)?;
+    for along in layout::SEPARATORS {
+        let line = if look.upright {
+            rect(ox + 11.0 * u, oy + along * u, 24.0 * u, 1.0)
+        } else {
+            rect(ox + along * u, oy + 11.0 * u, 1.0, 24.0 * u)
+        };
+        c.fill_rect(line, t.divider)?;
     }
-    for (k, spec) in BUTTONS.iter().enumerate() {
-        let at = (ox + spec.x * u, oy + BUTTON_Y * u);
+    for (k, spec) in layout::buttons().enumerate() {
+        let (x, y) = layout::button_xy(k, look.upright);
+        let at = (ox + x * u, oy + y * u);
         let b = ButtonLook {
             active: match spec.button {
-                Button::Tool(i) => look.tool == i,
+                Button::Tool(kit) => Kit::of(look.tool) == Some(kit),
                 Button::Style => look.style_open,
                 _ => false,
             },
-            enabled: match spec.button {
-                Button::Undo => look.can_undo,
-                Button::Redo => look.can_redo,
-                _ => true,
-            },
+            enabled: spec.button != Button::Undo || look.can_undo,
             hover: look.hover == Some(k),
             pressed: look.pressed == Some(k),
         };
-        if spec.button == Button::Style {
-            // The current colour, as a dot.
-            button_back(c, t, u, at.0, at.1, &b)?;
-            let (cx, cy) = (at.0 + 15.0 * u, at.1 + 15.0 * u);
-            c.fill_circle(cx, cy, 9.0 * u, rgba(look.color))?;
-            c.stroke_circle(cx, cy, 9.0 * u, 1.0, t.stroke_strong)?;
-        } else {
-            icon_button(c, t, u, at, spec.icon, &b)?;
-        }
+        let icon = match spec.button {
+            Button::Tool(kit) => layout::tool_icon(look.picks.tool(kit)),
+            Button::Style => {
+                // The current colour, as a dot.
+                button_back(c, t, u, at.0, at.1, &b)?;
+                let (cx, cy) = (at.0 + 15.0 * u, at.1 + 15.0 * u);
+                c.fill_circle(cx, cy, 9.0 * u, rgba(look.color))?;
+                c.stroke_circle(cx, cy, 9.0 * u, 1.0, t.stroke_strong)?;
+                continue;
+            }
+            Button::Undo => icons::UNDO,
+            Button::Copy => icons::COPY,
+            Button::CopyText => icons::SCAN_TEXT,
+            Button::Save => icons::SAVE,
+            Button::Close => icons::DISMISS,
+        };
+        icon_button(c, t, u, at, icon, &b)?;
     }
     Ok(())
 }
@@ -188,9 +202,12 @@ pub fn tip(c: &Canvas<'_>, t: &Theme, u: f32, text: &str, bubble: (f32, f32)) ->
 pub struct PanelLook {
     pub color: Color,
     pub recent: Vec<Color>,
+    /// The thickness setting (the slider) and the size of what the tool draws (shown).
     pub width: f32,
+    pub size: f32,
     pub filled: bool,
-    pub picker: bool,
+    pub tool: Option<Tool>,
+    pub form: PanelForm,
     pub hsv: (f32, f32, f32),
     pub eyedropper: bool,
     pub hover: Option<PanelHit>,
@@ -199,7 +216,7 @@ pub struct PanelLook {
 pub fn panel_surface(u: f32) -> (u32, u32) {
     (
         (layout::PANEL_W * u + 2.0 * SHADOW * u).ceil() as u32,
-        (layout::PANEL_PICKER_H * u + 2.0 * SHADOW * u).ceil() as u32,
+        (layout::PANEL_MAX_H * u + 2.0 * SHADOW * u).ceil() as u32,
     )
 }
 
@@ -226,14 +243,16 @@ fn swatch(
 
 pub fn panel(c: &Canvas<'_>, t: &Theme, u: f32, look: &PanelLook) -> Result<()> {
     let (ox, oy) = (SHADOW * u, SHADOW * u);
-    let height = if look.picker {
-        layout::PANEL_PICKER_H
-    } else {
-        layout::PANEL_H
-    };
-    let back = rect(ox, oy, layout::PANEL_W * u, height * u);
+    let form = &look.form;
+    let back = rect(ox, oy, layout::PANEL_W * u, form.height() * u);
     floating_box(c, t, back, 12.0 * u, 0.97, Rgba::hex(0x000000, 0x50))?;
     let at = |x: f32, y: f32| (ox + x * u, oy + y * u);
+    let divider = |y: f32| {
+        c.fill_rect(
+            rect(ox + 10.0 * u, oy + y * u, (layout::PANEL_W - 20.0) * u, 1.0),
+            t.divider,
+        )
+    };
     for (i, colour) in Color::PALETTE.iter().enumerate() {
         let (x, y) = at(layout::swatch_x(i), 10.0);
         swatch(c, t, u, x, y, Some(rgba(*colour)), *colour == look.color)?;
@@ -243,7 +262,7 @@ pub fn panel(c: &Canvas<'_>, t: &Theme, u: f32, look: &PanelLook) -> Result<()> 
         swatch(c, t, u, x, y, Some(rgba(*colour)), *colour == look.color)?;
     }
     let (x, y) = at(layout::OWN_COLOUR.0, layout::OWN_COLOUR.1);
-    swatch(c, t, u, x, y, None, look.picker)?;
+    swatch(c, t, u, x, y, None, form.picker)?;
     c.icon(icons::ADD, x + 4.0 * u, y + 4.0 * u, 16.0 * u, t.text)?;
     let button = |hit: PanelHit, active: bool| ButtonLook {
         active,
@@ -259,60 +278,64 @@ pub fn panel(c: &Canvas<'_>, t: &Theme, u: f32, look: &PanelLook) -> Result<()> 
         icons::EYEDROPPER,
         &button(PanelHit::Eyedropper, look.eyedropper),
     )?;
-    c.fill_rect(
-        rect(
-            ox + 10.0 * u,
-            oy + 74.0 * u,
-            (layout::PANEL_W - 20.0) * u,
-            1.0,
-        ),
-        t.divider,
-    )?;
-    icon_button(
-        c,
-        t,
-        u,
-        at(layout::THINNER.0, layout::THINNER.1),
-        icons::SUBTRACT,
-        &button(PanelHit::Thinner, false),
-    )?;
-    let (lx, ly, lw) = layout::WIDTH_LABEL;
-    let (x, y) = at(lx, ly);
+    divider(74.0)?;
+
+    // The size: a slider, filled up to its knob, and the size of what the tool draws.
+    let (tx, ty, length) = layout::SIZE_TRACK;
+    let (x, y) = at(tx, ty);
+    let knob = x + layout::size_to_slider(look.width) * length * u;
+    let track = rect(x, y - 2.0 * u, length * u, 4.0 * u);
+    c.fill_round(track, 2.0 * u, t.divider)?;
+    c.fill_round(rect(x, y - 2.0 * u, knob - x, 4.0 * u), 2.0 * u, t.accent)?;
+    let grow = if look.hover == Some(PanelHit::Size) {
+        1.0
+    } else {
+        0.0
+    };
+    c.fill_circle(knob, y, (7.0 + grow) * u, t.flyout)?;
+    c.fill_circle(knob, y, (4.0 + grow) * u, t.accent)?;
+    c.stroke_circle(knob, y, (7.0 + grow) * u, 1.0, t.stroke_strong)?;
+    let (lx, lw) = layout::SIZE_LABEL;
+    let (x, y) = at(lx, ty - 15.0);
     c.text(
-        &format!("{} px", look.width.round()),
-        rect(x, y, lw * u, BUTTON * u),
+        &format!("{}", look.size.round()),
+        rect(x, y, lw * u, 30.0 * u),
         13.0 * u,
         t.text,
         Align::Centre,
     )?;
-    icon_button(
-        c,
-        t,
-        u,
-        at(layout::THICKER.0, layout::THICKER.1),
-        icons::ADD,
-        &button(PanelHit::Thicker, false),
-    )?;
-    icon_button(
-        c,
-        t,
-        u,
-        at(layout::FILL.0, layout::FILL.1),
-        icons::SQUARE,
-        &button(PanelHit::Fill, look.filled),
-    )?;
-    if look.picker {
-        c.fill_rect(
-            rect(
-                ox + 10.0 * u,
-                oy + 110.0 * u,
-                (layout::PANEL_W - 20.0) * u,
-                1.0,
-            ),
-            t.divider,
-        )?;
+
+    // The other tool of the button in use, and the fill of the shapes.
+    if form.extras() {
+        divider(118.0)?;
+        for (i, tool) in form.variants.iter().flatten().enumerate() {
+            icon_button(
+                c,
+                t,
+                u,
+                at(layout::variant_x(i), layout::EXTRAS_Y),
+                layout::tool_icon(Some(*tool)),
+                &button(PanelHit::Variant(i), look.tool == Some(*tool)),
+            )?;
+        }
+        if form.fill {
+            let (x, y) = at(layout::FILL_X, layout::EXTRAS_Y);
+            button_back(c, t, u, x, y, &button(PanelHit::Fill, false))?;
+            // A square in the colour: filled, or its outline only.
+            let square = rect(x + 7.0 * u, y + 7.0 * u, 16.0 * u, 16.0 * u);
+            if look.filled {
+                c.fill_round(square, 3.0 * u, rgba(look.color))?;
+                c.stroke_round(square, 3.0 * u, 1.0, t.stroke_strong)?;
+            } else {
+                c.stroke_round(square, 3.0 * u, 2.0 * u, rgba(look.color))?;
+            }
+        }
+    }
+
+    if form.picker {
+        divider(form.picker_top())?;
         let (h, s, v) = look.hsv;
-        let (sx, sy, sw, sh) = layout::SHADE;
+        let (sx, sy, sw, sh) = form.shade();
         let (x, y) = at(sx, sy);
         let shade = rect(x, y, sw * u, sh * u);
         let (r, g, b) = hsv_to_rgb(h, 1.0, 1.0);
@@ -335,7 +358,7 @@ pub fn panel(c: &Canvas<'_>, t: &Theme, u: f32, look: &PanelLook) -> Result<()> 
         )?;
         let (kx, ky) = (x + s * sw * u, y + (1.0 - v) * sh * u);
         c.stroke_circle(kx, ky, 5.0 * u, 2.0 * u, white)?;
-        let (hx, hy, hw, hh) = layout::HUE;
+        let (hx, hy, hw, hh) = form.hue();
         let (x, y) = at(hx, hy);
         let bar = rect(x, y, hw * u, hh * u);
         let stops: Vec<(f32, Rgba)> = [
@@ -358,6 +381,20 @@ pub fn panel(c: &Canvas<'_>, t: &Theme, u: f32, look: &PanelLook) -> Result<()> 
         c.stroke_round(marker, 0.0, 1.0, black)?;
     }
     Ok(())
+}
+
+/// Side in pixels of the surface of the size ring for a `diameter` (image pixels).
+pub fn brush_side(diameter: u32) -> u32 {
+    diameter + 6
+}
+
+/// The size of what the tool draws, around the pointer: a ring of that diameter, white over a
+/// dark edge so it shows on any picture.
+pub fn brush(c: &Canvas<'_>, diameter: u32) -> Result<()> {
+    let side = brush_side(diameter) as f32;
+    let (centre, r) = (side / 2.0, (diameter as f32 / 2.0).max(1.0));
+    c.stroke_circle(centre, centre, r + 1.0, 1.0, Rgba([0.0, 0.0, 0.0, 0.6]))?;
+    c.stroke_circle(centre, centre, r, 1.5, Rgba([1.0, 1.0, 1.0, 1.0]))
 }
 
 /// Size of the size label for `text`.

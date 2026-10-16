@@ -634,16 +634,15 @@ pub fn run_edit(args: &[String]) -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("editor window: {e}"))
 }
 
-/// What the toolbar's buttons do, in their order (see `vixeeny_overlay::layout::BUTTONS`).
+/// What the toolbar's buttons do, in the order of `vixeeny_overlay::layout::Tip`.
 pub(crate) fn toolbar_tips(lang: vixeeny_common::i18n::Lang) -> Vec<String> {
     use vixeeny_common::i18n::{Key, tr};
     [
         Key::TipMove,
-        Key::TipSelect,
         Key::TipPen,
         Key::TipHighlight,
-        Key::TipLine,
         Key::TipArrow,
+        Key::TipLine,
         Key::TipRectangle,
         Key::TipEllipse,
         Key::TipText,
@@ -652,12 +651,9 @@ pub(crate) fn toolbar_tips(lang: vixeeny_common::i18n::Lang) -> Vec<String> {
         Key::TipPixelate,
         Key::TipStyle,
         Key::TipUndo,
-        Key::TipRedo,
         Key::TipCopy,
         Key::TipCopyText,
         Key::TipSave,
-        Key::TipSaveAs,
-        Key::TipScroll,
         Key::TipClose,
     ]
     .into_iter()
@@ -670,6 +666,20 @@ mod tests {
     use vixeeny_editor::{Modifiers, Point, Tool};
 
     use super::*;
+
+    #[test]
+    fn every_tip_of_the_toolbar_has_its_text() {
+        use vixeeny_overlay::layout::{TIP_COUNT, Tip};
+        for lang in [
+            vixeeny_common::i18n::Lang::En,
+            vixeeny_common::i18n::Lang::Fr,
+        ] {
+            let tips = toolbar_tips(lang);
+            assert_eq!(tips.len(), TIP_COUNT);
+            assert_eq!(Tip::Close as usize, TIP_COUNT - 1);
+            assert!(tips.iter().all(|t| !t.is_empty()));
+        }
+    }
 
     #[test]
     fn a_saved_picture_is_shown_centred_where_it_fits() {

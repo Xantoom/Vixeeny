@@ -16,6 +16,6 @@ pub use render::{RgbaImage, bgra_to_rgba, render};
 pub mod editor;
 pub use editor::{Editor, Modifiers, Outcome, Tool, ToolSettings};
 pub mod selection;
-pub use selection::{CursorHint, Handle, Selection};
+pub use selection::{BarPlace, BarSide, CursorHint, Handle, Selection};
 pub mod session;
 pub use session::{Command, Key, KeyInput, MagnifierView, Session, View};

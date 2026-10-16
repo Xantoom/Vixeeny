@@ -10,10 +10,12 @@ use crate::editor::{Editor, Modifiers, Outcome, Tool};
 use crate::geometry::{Point, Rect};
 use crate::model::{Annotation, Color};
 use crate::render::{RgbaImage, render_region};
-use crate::selection::{CursorHint, Selection, magnifier_position, magnifier_source, place_beside};
+use crate::selection::{
+    BarPlace, CursorHint, Selection, magnifier_position, magnifier_source, place_toolbar,
+};
 
 /// Size of the toolbar, in image pixels (the UI lays out its content to fit).
-pub const TOOLBAR_SIZE: (f32, f32) = (813.0, 46.0);
+pub const TOOLBAR_SIZE: (f32, f32) = (549.0, 46.0);
 /// Source pixels shown by the magnifier, per side, and the on-screen zoom factor.
 pub const MAGNIFIER_SIDE: u32 = 11;
 pub const MAGNIFIER_ZOOM: f32 = 10.0;
@@ -81,7 +83,15 @@ pub struct View {
     pub hover_window: Option<Rect>,
     pub size_label: Option<(String, Point)>,
     pub magnifier: Option<MagnifierView>,
-    pub toolbar: Option<Point>,
+    pub toolbar: Option<BarPlace>,
+    /// An annotation is being drawn (the toolbar inside the zone fades away meanwhile).
+    pub drawing: bool,
+    /// The outline of the selected annotation, while the zone tool is in hand.
+    pub selected: Option<Rect>,
+    /// The size of what the tool in hand draws (see [`Session::brush`]).
+    pub brush: Option<f32>,
+    /// Where the pointer is, image pixels.
+    pub pointer: Point,
     /// The part of the zone that annotations (and the gesture in progress) cover, drawn, and
     /// where it goes. `None` when there is nothing to draw: show the frozen image as is. The same
     /// `Rc` comes back while nothing changes, so the host can skip uploading it again.
@@ -112,6 +122,8 @@ pub struct Session {
     editor: Editor,
     selection: Selection,
     tool: Option<Tool>,
+    /// The tool to go back to once the eyedropper has picked a colour.
+    before_eyedropper: Option<Tool>,
     target: Option<Target>,
     cursor: Point,
     text_input: Option<Point>,
@@ -144,6 +156,7 @@ impl Session {
             selection: Selection::new(bounds, windows),
             base,
             tool: None,
+            before_eyedropper: None,
             target: None,
             cursor: Point::default(),
             text_input: None,
@@ -226,6 +239,9 @@ impl Session {
     /// and takes effect once the zone is drawn.
     pub fn choose_tool(&mut self, tool: Option<Tool>) {
         self.text_input = None;
+        if tool == Some(Tool::Eyedropper) && self.tool != tool {
+            self.before_eyedropper = self.tool;
+        }
         self.tool = tool;
         if let Some(t) = self.tool {
             self.editor.tool = t;
@@ -254,10 +270,13 @@ impl Session {
 
     fn route(&self, p: Point) -> Target {
         match (self.tool, self.selection.rect()) {
-            (Some(_), Some(rect)) if self.selection.is_settled() => {
-                if self.selection.handle_at(p).is_some() {
-                    Target::Selection
-                } else if rect.contains(p) {
+            (tool, Some(rect))
+                if self.selection.is_settled()
+                    && self.selection.handle_at(p).is_none()
+                    && rect.contains(p) =>
+            {
+                // The zone tool moves an annotation when it is pressed on one, the zone else.
+                if tool.is_some() || self.editor.doc.hit_test(p).is_some() {
                     Target::Editor
                 } else {
                     Target::Selection
@@ -267,6 +286,50 @@ impl Session {
         }
     }
 
+    /// The zone tool is in hand, or the selection one: annotations can be picked and moved.
+    fn picking(&self) -> bool {
+        matches!(self.tool, None | Some(Tool::Select))
+    }
+
+    /// The outline of the selected annotation (of its moved copy during a move), while
+    /// annotations can be picked.
+    fn selected(&self) -> Option<Rect> {
+        if !self.picking() {
+            return None;
+        }
+        if self.editor.hidden().is_some() {
+            return self.editor.preview().map(|a| a.bounds());
+        }
+        let id = self.editor.selection()?;
+        self.editor.doc.get(id).map(Annotation::bounds)
+    }
+
+    /// The size of what the tool in hand draws, in image pixels (the stroke's width, the
+    /// marker's or the text's height, the blur's reach); `None` for tools that draw nothing.
+    pub fn brush(&self) -> Option<f32> {
+        let s = &self.editor.settings;
+        Some(match self.tool? {
+            Tool::Pen | Tool::Line | Tool::Arrow | Tool::Rect | Tool::Ellipse => s.style.width,
+            Tool::Highlighter => crate::editor::highlight_width(s.style.width),
+            Tool::Marker => 2.0 * s.marker_radius,
+            Tool::Text => s.text_size,
+            Tool::Blur => 2.0 * s.blur_radius,
+            Tool::Pixelate => s.pixelate_block as f32,
+            Tool::Select | Tool::Eyedropper => return None,
+        })
+    }
+
+    /// Makes what the tools draw larger (`steps` > 0) or smaller, by steps that grow with the
+    /// size (the mouse wheel).
+    pub fn grow(&mut self, steps: i32) {
+        let mut width = self.editor.settings.style.width;
+        for _ in 0..steps.unsigned_abs() {
+            let step = (width / 8.0).round().max(1.0);
+            width += if steps > 0 { step } else { -step };
+        }
+        self.set_width(width);
+    }
+
     pub fn pointer_down(&mut self, p: Point, mods: Modifiers) {
         self.cursor = p;
         self.text_input = None;
@@ -274,6 +337,7 @@ impl Session {
         self.target = Some(target);
         match target {
             Target::Selection => {
+                self.editor.deselect();
                 // Starting a new zone leaves the tool and the zone-bound gesture state.
                 if self.selection.rect().is_none_or(|r| !r.contains(p))
                     && self.selection.handle_at(p).is_none()
@@ -283,11 +347,21 @@ impl Session {
                 self.selection.pointer_down(p);
             }
             Target::Editor => {
-                if let Outcome::TextRequested(at) =
-                    self.editor.pointer_down(p, mods, Some(&self.base))
-                {
-                    self.text_input = Some(at);
-                    self.target = None;
+                if self.picking() {
+                    self.editor.tool = Tool::Select;
+                }
+                match self.editor.pointer_down(p, mods, Some(&self.base)) {
+                    Outcome::TextRequested(at) => {
+                        self.text_input = Some(at);
+                        self.target = None;
+                    }
+                    // The colour is taken: back to the tool it is for.
+                    Outcome::Picked(_) => {
+                        let back = self.before_eyedropper.take();
+                        self.choose_tool(back);
+                        self.target = None;
+                    }
+                    Outcome::Nothing => {}
                 }
             }
         }
@@ -388,7 +462,7 @@ impl Session {
                     Key::Up => (0.0, -step),
                     _ => (0.0, step),
                 };
-                if self.tool == Some(Tool::Select) {
+                if self.picking() {
                     self.editor.nudge(dx, dy);
                 }
                 None
@@ -531,18 +605,20 @@ impl Session {
                 None
             },
             toolbar: zone.filter(|_| settled).map(|z| {
-                // On the monitor of the zone's bottom-right corner, where the bar goes.
-                let bounds = self.screen_at(Point::new(z.right() - 1.0, z.bottom() - 1.0));
-                place_beside(
+                place_toolbar(
                     &z,
                     (
                         TOOLBAR_SIZE.0 * self.ui_scale,
                         TOOLBAR_SIZE.1 * self.ui_scale,
                     ),
-                    &bounds,
+                    |p| self.screen_at(p),
                     GAP * self.ui_scale,
                 )
             }),
+            drawing: self.target == Some(Target::Editor) && self.editor.preview().is_some(),
+            selected: self.selected(),
+            brush: self.brush(),
+            pointer: self.cursor,
             annotated: zone.and_then(|z| self.annotated(&z)),
             cursor: self.cursor_hint(),
             tool: self.tool,

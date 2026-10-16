@@ -46,14 +46,18 @@ fn backdrop(c: &Canvas<'_>, w: u32, h: u32) -> windows::core::Result<()> {
     )
 }
 
-fn bar_look() -> BarLook {
+fn bar_look(upright: bool) -> BarLook {
     BarLook {
-        tool: 1,
+        tool: Some(vixeeny_editor::Tool::Ellipse),
+        picks: crate::layout::Picks {
+            shape: vixeeny_editor::Tool::Ellipse,
+            ..Default::default()
+        },
+        upright,
         color: Color::PALETTE[0],
         can_undo: true,
-        can_redo: false,
-        style_open: false,
-        hover: Some(4),
+        style_open: true,
+        hover: Some(2),
         pressed: None,
     }
 }
@@ -73,19 +77,23 @@ fn every_piece_draws() {
     ] {
         let t = Theme::new(look);
         let u = 1.25;
-        let (bw, bh) = paint::bar_surface(u);
+        let (bw, bh) = paint::bar_surface(u, false);
+        let (uw, uh) = paint::bar_surface(u, true);
         let (pw, ph) = paint::panel_surface(u);
+        let tool = vixeeny_editor::Tool::Ellipse;
         let panel = PanelLook {
             color: Color::PALETTE[4],
             recent: vec![Color::rgb(10, 200, 120), Color::PALETTE[4]],
-            width: 4.0,
+            width: 6.0,
+            size: 6.0,
             filled: true,
-            picker: true,
+            tool: Some(tool),
+            form: crate::layout::PanelForm::of(Some(tool), true),
             hsv: (200.0, 0.7, 0.8),
             eyedropper: false,
-            hover: Some(PanelHit::Thicker),
+            hover: Some(PanelHit::Size),
         };
-        let (w, h) = (bw.max(pw) + 40, bh + ph + 160);
+        let (w, h) = (bw.max(pw + uw + 20) + 40, bh + ph.max(uh) + 160);
         let pixels = gfx
             .render(w, h, |c| {
                 backdrop(c, w, h)?;
@@ -94,23 +102,29 @@ fn every_piece_draws() {
                 unsafe { c.dc.SetTransform(&at(10.0, 10.0)) };
                 paint::panel(c, &t, u, &panel)?;
                 // SAFETY: as above.
-                unsafe { c.dc.SetTransform(&at(10.0, ph as f32)) };
-                paint::toolbar(c, &t, u, &bar_look())?;
+                unsafe { c.dc.SetTransform(&at((pw + 20) as f32, 10.0)) };
+                paint::toolbar(c, &t, u, &bar_look(true))?;
+                // SAFETY: as above.
+                unsafe { c.dc.SetTransform(&at(10.0, ph.max(uh) as f32)) };
+                paint::toolbar(c, &t, u, &bar_look(false))?;
+                // SAFETY: as above.
+                unsafe { c.dc.SetTransform(&at(440.0, (ph.max(uh) + bh) as f32)) };
+                paint::brush(c, 24)?;
                 let text = "Rectangle";
                 let ((_, _), bubble) = paint::tip_size(&gfx, u, text)?;
                 // SAFETY: as above.
-                unsafe { c.dc.SetTransform(&at(300.0, (ph + bh) as f32)) };
+                unsafe { c.dc.SetTransform(&at(300.0, (ph.max(uh) + bh) as f32)) };
                 paint::tip(c, &t, u, text, bubble)?;
                 let label = "1280 × 720";
                 let size = paint::label_size(&gfx, u, label)?;
                 // SAFETY: as above.
-                unsafe { c.dc.SetTransform(&at(40.0, (ph + bh + 20) as f32)) };
+                unsafe { c.dc.SetTransform(&at(40.0, (ph.max(uh) + bh + 20) as f32)) };
                 paint::size_label(c, &t, u, label, size)?;
                 // SAFETY: as above.
-                unsafe { c.dc.SetTransform(&at(500.0, (ph + bh) as f32)) };
+                unsafe { c.dc.SetTransform(&at(500.0, (ph.max(uh) + bh) as f32)) };
                 paint::handle(c, &t, u)?;
                 // SAFETY: as above.
-                unsafe { c.dc.SetTransform(&at(560.0, (ph + bh) as f32)) };
+                unsafe { c.dc.SetTransform(&at(560.0, (ph.max(uh) + bh) as f32)) };
                 paint::field(
                     c,
                     &FieldLook {

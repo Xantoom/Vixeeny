@@ -83,6 +83,11 @@ enum Drag {
     },
 }
 
+/// The width of the highlighter's stroke for a thickness setting: a broad marker pen.
+pub fn highlight_width(width: f32) -> f32 {
+    (width * 4.0).max(12.0)
+}
+
 /// Smallest drag, in pixels, that creates a shape.
 const MIN_DRAG: f32 = 3.0;
 const RECENT_COLORS: usize = 8;
@@ -290,7 +295,7 @@ impl Editor {
             Tool::Highlighter => Some(Annotation::Highlight {
                 points: points.to_vec(),
                 color: s.style.color.with_alpha(s.highlight_alpha),
-                width: (s.style.width * 4.0).max(12.0),
+                width: highlight_width(s.style.width),
             }),
             Tool::Line | Tool::Arrow if big_enough => {
                 let to = if shift {
@@ -373,6 +378,11 @@ impl Editor {
         let id = self.add(a);
         self.selection = Some(id);
         Some(id)
+    }
+
+    /// Forgets the selected annotation.
+    pub fn deselect(&mut self) {
+        self.selection = None;
     }
 
     pub fn delete_selected(&mut self) {

@@ -37,8 +37,9 @@ fn main() {
         probe.pointer_down(vixeeny_editor::Point::new(100.0, 80.0), Default::default());
         probe.pointer_up(vixeeny_editor::Point::new(500.0, 300.0), Default::default());
         probe.view().toolbar.map(|b| {
-            let spec = &vixeeny_overlay::layout::BUTTONS[12];
-            ((b.x + spec.x + 15.0) as i32, (b.y + 23.0) as i32)
+            // The style button.
+            let (x, y) = vixeeny_overlay::layout::button_xy(8, b.side.upright());
+            ((b.at.x + x + 15.0) as i32, (b.at.y + y + 15.0) as i32)
         })
     };
     let mut session = Session::new(image, Vec::new());

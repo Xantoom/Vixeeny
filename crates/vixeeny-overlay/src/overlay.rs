@@ -6,7 +6,9 @@
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
-use vixeeny_editor::{Color, Command, Key, KeyInput, Modifiers, Point, Rect, Session, Tool, View};
+use vixeeny_editor::{
+    BarSide, Color, Command, Key, KeyInput, Modifiers, Point, Rect, Session, Tool, View,
+};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Dwm::DwmFlush;
 use windows::Win32::Graphics::Gdi::ValidateRect;
@@ -24,7 +26,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::gfx::{self, Gfx};
-use crate::layout::{self, BAR_H, BAR_W, BUTTON, BUTTONS, Button, PanelHit, SHADOW, TOOLS};
+use crate::layout::{self, BAR_H, BUTTON, Button, PanelForm, PanelHit, Picks, SHADOW};
 use crate::paint::{self, BarLook, FieldLook, PanelLook};
 use crate::scene::{self, Pane, Solids, TipLook};
 use crate::theme::{Look, Rgba, Theme, hsv_to_rgb, rgb_to_hsv};
@@ -54,6 +56,11 @@ const WM_MOUSELEAVE: u32 = 0x02a3;
 const TIP_TIMER: usize = 1;
 const CARET_TIMER: usize = 2;
 const CARET_BLINK_MS: u32 = 530;
+/// The size ring stays this long after the wheel last turned.
+const BRUSH_TIMER: usize = 3;
+const BRUSH_MS: u32 = 700;
+/// The opacity of a toolbar inside the zone while an annotation is drawn under it.
+const FADED: f32 = 0.12;
 
 /// What a press started.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -83,6 +90,10 @@ struct Ui {
     style_open: bool,
     picker: bool,
     hsv: (f32, f32, f32),
+    /// What the two-tool buttons take.
+    picks: Picks,
+    /// The size ring is shown (the wheel just turned).
+    brush: bool,
     /// The tip shown, and the button waiting for one.
     tip: Option<usize>,
     tip_pending: Option<usize>,
@@ -153,12 +164,13 @@ fn color_of_hsv(h: f32, s: f32, v: f32) -> Color {
 }
 
 impl Shared {
-    fn bar_look(&self, view: &View, ui: &Ui) -> BarLook {
+    fn bar_look(view: &View, ui: &Ui, side: BarSide) -> BarLook {
         BarLook {
-            tool: layout::tool_index(view.tool),
+            tool: view.tool,
+            picks: ui.picks,
+            upright: side.upright(),
             color: view.color,
             can_undo: view.can_undo,
-            can_redo: view.can_redo,
             style_open: ui.style_open,
             hover: match ui.hover {
                 Some(Hover::Button(k)) => Some(k),
@@ -176,8 +188,10 @@ impl Shared {
             color: view.color,
             recent: view.recent_colors.clone(),
             width: view.width,
+            size: view.brush.unwrap_or(view.width),
             filled: view.filled,
-            picker: ui.picker,
+            tool: view.tool,
+            form: PanelForm::of(view.tool, ui.picker),
             hsv: ui.hsv,
             eyedropper: view.tool == Some(Tool::Eyedropper),
             hover: match (ui.press, ui.hover) {
@@ -188,30 +202,50 @@ impl Shared {
         }
     }
 
-    /// Where the bar itself (not its shadow) is in `pane`, window pixels; `None` when the pane
-    /// does not show it.
-    fn bar_in(&self, pane: &Pane, view: &View, scroll: f32) -> Option<(f32, f32)> {
-        let at = view.toolbar?;
+    /// Where the bar itself (not its shadow) is in `pane`, window pixels, and on which side of
+    /// the zone; `None` when the pane does not show it.
+    fn bar_in(&self, pane: &Pane, view: &View, scroll: f32) -> Option<(f32, f32, BarSide)> {
+        let place = view.toolbar?;
         let u = self.u;
-        let (x, y) = if self.scrolling.get() {
+        let (x, y, side) = if self.scrolling.get() {
             // The zone is the whole long image: keep the bar in view, top right.
-            ((pane.size.0 as f32 - (BAR_W + 16.0) * u).max(0.0), 16.0 * u)
+            let w = layout::BAR_W * u;
+            (
+                (pane.size.0 as f32 - w - 16.0 * u).max(0.0),
+                16.0 * u,
+                BarSide::Inside,
+            )
         } else {
-            pane.to_window(at.x, at.y, scroll)
+            let (x, y) = pane.to_window(place.at.x, place.at.y, scroll);
+            (x, y, place.side)
         };
-        let (w, h) = (BAR_W * u, BAR_H * u);
+        let (w, h) = layout::bar_size(side.upright());
+        let (w, h) = (w * u, h * u);
         let visible =
             x < pane.size.0 as f32 && x + w > 0.0 && y < pane.size.1 as f32 && y + h > 0.0;
-        visible.then_some((x, y))
+        visible.then_some((x, y, side))
     }
 
     fn panel_in(&self, pane: &Pane, view: &View, ui: &Ui) -> Option<(f32, f32)> {
         if !ui.style_open {
             return None;
         }
-        let (bx, by) = self.bar_in(pane, view, ui.scroll)?;
-        let (dx, dy) = layout::panel_offset(by / self.u, ui.picker);
-        Some((bx + dx * self.u, by + dy * self.u))
+        let u = self.u;
+        let (bx, by, side) = self.bar_in(pane, view, ui.scroll)?;
+        let upright = side.upright();
+        let height = PanelForm::of(view.tool, ui.picker).height();
+        let (pw, ph) = (pane.size.0 as f32, pane.size.1 as f32);
+        // The room before and after the bar, across it.
+        let room = if upright {
+            (bx / u, (pw - bx) / u - BAR_H)
+        } else {
+            (by / u, (ph - by) / u - BAR_H)
+        };
+        let before_first = matches!(side, BarSide::Above | BarSide::Left);
+        let (dx, dy) = layout::panel_offset(upright, before_first, room, height);
+        let x = (bx + dx * u).clamp(0.0, (pw - layout::PANEL_W * u).max(0.0));
+        let y = (by + dy * u).clamp(0.0, (ph - height * u).max(0.0));
+        Some((x, y))
     }
 
     fn field_look(view: &View, ui: &Ui) -> Option<FieldLook> {
@@ -294,6 +328,14 @@ impl Shared {
         for (v, r) in pane.border.iter().zip(border) {
             scene::place(v, r)?;
         }
+        // The selected annotation, outlined just around it.
+        let outline = view.selected.map_or([(0.0, 0.0, 0.0, 0.0); 4], |r| {
+            let r = Rect::new(r.x - 3.0, r.y - 3.0, r.w + 6.0, r.h + 6.0);
+            scene::border_rects(scene::snap(&r), 1.0)
+        });
+        for (v, r) in pane.outline.iter().zip(outline) {
+            scene::place(v, r)?;
+        }
         let handles = zone.filter(|z| view.settled && pane.sees(*z, 20.0 * u));
         if pane.handles_at.replace(handles) != handles {
             let half = self.solids.handle_side as f32 / 2.0;
@@ -374,6 +416,27 @@ impl Shared {
             _ => pane.field.hide()?,
         }
 
+        // The size ring, around the pointer while the wheel changes the size.
+        match view.brush.filter(|_| ui.brush) {
+            Some(size) => {
+                let diameter = size.round().max(2.0) as u32;
+                let side = paint::brush_side(diameter) as f32;
+                let (x, y) = (view.pointer.x - side / 2.0, view.pointer.y - side / 2.0);
+                if pane.sees((x, y, side, side), 0.0) {
+                    pane.brush.show(
+                        gfx,
+                        &diameter,
+                        || Ok((side as u32, side as u32)),
+                        |c| paint::brush(c, diameter),
+                    )?;
+                    pane.brush.move_to(x.round(), y.round())?;
+                } else {
+                    pane.brush.hide()?;
+                }
+            }
+            None => pane.brush.hide()?,
+        }
+
         // The scroll bar of a long image.
         let image_h = self.session.borrow().base().height as f32;
         let view_h = pane.size.1 as f32;
@@ -391,12 +454,13 @@ impl Shared {
         // The toolbar, its tip and the style panel.
         let margin = SHADOW * u;
         match self.bar_in(pane, view, scroll) {
-            Some((bx, by)) => {
-                let look = self.bar_look(view, ui);
+            Some((bx, by, side)) => {
+                let look = Self::bar_look(view, ui, side);
+                let upright = side.upright();
                 pane.toolbar.show(
                     gfx,
                     &look,
-                    || Ok(paint::bar_surface(u)),
+                    || Ok(paint::bar_surface(u, upright)),
                     |c| paint::toolbar(c, t, u, &look),
                 )?;
                 if pane
@@ -405,10 +469,15 @@ impl Shared {
                 {
                     pane.toolbar.appear(gfx, 6.0 * u, 0.18, t.animations)?;
                 }
-                match ui
-                    .tip
-                    .and_then(|k| Some((k, self.tips.borrow().get(k)?.clone())))
-                {
+                // Inside the zone, the bar steps aside while an annotation is drawn.
+                let faded = side == BarSide::Inside && view.drawing;
+                pane.toolbar
+                    .fade(gfx, if faded { FADED } else { 1.0 }, t.animations)?;
+                let tip = ui.tip.filter(|_| !faded).and_then(|k| {
+                    let which = layout::tip_of(k, &ui.picks) as usize;
+                    Some((k, self.tips.borrow().get(which)?.clone()))
+                });
+                match tip {
                     Some((k, text)) if !text.is_empty() => {
                         let ((w, h), bubble) = paint::tip_size(gfx, u, &text)?;
                         let look = TipLook { button: k, text };
@@ -418,17 +487,31 @@ impl Shared {
                             || Ok((w, h)),
                             |c| paint::tip(c, t, u, &look.text, bubble),
                         )?;
-                        let below = by < 48.0 * u;
-                        let cx = bx + (BUTTONS[k].x + BUTTON / 2.0) * u;
-                        let top = by + layout::BUTTON_Y * u;
-                        let y = if below {
-                            top + BUTTON * u + 14.0 * u
-                        } else {
-                            top - bubble.1 - 14.0 * u
+                        let (x, y) = layout::button_xy(k, upright);
+                        let (cx, cy) = (bx + (x + BUTTON / 2.0) * u, by + (y + BUTTON / 2.0) * u);
+                        let gap = (BUTTON / 2.0 + 14.0) * u;
+                        let pw = pane.size.0 as f32;
+                        // Beside an upright bar, on the side away from the zone if it fits.
+                        let right = cx + gap;
+                        let left = cx - gap - bubble.0;
+                        let (left, top) = match side {
+                            BarSide::Right if right + bubble.0 <= pw || left < 0.0 => {
+                                (right, cy - bubble.1 / 2.0)
+                            }
+                            BarSide::Left if left >= 0.0 || right + bubble.0 > pw => {
+                                (left, cy - bubble.1 / 2.0)
+                            }
+                            BarSide::Right => (left, cy - bubble.1 / 2.0),
+                            BarSide::Left => (right, cy - bubble.1 / 2.0),
+                            // Above the bar, unless the screen's top edge is in the way.
+                            BarSide::Above if by >= 48.0 * u => {
+                                (cx - bubble.0 / 2.0, cy - gap - bubble.1)
+                            }
+                            _ => (cx - bubble.0 / 2.0, cy + gap),
                         };
+                        let left = left.clamp(0.0, (pw - bubble.0).max(0.0));
                         let m = paint::TIP_MARGIN * u;
-                        pane.tip
-                            .move_to((cx - bubble.0 / 2.0 - m).round(), (y - m).round())?;
+                        pane.tip.move_to((left - m).round(), (top - m).round())?;
                     }
                     _ => pane.tip.hide()?,
                 }
@@ -497,17 +580,23 @@ impl Shared {
                 (y - py) / u,
                 Color::PALETTE.len(),
                 recent,
-                ui.picker,
+                &PanelForm::of(view.tool, ui.picker),
             ) {
                 return Some(Hover::Panel(hit));
             }
         }
-        let (bx, by) = self.bar_in(pane, &view, ui.scroll)?;
-        let (lx, ly) = ((x - bx) / u, (y - by) / u);
-        if !(0.0..BAR_W).contains(&lx) || !(0.0..BAR_H).contains(&ly) {
+        let (bx, by, side) = self.bar_in(pane, &view, ui.scroll)?;
+        // A bar that stepped aside for a drawing is not in the way.
+        if side == BarSide::Inside && view.drawing {
             return None;
         }
-        Some(layout::button_at(lx, ly).map_or(Hover::Bar, Hover::Button))
+        let upright = side.upright();
+        let (w, h) = layout::bar_size(upright);
+        let (lx, ly) = ((x - bx) / u, (y - by) / u);
+        if !(0.0..w).contains(&lx) || !(0.0..h).contains(&ly) {
+            return None;
+        }
+        Some(layout::button_at(lx, ly, upright).map_or(Hover::Bar, Hover::Button))
     }
 
     fn message(&self, i: usize, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
@@ -568,7 +657,12 @@ impl Shared {
             }
             WM_MOUSEWHEEL => {
                 let delta = high_word(wparam.0 as isize) as f32;
-                self.scroll_by(-delta);
+                // A long image scrolls; Ctrl, or any other image, sizes the tool.
+                if self.scrolling.get() && !key_down(VK_CONTROL) {
+                    self.scroll_by(-delta);
+                } else {
+                    self.wheel(i, delta);
+                }
             }
             WM_KEYDOWN | WM_SYSKEYDOWN => {
                 let vk = windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY(wparam.0 as u16);
@@ -647,8 +741,9 @@ impl Shared {
                     session.pointer_move(Point::new(ix, iy), Modifiers { shift });
                     moved = session.hover_state() != before || session.in_gesture();
                 }
-                // A hover that changes nothing on screen costs nothing.
-                if !changed && !moved {
+                // A hover that changes nothing on screen costs nothing (the size ring follows
+                // the pointer).
+                if !changed && !moved && !self.ui.borrow().brush {
                     let view = self.session.borrow().view();
                     self.update_pointer(&view);
                     return;
@@ -672,7 +767,7 @@ impl Shared {
         match hit {
             Some(Hover::Button(k)) => ui.press = Some(Press::Button(k)),
             Some(Hover::Bar | Hover::Panel(PanelHit::Background)) => {}
-            Some(Hover::Panel(hit @ (PanelHit::Shade | PanelHit::Hue))) => {
+            Some(Hover::Panel(hit @ (PanelHit::Shade | PanelHit::Hue | PanelHit::Size))) => {
                 ui.press = Some(Press::Picking(hit));
                 drop(ui);
                 self.pick(pane, hit, x, y);
@@ -749,9 +844,10 @@ impl Shared {
 
     /// Clicks toolbar button `k`; `true` when the overlay closed.
     fn button(&self, k: usize) -> bool {
-        match BUTTONS[k].button {
-            Button::Tool(i) => {
-                self.session.borrow_mut().choose_tool(TOOLS[i]);
+        match layout::button(k).button {
+            Button::Tool(kit) => {
+                let tool = self.ui.borrow().picks.tool(kit);
+                self.session.borrow_mut().choose_tool(tool);
             }
             Button::Style => {
                 let mut ui = self.ui.borrow_mut();
@@ -759,12 +855,9 @@ impl Shared {
                 ui.picker = false;
             }
             Button::Undo => self.session.borrow_mut().undo(),
-            Button::Redo => self.session.borrow_mut().redo(),
             Button::Copy => return self.run_command(Command::Copy),
             Button::CopyText => return self.run_command(Command::CopyText),
             Button::Save => return self.run_command(Command::Save),
-            Button::SaveAs => return self.run_command(Command::SaveAs),
-            Button::Scroll => return self.run_command(Command::Scroll),
             Button::Close => return self.run_command(Command::Close),
         }
         false
@@ -798,10 +891,15 @@ impl Shared {
                 session.choose_tool(Some(Tool::Eyedropper));
                 ui.style_open = false;
             }
-            PanelHit::Thinner => session.set_width(view.width - 1.0),
-            PanelHit::Thicker => session.set_width(view.width + 1.0),
+            PanelHit::Variant(i) => {
+                let form = PanelForm::of(view.tool, ui.picker);
+                if let Some(tool) = form.variants.and_then(|v| v.get(i).copied()) {
+                    ui.picks.remember(tool);
+                    session.choose_tool(Some(tool));
+                }
+            }
             PanelHit::Fill => session.set_filled(!view.filled),
-            PanelHit::Shade | PanelHit::Hue | PanelHit::Background => {}
+            PanelHit::Size | PanelHit::Shade | PanelHit::Hue | PanelHit::Background => {}
         }
     }
 
@@ -812,18 +910,44 @@ impl Shared {
             return;
         };
         let (lx, ly) = ((x - px) / self.u, (y - py) / self.u);
+        if hit == PanelHit::Size {
+            self.session.borrow_mut().set_width(layout::size_at(lx));
+            return;
+        }
         let mut ui = self.ui.borrow_mut();
+        let form = PanelForm::of(view.tool, ui.picker);
         match hit {
             PanelHit::Shade => {
-                let (s, v) = layout::shade_at(lx, ly);
+                let (s, v) = layout::shade_at(&form, lx, ly);
                 ui.hsv.1 = s;
                 ui.hsv.2 = v;
             }
-            _ => ui.hsv.0 = layout::hue_at(ly),
+            _ => ui.hsv.0 = layout::hue_at(&form, ly),
         }
         let (h, s, v) = ui.hsv;
         drop(ui);
         self.session.borrow_mut().set_color(color_of_hsv(h, s, v));
+    }
+
+    /// The wheel turned by `delta` (120 a notch) over pane `i`: the tool in hand draws larger
+    /// or smaller, and a ring shows the size for a moment.
+    fn wheel(&self, i: usize, delta: f32) {
+        let steps = (delta / 120.0).round() as i32;
+        let steps = if steps == 0 {
+            delta.signum() as i32
+        } else {
+            steps
+        };
+        let mut session = self.session.borrow_mut();
+        if steps == 0 || session.brush().is_none() {
+            return;
+        }
+        session.grow(steps);
+        drop(session);
+        self.ui.borrow_mut().brush = true;
+        // SAFETY: plain timer call on a window of this thread.
+        unsafe { SetTimer(Some(self.panes[i].hwnd), BRUSH_TIMER, BRUSH_MS, None) };
+        self.refresh();
     }
 
     fn scroll_by(&self, dy: f32) {
@@ -997,6 +1121,12 @@ impl Shared {
                 let mut ui = self.ui.borrow_mut();
                 ui.caret_on = !ui.caret_on;
                 drop(ui);
+                self.refresh();
+            }
+            BRUSH_TIMER => {
+                // SAFETY: plain call on a window of this thread.
+                let _ = unsafe { KillTimer(Some(self.panes[i].hwnd), BRUSH_TIMER) };
+                self.ui.borrow_mut().brush = false;
                 self.refresh();
             }
             _ => {}
