@@ -13,6 +13,12 @@ use crate::render::{RgbaImage, render_region};
 use crate::selection::{BarPlace, CursorHint, Selection, place_toolbar};
 
 /// Size of the toolbar, in image pixels (the UI lays out its content to fit).
+/// The drawing area of the layers grows by blocks of this many pixels (see
+/// [`View::layers_area`]).
+pub const LAYER_BLOCK: u32 = 128;
+/// Drawn around the annotations' bounds: joins and anti-aliasing reach a little past them.
+const LAYER_MARGIN: f32 = 8.0;
+
 pub const TOOLBAR_SIZE: (f32, f32) = (651.0, 46.0);
 /// The thickness the tools start with, and the largest one, at 100 % (they grow with the
 /// interface scale).
@@ -20,8 +26,6 @@ pub const DEFAULT_WIDTH: f32 = 4.0;
 pub const MAX_WIDTH: f32 = 40.0;
 /// Space around the toolbar.
 const GAP: f32 = 8.0;
-/// Drawn around the annotations' bounds: miter joins and anti-aliasing reach a little past them.
-const DRAW_MARGIN: f32 = 8.0;
 
 /// What the user asked the host to do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,10 +84,15 @@ pub struct View {
     pub live: bool,
     /// The largest thickness.
     pub max_width: f32,
-    /// The part of the zone that annotations (and the gesture in progress) cover, drawn, and
-    /// where it goes. `None` when there is nothing to draw: show the frozen image as is. The same
-    /// `Rc` comes back while nothing changes, so the host can skip uploading it again.
-    pub annotated: Option<(Rc<RgbaImage>, Point)>,
+    /// What to draw over the screens, bottom to top (image pixels): the annotations and the
+    /// gesture in progress. The same `Rc` comes back while nothing changes.
+    pub layers: Rc<Vec<Annotation>>,
+    /// Where they are drawn (whole image pixels: x, y, width, height): what they cover, in
+    /// the zone, rounded out to blocks of [`LAYER_BLOCK`] pixels so it changes seldom while
+    /// drawing. `None` while there is nothing to draw.
+    pub layers_area: Option<(u32, u32, u32, u32)>,
+    /// Changes when the picture of the screens is replaced (see [`Session::replace_base`]).
+    pub base_version: u64,
     pub cursor: CursorHint,
     pub tool: Option<Tool>,
     pub color: Color,
@@ -125,20 +134,12 @@ pub struct Session {
     ui_scale: f32,
     /// The monitors, in image pixels: the toolbar stays on one of them.
     screens: Vec<Rect>,
-    /// The last drawing of the annotations, with what it was drawn from.
-    drawn: RefCell<Option<Drawn>>,
+    /// The layers last given (see [`View::layers`]).
+    layers: RefCell<Rc<Vec<Annotation>>>,
+    base_version: u64,
     /// The screens are shown live: the annotations are drawn over nothing (see
     /// [`Session::set_live`]).
     live: bool,
-}
-
-/// A drawing of the annotations: what was drawn, where, and the result.
-#[derive(Debug)]
-struct Drawn {
-    layers: Vec<Annotation>,
-    region: Rect,
-    live: bool,
-    image: Rc<RgbaImage>,
 }
 
 impl Session {
@@ -158,7 +159,8 @@ impl Session {
             auto_command: None,
             ui_scale: 1.0,
             screens: vec![bounds],
-            drawn: RefCell::new(None),
+            layers: RefCell::default(),
+            base_version: 0,
             live: false,
         }
     }
@@ -230,46 +232,33 @@ impl Session {
             return false;
         }
         self.base = base;
-        *self.drawn.borrow_mut() = None;
+        self.base_version += 1;
         true
     }
 
     /// Live, the part of the screens (whole image pixels) that annotations take their pixels
-    /// from: the zone, while it holds a blur or a pixelation. The host keeps it up to date with
-    /// [`Session::patch_base`]. `None` while nothing needs it, and while the zone is being moved
+    /// from: the zone, while it holds a blur, a pixelation or a highlight. The host follows it,
+    /// to draw the layers over it. `None` while nothing needs it, and while the zone is being moved
     /// or resized.
     pub fn live_area(&self) -> Option<(u32, u32, u32, u32)> {
         if !self.live || self.target == Some(Target::Selection) {
             return None;
         }
-        let zone = self.selection.rect()?;
-        let effect =
-            |a: &Annotation| matches!(a, Annotation::Blur { .. } | Annotation::Pixelate { .. });
+        let area = self.zone_px()?;
+        let effect = |a: &Annotation| {
+            matches!(
+                a,
+                Annotation::Blur { .. }
+                    | Annotation::Pixelate { .. }
+                    | Annotation::Highlight { .. }
+            )
+        };
         let used = self.editor.doc.items.iter().any(|i| effect(&i.annotation))
             || self.editor.preview().is_some_and(|a| effect(&a));
         if !used {
             return None;
         }
-        let x0 = (zone.x.floor().max(0.0) as u32).min(self.base.width);
-        let y0 = (zone.y.floor().max(0.0) as u32).min(self.base.height);
-        let x1 = ((zone.x + zone.w).ceil().max(0.0) as u32).min(self.base.width);
-        let y1 = ((zone.y + zone.h).ceil().max(0.0) as u32).min(self.base.height);
-        (x1 > x0 && y1 > y0).then_some((x0, y0, x1 - x0, y1 - y0))
-    }
-
-    /// Takes `part`, a fresh picture of the screens, with its top-left corner at `(x, y)`.
-    pub fn patch_base(&mut self, x: u32, y: u32, part: &RgbaImage) {
-        let w = part.width.min(self.base.width.saturating_sub(x)) as usize;
-        if w == 0 {
-            return;
-        }
-        let rows = part.height.min(self.base.height.saturating_sub(y));
-        for row in 0..rows {
-            let from = (row * part.width) as usize * 4;
-            let to = ((y + row) * self.base.width + x) as usize * 4;
-            self.base.data[to..to + w * 4].copy_from_slice(&part.data[from..from + w * 4]);
-        }
-        *self.drawn.borrow_mut() = None;
+        Some(area)
     }
 
     /// Removes every annotation (undo brings them back).
@@ -585,11 +574,8 @@ impl Session {
         }
     }
 
-    fn annotated(&self, zone: &Rect) -> Option<(Rc<RgbaImage>, Point)> {
-        let preview = self.editor.preview();
-        if self.editor.doc.items.is_empty() && preview.is_none() {
-            return None;
-        }
+    /// The annotations and the gesture in progress, bottom to top (see [`View::layers`]).
+    fn layers(&self) -> Rc<Vec<Annotation>> {
         let hidden = self.editor.hidden();
         let layers: Vec<Annotation> = self
             .editor
@@ -598,57 +584,44 @@ impl Session {
             .iter()
             .filter(|i| Some(i.id) != hidden)
             .map(|i| i.annotation.clone())
-            .chain(preview)
+            .chain(self.editor.preview())
             .collect();
-        // Only what the annotations cover (with a margin for joins and anti-aliasing): the
-        // frozen image already shows the rest, and a small image is quick to draw and upload.
+        let mut last = self.layers.borrow_mut();
+        if **last != layers {
+            *last = Rc::new(layers);
+        }
+        last.clone()
+    }
+
+    fn layers_area(&self, layers: &[Annotation]) -> Option<(u32, u32, u32, u32)> {
+        let (zx, zy, zw, zh) = self.zone_px()?;
         let covered = layers
             .iter()
             .map(Annotation::bounds)
             .reduce(|a, b| a.union(&b))?
-            .inflate(DRAW_MARGIN);
-        let region = covered.intersect(zone)?;
-        let mut drawn = self.drawn.borrow_mut();
-        let image = match drawn.as_ref() {
-            Some(d) if d.region == region && d.layers == layers && d.live == self.live => {
-                d.image.clone()
-            }
-            _ => {
-                let mut image = render_region(&self.base, layers.iter(), &region)?;
-                if self.live {
-                    // Over the live screens: only what the annotations changed shows.
-                    let under = render_region(&self.base, std::iter::empty(), &region)?;
-                    for (px, was) in image
-                        .data
-                        .as_chunks_mut::<4>()
-                        .0
-                        .iter_mut()
-                        .zip(under.data.as_chunks::<4>().0)
-                    {
-                        if px == was {
-                            *px = [0; 4];
-                        }
-                    }
-                }
-                let image = Rc::new(image);
-                *drawn = Some(Drawn {
-                    layers,
-                    region,
-                    live: self.live,
-                    image: image.clone(),
-                });
-                image
-            }
-        };
-        // `render_region` rounds the region outwards; the image sits at the rounded corner.
-        Some((
-            image,
-            Point::new(region.x.floor().max(0.0), region.y.floor().max(0.0)),
-        ))
+            .inflate(LAYER_MARGIN);
+        let block = LAYER_BLOCK as f32;
+        let x0 = ((covered.x / block).floor() * block).max(zx as f32) as u32;
+        let y0 = ((covered.y / block).floor() * block).max(zy as f32) as u32;
+        let x1 = (((covered.x + covered.w) / block).ceil() * block).min((zx + zw) as f32) as u32;
+        let y1 = (((covered.y + covered.h) / block).ceil() * block).min((zy + zh) as f32) as u32;
+        (x1 > x0 && y1 > y0).then_some((x0, y0, x1 - x0, y1 - y0))
+    }
+
+    /// The zone in whole image pixels (x, y, width, height), rounded outwards and clamped.
+    fn zone_px(&self) -> Option<(u32, u32, u32, u32)> {
+        let zone = self.selection.rect()?;
+        let x0 = (zone.x.floor().max(0.0) as u32).min(self.base.width);
+        let y0 = (zone.y.floor().max(0.0) as u32).min(self.base.height);
+        let x1 = ((zone.x + zone.w).ceil().max(0.0) as u32).min(self.base.width);
+        let y1 = ((zone.y + zone.h).ceil().max(0.0) as u32).min(self.base.height);
+        (x1 > x0 && y1 > y0).then_some((x0, y0, x1 - x0, y1 - y0))
     }
 
     pub fn view(&self) -> View {
         let zone = self.selection.rect();
+        let layers = self.layers();
+        let layers_area = self.layers_area(&layers);
         let settled = self.selection.is_settled();
         let settings = &self.editor.settings;
         View {
@@ -678,7 +651,9 @@ impl Session {
             pointer: self.cursor,
             live: self.live,
             max_width: self.max_width(),
-            annotated: zone.and_then(|z| self.annotated(&z)),
+            layers,
+            layers_area,
+            base_version: self.base_version,
             cursor: self.cursor_hint(),
             tool: self.tool,
             color: settings.style.color,

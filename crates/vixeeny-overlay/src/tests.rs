@@ -442,3 +442,173 @@ fn a_screenshot_notification_is_its_picture_alone() {
         "the picture fills the card"
     );
 }
+
+/// A picture with detail everywhere, for the effects to show.
+fn screens(w: u32, h: u32) -> RgbaImage {
+    let data = (0..w * h)
+        .flat_map(|i| {
+            let (x, y) = (i % w, i / w);
+            let check = if (x / 6 + y / 6) % 2 == 0 { 40 } else { 0 };
+            [
+                (x * 255 / w) as u8,
+                (y * 255 / h) as u8,
+                150 + check as u8,
+                255,
+            ]
+        })
+        .collect();
+    RgbaImage::new(w, h, data).expect("image")
+}
+
+fn every_annotation() -> Vec<vixeeny_editor::Annotation> {
+    use vixeeny_editor::{Annotation, Point, Rect, Style};
+    let style = |c: Color, width: f32| Style { color: c, width };
+    let p = Point::new;
+    vec![
+        Annotation::Pen {
+            points: vec![p(10.0, 10.0), p(40.0, 30.0), p(70.0, 12.0), p(90.0, 40.0)],
+            style: style(Color::rgb(230, 30, 30), 5.0),
+        },
+        Annotation::Rect {
+            rect: Rect::new(20.0, 50.0, 60.0, 40.0),
+            style: style(Color::rgb(30, 160, 60), 4.0),
+            filled: false,
+        },
+        Annotation::Ellipse {
+            rect: Rect::new(100.0, 10.0, 50.0, 30.0),
+            style: style(Color::rgb(250, 200, 0), 3.0),
+            filled: true,
+        },
+        Annotation::Arrow {
+            from: p(110.0, 100.0),
+            to: p(180.0, 60.0),
+            style: style(Color::rgb(20, 20, 20), 4.0),
+        },
+        Annotation::Highlight {
+            points: vec![p(10.0, 105.0), p(90.0, 105.0)],
+            color: Color {
+                a: 128,
+                ..Color::rgb(255, 230, 0)
+            },
+            width: 14.0,
+        },
+        Annotation::Blur {
+            rect: Rect::new(150.0, 80.0, 45.0, 35.0),
+            radius: 6.0,
+        },
+        Annotation::Pixelate {
+            rect: Rect::new(160.0, 5.0, 36.0, 36.0),
+            block: 8,
+        },
+        Annotation::Text {
+            pos: p(30.0, 60.0),
+            text: "Hé".into(),
+            size: 18.0,
+            color: Color::rgb(255, 255, 255),
+            background: Some(Color::rgb(40, 40, 120)),
+        },
+        Annotation::Marker {
+            center: p(130.0, 70.0),
+            number: 7,
+            color: Color::rgb(220, 40, 40),
+            radius: 11.0,
+        },
+    ]
+}
+
+#[test]
+fn the_graphics_card_draws_the_annotations_as_the_export_does() {
+    use crate::drawing::Drawing;
+    let gfx = Gfx::new().expect("graphics devices");
+    let (w, h) = (200, 120);
+    let base = screens(w, h);
+    let layers = std::rc::Rc::new(every_annotation());
+    let mut drawing = Drawing::new(&gfx, (0, 0, w, h), &base, 0).expect("drawing");
+    drawing.update(&gfx, &layers, false).expect("drawn");
+    let gpu = gfx
+        .render(w, h, |c| {
+            drawing.draw(c, (0.0, 0.0), false);
+            Ok(())
+        })
+        .expect("rendered");
+    save("drawing-gpu", w, h, &gpu);
+    let cpu = vixeeny_editor::render::render_region(
+        &base,
+        layers.iter(),
+        &vixeeny_editor::Rect::new(0.0, 0.0, w as f32, h as f32),
+    )
+    .expect("exported");
+    let cpu_bgra: Vec<u8> = cpu
+        .data
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|p| [p[2], p[1], p[0], p[3]])
+        .collect();
+    save("drawing-export", w, h, &cpu_bgra);
+    // The same picture, but for anti-aliasing and the effects' filters.
+    let mut total = 0u64;
+    let mut far = 0;
+    for (g, c) in gpu
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(cpu_bgra.as_chunks::<4>().0)
+    {
+        let d = (0..3)
+            .map(|i| u64::from(g[i].abs_diff(c[i])))
+            .max()
+            .unwrap_or(0);
+        total += d;
+        if d > 60 {
+            far += 1;
+        }
+    }
+    let n = u64::from(w * h);
+    assert!(total / n < 6, "mean difference {}", total / n);
+    assert!(far * 100 < n * 3, "{far} pixels far apart");
+}
+
+#[test]
+fn live_only_what_is_drawn_covers_the_screens() {
+    use crate::drawing::Drawing;
+    use vixeeny_editor::{Annotation, Rect, Style};
+    let gfx = Gfx::new().expect("graphics devices");
+    let (w, h) = (100, 60);
+    let layers = std::rc::Rc::new(vec![
+        Annotation::Rect {
+            rect: Rect::new(10.0, 10.0, 40.0, 30.0),
+            style: Style {
+                color: Color::rgb(255, 0, 0),
+                width: 4.0,
+            },
+            filled: false,
+        },
+        Annotation::Blur {
+            rect: Rect::new(60.0, 10.0, 30.0, 30.0),
+            radius: 4.0,
+        },
+    ]);
+    let mut drawing = Drawing::new(&gfx, (0, 0, w, h), &screens(w, h), 0).expect("drawing");
+    drawing.update(&gfx, &layers, true).expect("drawn");
+    let px = gfx
+        .render(w, h, |c| {
+            drawing.draw(c, (0.0, 0.0), true);
+            Ok(())
+        })
+        .expect("rendered");
+    save("drawing-live", w, h, &px);
+    let alpha = |x: usize, y: usize| px[(y * w as usize + x) * 4 + 3];
+    eprintln!(
+        "{:?}",
+        (0..100)
+            .step_by(5)
+            .map(|x| alpha(x, 25))
+            .collect::<Vec<_>>()
+    );
+    // The rectangle's edge and the blur cover the screens; inside the outline, they show.
+    assert_eq!(alpha(10, 25), 255);
+    assert_eq!(alpha(75, 25), 255);
+    assert_eq!(alpha(30, 25), 0);
+    assert_eq!(alpha(5, 55), 0);
+}

@@ -139,31 +139,186 @@ fn paint(c: Color, blend: BlendMode) -> Paint<'static> {
 
 fn stroke(width: f32) -> Stroke {
     Stroke {
-        width: width.max(0.5),
+        width: stroke_width(width),
         line_cap: LineCap::Round,
         line_join: LineJoin::Round,
         ..Stroke::default()
     }
 }
 
-/// Quadratic smoothing through the midpoints of consecutive points.
-fn smooth_path(points: &[Point]) -> Option<Path> {
-    let mut pb = PathBuilder::new();
-    let first = points.first()?;
-    pb.move_to(first.x, first.y);
-    match points.len() {
-        1 => pb.line_to(first.x + 0.01, first.y),
-        2 => pb.line_to(points[1].x, points[1].y),
+/// A piece of a stroke's path, after its first point.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Segment {
+    Line(Point),
+    /// Control point, end point.
+    Quad(Point, Point),
+}
+
+/// The path of a stroke through `points`: quadratic smoothing through the midpoints of
+/// consecutive points. Its first point, then its segments; `None` without points.
+pub fn smooth(points: &[Point]) -> Option<(Point, Vec<Segment>)> {
+    let first = *points.first()?;
+    let segments = match points.len() {
+        1 => vec![Segment::Line(Point::new(first.x + 0.01, first.y))],
+        2 => vec![Segment::Line(points[1])],
         n => {
-            for i in 1..n - 1 {
-                let (c, next) = (points[i], points[i + 1]);
-                pb.quad_to(c.x, c.y, (c.x + next.x) / 2.0, (c.y + next.y) / 2.0);
-            }
-            let last = points[n - 1];
-            pb.line_to(last.x, last.y);
+            let mut s: Vec<Segment> = (1..n - 1)
+                .map(|i| {
+                    let (c, next) = (points[i], points[i + 1]);
+                    Segment::Quad(c, Point::new((c.x + next.x) / 2.0, (c.y + next.y) / 2.0))
+                })
+                .collect();
+            s.push(Segment::Line(points[n - 1]));
+            s
+        }
+    };
+    Some((first, segments))
+}
+
+fn smooth_path(points: &[Point]) -> Option<Path> {
+    let (first, segments) = smooth(points)?;
+    let mut pb = PathBuilder::new();
+    pb.move_to(first.x, first.y);
+    for s in segments {
+        match s {
+            Segment::Line(p) => pb.line_to(p.x, p.y),
+            Segment::Quad(c, p) => pb.quad_to(c.x, c.y, p.x, p.y),
         }
     }
     pb.finish()
+}
+
+/// The thickness a stroke of `width` is drawn with.
+pub fn stroke_width(width: f32) -> f32 {
+    width.max(0.5)
+}
+
+/// An arrow: its shaft ends at `shaft_end`, its head is a triangle.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ArrowShape {
+    pub shaft_end: Point,
+    pub head: [Point; 3],
+}
+
+/// The arrow from `from` to `to`, `width` thick; `None` when it has no length.
+pub fn arrow_shape(from: Point, to: Point, width: f32) -> Option<ArrowShape> {
+    let len = from.distance(to);
+    if len < 0.5 {
+        return None;
+    }
+    let (ux, uy) = ((to.x - from.x) / len, (to.y - from.y) / len);
+    let head = arrow_head(width).min(len);
+    let half = head * 0.45;
+    Some(ArrowShape {
+        shaft_end: Point::new(to.x - ux * head * 0.8, to.y - uy * head * 0.8),
+        head: [
+            to,
+            Point::new(to.x - ux * head - uy * half, to.y - uy * head + ux * half),
+            Point::new(to.x - ux * head + uy * half, to.y - uy * head - ux * half),
+        ],
+    })
+}
+
+/// The box behind a text that has a background.
+pub fn text_background(a: &Annotation) -> Option<(Rect, Color)> {
+    match a {
+        Annotation::Text {
+            size,
+            background: Some(bg),
+            ..
+        } => Some((a.bounds().inflate(size * 0.2), *bg)),
+        _ => None,
+    }
+}
+
+/// The colour of a marker's number: dark on a light badge, light on a dark one.
+pub fn marker_ink(color: Color) -> Color {
+    if luminance(color) > 140.0 {
+        Color::rgb(0, 0, 0)
+    } else {
+        Color::rgb(255, 255, 255)
+    }
+}
+
+/// What a text or a marker's number is written with: the text, its top-left corner, its size
+/// and colour.
+fn writing(a: &Annotation) -> Option<(String, Point, f32, Color)> {
+    match a {
+        Annotation::Text {
+            pos,
+            text,
+            size,
+            color,
+            ..
+        } => Some((text.clone(), *pos, *size, *color)),
+        Annotation::Marker {
+            center,
+            number,
+            color,
+            radius,
+        } => {
+            let size = radius * 1.2;
+            let label = number.to_string();
+            let (_, w, h) = text::layout(&label, size);
+            Some((
+                label,
+                Point::new(center.x - w / 2.0, center.y - h / 2.0),
+                size,
+                marker_ink(*color),
+            ))
+        }
+        _ => None,
+    }
+}
+
+/// Visits each glyph pixel of a writing: `(x, y, coverage)`, image pixels.
+fn glyph_pixels(origin: Point, content: &str, size: f32, mut f: impl FnMut(i32, i32, u8)) {
+    let font = text::font();
+    let (glyphs, ..) = text::layout(content, size);
+    for g in glyphs {
+        let (m, coverage) = font.rasterize(g.ch, size);
+        if m.width == 0 {
+            continue;
+        }
+        let gx = (origin.x + g.x).round() as i32 + m.xmin;
+        let gy = (origin.y + g.baseline).round() as i32 - m.ymin - m.height as i32;
+        for row in 0..m.height {
+            for col in 0..m.width {
+                f(
+                    gx + col as i32,
+                    gy + row as i32,
+                    coverage[row * m.width + col],
+                );
+            }
+        }
+    }
+}
+
+/// The letters of a text or of a marker's number, drawn alone (straight alpha), with where
+/// the image's top-left corner goes; `None` for other annotations or no letters.
+pub fn letters(a: &Annotation) -> Option<(RgbaImage, i32, i32)> {
+    let (content, origin, size, color) = writing(a)?;
+    let mut hits = Vec::new();
+    glyph_pixels(origin, &content, size, |x, y, c| hits.push((x, y, c)));
+    let x0 = hits.iter().map(|h| h.0).min()?;
+    let y0 = hits.iter().map(|h| h.1).min()?;
+    let w = (hits.iter().map(|h| h.0).max()? - x0 + 1) as u32;
+    let h = (hits.iter().map(|h| h.1).max()? - y0 + 1) as u32;
+    let mut image = RgbaImage {
+        width: w,
+        height: h,
+        data: vec![0; w as usize * h as usize * 4],
+    };
+    for (x, y, c) in hits {
+        let o = ((y - y0) as usize * w as usize + (x - x0) as usize) * 4;
+        let px = &mut image.data[o..o + 4];
+        // Overlapping glyphs: the most covered wins.
+        let a = (u32::from(c) * u32::from(color.a) / 255) as u8;
+        if a >= px[3] {
+            px.copy_from_slice(&[color.r, color.g, color.b, a]);
+        }
+    }
+    Some((image, x0, y0))
 }
 
 fn skia_rect(r: &Rect) -> Option<tiny_skia::Rect> {
@@ -185,31 +340,14 @@ fn blend_pixel(dst: &mut [u8], color: Color, cov: u8) {
 }
 
 fn draw_text(pix: &mut Pixmap, origin: Point, content: &str, size: f32, color: Color) {
-    let font = text::font();
     let (w, h) = (pix.width() as i32, pix.height() as i32);
-    let (glyphs, ..) = text::layout(content, size);
-    for g in glyphs {
-        let (m, coverage) = font.rasterize(g.ch, size);
-        if m.width == 0 {
-            continue;
+    glyph_pixels(origin, content, size, |x, y, coverage| {
+        if x < 0 || y < 0 || x >= w || y >= h {
+            return;
         }
-        let gx = (origin.x + g.x).round() as i32 + m.xmin;
-        let gy = (origin.y + g.baseline).round() as i32 - m.ymin - m.height as i32;
-        for row in 0..m.height {
-            for col in 0..m.width {
-                let (x, y) = (gx + col as i32, gy + row as i32);
-                if x < 0 || y < 0 || x >= w || y >= h {
-                    continue;
-                }
-                let o = (y as usize * w as usize + x as usize) * 4;
-                blend_pixel(
-                    &mut pix.data_mut()[o..o + 4],
-                    color,
-                    coverage[row * m.width + col],
-                );
-            }
-        }
-    }
+        let o = (y as usize * w as usize + x as usize) * 4;
+        blend_pixel(&mut pix.data_mut()[o..o + 4], color, coverage);
+    });
 }
 
 fn draw_annotation(pix: &mut Pixmap, a: &Annotation) {
@@ -284,32 +422,27 @@ fn draw_annotation(pix: &mut Pixmap, a: &Annotation) {
                 }
             }
         }
-        Annotation::Text {
-            pos,
-            text,
-            size,
-            color,
-            background,
-        } => {
-            if let Some(bg) = background {
-                let b = a.bounds().inflate(size * 0.2);
-                if let Some(r) = skia_rect(&b) {
-                    pix.fill_path(
-                        &PathBuilder::from_rect(r),
-                        &paint(*bg, BlendMode::SourceOver),
-                        FillRule::Winding,
-                        id,
-                        None,
-                    );
-                }
+        Annotation::Text { .. } => {
+            if let Some((b, bg)) = text_background(a)
+                && let Some(r) = skia_rect(&b)
+            {
+                pix.fill_path(
+                    &PathBuilder::from_rect(r),
+                    &paint(bg, BlendMode::SourceOver),
+                    FillRule::Winding,
+                    id,
+                    None,
+                );
             }
-            draw_text(pix, *pos, text, *size, *color);
+            if let Some((content, origin, size, color)) = writing(a) {
+                draw_text(pix, origin, &content, size, color);
+            }
         }
         Annotation::Marker {
             center,
-            number,
             color,
             radius,
+            ..
         } => {
             if let Some(path) = PathBuilder::from_circle(center.x, center.y, *radius) {
                 pix.fill_path(
@@ -320,43 +453,27 @@ fn draw_annotation(pix: &mut Pixmap, a: &Annotation) {
                     None,
                 );
             }
-            let size = radius * 1.2;
-            let label = number.to_string();
-            let (_, w, h) = text::layout(&label, size);
-            let ink = if luminance(*color) > 140.0 {
-                Color::rgb(0, 0, 0)
-            } else {
-                Color::rgb(255, 255, 255)
-            };
-            draw_text(
-                pix,
-                Point::new(center.x - w / 2.0, center.y - h / 2.0),
-                &label,
-                size,
-                ink,
-            );
+            if let Some((content, origin, size, color)) = writing(a) {
+                draw_text(pix, origin, &content, size, color);
+            }
         }
         Annotation::Blur { .. } | Annotation::Pixelate { .. } => {} // pixel effects, see `render`
     }
 }
 
 fn draw_arrow(pix: &mut Pixmap, from: Point, to: Point, color: Color, width: f32) {
-    let len = from.distance(to);
-    if len < 0.5 {
+    let Some(shape) = arrow_shape(from, to, width) else {
         return;
-    }
-    let (ux, uy) = ((to.x - from.x) / len, (to.y - from.y) / len);
-    let head = arrow_head(width).min(len);
-    let base = Point::new(to.x - ux * head * 0.8, to.y - uy * head * 0.8);
+    };
     let p = paint(color, BlendMode::SourceOver);
-    if let Some(path) = smooth_path(&[from, base]) {
+    if let Some(path) = smooth_path(&[from, shape.shaft_end]) {
         pix.stroke_path(&path, &p, &stroke(width), Transform::identity(), None);
     }
-    let half = head * 0.45;
+    let [a, b, c] = shape.head;
     let mut pb = PathBuilder::new();
-    pb.move_to(to.x, to.y);
-    pb.line_to(to.x - ux * head - uy * half, to.y - uy * head + ux * half);
-    pb.line_to(to.x - ux * head + uy * half, to.y - uy * head - ux * half);
+    pb.move_to(a.x, a.y);
+    pb.line_to(b.x, b.y);
+    pb.line_to(c.x, c.y);
     pb.close();
     if let Some(path) = pb.finish() {
         pix.fill_path(&path, &p, FillRule::Winding, Transform::identity(), None);

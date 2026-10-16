@@ -4,7 +4,7 @@
 //! ```text
 //! root (window pixels)
 //! ├─ content (image pixels: offset by the window's area and the scroll)
-//! │  ├─ frozen tiles · annotated tiles
+//! │  ├─ frozen tiles · the annotations
 //! │  ├─ veil (4 rectangles around the zone, one opacity) · border (4) · handles (8)
 //! │  ├─ outline of the selected annotation (4)
 //! │  └─ size label · text field · size ring
@@ -352,11 +352,6 @@ impl Picture {
         }
         Ok(())
     }
-
-    pub fn clear(&self) -> Result<()> {
-        // SAFETY: plain tree call.
-        unsafe { self.visual.RemoveAllVisuals() }
-    }
 }
 
 /// Solid colours shared by every window.
@@ -377,8 +372,8 @@ pub struct TipLook {
     pub text: String,
 }
 
-/// An image a window shows, and where.
-pub type Shown = (std::rc::Rc<RgbaImage>, (f32, f32));
+/// What the annotations piece shows: the drawing's version, live or not.
+pub type DrawnLook = (u64, bool);
 
 /// One window: a monitor and the part of the image it shows.
 pub struct Pane {
@@ -392,8 +387,8 @@ pub struct Pane {
     pub _root: IDCompositionVisual2,
     pub content: IDCompositionVisual2,
     pub frozen: Picture,
-    pub annotated: Picture,
-    pub annotated_image: RefCell<Option<Shown>>,
+    /// The annotations, drawn by the graphics card (see `crate::drawing`).
+    pub drawing: Piece<DrawnLook>,
     pub _veil_group: IDCompositionVisual2,
     pub veil_effect: IDCompositionEffectGroup,
     pub veil: [IDCompositionVisual2; 4],
@@ -431,8 +426,8 @@ impl Pane {
         add(&root, &content)?;
         let frozen = Picture::new(gfx)?;
         add(&content, &frozen.visual)?;
-        let annotated = Picture::new(gfx)?;
-        add(&content, &annotated.visual)?;
+        let drawing = Piece::new(gfx, false)?;
+        add(&content, &drawing.visual)?;
         let veil_group = visual(gfx)?;
         // SAFETY: plain creation and property calls.
         let veil_effect = unsafe {
@@ -510,8 +505,7 @@ impl Pane {
             _root: root,
             content,
             frozen,
-            annotated,
-            annotated_image: RefCell::new(None),
+            drawing,
             _veil_group: veil_group,
             veil_effect,
             veil,

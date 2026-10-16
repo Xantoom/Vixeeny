@@ -3,6 +3,7 @@
 //! Screen, the side strip, the notifications and the recording widget.
 
 pub mod cutter;
+mod drawing;
 pub mod gfx;
 pub mod icons {
     //! The icons of `vixeeny-ui/ui/icons.slint`, as SVG path data (20×20).
@@ -20,6 +21,7 @@ pub mod toast;
 pub mod widget;
 mod window;
 
+pub use drawing::ScreenPart;
 pub use overlay::{Overlay, OverlayError, Screen, Screens, Wake, post};
 pub use theme::{Look, dark_theme};
 

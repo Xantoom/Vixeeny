@@ -27,6 +27,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_RBUTTONDOWN, WM_SETCURSOR, WM_SYSKEYDOWN, WM_TIMER,
 };
 
+use crate::drawing::{Drawing, ScreenPart};
 use crate::gfx::{self, Gfx};
 use crate::layout::{self, BAR_H, BUTTON, Button, PanelForm, PanelHit, Picks, SHADOW, Tip};
 use crate::paint::{self, BarLook, FieldLook, PanelLook};
@@ -63,8 +64,8 @@ pub trait Screens {
     /// windows left out, calling [`Wake::wake`] each time a new picture of it waits in
     /// [`Screens::take`]. `None`: stops.
     fn watch(&self, area: Option<(u32, u32, u32, u32)>, wake: Wake);
-    /// The newest pictures of the area followed, each with where its top-left corner goes.
-    fn take(&self) -> Vec<(u32, u32, vixeeny_editor::RgbaImage)>;
+    /// The newest pictures of the area followed.
+    fn take(&self) -> Vec<ScreenPart>;
 }
 
 /// Tells the editor, from any thread, that new pictures of the screens wait.
@@ -162,6 +163,10 @@ struct Shared {
     /// The part of the screens followed, and its wake.
     watched: Cell<Option<(u32, u32, u32, u32)>>,
     wake: Wake,
+    /// The newest picture of each part followed.
+    live_parts: RefCell<Vec<ScreenPart>>,
+    /// The annotations as the graphics card draws them.
+    drawing: RefCell<Option<Drawing>>,
     scrolling: Cell<bool>,
     /// A command is running (a dialog may be up): input waits.
     busy: Cell<bool>,
@@ -336,6 +341,10 @@ impl Shared {
     fn update(&self) -> windows::core::Result<()> {
         let view = self.session.borrow().view();
         self.sync_typing(&view);
+        if let Err(e) = self.sync_drawing(&view) {
+            tracing::warn!("annotations not drawn: {e}");
+            *self.drawing.borrow_mut() = None;
+        }
         let ui = self.ui.borrow();
         for pane in &self.panes {
             self.update_pane(pane, &view, &ui)?;
@@ -345,6 +354,42 @@ impl Shared {
         self.follow(&view);
         // SAFETY: plain call.
         unsafe { self.gfx.dcomp.Commit() }
+    }
+
+    /// Draws the annotations again where they changed, over the screens under them.
+    fn sync_drawing(&self, view: &View) -> windows::core::Result<()> {
+        let mut slot = self.drawing.borrow_mut();
+        let Some(area) = view.layers_area.map(|a| self.bounded(a)) else {
+            *slot = None;
+            return Ok(());
+        };
+        let session = self.session.borrow();
+        match slot.as_mut() {
+            Some(d) if d.area == area => {
+                if d.base_version != view.base_version {
+                    d.set_screens(&self.gfx, session.base(), view.base_version)?;
+                }
+            }
+            _ => {
+                let mut d = Drawing::new(&self.gfx, area, session.base(), view.base_version)?;
+                for part in self.live_parts.borrow().iter() {
+                    d.feed(part)?;
+                }
+                *slot = Some(d);
+            }
+        }
+        drop(session);
+        if let Some(d) = slot.as_mut() {
+            d.update(&self.gfx, &view.layers, view.live)?;
+        }
+        Ok(())
+    }
+
+    /// `area` cut to the largest bitmap the graphics card takes.
+    fn bounded(&self, (x, y, w, h): (u32, u32, u32, u32)) -> (u32, u32, u32, u32) {
+        // SAFETY: plain call.
+        let most = unsafe { self.gfx.dc.GetMaximumBitmapSize() }.max(1);
+        (x, y, w.min(most), h.min(most))
     }
 
     /// Opens or closes the text field with the session's, and runs its caret.
@@ -434,31 +479,29 @@ impl Shared {
             _ => pane.label.hide()?,
         }
 
-        // The zone with its annotations.
-        let annotated = view
-            .annotated
-            .as_ref()
-            .filter(|(img, at)| pane.sees((at.x, at.y, img.width as f32, img.height as f32), 0.0));
-        let same = match (annotated, pane.annotated_image.borrow().as_ref()) {
-            (Some((img, at)), Some((old, old_at))) => {
-                Rc::ptr_eq(img, old) && (at.x, at.y) == *old_at
+        // The annotations.
+        let drawing = self.drawing.borrow();
+        let shown = drawing.as_ref().filter(|d| {
+            let (x, y, w, h) = d.area;
+            view.layers_area.is_some() && pane.sees((x as f32, y as f32, w as f32, h as f32), 0.0)
+        });
+        match shown {
+            Some(d) => {
+                let (x, y, w, h) = d.area;
+                pane.drawing.show(
+                    gfx,
+                    &(d.version, view.live),
+                    || Ok((w, h)),
+                    |c| {
+                        d.draw(c, (0.0, 0.0), view.live);
+                        Ok(())
+                    },
+                )?;
+                pane.drawing.move_to(x as f32, y as f32)?;
             }
-            (None, None) => true,
-            _ => false,
-        };
-        if !same {
-            match annotated {
-                Some((img, at)) => {
-                    pane.annotated
-                        .set(gfx, img, (0, 0, img.width, img.height), at.x, at.y)?;
-                    *pane.annotated_image.borrow_mut() = Some((img.clone(), (at.x, at.y)));
-                }
-                None => {
-                    pane.annotated.clear()?;
-                    *pane.annotated_image.borrow_mut() = None;
-                }
-            }
+            None => pane.drawing.hide()?,
         }
+        drop(drawing);
 
         // The text field.
         match (view.text_input, Self::field_look(view, ui)) {
@@ -1241,10 +1284,11 @@ impl Shared {
         } else {
             None
         };
-        if self.watched.replace(area) != area
-            && let Some(screens) = self.screens.borrow().as_ref()
-        {
-            screens.watch(area, self.wake.clone());
+        if self.watched.replace(area) != area {
+            self.live_parts.borrow_mut().clear();
+            if let Some(screens) = self.screens.borrow().as_ref() {
+                screens.watch(area, self.wake.clone());
+            }
         }
     }
 
@@ -1255,15 +1299,26 @@ impl Shared {
             Some(screens) if self.watched.get().is_some() => screens.take(),
             _ => return,
         };
-        // A command holds the session (a dialog may be up): the next pictures will do.
-        if parts.is_empty() || self.busy.get() || self.closing.get() {
+        if parts.is_empty() || self.closing.get() {
             return;
         }
-        let mut session = self.session.borrow_mut();
-        for (x, y, part) in &parts {
-            session.patch_base(*x, *y, part);
+        let mut kept = self.live_parts.borrow_mut();
+        let mut drawing = self.drawing.borrow_mut();
+        for part in parts {
+            if let Some(d) = drawing.as_mut()
+                && let Err(e) = d.feed(&part)
+            {
+                tracing::warn!("live screens not shown: {e}");
+            }
+            let same = |k: &ScreenPart| {
+                (k.x, k.y, k.width, k.height) == (part.x, part.y, part.width, part.height)
+            };
+            match kept.iter_mut().find(|k| same(k)) {
+                Some(k) => *k = part,
+                None => kept.push(part),
+            }
         }
-        drop(session);
+        drop((kept, drawing));
         self.refresh();
     }
 
@@ -1313,6 +1368,8 @@ impl Shared {
             return;
         };
         if self.session.borrow_mut().replace_base(picture) {
+            // Older than the picture just taken.
+            self.live_parts.borrow_mut().clear();
             let session = self.session.borrow();
             for pane in &self.panes {
                 if let Err(e) = upload_frozen(&self.gfx, pane, session.base()) {
@@ -1442,6 +1499,8 @@ impl Overlay {
             screens: RefCell::default(),
             excluded: Cell::new(false),
             watched: Cell::new(None),
+            live_parts: RefCell::default(),
+            drawing: RefCell::default(),
             wake: Wake {
                 hwnd: first_hwnd,
                 pending: Arc::default(),

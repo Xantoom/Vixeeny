@@ -409,7 +409,7 @@ impl vixeeny_overlay::Screens for LiveScreens {
         }
     }
 
-    fn take(&self) -> Vec<(u32, u32, RgbaImage)> {
+    fn take(&self) -> Vec<vixeeny_overlay::ScreenPart> {
         let mut parts = Vec::new();
         for (x, y, stream) in self.streams.borrow().iter() {
             // Only the newest picture matters.
@@ -420,12 +420,14 @@ impl vixeeny_overlay::Screens for LiveScreens {
                 }
             }
             if let Some(frame) = newest {
-                if let Some(image) =
-                    RgbaImage::from_bgra(frame.width, frame.height, frame.stride, &frame.data)
-                {
-                    parts.push((*x, *y, image));
-                }
-                stream.buffers().give(frame.data);
+                parts.push(vixeeny_overlay::ScreenPart {
+                    x: *x,
+                    y: *y,
+                    width: frame.width,
+                    height: frame.height,
+                    stride: frame.stride,
+                    bgra: frame.data,
+                });
             }
         }
         parts

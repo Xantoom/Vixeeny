@@ -371,3 +371,74 @@ fn a_bgra_screen_lands_at_its_place_in_the_desktop() {
     assert!(dst[..row + 4].iter().all(|&b| b == 0));
     assert!(dst[2 * row + 12..].iter().all(|&b| b == 0));
 }
+
+#[test]
+fn a_stroke_is_smoothed_through_the_midpoints() {
+    let pts = [
+        Point::new(0.0, 0.0),
+        Point::new(10.0, 0.0),
+        Point::new(10.0, 10.0),
+    ];
+    let (first, segments) = smooth(&pts).expect("a path");
+    assert_eq!(first, pts[0]);
+    assert_eq!(
+        segments,
+        [
+            Segment::Quad(pts[1], Point::new(10.0, 5.0)),
+            Segment::Line(pts[2]),
+        ]
+    );
+    // A single point is a dot.
+    assert_eq!(smooth(&pts[..1]).expect("a dot").1.len(), 1);
+    assert!(smooth(&[]).is_none());
+}
+
+#[test]
+fn an_arrow_head_points_at_the_end() {
+    let shape = arrow_shape(Point::new(0.0, 0.0), Point::new(100.0, 0.0), 4.0).expect("arrow");
+    let head = arrow_head(4.0);
+    assert_eq!(shape.head[0], Point::new(100.0, 0.0));
+    assert!((shape.shaft_end.x - (100.0 - head * 0.8)).abs() < 1e-4);
+    assert!(shape.head[1].y > 0.0 && shape.head[2].y < 0.0);
+    assert!(arrow_shape(Point::new(1.0, 1.0), Point::new(1.1, 1.0), 4.0).is_none());
+}
+
+#[test]
+fn the_letters_of_a_text_are_drawn_alone_where_the_export_puts_them() {
+    let text = Annotation::Text {
+        pos: Point::new(10.0, 10.0),
+        text: "Hi".into(),
+        size: 20.0,
+        color: Color::rgb(255, 0, 0),
+        background: None,
+    };
+    let (image, x, y) = letters(&text).expect("letters");
+    let out = render(&white(80, 50), &doc_with(80, 50, vec![text.clone()]));
+    // Where a letter fully covers a pixel, the export has the text's colour.
+    let mut solid = 0;
+    for py in 0..image.height {
+        for px in 0..image.width {
+            if image.pixel(px, py).a == 255 {
+                solid += 1;
+                let c = out.pixel(x as u32 + px, y as u32 + py);
+                assert_eq!(c, Color::rgb(255, 0, 0), "at {px},{py}");
+            }
+        }
+    }
+    assert!(solid > 10);
+    let marker = Annotation::Marker {
+        center: Point::new(20.0, 20.0),
+        number: 3,
+        color: Color::rgb(250, 250, 250),
+        radius: 12.0,
+    };
+    let (image, ..) = letters(&marker).expect("a number");
+    assert!(
+        image
+            .data
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|p| p[3] > 0 && p[0] == 0)
+    );
+}

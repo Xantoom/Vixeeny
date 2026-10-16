@@ -99,20 +99,13 @@ fn tools_draw_inside_the_zone_and_the_export_contains_them() {
     assert_eq!(out.pixel(25, 25), Color::rgb(0, 255, 0)); // inside the rectangle
     assert_eq!(out.pixel(2, 2), Color::rgb(255, 0, 0)); // untouched red
     assert_eq!(out.pixel(90, 2), Color::rgb(0, 0, 255)); // untouched blue
-    // the live view agrees with the export, over what the annotation covers only
+    // the view gives the annotation to draw, over the zone
     let view = s.view();
-    let (annotated, at) = view.annotated.unwrap();
-    assert!(at.x >= 20.0 && at.y >= 20.0, "{at:?}");
-    assert!(annotated.width < out.width && annotated.height < out.height);
-    for y in 0..annotated.height {
-        for x in 0..annotated.width {
-            let (ox, oy) = (at.x as u32 - 20 + x, at.y as u32 - 20 + y);
-            assert_eq!(annotated.pixel(x, y), out.pixel(ox, oy), "at {x},{y}");
-        }
-    }
-    // nothing changed: the same drawing comes back, not a new one
-    let again = s.view().annotated.unwrap().0;
-    assert!(std::rc::Rc::ptr_eq(&annotated, &again));
+    assert_eq!(view.layers.len(), 1);
+    // what it covers, by blocks, inside the zone
+    assert_eq!(view.layers_area, Some((20, 20, 100, 60)));
+    // nothing changed: the same layers come back, not new ones
+    assert!(std::rc::Rc::ptr_eq(&view.layers, &s.view().layers));
 }
 
 #[test]
@@ -153,7 +146,7 @@ fn a_gesture_in_progress_is_part_of_the_view_but_not_the_document() {
     s.pointer_down(p(20.0, 20.0), NO);
     s.pointer_move(p(100.0, 50.0), NO);
     assert!(s.editor().doc.items.is_empty());
-    assert!(s.view().annotated.is_some());
+    assert_eq!(s.view().layers.len(), 1);
     s.pointer_up(p(100.0, 50.0), NO);
     assert_eq!(s.editor().doc.items.len(), 1);
 }
@@ -455,22 +448,12 @@ fn the_tools_start_as_thick_as_they_look_at_100_percent() {
 }
 
 #[test]
-fn live_the_annotations_are_drawn_over_nothing() {
+fn a_fresh_picture_of_the_screens_changes_the_base_version() {
     let mut s = session();
-    drag(&mut s, p(10.0, 10.0), p(190.0, 90.0));
-    s.choose_tool(Some(Tool::Rect));
-    drag(&mut s, p(30.0, 30.0), p(60.0, 60.0));
-    let (frozen, _) = s.view().annotated.expect("drawn");
-    s.set_live(true);
-    let (live, at) = s.view().annotated.expect("drawn");
-    assert!(frozen.data.as_chunks::<4>().0.iter().all(|px| px[3] == 255));
-    // The middle of the outline-only rectangle is the screen's: transparent; its edge is not.
-    let alpha = |x: f32, y: f32| {
-        let (x, y) = ((x - at.x) as usize, (y - at.y) as usize);
-        live.data[(y * live.width as usize + x) * 4 + 3]
-    };
-    assert_eq!(alpha(45.0, 45.0), 0);
-    assert_eq!(alpha(30.0, 45.0), 255);
+    drag(&mut s, p(10.0, 10.0), p(20.0, 20.0));
+    let before = s.view().base_version;
+    assert!(s.replace_base(RgbaImage::filled(200, 100, Color::rgb(0, 255, 0))));
+    assert_ne!(s.view().base_version, before);
 }
 
 #[test]
@@ -491,7 +474,7 @@ fn clearing_takes_every_annotation_away() {
     drag(&mut s, p(30.0, 30.0), p(60.0, 60.0));
     drag(&mut s, p(80.0, 30.0), p(90.0, 60.0));
     s.clear();
-    assert!(s.editor().doc.items.is_empty() && s.view().annotated.is_none());
+    assert!(s.editor().doc.items.is_empty() && s.view().layers_area.is_none());
     s.undo();
     assert_eq!(s.editor().doc.items.len(), 2);
 }
@@ -513,16 +496,20 @@ fn live_a_blurred_zone_follows_the_screens() {
 }
 
 #[test]
-fn a_part_of_the_screens_is_refreshed_in_place() {
-    let mut s = session();
-    drag(&mut s, p(10.0, 10.0), p(190.0, 90.0));
-    let before = s.base().pixel(0, 0);
-    s.patch_base(20, 30, &RgbaImage::filled(5, 4, Color::rgb(0, 255, 0)));
-    // Past the right and bottom edges, a part is cut.
-    s.patch_base(198, 98, &RgbaImage::filled(5, 5, Color::rgb(0, 0, 255)));
-    assert_eq!(s.base().pixel(20, 30), Color::rgb(0, 255, 0));
-    assert_eq!(s.base().pixel(24, 33), Color::rgb(0, 255, 0));
-    assert_eq!(s.base().pixel(199, 99), Color::rgb(0, 0, 255));
-    assert_eq!(s.base().pixel(0, 0), before);
-    assert_ne!(s.base().pixel(25, 30), Color::rgb(0, 255, 0));
+fn the_layers_are_drawn_over_what_they_cover_by_blocks() {
+    let mut s = Session::new(
+        RgbaImage::filled(1000, 800, Color::rgb(9, 9, 9)),
+        Vec::new(),
+    );
+    drag(&mut s, p(10.0, 10.0), p(990.0, 790.0));
+    s.choose_tool(Some(Tool::Rect));
+    drag(&mut s, p(300.0, 300.0), p(320.0, 310.0));
+    // 300 - 2 - 8 = 290 → 256; 320 + 2 + 8 = 330 → 384.
+    assert_eq!(s.view().layers_area, Some((256, 256, 128, 128)));
+    // A little more drawing in the same blocks: the same area.
+    drag(&mut s, p(330.0, 320.0), p(340.0, 330.0));
+    assert_eq!(s.view().layers_area, Some((256, 256, 128, 128)));
+    // Near the zone's edge, the zone bounds it.
+    drag(&mut s, p(40.0, 40.0), p(50.0, 50.0));
+    assert_eq!(s.view().layers_area, Some((10, 10, 374, 374)));
 }
