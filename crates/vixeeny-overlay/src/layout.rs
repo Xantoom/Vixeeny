@@ -124,9 +124,14 @@ pub fn tool_icon(tool: Option<Tool>) -> &'static str {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Button {
     Tool(Kit),
-    /// Opens the style panel (colour, size, the button's other tool, fill).
+    /// Shows the screens live behind the zone, or frozen again.
+    Live,
+    /// Opens the style panel (colours, size, fill).
     Style,
     Undo,
+    Redo,
+    /// Removes every annotation.
+    Clear,
     Copy,
     CopyText,
     Save,
@@ -143,25 +148,28 @@ const fn spec(button: Button, along: f32) -> ButtonSpec {
     ButtonSpec { button, along }
 }
 
-/// The bar, in its groups: the zone · the tools · style · undo · outputs · close.
-pub const BUTTONS: [ButtonSpec; 13] = [
+/// The bar, in its groups: the zone · the tools · style · history · outputs · close.
+pub const BUTTONS: [ButtonSpec; 16] = [
     spec(Button::Tool(Kit::Zone), 6.0),
-    spec(Button::Tool(Kit::Pen), 53.0),
-    spec(Button::Tool(Kit::Highlighter), 87.0),
-    spec(Button::Tool(Kit::Arrow), 121.0),
-    spec(Button::Tool(Kit::Shape), 155.0),
-    spec(Button::Tool(Kit::Text), 189.0),
-    spec(Button::Tool(Kit::Marker), 223.0),
-    spec(Button::Tool(Kit::Mask), 257.0),
-    spec(Button::Style, 304.0),
-    spec(Button::Undo, 351.0),
-    spec(Button::Copy, 398.0),
-    spec(Button::CopyText, 432.0),
-    spec(Button::Save, 466.0),
+    spec(Button::Live, 40.0),
+    spec(Button::Tool(Kit::Pen), 87.0),
+    spec(Button::Tool(Kit::Highlighter), 121.0),
+    spec(Button::Tool(Kit::Arrow), 155.0),
+    spec(Button::Tool(Kit::Shape), 189.0),
+    spec(Button::Tool(Kit::Text), 223.0),
+    spec(Button::Tool(Kit::Marker), 257.0),
+    spec(Button::Tool(Kit::Mask), 291.0),
+    spec(Button::Style, 338.0),
+    spec(Button::Undo, 385.0),
+    spec(Button::Redo, 419.0),
+    spec(Button::Clear, 453.0),
+    spec(Button::Copy, 500.0),
+    spec(Button::CopyText, 534.0),
+    spec(Button::Save, 568.0),
 ];
 
 /// The close button, last.
-pub const CLOSE: ButtonSpec = spec(Button::Close, 513.0);
+pub const CLOSE: ButtonSpec = spec(Button::Close, 615.0);
 
 /// Every button, close included.
 pub fn buttons() -> impl Iterator<Item = &'static ButtonSpec> {
@@ -174,10 +182,10 @@ pub fn button(k: usize) -> &'static ButtonSpec {
 }
 
 /// The hairlines between the groups.
-pub const SEPARATORS: [f32; 5] = [44.0, 295.0, 342.0, 389.0, 504.0];
+pub const SEPARATORS: [f32; 5] = [78.0, 329.0, 376.0, 491.0, 606.0];
 
 /// Length and thickness of the bar.
-pub const BAR_W: f32 = 549.0;
+pub const BAR_W: f32 = 651.0;
 pub const BAR_H: f32 = 46.0;
 pub const BUTTON: f32 = 30.0;
 pub const BUTTON_Y: f32 = 8.0;
@@ -218,6 +226,9 @@ pub fn button_at(x: f32, y: f32, upright: bool) -> Option<usize> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tip {
     Zone,
+    /// The live button, while the screens are frozen, and while they are live.
+    Live,
+    Freeze,
     Pen,
     Highlighter,
     Arrow,
@@ -230,76 +241,96 @@ pub enum Tip {
     Pixelate,
     Style,
     Undo,
+    Redo,
+    Clear,
     Copy,
     CopyText,
     Save,
     Close,
+    /// What comes before the other tool of a two-tool button ("Right-click: ").
+    RightClick,
 }
 
-pub const TIP_COUNT: usize = 17;
+pub const TIP_COUNT: usize = 22;
 
-/// The tip of button `k`: a two-tool button names the tool it takes now.
-pub fn tip_of(k: usize, picks: &Picks) -> Tip {
-    match button(k).button {
-        Button::Tool(kit) => match picks.tool(kit) {
-            None | Some(Tool::Select | Tool::Eyedropper) => Tip::Zone,
-            Some(Tool::Pen) => Tip::Pen,
-            Some(Tool::Highlighter) => Tip::Highlighter,
-            Some(Tool::Arrow) => Tip::Arrow,
-            Some(Tool::Line) => Tip::Line,
-            Some(Tool::Rect) => Tip::Rect,
-            Some(Tool::Ellipse) => Tip::Ellipse,
-            Some(Tool::Text) => Tip::Text,
-            Some(Tool::Marker) => Tip::Marker,
-            Some(Tool::Blur) => Tip::Blur,
-            Some(Tool::Pixelate) => Tip::Pixelate,
-        },
+fn tool_tip(tool: Option<Tool>) -> Tip {
+    match tool {
+        None | Some(Tool::Select | Tool::Eyedropper) => Tip::Zone,
+        Some(Tool::Pen) => Tip::Pen,
+        Some(Tool::Highlighter) => Tip::Highlighter,
+        Some(Tool::Arrow) => Tip::Arrow,
+        Some(Tool::Line) => Tip::Line,
+        Some(Tool::Rect) => Tip::Rect,
+        Some(Tool::Ellipse) => Tip::Ellipse,
+        Some(Tool::Text) => Tip::Text,
+        Some(Tool::Marker) => Tip::Marker,
+        Some(Tool::Blur) => Tip::Blur,
+        Some(Tool::Pixelate) => Tip::Pixelate,
+    }
+}
+
+/// The tip of button `k` (`live`: the screens are shown live), and for a two-tool button the
+/// tip of its other tool, which a right-click takes.
+pub fn tip_of(k: usize, picks: &Picks, live: bool) -> (Tip, Option<Tip>) {
+    let tip = match button(k).button {
+        Button::Tool(kit) => {
+            return (
+                tool_tip(picks.tool(kit)),
+                other_tool(kit, picks).map(|t| tool_tip(Some(t))),
+            );
+        }
+        Button::Live if live => Tip::Freeze,
+        Button::Live => Tip::Live,
         Button::Style => Tip::Style,
         Button::Undo => Tip::Undo,
+        Button::Redo => Tip::Redo,
+        Button::Clear => Tip::Clear,
         Button::Copy => Tip::Copy,
         Button::CopyText => Tip::CopyText,
         Button::Save => Tip::Save,
         Button::Close => Tip::Close,
-    }
+    };
+    (tip, None)
+}
+
+/// The tool a right-click on `kit`'s button takes: the one it does not take now.
+pub fn other_tool(kit: Kit, picks: &Picks) -> Option<Tool> {
+    let now = picks.tool(kit)?;
+    kit.tools().iter().copied().find(|t| *t != now)
 }
 
 // ---- the style panel
+//
+// Three rows: the colours given, ended by the colour picker; the colours last used, ended by
+// the eyedropper; the size, ended by its value. The shapes add their fill; the picker opens
+// under it all.
 
-pub const PANEL_W: f32 = 240.0;
-/// Recent colours shown (the row ends at the "own colour" swatch).
-pub const RECENT_SHOWN: usize = 5;
+pub const PANEL_W: f32 = 268.0;
+/// Recent colours shown.
+pub const RECENT_SHOWN: usize = 8;
 pub const SWATCH: f32 = 24.0;
 
-/// What the panel holds besides the colours and the size: the other tool of the button in use
-/// and the fill of the shapes, and whether the colour picker is open.
+/// What the panel holds besides the colours and the size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct PanelForm {
-    /// The two tools of the button in use.
-    pub variants: Option<[Tool; 2]>,
     /// The fill switch (shapes).
     pub fill: bool,
+    /// The colour picker is open.
     pub picker: bool,
 }
 
 impl PanelForm {
     /// The panel for the tool in hand.
     pub fn of(tool: Option<Tool>, picker: bool) -> Self {
-        let tools = Kit::of(tool).map_or(&[][..], Kit::tools);
         Self {
-            variants: (tools.len() == 2).then(|| [tools[0], tools[1]]),
             fill: matches!(tool, Some(Tool::Rect | Tool::Ellipse)),
             picker,
         }
     }
 
-    /// The row of the variants and the fill is there.
-    pub fn extras(&self) -> bool {
-        self.variants.is_some() || self.fill
-    }
-
     /// Where the colour picker starts.
     pub fn picker_top(&self) -> f32 {
-        if self.extras() { 166.0 } else { 120.0 }
+        if self.fill { 166.0 } else { 120.0 }
     }
 
     pub fn height(&self) -> f32 {
@@ -308,11 +339,11 @@ impl PanelForm {
 
     /// The saturation-and-value square and the hue bar: x, y, w, h.
     pub fn shade(&self) -> (f32, f32, f32, f32) {
-        (10.0, self.picker_top() + 10.0, 180.0, 120.0)
+        (10.0, self.picker_top() + 10.0, 210.0, 120.0)
     }
 
     pub fn hue(&self) -> (f32, f32, f32, f32) {
-        (202.0, self.picker_top() + 10.0, 28.0, 120.0)
+        (230.0, self.picker_top() + 10.0, 28.0, 120.0)
     }
 }
 
@@ -328,8 +359,6 @@ pub enum PanelHit {
     Eyedropper,
     /// The size slider.
     Size,
-    /// One of the two tools of the button in use.
-    Variant(usize),
     Fill,
     /// Saturation and value.
     Shade,
@@ -342,32 +371,26 @@ pub fn swatch_x(i: usize) -> f32 {
     10.0 + i as f32 * 28.0
 }
 
-pub const OWN_COLOUR: (f32, f32) = (174.0, 42.0);
-pub const EYEDROPPER: (f32, f32) = (202.0, 39.0);
-/// The slider's track (x, y of its middle, length) and the size shown after it (x, width).
-pub const SIZE_TRACK: (f32, f32, f32) = (18.0, 97.0, 164.0);
-pub const SIZE_LABEL: (f32, f32) = (190.0, 44.0);
-/// The row of the variants and the fill.
-pub const EXTRAS_Y: f32 = 126.0;
-pub fn variant_x(i: usize) -> f32 {
-    10.0 + i as f32 * 34.0
-}
-pub const FILL_X: f32 = PANEL_W - 40.0;
+/// The picker's swatch ends the first row, the eyedropper the second.
+pub const OWN_COLOUR: (f32, f32) = (234.0, 10.0);
+pub const EYEDROPPER: (f32, f32) = (231.0, 39.0);
+/// The slider's track (x, y of its middle, length) and its value after it (x, width).
+pub const SIZE_TRACK: (f32, f32, f32) = (18.0, 97.0, 180.0);
+pub const SIZE_LABEL: (f32, f32) = (206.0, 54.0);
+/// The fill switch of the shapes.
+pub const FILL: (f32, f32) = (10.0, 126.0);
 
-/// Smallest and largest size the slider gives.
-pub const SIZE_MIN: f32 = 1.0;
-pub const SIZE_MAX: f32 = 40.0;
-
-/// Where the slider's knob is for `width` (0–1): the small sizes, the most used, get more room.
-pub fn size_to_slider(width: f32) -> f32 {
-    ((width.clamp(SIZE_MIN, SIZE_MAX) - SIZE_MIN) / (SIZE_MAX - SIZE_MIN)).sqrt()
+/// Where the slider's knob is for `width` (0–1) when sizes go up to `max`: the small sizes,
+/// the most used, get more room.
+pub fn size_to_slider(width: f32, max: f32) -> f32 {
+    ((width.clamp(1.0, max) - 1.0) / (max - 1.0).max(1.0)).sqrt()
 }
 
-/// The width for the pointer at panel `x` on the slider.
-pub fn size_at(x: f32) -> f32 {
+/// The width for the pointer at panel `x` on the slider, sizes going up to `max`.
+pub fn size_at(x: f32, max: f32) -> f32 {
     let (x0, _, length) = SIZE_TRACK;
     let t = ((x - x0) / length).clamp(0.0, 1.0);
-    (SIZE_MIN + (SIZE_MAX - SIZE_MIN) * t * t).round()
+    (1.0 + (max - 1.0) * t * t).round()
 }
 
 fn in_box(x: f32, y: f32, at: (f32, f32), w: f32, h: f32) -> bool {
@@ -386,7 +409,6 @@ pub fn panel_at(
         return None;
     }
     let (sx, sy, sl) = SIZE_TRACK;
-    let variants = form.variants.map_or(0, |v| v.len());
     let hit = if let Some(i) =
         (0..palette).find(|&i| in_box(x, y, (swatch_x(i), 10.0), SWATCH, SWATCH))
     {
@@ -401,11 +423,7 @@ pub fn panel_at(
         PanelHit::Eyedropper
     } else if in_box(x, y, (sx - 10.0, sy - 14.0), sl + 20.0, 28.0) {
         PanelHit::Size
-    } else if let Some(i) =
-        (0..variants).find(|&i| in_box(x, y, (variant_x(i), EXTRAS_Y), BUTTON, BUTTON))
-    {
-        PanelHit::Variant(i)
-    } else if form.fill && in_box(x, y, (FILL_X, EXTRAS_Y), BUTTON, BUTTON) {
+    } else if form.fill && in_box(x, y, FILL, BUTTON, BUTTON) {
         PanelHit::Fill
     } else if form.picker && {
         let (sx, sy, sw, sh) = form.shade();
@@ -480,13 +498,14 @@ mod tests {
     fn buttons_are_found_by_position_lying_and_upright() {
         assert_eq!(button_at(10.0, 20.0, false), Some(0));
         assert_eq!(button_at(20.0, 10.0, true), Some(0));
-        assert_eq!(button_at(40.0, 20.0, false), None); // before the separator
-        assert_eq!(button_at(310.0, 20.0, false), Some(8));
-        assert_eq!(button_at(20.0, 310.0, true), Some(8));
-        assert_eq!(button_at(530.0, 20.0, false), Some(13));
+        assert_eq!(button_at(75.0, 20.0, false), None); // before the separator
+        assert_eq!(button_at(345.0, 20.0, false), Some(9));
+        assert_eq!(button_at(20.0, 345.0, true), Some(9));
+        assert_eq!(button_at(630.0, 20.0, false), Some(16));
         assert_eq!(button_at(10.0, 2.0, false), None);
-        assert!(matches!(button(13).button, Button::Close));
-        assert_eq!(button_xy(8, true), (BUTTON_Y, 304.0));
+        assert!(matches!(button(9).button, Button::Style));
+        assert!(matches!(button(16).button, Button::Close));
+        assert_eq!(button_xy(9, true), (BUTTON_Y, 338.0));
     }
 
     #[test]
@@ -505,34 +524,41 @@ mod tests {
     }
 
     #[test]
-    fn two_tool_buttons_take_what_the_panel_chose() {
+    fn a_right_click_takes_the_other_tool_and_the_tip_says_so() {
         let mut picks = Picks::default();
-        assert_eq!(picks.tool(Kit::Shape), Some(Tool::Rect));
-        picks.remember(Tool::Ellipse);
+        assert_eq!(other_tool(Kit::Mask, &picks), Some(Tool::Pixelate));
+        assert_eq!(other_tool(Kit::Pen, &picks), None);
+        picks.remember(Tool::Pixelate);
         picks.remember(Tool::Pen);
-        assert_eq!(picks.tool(Kit::Shape), Some(Tool::Ellipse));
-        assert_eq!(picks.tool(Kit::Arrow), Some(Tool::Arrow));
-        assert_eq!(Kit::of(Some(Tool::Pixelate)), Some(Kit::Mask));
+        assert_eq!(picks.tool(Kit::Mask), Some(Tool::Pixelate));
+        assert_eq!(other_tool(Kit::Mask, &picks), Some(Tool::Blur));
+        assert_eq!(Kit::of(Some(Tool::Ellipse)), Some(Kit::Shape));
         assert_eq!(Kit::of(None), Some(Kit::Zone));
         assert_eq!(Kit::of(Some(Tool::Eyedropper)), None);
-        let shape = BUTTONS
+        let mask = BUTTONS
             .iter()
-            .position(|b| b.button == Button::Tool(Kit::Shape))
+            .position(|b| b.button == Button::Tool(Kit::Mask))
             .unwrap_or(0);
-        assert_eq!(tip_of(shape, &picks), Tip::Ellipse);
-        assert_eq!(tip_of(13, &picks), Tip::Close);
+        assert_eq!(
+            tip_of(mask, &picks, false),
+            (Tip::Pixelate, Some(Tip::Blur))
+        );
+        assert_eq!(tip_of(2, &picks, false), (Tip::Pen, None));
+        assert_eq!(tip_of(1, &picks, false).0, Tip::Live);
+        assert_eq!(tip_of(1, &picks, true).0, Tip::Freeze);
+        assert_eq!(tip_of(16, &picks, false).0, Tip::Close);
+        assert_eq!(Tip::RightClick as usize, TIP_COUNT - 1);
     }
 
     #[test]
     fn the_panel_fits_the_tool() {
         let pen = PanelForm::of(Some(Tool::Pen), false);
-        assert!(!pen.extras());
         let rect = PanelForm::of(Some(Tool::Rect), false);
-        assert_eq!(rect.variants, Some([Tool::Rect, Tool::Ellipse]));
-        assert!(rect.fill && rect.height() > pen.height());
-        let blur = PanelForm::of(Some(Tool::Pixelate), true);
-        assert!(!blur.fill && blur.variants.is_some());
-        assert_eq!(blur.height(), PANEL_MAX_H);
+        assert!(!pen.fill && rect.fill && rect.height() > pen.height());
+        assert_eq!(
+            PanelForm::of(Some(Tool::Ellipse), true).height(),
+            PANEL_MAX_H
+        );
     }
 
     #[test]
@@ -540,32 +566,31 @@ mod tests {
         let pen = PanelForm::of(Some(Tool::Pen), false);
         let rect = PanelForm::of(Some(Tool::Rect), true);
         assert_eq!(panel_at(12.0, 12.0, 8, 0, &pen), Some(PanelHit::Palette(0)));
+        assert_eq!(panel_at(240.0, 20.0, 8, 0, &pen), Some(PanelHit::OwnColour));
         assert_eq!(panel_at(12.0, 44.0, 8, 0, &pen), Some(PanelHit::Background));
         assert_eq!(panel_at(12.0, 44.0, 8, 2, &pen), Some(PanelHit::Recent(0)));
-        assert_eq!(panel_at(180.0, 50.0, 8, 0, &pen), Some(PanelHit::OwnColour));
+        assert_eq!(panel_at(210.0, 50.0, 8, 8, &pen), Some(PanelHit::Recent(7)));
+        assert_eq!(
+            panel_at(245.0, 50.0, 8, 8, &pen),
+            Some(PanelHit::Eyedropper)
+        );
         assert_eq!(panel_at(100.0, 97.0, 8, 0, &pen), Some(PanelHit::Size));
         assert_eq!(panel_at(20.0, 140.0, 8, 0, &pen), None);
-        assert_eq!(
-            panel_at(20.0, 140.0, 8, 0, &rect),
-            Some(PanelHit::Variant(0))
-        );
-        assert_eq!(
-            panel_at(50.0, 140.0, 8, 0, &rect),
-            Some(PanelHit::Variant(1))
-        );
-        assert_eq!(panel_at(210.0, 140.0, 8, 0, &rect), Some(PanelHit::Fill));
+        assert_eq!(panel_at(20.0, 140.0, 8, 0, &rect), Some(PanelHit::Fill));
         assert_eq!(panel_at(20.0, 200.0, 8, 0, &rect), Some(PanelHit::Shade));
-        assert_eq!(panel_at(210.0, 200.0, 8, 0, &rect), Some(PanelHit::Hue));
+        assert_eq!(panel_at(240.0, 200.0, 8, 0, &rect), Some(PanelHit::Hue));
     }
 
     #[test]
     fn the_slider_gives_small_sizes_more_room() {
         let (x0, _, length) = SIZE_TRACK;
-        assert_eq!(size_at(x0 - 50.0), SIZE_MIN);
-        assert_eq!(size_at(x0 + length + 50.0), SIZE_MAX);
-        assert!(size_at(x0 + length / 2.0) < 15.0);
-        for w in [1.0, 4.0, 12.0, 40.0] {
-            assert_eq!(size_at(x0 + size_to_slider(w) * length), w);
+        for max in [40.0, 80.0] {
+            assert_eq!(size_at(x0 - 50.0, max), 1.0);
+            assert_eq!(size_at(x0 + length + 50.0, max), max);
+            assert!(size_at(x0 + length / 2.0, max) < max / 2.0);
+            for w in [1.0, 4.0, 12.0, max] {
+                assert_eq!(size_at(x0 + size_to_slider(w, max) * length, max), w);
+            }
         }
     }
 

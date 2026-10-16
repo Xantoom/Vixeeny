@@ -38,40 +38,11 @@ fn before_any_selection_the_screen_is_calm() {
     let mut s = session();
     s.pointer_move(p(50.0, 50.0), NO);
     let v = s.view();
-    assert!(v.magnifier.is_none() && v.toolbar.is_none() && v.selection.is_none());
+    assert!(v.toolbar.is_none() && v.selection.is_none());
 }
 
 #[test]
-fn the_magnifier_shows_the_pixel_under_the_drag() {
-    let mut s = session();
-    s.pointer_down(p(20.0, 20.0), NO);
-    s.pointer_move(p(50.0, 50.0), NO);
-    let m = s.view().magnifier.expect("magnifier");
-    assert_eq!(m.hex, "#ff0000");
-    assert_eq!((m.pixels.width, m.pixels.height), (11, 11));
-    s.pointer_move(p(150.0, 50.0), NO);
-    assert_eq!(s.view().magnifier.unwrap().hex, "#0000ff");
-}
-
-#[test]
-fn resizing_a_zone_shows_no_magnifier() {
-    let mut s = session();
-    drag(&mut s, p(20.0, 20.0), p(120.0, 80.0));
-    // The pointer leaves the fresh corner, then takes the right edge.
-    s.pointer_move(p(150.0, 95.0), NO);
-    s.pointer_down(p(120.0, 50.0), NO);
-    s.pointer_move(p(160.0, 50.0), NO);
-    let v = s.view();
-    assert!(
-        v.selection.is_some_and(|z| z.right() > 150.0),
-        "{:?}",
-        v.selection
-    );
-    assert!(v.magnifier.is_none());
-}
-
-#[test]
-fn the_toolbar_and_magnifier_stay_on_one_monitor() {
+fn the_toolbar_stays_on_one_monitor() {
     // Two 1000×800 monitors side by side; a zone ending at the right edge of the left one.
     let base = RgbaImage::filled(2000, 800, Color::rgb(0, 0, 0));
     let mut s = Session::new(base, Vec::new()).with_screens(vec![
@@ -80,8 +51,6 @@ fn the_toolbar_and_magnifier_stay_on_one_monitor() {
     ]);
     s.pointer_down(p(400.0, 100.0), NO);
     s.pointer_move(p(990.0, 300.0), NO);
-    let m = s.view().magnifier.expect("magnifier");
-    assert!(m.position.x + m.size <= 1000.0, "{:?}", m.position);
     s.pointer_up(p(990.0, 300.0), NO);
     let bar = s.view().toolbar.expect("toolbar");
     assert!(bar.at.x + TOOLBAR_SIZE.0 <= 1000.0, "{bar:?}");
@@ -99,7 +68,7 @@ fn hovering_highlights_the_window_and_a_click_selects_it() {
     s.pointer_up(p(30.0, 30.0), NO);
     let v = s.view();
     assert_eq!(v.selection, Some(Rect::new(10.0, 10.0, 80.0, 60.0)));
-    assert!(v.settled && v.toolbar.is_some() && v.magnifier.is_none());
+    assert!(v.settled && v.toolbar.is_some());
     assert_eq!(v.size_label.unwrap().0, "80 × 60");
 }
 
@@ -111,7 +80,6 @@ fn drawing_a_zone_shows_its_size_while_dragging() {
     let v = s.view();
     assert_eq!(v.size_label.unwrap().0, "50 × 40");
     assert!(!v.settled && v.toolbar.is_none());
-    assert!(v.magnifier.is_some(), "the magnifier follows the drag");
 }
 
 #[test]
@@ -473,4 +441,57 @@ fn the_wheel_sizes_what_the_tool_draws() {
     assert_eq!(s.view().width, 28.0);
     s.choose_tool(Some(Tool::Text));
     assert_eq!(s.brush(), Some(s.editor().settings.text_size));
+}
+
+#[test]
+fn the_tools_start_as_thick_as_they_look_at_100_percent() {
+    let mut s = session();
+    s.set_ui_scale(2.0);
+    assert_eq!(s.view().width, 2.0 * DEFAULT_WIDTH);
+    assert_eq!(s.max_width(), 2.0 * MAX_WIDTH);
+    assert_eq!(s.editor().settings.text_size, 48.0);
+    s.set_width(1000.0);
+    assert_eq!(s.view().width, 80.0);
+}
+
+#[test]
+fn live_the_annotations_are_drawn_over_nothing() {
+    let mut s = session();
+    drag(&mut s, p(10.0, 10.0), p(190.0, 90.0));
+    s.choose_tool(Some(Tool::Rect));
+    drag(&mut s, p(30.0, 30.0), p(60.0, 60.0));
+    let (frozen, _) = s.view().annotated.expect("drawn");
+    s.set_live(true);
+    let (live, at) = s.view().annotated.expect("drawn");
+    assert!(frozen.data.as_chunks::<4>().0.iter().all(|px| px[3] == 255));
+    // The middle of the outline-only rectangle is the screen's: transparent; its edge is not.
+    let alpha = |x: f32, y: f32| {
+        let (x, y) = ((x - at.x) as usize, (y - at.y) as usize);
+        live.data[(y * live.width as usize + x) * 4 + 3]
+    };
+    assert_eq!(alpha(45.0, 45.0), 0);
+    assert_eq!(alpha(30.0, 45.0), 255);
+}
+
+#[test]
+fn a_fresh_picture_of_the_screens_replaces_the_frozen_one() {
+    let mut s = session();
+    drag(&mut s, p(10.0, 10.0), p(20.0, 20.0));
+    assert!(!s.replace_base(RgbaImage::filled(10, 10, Color::rgb(0, 255, 0))));
+    assert!(s.replace_base(RgbaImage::filled(200, 100, Color::rgb(0, 255, 0))));
+    let out = s.export().expect("exported");
+    assert_eq!(&out.data[..4], &[0, 255, 0, 255]);
+}
+
+#[test]
+fn clearing_takes_every_annotation_away() {
+    let mut s = session();
+    drag(&mut s, p(10.0, 10.0), p(190.0, 90.0));
+    s.choose_tool(Some(Tool::Pen));
+    drag(&mut s, p(30.0, 30.0), p(60.0, 60.0));
+    drag(&mut s, p(80.0, 30.0), p(90.0, 60.0));
+    s.clear();
+    assert!(s.editor().doc.items.is_empty() && s.view().annotated.is_none());
+    s.undo();
+    assert_eq!(s.editor().doc.items.len(), 2);
 }

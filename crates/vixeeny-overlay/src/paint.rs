@@ -1,16 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! What the drawn pieces of the editor look like: the toolbar, its tips, the style panel, the
-//! size label, the magnifier, a handle of the zone and the text field. Each piece is drawn whole
+//! size label, a handle of the zone and the text field. Each piece is drawn whole
 //! into its own surface, only when it changes.
 
-use vixeeny_editor::{Color, MagnifierView, Tool};
+use vixeeny_editor::{Color, Tool};
 use windows::Win32::Graphics::Direct2D::Common::D2D_RECT_F;
-use windows::Win32::Graphics::Direct2D::{
-    D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_LAYER_OPTIONS1_NONE, D2D1_LAYER_PARAMETERS1,
-    D2D1_ROUNDED_RECT, ID2D1Geometry, ID2D1Layer,
-};
-use windows::core::{Interface, Result};
-use windows_numerics::Matrix3x2;
+use windows::core::Result;
 
 use crate::gfx::{Align, Canvas, Font, Gfx, rect};
 use crate::icons;
@@ -35,7 +30,13 @@ pub struct BarLook {
     pub picks: Picks,
     pub upright: bool,
     pub color: Color,
+    /// The screens are shown live; `can_live`: they can be.
+    pub live: bool,
+    pub can_live: bool,
     pub can_undo: bool,
+    pub can_redo: bool,
+    /// There are annotations to clear.
+    pub can_clear: bool,
     pub style_open: bool,
     /// Button under the pointer, and the one being pressed.
     pub hover: Option<usize>,
@@ -143,10 +144,17 @@ pub fn toolbar(c: &Canvas<'_>, t: &Theme, u: f32, look: &BarLook) -> Result<()> 
         let b = ButtonLook {
             active: match spec.button {
                 Button::Tool(kit) => Kit::of(look.tool) == Some(kit),
+                Button::Live => look.live,
                 Button::Style => look.style_open,
                 _ => false,
             },
-            enabled: spec.button != Button::Undo || look.can_undo,
+            enabled: match spec.button {
+                Button::Live => look.can_live,
+                Button::Undo => look.can_undo,
+                Button::Redo => look.can_redo,
+                Button::Clear => look.can_clear,
+                _ => true,
+            },
             hover: look.hover == Some(k),
             pressed: look.pressed == Some(k),
         };
@@ -160,7 +168,12 @@ pub fn toolbar(c: &Canvas<'_>, t: &Theme, u: f32, look: &BarLook) -> Result<()> 
                 c.stroke_circle(cx, cy, 9.0 * u, 1.0, t.stroke_strong)?;
                 continue;
             }
+            // Live: what the button does now (pause the screens, or let them play).
+            Button::Live if look.live => icons::PAUSE_FILLED,
+            Button::Live => icons::PLAY_FILLED,
             Button::Undo => icons::UNDO,
+            Button::Redo => icons::REDO,
+            Button::Clear => icons::DELETE,
             Button::Copy => icons::COPY,
             Button::CopyText => icons::SCAN_TEXT,
             Button::Save => icons::SAVE,
@@ -202,8 +215,10 @@ pub fn tip(c: &Canvas<'_>, t: &Theme, u: f32, text: &str, bubble: (f32, f32)) ->
 pub struct PanelLook {
     pub color: Color,
     pub recent: Vec<Color>,
-    /// The thickness setting (the slider) and the size of what the tool draws (shown).
+    /// The thickness setting (the slider, up to `max_width`) and the size of what the tool
+    /// draws (shown).
     pub width: f32,
+    pub max_width: f32,
     pub size: f32,
     pub filled: bool,
     pub tool: Option<Tool>,
@@ -261,6 +276,7 @@ pub fn panel(c: &Canvas<'_>, t: &Theme, u: f32, look: &PanelLook) -> Result<()> 
         let (x, y) = at(layout::swatch_x(i), 42.0);
         swatch(c, t, u, x, y, Some(rgba(*colour)), *colour == look.color)?;
     }
+    // The colour picker ends the first row.
     let (x, y) = at(layout::OWN_COLOUR.0, layout::OWN_COLOUR.1);
     swatch(c, t, u, x, y, None, form.picker)?;
     c.icon(icons::ADD, x + 4.0 * u, y + 4.0 * u, 16.0 * u, t.text)?;
@@ -283,7 +299,7 @@ pub fn panel(c: &Canvas<'_>, t: &Theme, u: f32, look: &PanelLook) -> Result<()> 
     // The size: a slider, filled up to its knob, and the size of what the tool draws.
     let (tx, ty, length) = layout::SIZE_TRACK;
     let (x, y) = at(tx, ty);
-    let knob = x + layout::size_to_slider(look.width) * length * u;
+    let knob = x + layout::size_to_slider(look.width, look.max_width) * length * u;
     let track = rect(x, y - 2.0 * u, length * u, 4.0 * u);
     c.fill_round(track, 2.0 * u, t.divider)?;
     c.fill_round(rect(x, y - 2.0 * u, knob - x, 4.0 * u), 2.0 * u, t.accent)?;
@@ -298,28 +314,18 @@ pub fn panel(c: &Canvas<'_>, t: &Theme, u: f32, look: &PanelLook) -> Result<()> 
     let (lx, lw) = layout::SIZE_LABEL;
     let (x, y) = at(lx, ty - 15.0);
     c.text(
-        &format!("{}", look.size.round()),
+        &format!("{} px", look.size.round()),
         rect(x, y, lw * u, 30.0 * u),
         13.0 * u,
         t.text,
         Align::Centre,
     )?;
 
-    // The other tool of the button in use, and the fill of the shapes.
-    if form.extras() {
+    // The fill of the shapes.
+    if form.fill {
         divider(118.0)?;
-        for (i, tool) in form.variants.iter().flatten().enumerate() {
-            icon_button(
-                c,
-                t,
-                u,
-                at(layout::variant_x(i), layout::EXTRAS_Y),
-                layout::tool_icon(Some(*tool)),
-                &button(PanelHit::Variant(i), look.tool == Some(*tool)),
-            )?;
-        }
-        if form.fill {
-            let (x, y) = at(layout::FILL_X, layout::EXTRAS_Y);
+        {
+            let (x, y) = at(layout::FILL.0, layout::FILL.1);
             button_back(c, t, u, x, y, &button(PanelHit::Fill, false))?;
             // A square in the colour: filled, or its outline only.
             let square = rect(x + 7.0 * u, y + 7.0 * u, 16.0 * u, 16.0 * u);
@@ -408,69 +414,6 @@ pub fn size_label(c: &Canvas<'_>, t: &Theme, u: f32, text: &str, size: (u32, u32
     c.fill_round(r, 4.0 * u, t.flyout)?;
     c.stroke_round(r, 4.0 * u, 1.0, t.stroke_strong)?;
     c.text(text, r, 12.0 * u, t.text, Align::Centre)
-}
-
-pub fn magnifier_size(u: f32, m: &MagnifierView) -> (u32, u32) {
-    (m.size.ceil() as u32, (m.size + 28.0 * u).ceil() as u32)
-}
-
-pub fn magnifier(c: &Canvas<'_>, t: &Theme, u: f32, m: &MagnifierView) -> Result<()> {
-    let (w, h) = magnifier_size(u, m);
-    let back = rect(0.0, 0.0, w as f32, h as f32);
-    let radius = 8.0 * u;
-    c.fill_round(back, radius, t.flyout)?;
-    let bitmap = c
-        .gfx
-        .bitmap(&m.pixels, (0, 0, m.pixels.width, m.pixels.height))?;
-    // The zoomed pixels, clipped to the rounded box.
-    // SAFETY: the layer is pushed and popped around the drawing; the geometry lives until then.
-    unsafe {
-        let mask = c
-            .gfx
-            .factory
-            .CreateRoundedRectangleGeometry(&D2D1_ROUNDED_RECT {
-                rect: back,
-                radiusX: radius,
-                radiusY: radius,
-            })?;
-        let mask: ID2D1Geometry = mask.cast()?;
-        c.dc.PushLayer(
-            &D2D1_LAYER_PARAMETERS1 {
-                contentBounds: rect(-1e6, -1e6, 2e6, 2e6),
-                geometricMask: std::mem::ManuallyDrop::new(Some(mask)),
-                maskAntialiasMode: D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
-                maskTransform: Matrix3x2::identity(),
-                opacity: 1.0,
-                opacityBrush: std::mem::ManuallyDrop::new(None),
-                layerOptions: D2D1_LAYER_OPTIONS1_NONE,
-            },
-            None::<&ID2D1Layer>,
-        );
-        c.pixels(&bitmap, rect(0.0, 0.0, m.size, m.size))?;
-        c.dc.PopLayer();
-    }
-    c.stroke_round(back, radius, 1.0, t.stroke_strong)?;
-    // The reticle: the centre cell.
-    let cell = m.size / vixeeny_editor::session::MAGNIFIER_SIDE as f32;
-    let at = (m.size - cell) / 2.0;
-    let white = Rgba([1.0, 1.0, 1.0, 1.0]);
-    c.stroke_round(rect(at, at, cell, cell), 0.0, 1.0, white)?;
-    c.stroke_round(
-        rect(at + 1.0, at + 1.0, cell - 2.0, cell - 2.0),
-        0.0,
-        1.0,
-        Rgba([0.0, 0.0, 0.0, 1.0]),
-    )?;
-    let swatch = rect(6.0 * u, m.size + 6.0 * u, 16.0 * u, 16.0 * u);
-    c.fill_rect(swatch, rgba(m.color))?;
-    c.stroke_round(swatch, 0.0, 1.0, white)?;
-    c.text(
-        &m.hex,
-        rect(28.0 * u, m.size, w as f32 - 28.0 * u, 28.0 * u),
-        13.0 * u,
-        t.text,
-        Align::Leading,
-    )
 }
 
 /// Side of a handle's surface.

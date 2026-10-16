@@ -2,7 +2,7 @@
 //! Off-screen drawings of every piece. With `VIXEENY_SCREENSHOTS` set to a folder, each is also
 //! written there as a PNG (over a desktop-like background), to be looked at.
 
-use vixeeny_editor::{Color, MagnifierView, RgbaImage};
+use vixeeny_editor::{Color, RgbaImage};
 
 use crate::gfx::{Canvas, Gfx, rect};
 use crate::layout::PanelHit;
@@ -55,7 +55,11 @@ fn bar_look(upright: bool) -> BarLook {
         },
         upright,
         color: Color::PALETTE[0],
+        live: true,
+        can_live: true,
         can_undo: true,
+        can_redo: false,
+        can_clear: true,
         style_open: true,
         hover: Some(2),
         pressed: None,
@@ -85,6 +89,7 @@ fn every_piece_draws() {
             color: Color::PALETTE[4],
             recent: vec![Color::rgb(10, 200, 120), Color::PALETTE[4]],
             width: 6.0,
+            max_width: 40.0,
             size: 6.0,
             filled: true,
             tool: Some(tool),
@@ -144,40 +149,6 @@ fn every_piece_draws() {
     }
 }
 
-#[test]
-fn the_magnifier_draws_its_pixels() {
-    let gfx = Gfx::new().expect("graphics devices");
-    let t = Theme::new(Look::default());
-    let u = 1.0;
-    let side = vixeeny_editor::session::MAGNIFIER_SIDE;
-    let mut data = Vec::new();
-    for y in 0..side {
-        for x in 0..side {
-            data.extend_from_slice(&[(x * 23) as u8, (y * 23) as u8, 128, 255]);
-        }
-    }
-    let m = MagnifierView {
-        pixels: RgbaImage::new(side, side, data).expect("image"),
-        position: Default::default(),
-        size: 110.0,
-        hex: "#5c3a80".into(),
-        color: Color::rgb(0x5c, 0x3a, 0x80),
-    };
-    let (w, h) = paint::magnifier_size(u, &m);
-    let pixels = gfx
-        .render(w, h, |c| paint::magnifier(c, &t, u, &m))
-        .expect("drawn");
-    save("magnifier", w, h, &pixels);
-    // The top-left source pixel (0, 0, 128) fills the first cell, 10 px wide.
-    let at = |x: u32, y: u32| {
-        let o = ((y * w + x) * 4) as usize;
-        [pixels[o], pixels[o + 1], pixels[o + 2]]
-    };
-    assert_eq!(at(5, 5), [128, 0, 0]);
-    // The second cell is (23, 0, 128).
-    assert_eq!(at(15, 5), [128, 0, 23]);
-}
-
 fn side_texts() -> crate::side::SideTexts {
     crate::side::SideTexts {
         image: "Screenshot".into(),
@@ -196,7 +167,6 @@ fn side_texts() -> crate::side::SideTexts {
     }
 }
 
-/// The strip as the window shows it: the strip and its label over a desktop.
 #[test]
 fn the_side_strip_draws_in_both_themes_and_orientations() {
     use crate::side::{self, Edge, SideState, Strip, StripLayout};

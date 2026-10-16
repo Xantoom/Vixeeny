@@ -12,7 +12,7 @@ use vixeeny_common::config::Config;
 use vixeeny_common::ipc::{ActionId, Frozen};
 use vixeeny_editor::{Command, Rect, RgbaImage, Session};
 use vixeeny_image::{Bgra, ImageFormat};
-use vixeeny_platform::HdrInfo;
+use vixeeny_platform::{HdrInfo, MonitorInfo};
 
 use crate::still::{self, Destination, Snapshot};
 
@@ -345,6 +345,28 @@ fn frozen_desktop(
     Ok((image, hdr))
 }
 
+/// A picture of every screen (HDR screens tone-mapped), and with `keep_hdr` the same as HDR.
+fn grab_screens(
+    monitors: &[MonitorInfo],
+    keep_hdr: bool,
+) -> anyhow::Result<(RgbaImage, Option<HdrCapture>)> {
+    let backend = vixeeny_capture::WgcBackend::new()?;
+    let options = CaptureOptions {
+        show_cursor: false,
+        tonemap: Some(crate::tonemap_hdr),
+    };
+    let mut capturer = Capturer::new(backend, monitors.to_vec());
+    let frame = capturer.grab(&CaptureTarget::AllMonitors, options)?;
+    let hdr = if keep_hdr {
+        capturer.grab_hdr(&CaptureTarget::AllMonitors, false)?
+    } else {
+        None
+    };
+    let base = RgbaImage::from_bgra(frame.width, frame.height, frame.stride, &frame.data)
+        .context("unexpected capture buffer")?;
+    Ok((base, hdr))
+}
+
 pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Result<()> {
     let started = Instant::now();
     tracing::debug!(
@@ -376,23 +398,7 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
     });
     let (base, hdr) = match from_daemon {
         Some(desktop) => desktop,
-        None => {
-            let backend = vixeeny_capture::WgcBackend::new()?;
-            let options = CaptureOptions {
-                show_cursor: false,
-                tonemap: Some(crate::tonemap_hdr),
-            };
-            let mut capturer = Capturer::new(backend, monitors.clone());
-            let frame = capturer.grab(&CaptureTarget::AllMonitors, options)?;
-            let hdr = if keep_hdr {
-                capturer.grab_hdr(&CaptureTarget::AllMonitors, false)?
-            } else {
-                None
-            };
-            let base = RgbaImage::from_bgra(frame.width, frame.height, frame.stride, &frame.data)
-                .context("unexpected capture buffer")?;
-            (base, hdr)
-        }
+        None => grab_screens(&monitors, keep_hdr)?,
     };
     tracing::debug!(
         "screen read ({}x{}) after {:?}",
@@ -404,7 +410,7 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
     let scale = vixeeny_platform::monitor_at(&monitors, cursor.0, cursor.1)
         .map_or(1.0, |m| m.scale_factor() as f32);
     // One overlay window per monitor, each showing its part of the frozen desktop.
-    // The monitors in image pixels: the toolbar and the magnifier stay on one of them.
+    // The monitors in image pixels: the toolbar stays on one of them.
     let monitor_areas: Vec<Rect> = monitors
         .iter()
         .map(|m| {
@@ -436,11 +442,15 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
         cursor,
         foreground: foreground.clone(),
     };
+    let live_monitors = monitors.clone();
     let snapshot = Snapshot {
         monitors,
         cursor,
         foreground,
     };
+    // Live, the export takes a fresh picture of the screens: its HDR twin replaces this one.
+    let hdr = std::rc::Rc::new(std::cell::RefCell::new(hdr));
+    let live_hdr = hdr.clone();
     let config = config.clone();
     let tips = toolbar_tips(crate::lang(&config.general.language));
     let config_for_scroll = config.clone();
@@ -466,7 +476,7 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
                 ActionId::CaptureRegion,
                 command,
                 session,
-                hdr.as_ref(),
+                hdr.borrow().as_ref(),
             ) {
                 return close;
             }
@@ -488,6 +498,18 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
     )
     .map_err(|e| anyhow::anyhow!("cannot create the editor window: {e}"))?;
     overlay.set_tips(&tips);
+    if mode == Mode::Editor {
+        overlay.on_thaw(move || match grab_screens(&live_monitors, keep_hdr) {
+            Ok((picture, hdr)) => {
+                *live_hdr.borrow_mut() = hdr;
+                Some(picture)
+            }
+            Err(e) => {
+                tracing::warn!("live screens not read: {e:#}");
+                None
+            }
+        });
+    }
     tracing::debug!("editor ready after {:?}", started.elapsed());
     // The windows appear with their content, over the frozen screens, which then go.
     let shown = thaw.clone();
@@ -639,6 +661,8 @@ pub(crate) fn toolbar_tips(lang: vixeeny_common::i18n::Lang) -> Vec<String> {
     use vixeeny_common::i18n::{Key, tr};
     [
         Key::TipMove,
+        Key::TipLive,
+        Key::TipFreeze,
         Key::TipPen,
         Key::TipHighlight,
         Key::TipArrow,
@@ -651,10 +675,13 @@ pub(crate) fn toolbar_tips(lang: vixeeny_common::i18n::Lang) -> Vec<String> {
         Key::TipPixelate,
         Key::TipStyle,
         Key::TipUndo,
+        Key::TipRedo,
+        Key::TipClear,
         Key::TipCopy,
         Key::TipCopyText,
         Key::TipSave,
         Key::TipClose,
+        Key::TipRightClick,
     ]
     .into_iter()
     .map(|k| tr(k, lang).to_owned())
@@ -676,7 +703,7 @@ mod tests {
         ] {
             let tips = toolbar_tips(lang);
             assert_eq!(tips.len(), TIP_COUNT);
-            assert_eq!(Tip::Close as usize, TIP_COUNT - 1);
+            assert_eq!(Tip::RightClick as usize, TIP_COUNT - 1);
             assert!(tips.iter().all(|t| !t.is_empty()));
         }
     }

@@ -18,6 +18,14 @@ pub enum Edit {
         old: Annotation,
         new: Annotation,
     },
+    /// Every annotation goes (`items`: all of them, in order).
+    Clear {
+        items: Vec<Item>,
+    },
+    /// The inverse of [`Edit::Clear`]: they all come back.
+    Restore {
+        items: Vec<Item>,
+    },
 }
 
 impl Edit {
@@ -36,6 +44,12 @@ impl Edit {
                 old: new.clone(),
                 new: old.clone(),
             },
+            Self::Clear { items } => Self::Restore {
+                items: items.clone(),
+            },
+            Self::Restore { items } => Self::Clear {
+                items: items.clone(),
+            },
         }
     }
 
@@ -50,6 +64,8 @@ impl Edit {
                     i.annotation = new.clone();
                 }
             }
+            Self::Clear { .. } => doc.items.clear(),
+            Self::Restore { items } => doc.items.clone_from(items),
         }
     }
 }

@@ -10,18 +10,16 @@ use crate::editor::{Editor, Modifiers, Outcome, Tool};
 use crate::geometry::{Point, Rect};
 use crate::model::{Annotation, Color};
 use crate::render::{RgbaImage, render_region};
-use crate::selection::{
-    BarPlace, CursorHint, Selection, magnifier_position, magnifier_source, place_toolbar,
-};
+use crate::selection::{BarPlace, CursorHint, Selection, place_toolbar};
 
 /// Size of the toolbar, in image pixels (the UI lays out its content to fit).
-pub const TOOLBAR_SIZE: (f32, f32) = (549.0, 46.0);
-/// Source pixels shown by the magnifier, per side, and the on-screen zoom factor.
-pub const MAGNIFIER_SIDE: u32 = 11;
-pub const MAGNIFIER_ZOOM: f32 = 10.0;
-/// Space around the toolbar and the magnifier.
+pub const TOOLBAR_SIZE: (f32, f32) = (651.0, 46.0);
+/// The thickness the tools start with, and the largest one, at 100 % (they grow with the
+/// interface scale).
+pub const DEFAULT_WIDTH: f32 = 4.0;
+pub const MAX_WIDTH: f32 = 40.0;
+/// Space around the toolbar.
 const GAP: f32 = 8.0;
-const MAGNIFIER_OFFSET: f32 = 24.0;
 /// Drawn around the annotations' bounds: miter joins and anti-aliasing reach a little past them.
 const DRAW_MARGIN: f32 = 8.0;
 
@@ -61,19 +59,6 @@ pub struct KeyInput {
     pub shift: bool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct MagnifierView {
-    /// The `MAGNIFIER_SIDE`² source pixels, to be shown `MAGNIFIER_ZOOM` times larger with no
-    /// smoothing.
-    pub pixels: RgbaImage,
-    pub position: Point,
-    /// Side of the magnified square on screen, in pixels.
-    pub size: f32,
-    /// Colour under the cursor, `#rrggbb`.
-    pub hex: String,
-    pub color: Color,
-}
-
 /// Everything to display, recomputed after each input.
 #[derive(Debug, Clone, PartialEq)]
 pub struct View {
@@ -82,7 +67,6 @@ pub struct View {
     pub settled: bool,
     pub hover_window: Option<Rect>,
     pub size_label: Option<(String, Point)>,
-    pub magnifier: Option<MagnifierView>,
     pub toolbar: Option<BarPlace>,
     /// An annotation is being drawn (the toolbar inside the zone fades away meanwhile).
     pub drawing: bool,
@@ -92,6 +76,10 @@ pub struct View {
     pub brush: Option<f32>,
     /// Where the pointer is, image pixels.
     pub pointer: Point,
+    /// The screens are shown live rather than frozen.
+    pub live: bool,
+    /// The largest thickness.
+    pub max_width: f32,
     /// The part of the zone that annotations (and the gesture in progress) cover, drawn, and
     /// where it goes. `None` when there is nothing to draw: show the frozen image as is. The same
     /// `Rc` comes back while nothing changes, so the host can skip uploading it again.
@@ -104,6 +92,8 @@ pub struct View {
     pub filled: bool,
     pub can_undo: bool,
     pub can_redo: bool,
+    /// There are annotations (to clear).
+    pub can_clear: bool,
     /// Where the text field is open, if the Text tool was just clicked.
     pub text_input: Option<Point>,
     /// Font size of the text tool, in pixels.
@@ -131,12 +121,15 @@ pub struct Session {
     pub dim: f32,
     /// Command issued once, as soon as the first zone is settled (the scrolling capture: no toolbar step).
     auto_command: Option<Command>,
-    /// Scale of the interface (the window's scale factor); the toolbar and magnifier grow with it.
+    /// Scale of the interface (the window's scale factor); the toolbar grows with it.
     ui_scale: f32,
-    /// The monitors, in image pixels: the toolbar and the magnifier stay on one of them.
+    /// The monitors, in image pixels: the toolbar stays on one of them.
     screens: Vec<Rect>,
     /// The last drawing of the annotations, with what it was drawn from.
     drawn: RefCell<Option<Drawn>>,
+    /// The screens are shown live: the annotations are drawn over nothing (see
+    /// [`Session::set_live`]).
+    live: bool,
 }
 
 /// A drawing of the annotations: what was drawn, where, and the result.
@@ -144,6 +137,7 @@ pub struct Session {
 struct Drawn {
     layers: Vec<Annotation>,
     region: Rect,
+    live: bool,
     image: Rc<RgbaImage>,
 }
 
@@ -165,11 +159,12 @@ impl Session {
             ui_scale: 1.0,
             screens: vec![bounds],
             drawn: RefCell::new(None),
+            live: false,
         }
     }
 
-    /// The monitors the image spans (image pixels), so that the toolbar and the magnifier never
-    /// straddle two of them.
+    /// The monitors the image spans (image pixels), so that the toolbar never straddles two
+    /// of them.
     pub fn with_screens(mut self, screens: Vec<Rect>) -> Self {
         if !screens.is_empty() {
             self.screens = screens;
@@ -205,8 +200,44 @@ impl Session {
         self
     }
 
+    /// The interface scale (the monitor's, 1.0 at 100 %): the toolbar grows with it, and the
+    /// tools start as thick as they look at 100 %.
     pub fn set_ui_scale(&mut self, scale: f32) {
         self.ui_scale = scale.clamp(0.5, 4.0);
+        self.set_width(DEFAULT_WIDTH * self.ui_scale);
+    }
+
+    /// The largest thickness, for this scale.
+    pub fn max_width(&self) -> f32 {
+        MAX_WIDTH * self.ui_scale
+    }
+
+    /// Shows the screens live (`true`) or frozen. Live, the annotations are drawn over nothing,
+    /// and the host takes a fresh picture of the screens before it exports (see
+    /// [`Session::replace_base`]).
+    pub fn set_live(&mut self, live: bool) {
+        self.live = live;
+    }
+
+    pub fn is_live(&self) -> bool {
+        self.live
+    }
+
+    /// Takes `base` (a fresh picture of the same screens) instead of the frozen one. `false`,
+    /// and nothing changes, when it is not the same size.
+    pub fn replace_base(&mut self, base: RgbaImage) -> bool {
+        if (base.width, base.height) != (self.base.width, self.base.height) {
+            return false;
+        }
+        self.base = base;
+        *self.drawn.borrow_mut() = None;
+        true
+    }
+
+    /// Removes every annotation (undo brings them back).
+    pub fn clear(&mut self) {
+        self.text_input = None;
+        self.editor.clear();
     }
 
     pub fn ui_scale(&self) -> f32 {
@@ -253,13 +284,14 @@ impl Session {
     }
 
     pub fn set_width(&mut self, width: f32) {
-        let width = width.clamp(1.0, 40.0);
+        let width = width.clamp(1.0, self.max_width());
+        let scale = self.ui_scale;
         let settings = &mut self.editor.settings;
         settings.style.width = width;
-        // One thickness control sizes every tool (defaults at width 4: 24 px text, 14 px markers,
-        // blur radius 6, 10 px mosaic cells).
-        settings.text_size = 8.0 + 4.0 * width;
-        settings.marker_radius = 10.0 + width;
+        // One thickness control sizes every tool (defaults at width 4, at 100 %: 24 px text,
+        // 14 px markers, blur radius 6, 10 px mosaic cells).
+        settings.text_size = 8.0 * scale + 4.0 * width;
+        settings.marker_radius = 10.0 * scale + width;
         settings.blur_radius = 1.5 * width;
         settings.pixelate_block = (2.5 * width).round().max(2.0) as u32;
     }
@@ -540,12 +572,31 @@ impl Session {
         let region = covered.intersect(zone)?;
         let mut drawn = self.drawn.borrow_mut();
         let image = match drawn.as_ref() {
-            Some(d) if d.region == region && d.layers == layers => d.image.clone(),
+            Some(d) if d.region == region && d.layers == layers && d.live == self.live => {
+                d.image.clone()
+            }
             _ => {
-                let image = Rc::new(render_region(&self.base, layers.iter(), &region)?);
+                let mut image = render_region(&self.base, layers.iter(), &region)?;
+                if self.live {
+                    // Over the live screens: only what the annotations changed shows.
+                    let under = render_region(&self.base, std::iter::empty(), &region)?;
+                    for (px, was) in image
+                        .data
+                        .as_chunks_mut::<4>()
+                        .0
+                        .iter_mut()
+                        .zip(under.data.as_chunks::<4>().0)
+                    {
+                        if px == was {
+                            *px = [0; 4];
+                        }
+                    }
+                }
+                let image = Rc::new(image);
                 *drawn = Some(Drawn {
                     layers,
                     region,
+                    live: self.live,
                     image: image.clone(),
                 });
                 image
@@ -556,32 +607,6 @@ impl Session {
             image,
             Point::new(region.x.floor().max(0.0), region.y.floor().max(0.0)),
         ))
-    }
-
-    fn magnifier(&self) -> Option<MagnifierView> {
-        let image = Rect::new(0.0, 0.0, self.base.width as f32, self.base.height as f32);
-        let bounds = self.screen_at(self.cursor);
-        let src = magnifier_source(self.cursor, MAGNIFIER_SIDE, &image);
-        let pixels = render_region(&self.base, std::iter::empty(), &src)?;
-        let (px, py) = (
-            (self.cursor.x.max(0.0) as u32).min(self.base.width - 1),
-            (self.cursor.y.max(0.0) as u32).min(self.base.height - 1),
-        );
-        let color = self.base.pixel(px, py).with_alpha(255);
-        let scale = self.ui_scale;
-        let size = MAGNIFIER_SIDE as f32 * MAGNIFIER_ZOOM * scale;
-        Some(MagnifierView {
-            pixels,
-            size,
-            position: magnifier_position(
-                self.cursor,
-                (size, size + 28.0 * scale),
-                &bounds,
-                MAGNIFIER_OFFSET * scale,
-            ),
-            hex: color.hex(),
-            color,
-        })
     }
 
     pub fn view(&self) -> View {
@@ -598,12 +623,6 @@ impl Session {
                 let y = if z.y >= label { z.y - label } else { z.y + 4.0 };
                 (text, Point::new(z.x, y))
             }),
-            // Only while the zone is drawn: a calm frozen screen otherwise (not while resizing).
-            magnifier: if zone.is_some() && self.selection.is_drawing() {
-                self.magnifier()
-            } else {
-                None
-            },
             toolbar: zone.filter(|_| settled).map(|z| {
                 place_toolbar(
                     &z,
@@ -619,6 +638,8 @@ impl Session {
             selected: self.selected(),
             brush: self.brush(),
             pointer: self.cursor,
+            live: self.live,
+            max_width: self.max_width(),
             annotated: zone.and_then(|z| self.annotated(&z)),
             cursor: self.cursor_hint(),
             tool: self.tool,
@@ -628,6 +649,7 @@ impl Session {
             filled: settings.filled,
             can_undo: self.editor.can_undo(),
             can_redo: self.editor.can_redo(),
+            can_clear: !self.editor.doc.items.is_empty(),
             text_input: self.text_input,
             text_size: settings.text_size,
             dim: self.dim,

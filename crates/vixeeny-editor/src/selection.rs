@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The capture area: drawing a zone, resizing and moving it with handles,
-//! window detection, and where the toolbar, size label and magnifier go. Pure geometry; all
+//! window detection, and where the toolbar goes. Pure geometry; all
 //! coordinates are pixels of the frozen image.
 
 use crate::geometry::{Point, Rect};
@@ -116,8 +116,7 @@ impl Selection {
         !matches!(self.mode, Mode::Idle)
     }
 
-    /// The zone is being drawn: the magnifier helps start it on the right pixel. Not while it
-    /// is resized or moved (the zone itself is then what the eye follows).
+    /// The zone is being drawn (not resized nor moved).
     pub fn is_drawing(&self) -> bool {
         matches!(self.mode, Mode::Drawing { .. })
     }
@@ -376,33 +375,6 @@ pub fn place_toolbar(
     place(lying(&s), y, BarSide::Inside)
 }
 
-/// The square of source pixels shown by the magnifier: `side` pixels centred on the cursor,
-/// shifted to stay inside the image (the edge pixel is then magnified off-centre).
-pub fn magnifier_source(cursor: Point, side: u32, bounds: &Rect) -> Rect {
-    let side = side as f32;
-    let x = (cursor.x.floor() - (side / 2.0).floor())
-        .clamp(bounds.x, (bounds.right() - side).max(bounds.x));
-    let y = (cursor.y.floor() - (side / 2.0).floor())
-        .clamp(bounds.y, (bounds.bottom() - side).max(bounds.y));
-    Rect::new(x, y, side, side)
-}
-
-/// Where the magnifier box goes: down-right of the cursor, flipping to the other side near the
-/// edges so it never covers the pixel being inspected.
-pub fn magnifier_position(cursor: Point, size: (f32, f32), bounds: &Rect, offset: f32) -> Point {
-    let x = if cursor.x + offset + size.0 <= bounds.right() {
-        cursor.x + offset
-    } else {
-        cursor.x - offset - size.0
-    };
-    let y = if cursor.y + offset + size.1 <= bounds.bottom() {
-        cursor.y + offset
-    } else {
-        cursor.y - offset - size.1
-    };
-    Point::new(x.max(bounds.x), y.max(bounds.y))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -602,7 +574,7 @@ mod tests {
         s.pointer_down(p(350.0, 320.0));
         assert_eq!(s.rect(), Some(Rect::new(150.0, 120.0, 200.0, 200.0)));
         s.pointer_move(p(400.0, 400.0));
-        // Resized from the handle (no magnifier then).
+        // Resized from the handle.
         assert_eq!(s.rect(), Some(Rect::new(150.0, 120.0, 250.0, 280.0)));
         assert!(!s.is_drawing());
     }
@@ -703,40 +675,5 @@ mod tests {
             8.0,
         );
         assert_eq!((b.at.y, b.side), (1028.0, BarSide::Below));
-    }
-
-    #[test]
-    fn magnifier_source_stays_in_the_image() {
-        let b = Rect::new(0.0, 0.0, 100.0, 50.0);
-        assert_eq!(
-            magnifier_source(p(50.5, 25.5), 11, &b),
-            Rect::new(45.0, 20.0, 11.0, 11.0)
-        );
-        assert_eq!(
-            magnifier_source(p(0.0, 0.0), 11, &b),
-            Rect::new(0.0, 0.0, 11.0, 11.0)
-        );
-        assert_eq!(
-            magnifier_source(p(99.9, 49.9), 11, &b),
-            Rect::new(89.0, 39.0, 11.0, 11.0)
-        );
-    }
-
-    #[test]
-    fn magnifier_flips_near_the_edges() {
-        let b = Rect::new(0.0, 0.0, 1000.0, 600.0);
-        let size = (120.0, 140.0);
-        assert_eq!(
-            magnifier_position(p(100.0, 100.0), size, &b, 20.0),
-            p(120.0, 120.0)
-        );
-        assert_eq!(
-            magnifier_position(p(950.0, 100.0), size, &b, 20.0),
-            p(810.0, 120.0)
-        );
-        assert_eq!(
-            magnifier_position(p(100.0, 580.0), size, &b, 20.0),
-            p(120.0, 420.0)
-        );
     }
 }

@@ -325,6 +325,11 @@ pub enum Key {
     OptBackdropNone,
     OptBackdropBlur,
     OptBackdropColour,
+    TipLive,
+    TipFreeze,
+    TipRedo,
+    TipClear,
+    TipRightClick,
 }
 
 impl Key {
@@ -642,6 +647,11 @@ impl Key {
         Self::OptBackdropNone,
         Self::OptBackdropBlur,
         Self::OptBackdropColour,
+        Self::TipLive,
+        Self::TipFreeze,
+        Self::TipRedo,
+        Self::TipClear,
+        Self::TipRightClick,
     ];
 }
 
@@ -1090,8 +1100,8 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::TipPixelate, Lang::Fr) => "Pixeliser",
         (Key::TipStyle, Lang::En) => "Colour and size (wheel: size)",
         (Key::TipStyle, Lang::Fr) => "Couleur et taille (molette : taille)",
-        (Key::TipUndo, Lang::En) => "Undo (Ctrl+Z) · Redo: Ctrl+Y",
-        (Key::TipUndo, Lang::Fr) => "Annuler (Ctrl+Z) · Rétablir : Ctrl+Y",
+        (Key::TipUndo, Lang::En) => "Undo (Ctrl+Z)",
+        (Key::TipUndo, Lang::Fr) => "Annuler (Ctrl+Z)",
         (Key::TipCopy, Lang::En) => "Copy (Ctrl+C)",
         (Key::TipCopy, Lang::Fr) => "Copier (Ctrl+C)",
         (Key::TipSave, Lang::En) => "Save (Ctrl+S) · Save as: Ctrl+Shift+S",
@@ -1376,6 +1386,16 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::OptBackdropBlur, Lang::Fr) => "Fenêtre floutée",
         (Key::OptBackdropColour, Lang::En) => "Accent colour",
         (Key::OptBackdropColour, Lang::Fr) => "Couleur d'accentuation",
+        (Key::TipLive, Lang::En) => "Show the screens live",
+        (Key::TipLive, Lang::Fr) => "Voir l'écran en direct",
+        (Key::TipFreeze, Lang::En) => "Freeze the screens",
+        (Key::TipFreeze, Lang::Fr) => "Figer l'écran",
+        (Key::TipRedo, Lang::En) => "Redo (Ctrl+Y)",
+        (Key::TipRedo, Lang::Fr) => "Rétablir (Ctrl+Y)",
+        (Key::TipClear, Lang::En) => "Clear everything",
+        (Key::TipClear, Lang::Fr) => "Tout effacer",
+        (Key::TipRightClick, Lang::En) => "Right-click: ",
+        (Key::TipRightClick, Lang::Fr) => "Clic droit : ",
     }
 }
 

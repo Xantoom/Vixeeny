@@ -7,7 +7,7 @@
 //! │  ├─ frozen tiles · annotated tiles
 //! │  ├─ veil (4 rectangles around the zone, one opacity) · border (4) · handles (8)
 //! │  ├─ outline of the selected annotation (4)
-//! │  └─ size label · magnifier · text field · size ring
+//! │  └─ size label · text field · size ring
 //! ├─ scroll bar
 //! └─ toolbar · style panel · tip
 //! ```
@@ -402,7 +402,6 @@ pub struct Pane {
     pub handles_at: Cell<Option<Px>>,
     pub outline: [IDCompositionVisual2; 4],
     pub label: Piece<String>,
-    pub magnifier: Piece<vixeeny_editor::MagnifierView>,
     pub field: Piece<FieldLook>,
     /// The size of what the tool draws, shown while the wheel changes it (its diameter).
     pub brush: Piece<u32>,
@@ -412,6 +411,8 @@ pub struct Pane {
     pub tip: Piece<TipLook>,
     /// The content's offset (scroll), to set it only when it changes.
     pub content_at: Cell<Option<(f32, f32)>>,
+    /// The frozen picture is moved out of sight (the screens are shown live).
+    pub frozen_away: Cell<bool>,
 }
 
 impl Pane {
@@ -477,8 +478,6 @@ impl Pane {
         }
         let label = Piece::new(gfx, false)?;
         add(&content, &label.visual)?;
-        let magnifier = Piece::new(gfx, false)?;
-        add(&content, &magnifier.visual)?;
         let field = Piece::new(gfx, false)?;
         add(&content, &field.visual)?;
         let brush = Piece::new(gfx, false)?;
@@ -521,7 +520,6 @@ impl Pane {
             handles_at: Cell::new(None),
             outline,
             label,
-            magnifier,
             field,
             brush,
             scrollbar,
@@ -529,6 +527,7 @@ impl Pane {
             panel,
             tip,
             content_at: Cell::new(None),
+            frozen_away: Cell::new(false),
         })
     }
 

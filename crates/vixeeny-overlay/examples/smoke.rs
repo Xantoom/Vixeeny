@@ -38,7 +38,7 @@ fn main() {
         probe.pointer_up(vixeeny_editor::Point::new(500.0, 300.0), Default::default());
         probe.view().toolbar.map(|b| {
             // The style button.
-            let (x, y) = vixeeny_overlay::layout::button_xy(8, b.side.upright());
+            let (x, y) = vixeeny_overlay::layout::button_xy(9, b.side.upright());
             ((b.at.x + x + 15.0) as i32, (b.at.y + y + 15.0) as i32)
         })
     };

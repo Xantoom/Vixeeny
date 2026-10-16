@@ -380,6 +380,17 @@ impl Editor {
         Some(id)
     }
 
+    /// Removes every annotation, in one step that undo brings back.
+    pub fn clear(&mut self) {
+        self.drag = None;
+        if self.doc.items.is_empty() {
+            return;
+        }
+        let items = self.doc.items.clone();
+        self.history.commit(&mut self.doc, Edit::Clear { items });
+        self.selection = None;
+    }
+
     /// Forgets the selected annotation.
     pub fn deselect(&mut self) {
         self.selection = None;
@@ -687,6 +698,24 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn clearing_removes_everything_in_one_undoable_step() {
+        let mut ed = Editor::new(200, 100);
+        ed.tool = Tool::Rect;
+        drag(&mut ed, p(10.0, 10.0), p(50.0, 50.0), NO);
+        drag(&mut ed, p(60.0, 10.0), p(90.0, 50.0), NO);
+        ed.clear();
+        assert!(ed.doc.items.is_empty() && ed.selection().is_none());
+        ed.undo();
+        assert_eq!(ed.doc.items.len(), 2);
+        ed.redo();
+        assert!(ed.doc.items.is_empty());
+        // Nothing to clear: no step is added.
+        ed.clear();
+        ed.undo();
+        assert_eq!(ed.doc.items.len(), 2);
     }
 
     #[test]

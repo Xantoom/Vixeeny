@@ -22,11 +22,11 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SW_SHOWNOACTIVATE, SetCursor, SetForegroundWindow, SetTimer, ShowWindow, TranslateMessage,
     WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_DPICHANGED, WM_ERASEBKGND, WM_KEYDOWN,
     WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_PAINT,
-    WM_SETCURSOR, WM_SYSKEYDOWN, WM_TIMER,
+    WM_RBUTTONDOWN, WM_SETCURSOR, WM_SYSKEYDOWN, WM_TIMER,
 };
 
 use crate::gfx::{self, Gfx};
-use crate::layout::{self, BAR_H, BUTTON, Button, PanelForm, PanelHit, Picks, SHADOW};
+use crate::layout::{self, BAR_H, BUTTON, Button, PanelForm, PanelHit, Picks, SHADOW, Tip};
 use crate::paint::{self, BarLook, FieldLook, PanelLook};
 use crate::scene::{self, Pane, Solids, TipLook};
 use crate::theme::{Look, Rgba, Theme, hsv_to_rgb, rgb_to_hsv};
@@ -50,6 +50,8 @@ pub struct OverlayError(#[from] windows::core::Error);
 /// Returns `true` when the overlay should close afterwards.
 type CommandHandler = dyn Fn(Command, &Session) -> bool;
 type FirstFrame = Box<dyn FnOnce(Vec<u64>)>;
+/// Takes a fresh picture of the screens (the overlay's windows hidden).
+type Thaw = dyn Fn() -> Option<vixeeny_editor::RgbaImage>;
 
 /// `WM_MOUSELEAVE` (declared with the common controls in the bindings).
 const WM_MOUSELEAVE: u32 = 0x02a3;
@@ -123,6 +125,8 @@ struct Shared {
     panes: Vec<Pane>,
     handler: Box<CommandHandler>,
     tips: RefCell<Vec<String>>,
+    /// Shows the screens live; without it the screens stay frozen.
+    thaw: RefCell<Option<Box<Thaw>>>,
     scrolling: Cell<bool>,
     /// A command is running (a dialog may be up): input waits.
     busy: Cell<bool>,
@@ -164,13 +168,40 @@ fn color_of_hsv(h: f32, s: f32, v: f32) -> Color {
 }
 
 impl Shared {
-    fn bar_look(view: &View, ui: &Ui, side: BarSide) -> BarLook {
+    fn can_live(&self) -> bool {
+        self.thaw.borrow().is_some() && !self.scrolling.get()
+    }
+
+    /// The tip of button `k`; a two-tool button adds what a right-click takes.
+    fn tip_text(&self, k: usize, picks: &Picks, live: bool) -> Option<String> {
+        let tips = self.tips.borrow();
+        let (tip, other) = layout::tip_of(k, picks, live);
+        let text = tips.get(tip as usize)?;
+        let Some(other) = other.and_then(|o| tips.get(o as usize)) else {
+            return Some(text.clone());
+        };
+        let right = tips
+            .get(Tip::RightClick as usize)
+            .map_or("", String::as_str);
+        let mut chars = other.chars();
+        let other: String = chars
+            .next()
+            .map(|c| c.to_lowercase().chain(chars).collect())
+            .unwrap_or_default();
+        Some(format!("{text} · {right}{other}"))
+    }
+
+    fn bar_look(&self, view: &View, ui: &Ui, side: BarSide) -> BarLook {
         BarLook {
             tool: view.tool,
             picks: ui.picks,
             upright: side.upright(),
             color: view.color,
+            live: view.live,
+            can_live: self.can_live(),
             can_undo: view.can_undo,
+            can_redo: view.can_redo,
+            can_clear: view.can_clear,
             style_open: ui.style_open,
             hover: match ui.hover {
                 Some(Hover::Button(k)) => Some(k),
@@ -188,6 +219,7 @@ impl Shared {
             color: view.color,
             recent: view.recent_colors.clone(),
             width: view.width,
+            max_width: view.max_width,
             size: view.brush.unwrap_or(view.width),
             filled: view.filled,
             tool: view.tool,
@@ -317,6 +349,11 @@ impl Shared {
         if pane.content_at.replace(Some(content_at)) != Some(content_at) {
             scene::set_offset(&pane.content, content_at.0, content_at.1)?;
         }
+        // Live, the frozen picture goes out of sight: the windows show the screens beneath them.
+        if pane.frozen_away.replace(view.live) != view.live {
+            let away = if view.live { -1.0e6 } else { 0.0 };
+            scene::set_offset(&pane.frozen.visual, away, away)?;
+        }
         let area = pane.area_px();
         let zone = view.selection.as_ref().map(scene::snap);
 
@@ -359,21 +396,6 @@ impl Shared {
                 pane.label.move_to(at.x.round(), at.y.round())?;
             }
             _ => pane.label.hide()?,
-        }
-
-        // The magnifier.
-        match &view.magnifier {
-            Some(m) if pane.sees((m.position.x, m.position.y, m.size, m.size + 28.0 * u), 0.0) => {
-                pane.magnifier.show(
-                    gfx,
-                    m,
-                    || Ok(paint::magnifier_size(u, m)),
-                    |c| paint::magnifier(c, t, u, m),
-                )?;
-                pane.magnifier
-                    .move_to(m.position.x.round(), m.position.y.round())?;
-            }
-            _ => pane.magnifier.hide()?,
         }
 
         // The zone with its annotations.
@@ -455,7 +477,7 @@ impl Shared {
         let margin = SHADOW * u;
         match self.bar_in(pane, view, scroll) {
             Some((bx, by, side)) => {
-                let look = Self::bar_look(view, ui, side);
+                let look = self.bar_look(view, ui, side);
                 let upright = side.upright();
                 pane.toolbar.show(
                     gfx,
@@ -473,10 +495,10 @@ impl Shared {
                 let faded = side == BarSide::Inside && view.drawing;
                 pane.toolbar
                     .fade(gfx, if faded { FADED } else { 1.0 }, t.animations)?;
-                let tip = ui.tip.filter(|_| !faded).and_then(|k| {
-                    let which = layout::tip_of(k, &ui.picks) as usize;
-                    Some((k, self.tips.borrow().get(which)?.clone()))
-                });
+                let tip = ui
+                    .tip
+                    .filter(|_| !faded)
+                    .and_then(|k| Some((k, self.tip_text(k, &ui.picks, view.live)?)));
                 match tip {
                     Some((k, text)) if !text.is_empty() => {
                         let ((w, h), bubble) = paint::tip_size(gfx, u, &text)?;
@@ -642,6 +664,7 @@ impl Shared {
             WM_MOUSEMOVE => self.pointer_moved(i, x, y),
             WM_LBUTTONDOWN | WM_LBUTTONDBLCLK => self.pointer_pressed(i, x, y),
             WM_LBUTTONUP => self.pointer_released(i, x, y),
+            WM_RBUTTONDOWN => self.right_click(i, x, y),
             WM_MOUSELEAVE => {
                 let mut ui = self.ui.borrow_mut();
                 if let Some(t) = ui.tracking.get_mut(i) {
@@ -842,6 +865,27 @@ impl Shared {
         self.refresh();
     }
 
+    /// A right-click on a two-tool button takes its other tool.
+    fn right_click(&self, i: usize, x: f32, y: f32) {
+        if self.ui.borrow().press.is_some() {
+            return;
+        }
+        let Some(Hover::Button(k)) = self.hit(&self.panes[i], x, y) else {
+            return;
+        };
+        let Button::Tool(kit) = layout::button(k).button else {
+            return;
+        };
+        let mut ui = self.ui.borrow_mut();
+        let Some(tool) = layout::other_tool(kit, &ui.picks) else {
+            return;
+        };
+        ui.picks.remember(tool);
+        drop(ui);
+        self.session.borrow_mut().choose_tool(Some(tool));
+        self.refresh();
+    }
+
     /// Clicks toolbar button `k`; `true` when the overlay closed.
     fn button(&self, k: usize) -> bool {
         match layout::button(k).button {
@@ -854,7 +898,16 @@ impl Shared {
                 ui.style_open = !ui.style_open;
                 ui.picker = false;
             }
+            Button::Live => {
+                if self.can_live() {
+                    let mut session = self.session.borrow_mut();
+                    let live = !session.is_live();
+                    session.set_live(live);
+                }
+            }
             Button::Undo => self.session.borrow_mut().undo(),
+            Button::Redo => self.session.borrow_mut().redo(),
+            Button::Clear => self.session.borrow_mut().clear(),
             Button::Copy => return self.run_command(Command::Copy),
             Button::CopyText => return self.run_command(Command::CopyText),
             Button::Save => return self.run_command(Command::Save),
@@ -891,13 +944,6 @@ impl Shared {
                 session.choose_tool(Some(Tool::Eyedropper));
                 ui.style_open = false;
             }
-            PanelHit::Variant(i) => {
-                let form = PanelForm::of(view.tool, ui.picker);
-                if let Some(tool) = form.variants.and_then(|v| v.get(i).copied()) {
-                    ui.picks.remember(tool);
-                    session.choose_tool(Some(tool));
-                }
-            }
             PanelHit::Fill => session.set_filled(!view.filled),
             PanelHit::Size | PanelHit::Shade | PanelHit::Hue | PanelHit::Background => {}
         }
@@ -911,7 +957,9 @@ impl Shared {
         };
         let (lx, ly) = ((x - px) / self.u, (y - py) / self.u);
         if hit == PanelHit::Size {
-            self.session.borrow_mut().set_width(layout::size_at(lx));
+            self.session
+                .borrow_mut()
+                .set_width(layout::size_at(lx, view.max_width));
             return;
         }
         let mut ui = self.ui.borrow_mut();
@@ -1142,10 +1190,48 @@ impl Shared {
         }
     }
 
+    /// Live, takes a fresh picture of the screens for the export, the windows hidden meanwhile.
+    fn thaw(&self) {
+        let thaw = self.thaw.borrow();
+        let Some(thaw) = thaw.as_ref() else {
+            return;
+        };
+        for p in &self.panes {
+            window::set_cloak(p.hwnd, true);
+        }
+        // SAFETY: plain calls; the next frames are composed without the windows.
+        unsafe {
+            let _ = DwmFlush();
+            let _ = DwmFlush();
+        }
+        let picture = thaw();
+        for p in &self.panes {
+            window::set_cloak(p.hwnd, false);
+        }
+        let Some(picture) = picture else {
+            return;
+        };
+        if self.session.borrow_mut().replace_base(picture) {
+            let session = self.session.borrow();
+            for pane in &self.panes {
+                if let Err(e) = upload_frozen(&self.gfx, pane, session.base()) {
+                    tracing::warn!("editor picture: {e}");
+                }
+            }
+        }
+    }
+
     /// Hands `command` to the host; `true` when the overlay closed.
     fn run_command(&self, command: Command) -> bool {
         if self.busy.replace(true) {
             return false;
+        }
+        let exports = matches!(
+            command,
+            Command::Copy | Command::CopyText | Command::Save | Command::SaveAs
+        );
+        if exports && self.session.borrow().is_live() {
+            self.thaw();
         }
         // A system dialog (Save as) must be able to appear above the overlay.
         let dialog = command == Command::SaveAs;
@@ -1172,6 +1258,24 @@ impl Shared {
         }
         close
     }
+}
+
+/// Shows in `pane` its part of the screens' picture.
+fn upload_frozen(
+    gfx: &Gfx,
+    pane: &Pane,
+    base: &vixeeny_editor::RgbaImage,
+) -> windows::core::Result<()> {
+    let (ax, ay, aw, ah) = pane.area_px();
+    let x0 = (ax.max(0.0) as u32).min(base.width);
+    let y0 = (ay.max(0.0) as u32).min(base.height);
+    let x1 = ((ax + aw).max(0.0) as u32).min(base.width);
+    let y1 = ((ay + ah).max(0.0) as u32).min(base.height);
+    if x1 > x0 && y1 > y0 {
+        pane.frozen
+            .set(gfx, base, (x0, y0, x1 - x0, y1 - y0), x0 as f32, y0 as f32)?;
+    }
+    Ok(())
 }
 
 /// The editor over the frozen screens: one window per monitor, all showing the same session.
@@ -1216,15 +1320,7 @@ impl Overlay {
             let hwnd = window::create(wndproc, s.position.0, s.position.1, s.size.0, s.size.1)?;
             let pane = Pane::new(&gfx, &solids, hwnd, s.position, s.size, s.area)?;
             // This window's part of the frozen image, uploaded once.
-            let (ax, ay, aw, ah) = pane.area_px();
-            let x0 = (ax.max(0.0) as u32).min(base.width);
-            let y0 = (ay.max(0.0) as u32).min(base.height);
-            let x1 = ((ax + aw).max(0.0) as u32).min(base.width);
-            let y1 = ((ay + ah).max(0.0) as u32).min(base.height);
-            if x1 > x0 && y1 > y0 {
-                pane.frozen
-                    .set(&gfx, base, (x0, y0, x1 - x0, y1 - y0), x0 as f32, y0 as f32)?;
-            }
+            upload_frozen(&gfx, &pane, base)?;
             panes.push(pane);
         }
         let shared = Rc::new(Shared {
@@ -1241,6 +1337,7 @@ impl Overlay {
             panes,
             handler: Box::new(on_command),
             tips: RefCell::default(),
+            thaw: RefCell::default(),
             scrolling: Cell::new(false),
             busy: Cell::new(false),
             closing: Cell::new(false),
@@ -1257,6 +1354,13 @@ impl Overlay {
     /// What each toolbar button does, said on hover (in the order of [`layout::BUTTONS`]).
     pub fn set_tips(&self, tips: &[String]) {
         *self.shared.tips.borrow_mut() = tips.to_vec();
+    }
+
+    /// Lets the user show the screens live: `thaw` takes a fresh picture of them (the overlay's
+    /// windows hidden) when the zone is exported.
+    pub fn on_thaw(&self, thaw: impl Fn() -> Option<vixeeny_editor::RgbaImage> + 'static) {
+        *self.shared.thaw.borrow_mut() = Some(Box::new(thaw));
+        self.shared.refresh();
     }
 
     /// The image is taller than the window (scrolling capture): it scrolls, the toolbar stays.

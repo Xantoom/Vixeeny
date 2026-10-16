@@ -11,6 +11,8 @@ use vixeeny_overlay::{Look, Overlay, Screen, layout, post};
 const WM_MOUSEMOVE: u32 = 0x0200;
 const WM_LBUTTONDOWN: u32 = 0x0201;
 const WM_LBUTTONUP: u32 = 0x0202;
+const WM_RBUTTONDOWN: u32 = 0x0204;
+const WM_RBUTTONUP: u32 = 0x0205;
 const WM_KEYDOWN: u32 = 0x0100;
 const WM_CLOSE: u32 = 0x0010;
 const VK_ESCAPE: usize = 0x1b;
@@ -106,10 +108,12 @@ const WM_CHAR: u32 = 0x0102;
 const VK_RETURN: usize = 0x0d;
 
 /// Buttons of the bar (see `layout::BUTTONS`).
-const SHAPE: usize = 4;
-const TEXT: usize = 5;
-const STYLE: usize = 8;
-const COPY: usize = 10;
+const PEN: usize = 2;
+const SHAPE: usize = 5;
+const TEXT: usize = 6;
+const STYLE: usize = 9;
+const CLEAR: usize = 12;
+const COPY: usize = 13;
 
 /// Where the bar goes for the zone of [`draw_zone`] (the same session, run without windows).
 fn bar_place() -> vixeeny_editor::BarPlace {
@@ -207,7 +211,7 @@ fn the_style_panel_opens_and_picks_a_colour() {
     let hwnd = overlay.handles()[0];
     draw_zone(hwnd);
     click_button(hwnd, STYLE);
-    // The third palette swatch of the panel (no tool in hand: no row of variants).
+    // The third palette swatch of the panel.
     let (px, py) = panel_at(layout::PanelForm::of(None, false).height());
     click(
         hwnd,
@@ -256,7 +260,7 @@ fn the_wheel_sizes_the_tool_in_hand_only() {
     assert_eq!(width, Some(4.0));
     let width = after(
         |hwnd| {
-            click_button(hwnd, 1); // the pen
+            click_button(hwnd, PEN);
             wheel(hwnd, 3);
             wheel(hwnd, -1);
         },
@@ -266,23 +270,36 @@ fn the_wheel_sizes_the_tool_in_hand_only() {
 }
 
 #[test]
-fn the_panel_switches_a_button_to_its_other_tool() {
+fn a_right_click_switches_a_button_to_its_other_tool() {
     let tool = after(
         |hwnd| {
-            click_button(hwnd, SHAPE);
-            click_button(hwnd, STYLE);
-            let form = layout::PanelForm::of(Some(vixeeny_editor::Tool::Rect), false);
-            let (px, py) = panel_at(form.height());
-            click(
-                hwnd,
-                (px + layout::variant_x(1) + 15.0) as i32,
-                (py + layout::EXTRAS_Y + 15.0) as i32,
-            );
+            let bar = bar_place();
+            let (bx, by) = layout::button_xy(SHAPE, bar.side.upright());
+            let (x, y) = ((bar.at.x + bx + 15.0) as i32, (bar.at.y + by + 15.0) as i32);
+            post(hwnd, WM_MOUSEMOVE, 0, at(x, y));
+            post(hwnd, WM_RBUTTONDOWN, 2, at(x, y));
+            post(hwnd, WM_RBUTTONUP, 0, at(x, y));
             // The button now takes the ellipse.
-            click_button(hwnd, 1);
+            click_button(hwnd, PEN);
             click_button(hwnd, SHAPE);
         },
         |s| s.tool(),
     );
     assert_eq!(tool, Some(Some(vixeeny_editor::Tool::Ellipse)));
+}
+
+#[test]
+fn the_clear_button_takes_every_annotation_away() {
+    let counts = after(
+        |hwnd| {
+            click_button(hwnd, PEN);
+            post(hwnd, WM_MOUSEMOVE, 0, at(200, 200));
+            post(hwnd, WM_LBUTTONDOWN, 1, at(200, 200));
+            post(hwnd, WM_MOUSEMOVE, 1, at(260, 240));
+            post(hwnd, WM_LBUTTONUP, 0, at(260, 240));
+            click_button(hwnd, CLEAR);
+        },
+        |s| (s.editor().doc.items.len(), s.view().can_undo),
+    );
+    assert_eq!(counts, Some((0, true)));
 }
