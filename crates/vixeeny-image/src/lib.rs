@@ -86,7 +86,7 @@ pub struct PngSettings {
 }
 
 impl Default for PngSettings {
-    /// Plan 5.4: fast compression, oxipng off.
+    /// Defaults: fast compression, oxipng off.
     fn default() -> Self {
         Self {
             compression: PngCompression::Fast,
@@ -142,7 +142,7 @@ pub struct WebpSettings {
 }
 
 impl Default for WebpSettings {
-    /// Plan 5.4: lossless.
+    /// Defaults: lossless.
     fn default() -> Self {
         Self {
             lossless: true,
@@ -164,7 +164,7 @@ pub struct AvifSettings {
 }
 
 impl Default for AvifSettings {
-    /// Plan 5.4: quality 80, 10 bits, 4:4:4.
+    /// Defaults: quality 80, 10 bits, 4:4:4.
     fn default() -> Self {
         Self {
             quality: 80,
@@ -185,7 +185,7 @@ pub struct JxlSettings {
 }
 
 impl Default for JxlSettings {
-    /// Plan 5.4: lossless, effort 7.
+    /// Defaults: lossless, effort 7.
     fn default() -> Self {
         Self {
             lossless: true,

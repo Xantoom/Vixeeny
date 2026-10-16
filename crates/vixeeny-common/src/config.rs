@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! `config.toml`: typed model with defaults (plan annex 13.1), versioned schema and migrations.
+//! `config.toml`: typed model with defaults, versioned schema and migrations.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -674,21 +674,43 @@ pub fn migrate_with(
 }
 
 impl Config {
-    /// Parses and migrates a config document. Unknown keys are ignored, missing keys default.
+    /// Parses and migrates a config document. Unknown keys are ignored, missing keys default,
+    /// and a value that cannot be read takes its default without the others.
     pub fn from_toml(text: &str) -> Result<Self, ConfigError> {
+        Self::parse(text).map(|(config, _)| config)
+    }
+
+    /// The config, and whether some values could not be read.
+    fn parse(text: &str) -> Result<(Self, bool), ConfigError> {
         let mut table: toml::Table = toml::from_str(text)?;
         migrate_with(&mut table, SCHEMA_VERSION, MIGRATIONS)?;
-        Ok(table.try_into()?)
+        match table.clone().try_into() {
+            Ok(config) => Ok((config, false)),
+            Err(e) => {
+                tracing::warn!("some settings cannot be read, their defaults are used: {e}");
+                let mut kept = toml::Table::new();
+                salvage(&mut kept, &mut Vec::new(), table);
+                Ok((kept.try_into()?, true))
+            }
+        }
     }
 
     pub fn to_toml(&self) -> Result<String, ConfigError> {
         Ok(toml::to_string_pretty(self)?)
     }
 
-    /// Loads `path`; a missing file yields the defaults (nothing is written).
+    /// Loads `path`; a missing file yields the defaults (nothing is written). A file that cannot
+    /// be read in full is first copied to `config.toml.bak`, so that what it held survives the
+    /// next save.
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
         match std::fs::read_to_string(path) {
-            Ok(text) => Self::from_toml(&text),
+            Ok(text) => {
+                let parsed = Self::parse(&text);
+                if !matches!(parsed, Ok((_, false))) {
+                    let _ = std::fs::write(path.with_extension("toml.bak"), &text);
+                }
+                parsed.map(|(config, _)| config)
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(source) => Err(ConfigError::Io {
                 path: path.display().to_string(),
@@ -709,6 +731,42 @@ impl Config {
         let tmp = path.with_extension("toml.tmp");
         std::fs::write(&tmp, self.to_toml()?).map_err(io)?;
         std::fs::rename(&tmp, path).map_err(io)
+    }
+}
+
+/// Puts into `kept` (at `path`) every value of `source` that reads, one by one; a table that
+/// does not is gone through value by value.
+fn salvage(kept: &mut toml::Table, path: &mut Vec<String>, source: toml::Table) {
+    /// The table at `path` (kept before its values are).
+    fn at<'a>(kept: &'a mut toml::Table, path: &[String]) -> Option<&'a mut toml::Table> {
+        path.iter()
+            .try_fold(kept, |table, key| table.get_mut(key)?.as_table_mut())
+    }
+    let reads = |kept: &toml::Table| kept.clone().try_into::<Config>().is_ok();
+    for (key, value) in source {
+        let Some(table) = at(kept, path) else {
+            return;
+        };
+        table.insert(key.clone(), value.clone());
+        if reads(kept) {
+            continue;
+        }
+        let Some(table) = at(kept, path) else {
+            return;
+        };
+        table.remove(&key);
+        if let toml::Value::Table(inner) = value {
+            table.insert(key.clone(), toml::Table::new().into());
+            if !reads(kept) {
+                if let Some(table) = at(kept, path) {
+                    table.remove(&key);
+                }
+                continue;
+            }
+            path.push(key);
+            salvage(kept, path, inner);
+            path.pop();
+        }
     }
 }
 
@@ -778,6 +836,44 @@ mod tests {
         assert!(!cfg.general.autostart);
         assert_eq!(cfg.general.app_idle_exit_seconds, 30);
         assert_eq!(cfg.hotkeys, Hotkeys::default());
+    }
+
+    #[test]
+    fn a_value_that_cannot_be_read_takes_its_default_alone() {
+        let text = "schema_version = 6\n\
+            [general]\nautostart = \"yes\"\nsounds = true\n\
+            [hotkeys]\ncapture_region = [\"F8\"]\nrecord_toggle = \"F9\"\n\
+            [image]\nformat = \"png\"\n[image.jpeg]\nquality = \"high\"\n\
+            [replay]\nduration_seconds = -5\n";
+        let cfg = Config::from_toml(text).unwrap();
+        let defaults = Config::default();
+        assert_eq!(cfg.general.autostart, defaults.general.autostart);
+        assert!(cfg.general.sounds);
+        assert_eq!(cfg.hotkeys.capture_region, ["F8"]);
+        assert_eq!(cfg.hotkeys.record_toggle, defaults.hotkeys.record_toggle);
+        assert_eq!(cfg.image.format, "png");
+        assert_eq!(cfg.image.jpeg, defaults.image.jpeg);
+        assert_eq!(
+            cfg.replay.duration_seconds,
+            defaults.replay.duration_seconds
+        );
+    }
+
+    #[test]
+    fn a_file_read_in_part_is_kept_aside_first() {
+        let dir = std::env::temp_dir().join(format!("vx-config-bak-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        let backup = dir.join("config.toml.bak");
+        std::fs::write(&path, "[hotkeys]\ncapture_region = [\"F8\"]\n").unwrap();
+        Config::load(&path).unwrap();
+        assert!(!backup.exists());
+        for text in ["[general]\nsounds = 3\n", "not toml ["] {
+            std::fs::write(&path, text).unwrap();
+            let _ = Config::load(&path);
+            assert_eq!(std::fs::read_to_string(&backup).unwrap(), text);
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

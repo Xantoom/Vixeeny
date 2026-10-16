@@ -9,8 +9,8 @@ Example: H.266 through VVenC, or AV2 when it exists.
    the BtbN image does not have it). Build it locally with `packaging/ffmpeg/build.sh
    native/build/work/ffmpeg.zip`, then run `cargo xtask build-native ffmpeg`; the CI rebuilds it
    by itself when the script changes.
-3. Add the family (`vvc`, `av2`) to `Family` in `src/registry.rs`, to the container matrix
-   (plan annex 13.2) and to the rules of `src/validate.rs` (frame-rate limit, HDR).
+3. Add the family (`vvc`, `av2`) to `Family` in `src/registry.rs` and to the container matrix
+   and the rules of `src/validate.rs` (frame-rate limit, HDR).
 4. Add an `[[encoder]]` entry to `registry.toml`: pixel formats, containers, the four presets
    (plain FFmpeg options), the rate control of the custom preset (the quality scale and the
    options of each mode: constant quality, VBR, CBR) and the other parameters. The header of

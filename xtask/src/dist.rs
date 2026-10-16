@@ -39,6 +39,18 @@ fn files_under(dir: &Path) -> Result<Vec<PathBuf>> {
     Ok(found)
 }
 
+/// The list of the files of a version: the next update removes those it no longer has
+/// (`vixeeny-updater`'s `swap::MANIFEST`).
+const MANIFEST: &str = "files.txt";
+
+fn manifest(stage: &Path) -> Result<String> {
+    let mut text = String::new();
+    for relative in files_under(stage)? {
+        writeln!(text, "{}", relative.to_string_lossy().replace('\\', "/"))?;
+    }
+    Ok(text)
+}
+
 fn write_zip(stage: &Path, out: &Path) -> Result<()> {
     let mut zip = zip::ZipWriter::new(std::fs::File::create(out)?);
     for relative in files_under(stage)? {
@@ -162,6 +174,7 @@ pub fn dist(args: &[String]) -> Result<()> {
         stage.join("THIRD-PARTY-LICENSES.txt"),
         third_party_licenses()?,
     )?;
+    std::fs::write(stage.join(MANIFEST), manifest(&stage)?)?;
 
     let base = format!("Vixeeny-{version}-windows-x64");
     let update = out.join(format!("{base}.zip"));
@@ -198,6 +211,18 @@ pub fn sums(args: &[String]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_manifest_lists_every_file_with_forward_slashes() -> Result<()> {
+        let dir = std::env::temp_dir().join(format!("vixeeny-manifest-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("licenses"))?;
+        std::fs::write(dir.join("Vixeeny.exe"), "")?;
+        std::fs::write(dir.join("licenses/a.txt"), "")?;
+        let text = manifest(&dir)?;
+        std::fs::remove_dir_all(&dir)?;
+        assert_eq!(text, "Vixeeny.exe\nlicenses/a.txt\n");
+        Ok(())
+    }
 
     #[test]
     fn the_portable_archive_is_the_update_archive_plus_its_flag() -> Result<()> {

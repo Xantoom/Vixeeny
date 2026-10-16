@@ -155,7 +155,7 @@ pub fn center_crop(size: (u32, u32), aspect: Option<(u32, u32)>) -> (u32, u32, u
     )
 }
 
-/// Whether an audio codec fits a container (annex 13.2); `None` for an unknown codec.
+/// Whether an audio codec fits a container; `None` for an unknown codec.
 fn audio_ok(codec: &str, container: Container) -> Option<bool> {
     Some(match codec {
         "aac" | "flac" => !matches!(container, Container::Webm),

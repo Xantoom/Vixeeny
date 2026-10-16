@@ -36,7 +36,7 @@ pub enum CaptureTarget {
 /// `vixeeny_image::tonemap`.
 pub type ToneMapFn = fn(&[f32], &HdrInfo) -> Vec<u8>;
 
-/// Plan 5.2: no cursor in still images by default.
+/// No cursor in still images by default.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CaptureOptions {
     pub show_cursor: bool,

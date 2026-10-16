@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Replacing the installed files by the new ones, keeping the old ones until the new version has
-//! started (rollback). Files that are not part of the update (settings, the
-//! `portable.flag` marker) are never touched.
+//! started (rollback). Each version lists its files in [`MANIFEST`]: a file the previous version
+//! listed and the new one does not is removed (kept in the backup like the replaced ones). Files
+//! of no list (settings, the `portable.flag` marker) are never touched.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -15,6 +16,28 @@ pub struct Journal {
     pub replaced: Vec<PathBuf>,
     /// Files that did not exist before.
     pub added: Vec<PathBuf>,
+    /// Files of the previous version the new one no longer has, moved to the backup folder.
+    #[serde(default)]
+    pub removed: Vec<PathBuf>,
+}
+
+/// The list of the files of a version, one relative path per line (`/` separated).
+pub const MANIFEST: &str = "files.txt";
+
+/// The files `dir`'s manifest lists; none without one. A line that would leave `dir` is skipped.
+fn listed(dir: &Path) -> Vec<PathBuf> {
+    let Ok(text) = std::fs::read_to_string(dir.join(MANIFEST)) else {
+        return Vec::new();
+    };
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(PathBuf::from)
+        .filter(|path| {
+            path.components()
+                .all(|c| matches!(c, std::path::Component::Normal(_)))
+        })
+        .collect()
 }
 
 const JOURNAL: &str = "journal.json";
@@ -82,6 +105,15 @@ pub fn install(staged: &Path, target: &Path, backup: &Path) -> io::Result<Journa
     std::fs::create_dir_all(backup)?;
     let mut journal = Journal::default();
     let result = files_under(staged).and_then(|files| {
+        // Read before the new manifest replaces it.
+        let obsolete: Vec<PathBuf> = listed(target)
+            .into_iter()
+            .filter(|old| !files.contains(old) && target.join(old).is_file())
+            .collect();
+        for relative in obsolete {
+            move_file(&target.join(&relative), &backup.join(&relative))?;
+            journal.removed.push(relative);
+        }
         for relative in files {
             let (from, to) = (staged.join(&relative), target.join(&relative));
             if to.exists() {
@@ -114,6 +146,9 @@ fn undo(journal: &Journal, target: &Path, backup: &Path) -> io::Result<()> {
     }
     for relative in &journal.replaced {
         let _ = std::fs::remove_file(target.join(relative));
+        move_file(&backup.join(relative), &target.join(relative))?;
+    }
+    for relative in &journal.removed {
         move_file(&backup.join(relative), &target.join(relative))?;
     }
     Ok(())
@@ -213,6 +248,51 @@ mod tests {
             read(&target, "vixeeny-daemon.exe").as_deref(),
             Some("old daemon")
         );
+    }
+
+    #[test]
+    fn files_the_new_version_no_longer_has_go_and_come_back_on_rollback() {
+        let (_dir, staged, target, backup) = setup();
+        put(&target, "old.dll", "old library");
+        put(&target, "user.txt", "yours");
+        put(
+            &target,
+            MANIFEST,
+            "vixeeny-daemon.exe\nold.dll\n../outside.txt\n",
+        );
+        put(
+            &staged,
+            MANIFEST,
+            "vixeeny-daemon.exe\nlicenses/THIRD-PARTY.txt\n",
+        );
+        let journal = install(&staged, &target, &backup).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(journal.removed, [PathBuf::from("old.dll")]);
+        assert_eq!(read(&target, "old.dll"), None);
+        assert_eq!(read(&target, "user.txt").as_deref(), Some("yours"));
+        assert!(target.join("portable.flag").exists());
+        rollback(&target, &backup).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(read(&target, "old.dll").as_deref(), Some("old library"));
+        assert_eq!(
+            read(&target, MANIFEST).as_deref(),
+            Some("vixeeny-daemon.exe\nold.dll\n../outside.txt\n")
+        );
+    }
+
+    #[test]
+    fn without_a_previous_list_nothing_is_removed() {
+        let (_dir, staged, target, backup) = setup();
+        put(&target, "old.dll", "old library");
+        put(&staged, MANIFEST, "vixeeny-daemon.exe\n");
+        let journal = install(&staged, &target, &backup).unwrap_or_else(|e| panic!("{e}"));
+        assert!(journal.removed.is_empty());
+        assert!(target.join("old.dll").exists());
+    }
+
+    #[test]
+    fn a_journal_of_an_older_version_still_reads() {
+        let journal: Journal = serde_json::from_str(r#"{"replaced":["a.exe"],"added":[]}"#)
+            .unwrap_or_else(|e| panic!("{e}"));
+        assert!(journal.removed.is_empty());
     }
 
     #[test]

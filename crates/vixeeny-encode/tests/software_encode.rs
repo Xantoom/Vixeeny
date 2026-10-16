@@ -64,7 +64,7 @@ fn opts(s: &str) -> Dictionary<'static> {
     d
 }
 
-/// Plan 13.2 container × codec matrix.
+/// The container × codec matrix.
 fn allowed(container: &str, family: &str) -> bool {
     match container {
         "webm" => matches!(family, "av1" | "vp9" | "opus"),
