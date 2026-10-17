@@ -67,7 +67,7 @@ fn texture(device: &Device) -> ID3D11Texture2D {
     out.unwrap()
 }
 
-fn config(registry: &Registry, id: &str, depth: u8) -> RecordConfig {
+fn config(registry: &Registry, id: &str, depth: u8, chroma: Chroma) -> RecordConfig {
     let encoder = registry.get(id).unwrap().clone();
     let options = encoder
         .presets
@@ -83,7 +83,7 @@ fn config(registry: &Registry, id: &str, depth: u8) -> RecordConfig {
         output_size: (W, H),
         fps: Fps::whole(30),
         depth,
-        chroma: Chroma::C420,
+        chroma,
         hdr: false,
         split: Split::Off,
         keyframe_seconds: 1.0,
@@ -124,7 +124,17 @@ fn centre(path: &Path) -> [i32; 3] {
         }
     }
     let (x, y) = (W as usize / 2, H as usize / 2);
-    let ten = decoded.format() == vixeeny_encode::ffmpeg::format::Pixel::YUV420P10LE;
+    use vixeeny_encode::ffmpeg::format::Pixel;
+    let ten = matches!(
+        decoded.format(),
+        Pixel::YUV420P10LE | Pixel::YUV422P10LE | Pixel::YUV444P10LE
+    );
+    // Chroma samples per luma sample, across and down.
+    let (cx, cy) = match decoded.format() {
+        Pixel::YUV444P | Pixel::YUV444P10LE => (1, 1),
+        Pixel::YUV422P | Pixel::YUV422P10LE => (2, 1),
+        _ => (2, 2),
+    };
     let sample = |plane: usize, x: usize, y: usize| {
         let data = decoded.data(plane);
         let row = y * decoded.stride(plane);
@@ -139,8 +149,8 @@ fn centre(path: &Path) -> [i32; 3] {
     };
     [
         sample(0, x, y),
-        sample(1, x / 2, y / 2),
-        sample(2, x / 2, y / 2),
+        sample(1, x / cx, y / cy),
+        sample(2, x / cx, y / cy),
     ]
 }
 
@@ -158,6 +168,7 @@ fn record_gpu(
     id: &str,
     feed: Feed,
     depth: u8,
+    chroma: Chroma,
 ) -> Option<[i32; 3]> {
     let registry = Registry::builtin().unwrap();
     let pipeline = match GpuPipeline::new(
@@ -171,16 +182,22 @@ fn record_gpu(
         Fps::whole(30),
         false,
         depth == 10,
+        chroma,
         feed,
     ) {
         Ok(p) => p,
+        // Beyond 4:2:0, what the video processor writes depends on the driver.
+        Err(e) if chroma != Chroma::C420 && e.to_string().contains("cannot write") => {
+            eprintln!("{id} {}: {e}", chroma.name());
+            return None;
+        }
         Err(e) => {
             vixeeny_common::skip_test(format!("no GPU video processor ({e})"));
             return None;
         }
     };
     let pipeline = Arc::new(pipeline);
-    let mut cfg = config(&registry, id, depth);
+    let mut cfg = config(&registry, id, depth, chroma);
     cfg.gpu = Some(Arc::clone(&pipeline));
     let dir = scratch(id);
     let rec = Recorder::start(cfg, namer(&dir)).unwrap();
@@ -204,14 +221,21 @@ fn record_gpu(
 #[test]
 fn a_software_encoder_records_downloaded_gpu_frames_with_the_right_colours() {
     let (device, context) = d3d::create_device(None).unwrap();
-    let Some(got) = record_gpu(&device, &context, "libx264", Feed::Download, 8) else {
+    let Some(got) = record_gpu(
+        &device,
+        &context,
+        "libx264",
+        Feed::Download,
+        8,
+        Chroma::C420,
+    ) else {
         return;
     };
     assert_colour(got, "x264 via the GPU");
     // The CPU path gives the same colour.
     let registry = Registry::builtin().unwrap();
     let dir = scratch("cpu");
-    let rec = Recorder::start(config(&registry, "libx264", 8), namer(&dir)).unwrap();
+    let rec = Recorder::start(config(&registry, "libx264", 8, Chroma::C420), namer(&dir)).unwrap();
     for i in 0..10 {
         let frame = VideoFrame {
             width: W,
@@ -254,12 +278,28 @@ fn nvenc_reads_the_gpu_frames_directly_when_present() {
         return;
     }
     assert_colour(
-        record_gpu(&device, &context, "nvenc_h264", Feed::Direct, 8).unwrap(),
+        record_gpu(
+            &device,
+            &context,
+            "nvenc_h264",
+            Feed::Direct,
+            8,
+            Chroma::C420,
+        )
+        .unwrap(),
         "NVENC via the GPU",
     );
     // Downloaded frames into a hardware encoder: QSV's fallback, tried on NVENC.
     assert_colour(
-        record_gpu(&device, &context, "nvenc_h264", Feed::Download, 8).unwrap(),
+        record_gpu(
+            &device,
+            &context,
+            "nvenc_h264",
+            Feed::Download,
+            8,
+            Chroma::C420,
+        )
+        .unwrap(),
         "NVENC from downloaded frames",
     );
 }
@@ -267,7 +307,32 @@ fn nvenc_reads_the_gpu_frames_directly_when_present() {
 #[test]
 fn ten_bit_gpu_frames_are_unpacked_for_a_software_encoder() {
     let (device, context) = d3d::create_device(None).unwrap();
-    if let Some(got) = record_gpu(&device, &context, "libx265", Feed::Download, 10) {
+    if let Some(got) = record_gpu(
+        &device,
+        &context,
+        "libx265",
+        Feed::Download,
+        10,
+        Chroma::C420,
+    ) {
         assert_colour(got, "x265 10-bit via the GPU");
+    }
+}
+
+#[test]
+fn full_and_half_chroma_come_from_the_gpu_for_a_software_encoder() {
+    let (device, context) = d3d::create_device(None).unwrap();
+    for (id, depth, chroma) in [
+        ("libx264", 8, Chroma::C444),
+        ("libx264", 8, Chroma::C422),
+        ("libx265", 10, Chroma::C444),
+        ("libx265", 10, Chroma::C422),
+    ] {
+        if let Some(got) = record_gpu(&device, &context, id, Feed::Download, depth, chroma) {
+            assert_colour(
+                got,
+                &format!("{id} {depth}-bit {} via the GPU", chroma.name()),
+            );
+        }
     }
 }

@@ -282,8 +282,9 @@ fn try_gpu(
     source_hdr: bool,
 ) -> Option<GpuParts> {
     let feed = vixeeny_encode::gpu::feed(encoder)?;
+    // 4:2:2 and 4:4:4 come back packed from the GPU, for a software encoder to unpack.
     if std::env::var_os("VIXEENY_NO_GPU").is_some()
-        || config.chroma != Chroma::C420
+        || (config.chroma != Chroma::C420 && feed != Feed::Download)
         || !matches!(config.depth, 8 | 10)
     {
         return None;
@@ -308,6 +309,7 @@ fn try_gpu(
                 config.fps,
                 config.hdr,
                 config.depth == 10 || config.hdr,
+                config.chroma,
                 feed,
             )
             .map(|pipeline| GpuParts {

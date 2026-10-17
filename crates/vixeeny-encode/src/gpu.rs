@@ -119,7 +119,8 @@ impl GpuPipeline {
         }
     }
 
-    /// [`Feed::Download`]: the pixels of `frame` in system memory (NV12 or P010).
+    /// [`Feed::Download`]: the pixels of `frame` in system memory (NV12 / P010, or packed
+    /// 4:2:2 / 4:4:4).
     pub(crate) fn download(
         &self,
         frame: &HwFrame,
@@ -155,6 +156,7 @@ mod windows_impl {
     use crate::clock::Fps;
     use crate::d3d_convert::{Conversion, VideoConverter};
     use crate::recorder::RecordError;
+    use crate::registry::Chroma;
     use ffmpeg_next::ffi;
     use windows::Win32::Foundation::RECT;
     use windows::Win32::Graphics::Direct3D11::{
@@ -162,7 +164,9 @@ mod windows_impl {
         D3D11_USAGE_DEFAULT, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
     };
     use windows::Win32::Graphics::Dxgi::Common::{
-        DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_SAMPLE_DESC,
+        DXGI_FORMAT_AYUV, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_NV12, DXGI_FORMAT_P010,
+        DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_Y210, DXGI_FORMAT_Y410, DXGI_FORMAT_YUY2,
+        DXGI_SAMPLE_DESC,
     };
     use windows::core::Interface;
 
@@ -186,7 +190,8 @@ mod windows_impl {
     impl GpuPipeline {
         /// Builds the video processor, the FFmpeg D3D11 device and frame pool on `device` (and
         /// their QSV view for [`Feed::Qsv`]), and converts one blank frame as a self-test.
-        /// `ten_bit`: P010 instead of NV12 (always for an HDR output).
+        /// `ten_bit`: P010 instead of NV12 (always for an HDR output). `chroma` other than 4:2:0
+        /// gives packed frames (YUY2 / Y210, AYUV / Y410), for [`Feed::Download`] only.
         #[allow(clippy::too_many_arguments)]
         pub fn new(
             device: &ID3D11Device,
@@ -196,8 +201,12 @@ mod windows_impl {
             fps: Fps,
             hdr_output: bool,
             ten_bit: bool,
+            chroma: Chroma,
             feed: Feed,
         ) -> Result<Self, RecordError> {
+            if chroma != Chroma::C420 && feed != Feed::Download {
+                return Err(cfg_err("frame pool", "4:2:2 and 4:4:4 are downloaded only"));
+            }
             let converter = VideoConverter::new(
                 device,
                 context,
@@ -210,6 +219,20 @@ mod windows_impl {
                 },
             )
             .map_err(|e| cfg_err("video processor", e))?;
+            let (written, sw_format) = match (chroma, ten_bit) {
+                (Chroma::C420, false) => (DXGI_FORMAT_NV12, ffi::AVPixelFormat::AV_PIX_FMT_NV12),
+                (Chroma::C420, true) => (DXGI_FORMAT_P010, ffi::AVPixelFormat::AV_PIX_FMT_P010LE),
+                (Chroma::C422, false) => (DXGI_FORMAT_YUY2, ffi::AVPixelFormat::AV_PIX_FMT_YUYV422),
+                (Chroma::C422, true) => (DXGI_FORMAT_Y210, ffi::AVPixelFormat::AV_PIX_FMT_Y210LE),
+                (Chroma::C444, false) => (DXGI_FORMAT_AYUV, ffi::AVPixelFormat::AV_PIX_FMT_VUYX),
+                (Chroma::C444, true) => (DXGI_FORMAT_Y410, ffi::AVPixelFormat::AV_PIX_FMT_XV30LE),
+            };
+            if !converter.writes(written) {
+                return Err(cfg_err(
+                    "video processor",
+                    format!("cannot write {}", chroma.name()),
+                ));
+            }
 
             // SAFETY: plain FFmpeg allocation and initialisation calls; every return value is
             // checked and partial state is released on failure.
@@ -234,11 +257,7 @@ mod windows_impl {
                 }
                 let fctx = (*frames).data.cast::<ffi::AVHWFramesContext>();
                 (*fctx).format = ffi::AVPixelFormat::AV_PIX_FMT_D3D11;
-                (*fctx).sw_format = if ten_bit {
-                    ffi::AVPixelFormat::AV_PIX_FMT_P010LE
-                } else {
-                    ffi::AVPixelFormat::AV_PIX_FMT_NV12
-                };
+                (*fctx).sw_format = sw_format;
                 (*fctx).width = out.0 as i32;
                 (*fctx).height = out.1 as i32;
                 // NVIDIA refuses NV12 / P010 texture arrays that can be render targets (what the
