@@ -209,7 +209,20 @@ fn the_graphics_card_and_the_processor_show_the_same_frames() {
         let (b, pb) = cpu.read((160, 90)).unwrap().unwrap();
         assert_eq!((a, b), (target, target));
         assert!(number(&pa.bgra).abs_diff(number(&pb.bgra)) <= 1);
+        // The same picture, but for the filters of the two scalers.
+        let diff: u64 = pa
+            .bgra
+            .iter()
+            .zip(&pb.bgra)
+            .map(|(x, y)| u64::from(x.abs_diff(*y)))
+            .sum();
+        assert!(
+            diff / pa.bgra.len() as u64 <= 8,
+            "mean difference {}",
+            diff / pa.bgra.len() as u64
+        );
     }
+    assert!(card.scaled_on_card(), "the card scales what it decodes");
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -222,6 +235,12 @@ fn an_hdr_clip_is_previewed_in_sdr() {
         let mut pictures = Pictures::open_with(&clip, hardware).unwrap();
         pictures.seek(10).unwrap();
         let (_, picture) = pictures.read((160, 90)).unwrap().unwrap();
+        if hardware && pictures.hardware() {
+            assert!(
+                pictures.scaled_on_card(),
+                "the card scales the HDR frames too"
+            );
+        }
         let centre = &picture.bgra[(45 * 160 + 80) * 4..][..4];
         // Shown as PQ codes it would be a mid grey (≈ 150): tone mapped, a near white.
         assert!(

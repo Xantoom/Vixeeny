@@ -2,6 +2,8 @@
 //! vixeeny-encode — the codec registry, profile validation, hardware probing and, in
 //! later milestones, the video pipeline. See README.md.
 
+#[cfg(windows)]
+mod card_scale;
 pub mod clock;
 mod convert;
 pub mod cut;

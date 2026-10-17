@@ -391,21 +391,36 @@ impl ToneMap {
     /// A picture of `w`×`h` RGB48 (rows `stride` bytes apart) to packed BGRA in `bgra`, on
     /// every core.
     fn run(&self, data: &[u8], stride: usize, w: usize, h: usize, bgra: &mut [u8]) {
+        self.run_with::<6>(data, stride, (w, h), bgra, |px| {
+            let c = |i: usize| u16::from_le_bytes([px[i], px[i + 1]]);
+            [c(0), c(2), c(4)]
+        });
+    }
+
+    /// Like [`run`](Self::run), from pixels of `N` bytes whose PQ codes `codes` reads (16 bits).
+    pub(crate) fn run_with<const N: usize>(
+        &self,
+        data: &[u8],
+        stride: usize,
+        (w, h): (usize, usize),
+        bgra: &mut [u8],
+        codes: impl Fn(&[u8; N]) -> [u16; 3] + Sync,
+    ) {
         let threads = std::thread::available_parallelism().map_or(4, std::num::NonZero::get);
         let rows = h.div_ceil(threads).max(1);
+        let codes = &codes;
         std::thread::scope(|s| {
             for (chunk, out) in bgra.chunks_mut(rows * w * 4).enumerate() {
                 s.spawn(move || {
                     for (r, line) in out.chunks_exact_mut(w * 4).enumerate() {
-                        let row = &data[(chunk * rows + r) * stride..][..w * 6];
+                        let row = &data[(chunk * rows + r) * stride..][..w * N];
                         for (px, dst) in row
-                            .as_chunks::<6>()
+                            .as_chunks::<N>()
                             .0
                             .iter()
                             .zip(line.as_chunks_mut::<4>().0)
                         {
-                            let c = |i: usize| u16::from_le_bytes([px[i], px[i + 1]]);
-                            *dst = self.pixel([c(0), c(2), c(4)]);
+                            *dst = self.pixel(codes(px));
                         }
                     }
                 });
@@ -484,6 +499,10 @@ pub struct Pictures {
     /// The decoder works on the graphics card.
     hardware: bool,
     scaler: Scaler,
+    /// Scales the frames of the card on the card; `None` once it failed (the processor
+    /// scales them then).
+    #[cfg(windows)]
+    card: Option<crate::card_scale::CardScaler>,
     /// Frames before this one are decoded but not handed out (after a seek).
     from: usize,
     eof: bool,
@@ -517,6 +536,8 @@ impl Pictures {
             hardware,
             input,
             scaler: Scaler::new(clip.hdr)?,
+            #[cfg(windows)]
+            card: Some(crate::card_scale::CardScaler::new()),
             from: 0,
             eof: false,
             decoded: frame::Video::empty(),
@@ -535,6 +556,15 @@ impl Pictures {
     /// Whether the graphics card decodes.
     pub fn hardware(&self) -> bool {
         self.hardware
+    }
+
+    /// Whether the graphics card also scales what it decodes (only the pictures shown come
+    /// back to memory).
+    pub fn scaled_on_card(&self) -> bool {
+        #[cfg(windows)]
+        return self.hardware && self.card.is_some();
+        #[cfg(not(windows))]
+        false
     }
 
     /// The card failed (a codec or profile it has not): the processor takes over, from the
@@ -613,8 +643,45 @@ impl Pictures {
         if !on_card {
             return Ok(Some((i, self.scaler.run(&self.decoded, size, bgra)?)));
         }
+        #[cfg(windows)]
+        let bgra = match self.on_card(size, bgra) {
+            Ok(picture) => return Ok(Some((i, picture))),
+            Err(bgra) => bgra,
+        };
         self.copy_from_card()?;
         Ok(Some((i, self.scaler.run(&self.copied, size, bgra)?)))
+    }
+
+    /// The frame of the card scaled on the card; `bgra` back when the card cannot.
+    #[cfg(windows)]
+    fn on_card(&mut self, size: (u32, u32), mut bgra: Vec<u8>) -> Result<Picture, Vec<u8>> {
+        let Some(card) = self.card.as_mut() else {
+            return Err(bgra);
+        };
+        let (w, h) = (size.0.max(2), size.1.max(2));
+        bgra.clear();
+        bgra.resize(w as usize * h as usize * 4, 0);
+        // SAFETY: the frame was just decoded by the card (`hw_frames_ctx` checked by the caller).
+        let done = unsafe {
+            card.run(
+                self.decoded.as_ptr(),
+                (w, h),
+                &mut bgra,
+                self.scaler.tone.as_ref(),
+            )
+        };
+        match done {
+            Ok(()) => Ok(Picture {
+                width: w,
+                height: h,
+                bgra,
+            }),
+            Err(e) => {
+                tracing::info!("video editor: frames scaled on the processor ({e})");
+                self.card = None;
+                Err(bgra)
+            }
+        }
     }
 
     /// Copies the frame of the card to memory, into the buffers of the last copy when they

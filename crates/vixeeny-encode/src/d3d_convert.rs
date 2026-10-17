@@ -111,6 +111,32 @@ impl VideoConverter {
         fps: (u32, u32),
         conversion: Conversion,
     ) -> Result<Self, String> {
+        let spaces = match (conversion.hdr_source, conversion.hdr_output) {
+            (true, true) => (
+                DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709,
+                DXGI_COLOR_SPACE_YCBCR_STUDIO_G2084_LEFT_P2020,
+            ),
+            (true, false) => (
+                DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709,
+                DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709,
+            ),
+            (false, _) => (
+                DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709,
+                DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709,
+            ),
+        };
+        Self::with_spaces(device, context, src, out, fps, spaces)
+    }
+
+    /// A converter from `spaces.0` to `spaces.1` (any formats the video processor takes).
+    pub fn with_spaces(
+        device: &ID3D11Device,
+        context: &ID3D11DeviceContext,
+        src: (u32, u32),
+        out: (u32, u32),
+        fps: (u32, u32),
+        (input_space, output_space): (DXGI_COLOR_SPACE_TYPE, DXGI_COLOR_SPACE_TYPE),
+    ) -> Result<Self, String> {
         let video_device: ID3D11VideoDevice = device.cast().map_err(|e| err("video device", e))?;
         let video_context: ID3D11VideoContext1 =
             context.cast().map_err(|e| err("video context", e))?;
@@ -134,21 +160,6 @@ impl VideoConverter {
         // SAFETY: as above.
         let processor = unsafe { video_device.CreateVideoProcessor(&enumerator, 0) }
             .map_err(|e| err("CreateVideoProcessor", e))?;
-        let (input_space, output_space): (DXGI_COLOR_SPACE_TYPE, DXGI_COLOR_SPACE_TYPE) =
-            match (conversion.hdr_source, conversion.hdr_output) {
-                (true, true) => (
-                    DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709,
-                    DXGI_COLOR_SPACE_YCBCR_STUDIO_G2084_LEFT_P2020,
-                ),
-                (true, false) => (
-                    DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709,
-                    DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709,
-                ),
-                (false, _) => (
-                    DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709,
-                    DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709,
-                ),
-            };
         // SAFETY: the processor belongs to this video context; no pointers are involved.
         unsafe {
             video_context.VideoProcessorSetStreamColorSpace1(&processor, 0, input_space);
@@ -174,13 +185,26 @@ impl VideoConverter {
         dst: &ID3D11Texture2D,
         dst_slice: u32,
     ) -> Result<(), String> {
+        self.convert_slice(src, 0, src_rect, dst, dst_slice)
+    }
+
+    /// Like [`convert`](Self::convert), from slice `src_slice` of a texture array (the frames
+    /// of a decoder).
+    pub fn convert_slice(
+        &self,
+        src: &ID3D11Texture2D,
+        src_slice: u32,
+        src_rect: RECT,
+        dst: &ID3D11Texture2D,
+        dst_slice: u32,
+    ) -> Result<(), String> {
         let input_desc = D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC {
             FourCC: 0,
             ViewDimension: D3D11_VPIV_DIMENSION_TEXTURE2D,
             Anonymous: D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC_0 {
                 Texture2D: D3D11_TEX2D_VPIV {
                     MipSlice: 0,
-                    ArraySlice: 0,
+                    ArraySlice: src_slice,
                 },
             },
         };
