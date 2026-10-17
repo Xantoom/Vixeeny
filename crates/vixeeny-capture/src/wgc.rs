@@ -377,6 +377,10 @@ impl StillBackend for WgcBackend {
         self.grab_sdr(&window_item(window)?, None, cursor, info, tonemap)
     }
 
+    fn d3d_device(&self) -> Option<ID3D11Device> {
+        Some(self.device.clone())
+    }
+
     fn window_monitor(&self, window: WindowId) -> Option<MonitorId> {
         // SAFETY: a stale window handle gives a null monitor.
         let monitor = unsafe { MonitorFromWindow(hwnd(window), MONITOR_DEFAULTTONULL) };

@@ -105,7 +105,7 @@ pub struct Gfx {
     icons: RefCell<HashMap<usize, Option<ID2D1PathGeometry>>>,
 }
 
-fn d3d_device(driver: D3D_DRIVER_TYPE) -> Result<ID3D11Device> {
+pub(crate) fn d3d_device(driver: D3D_DRIVER_TYPE) -> Result<ID3D11Device> {
     let mut device = None;
     // SAFETY: the out-pointer is valid for the call; no adapter, default feature levels.
     unsafe {

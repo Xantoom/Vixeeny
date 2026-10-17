@@ -120,7 +120,7 @@ fn effect_rect(r: &Rect, w: u32, h: u32) -> Option<D2D_RECT_F> {
     })
 }
 
-fn floats(values: &[f32]) -> Vec<u8> {
+pub(crate) fn floats(values: &[f32]) -> Vec<u8> {
     values.iter().flat_map(|v| v.to_le_bytes()).collect()
 }
 
@@ -170,7 +170,7 @@ fn into(
     }
 }
 
-fn effect(
+pub(crate) fn effect(
     dc: &ID2D1DeviceContext,
     id: &windows::core::GUID,
     input: &ID2D1Image,
@@ -183,7 +183,7 @@ fn effect(
     }
 }
 
-fn set(
+pub(crate) fn set(
     e: &ID2D1Effect,
     prop: i32,
     kind: windows::Win32::Graphics::Direct2D::D2D1_PROPERTY_TYPE,
@@ -193,7 +193,7 @@ fn set(
     unsafe { e.SetValue(prop as u32, kind, data) }
 }
 
-fn set_enum(e: &ID2D1Effect, prop: i32, value: i32) -> Result<()> {
+pub(crate) fn set_enum(e: &ID2D1Effect, prop: i32, value: i32) -> Result<()> {
     set(
         e,
         prop,
@@ -202,13 +202,17 @@ fn set_enum(e: &ID2D1Effect, prop: i32, value: i32) -> Result<()> {
     )
 }
 
-fn output(e: &ID2D1Effect) -> Result<ID2D1Image> {
+pub(crate) fn output(e: &ID2D1Effect) -> Result<ID2D1Image> {
     // SAFETY: plain call.
     unsafe { e.GetOutput() }
 }
 
 /// `input` within `r`, its edges repeated outwards (the export's effects only see their area).
-fn clamped(dc: &ID2D1DeviceContext, input: &ID2D1Image, r: D2D_RECT_F) -> Result<ID2D1Image> {
+pub(crate) fn clamped(
+    dc: &ID2D1DeviceContext,
+    input: &ID2D1Image,
+    r: D2D_RECT_F,
+) -> Result<ID2D1Image> {
     let crop = effect(dc, &CLSID_D2D1Crop, input)?;
     set(
         &crop,
@@ -230,7 +234,7 @@ fn clamped(dc: &ID2D1DeviceContext, input: &ID2D1Image, r: D2D_RECT_F) -> Result
     output(&border)
 }
 
-fn blurred(
+pub(crate) fn blurred(
     dc: &ID2D1DeviceContext,
     input: &ID2D1Image,
     r: D2D_RECT_F,

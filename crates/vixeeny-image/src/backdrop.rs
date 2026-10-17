@@ -27,29 +27,75 @@ pub struct Linear {
 /// Margin and corner radius at 100 %, in pixels; they grow with the screen's scale.
 const MARGIN: f32 = 48.0;
 const RADIUS: f32 = 8.0;
+/// How much the blur backdrop is darkened (so the window stands out), and how much the shadow
+/// darkens at its heart.
+pub const DARKEN: f32 = 0.8;
+pub const SHADOW: f32 = 0.45;
+
+/// The sizes of a window set on its background, in pixels (what the graphics card draws too).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Layout {
+    /// The whole picture.
+    pub size: (u32, u32),
+    pub margin: u32,
+    pub radius: f32,
+    /// How far down the shadow is, and the radius of its three box blurs.
+    pub offset: u32,
+    pub softness: u32,
+    /// The blur backdrop is worked out at this size, then blurred by three box blurs of
+    /// `small_radius`.
+    pub small: (u32, u32),
+    pub small_radius: u32,
+}
+
+/// The layout of a `width`×`height` window at the interface `scale` of its screen.
+pub fn layout(width: u32, height: u32, scale: f32) -> Layout {
+    let margin = (MARGIN * scale).round().max(8.0) as u32;
+    let (w, h) = (width + 2 * margin, height + 2 * margin);
+    // Worked out small (an eighth), then smoothly enlarged: the same look, far less work.
+    let small = ((w / 8).max(4), (h / 8).max(4));
+    Layout {
+        size: (w, h),
+        margin,
+        radius: RADIUS * scale,
+        offset: (margin as f32 * 0.25).round() as u32,
+        softness: (margin as f32 * 0.4).round().max(1.0) as u32,
+        small,
+        small_radius: (small.0.max(small.1) / 12).max(2),
+    }
+}
+
+/// A plain backdrop colour in linear light, at `white` (see [`set_on`]).
+pub fn linear_colour(c: [u8; 3], white: f32) -> [f32; 3] {
+    c.map(|v| srgb_decode(f32::from(v) / 255.0) * white)
+}
 
 /// `window` on `backdrop`, at the interface `scale` of its screen. `white`: SDR white in the
 /// picture's units (1.0 for SDR, the screen's SDR white / 80 for scRGB), the brightness of the
 /// colour backdrop.
 pub fn set_on(window: &Linear, backdrop: Backdrop, scale: f32, white: f32) -> Linear {
-    let margin = (MARGIN * scale).round().max(8.0) as u32;
-    let radius = RADIUS * scale;
-    let (w, h) = (window.width + 2 * margin, window.height + 2 * margin);
+    let layout = layout(window.width, window.height, scale);
+    let Layout {
+        size: (w, h),
+        margin,
+        radius,
+        ..
+    } = layout;
     let mut out = match backdrop {
         Backdrop::Colour(c) => {
-            let px = c.map(|v| srgb_decode(f32::from(v) / 255.0) * white);
+            let px = linear_colour(c, white);
             Linear {
                 width: w,
                 height: h,
                 rgba: [px[0], px[1], px[2], 1.0].repeat(w as usize * h as usize),
             }
         }
-        Backdrop::Blur => blurred(window, w, h),
+        Backdrop::Blur => blurred(window, &layout),
     };
     // The shadow: the window's shape, lower, softened, darkening what is under it.
     let shape = rounded(window.width, window.height, radius);
-    let offset = (margin as f32 * 0.25).round() as usize;
-    let softness = (margin as f32 * 0.4).round().max(1.0) as usize;
+    let offset = layout.offset as usize;
+    let softness = layout.softness as usize;
     let mut shadow = vec![0.0_f32; w as usize * h as usize];
     for y in 0..window.height as usize {
         let dst = (y + margin as usize + offset) * w as usize + margin as usize;
@@ -65,7 +111,7 @@ pub fn set_on(window: &Linear, backdrop: Backdrop, scale: f32, white: f32) -> Li
         .par_chunks_mut(4)
         .zip(shadow.par_iter())
         .for_each(|(px, &s)| {
-            let keep = 1.0 - 0.45 * s;
+            let keep = 1.0 - SHADOW * s;
             px[0] *= keep;
             px[1] *= keep;
             px[2] *= keep;
@@ -124,9 +170,9 @@ fn rounded(w: u32, h: u32, radius: f32) -> Vec<f32> {
 
 /// The window stretched over `w`×`h` and blurred well past recognition, a little darker so the
 /// window stands out.
-fn blurred(window: &Linear, w: u32, h: u32) -> Linear {
-    // Worked out small (an eighth), then smoothly enlarged: the same look, far less work.
-    let (sw, sh) = ((w / 8).max(4) as usize, (h / 8).max(4) as usize);
+fn blurred(window: &Linear, layout: &Layout) -> Linear {
+    let (w, h) = layout.size;
+    let (sw, sh) = (layout.small.0 as usize, layout.small.1 as usize);
     let (ww, wh) = (window.width as usize, window.height as usize);
     let mut small = vec![[0.0_f32; 3]; sw * sh];
     for (i, px) in small.iter_mut().enumerate() {
@@ -144,9 +190,9 @@ fn blurred(window: &Linear, w: u32, h: u32) -> Linear {
             }
         }
         let n = ((y1.min(wh) - y0) * (x1.min(ww) - x0)).max(1) as f32;
-        *px = sum.map(|s| s / n * 0.8);
+        *px = sum.map(|s| s / n * DARKEN);
     }
-    let radius = (sw.max(sh) / 12).max(2);
+    let radius = layout.small_radius as usize;
     for c in 0..3 {
         let mut plane: Vec<f32> = small.iter().map(|p| p[c]).collect();
         blur_plane(&mut plane, sw, sh, radius);

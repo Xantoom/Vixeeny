@@ -35,6 +35,8 @@ windows = { workspace = true, features = [
 ] }
 
 [dev-dependencies]
+vixeeny-common = { path = "../vixeeny-common" }
+vixeeny-image = { path = "../vixeeny-image" }
 png.workspace = true
 vixeeny-capture = { path = "../vixeeny-capture" }
 vixeeny-platform = { path = "../vixeeny-platform" }

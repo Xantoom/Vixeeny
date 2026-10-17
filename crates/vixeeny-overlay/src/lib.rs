@@ -2,6 +2,7 @@
 //! vixeeny-overlay — what Vixeeny draws natively (see the README): the zone editor of Print
 //! Screen, the side strip, the notifications and the recording widget.
 
+pub mod backdrop;
 pub mod cutter;
 mod drawing;
 pub mod gfx;

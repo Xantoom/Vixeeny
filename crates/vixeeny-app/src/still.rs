@@ -12,6 +12,7 @@ use vixeeny_common::ipc::ActionId;
 use vixeeny_common::naming::{self, AppInfo, Vars};
 use vixeeny_image::backdrop::{self, Backdrop, Linear};
 use vixeeny_image::{Bgra, Hdr, ImageError, ImageFormat, Settings};
+use vixeeny_overlay::backdrop as card;
 use vixeeny_platform::{ExeMetadata, LocalTime, MonitorInfo, WindowInfo, monitor_at};
 
 #[derive(Debug, thiserror::Error)]
@@ -203,7 +204,9 @@ pub fn run<B: StillBackend>(
     } else {
         None
     };
-    // A window set on its background: the interface scale of its screen sizes the margin.
+    // A window set on its background: the interface scale of its screen sizes the margin. It is
+    // drawn on the capture's own graphics device.
+    let device = capturer.d3d_device();
     let backdrop = output
         .backdrop
         .filter(|_| action == ActionId::CaptureWindow)
@@ -224,18 +227,39 @@ pub fn run<B: StillBackend>(
     let path = if let Some(mut capture) = hdr {
         let grabbed = started.elapsed();
         if let Some((b, scale)) = backdrop {
-            let window = Linear {
-                width: capture.frame.width,
-                height: capture.frame.height,
-                rgba: std::mem::take(&mut capture.frame.rgba),
-            };
+            let (w, h) = (capture.frame.width, capture.frame.height);
             let white = capture.info.sdr_white_nits / 80.0;
-            let set = backdrop::set_on(&window, b, scale, white);
-            capture.frame = HdrFrame {
-                width: set.width,
-                height: set.height,
-                rgba: set.rgba,
+            let layout = backdrop::layout(w, h, scale);
+            let window = card::Window::Hdr {
+                width: w,
+                height: h,
+                rgba: &capture.frame.rgba,
             };
+            capture.frame =
+                match card::set_on_card(device.as_ref(), &window, &card_setting(&layout, b, white))
+                {
+                    Ok(card::Set::Hdr(rgba)) => HdrFrame {
+                        width: layout.size.0,
+                        height: layout.size.1,
+                        rgba,
+                    },
+                    card => {
+                        if let Err(e) = card {
+                            tracing::debug!("backdrop on the processor: {e}");
+                        }
+                        let window = Linear {
+                            width: w,
+                            height: h,
+                            rgba: std::mem::take(&mut capture.frame.rgba),
+                        };
+                        let set = backdrop::set_on(&window, b, scale, white);
+                        HdrFrame {
+                            width: set.width,
+                            height: set.height,
+                            rgba: set.rgba,
+                        }
+                    }
+                };
         }
         let path = save_hdr(action, snap, dest, output, metadata, &capture)?;
         tracing::debug!(
@@ -247,10 +271,29 @@ pub fn run<B: StillBackend>(
         let frame = capturer.grab(&target, options)?;
         let grabbed = started.elapsed();
         let set = backdrop.map(|(b, scale)| {
-            let window =
-                backdrop::linear_from_bgra(frame.width, frame.height, frame.stride, &frame.data);
-            let set = backdrop::set_on(&window, b, scale, 1.0);
-            (set.width, set.height, backdrop::linear_to_bgra(&set))
+            let layout = backdrop::layout(frame.width, frame.height, scale);
+            let window = card::Window::Sdr {
+                width: frame.width,
+                height: frame.height,
+                stride: frame.stride,
+                bgra: &frame.data,
+            };
+            match card::set_on_card(device.as_ref(), &window, &card_setting(&layout, b, 1.0)) {
+                Ok(card::Set::Sdr(bgra)) => (layout.size.0, layout.size.1, bgra),
+                card => {
+                    if let Err(e) = card {
+                        tracing::debug!("backdrop on the processor: {e}");
+                    }
+                    let window = backdrop::linear_from_bgra(
+                        frame.width,
+                        frame.height,
+                        frame.stride,
+                        &frame.data,
+                    );
+                    let set = backdrop::set_on(&window, b, scale, 1.0);
+                    (set.width, set.height, backdrop::linear_to_bgra(&set))
+                }
+            }
         });
         let image = match &set {
             Some((w, h, bgra)) => Bgra::new(*w, *h, *w as usize * 4, bgra),
@@ -343,6 +386,24 @@ fn write_named(
     );
     write_atomic(&path, bytes)?;
     Ok(path)
+}
+
+/// The graphics card's version of `b`, with the processor's sizes.
+fn card_setting(layout: &backdrop::Layout, b: Backdrop, white: f32) -> card::Setting {
+    card::Setting {
+        margin: layout.margin,
+        radius: layout.radius,
+        offset: layout.offset,
+        softness: layout.softness,
+        small: layout.small,
+        small_radius: layout.small_radius,
+        darken: backdrop::DARKEN,
+        shadow: backdrop::SHADOW,
+        behind: match b {
+            Backdrop::Blur => card::Behind::Blur,
+            Backdrop::Colour(c) => card::Behind::Colour(backdrop::linear_colour(c, white)),
+        },
+    }
 }
 
 #[cfg(test)]

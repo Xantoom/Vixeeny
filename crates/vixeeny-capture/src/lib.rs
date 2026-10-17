@@ -19,6 +19,7 @@ pub use hdr::{HdrCapture, HdrFrame, reference};
 use vixeeny_platform::{HdrInfo, MonitorId, MonitorInfo, PhysicalRect, WindowId, virtual_bounds};
 pub use wgc::WgcBackend;
 pub use wgc_stream::{CapturedFrame, GpuCapture, Notify, StreamTarget, TextureSink, VideoStream};
+use windows::Win32::Graphics::Direct3D11::ID3D11Device;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum CaptureTarget {
@@ -119,6 +120,10 @@ pub trait StillBackend {
     fn window_monitor(&self, _window: WindowId) -> Option<MonitorId> {
         None
     }
+    /// The Direct3D device the captures are made on, for further work on the graphics card.
+    fn d3d_device(&self) -> Option<ID3D11Device> {
+        None
+    }
 }
 
 pub struct Capturer<B: StillBackend> {
@@ -132,6 +137,11 @@ impl<B: StillBackend> Capturer<B> {
             card_tonemap::warm();
         }
         Self { backend, monitors }
+    }
+
+    /// The backend's Direct3D device (see [`StillBackend::d3d_device`]).
+    pub fn d3d_device(&self) -> Option<ID3D11Device> {
+        self.backend.d3d_device()
     }
 
     fn monitor(&self, id: MonitorId) -> Result<&MonitorInfo, CaptureError> {
