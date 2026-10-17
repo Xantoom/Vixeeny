@@ -62,6 +62,12 @@ pub enum CaptureError {
     Os(String),
 }
 
+/// A monitor as it shows: scRGB for an HDR one, 8-bit for the others.
+pub enum Shown {
+    Hdr(HdrFrame),
+    Sdr(CpuFrame),
+}
+
 /// What an OS must provide for single images.
 pub trait StillBackend {
     /// The whole monitor, physical pixels.
@@ -136,6 +142,22 @@ pub trait StillBackend {
                     self.grab_monitor_sdr(m, None, cursor, &info, tonemap)
                 }
                 _ => self.grab_monitor(m, cursor),
+            })
+            .collect()
+    }
+    /// Every monitor of `monitors` as it shows: [`grab_monitor_hdr`](Self::grab_monitor_hdr)
+    /// for an HDR one, [`grab_monitor`](Self::grab_monitor) for the others. A backend may
+    /// capture them side by side.
+    fn grab_monitors_shown(
+        &mut self,
+        monitors: &[MonitorInfo],
+        cursor: bool,
+    ) -> Result<Vec<Shown>, CaptureError> {
+        monitors
+            .iter()
+            .map(|m| match m.hdr {
+                Some(_) => self.grab_monitor_hdr(m, None, cursor).map(Shown::Hdr),
+                None => self.grab_monitor(m, cursor).map(Shown::Sdr),
             })
             .collect()
     }
@@ -288,17 +310,15 @@ impl<B: StillBackend> Capturer<B> {
         let bounds =
             virtual_bounds(self.monitors.iter().map(|m| &m.rect)).ok_or(CaptureError::NoMonitor)?;
         let mut canvas = HdrFrame::new(bounds.width, bounds.height);
-        for monitor in self.monitors.clone() {
-            let frame = match monitor.hdr {
-                Some(own) => {
-                    let mut frame = self.backend.grab_monitor_hdr(&monitor, None, cursor)?;
-                    frame.scale(info.sdr_white_nits / own.sdr_white_nits.max(1.0));
+        let shown = self.backend.grab_monitors_shown(&self.monitors, cursor)?;
+        for (monitor, shown) in self.monitors.iter().zip(shown) {
+            let frame = match (shown, monitor.hdr) {
+                (Shown::Hdr(mut frame), own) => {
+                    let own = own.map_or(info.sdr_white_nits, |o| o.sdr_white_nits);
+                    frame.scale(info.sdr_white_nits / own.max(1.0));
                     frame
                 }
-                None => HdrFrame::from_sdr(
-                    &self.backend.grab_monitor(&monitor, cursor)?,
-                    info.sdr_white_nits,
-                ),
+                (Shown::Sdr(frame), _) => HdrFrame::from_sdr(&frame, info.sdr_white_nits),
             };
             let at = monitor.rect.relative_to(&bounds);
             canvas.blit(&frame, at.x, at.y);

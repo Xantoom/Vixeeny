@@ -30,7 +30,9 @@ use windows::Win32::System::WinRT::Direct3D11::{
 use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop;
 use windows::core::{Interface, factory};
 
-use crate::{CaptureError, CpuFrame, HdrFrame, StillBackend, ToneMapFn, card_tonemap, tonemapped};
+use crate::{
+    CaptureError, CpuFrame, HdrFrame, Shown, StillBackend, ToneMapFn, card_tonemap, tonemapped,
+};
 
 pub(crate) const FRAME_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -455,6 +457,35 @@ impl StillBackend for WgcBackend {
                     started.finish(|t| self.read_tonemapped(t, None, &info, tonemap))
                 }
                 _ => started.finish(|t| self.read_sdr(t)),
+            })
+            .collect()
+    }
+
+    fn grab_monitors_shown(
+        &mut self,
+        monitors: &[MonitorInfo],
+        cursor: bool,
+    ) -> Result<Vec<Shown>, CaptureError> {
+        // Every capture starts before any is waited for: they run side by side.
+        let started = monitors
+            .iter()
+            .map(|m| {
+                let format = match m.hdr {
+                    Some(_) => DirectXPixelFormat::R16G16B16A16Float,
+                    None => DirectXPixelFormat::B8G8R8A8UIntNormalized,
+                };
+                self.start(&monitor_item(m)?, cursor, format)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        monitors
+            .iter()
+            .zip(started)
+            .map(|(m, started)| match m.hdr {
+                Some(_) => started.finish(|t| {
+                    let raw = read_back(&self.device, &self.context, t)?;
+                    raw_hdr(&raw, None).map(Shown::Hdr)
+                }),
+                None => started.finish(|t| self.read_sdr(t).map(Shown::Sdr)),
             })
             .collect()
     }
