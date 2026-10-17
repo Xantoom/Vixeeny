@@ -103,9 +103,14 @@ pub struct Destination<'a> {
     pub use_foreground_app: bool,
     pub app_names: &'a BTreeMap<String, String>,
     pub now: &'a LocalTime,
-    /// Called with the image once it is written (e.g. to copy it to the clipboard).
-    pub after_save: Option<&'a dyn Fn(&Bgra<'_>)>,
+    /// Called with the image once it is written (e.g. to copy it to the clipboard), and with
+    /// the file's bytes when they are the image itself (not an HDR file of an SDR copy), so that
+    /// it is not encoded again.
+    pub after_save: Option<&'a AfterSave<'a>>,
 }
+
+/// What [`Destination::after_save`] calls: the image, and the file's bytes when they are it.
+pub type AfterSave<'a> = dyn Fn(&Bgra<'_>, Option<&[u8]>) + 'a;
 
 /// Display name of the application a capture is attributed to.
 pub(crate) fn app_name(
@@ -330,7 +335,7 @@ pub fn save_image(
         &bytes,
     )?;
     if let Some(after) = dest.after_save {
-        after(image);
+        after(image, Some(&bytes));
     }
     Ok(path)
 }
@@ -351,7 +356,7 @@ pub fn save_hdr(
     let path = write_named(action, snap, dest, output.format, metadata, size, &bytes)?;
     if let Some(after) = dest.after_save {
         let sdr = image.to_sdr();
-        after(&Bgra::new(size.0, size.1, size.0 as usize * 4, &sdr));
+        after(&Bgra::new(size.0, size.1, size.0 as usize * 4, &sdr), None);
     }
     Ok(path)
 }
@@ -753,7 +758,12 @@ mod tests {
         let now = now();
         let names = BTreeMap::new();
         let copied = std::cell::Cell::new(None);
-        let copy = |image: &Bgra<'_>| copied.set(Some((image.width, image.data[0])));
+        // The file's bytes, when the clipboard can take them as they are.
+        let encoded = std::cell::RefCell::new(None);
+        let copy = |image: &Bgra<'_>, bytes: Option<&[u8]>| {
+            copied.set(Some((image.width, image.data[0])));
+            *encoded.borrow_mut() = bytes.map(<[u8]>::to_vec);
+        };
         let dest = Destination {
             dir: &dir,
             template: "{app}",
@@ -795,10 +805,14 @@ mod tests {
         let (width, first) = copied.take().unwrap();
         assert_eq!(width, 160);
         assert!((150..250).contains(&first), "{first}");
+        // An HDR file is not the clipboard's SDR image: that one is encoded on its own.
+        assert!(encoded.take().is_none());
         // Converted when asked, and always for WebP.
         let sdr = shoot(ImageFormat::Png, false);
         assert!(!sdr.windows(4).any(|c| c == b"cICP"));
         assert_eq!(copied.take().unwrap().1, 7);
+        // The SDR file is the clipboard's image: not encoded a second time.
+        assert_eq!(encoded.take(), Some(sdr));
         let webp = shoot(ImageFormat::WebP, true);
         assert_eq!(&webp[8..12], b"WEBP");
         assert_eq!(copied.take().unwrap().1, 7);

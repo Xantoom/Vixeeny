@@ -9,10 +9,18 @@ use vixeeny_platform::PlatformError;
 use vixeeny_platform::clipboard::ImageClip;
 
 /// Copies `image`: as PNG (lossless) or, in another chosen format, as a file of that format
-/// (see `vixeeny_platform::clipboard`). A bitmap goes along in every case.
-pub fn copy_bgra(config: &Config, image: &Bgra<'_>) -> anyhow::Result<()> {
+/// (see `vixeeny_platform::clipboard`). A bitmap goes along in every case. `encoded`: the image
+/// already encoded with the image settings (the file just saved), not encoded again then.
+pub fn copy_bgra(config: &Config, image: &Bgra<'_>, encoded: Option<&[u8]>) -> anyhow::Result<()> {
     let (format, settings) = crate::image_output(config);
-    let bytes = vixeeny_image::encode(format, image, &settings)?;
+    let made;
+    let bytes = match encoded {
+        Some(bytes) => bytes,
+        None => {
+            made = vixeeny_image::encode(format, image, &settings)?;
+            &made[..]
+        }
+    };
     // The clipboard wants tightly packed rows.
     let row = image.width as usize * 4;
     let packed: Vec<u8>;
@@ -31,11 +39,11 @@ pub fn copy_bgra(config: &Config, image: &Bgra<'_>) -> anyhow::Result<()> {
     let file = if format == ImageFormat::Png {
         None
     } else {
-        Some(clip_file(format, &bytes)?)
+        Some(clip_file(format, bytes)?)
     };
     let clip = ImageClip {
-        png: (format == ImageFormat::Png).then_some(&bytes[..]),
-        jpeg: (format == ImageFormat::Jpeg).then_some(&bytes[..]),
+        png: (format == ImageFormat::Png).then_some(bytes),
+        jpeg: (format == ImageFormat::Jpeg).then_some(bytes),
         file: file.as_deref(),
     };
     vixeeny_platform::clipboard::copy_image(image.width, image.height, pixels, clip)

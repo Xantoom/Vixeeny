@@ -120,6 +120,25 @@ pub trait StillBackend {
     fn window_monitor(&self, _window: WindowId) -> Option<MonitorId> {
         None
     }
+    /// Every monitor of `monitors`, each as [`grab_monitor`](Self::grab_monitor) gives it, or
+    /// [`grab_monitor_sdr`](Self::grab_monitor_sdr) for an HDR one when `tonemap` is set. A
+    /// backend may capture them side by side.
+    fn grab_monitors(
+        &mut self,
+        monitors: &[MonitorInfo],
+        cursor: bool,
+        tonemap: Option<ToneMapFn>,
+    ) -> Result<Vec<CpuFrame>, CaptureError> {
+        monitors
+            .iter()
+            .map(|m| match (m.hdr, tonemap) {
+                (Some(info), Some(tonemap)) => {
+                    self.grab_monitor_sdr(m, None, cursor, &info, tonemap)
+                }
+                _ => self.grab_monitor(m, cursor),
+            })
+            .collect()
+    }
     /// The Direct3D device the captures are made on, for further work on the graphics card.
     fn d3d_device(&self) -> Option<ID3D11Device> {
         None
@@ -137,6 +156,11 @@ impl<B: StillBackend> Capturer<B> {
             card_tonemap::warm();
         }
         Self { backend, monitors }
+    }
+
+    /// The backend, to be kept for the next captures.
+    pub fn into_backend(self) -> B {
+        self.backend
     }
 
     /// The backend's Direct3D device (see [`StillBackend::d3d_device`]).
@@ -215,8 +239,10 @@ impl<B: StillBackend> Capturer<B> {
         let bounds =
             virtual_bounds(self.monitors.iter().map(|m| &m.rect)).ok_or(CaptureError::NoMonitor)?;
         let mut canvas = CpuFrame::new(bounds.width, bounds.height);
-        for monitor in self.monitors.clone() {
-            let frame = self.monitor_frame(&monitor, options)?;
+        let frames =
+            self.backend
+                .grab_monitors(&self.monitors, options.show_cursor, options.tonemap)?;
+        for (monitor, frame) in self.monitors.iter().zip(frames) {
             let at = monitor.rect.relative_to(&bounds);
             canvas.blit(&frame, at.x, at.y);
         }

@@ -30,6 +30,7 @@ fn copy_to_clipboard(config: &Config, img: &RgbaImage) -> anyhow::Result<()> {
     copy_bgra(
         config,
         &Bgra::new(img.width, img.height, img.width as usize * 4, &bgra),
+        None,
     )
 }
 
@@ -132,11 +133,6 @@ pub fn output_command(
                 match save(config, snapshot, action, &img, hdr.as_ref(), chosen) {
                     Ok(path) => {
                         tracing::debug!("saved {}", path.display());
-                        if config.image.copy_to_clipboard
-                            && let Err(e) = copy_to_clipboard(config, &img)
-                        {
-                            tracing::warn!("clipboard: {e:#}");
-                        }
                         true
                     }
                     Err(e) => {
@@ -176,7 +172,8 @@ fn copy_text(config: &Config, img: &RgbaImage) {
 }
 
 /// Writes `bitmap` to the images folder (or to `chosen`, whose extension picks the format);
-/// `hdr`, the same picture as HDR, is written instead when HDR is kept and the format can.
+/// `hdr`, the same picture as HDR, is written instead when HDR is kept and the format can. It
+/// is then copied to the clipboard when the settings say so.
 pub fn save_bgra(
     config: &Config,
     snap: &Snapshot,
@@ -186,6 +183,14 @@ pub fn save_bgra(
     chosen: Option<PathBuf>,
 ) -> anyhow::Result<PathBuf> {
     let (default_format, settings) = crate::image_output(config);
+    // Once saved, the image goes to the clipboard as well when the settings say so.
+    let copy = |image: &Bgra<'_>, encoded: Option<&[u8]>| {
+        if config.image.copy_to_clipboard
+            && let Err(e) = copy_bgra(config, image, encoded)
+        {
+            tracing::warn!("clipboard: {e:#}");
+        }
+    };
     let output = |format| still::Output {
         format,
         settings: &settings,
@@ -200,11 +205,15 @@ pub fn save_bgra(
             .and_then(ImageFormat::from_name)
             .filter(|f| f.available())
             .unwrap_or(default_format);
-        let bytes = match hdr.filter(|_| output(format).hdr()) {
+        let hdr = hdr.filter(|_| output(format).hdr());
+        let bytes = match hdr {
             Some(hdr) => vixeeny_image::encode_hdr(format, &still::hdr_image(hdr), &settings)?,
             None => vixeeny_image::encode(format, bitmap, &settings)?,
         };
         still::write_atomic(&path, &bytes)?;
+        // The file is the clipboard's image when it is in the format of the settings.
+        let same = hdr.is_none() && format == default_format;
+        copy(bitmap, same.then_some(&bytes[..]));
         return Ok(path);
     }
     let dir = vixeeny_common::paths::expand_user_dir(&config.paths.images)
@@ -217,7 +226,7 @@ pub fn save_bgra(
         use_foreground_app: true,
         app_names: &config.paths.app_names,
         now: &now,
-        after_save: None,
+        after_save: Some(&copy),
     };
     let output = output(default_format);
     let metadata = &vixeeny_platform::exe_metadata;

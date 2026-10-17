@@ -5,7 +5,7 @@
 //! Own windows are kept out of monitor captures by `WDA_EXCLUDEFROMCAPTURE`, set by the
 //! windows' owner (see `vixeeny_overlay::popup`), not here.
 
-use std::sync::mpsc::{Sender, channel};
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
 use vixeeny_platform::{HdrInfo, MonitorId, MonitorInfo, PhysicalRect, WindowId};
@@ -44,6 +44,11 @@ pub struct WgcBackend {
     winrt_device: IDirect3DDevice,
 }
 
+// SAFETY: a Direct3D 11 device is free-threaded and its WinRT wrapper is agile; the immediate
+// context is not thread-safe, but a moved backend is used by one thread at a time (it is not
+// `Sync`). It is made on one thread and used on another (the app makes it while starting).
+unsafe impl Send for WgcBackend {}
+
 impl WgcBackend {
     pub fn new() -> Result<Self, CaptureError> {
         if !GraphicsCaptureSession::IsSupported().map_err(os("IsSupported"))? {
@@ -67,9 +72,12 @@ impl WgcBackend {
         cursor: bool,
     ) -> Result<CpuFrame, CaptureError> {
         let format = DirectXPixelFormat::B8G8R8A8UIntNormalized;
-        let raw = self.grab_item(item, cursor, format, |texture| {
-            read_back(&self.device, &self.context, texture)
-        })?;
+        self.grab_item(item, cursor, format, |texture| self.read_sdr(texture))
+    }
+
+    /// A frame of 8-bit BGRA.
+    fn read_sdr(&self, texture: &ID3D11Texture2D) -> Result<CpuFrame, CaptureError> {
+        let raw = read_back(&self.device, &self.context, texture)?;
         CpuFrame::from_raw(raw.width, raw.height, raw.stride, raw.data)
     }
 
@@ -81,6 +89,16 @@ impl WgcBackend {
         pixel_format: DirectXPixelFormat,
         read: impl FnOnce(&ID3D11Texture2D) -> Result<T, CaptureError>,
     ) -> Result<T, CaptureError> {
+        self.start(item, cursor, pixel_format)?.finish(read)
+    }
+
+    /// A capture of `item` under way: its first frame is waited for by [`Started::finish`].
+    fn start(
+        &self,
+        item: &GraphicsCaptureItem,
+        cursor: bool,
+        pixel_format: DirectXPixelFormat,
+    ) -> Result<Started, CaptureError> {
         let size = item.Size().map_err(os("item size"))?;
         let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
             &self.winrt_device,
@@ -95,26 +113,17 @@ impl WgcBackend {
         let session = pool
             .CreateCaptureSession(item)
             .map_err(os("CreateCaptureSession"))?;
+        let started = Started {
+            pool,
+            session,
+            token,
+            arrived: rx,
+        };
         // The cursor and border switches need recent Windows builds; ignore their absence.
-        let _ = session.SetIsCursorCaptureEnabled(cursor);
-        let _ = session.SetIsBorderRequired(false);
-        let result = (|| {
-            session.StartCapture().map_err(os("StartCapture"))?;
-            rx.recv_timeout(FRAME_TIMEOUT)
-                .map_err(|_| CaptureError::Timeout)?;
-            let frame = pool.TryGetNextFrame().map_err(os("TryGetNextFrame"))?;
-            let surface = frame.Surface().map_err(os("Surface"))?;
-            let access: IDirect3DDxgiInterfaceAccess =
-                surface.cast().map_err(os("surface access"))?;
-            // SAFETY: the surface is backed by a D3D11 texture on our device.
-            let texture: ID3D11Texture2D =
-                unsafe { access.GetInterface() }.map_err(os("GetInterface"))?;
-            read(&texture)
-        })();
-        let _ = pool.RemoveFrameArrived(token);
-        let _ = session.Close();
-        let _ = pool.Close();
-        result
+        let _ = started.session.SetIsCursorCaptureEnabled(cursor);
+        let _ = started.session.SetIsBorderRequired(false);
+        started.session.StartCapture().map_err(os("StartCapture"))?;
+        Ok(started)
     }
 
     /// The item (or `area` of it) in scRGB: the half floats Windows composes HDR screens in.
@@ -149,23 +158,67 @@ impl WgcBackend {
             item,
             cursor,
             DirectXPixelFormat::R16G16B16A16Float,
-            |texture| {
-                let mut desc = D3D11_TEXTURE2D_DESC::default();
-                // SAFETY: `desc` is a valid out-pointer.
-                unsafe { texture.GetDesc(&mut desc) };
-                let whole = PhysicalRect::new(0, 0, desc.Width, desc.Height);
-                let part = inside(area, whole)?;
-                let card = card_tonemap::stage(&self.device, &self.context, texture, &part, info)
-                    .and_then(|staging| map(&self.context, &staging, part.width, part.height));
-                match card {
-                    Ok(raw) => CpuFrame::from_raw(raw.width, raw.height, raw.stride, raw.data),
-                    Err(_) => {
-                        let raw = read_back(&self.device, &self.context, texture)?;
-                        tonemapped(&raw_hdr(&raw, area)?, info, tonemap)
-                    }
-                }
-            },
+            |texture| self.read_tonemapped(texture, area, info, tonemap),
         )
+    }
+
+    /// `area` of a frame of half floats, tone-mapped (see [`grab_sdr`](Self::grab_sdr)).
+    fn read_tonemapped(
+        &self,
+        texture: &ID3D11Texture2D,
+        area: Option<&PhysicalRect>,
+        info: &HdrInfo,
+        tonemap: ToneMapFn,
+    ) -> Result<CpuFrame, CaptureError> {
+        let mut desc = D3D11_TEXTURE2D_DESC::default();
+        // SAFETY: `desc` is a valid out-pointer.
+        unsafe { texture.GetDesc(&mut desc) };
+        let whole = PhysicalRect::new(0, 0, desc.Width, desc.Height);
+        let part = inside(area, whole)?;
+        let card = card_tonemap::stage(&self.device, &self.context, texture, &part, info)
+            .and_then(|staging| map(&self.context, &staging, part.width, part.height));
+        match card {
+            Ok(raw) => CpuFrame::from_raw(raw.width, raw.height, raw.stride, raw.data),
+            Err(_) => {
+                let raw = read_back(&self.device, &self.context, texture)?;
+                tonemapped(&raw_hdr(&raw, area)?, info, tonemap)
+            }
+        }
+    }
+}
+
+/// A capture session waiting for its first frame; closed when dropped.
+struct Started {
+    pool: Direct3D11CaptureFramePool,
+    session: GraphicsCaptureSession,
+    token: i64,
+    arrived: Receiver<()>,
+}
+
+impl Started {
+    /// The first frame, handed to `read` while it is held.
+    fn finish<T>(
+        self,
+        read: impl FnOnce(&ID3D11Texture2D) -> Result<T, CaptureError>,
+    ) -> Result<T, CaptureError> {
+        self.arrived
+            .recv_timeout(FRAME_TIMEOUT)
+            .map_err(|_| CaptureError::Timeout)?;
+        let frame = self.pool.TryGetNextFrame().map_err(os("TryGetNextFrame"))?;
+        let surface = frame.Surface().map_err(os("Surface"))?;
+        let access: IDirect3DDxgiInterfaceAccess = surface.cast().map_err(os("surface access"))?;
+        // SAFETY: the surface is backed by a D3D11 texture on our device.
+        let texture: ID3D11Texture2D =
+            unsafe { access.GetInterface() }.map_err(os("GetInterface"))?;
+        read(&texture)
+    }
+}
+
+impl Drop for Started {
+    fn drop(&mut self) {
+        let _ = self.pool.RemoveFrameArrived(self.token);
+        let _ = self.session.Close();
+        let _ = self.pool.Close();
     }
 }
 
@@ -375,6 +428,35 @@ impl StillBackend for WgcBackend {
         tonemap: ToneMapFn,
     ) -> Result<CpuFrame, CaptureError> {
         self.grab_sdr(&window_item(window)?, None, cursor, info, tonemap)
+    }
+
+    fn grab_monitors(
+        &mut self,
+        monitors: &[MonitorInfo],
+        cursor: bool,
+        tonemap: Option<ToneMapFn>,
+    ) -> Result<Vec<CpuFrame>, CaptureError> {
+        // Every capture starts before any is waited for: they run side by side.
+        let started = monitors
+            .iter()
+            .map(|m| {
+                let format = match (m.hdr, tonemap) {
+                    (Some(_), Some(_)) => DirectXPixelFormat::R16G16B16A16Float,
+                    _ => DirectXPixelFormat::B8G8R8A8UIntNormalized,
+                };
+                self.start(&monitor_item(m)?, cursor, format)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        monitors
+            .iter()
+            .zip(started)
+            .map(|(m, started)| match (m.hdr, tonemap) {
+                (Some(info), Some(tonemap)) => {
+                    started.finish(|t| self.read_tonemapped(t, None, &info, tonemap))
+                }
+                _ => started.finish(|t| self.read_sdr(t)),
+            })
+            .collect()
     }
 
     fn d3d_device(&self) -> Option<ID3D11Device> {

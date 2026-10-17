@@ -343,11 +343,6 @@ pub fn run(
     )?;
     tracing::info!("scrolling capture saved ({}x{})", frame.width, frame.height);
     tracing::debug!("saved {}", path.display());
-    if config.image.copy_to_clipboard
-        && let Err(e) = crate::region::copy_bgra(config, &bitmap)
-    {
-        tracing::warn!("clipboard: {e:#}");
-    }
     Ok(())
 }
 
