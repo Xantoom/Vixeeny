@@ -67,6 +67,12 @@ impl WgcBackend {
         })
     }
 
+    /// Whether the device is gone (a driver update or reset): a new backend is needed.
+    pub fn is_lost(&self) -> bool {
+        // SAFETY: a plain query of a live device.
+        unsafe { self.device.GetDeviceRemovedReason() }.is_err()
+    }
+
     /// The item as plain 8-bit BGRA.
     fn grab_sdr_item(
         &self,

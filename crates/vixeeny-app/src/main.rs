@@ -9,6 +9,7 @@ use std::sync::mpsc::{RecvTimeoutError, Sender, channel};
 use std::time::Duration;
 
 mod audio_rig;
+mod capture_backend;
 mod clipboard;
 mod cut;
 mod probe;
@@ -134,8 +135,7 @@ fn direct_capture(action: ActionId, config: &Config) -> anyhow::Result<std::path
         now: &now,
         after_save: None,
     };
-    let (backend, kept) = capture_backend()?;
-    let mut capturer = Capturer::new(backend, snapshot.monitors.clone());
+    let mut backend = capture_backend::Lent::take()?;
     let options = CaptureOptions {
         show_cursor: false,
         tonemap: Some(tonemap_hdr),
@@ -150,11 +150,12 @@ fn direct_capture(action: ActionId, config: &Config) -> anyhow::Result<std::path
         after_save: config.image.copy_to_clipboard.then_some(&copy),
         ..destination
     };
-    let run = |capturer: &mut Capturer<vixeeny_capture::WgcBackend>| {
+    let run = |backend: &mut vixeeny_capture::WgcBackend| {
+        let mut capturer = Capturer::new(backend, snapshot.monitors.clone());
         still::run(
             action,
             &snapshot,
-            capturer,
+            &mut capturer,
             &destination,
             options,
             still::Output {
@@ -166,56 +167,22 @@ fn direct_capture(action: ActionId, config: &Config) -> anyhow::Result<std::path
             &vixeeny_platform::exe_metadata,
         )
     };
-    let mut result = run(&mut capturer);
-    if kept && let Err(still::StillError::Capture(e)) = &result {
+    let mut result = run(&mut backend);
+    if backend.kept
+        && let Err(still::StillError::Capture(e)) = &result
+    {
         // The kept device may be gone (a driver update, the computer asleep): once more with
         // a new one.
         tracing::debug!("capture with the kept device failed ({e}), with a new one");
-        capturer = Capturer::new(
-            vixeeny_capture::WgcBackend::new()?,
-            snapshot.monitors.clone(),
-        );
-        result = run(&mut capturer);
+        backend.renew()?;
+        result = run(&mut backend);
+    }
+    if matches!(result, Err(still::StillError::Capture(_))) {
+        backend.discard();
     }
     let path = result?;
-    CAPTURE_BACKEND.set(Some(capturer.into_backend()));
     tracing::info!("screenshot taken in {:?}", started.elapsed());
     Ok(path)
-}
-
-thread_local! {
-    /// The capture backend, kept for the next captures of this process (which ends once idle a
-    /// while): making it, a Direct3D device, takes longer than a capture.
-    static CAPTURE_BACKEND: std::cell::RefCell<Option<vixeeny_capture::WgcBackend>> =
-        const { std::cell::RefCell::new(None) };
-}
-
-type Warming =
-    std::thread::JoinHandle<Result<vixeeny_capture::WgcBackend, vixeeny_capture::CaptureError>>;
-
-/// The capture backend being made in the background, for the capture this process starts with.
-static WARMING: std::sync::Mutex<Option<Warming>> = std::sync::Mutex::new(None);
-
-/// Starts making the capture backend while the rest of the app starts.
-fn warm_capture() {
-    let made = std::thread::Builder::new()
-        .name("capture-warm".into())
-        .spawn(vixeeny_capture::WgcBackend::new);
-    if let (Ok(handle), Ok(mut warming)) = (made, WARMING.lock()) {
-        *warming = Some(handle);
-    }
-}
-
-/// The capture backend: the kept one (`true`), the one made in the background, or a new one.
-fn capture_backend() -> anyhow::Result<(vixeeny_capture::WgcBackend, bool)> {
-    if let Some(backend) = CAPTURE_BACKEND.take() {
-        return Ok((backend, true));
-    }
-    let warming = WARMING.lock().ok().and_then(|mut w| w.take());
-    if let Some(Ok(Ok(backend))) = warming.map(std::thread::JoinHandle::join) {
-        return Ok((backend, false));
-    }
-    Ok((vixeeny_capture::WgcBackend::new()?, false))
 }
 
 /// What a window capture is set on, by the setting: a blur of the window, or the accent colour
@@ -658,11 +625,19 @@ fn run() -> anyhow::Result<()> {
         _ => {}
     }
     let (first_action, first_frozen) = parse_action()?;
+    // What the first action needs from the graphics card is made while the app starts: the
+    // device reading the frozen screens, the capture device.
+    if let Some(frozen) = &first_frozen {
+        vixeeny_capture::freeze::warm(frozen);
+    }
     if matches!(
         first_action,
-        ActionId::CaptureFullscreen | ActionId::CaptureWindow | ActionId::CaptureAllMonitors
+        ActionId::CaptureFullscreen
+            | ActionId::CaptureWindow
+            | ActionId::CaptureAllMonitors
+            | ActionId::CaptureScrolling
     ) {
-        warm_capture();
+        capture_backend::warm();
     }
     let mut config = vixeeny_common::paths::config_file()
         .and_then(|path| Config::load(&path).ok())

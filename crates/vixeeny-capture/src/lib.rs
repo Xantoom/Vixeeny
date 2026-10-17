@@ -167,6 +167,75 @@ pub trait StillBackend {
     }
 }
 
+/// A backend lent for a while (kept by its owner for the next captures).
+impl<B: StillBackend + ?Sized> StillBackend for &mut B {
+    fn grab_monitor(
+        &mut self,
+        monitor: &MonitorInfo,
+        cursor: bool,
+    ) -> Result<CpuFrame, CaptureError> {
+        (**self).grab_monitor(monitor, cursor)
+    }
+    fn grab_monitor_hdr(
+        &mut self,
+        monitor: &MonitorInfo,
+        area: Option<&PhysicalRect>,
+        cursor: bool,
+    ) -> Result<HdrFrame, CaptureError> {
+        (**self).grab_monitor_hdr(monitor, area, cursor)
+    }
+    fn grab_monitor_sdr(
+        &mut self,
+        monitor: &MonitorInfo,
+        area: Option<&PhysicalRect>,
+        cursor: bool,
+        info: &HdrInfo,
+        tonemap: ToneMapFn,
+    ) -> Result<CpuFrame, CaptureError> {
+        (**self).grab_monitor_sdr(monitor, area, cursor, info, tonemap)
+    }
+    fn grab_window(&mut self, window: WindowId, cursor: bool) -> Result<CpuFrame, CaptureError> {
+        (**self).grab_window(window, cursor)
+    }
+    fn grab_window_hdr(
+        &mut self,
+        window: WindowId,
+        cursor: bool,
+    ) -> Result<HdrFrame, CaptureError> {
+        (**self).grab_window_hdr(window, cursor)
+    }
+    fn grab_window_sdr(
+        &mut self,
+        window: WindowId,
+        cursor: bool,
+        info: &HdrInfo,
+        tonemap: ToneMapFn,
+    ) -> Result<CpuFrame, CaptureError> {
+        (**self).grab_window_sdr(window, cursor, info, tonemap)
+    }
+    fn window_monitor(&self, window: WindowId) -> Option<MonitorId> {
+        (**self).window_monitor(window)
+    }
+    fn grab_monitors(
+        &mut self,
+        monitors: &[MonitorInfo],
+        cursor: bool,
+        tonemap: Option<ToneMapFn>,
+    ) -> Result<Vec<CpuFrame>, CaptureError> {
+        (**self).grab_monitors(monitors, cursor, tonemap)
+    }
+    fn grab_monitors_shown(
+        &mut self,
+        monitors: &[MonitorInfo],
+        cursor: bool,
+    ) -> Result<Vec<Shown>, CaptureError> {
+        (**self).grab_monitors_shown(monitors, cursor)
+    }
+    fn d3d_device(&self) -> Option<ID3D11Device> {
+        (**self).d3d_device()
+    }
+}
+
 pub struct Capturer<B: StillBackend> {
     backend: B,
     monitors: Vec<MonitorInfo>,
@@ -178,11 +247,6 @@ impl<B: StillBackend> Capturer<B> {
             card_tonemap::warm();
         }
         Self { backend, monitors }
-    }
-
-    /// The backend, to be kept for the next captures.
-    pub fn into_backend(self) -> B {
-        self.backend
     }
 
     /// The backend's Direct3D device (see [`StillBackend::d3d_device`]).

@@ -8,7 +8,9 @@
 //! ([`THAW_MESSAGE`]), so the screen never flickers.
 
 use std::cell::RefCell;
+use std::sync::Mutex;
 use std::sync::mpsc::channel;
+use std::thread::JoinHandle;
 use std::time::Instant;
 
 use vixeeny_common::ipc::{Frozen, FrozenScreen, THAW_MESSAGE};
@@ -463,19 +465,52 @@ pub fn scrgb(screen: &FrozenScreen, rows: &[u8], stride: usize) -> HdrFrame {
     }
 }
 
-thread_local! {
-    /// The app's device on the daemon's adapter, kept for the next captures.
-    static READER: RefCell<Option<(i64, ID3D11Device, ID3D11DeviceContext)>> =
-        const { RefCell::new(None) };
+/// The app's device on the daemon's adapter.
+struct Reader {
+    adapter: i64,
+    device: ID3D11Device,
+    context: ID3D11DeviceContext,
+}
+
+// SAFETY: a Direct3D 11 device is free-threaded; the immediate context is used by one thread at
+// a time (made on the warming thread, then used by the thread that reads the screens).
+unsafe impl Send for Reader {}
+
+/// The reader, kept for the next captures of the process.
+static READER: Mutex<Option<Reader>> = Mutex::new(None);
+
+/// The reader being made in the background (see [`warm`]).
+static WARMING: Mutex<Option<JoinHandle<Result<Reader, CaptureError>>>> = Mutex::new(None);
+
+/// Starts making the device that reads the frozen screens of `frozen`, while the app starts.
+pub fn warm(frozen: &Frozen) {
+    let adapter = frozen.adapter;
+    let made = std::thread::Builder::new()
+        .name("frozen-warm".into())
+        .spawn(move || make_reader(adapter));
+    if let (Ok(handle), Ok(mut warming)) = (made, WARMING.lock()) {
+        *warming = Some(handle);
+    }
 }
 
 fn reader(adapter: i64) -> Result<(ID3D11Device, ID3D11DeviceContext), CaptureError> {
-    if let Some((_, device, context)) = READER
-        .with(|r| r.borrow().clone())
-        .filter(|r| r.0 == adapter)
-    {
-        return Ok((device, context));
+    let mut kept = READER
+        .lock()
+        .map_err(|_| CaptureError::Os("reader lock".into()))?;
+    if kept.as_ref().is_none_or(|r| r.adapter != adapter) {
+        let warming = WARMING.lock().ok().and_then(|mut w| w.take());
+        *kept = Some(match warming.map(JoinHandle::join) {
+            Some(Ok(Ok(made))) if made.adapter == adapter => made,
+            _ => make_reader(adapter)?,
+        });
     }
+    let r = kept
+        .as_ref()
+        .ok_or_else(|| CaptureError::Os("no reader".into()))?;
+    Ok((r.device.clone(), r.context.clone()))
+}
+
+fn make_reader(adapter: i64) -> Result<Reader, CaptureError> {
     let luid = LUID {
         LowPart: adapter as u32,
         HighPart: (adapter >> 32) as i32,
@@ -487,8 +522,11 @@ fn reader(adapter: i64) -> Result<(ID3D11Device, ID3D11DeviceContext), CaptureEr
     }
     .map_err(os("EnumAdapterByLuid"))?;
     let (device, context) = d3d_device(Some(&dxgi_adapter))?;
-    READER.with(|r| *r.borrow_mut() = Some((adapter, device.clone(), context.clone())));
-    Ok((device, context))
+    Ok(Reader {
+        adapter,
+        device,
+        context,
+    })
 }
 
 /// Reads the shared textures (in the app): `each` gets every screen's rows (`stride` bytes
@@ -552,7 +590,9 @@ pub fn read_with(
     })();
     if result.is_err() {
         // The device may be lost: the next capture starts with a new one.
-        READER.with(|r| *r.borrow_mut() = None);
+        if let Ok(mut kept) = READER.lock() {
+            *kept = None;
+        }
     }
     result
 }

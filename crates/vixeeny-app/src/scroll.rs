@@ -161,8 +161,8 @@ fn capture_loop(
     preview: &vixeeny_ui::scroll_panel::ScrollHandle,
     preview_box: (u32, u32),
 ) -> anyhow::Result<Option<(Stitched, Option<HdrInfo>)>> {
-    let backend = vixeeny_capture::WgcBackend::new()?;
-    let mut capturer = Capturer::new(backend, monitors);
+    let mut backend = crate::capture_backend::Lent::take()?;
+    let mut capturer = Capturer::new(&mut *backend, monitors);
     let options = CaptureOptions {
         show_cursor: false,
         tonemap: Some(crate::tonemap_hdr),

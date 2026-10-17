@@ -453,12 +453,12 @@ fn grab_screens(
     monitors: &[MonitorInfo],
     keep_hdr: bool,
 ) -> anyhow::Result<(RgbaImage, Option<HdrCapture>)> {
-    let backend = vixeeny_capture::WgcBackend::new()?;
+    let mut backend = crate::capture_backend::Lent::take()?;
     let options = CaptureOptions {
         show_cursor: false,
         tonemap: Some(crate::tonemap_hdr),
     };
-    let mut capturer = Capturer::new(backend, monitors.to_vec());
+    let mut capturer = Capturer::new(&mut *backend, monitors.to_vec());
     let frame = capturer.grab(&CaptureTarget::AllMonitors, options)?;
     let hdr = if keep_hdr {
         capturer.grab_hdr(&CaptureTarget::AllMonitors, false)?
@@ -616,6 +616,11 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
     overlay.on_first_frame(move |_| {
         tracing::debug!("editor on screen after {:?}", started.elapsed());
         shown.release();
+        // Unfrozen, the editor takes a fresh picture of the screens: its capture device is
+        // made now that the editor shows (not to slow it down).
+        if matches!(mode, Mode::Editor) {
+            crate::capture_backend::warm();
+        }
     });
     let result = overlay.run(cursor);
     drop(thaw);
