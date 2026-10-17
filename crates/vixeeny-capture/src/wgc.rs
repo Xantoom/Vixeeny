@@ -8,7 +8,7 @@
 use std::sync::mpsc::{Sender, channel};
 use std::time::Duration;
 
-use vixeeny_platform::{MonitorId, MonitorInfo, PhysicalRect, WindowId};
+use vixeeny_platform::{HdrInfo, MonitorId, MonitorInfo, PhysicalRect, WindowId};
 use windows::Foundation::TypedEventHandler;
 use windows::Graphics::Capture::{
     Direct3D11CaptureFramePool, GraphicsCaptureItem, GraphicsCaptureSession,
@@ -30,7 +30,7 @@ use windows::Win32::System::WinRT::Direct3D11::{
 use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop;
 use windows::core::{Interface, factory};
 
-use crate::{CaptureError, CpuFrame, HdrFrame, StillBackend};
+use crate::{CaptureError, CpuFrame, HdrFrame, StillBackend, ToneMapFn, card_tonemap, tonemapped};
 
 pub(crate) const FRAME_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -60,12 +60,27 @@ impl WgcBackend {
         })
     }
 
-    fn grab_item(
+    /// The item as plain 8-bit BGRA.
+    fn grab_sdr_item(
+        &self,
+        item: &GraphicsCaptureItem,
+        cursor: bool,
+    ) -> Result<CpuFrame, CaptureError> {
+        let format = DirectXPixelFormat::B8G8R8A8UIntNormalized;
+        let raw = self.grab_item(item, cursor, format, |texture| {
+            read_back(&self.device, &self.context, texture)
+        })?;
+        CpuFrame::from_raw(raw.width, raw.height, raw.stride, raw.data)
+    }
+
+    /// The first frame of `item`, handed to `read` while it is held.
+    fn grab_item<T>(
         &self,
         item: &GraphicsCaptureItem,
         cursor: bool,
         pixel_format: DirectXPixelFormat,
-    ) -> Result<RawFrame, CaptureError> {
+        read: impl FnOnce(&ID3D11Texture2D) -> Result<T, CaptureError>,
+    ) -> Result<T, CaptureError> {
         let size = item.Size().map_err(os("item size"))?;
         let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
             &self.winrt_device,
@@ -94,7 +109,7 @@ impl WgcBackend {
             // SAFETY: the surface is backed by a D3D11 texture on our device.
             let texture: ID3D11Texture2D =
                 unsafe { access.GetInterface() }.map_err(os("GetInterface"))?;
-            read_back(&self.device, &self.context, &texture)
+            read(&texture)
         })();
         let _ = pool.RemoveFrameArrived(token);
         let _ = session.Close();
@@ -109,25 +124,75 @@ impl WgcBackend {
         area: Option<&PhysicalRect>,
         cursor: bool,
     ) -> Result<HdrFrame, CaptureError> {
-        let raw = self.grab_item(item, cursor, DirectXPixelFormat::R16G16B16A16Float)?;
-        let whole = PhysicalRect::new(0, 0, raw.width, raw.height);
-        let area = area.copied().unwrap_or(whole);
-        if area.is_empty() || whole.intersection(&area) != Some(area) {
-            return Err(CaptureError::InvalidRegion);
-        }
-        let start = area.y as usize * raw.stride + area.x as usize * 8;
-        let rgba = halves_to_f32(
-            &raw.data[start..],
-            raw.stride,
-            area.width as usize,
-            area.height as usize,
-        );
-        Ok(HdrFrame {
-            width: area.width,
-            height: area.height,
-            rgba,
-        })
+        self.grab_item(
+            item,
+            cursor,
+            DirectXPixelFormat::R16G16B16A16Float,
+            |texture| {
+                let raw = read_back(&self.device, &self.context, texture)?;
+                raw_hdr(&raw, area)
+            },
+        )
     }
+
+    /// The item (or `area` of it) tone-mapped to SDR on the graphics card, or with `tonemap`
+    /// when the card cannot.
+    fn grab_sdr(
+        &self,
+        item: &GraphicsCaptureItem,
+        area: Option<&PhysicalRect>,
+        cursor: bool,
+        info: &HdrInfo,
+        tonemap: ToneMapFn,
+    ) -> Result<CpuFrame, CaptureError> {
+        self.grab_item(
+            item,
+            cursor,
+            DirectXPixelFormat::R16G16B16A16Float,
+            |texture| {
+                let mut desc = D3D11_TEXTURE2D_DESC::default();
+                // SAFETY: `desc` is a valid out-pointer.
+                unsafe { texture.GetDesc(&mut desc) };
+                let whole = PhysicalRect::new(0, 0, desc.Width, desc.Height);
+                let part = inside(area, whole)?;
+                let card = card_tonemap::stage(&self.device, &self.context, texture, &part, info)
+                    .and_then(|staging| map(&self.context, &staging, part.width, part.height));
+                match card {
+                    Ok(raw) => CpuFrame::from_raw(raw.width, raw.height, raw.stride, raw.data),
+                    Err(_) => {
+                        let raw = read_back(&self.device, &self.context, texture)?;
+                        tonemapped(&raw_hdr(&raw, area)?, info, tonemap)
+                    }
+                }
+            },
+        )
+    }
+}
+
+/// `area` of a frame of `whole`, which it must lie in; all of it when `None`.
+fn inside(area: Option<&PhysicalRect>, whole: PhysicalRect) -> Result<PhysicalRect, CaptureError> {
+    let area = area.copied().unwrap_or(whole);
+    if area.is_empty() || whole.intersection(&area) != Some(area) {
+        return Err(CaptureError::InvalidRegion);
+    }
+    Ok(area)
+}
+
+/// `area` of RGBA half floats as scRGB.
+fn raw_hdr(raw: &RawFrame, area: Option<&PhysicalRect>) -> Result<HdrFrame, CaptureError> {
+    let area = inside(area, PhysicalRect::new(0, 0, raw.width, raw.height))?;
+    let start = area.y as usize * raw.stride + area.x as usize * 8;
+    let rgba = halves_to_f32(
+        &raw.data[start..],
+        raw.stride,
+        area.width as usize,
+        area.height as usize,
+    );
+    Ok(HdrFrame {
+        width: area.width,
+        height: area.height,
+        rgba,
+    })
 }
 
 /// GPU → CPU through a staging texture.
@@ -150,18 +215,27 @@ pub(crate) fn read_back(
     let staging = staging.ok_or_else(|| CaptureError::Os("no staging texture".into()))?;
     // SAFETY: both textures belong to this device and have identical size and format.
     unsafe { context.CopyResource(&staging, texture) };
+    map(context, &staging, desc.Width, desc.Height)
+}
+
+/// The bytes of a staging texture of `width` × `height`, once the GPU has written them.
+pub(crate) fn map(
+    context: &ID3D11DeviceContext,
+    staging: &ID3D11Texture2D,
+    width: u32,
+    height: u32,
+) -> Result<RawFrame, CaptureError> {
     let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
     // SAFETY: the staging texture has CPU read access; `mapped` is a valid out-pointer.
-    unsafe { context.Map(&staging, 0, D3D11_MAP_READ, 0, Some(&raw mut mapped)) }
+    unsafe { context.Map(staging, 0, D3D11_MAP_READ, 0, Some(&raw mut mapped)) }
         .map_err(os("Map"))?;
-    let (width, height) = (desc.Width, desc.Height);
     let stride = mapped.RowPitch as usize;
     // SAFETY: a mapped texture exposes `RowPitch * Height` readable bytes until `Unmap`.
     let bytes =
         unsafe { std::slice::from_raw_parts(mapped.pData.cast::<u8>(), stride * height as usize) };
     let data = bytes.to_vec();
     // SAFETY: matches the successful Map above.
-    unsafe { context.Unmap(&staging, 0) };
+    unsafe { context.Unmap(staging, 0) };
     Ok(RawFrame {
         width,
         height,
@@ -258,9 +332,7 @@ impl StillBackend for WgcBackend {
         monitor: &MonitorInfo,
         cursor: bool,
     ) -> Result<CpuFrame, CaptureError> {
-        let item = monitor_item(monitor)?;
-        let raw = self.grab_item(&item, cursor, DirectXPixelFormat::B8G8R8A8UIntNormalized)?;
-        CpuFrame::from_raw(raw.width, raw.height, raw.stride, raw.data)
+        self.grab_sdr_item(&monitor_item(monitor)?, cursor)
     }
 
     fn grab_monitor_hdr(
@@ -272,10 +344,19 @@ impl StillBackend for WgcBackend {
         self.grab_hdr(&monitor_item(monitor)?, area, cursor)
     }
 
+    fn grab_monitor_sdr(
+        &mut self,
+        monitor: &MonitorInfo,
+        area: Option<&PhysicalRect>,
+        cursor: bool,
+        info: &HdrInfo,
+        tonemap: ToneMapFn,
+    ) -> Result<CpuFrame, CaptureError> {
+        self.grab_sdr(&monitor_item(monitor)?, area, cursor, info, tonemap)
+    }
+
     fn grab_window(&mut self, window: WindowId, cursor: bool) -> Result<CpuFrame, CaptureError> {
-        let item = window_item(window)?;
-        let raw = self.grab_item(&item, cursor, DirectXPixelFormat::B8G8R8A8UIntNormalized)?;
-        CpuFrame::from_raw(raw.width, raw.height, raw.stride, raw.data)
+        self.grab_sdr_item(&window_item(window)?, cursor)
     }
 
     fn grab_window_hdr(
@@ -284,6 +365,16 @@ impl StillBackend for WgcBackend {
         cursor: bool,
     ) -> Result<HdrFrame, CaptureError> {
         self.grab_hdr(&window_item(window)?, None, cursor)
+    }
+
+    fn grab_window_sdr(
+        &mut self,
+        window: WindowId,
+        cursor: bool,
+        info: &HdrInfo,
+        tonemap: ToneMapFn,
+    ) -> Result<CpuFrame, CaptureError> {
+        self.grab_sdr(&window_item(window)?, None, cursor, info, tonemap)
     }
 
     fn window_monitor(&self, window: WindowId) -> Option<MonitorId> {

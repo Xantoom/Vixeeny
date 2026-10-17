@@ -6,6 +6,7 @@
 //! [`FakeBackend`]; the OS only supplies whole-monitor and whole-window frames through
 //! [`StillBackend`].
 
+mod card_tonemap;
 mod fake;
 mod frame;
 pub mod freeze;
@@ -79,6 +80,20 @@ pub trait StillBackend {
     ) -> Result<HdrFrame, CaptureError> {
         Err(CaptureError::Unsupported)
     }
+    /// The monitor (or `area` of it) tone-mapped to SDR; only called for monitors with `hdr`
+    /// set. A backend may do it on the graphics card, with the same tone mapper as `tonemap`
+    /// and `tonemap` as its fallback.
+    fn grab_monitor_sdr(
+        &mut self,
+        monitor: &MonitorInfo,
+        area: Option<&PhysicalRect>,
+        cursor: bool,
+        info: &HdrInfo,
+        tonemap: ToneMapFn,
+    ) -> Result<CpuFrame, CaptureError> {
+        let hdr = self.grab_monitor_hdr(monitor, area, cursor)?;
+        tonemapped(&hdr, info, tonemap)
+    }
     /// The whole window content.
     fn grab_window(&mut self, window: WindowId, cursor: bool) -> Result<CpuFrame, CaptureError>;
     /// The whole window content as scRGB floats. Only called for windows on an HDR monitor.
@@ -88,6 +103,17 @@ pub trait StillBackend {
         _cursor: bool,
     ) -> Result<HdrFrame, CaptureError> {
         Err(CaptureError::Unsupported)
+    }
+    /// The whole window content tone-mapped to SDR, as [`grab_monitor_sdr`](Self::grab_monitor_sdr).
+    fn grab_window_sdr(
+        &mut self,
+        window: WindowId,
+        cursor: bool,
+        info: &HdrInfo,
+        tonemap: ToneMapFn,
+    ) -> Result<CpuFrame, CaptureError> {
+        let hdr = self.grab_window_hdr(window, cursor)?;
+        tonemapped(&hdr, info, tonemap)
     }
     /// The monitor showing most of the window.
     fn window_monitor(&self, _window: WindowId) -> Option<MonitorId> {
@@ -102,6 +128,9 @@ pub struct Capturer<B: StillBackend> {
 
 impl<B: StillBackend> Capturer<B> {
     pub fn new(backend: B, monitors: Vec<MonitorInfo>) -> Self {
+        if monitors.iter().any(|m| m.hdr.is_some()) {
+            card_tonemap::warm();
+        }
         Self { backend, monitors }
     }
 
@@ -119,10 +148,13 @@ impl<B: StillBackend> Capturer<B> {
         options: CaptureOptions,
     ) -> Result<CpuFrame, CaptureError> {
         if let (Some(info), Some(tonemap)) = (monitor.hdr, options.tonemap) {
-            let hdr = self
-                .backend
-                .grab_monitor_hdr(monitor, None, options.show_cursor)?;
-            return tonemapped(&hdr, &info, tonemap);
+            return self.backend.grab_monitor_sdr(
+                monitor,
+                None,
+                options.show_cursor,
+                &info,
+                tonemap,
+            );
         }
         self.backend.grab_monitor(monitor, options.show_cursor)
     }
@@ -146,10 +178,13 @@ impl<B: StillBackend> Capturer<B> {
             CaptureTarget::Region { monitor, rect } => {
                 let monitor = self.monitor(*monitor)?.clone();
                 if let (Some(info), Some(tonemap)) = (monitor.hdr, options.tonemap) {
-                    let hdr =
-                        self.backend
-                            .grab_monitor_hdr(&monitor, Some(rect), options.show_cursor)?;
-                    return tonemapped(&hdr, &info, tonemap);
+                    return self.backend.grab_monitor_sdr(
+                        &monitor,
+                        Some(rect),
+                        options.show_cursor,
+                        &info,
+                        tonemap,
+                    );
                 }
                 self.backend
                     .grab_monitor(&monitor, options.show_cursor)?
@@ -157,8 +192,8 @@ impl<B: StillBackend> Capturer<B> {
             }
             CaptureTarget::Window(id) => match (self.window_hdr(*id), options.tonemap) {
                 (Some(info), Some(tonemap)) => {
-                    let hdr = self.backend.grab_window_hdr(*id, options.show_cursor)?;
-                    tonemapped(&hdr, &info, tonemap)
+                    self.backend
+                        .grab_window_sdr(*id, options.show_cursor, &info, tonemap)
                 }
                 _ => self.backend.grab_window(*id, options.show_cursor),
             },

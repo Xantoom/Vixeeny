@@ -312,11 +312,19 @@ fn frozen_desktop(
     };
     let reference = vixeeny_capture::reference(monitors).filter(|_| keep_hdr);
     let mut canvas = reference.map(|_| HdrFrame::new(bounds.width, bounds.height));
-    vixeeny_capture::freeze::read_with(frozen, |s, rows, stride| {
+    let levels = |s: &vixeeny_common::ipc::FrozenScreen| {
+        monitor_of(s).and_then(|m| m.hdr).unwrap_or(HdrInfo {
+            sdr_white_nits: 80.0,
+            peak_nits: 1000.0,
+        })
+    };
+    // Kept as HDR, the screens are needed in floats anyway: the tone mapping stays with them.
+    let on_card = |s: &vixeeny_common::ipc::FrozenScreen| (!keep_hdr).then(|| levels(s));
+    vixeeny_capture::freeze::read_with(frozen, on_card, |s, rows, stride, mapped| {
         let at = (s.y - bounds.y) as usize * row + (s.x - bounds.x) as usize * 4;
         let size = (s.width as usize, s.height as usize);
         let (x, y) = (s.x - bounds.x, s.y - bounds.y);
-        if !s.hdr {
+        if !s.hdr || mapped {
             vixeeny_editor::bgra_to_rgba(rows, stride, &mut data[at..], row, size);
             if let (Some(canvas), Some(reference)) = (&mut canvas, reference) {
                 let sdr =
@@ -325,10 +333,7 @@ fn frozen_desktop(
             }
             return;
         }
-        let info = monitor_of(s).and_then(|m| m.hdr).unwrap_or(HdrInfo {
-            sdr_white_nits: 80.0,
-            peak_nits: 1000.0,
-        });
+        let info = levels(s);
         let mut scrgb = vixeeny_capture::freeze::scrgb(s, rows, stride);
         let bgra = crate::tonemap_hdr(&scrgb.rgba, &info);
         vixeeny_editor::bgra_to_rgba(&bgra, size.0 * 4, &mut data[at..], row, size);

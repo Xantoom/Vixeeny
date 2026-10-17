@@ -12,7 +12,7 @@ use std::sync::mpsc::channel;
 use std::time::Instant;
 
 use vixeeny_common::ipc::{Frozen, FrozenScreen, THAW_MESSAGE};
-use vixeeny_platform::MonitorInfo;
+use vixeeny_platform::{HdrInfo, MonitorInfo, PhysicalRect};
 use windows::Graphics::Capture::{Direct3D11CaptureFramePool, GraphicsCaptureSession};
 use windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;
 use windows::Graphics::DirectX::DirectXPixelFormat;
@@ -49,7 +49,7 @@ use crate::wgc::{
     FRAME_TIMEOUT, d3d_device, frame_handler, halves_to_f32, monitor_item, os, winrt_device,
 };
 
-use crate::{CaptureError, HdrFrame};
+use crate::{CaptureError, HdrFrame, card_tonemap};
 
 /// The frozen screens go by themselves after this, whatever happens to the app.
 const SAFETY_TIMEOUT_MS: u32 = 10_000;
@@ -494,9 +494,13 @@ fn reader(adapter: i64) -> Result<(ID3D11Device, ID3D11DeviceContext), CaptureEr
 /// Reads the shared textures (in the app): `each` gets every screen's rows (`stride` bytes
 /// apart) while they are mapped, so it can convert them straight to where they go. The GPU
 /// copies of all screens are queued before the first is waited for.
+///
+/// An HDR screen for which `sdr` gives its levels is tone-mapped to BGRA on the graphics card;
+/// `each` is told whether that was done (`false`: half floats, as for the screens `sdr` skips).
 pub fn read_with(
     frozen: &Frozen,
-    mut each: impl FnMut(&FrozenScreen, &[u8], usize),
+    sdr: impl Fn(&FrozenScreen) -> Option<HdrInfo>,
+    mut each: impl FnMut(&FrozenScreen, &[u8], usize, bool),
 ) -> Result<(), CaptureError> {
     let result = (|| {
         let (device, context) = reader(frozen.adapter)?;
@@ -515,11 +519,19 @@ pub fn read_with(
                 .map_err(os("OpenSharedResource"))?;
                 let texture =
                     texture.ok_or_else(|| CaptureError::Os("no shared texture".into()))?;
-                let staging = stage(&device, &context, &texture)?;
-                Ok((screen, staging))
+                let whole = PhysicalRect::new(0, 0, screen.width, screen.height);
+                let card = sdr(screen).filter(|_| screen.hdr).and_then(|info| {
+                    card_tonemap::stage(&device, &context, &texture, &whole, &info).ok()
+                });
+                let on_card = card.is_some();
+                let staging = match card {
+                    Some(staging) => staging,
+                    None => stage(&device, &context, &texture)?,
+                };
+                Ok((screen, staging, on_card))
             })
             .collect::<Result<Vec<_>, CaptureError>>()?;
-        for (screen, staging) in staged {
+        for (screen, staging, on_card) in staged {
             let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
             // SAFETY: a staging texture with CPU read access; `mapped` is a valid out-pointer.
             unsafe { context.Map(&staging, 0, D3D11_MAP_READ, 0, Some(&raw mut mapped)) }
@@ -532,7 +544,7 @@ pub fn read_with(
                     stride * screen.height as usize,
                 )
             };
-            each(screen, rows, stride);
+            each(screen, rows, stride, on_card);
             // SAFETY: matches the successful Map above.
             unsafe { context.Unmap(&staging, 0) };
         }
@@ -636,11 +648,15 @@ mod tests {
             }],
         };
         let mut read: Vec<u8> = Vec::new();
-        read_with(&frozen, |_, rows, stride| {
-            read.extend(
-                (0..h as usize).flat_map(|y| &rows[y * stride..y * stride + w as usize * 4]),
-            )
-        })
+        read_with(
+            &frozen,
+            |_| None,
+            |_, rows, stride, _| {
+                read.extend(
+                    (0..h as usize).flat_map(|y| &rows[y * stride..y * stride + w as usize * 4]),
+                )
+            },
+        )
         .unwrap();
         let at = |x: usize, y: usize| &read[(y * w as usize + x) * 4..][..4];
         assert_eq!(at(2, 1), [20, 21, 22, 23]);

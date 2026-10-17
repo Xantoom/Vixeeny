@@ -5590,6 +5590,7 @@ dependencies = [
  "rayon",
  "thiserror 2.0.21",
  "vixeeny-common",
+ "vixeeny-image",
  "vixeeny-platform",
  "windows",
 ]

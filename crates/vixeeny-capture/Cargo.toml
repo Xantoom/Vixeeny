@@ -20,6 +20,7 @@ windows = { workspace = true, features = [
     "Foundation_Collections",
     "Win32_Foundation",
     "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D_Fxc",
     "Win32_Graphics_Dwm",
     "Win32_Graphics_Direct3D11",
     "Win32_Graphics_Dxgi",
@@ -31,6 +32,9 @@ windows = { workspace = true, features = [
     "Win32_System_WinRT_Graphics_Capture",
     "Win32_UI_WindowsAndMessaging",
 ] }
+
+[dev-dependencies]
+vixeeny-image = { path = "../vixeeny-image" }
 
 [lints]
 workspace = true
