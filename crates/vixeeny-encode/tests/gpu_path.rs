@@ -199,7 +199,7 @@ fn record_gpu(
     let pipeline = Arc::new(pipeline);
     let mut cfg = config(&registry, id, depth, chroma);
     cfg.gpu = Some(Arc::clone(&pipeline));
-    let dir = scratch(id);
+    let dir = scratch(&format!("{id}-{depth}-{}", chroma.name()));
     let rec = Recorder::start(cfg, namer(&dir)).unwrap();
     let source = texture(device);
     let rect = Rect {
