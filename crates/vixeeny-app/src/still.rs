@@ -103,14 +103,15 @@ pub struct Destination<'a> {
     pub use_foreground_app: bool,
     pub app_names: &'a BTreeMap<String, String>,
     pub now: &'a LocalTime,
-    /// Called with the image once it is written (e.g. to copy it to the clipboard), and with
-    /// the file's bytes when they are the image itself (not an HDR file of an SDR copy), so that
-    /// it is not encoded again.
+    /// Called with the image once it is saved (e.g. to copy it to the clipboard), and with the
+    /// file's bytes when they hold the image itself, so that it is not encoded again. When they
+    /// do not (an HDR file of an SDR copy), it is called while the file is written.
     pub after_save: Option<&'a AfterSave<'a>>,
 }
 
-/// What [`Destination::after_save`] calls: the image, and the file's bytes when they are it.
-pub type AfterSave<'a> = dyn Fn(&Bgra<'_>, Option<&[u8]>) + 'a;
+/// What [`Destination::after_save`] calls: the image, and the file's bytes when they are it. It
+/// may be called from another thread, while the file is written.
+pub type AfterSave<'a> = dyn Fn(&Bgra<'_>, Option<&[u8]>) + Sync + 'a;
 
 /// Display name of the application a capture is attributed to.
 pub(crate) fn app_name(
@@ -351,14 +352,33 @@ pub fn save_hdr(
     capture: &HdrCapture,
 ) -> Result<PathBuf, StillError> {
     let image = hdr_image(capture);
-    let bytes = vixeeny_image::encode_hdr(output.format, &image, output.settings)?;
     let size = (image.width, image.height);
-    let path = write_named(action, snap, dest, output.format, metadata, size, &bytes)?;
-    if let Some(after) = dest.after_save {
-        let sdr = image.to_sdr();
-        after(&Bgra::new(size.0, size.1, size.0 as usize * 4, &sdr), None);
-    }
-    Ok(path)
+    // An Ultra HDR JPEG is a JPEG of the SDR rendering (with a gain map): the clipboard takes
+    // the file as it is. Other HDR files are not the SDR rendering: it is encoded on its own,
+    // side by side with the file.
+    let reuse = output.format == ImageFormat::Jpeg;
+    std::thread::scope(|scope| {
+        let sdr = dest.after_save.map(|after| {
+            let image = &image;
+            scope.spawn(move || {
+                let sdr = image.to_sdr();
+                if !reuse {
+                    after(&Bgra::new(size.0, size.1, size.0 as usize * 4, &sdr), None);
+                }
+                sdr
+            })
+        });
+        let bytes = vixeeny_image::encode_hdr(output.format, &image, output.settings)?;
+        let path = write_named(action, snap, dest, output.format, metadata, size, &bytes)?;
+        let sdr = sdr.and_then(|done| done.join().ok());
+        if let (true, Some(after), Some(sdr)) = (reuse, dest.after_save, sdr) {
+            after(
+                &Bgra::new(size.0, size.1, size.0 as usize * 4, &sdr),
+                Some(&bytes),
+            );
+        }
+        Ok(path)
+    })
 }
 
 pub fn hdr_image(capture: &HdrCapture) -> Hdr<'_> {
@@ -757,13 +777,15 @@ mod tests {
         });
         let now = now();
         let names = BTreeMap::new();
-        let copied = std::cell::Cell::new(None);
+        let copied = std::sync::Mutex::new(None);
         // The file's bytes, when the clipboard can take them as they are.
-        let encoded = std::cell::RefCell::new(None);
+        let encoded = std::sync::Mutex::new(None);
         let copy = |image: &Bgra<'_>, bytes: Option<&[u8]>| {
-            copied.set(Some((image.width, image.data[0])));
-            *encoded.borrow_mut() = bytes.map(<[u8]>::to_vec);
+            *copied.lock().unwrap() = Some((image.width, image.data[0]));
+            *encoded.lock().unwrap() = bytes.map(<[u8]>::to_vec);
         };
+        let copied = || copied.lock().unwrap().take();
+        let encoded = || encoded.lock().unwrap().take();
         let dest = Destination {
             dir: &dir,
             template: "{app}",
@@ -802,20 +824,27 @@ mod tests {
         // nits, under SDR white: mid grey, not the fake tone mapper's 7).
         let png = shoot(ImageFormat::Png, true);
         assert!(png.windows(4).any(|c| c == b"cICP"));
-        let (width, first) = copied.take().unwrap();
+        let (width, first) = copied().unwrap();
         assert_eq!(width, 160);
         assert!((150..250).contains(&first), "{first}");
         // An HDR file is not the clipboard's SDR image: that one is encoded on its own.
-        assert!(encoded.take().is_none());
+        assert!(encoded().is_none());
+        // An Ultra HDR JPEG is: the clipboard takes the file as it is.
+        if ImageFormat::Jpeg.available() {
+            let jpeg = shoot(ImageFormat::Jpeg, true);
+            let (_, first) = copied().unwrap();
+            assert!((150..250).contains(&first), "{first}");
+            assert_eq!(encoded(), Some(jpeg));
+        }
         // Converted when asked, and always for WebP.
         let sdr = shoot(ImageFormat::Png, false);
         assert!(!sdr.windows(4).any(|c| c == b"cICP"));
-        assert_eq!(copied.take().unwrap().1, 7);
+        assert_eq!(copied().unwrap().1, 7);
         // The SDR file is the clipboard's image: not encoded a second time.
-        assert_eq!(encoded.take(), Some(sdr));
+        assert_eq!(encoded(), Some(sdr));
         let webp = shoot(ImageFormat::WebP, true);
         assert_eq!(&webp[8..12], b"WEBP");
-        assert_eq!(copied.take().unwrap().1, 7);
+        assert_eq!(copied().unwrap().1, 7);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

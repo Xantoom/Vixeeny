@@ -770,20 +770,19 @@ mod tests {
 
     #[test]
     fn config_maps_to_encoder_settings() {
+        let native = cfg!(feature = "native-codecs");
+        // JPEG, by default and when asked; PNG in a build without it.
+        let jpeg = if native {
+            ImageFormat::Jpeg
+        } else {
+            ImageFormat::Png
+        };
         let mut config = Config::default();
-        assert_eq!(image_output(&config).0, ImageFormat::Png);
+        assert_eq!(image_output(&config).0, jpeg);
         config.image.format = "jpeg".into();
         config.image.jpeg.quality = 70;
         let (format, settings) = image_output(&config);
-        let native = cfg!(feature = "native-codecs");
-        assert_eq!(
-            format,
-            if native {
-                ImageFormat::Jpeg
-            } else {
-                ImageFormat::Png
-            }
-        );
+        assert_eq!(format, jpeg);
         assert_eq!(
             (settings.jpeg.quality, settings.jpeg.chroma),
             (70, Chroma::Yuv444)

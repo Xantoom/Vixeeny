@@ -206,15 +206,23 @@ pub fn save_bgra(
             .filter(|f| f.available())
             .unwrap_or(default_format);
         let hdr = hdr.filter(|_| output(format).hdr());
-        let bytes = match hdr {
-            Some(hdr) => vixeeny_image::encode_hdr(format, &still::hdr_image(hdr), &settings)?,
-            None => vixeeny_image::encode(format, bitmap, &settings)?,
-        };
-        still::write_atomic(&path, &bytes)?;
-        // The file is the clipboard's image when it is in the format of the settings.
+        // The file is the clipboard's image when it is in the format of the settings; else
+        // the clipboard's is encoded side by side with it.
         let same = hdr.is_none() && format == default_format;
-        copy(bitmap, same.then_some(&bytes[..]));
-        return Ok(path);
+        return std::thread::scope(|scope| {
+            if !same {
+                scope.spawn(|| copy(bitmap, None));
+            }
+            let bytes = match hdr {
+                Some(hdr) => vixeeny_image::encode_hdr(format, &still::hdr_image(hdr), &settings)?,
+                None => vixeeny_image::encode(format, bitmap, &settings)?,
+            };
+            still::write_atomic(&path, &bytes)?;
+            if same {
+                copy(bitmap, Some(&bytes));
+            }
+            Ok(path)
+        });
     }
     let dir = vixeeny_common::paths::expand_user_dir(&config.paths.images)
         .context("cannot locate the images folder")?;
