@@ -102,16 +102,16 @@ fn settings_apply_immediately() {
     settings_render(&panel, "9-settings-general");
     let w = panel.window();
     let groups = w.get_groups();
-    w.invoke_row_toggled("sounds".into(), false);
+    w.invoke_row_toggled("notifications".into(), false);
     // The page keeps its rows (and their controls, which then animate): only the row changed.
     assert!(w.get_groups() == groups, "the rows were rebuilt");
     w.invoke_row_chosen("theme".into(), 2); // system, light, dark
     assert_eq!(seen.borrow().len(), 2, "one notification per change");
     let c = panel.config();
-    assert!(!c.general.sounds);
+    assert!(!c.general.notifications);
     assert_eq!(c.general.theme, "dark");
     // The same value again is not a change.
-    w.invoke_row_toggled("sounds".into(), false);
+    w.invoke_row_toggled("notifications".into(), false);
     assert_eq!(seen.borrow().len(), 2);
     panel.select_section(Section::Overlay);
     w.invoke_row_chosen("overlay_edge".into(), 0); // left, right, top, bottom

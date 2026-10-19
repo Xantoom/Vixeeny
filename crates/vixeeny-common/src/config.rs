@@ -198,7 +198,6 @@ pub struct General {
     pub autostart: bool,
     /// Seconds of inactivity before the app exits; 0 = exit immediately.
     pub app_idle_exit_seconds: u32,
-    pub sounds: bool,
     pub notifications: bool,
     pub check_updates: bool,
     /// New versions are downloaded and installed in the background, without asking.
@@ -214,7 +213,6 @@ impl Default for General {
             theme: "system".into(),
             autostart: true,
             app_idle_exit_seconds: 30,
-            sounds: true,
             notifications: true,
             check_updates: true,
             auto_update: true,
@@ -865,6 +863,11 @@ mod tests {
         assert_eq!(Config::load(&path).unwrap(), Config::default());
         assert_eq!(Config::from_toml("").unwrap(), Config::default());
         let cfg = Config::from_toml("[general]\nautostart = false\n").unwrap();
+        // A setting of older versions, gone since: left aside.
+        assert_eq!(
+            Config::from_toml("[general]\nsounds = true\n").unwrap(),
+            Config::default()
+        );
         assert!(!cfg.general.autostart);
         assert_eq!(cfg.general.app_idle_exit_seconds, 30);
         assert_eq!(cfg.hotkeys, Hotkeys::default());
@@ -873,14 +876,14 @@ mod tests {
     #[test]
     fn a_value_that_cannot_be_read_takes_its_default_alone() {
         let text = "schema_version = 6\n\
-            [general]\nautostart = \"yes\"\nsounds = true\n\
+            [general]\nautostart = \"yes\"\nnotifications = false\n\
             [hotkeys]\ncapture_region = [\"F8\"]\nrecord_toggle = \"F9\"\n\
             [image]\nformat = \"png\"\n[image.jpeg]\nquality = \"high\"\n\
             [replay]\nduration_seconds = -5\n";
         let cfg = Config::from_toml(text).unwrap();
         let defaults = Config::default();
         assert_eq!(cfg.general.autostart, defaults.general.autostart);
-        assert!(cfg.general.sounds);
+        assert!(!cfg.general.notifications);
         assert_eq!(cfg.hotkeys.capture_region, ["F8"]);
         assert_eq!(cfg.hotkeys.record_toggle, defaults.hotkeys.record_toggle);
         assert_eq!(cfg.image.format, "png");
@@ -900,7 +903,7 @@ mod tests {
         std::fs::write(&path, "[hotkeys]\ncapture_region = [\"F8\"]\n").unwrap();
         Config::load(&path).unwrap();
         assert!(!backup.exists());
-        for text in ["[general]\nsounds = 3\n", "not toml ["] {
+        for text in ["[general]\nnotifications = 3\n", "not toml ["] {
             std::fs::write(&path, text).unwrap();
             let _ = Config::load(&path);
             assert_eq!(std::fs::read_to_string(&backup).unwrap(), text);

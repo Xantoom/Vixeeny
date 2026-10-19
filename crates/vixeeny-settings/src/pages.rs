@@ -87,12 +87,6 @@ pub fn general(env: &Env, config: &Config) -> Vec<Row> {
             |c| c.general.notifications,
             |c, v| c.general.notifications = v,
         ),
-        toggle(
-            "sounds",
-            t(Key::SetSounds),
-            |c| c.general.sounds,
-            |c, v| c.general.sounds = v,
-        ),
         // The widget's warning sign, and a notification during a replay.
         disk_alert(env, config),
     ]
