@@ -1027,7 +1027,7 @@ mod tests {
                 "2560 × 1440 (QHD)",
                 "1920 × 1080 (Full HD)",
                 "1280 × 720 (HD)",
-                "854 × 480"
+                "854 × 480 (SD)"
             ]
         );
         // The screen's own height, set by name (or a larger screen's): the screen's size, once.
