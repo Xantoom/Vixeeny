@@ -262,6 +262,53 @@ pub fn process_name(pid: u32) -> Option<String> {
     }
 }
 
+/// The processes that started `pid`: its parent first, then the parent's, and so on (as far as
+/// they still run).
+pub fn process_ancestors(pid: u32) -> Vec<u32> {
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
+        TH32CS_SNAPPROCESS,
+    };
+    let mut parents = std::collections::HashMap::new();
+    // SAFETY: a snapshot walked with an entry whose size is set, then closed.
+    unsafe {
+        let Ok(snapshot) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else {
+            return Vec::new();
+        };
+        let mut entry = PROCESSENTRY32W {
+            dwSize: size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
+        let mut more = Process32FirstW(snapshot, &mut entry).is_ok();
+        while more {
+            parents.insert(entry.th32ProcessID, entry.th32ParentProcessID);
+            more = Process32NextW(snapshot, &mut entry).is_ok();
+        }
+        let _ = CloseHandle(snapshot);
+    }
+    let mut chain = Vec::new();
+    let mut at = pid;
+    // A parent's number may since have gone to a newer process: the chain can loop.
+    while let Some(&parent) = parents.get(&at) {
+        if parent == 0 || parent == pid || chain.contains(&parent) || chain.len() >= 32 {
+            break;
+        }
+        chain.push(parent);
+        at = parent;
+    }
+    chain
+}
+
+/// Leaves a window of this process out of every screen capture (Windows 10 2004 or later).
+pub fn exclude_from_capture(id: WindowId) -> Result<()> {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE,
+    };
+    // SAFETY: plain call on a window of this process.
+    unsafe { SetWindowDisplayAffinity(hwnd_of(id), WDA_EXCLUDEFROMCAPTURE) }
+        .map_err(|e| os_err("SetWindowDisplayAffinity", e))
+}
+
 pub fn window_info(id: WindowId) -> Result<Option<WindowInfo>> {
     let hwnd = hwnd_of(id);
     let Some(rect) = frame_rect(hwnd) else {

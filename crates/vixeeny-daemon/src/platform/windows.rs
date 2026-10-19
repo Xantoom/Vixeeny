@@ -82,6 +82,10 @@ impl Games for ForegroundGames {
         }
         .map(|w| w.pid)
     }
+
+    fn same_game(&self, pid: u32, game: u32) -> bool {
+        vixeeny_platform::games::part_of_game(pid, game)
+    }
 }
 
 fn os_locale() -> Option<String> {

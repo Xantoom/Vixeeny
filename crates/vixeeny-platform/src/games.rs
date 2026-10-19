@@ -81,6 +81,51 @@ pub fn exe_name(path: &str) -> Option<String> {
         .map(|n| n.to_string_lossy().to_lowercase())
 }
 
+/// Whether process `pid` is part of the game running as process `game`: the game itself, a
+/// process it started, or a program installed with it. A game's in-game web pages (shop, news,
+/// events) may come in front in a full-screen window of another process: it is still the game.
+pub fn part_of_game(pid: u32, game: u32) -> bool {
+    if pid == game {
+        return true;
+    }
+    // Its number may since have gone to another program.
+    if !crate::process_alive(game) {
+        return false;
+    }
+    if crate::process_ancestors(pid).contains(&game) {
+        return true;
+    }
+    match (crate::process_path(pid), crate::process_path(game)) {
+        (Some(exe), Some(game_exe)) => installed_with(&exe, &game_exe),
+        _ => false,
+    }
+}
+
+/// Whether `exe` lies in the folder of `game_exe` or below it. Not when that folder is too
+/// near the root of the disk to be the game's own (`C:\Program Files`).
+pub fn installed_with(exe: &str, game_exe: &str) -> bool {
+    let (Some(dir), Some(game_dir)) = (Path::new(exe).parent(), Path::new(game_exe).parent())
+    else {
+        return false;
+    };
+    let words = |p: &Path| {
+        p.components()
+            .filter_map(|c| match c {
+                std::path::Component::Normal(n) => Some(n.to_string_lossy().to_lowercase()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let (dir, game_dir) = (words(dir), words(game_dir));
+    let root = |p: &str| {
+        Path::new(p)
+            .components()
+            .next()
+            .map(|c| c.as_os_str().to_ascii_lowercase())
+    };
+    game_dir.len() >= 2 && root(exe) == root(game_exe) && dir.starts_with(&game_dir)
+}
+
 /// Whether `window` belongs to Vixeeny: this process, or an executable next to it.
 pub fn is_ours(window: &WindowInfo) -> bool {
     if window.pid == std::process::id() {
@@ -514,6 +559,32 @@ fn subkey_strings(root: HKEY, key: &str, value: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_program_installed_with_the_game_is_part_of_it() {
+        let game = r"D:\Games\Wuthering Waves Game\Client\Binaries\Win64\Client-Win64-Shipping.exe";
+        // Its in-game web pages.
+        let web = r"d:\games\wuthering waves game\Client\Binaries\Win64\ThirdParty\KrPcSdk_Global\KRSDKExternal.exe";
+        assert!(installed_with(web, game));
+        assert!(installed_with(game, game));
+        assert!(!installed_with(
+            r"C:\Program Files\Browser\browser.exe",
+            game
+        ));
+        assert!(!installed_with(
+            r"E:\Games\Wuthering Waves Game\Client\Binaries\Win64\x.exe",
+            game
+        ));
+        // A folder near the root of the disk holds many programs.
+        assert!(!installed_with(
+            r"C:\Program Files\Other\other.exe",
+            r"C:\Program Files\game.exe"
+        ));
+        assert!(!installed_with(
+            r"C:\Games\Other\other.exe",
+            r"C:\Games\Mine\game.exe"
+        ));
+    }
 
     #[test]
     fn the_steam_libraries_are_read_from_their_file() {

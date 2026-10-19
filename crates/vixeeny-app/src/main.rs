@@ -374,6 +374,9 @@ struct Recording {
     replay_game: Option<(u32, String)>,
     /// A game whose replay the user stopped by hand: it is not started again for it.
     declined: Option<u32>,
+    /// The games announced while they run, the replay on or off: each is told once per run
+    /// of the game, and again only when the replay changed.
+    announced: Vec<(u32, bool)>,
     /// Tells games from other full-screen programs.
     games: vixeeny_platform::games::Detector,
     /// Asks the main loop to look at the foreground again (the game closed).
@@ -426,18 +429,45 @@ impl Recording {
         let Some(game) = self.games.game_in_front(game_lists(config)) else {
             return;
         };
-        // The daemon tells once per game, and again after the replay settings changed.
         if !config.replay.enabled {
-            if config.replay.notify == "both" {
+            if config.replay.notify == "both" && self.first_time(&game, false) {
                 announce(config, false, &game);
             }
             return;
         }
-        if self.replay.is_some() || self.declined == Some(game.pid) {
+        let declined = self
+            .declined
+            .is_some_and(|pid| vixeeny_platform::games::part_of_game(game.pid, pid));
+        if self.replay.is_some() || declined {
             return;
         }
-        if self.start_replay(config, &game) && config.replay.notify != "none" {
+        if self.start_replay(config, &game)
+            && config.replay.notify != "none"
+            && self.first_time(&game, true)
+        {
             announce(config, true, &game);
+        }
+    }
+
+    /// Whether `game` (or the game it is part of) is not yet announced in this run of it with
+    /// the replay `on` (or off).
+    fn first_time(&mut self, game: &vixeeny_platform::WindowInfo, on: bool) -> bool {
+        self.announced
+            .retain(|(pid, _)| vixeeny_platform::process_alive(*pid));
+        let known = self
+            .announced
+            .iter_mut()
+            .find(|(pid, _)| vixeeny_platform::games::part_of_game(game.pid, *pid));
+        match known {
+            Some((_, told)) if *told == on => false,
+            Some((_, told)) => {
+                *told = on;
+                true
+            }
+            None => {
+                self.announced.push((game.pid, on));
+                true
+            }
         }
     }
 

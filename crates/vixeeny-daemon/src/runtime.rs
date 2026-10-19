@@ -28,6 +28,11 @@ pub trait Games {
     /// The process of the full-screen game in `window` (`None`: the foreground now), if it is
     /// one.
     fn game(&mut self, window: Option<u64>, config: &Config) -> Option<u32>;
+    /// Whether process `pid` is part of the game running as process `game` (its in-game web
+    /// pages, in a window of another process).
+    fn same_game(&self, pid: u32, game: u32) -> bool {
+        pid == game
+    }
 }
 
 /// No game detection (tests, or a system without it).
@@ -193,7 +198,11 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
             self.hooked = self.games.hook(self.tx.clone());
         }
         match self.games.game(window, &self.config) {
-            Some(pid) if self.last_game != Some(pid) => {
+            Some(pid)
+                if self
+                    .last_game
+                    .is_none_or(|game| !self.games.same_game(pid, game)) =>
+            {
                 self.last_game = Some(pid);
                 self.dispatch(Event::Action(ActionId::ReplayWatch));
                 true
@@ -557,6 +566,38 @@ mod tests {
             };
             assert_eq!(*spawned.lock().unwrap(), expected, "{enabled} {notify}");
         }
+    }
+
+    /// The process in front (a game when set); process 8 is part of game 7 (its web pages).
+    struct GameWithPages(Arc<Mutex<Option<u32>>>);
+
+    impl Games for GameWithPages {
+        fn hook(&mut self, _: EventTx) -> bool {
+            true
+        }
+        fn game(&mut self, _: Option<u64>, _: &Config) -> Option<u32> {
+            *self.0.lock().unwrap()
+        }
+        fn same_game(&self, pid: u32, game: u32) -> bool {
+            pid == game || (pid, game) == (8, 7)
+        }
+    }
+
+    #[test]
+    fn the_web_pages_of_a_game_are_not_another_game() {
+        let mut config = Config::default();
+        config.replay.enabled = true;
+        let (rt, events, _, spawned) = runtime(false, config);
+        let front = Arc::new(Mutex::new(None));
+        let mut rt = rt.with_games(Box::new(GameWithPages(front.clone())));
+        rt.start_replay_if_configured();
+        for (pid, game) in [(7, 7), (8, 7), (7, 7), (8, 7), (9, 9)] {
+            *front.lock().unwrap() = Some(pid);
+            events.send(Event::Foreground(1));
+            rt.pump();
+            assert_eq!(rt.last_game, Some(game), "{pid}");
+        }
+        assert_eq!(*spawned.lock().unwrap(), vec![(1, ActionId::ReplayWatch)]);
     }
 
     #[test]
