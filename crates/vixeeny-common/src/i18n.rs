@@ -36,7 +36,6 @@ pub enum Key {
     OvlSettings,
     /// `{height}`
     ScrollCapturing,
-    ScrollLost,
     /// `{height}`
     ScrollTruncated,
     SecGeneral,
@@ -358,7 +357,6 @@ impl Key {
         Self::OvlReplaySave,
         Self::OvlSettings,
         Self::ScrollCapturing,
-        Self::ScrollLost,
         Self::ScrollTruncated,
         Self::SecGeneral,
         Self::SecShortcuts,
@@ -752,8 +750,6 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::OvlSettings, Lang::Fr) => "Paramètres",
         (Key::ScrollCapturing, Lang::En) => "Capturing… {height} px (Enter to finish)",
         (Key::ScrollCapturing, Lang::Fr) => "Capture… {height} px (Entrée pour terminer)",
-        (Key::ScrollLost, Lang::En) => "Scrolled too fast: scroll back a little",
-        (Key::ScrollLost, Lang::Fr) => "Défilement trop rapide : remontez un peu",
         (Key::ScrollTruncated, Lang::En) => "Height limit reached ({height} px)",
         (Key::ScrollTruncated, Lang::Fr) => "Hauteur maximale atteinte ({height} px)",
         (Key::SecGeneral, Lang::En) => "General",

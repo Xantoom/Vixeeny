@@ -227,7 +227,6 @@ fn capture_loop(
         max_height,
         ..Default::default()
     });
-    let mut lost = false;
     let mut warned_full = false;
     // The preview is shown at most this often; the last change always shows.
     let mut shown: Option<Instant> = None;
@@ -246,15 +245,14 @@ fn capture_loop(
             buffers.give(captured.frame.data);
             let (frame, layer) = pushed.context("unexpected frame")?;
             match stitcher.push_layered(&frame, layer.as_deref())? {
-                Push::Lost => lost = true,
-                Push::Added { .. } | Push::First => lost = false,
                 Push::Full if !warned_full => {
                     warned_full = true;
                     let msg = tr(Key::ScrollTruncated, lang)
                         .replace("{height}", &stitcher.height().to_string());
                     preview.show_status(msg);
                 }
-                Push::Full | Push::Unchanged => {}
+                // A frame that cannot be placed is found again as soon as it can.
+                _ => {}
             }
             changed = true;
         }
@@ -269,12 +267,8 @@ fn capture_loop(
             unshown = false;
             shown = Some(Instant::now());
             if let Some(p) = stitcher.preview(preview_box.0, preview_box.1) {
-                let status = if lost {
-                    tr(Key::ScrollLost, lang).to_owned()
-                } else {
-                    tr(Key::ScrollCapturing, lang)
-                        .replace("{height}", &stitcher.height().to_string())
-                };
+                let status = tr(Key::ScrollCapturing, lang)
+                    .replace("{height}", &stitcher.height().to_string());
                 preview.show_preview(p.width, p.height, to_rgba(&p), status);
             }
         }
