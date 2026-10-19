@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::ipc::ActionId;
 
 /// Schema version written by this build. Bump it and add a migration to [`MIGRATIONS`].
-pub const SCHEMA_VERSION: u32 = 6;
+pub const SCHEMA_VERSION: u32 = 7;
 
 /// `MIGRATIONS[n]` upgrades a table from schema `n + 1` to `n + 2`.
 pub type Migration = fn(&mut toml::Table);
@@ -19,6 +19,7 @@ pub const MIGRATIONS: &[Migration] = &[
     v3_naming_per_kind,
     v4_widget_display,
     v5_two_shortcuts,
+    v6_scrolling_shortcut,
 ];
 
 /// 0.9 → 1.0: MP4 recordings are fragmented (a recording cut short still plays), and the cursor
@@ -105,6 +106,37 @@ fn v5_two_shortcuts(table: &mut toml::Table) {
     };
     for list in hotkeys.iter_mut().filter_map(|(_, v)| v.as_array_mut()) {
         list.truncate(crate::hotkey::MAX_PER_ACTION);
+    }
+}
+
+/// The scrolling capture's own shortcut.
+const SCROLLING_SHORTCUT: &str = "Ctrl+PrintScreen";
+
+/// 1.0: the scrolling capture has a shortcut of its own, unless the user has one for it or
+/// gave that one to another action.
+fn v6_scrolling_shortcut(table: &mut toml::Table) {
+    let Some(hotkeys) = table.get_mut("hotkeys").and_then(|h| h.as_table_mut()) else {
+        return;
+    };
+    let taken = hotkeys
+        .values()
+        .filter_map(|v| v.as_array())
+        .flatten()
+        .any(|v| {
+            v.as_str().is_some_and(|text| {
+                crate::hotkey::Hotkey::parse(text).ok()
+                    == crate::hotkey::Hotkey::parse(SCROLLING_SHORTCUT).ok()
+            })
+        });
+    let empty = hotkeys
+        .get("capture_scrolling")
+        .and_then(|v| v.as_array())
+        .is_none_or(Vec::is_empty);
+    if empty && !taken {
+        hotkeys.insert(
+            "capture_scrolling".into(),
+            toml::Value::Array(vec![SCROLLING_SHORTCUT.into()]),
+        );
     }
 }
 
@@ -236,7 +268,7 @@ impl Default for Hotkeys {
             capture_window: one("Alt+PrintScreen"),
             capture_fullscreen: one("Shift+PrintScreen"),
             capture_all_monitors: Vec::new(),
-            capture_scrolling: Vec::new(),
+            capture_scrolling: one(SCROLLING_SHORTCUT),
             record_toggle: one("Ctrl+Shift+R"),
             record_pause: one("Ctrl+Shift+P"),
             replay_toggle: Vec::new(),
@@ -952,6 +984,21 @@ mod tests {
         )
         .unwrap();
         assert_eq!(cfg.hotkeys.open_settings, ["Ctrl+1", "Ctrl+2"]);
+    }
+
+    #[test]
+    fn the_scrolling_capture_gets_its_shortcut_when_free() {
+        let read = |hotkeys: &str| {
+            Config::from_toml(&format!("schema_version = 6\n[hotkeys]\n{hotkeys}"))
+                .unwrap()
+                .hotkeys
+        };
+        let h = read("capture_scrolling = []\n");
+        assert_eq!(h.capture_scrolling, [SCROLLING_SHORTCUT]);
+        let h = read("capture_scrolling = [\"F7\"]\n");
+        assert_eq!(h.capture_scrolling, ["F7"]);
+        let h = read("capture_scrolling = []\nopen_settings = [\"ctrl+printscreen\"]\n");
+        assert!(h.capture_scrolling.is_empty());
     }
 
     #[test]

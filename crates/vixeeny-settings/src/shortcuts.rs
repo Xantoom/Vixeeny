@@ -50,15 +50,6 @@ pub fn table(config: &Config) -> Vec<(ActionId, [String; MAX_PER_ACTION])> {
         .collect()
 }
 
-/// What the settings page lists: the scrolling capture is chosen in the capture overlay, not
-/// from a shortcut page (its shortcut still works if the settings file has one).
-pub fn listed(config: &Config) -> Vec<(ActionId, [String; MAX_PER_ACTION])> {
-    table(config)
-        .into_iter()
-        .filter(|(action, _)| *action != ActionId::CaptureScrolling)
-        .collect()
-}
-
 /// Sets slot `slot` of `action` to `text` (empty clears it). The shortcut is written with its
 /// canonical names, its modifiers in the order given. Nothing changes when it is refused.
 pub fn set(config: &mut Config, action: ActionId, slot: usize, text: &str) -> Result<(), Refusal> {

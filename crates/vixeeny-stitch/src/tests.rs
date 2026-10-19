@@ -224,6 +224,21 @@ fn preview_fits_the_box() {
     assert!(t.width <= 32 && t.height <= 50);
 }
 
+#[test]
+fn the_preview_shows_the_assembled_image() {
+    let p = page(400, &[(120, 140)]);
+    let s = screen(&p, 100, 12, 8);
+    let mut st = Stitcher::new(Config::default());
+    for o in [100, 130, 170, 60, 20, 200] {
+        st.push(&s.frame(o)).unwrap();
+    }
+    let preview = st.preview(16, 60).unwrap();
+    let whole = st.finish().unwrap().frame;
+    let rows: Vec<&[u8]> = (0..whole.height as usize).map(|y| whole.row(y)).collect();
+    assert_eq!(preview, crate::frame::sampled(W, &rows, 16, 60));
+    assert!(preview.width <= 16 && preview.height <= 60);
+}
+
 /// A layer of another size per pixel: each pixel's bytes twice.
 fn doubled(data: &[u8]) -> Vec<u8> {
     data.as_chunks::<4>()

@@ -71,6 +71,20 @@ struct Rows {
 }
 
 impl Rows {
+    /// Every row, top to bottom (`row_bytes` each).
+    fn rows(&self, row_bytes: usize) -> impl Iterator<Item = &[u8]> {
+        self.header
+            .chunks_exact(row_bytes)
+            .chain(
+                self.above
+                    .iter()
+                    .rev()
+                    .flat_map(move |c| c.chunks_exact(row_bytes)),
+            )
+            .chain(self.body.chunks_exact(row_bytes))
+            .chain(self.footer.chunks_exact(row_bytes))
+    }
+
     fn assemble(&self) -> Vec<u8> {
         let mut data = Vec::with_capacity(
             self.header.len()
@@ -366,8 +380,19 @@ impl Stitcher {
 
     /// The image so far, for the live preview (downscaled to fit).
     pub fn preview(&self, max_width: u32, max_height: u32) -> Option<Frame> {
-        self.assemble()
-            .map(|(f, _)| f.thumbnail(max_width, max_height))
+        match &self.state {
+            State::Empty => None,
+            State::One(p) => Some(p.frame.thumbnail(max_width, max_height)),
+            State::Running(r) => {
+                let rows: Vec<&[u8]> = r.pixels.rows(r.prev.row_bytes()).collect();
+                Some(crate::frame::sampled(
+                    r.prev.width,
+                    &rows,
+                    max_width,
+                    max_height,
+                ))
+            }
+        }
     }
 
     /// The final image. `None` when no frame was pushed.

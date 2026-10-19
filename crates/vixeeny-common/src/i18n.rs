@@ -19,7 +19,6 @@ pub enum Key {
     HotkeysUnavailable,
     ScrollTitle,
     ScrollIntro,
-    ScrollStart,
     ScrollFinish,
     ScrollCancel,
     OvlImage,
@@ -343,7 +342,6 @@ impl Key {
         Self::HotkeysUnavailable,
         Self::ScrollTitle,
         Self::ScrollIntro,
-        Self::ScrollStart,
         Self::ScrollFinish,
         Self::ScrollCancel,
         Self::OvlImage,
@@ -718,10 +716,10 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         }
         (Key::ScrollTitle, Lang::En) => "Scrolling capture",
         (Key::ScrollTitle, Lang::Fr) => "Capture défilante",
-        (Key::ScrollIntro, Lang::En) => "Click Start, then scroll the content yourself.",
-        (Key::ScrollIntro, Lang::Fr) => "Cliquez sur Démarrer, puis faites défiler le contenu.",
-        (Key::ScrollStart, Lang::En) => "Start",
-        (Key::ScrollStart, Lang::Fr) => "Démarrer",
+        (Key::ScrollIntro, Lang::En) => "Scroll the content. Enter or Finish when done.",
+        (Key::ScrollIntro, Lang::Fr) => {
+            "Faites défiler le contenu. Entrée ou Terminer une fois fini."
+        }
         (Key::ScrollFinish, Lang::En) => "Finish",
         (Key::ScrollFinish, Lang::Fr) => "Terminer",
         (Key::ScrollCancel, Lang::En) => "Cancel",

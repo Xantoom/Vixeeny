@@ -10,7 +10,6 @@ use crate::ScrollWindow;
 pub struct ScrollTexts {
     pub title: String,
     pub intro: String,
-    pub start: String,
     pub finish: String,
     pub cancel: String,
 }
@@ -18,7 +17,6 @@ pub struct ScrollTexts {
 /// What the user decided.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScrollEvent {
-    Start,
     Finish,
     Cancel,
 }
@@ -66,10 +64,13 @@ impl ScrollPanel {
         let window = ScrollWindow::new()?;
         crate::theme::apply(&window, crate::theme::default_look());
         window.set_status(texts.intro.as_str().into());
-        window.set_start_label(texts.start.as_str().into());
         window.set_finish_label(texts.finish.as_str().into());
         window.set_cancel_label(texts.cancel.as_str().into());
         Ok(Self { window })
+    }
+
+    pub fn window(&self) -> &ScrollWindow {
+        &self.window
     }
 
     pub fn handle(&self) -> ScrollHandle {
@@ -88,13 +89,6 @@ impl ScrollPanel {
     /// itself on `Finish` and `Cancel`.
     pub fn run(self, on_event: impl Fn(ScrollEvent) + 'static) -> Result<(), slint::PlatformError> {
         let on_event = std::rc::Rc::new(on_event);
-        let (weak, f) = (self.window.as_weak(), on_event.clone());
-        self.window.on_start(move || {
-            if let Some(w) = weak.upgrade() {
-                w.set_running(true);
-            }
-            f(ScrollEvent::Start);
-        });
         let (weak, f) = (self.window.as_weak(), on_event.clone());
         self.window.on_finish(move || {
             f(ScrollEvent::Finish);

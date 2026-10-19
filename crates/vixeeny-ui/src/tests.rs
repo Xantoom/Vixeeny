@@ -329,21 +329,21 @@ fn shortcuts_are_edited_in_place_and_conflicts_are_explained() {
     panel.select_section(Section::Shortcuts);
     settings_render(&panel, "9-settings-shortcuts");
     let w = panel.window();
-    // Row 6 is the replay toggle, row 7 the replay save (Ctrl+Shift+S). Keys are recorded, never typed.
+    // Row 7 is the replay toggle, row 8 the replay save (Ctrl+Shift+S). Keys are recorded, never typed.
     let record = |row: i32, slot: i32, keys: &str| {
         w.invoke_shortcut_record(row, slot);
         panel.captured(settings_panel::Captured::Combination(keys.into()));
     };
-    record(6, 0, "Ctrl+Shift+F9");
+    record(7, 0, "Ctrl+Shift+F9");
     assert_eq!(panel.config().hotkeys.replay_toggle, ["Ctrl+Shift+F9"]);
     assert_eq!(seen.borrow().len(), 1);
-    record(6, 1, "Ctrl+Shift+S");
+    record(7, 1, "Ctrl+Shift+S");
     assert_eq!(panel.config().hotkeys.replay_toggle.len(), 1, "refused");
-    let row = w.get_shortcuts().row_data(6).unwrap();
+    let row = w.get_shortcuts().row_data(7).unwrap();
     assert!(row.error.contains("Save the replay"), "{}", row.error);
     assert_eq!(seen.borrow().len(), 1, "a refusal is not a change");
     // Leaving the window stops the recording without touching anything.
-    w.invoke_shortcut_record(6, 1);
+    w.invoke_shortcut_record(7, 1);
     assert!(panel.captured(settings_panel::Captured::Cancel));
     assert!(
         !panel.captured(settings_panel::Captured::Cancel),
@@ -351,7 +351,7 @@ fn shortcuts_are_edited_in_place_and_conflicts_are_explained() {
     );
     assert_eq!(seen.borrow().len(), 1);
     // The keys show while held, in the order pressed; letting go saves them.
-    w.invoke_shortcut_record(6, 1);
+    w.invoke_shortcut_record(7, 1);
     for code in ["ShiftLeft", "ControlRight", "ShiftRight", "F10"] {
         assert!(panel.key(code, true));
     }
@@ -366,7 +366,7 @@ fn shortcuts_are_edited_in_place_and_conflicts_are_explained() {
         "recorded: the keys are free again"
     );
     // Escape empties the slot.
-    w.invoke_shortcut_record(6, 0);
+    w.invoke_shortcut_record(7, 0);
     assert!(panel.key("Escape", true));
     assert_eq!(panel.config().hotkeys.replay_toggle, ["Shift+Ctrl+F10"]);
 }

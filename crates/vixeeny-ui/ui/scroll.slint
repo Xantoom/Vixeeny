@@ -2,16 +2,13 @@
 import { Theme, Icons, Button } from "controls.slint";
 
 // Control window of a scrolling capture: the live vertical preview of what has been
-// assembled, and the Start / Finish / Cancel buttons.
+// assembled, and the Finish / Cancel buttons. The capture runs from the start.
 export component ScrollWindow inherits Window {
     in property <string> status;
     in property <image> preview;
-    in property <bool> running: false;
-    in property <string> start-label: "Start";
     in property <string> finish-label: "Finish";
     in property <string> cancel-label: "Cancel";
 
-    callback start();
     callback finish();
     callback cancel();
 
@@ -31,7 +28,7 @@ export component ScrollWindow inherits Window {
                 return accept;
             }
             if (event.text == Key.Return) {
-                if (root.running) { root.finish(); } else { root.start(); }
+                root.finish();
                 return accept;
             }
             reject
@@ -72,13 +69,7 @@ export component ScrollWindow inherits Window {
                     clicked => { root.cancel(); }
                 }
                 Rectangle { horizontal-stretch: 1; }
-                if !root.running : Button {
-                    text: root.start-label;
-                    icon: Icons.play-filled;
-                    accent: true;
-                    clicked => { root.start(); }
-                }
-                if root.running : Button {
+                Button {
                     text: root.finish-label;
                     icon: Icons.checkmark;
                     accent: true;

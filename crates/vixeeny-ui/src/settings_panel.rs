@@ -1077,7 +1077,7 @@ impl SettingsPanel {
         let config = self.state.config.borrow();
         let taken = self.state.taken.borrow();
         let lang = self.state.lang();
-        let table: Vec<ShortcutRow> = shortcuts::listed(&config)
+        let table: Vec<ShortcutRow> = shortcuts::table(&config)
             .into_iter()
             .enumerate()
             .map(|(i, (action, slots))| {
@@ -1120,7 +1120,7 @@ impl SettingsPanel {
     fn set_shortcut(&self, row: usize, slot: usize, text: &str) {
         let state = &self.state;
         let lang = state.lang();
-        let listed = shortcuts::listed(&state.config.borrow());
+        let listed = shortcuts::table(&state.config.borrow());
         let Some(action) = listed.get(row).map(|(action, _)| *action) else {
             return;
         };
@@ -1244,7 +1244,7 @@ impl SettingsPanel {
             let config = state.config.borrow();
             let mut found = search(query, &state.env.borrow(), &config);
             // The actions of the shortcuts page.
-            for (action, _) in shortcuts::listed(&config) {
+            for (action, _) in shortcuts::table(&config) {
                 let label = action_label(action, lang);
                 if vixeeny_settings::matches(query, label) {
                     found.push(Found {

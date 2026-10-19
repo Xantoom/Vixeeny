@@ -326,7 +326,7 @@ mod tests {
     fn defaults_have_no_problem() {
         let r = resolve(&Hotkeys::default());
         assert!(r.problems.is_empty(), "{:?}", r.problems);
-        assert_eq!(r.bindings.len(), 8);
+        assert_eq!(r.bindings.len(), 9);
     }
 
     #[test]
