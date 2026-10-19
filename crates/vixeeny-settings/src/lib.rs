@@ -87,6 +87,8 @@ pub struct Opt {
     pub label: String,
     /// The title of the options under it, not one to choose.
     pub heading: bool,
+    /// The one advised: marked so in the list.
+    pub recommended: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -110,10 +112,9 @@ pub enum Kind {
     Folder,
     /// Read-only.
     Info,
-    /// Starts a new group of rows (shown apart from the one above); nothing to edit.
+    /// Starts a new group of rows (shown apart from the one above), titled by its label when it
+    /// has one; nothing to edit.
     Header,
-    /// How loud the microphone is right now (drawn by the window from what the host measures).
-    Meter,
     /// Shows or hides the rows under it (its value: whether they are shown). Its state is the
     /// window's, not a setting: see [`Env::open`].
     Expander,
@@ -155,6 +156,16 @@ pub struct Row {
     /// Shown greyed out: it does not apply with the other settings as they are (the "i" says
     /// why).
     pub greyed: bool,
+    /// What a number counts (`kbit/s`), written after it.
+    pub unit: String,
+    /// How 0 reads (`Auto`), when it means something else than none.
+    pub zero: String,
+    /// A short line under the label (an estimate).
+    pub detail: String,
+    /// Belongs to the row above it (a program of its list): set in under it.
+    pub nested: bool,
+    /// The microphone's level, drawn live under the slider.
+    pub meter: bool,
     get: Get,
     set: Set,
 }
@@ -166,7 +177,7 @@ impl Row {
 
     /// Whether it can be changed.
     pub fn enabled(&self) -> bool {
-        !self.greyed && !matches!(self.kind, Kind::Info | Kind::Header | Kind::Meter)
+        !self.greyed && !matches!(self.kind, Kind::Info | Kind::Header)
     }
 
     /// Checks `value` against the kind of the row, then writes it. Numbers are brought into
@@ -197,6 +208,31 @@ impl Row {
             _ => return Err(Invalid),
         };
         (self.set)(config, value)
+    }
+
+    /// A number as the user reads it: grouped by thousands, with its unit (`10 000 kbit/s`).
+    pub fn number_text(&self, n: i64, lang: Lang) -> String {
+        if n == 0 && !self.zero.is_empty() {
+            return self.zero.clone();
+        }
+        let digits = n.unsigned_abs().to_string();
+        let sep = if lang == Lang::Fr { '\u{a0}' } else { ',' };
+        let mut grouped = String::new();
+        for (i, c) in digits.chars().enumerate() {
+            // Four digits stay together (2048), as both languages write them.
+            if i > 0 && digits.len() > 4 && (digits.len() - i).is_multiple_of(3) {
+                grouped.push(sep);
+            }
+            grouped.push(c);
+        }
+        if n < 0 {
+            grouped.insert(0, '-');
+        }
+        match self.unit.as_str() {
+            "" => grouped,
+            "%" if lang == Lang::En => format!("{grouped}%"),
+            unit => format!("{grouped}\u{a0}{unit}"),
+        }
     }
 }
 
@@ -236,6 +272,8 @@ pub struct AudioDevices {
 #[derive(Debug, Clone)]
 pub struct Env {
     pub lang: Lang,
+    /// The language `auto` stands for (the system's).
+    pub auto_lang: Lang,
     /// The encoders of this platform, best first within each kind.
     pub encoders: Vec<EncoderInfo>,
     /// The hardware probe, once it has run.
@@ -273,6 +311,7 @@ impl Env {
     pub fn new(lang: Lang, version: &str) -> Self {
         Self {
             lang,
+            auto_lang: lang,
             encoders: encoders::all(),
             probe: None,
             detecting: false,
@@ -282,6 +321,11 @@ impl Env {
             machine: Machine::default(),
             open: std::collections::BTreeSet::new(),
         }
+    }
+
+    pub const fn with_auto_lang(mut self, lang: Lang) -> Self {
+        self.auto_lang = lang;
+        self
     }
 
     pub fn with_open(mut self, open: std::collections::BTreeSet<String>) -> Self {
@@ -321,6 +365,7 @@ fn heading(label: impl Into<String>) -> Opt {
         value: String::new(),
         label: label.into(),
         heading: true,
+        recommended: false,
     }
 }
 
@@ -329,6 +374,15 @@ fn opt(value: &str, label: impl Into<String>) -> Opt {
         heading: false,
         value: value.to_owned(),
         label: label.into(),
+        recommended: false,
+    }
+}
+
+/// The option advised, marked so in the list.
+fn advised(value: &str, label: impl Into<String>) -> Opt {
+    Opt {
+        recommended: true,
+        ..opt(value, label)
     }
 }
 
@@ -342,6 +396,11 @@ fn row(id: impl Into<String>, label: String, kind: Kind, get: Get, set: Set) -> 
         kind,
         picker: Picker::List,
         greyed: false,
+        unit: String::new(),
+        zero: String::new(),
+        detail: String::new(),
+        nested: false,
+        meter: false,
         get,
         set,
     }
@@ -449,15 +508,16 @@ fn picked(picker: Picker, mut row: Row) -> Row {
     row
 }
 
-/// A level that the window draws live.
-fn meter(id: &str, label: String) -> Row {
-    row(
-        id,
-        label,
-        Kind::Meter,
-        Box::new(|_| Value::Text(String::new())),
-        Box::new(|_, _| Err(Invalid)),
-    )
+/// Writes `unit` after the row's number.
+fn counted(mut row: Row, unit: impl Into<String>) -> Row {
+    row.unit = unit.into();
+    row
+}
+
+/// Sets the row in under the one above it.
+fn nested(mut row: Row) -> Row {
+    row.nested = true;
+    row
 }
 
 /// Adds `more` to what the "i" of the row says (after the explanation of the setting).
@@ -478,11 +538,11 @@ fn warned(mut row: Row, text: String) -> Row {
     row
 }
 
-/// Starts a new group: the rows below it are shown apart.
-fn header(id: &str) -> Row {
+/// Starts a new group: the rows below it are shown apart, under `title` (empty: none).
+fn header(id: &str, title: String) -> Row {
     row(
         id,
-        String::new(),
+        title,
         Kind::Header,
         Box::new(|_| Value::Text(String::new())),
         Box::new(|_, _| Err(Invalid)),
@@ -517,7 +577,7 @@ fn info(id: &str, label: String, value: String) -> Row {
 /// not apply with the current settings are left out, so a page only shows what matters.
 pub fn rows(section: Section, env: &Env, config: &Config) -> Vec<Row> {
     let mut rows = match section {
-        Section::General => pages::general(env),
+        Section::General => pages::general(env, config),
         Section::Overlay => pages::overlay(env, config),
         Section::Image => pages::image(env, config),
         Section::Video => pages::video(env, config),
@@ -590,7 +650,7 @@ pub fn search(query: &str, env: &Env, config: &Config) -> Vec<Found> {
         .flat_map(|section| {
             rows(section, &env, config)
                 .into_iter()
-                .filter(|r| !matches!(r.kind, Kind::Header | Kind::Expander | Kind::Meter))
+                .filter(|r| !matches!(r.kind, Kind::Header | Kind::Expander))
                 .filter(|r| matches(query, &r.label))
                 .map(move |r| Found {
                     section,
@@ -707,10 +767,10 @@ mod tests {
             ids.sort_unstable();
             ids.dedup();
             assert_eq!(ids.len(), rows.len(), "{section:?}");
-            for row in rows
-                .iter()
-                .filter(|r| !matches!(r.kind, Kind::Info | Kind::Header | Kind::Expander))
-            {
+            // A greyed row takes nothing (it may show what applies instead of the setting).
+            for row in rows.iter().filter(|r| {
+                !r.greyed && !matches!(r.kind, Kind::Info | Kind::Header | Kind::Expander)
+            }) {
                 let mut copy = config.clone();
                 let value = row.value(&config);
                 row.apply(&mut copy, value.clone())
@@ -935,6 +995,11 @@ mod tests {
     #[test]
     fn the_replay_keeps_its_duration_and_storage() {
         let mut c = Config::default();
+        // Greyed while the replay is off.
+        let off = rows(Section::Replay, &env(), &c);
+        assert!(row(&off, "replay_duration").greyed);
+        assert!(!row(&off, "replay_notify").greyed);
+        c.replay.enabled = true;
         let replay = rows(Section::Replay, &env(), &c);
         let duration = row(&replay, "replay_duration");
         duration.apply(&mut c, Value::Text("1800".into())).unwrap();
@@ -978,8 +1043,15 @@ mod tests {
     #[test]
     fn the_encoders_listed_are_the_ones_of_the_chosen_kind_that_exist_here() {
         let mut c = Config::default();
-        // Hardware by default; nothing listed before the probe has run.
-        assert!(encoder_options(&rows(Section::Video, &env(), &c)).is_empty());
+        // Hardware by default; nothing listed while the probe runs.
+        let detecting = env().with_probe(None, true);
+        assert!(encoder_options(&rows(Section::Video, &detecting, &c)).is_empty());
+        // No hardware encoder here: the software ones, and the kind says so.
+        let none = rows(Section::Video, &env(), &c);
+        assert!(encoder_options(&none).contains(&"libx264".to_owned()));
+        let kind = row(&none, "encoder_kind");
+        assert!(kind.greyed && !kind.warning.is_empty());
+        assert_eq!(kind.value(&c), Value::Text("software".into()));
         let e = with_nvenc();
         let video = rows(Section::Video, &e, &c);
         assert_eq!(encoder_options(&video), ["nvenc_h264"]);
@@ -1177,7 +1249,7 @@ mod tests {
         assert_eq!(capture(&c), Value::Text("system".into()));
         assert_eq!(row(&audio, "mic_on").value(&c), Value::Bool(false));
         assert!(!has_in(&audio, "mic_device"));
-        assert!(!has_in(&audio, "mic_level"));
+        assert!(!has_in(&audio, "mic_volume"));
         // One track: nothing to route.
         assert!(!has_in(&audio, "audio_routing"));
         // On: the Windows default, then the one picked.
@@ -1186,7 +1258,11 @@ mod tests {
             .unwrap();
         assert_eq!(c.video.audio.sources, ["system", "mic"]);
         let audio = rows(Section::Audio, &e, &c);
-        assert!(has_in(&audio, "mic_level"));
+        assert!(row(&audio, "mic_volume").meter);
+        assert_eq!(
+            row(&audio, "mic_volume").number_text(100, Lang::Fr),
+            "100\u{a0}%"
+        );
         match &row(&audio, "audio_routing").kind {
             Kind::Choice(o) => assert_eq!(o.len(), 2),
             _ => panic!("audio_routing is a choice"),
@@ -1269,6 +1345,7 @@ mod tests {
     #[test]
     fn the_replay_can_go_on_after_its_shortcut() {
         let mut c = Config::default();
+        c.replay.enabled = true;
         let replay = rows(Section::Replay, &env(), &c);
         let after = row(&replay, "replay_after");
         assert_eq!(after.value(&c), Value::Text("0".into()));
@@ -1329,23 +1406,24 @@ mod tests {
         };
         let mut c = Config::default();
         c.replay.duration_seconds = 300;
+        // Under the storage's name.
         let hint = |env: &Env, c: &Config| {
             row(&rows(Section::Replay, env, c), "replay_storage")
-                .info
+                .detail
                 .clone()
         };
         assert!(
-            hint(&with_ram(64), &c).contains("kept in RAM"),
+            hint(&with_ram(64), &c).ends_with("in RAM"),
             "{}",
             hint(&with_ram(64), &c)
         );
         assert!(
-            hint(&with_ram(8), &c).contains("kept on the disk"),
+            hint(&with_ram(8), &c).contains("on the disk"),
             "{}",
             hint(&with_ram(8), &c)
         );
         c.replay.storage = "disk".into();
-        assert!(!hint(&with_ram(64), &c).contains("kept in"));
+        assert!(!hint(&with_ram(64), &c).contains(" in RAM"));
         assert!(hint(&with_ram(64), &c).contains("GB"));
     }
 
@@ -1369,10 +1447,10 @@ mod tests {
         };
         let marked: Vec<_> = presets
             .iter()
-            .filter(|o| o.label.contains("recommended"))
+            .filter(|o| o.recommended)
             .map(|o| o.label.as_str())
             .collect();
-        assert_eq!(marked, ["P5 (recommended)"]);
+        assert_eq!(marked, ["P5"]);
         // A setting with nothing to add has no "i".
         assert!(row(&video, "video_cursor").info.is_empty());
         assert!(row(&video, "preset").info.is_empty());

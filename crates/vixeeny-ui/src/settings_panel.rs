@@ -20,7 +20,7 @@ use vixeeny_settings::{
 use crate::theme::{self, Look};
 use crate::{
     LineItem, PcTile, SearchHit, SettingGroup, SettingRow, SettingsWindow, ShortcutKey,
-    ShortcutRow, UiTexts,
+    ShortcutRow, ShortcutSpan, UiTexts,
 };
 
 /// One line of the about page.
@@ -296,6 +296,8 @@ fn ui_texts(lang: Lang) -> UiTexts {
         no_shortcut: t(Key::UiNoShortcut),
         keys_help: t(Key::UiKeysHelp),
         restart: t(Key::UpdateRestart),
+        recommended: t(Key::OptRecommended),
+        this_pc: t(Key::GrpThisPc),
     }
 }
 
@@ -320,17 +322,20 @@ pub fn action_label(action: ActionId, lang: Lang) -> &'static str {
     )
 }
 
-/// The rows as groups: each header starts one.
-fn grouped(rows: &[Row], config: &Config) -> Vec<Vec<SettingRow>> {
-    let mut groups: Vec<Vec<SettingRow>> = vec![Vec::new()];
+/// A group of rows under its title (empty: none).
+type Titled = (SharedString, Vec<SettingRow>);
+
+/// The rows as groups: each header starts one, titled by its label.
+fn grouped(rows: &[Row], config: &Config, lang: Lang) -> Vec<Titled> {
+    let mut groups: Vec<Titled> = vec![(SharedString::new(), Vec::new())];
     for row in rows {
         if matches!(row.kind, Kind::Header) {
-            groups.push(Vec::new());
-        } else if let Some(list) = groups.last_mut() {
-            list.push(row_model(row, config));
+            groups.push((row.label.as_str().into(), Vec::new()));
+        } else if let Some((_, list)) = groups.last_mut() {
+            list.push(row_model(row, config, lang));
         }
     }
-    groups.retain(|rows| !rows.is_empty());
+    groups.retain(|(_, rows)| !rows.is_empty());
     groups
 }
 
@@ -428,9 +433,16 @@ fn keep_leaving(old: &[Vec<SettingRow>], new: &mut Vec<Vec<SettingRow>>) {
 /// changed are updated, in place: their controls stay, so a toggle slides instead of being
 /// redrawn in its new state, and nothing flickers. On the same page, rows that appear unfold
 /// and rows that go fold away.
-fn show_groups(window: &SettingsWindow, groups: Vec<Vec<SettingRow>>) {
+fn show_groups(window: &SettingsWindow, groups: Vec<Titled>) {
     // Rows still folding away from the change before go at once.
     drop_leaving(window);
+    // Each row's group title: a group that only folds away has none.
+    let title_of: std::collections::HashMap<SharedString, SharedString> = groups
+        .iter()
+        .flat_map(|(title, rows)| rows.iter().map(move |r| (r.id.clone(), title.clone())))
+        .collect();
+    let titles: Vec<SharedString> = groups.iter().map(|(t, _)| t.clone()).collect();
+    let groups: Vec<Vec<SettingRow>> = groups.into_iter().map(|(_, rows)| rows).collect();
     let current = window.get_groups();
     let same_shape = current.row_count() == groups.len()
         && groups.iter().enumerate().all(|(i, rows)| {
@@ -444,9 +456,14 @@ fn show_groups(window: &SettingsWindow, groups: Vec<Vec<SettingRow>>) {
         });
     if same_shape {
         for (i, rows) in groups.into_iter().enumerate() {
-            let Some(group) = current.row_data(i) else {
+            let Some(mut group) = current.row_data(i) else {
                 continue;
             };
+            // A new language.
+            if group.title != titles[i] {
+                group.title = titles[i].clone();
+                current.set_row_data(i, group.clone());
+            }
             for (j, row) in rows.into_iter().enumerate() {
                 if group
                     .rows
@@ -479,6 +496,11 @@ fn show_groups(window: &SettingsWindow, groups: Vec<Vec<SettingRow>>) {
     let model: Vec<SettingGroup> = groups
         .into_iter()
         .map(|rows| SettingGroup {
+            title: rows
+                .iter()
+                .find_map(|r| title_of.get(&r.id).filter(|_| !r.leaving))
+                .cloned()
+                .unwrap_or_default(),
             rows: ModelRc::from(Rc::new(VecModel::from(rows))),
         })
         .collect();
@@ -512,13 +534,18 @@ fn picture(icon: Option<&vixeeny_settings::Icon>) -> slint::Image {
     })
 }
 
-fn row_model(row: &Row, config: &Config) -> SettingRow {
+fn row_model(row: &Row, config: &Config, lang: Lang) -> SettingRow {
     let value = row.value(config);
     let mut out = SettingRow {
         id: row.id.as_str().into(),
         label: row.label.as_str().into(),
         warning: row.warning.as_str().into(),
         info: row.info.as_str().into(),
+        detail: row.detail.as_str().into(),
+        nested: row.nested,
+        meter: row.meter,
+        shown: SharedString::new(),
+        marks: ModelRc::default(),
         kind: 5,
         enabled: row.enabled(),
         on: false,
@@ -567,8 +594,12 @@ fn row_model(row: &Row, config: &Config) -> SettingRow {
                     options.iter().map(|o| o.heading).collect::<Vec<_>>(),
                 )));
             }
+            if options.iter().any(|o| o.recommended) {
+                out.marks = ModelRc::from(Rc::new(VecModel::from(
+                    options.iter().map(|o| o.recommended).collect::<Vec<_>>(),
+                )));
+            }
         }
-        (Kind::Meter, _) => out.kind = 6,
         (Kind::Expander, Value::Bool(open)) => {
             out.kind = 9;
             out.on = open;
@@ -580,6 +611,7 @@ fn row_model(row: &Row, config: &Config) -> SettingRow {
                 2
             };
             out.num = n as i32;
+            out.shown = row.number_text(n, lang).into();
             out.min = *min as i32;
             out.max = *max as i32;
             out.step = *step as i32;
@@ -997,6 +1029,7 @@ impl SettingsPanel {
         let state = &self.state;
         let (probe, detecting) = state.probe.borrow().clone();
         *state.env.borrow_mut() = Env::new(state.lang(), &state.version)
+            .with_auto_lang(Lang::resolve("auto", state.os_locale.as_deref()))
             .with_probe(probe, detecting)
             .with_audio(state.audio.borrow().clone())
             .with_machine(state.machine.borrow().clone())
@@ -1012,11 +1045,11 @@ impl SettingsPanel {
         let env = state.env.borrow();
         if section.is_rows() {
             let built = rows(section, &env, &config);
-            show_groups(&self.window, grouped(&built, &config));
+            show_groups(&self.window, grouped(&built, &config, env.lang));
             // The level of the microphone, while its meter is on screen.
             let metered = built
                 .iter()
-                .any(|r| matches!(r.kind, Kind::Meter))
+                .any(|r| r.meter)
                 .then(|| {
                     config
                         .video
@@ -1034,7 +1067,7 @@ impl SettingsPanel {
             self.window.set_groups(ModelRc::default());
             state.rows.borrow_mut().clear();
         }
-        let overview = if section == Section::General {
+        let overview = if section == Section::About {
             vixeeny_settings::machine::overview(&env)
         } else {
             Default::default()
@@ -1112,6 +1145,24 @@ impl SettingsPanel {
                 }
             })
             .collect();
+        // The cards of the table: a group of actions each.
+        let mut spans: Vec<ShortcutSpan> = Vec::new();
+        for (i, row) in table.iter().enumerate() {
+            match spans.last_mut() {
+                Some(span) if !row.group => span.count += 1,
+                _ => spans.push(ShortcutSpan {
+                    start: i as i32,
+                    count: 1,
+                }),
+            }
+        }
+        // The second column is drawn whole only once a second shortcut is set.
+        let seconds = table
+            .iter()
+            .any(|row| row.keys.row_data(1).is_some_and(|key| !key.text.is_empty()));
+        self.window.set_two_columns(seconds);
+        self.window
+            .set_shortcut_spans(ModelRc::from(Rc::new(VecModel::from(spans))));
         self.window
             .set_shortcuts(ModelRc::from(Rc::new(VecModel::from(table))));
     }

@@ -261,6 +261,9 @@ export component ComboBox inherits Rectangle {
     in property <[string]> options;
     // Options that only title the ones under them (not chosen).
     in property <[bool]> headings;
+    // The options advised: `mark-text` beside them in the list.
+    in property <[bool]> marks;
+    in property <string> mark-text;
     in property <int> current: -1;
     in property <bool> enabled: true;
     in property <string> placeholder;
@@ -308,13 +311,15 @@ export component ComboBox inherits Rectangle {
         measure := VerticalLayout {
             for option in root.options : Text { text: option; font-size: 14px; }
         }
+        mark := Text { text: root.mark-text; font-size: 12px; }
     }
+    property <length> mark-w: root.marks.length > 0 ? mark.preferred-width + 16px : 0px;
     menu := PopupWindow {
         // At least as wide as the box, wider when a choice needs it: then it grows to the left,
         // its right edge on the box's (the boxes sit at the right of the page).
         x: root.width - self.width;
         y: root.height + 2px;
-        width: max(root.width, measure.preferred-width + 40px);
+        width: max(root.width, measure.preferred-width + 40px + root.mark-w);
         height: min(root.options.length * 40px + 8px, 420px);
         Rectangle {
             // Unfolds from the box when it opens.
@@ -334,8 +339,9 @@ export component ComboBox inherits Rectangle {
             drop-shadow-offset-y: 6px;
             Flickable {
                 content-height: root.options.length * 40px + 8px;
-                for option[i] in root.options : Rectangle {
+                for option[i] in root.options : item-row := Rectangle {
                     property <bool> head: i < root.headings.length && root.headings[i];
+                    property <bool> marked: i < root.marks.length && root.marks[i];
                     x: 4px;
                     y: 4px + i * 40px;
                     width: parent.width - 8px;
@@ -355,13 +361,23 @@ export component ComboBox inherits Rectangle {
                     Text {
                         x: parent.head ? 8px : 12px;
                         y: 0px;
-                        width: parent.width - 20px;
+                        width: parent.width - 20px - (parent.marked ? root.mark-w : 0px);
                         height: parent.height;
+                        overflow: elide;
                         text: option;
                         color: parent.head ? Theme.text-3 : Theme.text;
                         font-size: parent.head ? 12px : 14px;
                         font-weight: parent.head ? 600 : 400;
                         vertical-alignment: parent.head ? bottom : center;
+                    }
+                    if item-row.marked : Text {
+                        x: parent.width - 12px - self.width;
+                        width: self.preferred-width;
+                        height: parent.height;
+                        text: root.mark-text;
+                        color: Theme.text-3;
+                        font-size: 12px;
+                        vertical-alignment: center;
                     }
                     item := TouchArea {
                         enabled: !parent.head;
@@ -382,6 +398,8 @@ export component NumberBox inherits Rectangle {
     in property <int> hi: 100;
     in property <int> step: 1;
     in property <bool> enabled: true;
+    // The value as it reads (grouped, with its unit); empty: the bare number.
+    in property <string> shown;
     callback changed(int);
 
     width: 136px;
@@ -400,9 +418,10 @@ export component NumberBox inherits Rectangle {
         }
         Text {
             horizontal-stretch: 1;
-            text: root.value;
+            text: root.shown != "" ? root.shown : root.value;
             color: Theme.text;
             font-size: 14px;
+            overflow: elide;
             horizontal-alignment: center;
             vertical-alignment: center;
         }
@@ -643,17 +662,24 @@ export component GroupRow inherits Rectangle {
     in property <bool> fold: false;
     // Found by a search: outlined in the accent colour for a moment.
     in property <bool> flash: false;
+    // A card of its own; else a row of a card shared with its group (no frame), under a line
+    // when `divider`.
+    in property <bool> framed: true;
+    in property <bool> divider: false;
+    // Belongs to the row above it: set in.
+    in property <bool> nested: false;
     callback clicked();
 
     property <bool> stacked: root.width < root.stack-under;
     property <length> pad: 16px;
+    property <length> indent: root.nested ? 28px : 0px;
     property <bool> lead-on: root.has-icon || root.glyph != "";
-    property <length> lead: root.lead-on ? 36px : 0px;
+    property <length> lead: root.indent + (root.lead-on ? 36px : 0px);
     property <length> text-w: root.stacked ? root.width - 2 * root.pad - root.lead
         : max(120px, root.width - 2 * root.pad - root.lead - ctl.preferred-width - 24px);
     property <length> body: root.stacked ? txt.preferred-height + 10px + ctl.preferred-height
         : max(txt.preferred-height, ctl.preferred-height);
-    property <length> natural: max(64px, root.body + 32px);
+    property <length> natural: root.framed ? max(64px, root.body + 32px) : max(56px, root.body + 24px);
     property <bool> grown: !root.unfold;
     // A row made already leaving starts shown, then folds (the change is what animates).
     property <bool> folded: false;
@@ -673,13 +699,20 @@ export component GroupRow inherits Rectangle {
         running: root.fold && !root.folded;
         triggered => { root.folded = true; }
     }
-    border-radius: Theme.radius-card;
-    border-width: root.flash ? 2px : 1px;
+    border-radius: root.framed || root.flash ? Theme.radius-card : 0px;
+    border-width: root.flash ? 2px : (root.framed ? 1px : 0px);
     border-color: root.flash ? Theme.accent : Theme.stroke;
     animate border-color { duration: Theme.t-slow; }
     background: root.clickable && touch.pressed ? Theme.card-pressed
-        : (root.clickable && touch.has-hover ? Theme.card-hover : Theme.card);
+        : (root.clickable && touch.has-hover ? Theme.card-hover : (root.framed ? Theme.card : transparent));
     animate background { duration: Theme.t-fast; }
+    if root.divider : Rectangle {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: 1px;
+        background: Theme.stroke;
+    }
 
     touch := TouchArea {
         enabled: root.clickable && !root.fold;
@@ -687,7 +720,7 @@ export component GroupRow inherits Rectangle {
         clicked => { root.clicked(); }
     }
     if root.has-icon : Image {
-        x: root.pad;
+        x: root.pad + root.indent;
         y: (root.natural - self.height) / 2;
         width: 22px;
         height: 22px;
@@ -695,7 +728,7 @@ export component GroupRow inherits Rectangle {
         opacity: root.dimmed ? 0.45 : 1.0;
     }
     if !root.has-icon && root.glyph != "" : Icon {
-        x: root.pad + 1px;
+        x: root.pad + root.indent + 1px;
         y: (root.natural - self.height) / 2;
         data: root.glyph;
         size: 20px;

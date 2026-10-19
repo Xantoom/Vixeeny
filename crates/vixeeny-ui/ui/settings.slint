@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // The settings window: the tabs on the left, under the name of the program; the page
-// on the right, its settings as cards, a group of cards apart from the next. Rows are generic (a
+// on the right, its settings in cards, one card per group under the group's title. Rows are generic (a
 // toggle, a choice, a folder…); the shortcuts, the updates and the about page have their own
 // layouts. Plain Slint elements only (std-widgets would pull the SVG decoder in for its icons).
 import { Theme, Icons, Icon, Button, IconButton, Toggle, TextBox, ComboBox, NumberBox, Slider, NavItem, Group, GroupRow, InfoBar, ScrollArea, ProgressBar, SearchBox, ScreenPicker, LevelMeter, Tip, TipLayer } from "controls.slint";
@@ -14,7 +14,11 @@ export struct SettingRow {
     info: string,
     // Behind a warning sign beside the label (empty: nothing wrong).
     warning: string,
-    // 0 toggle, 1 choice, 2 number, 3 text, 4 folder, 5 info, 6 level meter, 8 slider,
+    // A short line under the label (an estimate).
+    detail: string,
+    // Belongs to the row above it (a program of its list): set in.
+    nested: bool,
+    // 0 toggle, 1 choice, 2 number, 3 text, 4 folder, 5 info, 8 slider,
     // 9 expander (`on`: open), 10 choice of a screen edge, 11 choice of a place on the screen
     // (its own place, if any, in `min` and `max`: thousandths across and down, else -1)
     kind: int,
@@ -22,12 +26,18 @@ export struct SettingRow {
     on: bool,
     text: string,
     num: int,
+    // The number as it reads: grouped, with its unit (`10 000 kbit/s`).
+    shown: string,
+    // The microphone's level, live under the slider.
+    meter: bool,
     min: int,
     max: int,
     step: int,
     options: [string],
     // The options that title the ones under them.
     headings: [bool],
+    // The options advised, marked so in the list.
+    marks: [bool],
     selected: int,
     // The choices of an "add" row.
     // A picture before the label (a program's icon).
@@ -204,9 +214,16 @@ component PcSheet inherits VerticalLayout {
     }
 }
 
-// Rows shown together; the next group stands apart.
+// Rows shown together in a card, under their title (empty: none).
 export struct SettingGroup {
+    title: string,
     rows: [SettingRow],
+}
+
+// A group of actions of the shortcuts table, as one card: its rows in the table.
+export struct ShortcutSpan {
+    start: int,
+    count: int,
 }
 
 export struct ShortcutKey {
@@ -247,6 +264,8 @@ export struct UiTexts {
     keys-help: string,
     restart: string,
     no-shortcut: string,
+    recommended: string,
+    this-pc: string,
 }
 
 component SettingLine inherits GroupRow {
@@ -270,8 +289,10 @@ component SettingLine inherits GroupRow {
     title: root.entry.label;
     info: root.entry.info;
     warning: root.entry.warning;
-    // Only a folder says something under its name: its path.
-    description: root.entry.kind == 4 ? root.entry.text : "";
+    // A folder's path under its name, else the row's own short line.
+    description: root.entry.kind == 4 ? root.entry.text : root.entry.detail;
+    framed: false;
+    nested: root.entry.nested;
     icon: root.entry.icon;
     has-icon: root.entry.has-icon;
     unfold: root.entry.fresh && root.animated;
@@ -311,11 +332,12 @@ component SettingLine inherits GroupRow {
         width: Theme.value-w;
         options: root.entry.options;
         headings: root.entry.headings;
+        marks: root.entry.marks;
+        mark-text: root.t.recommended;
         current: root.entry.selected;
         enabled: root.entry.enabled;
         selected(i) => { root.chosen(i); }
     }
-    if root.entry.kind == 6 : LevelMeter { level: root.level; }
     if root.entry.kind == 10 || root.entry.kind == 11 : ScreenPicker {
         corners: root.entry.kind == 11;
         options: root.entry.options;
@@ -333,26 +355,41 @@ component SettingLine inherits GroupRow {
         hi: root.entry.max;
         step: root.entry.step;
         enabled: root.entry.enabled;
+        shown: root.entry.shown;
         changed(v) => { root.number(v); }
     }
-    if root.entry.kind == 8 : HorizontalLayout {
-        spacing: 12px;
-        Slider {
-            width: Theme.value-w - 48px;
-            value: root.entry.num;
-            lo: root.entry.min;
-            hi: root.entry.max;
-            step: root.entry.step;
-            enabled: root.entry.enabled;
-            changed(v) => { root.number(v); }
+    if root.entry.kind == 8 : VerticalLayout {
+        alignment: center;
+        spacing: 2px;
+        HorizontalLayout {
+            spacing: 12px;
+            Slider {
+                width: Theme.value-w - 64px;
+                value: root.entry.num;
+                lo: root.entry.min;
+                hi: root.entry.max;
+                step: root.entry.step;
+                enabled: root.entry.enabled;
+                changed(v) => { root.number(v); }
+            }
+            Text {
+                width: 52px;
+                text: root.entry.shown != "" ? root.entry.shown : root.entry.num;
+                color: Theme.text-2;
+                font-size: 13px;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+            }
         }
-        Text {
-            width: 36px;
-            text: root.entry.num;
-            color: Theme.text-2;
-            font-size: 13px;
-            horizontal-alignment: right;
-            vertical-alignment: center;
+        // How loud the microphone is, under its volume: as long as the slider's track.
+        if root.entry.meter : HorizontalLayout {
+            padding-left: 10px;
+            alignment: start;
+            LevelMeter {
+                width: Theme.value-w - 84px;
+                height: 10px;
+                level: root.level;
+            }
         }
     }
     if root.entry.kind == 3 : TextBox {
@@ -438,29 +475,37 @@ component ShortcutField inherits Rectangle {
     accessible-label: root.key.text != "" ? root.key.text : root.t.add-shortcut;
 }
 
-// One action of the shortcuts table: its name (and what went wrong) on the left, its two
-// shortcuts in the columns on the right.
+// One action of the shortcuts table, a row of its group's card: its name (and what went
+// wrong) on the left, its two shortcuts in the columns on the right. The second column is a
+// mere "+" until a second shortcut is set somewhere (`second-w` narrow).
 component ShortcutLine inherits Rectangle {
     in property <ShortcutRow> entry;
     in property <bool> recording-here;
     in property <int> recording-slot;
     in property <string> held;
     in property <length> key-w;
+    in property <length> second-w;
+    // Under the row above it in the card.
+    in property <bool> divider;
     in property <UiTexts> t;
     callback record(int);
     callback clear(int);
 
     property <string> detail: root.entry.error != "" ? root.entry.error
         : (root.recording-here ? root.t.keys-help : "");
-    height: max(52px, info.preferred-height + 24px);
-    border-radius: Theme.radius-card;
-    border-width: 1px;
-    border-color: Theme.stroke;
-    background: Theme.card;
+    property <bool> compact: root.second-w < root.key-w;
+    height: max(56px, info.preferred-height + 24px);
+    if root.divider : Rectangle {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: 1px;
+        background: Theme.stroke;
+    }
     info := VerticalLayout {
         x: 16px;
         y: (parent.height - self.preferred-height) / 2;
-        width: root.width - 44px - 2 * root.key-w;
+        width: root.width - 44px - root.key-w - root.second-w;
         height: self.preferred-height;
         spacing: 2px;
         Text {
@@ -476,16 +521,25 @@ component ShortcutLine inherits Rectangle {
             wrap: word-wrap;
         }
     }
-    for key[k] in root.entry.keys : ShortcutField {
-        x: root.width - 16px - (2 - k) * root.key-w;
-        y: (parent.height - self.height) / 2;
-        width: root.key-w - 8px;
-        key: key;
-        recording: root.recording-here && root.recording-slot == key.slot;
-        held: root.held;
-        t: root.t;
-        record => { root.record(key.slot); }
-        clear => { root.clear(key.slot); }
+    for key[k] in root.entry.keys : Rectangle {
+        x: k == 0 ? root.width - 16px - root.second-w - root.key-w : root.width - 16px - root.second-w;
+        y: (parent.height - 32px) / 2;
+        width: (k == 0 ? root.key-w : root.second-w) - 8px;
+        height: 32px;
+        if k == 0 || !root.compact : ShortcutField {
+            width: parent.width;
+            key: key;
+            recording: root.recording-here && root.recording-slot == key.slot;
+            held: root.held;
+            t: root.t;
+            record => { root.record(key.slot); }
+            clear => { root.clear(key.slot); }
+        }
+        if k == 1 && root.compact : Button {
+            icon: Icons.add;
+            clicked => { root.record(key.slot); }
+            accessible-label: root.t.add-shortcut;
+        }
     }
 }
 
@@ -520,7 +574,7 @@ export component SettingsWindow inherits Window {
     // 0 general, 1 overlay, 2 image, 3 video, 4 sound, 5 replay, 6 shortcuts, 7 updates, 8 about
     in-out property <int> section: 0;
     in property <[SettingGroup]> groups;
-    // The general page: this computer, above the settings.
+    // The about page: this computer.
     in property <[PcTile]> pc-system;
     in property <[PcTile]> pc-gpus;
     in property <[PcTile]> pc-screens;
@@ -528,6 +582,9 @@ export component SettingsWindow inherits Window {
     // A message above the groups (problems with the video settings).
     in property <string> notice;
     in property <[ShortcutRow]> shortcuts;
+    // Its cards, and whether a second shortcut is set anywhere (the second column drawn whole).
+    in property <[ShortcutSpan]> shortcut-spans;
+    in property <bool> two-columns;
     // The shortcut being recorded (-1: none).
     in property <int> recording-row: -1;
     in property <int> recording-slot: -1;
@@ -723,7 +780,7 @@ export component SettingsWindow inherits Window {
         width: root.width - nav.width;
         height: root.height;
         // The column of the page: as wide as the window allows, up to a comfortable width.
-        property <length> column: min(self.width - 56px, 860px);
+        property <length> column: min(self.width - 56px, 1000px);
 
         // ---- the title of the page, on the line of the first tab: their texts share a baseline
         // (both are centred in the same height; the baseline sits ≈ 0.41 em under the centre,
@@ -744,29 +801,24 @@ export component SettingsWindow inherits Window {
 
         body := Rectangle {
             x: 0px;
-            y: root.top + root.tab-h + 14px;
+            y: root.top + root.tab-h + 20px;
             width: parent.width;
             height: parent.height - self.y;
 
             // ---- pages made of rows (and the updates page)
             if root.is-rows : rows-area := ScrollArea {
+                x: 0px;
                 width: parent.width - 8px;
                 height: parent.height;
                 VerticalLayout {
                     x: 24px;
                     width: page.column;
                     alignment: start;
-                    spacing: 24px;
+                    spacing: 28px;
                     padding-bottom: 32px;
                     if root.notice != "" : InfoBar {
                         kind: 1;
                         text: root.notice;
-                    }
-                    if root.section == 0 && root.pc-system.length + root.pc-gpus.length + root.pc-screens.length + root.pc-disks.length > 0 : PcSheet {
-                        system: root.pc-system;
-                        gpus: root.pc-gpus;
-                        screens: root.pc-screens;
-                        disks: root.pc-disks;
                     }
                     // Where the update stands, and what to do about it.
                     if root.section == 7 : Group {
@@ -791,8 +843,25 @@ export component SettingsWindow inherits Window {
                             }
                         }
                     }
-                    for g in root.groups : Group {
-                        for r in g.rows : SettingLine {
+                    // A group: its title, then its rows in one card.
+                    for g in root.groups : VerticalLayout {
+                        spacing: 8px;
+                        if g.title != "" : Text {
+                            text: g.title;
+                            color: Theme.text;
+                            font-size: 14px;
+                            font-weight: 600;
+                            wrap: word-wrap;
+                        }
+                        Rectangle {
+                            border-radius: Theme.radius-card;
+                            border-width: 1px;
+                            border-color: Theme.stroke;
+                            background: Theme.card;
+                            clip: true;
+                            VerticalLayout {
+                        for r[i] in g.rows : SettingLine {
+                            divider: i > 0;
                             entry: r;
                             t: root.t;
                             view-h: root.height;
@@ -807,12 +876,15 @@ export component SettingsWindow inherits Window {
                             browse => { root.row-browse(r.id); }
                             action(a) => { root.row-action(r.id, a); }
                         }
+                            }
+                        }
                     }
                 }
             }
 
             // ---- the answers of a search: each leads to its setting
             if root.searching : ScrollArea {
+                x: 0px;
                 width: parent.width - 8px;
                 height: parent.height;
                 VerticalLayout {
@@ -848,26 +920,38 @@ export component SettingsWindow inherits Window {
                 width: parent.width;
                 height: parent.height;
                 property <length> key-w: max(180px, min(240px, (page.column - 220px) / 2));
+                // A "+" until a second shortcut is set (or being recorded).
+                property <length> second-w: root.two-columns || (root.recording-row >= 0 && root.recording-slot == 1) ? self.key-w : 40px;
                 ScrollArea {
+                    x: 0px;
                     width: parent.width - 8px;
                     height: parent.height;
                     VerticalLayout {
                         x: 24px;
                         width: page.column;
                         alignment: start;
-                        spacing: 8px;
+                        spacing: 28px;
                         padding-bottom: 32px;
-                        for sc[i] in root.shortcuts : VerticalLayout {
-                            padding-top: sc.group && i > 0 ? 20px : 0px;
-                            ShortcutLine {
-                                entry: sc;
-                                recording-here: root.recording-row == i;
-                                recording-slot: root.recording-slot;
-                                held: root.recording-keys;
-                                key-w: key-w;
-                                t: root.t;
-                                record(slot) => { root.shortcut-record(i, slot); }
-                                clear(slot) => { root.shortcut-clear(i, slot); }
+                        for span in root.shortcut-spans : Rectangle {
+                            border-radius: Theme.radius-card;
+                            border-width: 1px;
+                            border-color: Theme.stroke;
+                            background: Theme.card;
+                            clip: true;
+                            VerticalLayout {
+                                for k in span.count : ShortcutLine {
+                                    property <int> i: span.start + k;
+                                    entry: root.shortcuts[self.i];
+                                    divider: k > 0;
+                                    recording-here: root.recording-row == self.i;
+                                    recording-slot: root.recording-slot;
+                                    held: root.recording-keys;
+                                    key-w: key-w;
+                                    second-w: second-w;
+                                    t: root.t;
+                                    record(slot) => { root.shortcut-record(self.i, slot); }
+                                    clear(slot) => { root.shortcut-clear(self.i, slot); }
+                                }
                             }
                         }
                     }
@@ -876,13 +960,14 @@ export component SettingsWindow inherits Window {
 
             // ---- about: who we are, this machine, the links
             if root.section == 8 && !root.searching : ScrollArea {
+                x: 0px;
                 width: parent.width - 8px;
                 height: parent.height;
                 VerticalLayout {
                     x: 24px;
                     width: page.column;
                     alignment: start;
-                    spacing: 24px;
+                    spacing: 28px;
                     padding-bottom: 32px;
                     Rectangle {
                         height: who.preferred-height;
@@ -907,7 +992,7 @@ export component SettingsWindow inherits Window {
                             }
                         }
                     }
-                    Group {
+                    if root.lines.length > 0 : Group {
                         for line in root.lines : GroupRow {
                             title: line.text;
                             description: line.detail;
@@ -930,6 +1015,22 @@ export component SettingsWindow inherits Window {
                             wrap: word-wrap;
                         }
                     }
+                    // This computer.
+                    if root.pc-system.length + root.pc-gpus.length + root.pc-screens.length + root.pc-disks.length > 0 : VerticalLayout {
+                        spacing: 8px;
+                        Text {
+                            text: root.t.this-pc;
+                            color: Theme.text;
+                            font-size: 14px;
+                            font-weight: 600;
+                        }
+                        PcSheet {
+                            system: root.pc-system;
+                            gpus: root.pc-gpus;
+                            screens: root.pc-screens;
+                            disks: root.pc-disks;
+                        }
+                    }
                 }
             }
         }
@@ -946,13 +1047,13 @@ export component SettingsWindow inherits Window {
         }
         double-clicked => { root.toggle-maximized(); }
     }
-    // The search, in the title bar: in the middle of the room between the name of the program
-    // and the window's buttons.
+    // The search, in the title bar: over the middle of the page's column, clear of the
+    // window's buttons.
     search := SearchBox {
-        property <length> from: 140px;
-        property <length> to: root.width - 3 * 46px;
-        width: min(380px, self.to - self.from - 48px);
-        x: (self.from + self.to - self.width) / 2;
+        property <length> centre: nav.width + 24px + page.column / 2;
+        property <length> room: min(self.centre - 140px, root.width - 3 * 46px - 24px - self.centre);
+        width: min(380px, 2 * self.room);
+        x: self.centre - self.width / 2;
         y: 5px;
         height: 32px;
         placeholder: root.search-placeholder;

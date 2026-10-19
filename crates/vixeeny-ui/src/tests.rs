@@ -511,6 +511,23 @@ fn every_page_of_the_settings_renders() {
     // The smallest window: nothing overlaps.
     panel.select_section(Section::General);
     settings_render_at(&panel, "9-page-smallest", (960, 640));
+    // In French (longer words): every page at the narrowest width, on a wide screen, and
+    // zoomed to 150 %.
+    panel.window().invoke_row_chosen("language".into(), 1);
+    for section in Section::ALL {
+        panel.select_section(section);
+        let name = format!("{section:?}").to_lowercase();
+        settings_render_at(&panel, &format!("9-fr-narrow-{name}"), (960, 1600));
+        settings_render_at(&panel, &format!("9-fr-wide-{name}"), (1920, 1080));
+    }
+    let window = WINDOW.with(Rc::clone);
+    window.dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: 1.5 });
+    for section in Section::ALL {
+        panel.select_section(section);
+        let name = format!("{section:?}").to_lowercase();
+        settings_render_at(&panel, &format!("9-fr-150-{name}"), (1440, 960));
+    }
+    window.dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: 1.0 });
 }
 
 #[test]
@@ -729,11 +746,11 @@ fn a_tooltip_goes_after_a_scroll() {
     settings_render_at(&panel, "tip-scroll-1", size);
     for event in [
         WindowEvent::PointerPressed {
-            position: at(600.0, 680.0),
+            position: at(600.0, 493.0),
             button: PointerEventButton::Left,
         },
         WindowEvent::PointerReleased {
-            position: at(600.0, 680.0),
+            position: at(600.0, 493.0),
             button: PointerEventButton::Left,
         },
     ] {
@@ -742,20 +759,20 @@ fn a_tooltip_goes_after_a_scroll() {
     scroll(500.0, -4000.0);
     settings_render_at(&panel, "tip-scroll-2", size);
     // Where the pointer ends, without ever resting on an "i".
-    let end = at(327.0 + 49.0 * 5.5, 657.0 - 49.0 * 10.0);
+    let end = at(335.0 + 49.0 * 5.5, 604.0 - 49.0 * 10.0);
     window.dispatch_event(WindowEvent::PointerMoved { position: end });
     scroll(end.y, 100.0);
     let clean = settings_render_at(&panel, "tip-scroll-3", size);
     scroll(end.y, -100.0);
-    // The chroma's "i", at the bottom; a little scroll; the pointer goes up to the expander.
+    // The container's "i", near the bottom; a little scroll; the pointer moves up and away.
     window.dispatch_event(WindowEvent::PointerMoved {
-        position: at(327.0, 657.0),
+        position: at(335.0, 604.0),
     });
-    scroll(657.0, 100.0);
+    scroll(604.0, 100.0);
     for k in 0..50 {
         let k = k as f32;
         window.dispatch_event(WindowEvent::PointerMoved {
-            position: at(327.0 + k * 5.5, 657.0 - k * 10.0),
+            position: at(335.0 + k * 5.5, 604.0 - k * 10.0),
         });
     }
     let left = settings_render_at(&panel, "tip-scroll-4", size);

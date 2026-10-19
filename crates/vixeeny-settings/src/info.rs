@@ -156,6 +156,18 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
             "How often a complete image is stored.\nMore often: smoother seeking, heavier file.\n0: automatic.",
             "Tous les combien une image complète est enregistrée.\nPlus fréquent = avance rapide plus fluide, fichier plus lourd.\n0 : automatique.",
         ),
+        "audio_routing" => pick(
+            "One track per source: separate tracks in Premiere Pro or DaVinci Resolve; a player such as VLC plays one of them only.\nEverything on one track: a single mix, heard the same everywhere.",
+            "Une piste par source : des pistes séparées dans Premiere Pro ou DaVinci Resolve ; un lecteur comme VLC n'en lit qu'une.\nTout sur une piste : un seul mélange, entendu pareil partout.",
+        ),
+        "p:tune" => pick(
+            "Adjusts the encoder to a kind of picture (film, animation, grain…).\nAuto: the encoder's default.",
+            "Adapte l'encodeur à un type d'image (film, animation, grain…).\nAuto : le réglage par défaut de l'encodeur.",
+        ),
+        "auto_update" => pick(
+            "Looks for a new version every 12 hours, downloads it in the background and installs it at the next start.",
+            "Cherche une nouvelle version toutes les 12 heures, la télécharge en arrière-plan et l'installe au prochain démarrage.",
+        ),
         "replay_enabled" => pick(
             "Vixeeny keeps the last minutes of play in memory.\nA shortcut saves them as a video, so nothing is missed.\nOnly in full screen.",
             "Vixeeny garde en mémoire les dernières minutes de jeu.\nUn raccourci les enregistre en vidéo, pour ne rien rater.\nActif seulement en plein écran.",

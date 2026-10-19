@@ -101,9 +101,21 @@ pub fn best(env: &Env, hardware: bool) -> Option<&EncoderInfo> {
     choices(env, hardware).into_iter().min_by_key(|e| e.rank)
 }
 
+/// Whether this computer may have a hardware encoder: one was found, or they are still being
+/// looked for.
+pub fn hardware_possible(env: &Env) -> bool {
+    (env.detecting && env.probe.is_none()) || !choices(env, true).is_empty()
+}
+
+/// Whether a profile records with a hardware encoder: the software ones are used when this
+/// computer has none.
+pub fn uses_hardware(env: &Env, profile: &Video) -> bool {
+    profile.encoder_kind != "software" && hardware_possible(env)
+}
+
 /// The encoder a profile uses: its own when it is listed for its kind, else the best one.
 pub fn resolved<'a>(env: &'a Env, profile: &Video) -> Option<&'a EncoderInfo> {
-    let hardware = profile.encoder_kind != "software";
+    let hardware = uses_hardware(env, profile);
     choices(env, hardware)
         .into_iter()
         .find(|e| e.id == profile.encoder)
@@ -118,18 +130,15 @@ pub fn spec(id: &str) -> Option<&'static Encoder> {
 pub fn param_label(key: &str, lang: Lang) -> String {
     let (en, fr) = match key {
         "rc.mode" => ("Rate control", "Contrôle du débit"),
-        "rc.bitrate" => ("Bitrate (kbit/s)", "Débit (kbit/s)"),
-        "rc.maxrate" => ("Maximum bitrate (kbit/s)", "Débit maximal (kbit/s)"),
+        "rc.bitrate" => ("Bitrate", "Débit"),
+        "rc.maxrate" => ("Maximum bitrate", "Débit maximal"),
         "preset" => ("Encoder preset", "Preset de l'encodeur"),
         "tune" => ("Tune", "Tune"),
         "quality" => ("Quality preset", "Préréglage de qualité"),
         "multipass" => ("Multipass", "Multipasse"),
-        "keyint" => (
-            "Key-frame interval (frames, 0 = auto)",
-            "Intervalle d'images clés (images, 0 = auto)",
-        ),
+        "keyint" => ("Key-frame interval", "Intervalle d'images clés"),
         "bframes" => ("B-frames", "Images B"),
-        "lookahead" => ("Look-ahead (frames)", "Anticipation (images)"),
+        "lookahead" => ("Look-ahead", "Anticipation"),
         "spatial-aq" => (
             "Spatial adaptive quantization",
             "Quantification adaptative spatiale",
@@ -151,12 +160,12 @@ pub fn param_label(key: &str, lang: Lang) -> String {
     if lang == Lang::Fr { fr } else { en }.to_owned()
 }
 
-/// The label of a numbered preset (SVT-AV1).
-pub fn numbered_preset_label(min: i64, max: i64, lang: Lang) -> String {
+/// What the ends of a numbered preset (SVT-AV1) mean.
+pub fn numbered_preset_ends(min: i64, max: i64, lang: Lang) -> String {
     if lang == Lang::Fr {
-        format!("Préréglage ({min} = le plus lent, {max} = le plus rapide)")
+        format!("{min} : le plus lent.\n{max} : le plus rapide.")
     } else {
-        format!("Preset ({min} = slowest, {max} = fastest)")
+        format!("{min}: slowest.\n{max}: fastest.")
     }
 }
 
