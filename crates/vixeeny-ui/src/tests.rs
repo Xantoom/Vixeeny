@@ -551,7 +551,7 @@ fn the_updates_and_about_pages_show_what_the_host_gives_them() {
     // Up to date: the card is green.
     panel.set_update(&settings_panel::UpdateView {
         stage: settings_panel::UpdateStage::Idle,
-        title: "Vixeeny is up to date".into(),
+        title: "Vixeeny 1.2.0 is up to date".into(),
         detail: "Last checked: 2026-10-11, 14:32".into(),
         progress: 0.0,
         action: "Check now".into(),

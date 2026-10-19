@@ -328,6 +328,7 @@ pub enum Key {
     TipRedo,
     TipClear,
     TipRightClick,
+    UpdateInstalled,
 }
 
 impl Key {
@@ -648,6 +649,7 @@ impl Key {
         Self::TipRedo,
         Self::TipClear,
         Self::TipRightClick,
+        Self::UpdateInstalled,
     ];
 }
 
@@ -1006,8 +1008,8 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         }
         (Key::UpdateNow, Lang::En) => "Download and install",
         (Key::UpdateNow, Lang::Fr) => "Télécharger et installer",
-        (Key::UpdateUpToDate, Lang::En) => "Vixeeny is up to date",
-        (Key::UpdateUpToDate, Lang::Fr) => "Vixeeny est à jour",
+        (Key::UpdateUpToDate, Lang::En) => "Vixeeny {version} is up to date",
+        (Key::UpdateUpToDate, Lang::Fr) => "Vixeeny {version} est à jour",
         (Key::UpdateFound, Lang::En) => "Version {version} is available",
         (Key::UpdateFound, Lang::Fr) => "La version {version} est disponible",
         (Key::UpdateChecking, Lang::En) => "Checking…",
@@ -1390,6 +1392,8 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::TipClear, Lang::Fr) => "Tout effacer",
         (Key::TipRightClick, Lang::En) => "Right-click: ",
         (Key::TipRightClick, Lang::Fr) => "Clic droit : ",
+        (Key::UpdateInstalled, Lang::En) => "Installed version: {version}",
+        (Key::UpdateInstalled, Lang::Fr) => "Version installée : {version}",
     }
 }
 

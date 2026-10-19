@@ -217,13 +217,13 @@ fn update_view(lang: Lang) -> UpdateView {
         Some(release) => UpdateView {
             stage: UpdateStage::Available,
             title: tr(Key::UpdateFound, lang).replace("{version}", &release.version),
-            detail: String::new(),
+            detail: tr(Key::UpdateInstalled, lang).replace("{version}", current),
             progress: 0.0,
             action: tr(Key::UpdateNow, lang).into(),
         },
         None => UpdateView {
             stage: UpdateStage::Idle,
-            title: tr(Key::UpdateUpToDate, lang).into(),
+            title: tr(Key::UpdateUpToDate, lang).replace("{version}", current),
             detail: if state.checked_at == 0 {
                 tr(Key::UpdateNever, lang).into()
             } else {
@@ -252,6 +252,7 @@ fn check_for_update(handle: PanelHandle, lang: Lang) {
     handle.set_update(UpdateView {
         stage: UpdateStage::Checking,
         title: tr(Key::UpdateChecking, lang).into(),
+        detail: tr(Key::UpdateInstalled, lang).replace("{version}", env!("CARGO_PKG_VERSION")),
         ..UpdateView::default()
     });
     std::thread::spawn(move || match client::check() {
