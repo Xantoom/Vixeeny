@@ -1,29 +1,65 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The assembling state machine.
+//!
+//! The long image is a column of rows, each at a position in the page. A new frame is placed
+//! where its rows agree with the rows already there, then lends them its rows: rows beyond the
+//! image extend it, and a row already there takes the new frame's view of it when that view is
+//! nearer the middle of the screen (where no sticky header, footer or floating button sits).
 
 use crate::frame::Frame;
-pub use crate::shift::Direction;
-use crate::shift::{self, Tolerance};
+
+/// Columns of a row summed apart in its signature.
+const BANDS: usize = 32;
+/// The signature of a row: the mean `B + 2G + R` of each band of columns.
+type Sig = [u16; BANDS];
+
+/// Rows compared at most to place a frame.
+const SAMPLED_ROWS: usize = 256;
+/// Difference of a band (out of 1020) under which two rows agree there.
+const BAND_SAME: u32 = 8;
+/// Difference of a band over which two rows just differ there (no matter by how much).
+const ROW_CAP: u32 = 64;
+/// Part of the rows compared that must be the same for a place to be taken.
+const SAME_SHARE: f32 = 0.7;
+/// The same, when the whole frame is compared.
+const WHOLE_SHARE: f32 = 0.95;
+/// How much a band of a row must differ from the same band of its neighbours for the row to
+/// tell where it is (grain from the rendering stays below).
+const DETAIL: u32 = 10;
+/// A band that changed by this much or less stayed still (grain from the rendering).
+const STILL: u16 = 3;
+/// Rows that must have moved for a frame to tell how the content moved.
+const MOVED_ROWS: usize = 8;
+/// Bands of columns that must have moved for a frame to tell how the content moved.
+const MOVING_BANDS: usize = 3;
+/// How much worse than the best place the next best must be for the best to be sure.
+const MARGIN: f32 = 3.0;
 
 #[derive(Debug, Clone)]
 pub struct Config {
     /// The assembled image never gets taller than this (30 000 px).
     pub max_height: u32,
-    /// Smallest overlap between two frames, as a fraction of the scrolling part. Frames that
+    /// Smallest overlap between a frame and the image, as a fraction of the frame. Frames that
     /// overlap less are reported as [`Push::Lost`].
     pub min_overlap: f32,
-    /// Per-row tolerance on the mean byte difference (0 = exact).
-    pub row_tolerance: u8,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
             max_height: 30_000,
-            min_overlap: 0.15,
-            row_tolerance: 2,
+            min_overlap: 0.12,
         }
     }
+}
+
+/// Which way the content moved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    /// The user scrolled down: content moved up, new rows appear at the bottom.
+    Down,
+    /// The user scrolled up: new rows appear at the top.
+    Up,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,9 +70,9 @@ pub enum Push {
         rows: u32,
         direction: Direction,
     },
-    /// Nothing moved since the previous frame.
+    /// Nothing moved since the previous frame, or it only showed rows already there.
     Unchanged,
-    /// The content moved too far (or changed) to be matched: scroll back a little.
+    /// The content moved too far (or changed) to be placed: scroll back a little.
     Lost,
     /// The height limit is reached; nothing more is added.
     Full,
@@ -60,86 +96,81 @@ pub struct Stitched {
     pub truncated: bool,
 }
 
-/// The rows kept so far, of the frames or of their layer.
+/// A row of the long image.
+struct Row {
+    pixels: Box<[u8]>,
+    layer: Option<Box<[u8]>>,
+    sig: Sig,
+    /// How far from the middle of its frame it was seen (0 = the middle).
+    view: u32,
+}
+
+/// The rows by position: `below[p]` for `p >= 0`, `above[-1 - p]` for `p < 0`.
 #[derive(Default)]
-struct Rows {
-    header: Vec<u8>,
-    footer: Vec<u8>,
-    /// Rows added above the body, most recent last (so the last chunk is the topmost).
-    above: Vec<Vec<u8>>,
-    body: Vec<u8>,
+struct Canvas {
+    above: Vec<Row>,
+    below: Vec<Row>,
 }
 
-impl Rows {
-    /// Every row, top to bottom (`row_bytes` each).
-    fn rows(&self, row_bytes: usize) -> impl Iterator<Item = &[u8]> {
-        self.header
-            .chunks_exact(row_bytes)
-            .chain(
-                self.above
-                    .iter()
-                    .rev()
-                    .flat_map(move |c| c.chunks_exact(row_bytes)),
-            )
-            .chain(self.body.chunks_exact(row_bytes))
-            .chain(self.footer.chunks_exact(row_bytes))
+impl Canvas {
+    fn lo(&self) -> isize {
+        -(self.above.len() as isize)
     }
 
-    fn assemble(&self) -> Vec<u8> {
-        let mut data = Vec::with_capacity(
-            self.header.len()
-                + self.above.iter().map(Vec::len).sum::<usize>()
-                + self.body.len()
-                + self.footer.len(),
-        );
-        data.extend_from_slice(&self.header);
-        for chunk in self.above.iter().rev() {
-            data.extend_from_slice(chunk);
+    fn hi(&self) -> isize {
+        self.below.len() as isize
+    }
+
+    fn len(&self) -> usize {
+        self.above.len() + self.below.len()
+    }
+
+    fn get(&self, p: isize) -> Option<&Row> {
+        if p >= 0 {
+            self.below.get(p as usize)
+        } else {
+            self.above.get((-1 - p) as usize)
         }
-        data.extend_from_slice(&self.body);
-        data.extend_from_slice(&self.footer);
-        data
+    }
+
+    fn get_mut(&mut self, p: isize) -> Option<&mut Row> {
+        if p >= 0 {
+            self.below.get_mut(p as usize)
+        } else {
+            self.above.get_mut((-1 - p) as usize)
+        }
+    }
+
+    /// Every row, top to bottom.
+    fn rows(&self) -> impl Iterator<Item = &Row> {
+        self.above.iter().rev().chain(&self.below)
     }
 }
 
-/// A frame and its layer: bytes of every row, in any layout (`len / height` per row).
-#[derive(Clone)]
-struct Pushed {
-    frame: Frame,
-    layer: Option<Vec<u8>>,
-}
-
-impl Pushed {
-    fn layer_row_bytes(&self) -> usize {
-        self.layer
-            .as_ref()
-            .map_or(0, |l| l.len() / self.frame.height as usize)
-    }
-}
-
-struct Running {
-    prev: Frame,
-    header: usize,
-    footer: usize,
-    pixels: Rows,
-    /// Dropped as soon as one frame comes without its layer.
-    layer: Option<Rows>,
-    rows: usize,
-    /// Top of the previous frame's scrolling part, relative to the first body row.
-    pos: isize,
-    /// Rows prepended above the first body row.
-    above_rows: usize,
-}
-
-enum State {
-    Empty,
-    One(Pushed),
-    Running(Box<Running>),
+/// What is known of a frame to place it.
+struct Seen {
+    sigs: Vec<Sig>,
+    /// Per row, the bands that changed since the previous frame (1) and those that did not
+    /// (0): what stays put on the screen while the content moves says nothing of the move.
+    moving: Vec<Sig>,
+    /// The rows with a band that changed, at most [`SAMPLED_ROWS`], evenly spread.
+    sampled: Vec<usize>,
 }
 
 pub struct Stitcher {
     config: Config,
-    state: State,
+    canvas: Canvas,
+    size: Option<(u32, u32)>,
+    /// Signatures of the previous frame (placed or not).
+    prev: Vec<Sig>,
+    /// Position of the top row of the last frame placed.
+    pos: isize,
+    /// Rows the last frame moved by: where the next one is looked for first.
+    speed: isize,
+    /// The last frame could not be placed: the next ones are looked for everywhere.
+    lost: bool,
+    /// Every frame came with a layer.
+    layered: bool,
     truncated: bool,
 }
 
@@ -147,30 +178,20 @@ impl Stitcher {
     pub fn new(config: Config) -> Self {
         Self {
             config,
-            state: State::Empty,
+            canvas: Canvas::default(),
+            size: None,
+            prev: Vec::new(),
+            pos: 0,
+            speed: 0,
+            lost: false,
+            layered: true,
             truncated: false,
         }
     }
 
     /// Height of the image assembled so far.
     pub fn height(&self) -> u32 {
-        match &self.state {
-            State::Empty => 0,
-            State::One(p) => p.frame.height,
-            State::Running(r) => r.rows as u32,
-        }
-    }
-
-    fn tolerance(&self) -> Tolerance {
-        Tolerance {
-            row_mean: self.config.row_tolerance,
-        }
-    }
-
-    fn min_overlap(&self, region_rows: usize) -> usize {
-        ((region_rows as f32 * self.config.min_overlap) as usize)
-            .max(4)
-            .min(region_rows.saturating_sub(1))
+        self.canvas.len() as u32
     }
 
     pub fn push(&mut self, frame: &Frame) -> Result<Push, StitchError> {
@@ -184,215 +205,261 @@ impl Stitcher {
         frame: &Frame,
         layer: Option<&[u8]>,
     ) -> Result<Push, StitchError> {
+        let got = (frame.width, frame.height);
+        match self.size {
+            Some(expected) if expected != got => {
+                return Err(StitchError::SizeChanged { expected, got });
+            }
+            _ => {}
+        }
         let layer = layer.filter(|l| l.len() % frame.height as usize == 0);
-        let pushed = Pushed {
-            frame: frame.clone(),
-            layer: layer.map(<[u8]>::to_vec),
+        self.layered &= layer.is_some();
+        let sigs = signatures(frame);
+        if self.size.is_none() {
+            self.size = Some(got);
+            for i in 0..frame.height as usize {
+                let row = self.row(frame, layer, &sigs, i);
+                self.canvas.below.push(row);
+            }
+            self.prev = sigs;
+            return Ok(Push::First);
+        }
+        let seen = self.seen(sigs);
+        self.prev.clone_from(&seen.sigs);
+        if seen.sampled.is_empty() {
+            return Ok(Push::Unchanged);
+        }
+        let Some(pos) = self.place(&seen) else {
+            self.lost = true;
+            self.speed = 0;
+            return Ok(Push::Lost);
         };
-        let state = std::mem::replace(&mut self.state, State::Empty);
-        let (state, outcome) = match state {
-            State::Empty => (State::One(pushed), Push::First),
-            State::One(prev) => self.second(prev, &pushed)?,
-            State::Running(run) => self.next(run, &pushed)?,
-        };
-        self.state = state;
-        Ok(outcome)
+        self.lost = false;
+        self.speed = pos - self.pos;
+        self.pos = pos;
+        Ok(self.lend(frame, layer, &seen.sigs, pos))
     }
 
-    fn check_size(prev: &Frame, frame: &Frame) -> Result<(), StitchError> {
-        if (prev.width, prev.height) == (frame.width, frame.height) {
-            Ok(())
+    fn row(&self, frame: &Frame, layer: Option<&[u8]>, sigs: &[Sig], i: usize) -> Row {
+        let n = frame.height as usize;
+        Row {
+            pixels: frame.row(i).into(),
+            layer: layer
+                .filter(|_| self.layered)
+                .map(|l| layer_row(l, n, i).into()),
+            sig: sigs[i],
+            view: view(i, n),
+        }
+    }
+
+    /// The bands that moved, and the rows to compare.
+    fn seen(&self, sigs: Vec<Sig>) -> Seen {
+        let moving: Vec<Sig> = sigs
+            .iter()
+            .zip(&self.prev)
+            .map(|(a, b)| std::array::from_fn(|k| u16::from(a[k].abs_diff(b[k]) > STILL)))
+            .collect();
+        let mut rows: Vec<usize> = (0..sigs.len())
+            .filter(|&i| moving[i].iter().any(|m| *m != 0) && detailed(&sigs, i))
+            .collect();
+        // Only a narrow column moved (a scroll bar's thumb, a blinking caret): it says nothing
+        // of how the content moved.
+        let bands = (0..BANDS)
+            .filter(|&k| rows.iter().any(|&i| moving[i][k] != 0))
+            .count();
+        let used = self.size.map_or(BANDS, |(w, _)| BANDS.min(w as usize));
+        // A few rows changed (grain, a small animation): not a scroll.
+        if bands < MOVING_BANDS.min(used) || rows.len() < MOVED_ROWS.min(sigs.len() / 4) {
+            rows.clear();
+        }
+        Seen {
+            sigs,
+            moving,
+            sampled: spread(rows),
+        }
+    }
+
+    /// The whole frame, every band of every row: when what moved cannot be found, the frame
+    /// came out of a stretch with nothing in it (blank space), and is placed by all it shows.
+    fn whole(seen: &Seen) -> Seen {
+        Seen {
+            sigs: seen.sigs.clone(),
+            moving: vec![[1; BANDS]; seen.sigs.len()],
+            sampled: spread((0..seen.sigs.len()).collect()),
+        }
+    }
+
+    /// Where the top row of the frame goes, if it can be told.
+    fn place(&self, seen: &Seen) -> Option<isize> {
+        let n = seen.sigs.len() as isize;
+        let overlap = ((n as f32 * self.config.min_overlap) as isize)
+            .max(4)
+            .min(n - 1);
+        let (lo, hi) = (self.canvas.lo(), self.canvas.hi());
+        // Every place the frame overlaps the image enough.
+        let first = lo - n + overlap;
+        let last = hi - overlap;
+        let guess = self.pos + self.speed;
+        let near = 24 + self.speed.abs() / 2;
+        let around = (self.pos - n + overlap, self.pos + n - overlap);
+        let ranges: &[(isize, isize, bool)] = if self.lost {
+            &[(first, last, false)]
         } else {
-            Err(StitchError::SizeChanged {
-                expected: (prev.width, prev.height),
-                got: (frame.width, frame.height),
-            })
-        }
-    }
-
-    /// The second frame decides which rows are a sticky header/footer.
-    fn second(&mut self, first: Pushed, pushed: &Pushed) -> Result<(State, Push), StitchError> {
-        let (prev, frame) = (&first.frame, &pushed.frame);
-        if let Err(e) = Self::check_size(prev, frame) {
-            self.state = State::One(first);
-            return Err(e);
-        }
-        let tol = self.tolerance();
-        let h = prev.height as usize;
-        let top = shift::fixed_rows(prev, frame, true, tol);
-        if top == h {
-            return Ok((State::One(first), Push::Unchanged));
-        }
-        let mut header = top;
-        let mut footer = shift::fixed_rows(prev, frame, false, tol).min(h - header);
-        // Keep a scrolling part worth comparing.
-        while h - header - footer < 8 && (header > 0 || footer > 0) {
-            if header >= footer {
-                header -= 1
-            } else {
-                footer -= 1
+            &[
+                (guess - near, guess + near, true),
+                (around.0, around.1, false),
+                (first, last, false),
+            ]
+        };
+        for &(from, to, narrow) in ranges {
+            let (from, to) = (from.max(first), to.min(last));
+            if from > to {
+                continue;
             }
-        }
-        let range = (header, h - footer);
-        let found = shift::find(prev, frame, range, tol, self.min_overlap(range.1 - range.0));
-        let s = match found {
-            Err(()) => return Ok((State::One(first), Push::Lost)),
-            Ok(None) => return Ok((State::One(first), Push::Unchanged)),
-            Ok(Some(s)) => s,
-        };
-        // Rows that look fixed but also agree with the shift are content (blank margins).
-        while header > 0 && agrees_with_shift(prev, frame, header - 1, s) {
-            header -= 1;
-        }
-        while footer > 0 && agrees_with_shift(prev, frame, h - footer, s) {
-            footer -= 1;
-        }
-        let first_rows = |data: &[u8], rb: usize| Rows {
-            header: data[..header * rb].to_vec(),
-            body: data[header * rb..(h - footer) * rb].to_vec(),
-            ..Rows::default()
-        };
-        let mut run = Running {
-            pixels: first_rows(&prev.data, prev.row_bytes()),
-            layer: first
-                .layer
-                .as_deref()
-                .map(|l| first_rows(l, first.layer_row_bytes())),
-            rows: h,
-            header,
-            footer,
-            prev: prev.clone(),
-            pos: 0,
-            above_rows: 0,
-        };
-        let outcome = self.apply(&mut run, pushed, s);
-        Ok((State::Running(Box::new(run)), outcome))
-    }
-
-    fn next(
-        &mut self,
-        mut run: Box<Running>,
-        pushed: &Pushed,
-    ) -> Result<(State, Push), StitchError> {
-        let frame = &pushed.frame;
-        if let Err(e) = Self::check_size(&run.prev, frame) {
-            self.state = State::Running(run);
-            return Err(e);
-        }
-        let tol = self.tolerance();
-        let h = frame.height as usize;
-        let range = (run.header, h - run.footer);
-        match shift::find(
-            &run.prev,
-            frame,
-            range,
-            tol,
-            self.min_overlap(range.1 - range.0),
-        ) {
-            Err(()) => Ok((State::Running(run), Push::Lost)),
-            Ok(None) => Ok((State::Running(run), Push::Unchanged)),
-            Ok(Some(s)) => {
-                let outcome = self.apply(&mut run, pushed, s);
-                Ok((State::Running(run), outcome))
-            }
-        }
-    }
-
-    /// Adds the rows `frame` brings beyond `run.prev`.
-    fn apply(&mut self, run: &mut Running, pushed: &Pushed, s: shift::Shift) -> Push {
-        let frame = &pushed.frame;
-        let h = frame.height as usize;
-        let n = h - run.header - run.footer;
-        let body_rows = run.pixels.body.len() / frame.row_bytes();
-        let pos = match s.direction {
-            Direction::Down => run.pos + s.rows as isize,
-            Direction::Up => run.pos - s.rows as isize,
-        };
-        // Rows of this frame's scrolling part that extend the assembled image.
-        let (wanted, up) = match s.direction {
-            Direction::Down => (
-                (pos + n as isize - body_rows as isize).max(0) as usize,
-                false,
-            ),
-            Direction::Up => ((-(run.above_rows as isize) - pos).max(0) as usize, true),
-        };
-        let room = (self.config.max_height as usize).saturating_sub(run.rows);
-        let take = wanted.min(room);
-        if take < wanted {
-            self.truncated = true;
-        }
-        let (header, footer) = (run.header, run.footer);
-        let keep = |rows: &mut Rows, data: &[u8], rb: usize| {
-            if take > 0 {
-                if up {
-                    let from = header + wanted - take;
-                    rows.above
-                        .push(data[from * rb..(header + wanted) * rb].to_vec());
-                } else {
-                    let from = h - footer - wanted;
-                    rows.body
-                        .extend_from_slice(&data[from * rb..(from + take) * rb]);
+            let scores: Vec<(isize, Score)> = (from..=to)
+                .filter_map(|p| self.score(seen, p).map(|s| (p, s)))
+                .collect();
+            if let Some(p) = best(&scores, guess, self.enough(seen), SAME_SHARE) {
+                // At the edge of a narrow search, a better place may lie beyond it.
+                if !narrow || (p > from || from == first) && (p < to || to == last) {
+                    return Some(p);
                 }
             }
-            rows.footer = data[(h - footer) * rb..].to_vec();
-        };
-        keep(&mut run.pixels, &frame.data, frame.row_bytes());
-        run.layer = match (run.layer.take(), &pushed.layer) {
-            (Some(mut rows), Some(layer)) => {
-                keep(&mut rows, layer, pushed.layer_row_bytes());
-                Some(rows)
-            }
-            _ => None,
-        };
-        if take > 0 {
-            if up {
-                run.above_rows += take;
-            }
-            run.rows += take;
         }
-        // When truncated, later frames keep tracking the true position.
-        run.pos = pos;
-        run.prev = frame.clone();
-        if take == 0 && wanted > 0 {
-            Push::Full
-        } else if take == 0 {
-            Push::Unchanged
-        } else {
-            Push::Added {
-                rows: take as u32,
-                direction: s.direction,
+        if self.lost {
+            return None;
+        }
+        let whole = Self::whole(seen);
+        let (from, to) = (around.0.max(first), around.1.min(last));
+        let scores: Vec<(isize, Score)> = (from..=to)
+            .filter_map(|p| self.score(&whole, p).map(|s| (p, s)))
+            .collect();
+        best(&scores, guess, self.enough(&whole), WHOLE_SHARE)
+    }
+
+    /// The rows a place must compare to be a proof: as many as the smallest overlap holds.
+    fn enough(&self, seen: &Seen) -> u32 {
+        let sampled = seen.sampled.len() as u32;
+        sampled
+            .min(MOVED_ROWS as u32)
+            .max((sampled as f32 * self.config.min_overlap) as u32)
+    }
+
+    /// How well the frame agrees with the image with its top row at `pos`.
+    fn score(&self, seen: &Seen, pos: isize) -> Option<Score> {
+        let mut score = Score::default();
+        for &i in &seen.sampled {
+            let Some(row) = self.canvas.get(pos + i as isize) else {
+                continue;
+            };
+            let (a, b, m) = (&row.sig, &seen.sigs[i], &seen.moving[i]);
+            let (mut sum, mut bands, mut agree) = (0u32, 0u32, 0u32);
+            for k in 0..BANDS {
+                let d = u32::from(a[k].abs_diff(b[k]));
+                let m = u32::from(m[k]);
+                sum += d.min(ROW_CAP) * m;
+                bands += m;
+                agree += u32::from(d <= BAND_SAME) * m;
+            }
+            score.rows += 1;
+            // A band or two may differ: something floating over the content in one of them.
+            score.same += u32::from(agree * 4 >= bands * 3);
+            score.cost += sum / bands.max(1);
+        }
+        (score.rows > 0).then_some(score)
+    }
+
+    /// Gives the image the rows of `frame` placed at `pos`.
+    fn lend(&mut self, frame: &Frame, layer: Option<&[u8]>, sigs: &[Sig], pos: isize) -> Push {
+        let n = frame.height as usize;
+        let max = self.config.max_height as usize;
+        let (mut down, mut up, mut wanted) = (0u32, 0u32, 0u32);
+        // Downwards first: the rows below the image come in order.
+        for i in 0..n {
+            let p = pos + i as isize;
+            if p >= self.canvas.hi() {
+                wanted += 1;
+                if self.canvas.len() < max {
+                    let row = self.row(frame, layer, sigs, i);
+                    self.canvas.below.push(row);
+                    down += 1;
+                }
+            } else if p >= self.canvas.lo() {
+                self.improve(frame, layer, sigs, i, p);
             }
         }
+        for i in (0..n).rev() {
+            let p = pos + i as isize;
+            if p < self.canvas.lo() {
+                wanted += 1;
+                if self.canvas.len() < max {
+                    let row = self.row(frame, layer, sigs, i);
+                    self.canvas.above.push(row);
+                    up += 1;
+                }
+            }
+        }
+        if (down + up) < wanted {
+            self.truncated = true;
+        }
+        match (down, up) {
+            (0, 0) if wanted > 0 => Push::Full,
+            (0, 0) => Push::Unchanged,
+            (rows, 0) => Push::Added {
+                rows,
+                direction: Direction::Down,
+            },
+            (_, rows) => Push::Added {
+                rows,
+                direction: Direction::Up,
+            },
+        }
+    }
+
+    /// Row `i` of the frame replaces the image's row at `p` when it is seen in the middle half
+    /// of the screen (the newest view of it there wins: a picture that has loaded since), or
+    /// nearer the middle than before.
+    fn improve(&mut self, frame: &Frame, layer: Option<&[u8]>, sigs: &[Sig], i: usize, p: isize) {
+        let n = frame.height as usize;
+        let seen = view(i, n);
+        let layered = self.layered;
+        let Some(row) = self.canvas.get_mut(p) else {
+            return;
+        };
+        if seen * 2 > n as u32 && seen >= row.view {
+            return;
+        }
+        row.pixels.copy_from_slice(frame.row(i));
+        row.layer = layer.filter(|_| layered).map(|l| layer_row(l, n, i).into());
+        row.sig = sigs[i];
+        row.view = seen;
     }
 
     fn assemble(&self) -> Option<(Frame, Option<Vec<u8>>)> {
-        match &self.state {
-            State::Empty => None,
-            State::One(p) => Some((p.frame.clone(), p.layer.clone())),
-            State::Running(r) => {
-                let data = r.pixels.assemble();
-                let height = (data.len() / r.prev.row_bytes()) as u32;
-                let frame = Frame::new(r.prev.width, height, data)?;
-                Some((frame, r.layer.as_ref().map(Rows::assemble)))
-            }
+        let (width, _) = self.size?;
+        let mut data = Vec::with_capacity(self.canvas.len() * width as usize * 4);
+        for row in self.canvas.rows() {
+            data.extend_from_slice(&row.pixels);
         }
+        let frame = Frame::new(width, self.canvas.len() as u32, data)?;
+        let layer = self
+            .layered
+            .then(|| {
+                let mut bytes = Vec::new();
+                for row in self.canvas.rows() {
+                    bytes.extend_from_slice(row.layer.as_deref()?);
+                }
+                Some(bytes)
+            })
+            .flatten();
+        Some((frame, layer))
     }
 
-    /// The image so far, for the live preview (downscaled to fit).
+    /// The image so far, for the live preview (downscaled to fit). Only the rows shown are read.
     pub fn preview(&self, max_width: u32, max_height: u32) -> Option<Frame> {
-        match &self.state {
-            State::Empty => None,
-            State::One(p) => Some(p.frame.thumbnail(max_width, max_height)),
-            State::Running(r) => {
-                let rows: Vec<&[u8]> = r.pixels.rows(r.prev.row_bytes()).collect();
-                Some(crate::frame::sampled(
-                    r.prev.width,
-                    &rows,
-                    max_width,
-                    max_height,
-                ))
-            }
-        }
+        let (width, _) = self.size?;
+        let rows: Vec<&[u8]> = self.canvas.rows().map(|r| &*r.pixels).collect();
+        Some(crate::frame::sampled(width, &rows, max_width, max_height))
     }
 
     /// The final image. `None` when no frame was pushed.
@@ -406,14 +473,105 @@ impl Stitcher {
     }
 }
 
-/// Whether row `y` of `new` equals the row of `prev` it would have come from under shift `s`.
-fn agrees_with_shift(prev: &Frame, new: &Frame, y: usize, s: shift::Shift) -> bool {
-    let from = match s.direction {
-        Direction::Down => y + s.rows,
-        Direction::Up => match y.checked_sub(s.rows) {
-            Some(v) => v,
-            None => return false,
-        },
+/// How far row `i` of `n` is from the middle of its frame.
+fn view(i: usize, n: usize) -> u32 {
+    (2 * i as i64 + 1 - n as i64).unsigned_abs() as u32
+}
+
+fn layer_row(layer: &[u8], height: usize, i: usize) -> &[u8] {
+    let bytes = layer.len() / height;
+    &layer[i * bytes..(i + 1) * bytes]
+}
+
+/// How one place agrees, over the rows compared.
+#[derive(Debug, Clone, Copy, Default)]
+struct Score {
+    rows: u32,
+    /// Rows that are the same row there.
+    same: u32,
+    /// Sum of the rows' mean differences, each band's capped at [`ROW_CAP`].
+    cost: u32,
+}
+
+impl Score {
+    fn mean(&self) -> f32 {
+        self.cost as f32 / self.rows.max(1) as f32
+    }
+}
+
+/// The place to take among `scores`: the best agreeing one, when it is clearly better than
+/// any other; among places alike (content that repeats), the nearest to `guess`.
+fn best(scores: &[(isize, Score)], guess: isize, enough: u32, share: f32) -> Option<isize> {
+    let good: Vec<(isize, f32)> = scores
+        .iter()
+        .filter(|(_, s)| s.rows >= enough && s.same as f32 >= s.rows as f32 * share)
+        .map(|(p, s)| (*p, s.mean()))
+        .collect();
+    let (top, top_mean) = good.iter().copied().min_by(|a, b| {
+        a.1.total_cmp(&b.1)
+            .then(a.0.abs_diff(guess).cmp(&b.0.abs_diff(guess)))
+    })?;
+    // Places as good as the best, apart from its neighbours: the content repeats.
+    let alike: Vec<isize> = good
+        .iter()
+        .filter(|(p, m)| p.abs_diff(top) > 2 && *m < top_mean + MARGIN)
+        .map(|(p, _)| *p)
+        .collect();
+    if alike.is_empty() {
+        return Some(top);
+    }
+    alike
+        .into_iter()
+        .chain([top])
+        .min_by_key(|p| p.abs_diff(guess))
+}
+
+/// Whether row `i` differs from both rows next to it: a row of blank space (or of a flat
+/// colour) is the same everywhere, and cannot tell where it is, even next to an edge.
+fn detailed(sigs: &[Sig], i: usize) -> bool {
+    let apart = |j: usize| {
+        sigs.get(j).map(|o| {
+            o.iter()
+                .zip(&sigs[i])
+                .map(|(a, b)| u32::from(a.abs_diff(*b)))
+                .max()
+                .unwrap_or(0)
+        })
     };
-    from < prev.height as usize && prev.row(from) == new.row(y)
+    [apart(i.wrapping_sub(1)), apart(i + 1)]
+        .into_iter()
+        .flatten()
+        .min()
+        .is_some_and(|d| d > DETAIL)
+}
+
+/// At most [`SAMPLED_ROWS`] of `rows`, evenly spread.
+fn spread(rows: Vec<usize>) -> Vec<usize> {
+    if rows.len() <= SAMPLED_ROWS {
+        return rows;
+    }
+    (0..SAMPLED_ROWS)
+        .map(|k| rows[k * rows.len() / SAMPLED_ROWS])
+        .collect()
+}
+
+/// The signature of every row of `frame`.
+fn signatures(frame: &Frame) -> Vec<Sig> {
+    let w = frame.width as usize;
+    let bands = BANDS.min(w);
+    // The band of each column, and the columns of each band.
+    let band_of: Vec<u8> = (0..w).map(|x| (x * bands / w) as u8).collect();
+    let mut counts = [0u32; BANDS];
+    for b in &band_of {
+        counts[*b as usize] += 1;
+    }
+    (0..frame.height as usize)
+        .map(|y| {
+            let mut sums = [0u32; BANDS];
+            for (px, b) in frame.row(y).as_chunks::<4>().0.iter().zip(&band_of) {
+                sums[*b as usize] += u32::from(px[0]) + 2 * u32::from(px[1]) + u32::from(px[2]);
+            }
+            std::array::from_fn(|k| (sums[k] / counts[k].max(1)) as u16)
+        })
+        .collect()
 }

@@ -271,3 +271,90 @@ fn a_layer_follows_the_rows_kept() {
     }
     assert!(st.finish().unwrap().layer.is_none());
 }
+
+/// A page of text: lines of words (dark dots on white), blank lines between paragraphs.
+fn text_page(width: usize, rows: usize) -> Vec<u8> {
+    let mut rng = Rng(11);
+    let mut data = Vec::with_capacity(width * rows * 4);
+    let mut y = 0;
+    while y < rows {
+        // A paragraph of 2 to 6 lines of 18 rows (12 of letters), then a blank gap.
+        let lines = 2 + rng.next() as usize % 5;
+        for _ in 0..lines {
+            let mut words = Vec::new();
+            let mut x = 8;
+            while x < width - 40 {
+                let w = 12 + rng.next() as usize % 40;
+                words.push((x, (x + w).min(width - 8)));
+                x += w + 6;
+            }
+            for r in 0..18 {
+                for x in 0..width {
+                    let ink = r < 12
+                        && words.iter().any(|&(a, b)| (a..b).contains(&x))
+                        && rng.next().is_multiple_of(3);
+                    let v = if ink { 30 } else { 255 };
+                    data.extend_from_slice(&[v, v, v, 255]);
+                }
+            }
+            y += 18;
+        }
+        let gap = 10 + rng.next() as usize % 60;
+        data.extend(std::iter::repeat_n(255, gap * width * 4));
+        y += gap;
+    }
+    data.truncate(width * rows * 4);
+    data
+}
+
+#[test]
+fn fast_scrolls_over_text_keep_the_page_and_nothing_that_floats() {
+    const PW: usize = 320;
+    const H: usize = 200;
+    let rows = 1200;
+    let page = text_page(PW, rows);
+    let rb = PW * 4;
+    // The page's top stays as a header; a button floats bottom right; a scroll bar on the right.
+    let frame = |o: usize| {
+        let mut data = page[..20 * rb].to_vec();
+        data.extend_from_slice(&page[(o + 20) * rb..(o + H) * rb]);
+        for y in 0..H {
+            for x in PW - 6..PW {
+                let thumb =
+                    (o * (H - 40) / (rows - H)..o * (H - 40) / (rows - H) + 40).contains(&y);
+                let v = if thumb { 120 } else { 235 };
+                data[(y * PW + x) * 4..(y * PW + x) * 4 + 4].copy_from_slice(&[v, v, v, 255]);
+            }
+            if (H - 40..H - 20).contains(&y) && o > 100 {
+                for x in PW - 40..PW - 16 {
+                    data[(y * PW + x) * 4..(y * PW + x) * 4 + 4]
+                        .copy_from_slice(&[200, 80, 20, 255]);
+                }
+            }
+        }
+        Frame::new(PW as u32, H as u32, data).unwrap()
+    };
+    // Jumps of up to three quarters of the zone are followed.
+    let mut st = Stitcher::new(Config::default());
+    for o in [
+        0, 37, 120, 260, 410, 380, 300, 450, 600, 740, 700, 850, 1000,
+    ] {
+        assert_ne!(st.push(&frame(o)).unwrap(), Push::Lost, "{o}");
+    }
+    assert_eq!(st.height() as usize, rows);
+    // Up to half the zone a frame (what a capture at 60 frames a second sees of a very fast
+    // scroll), every row is also seen in the middle of the screen, away from what floats.
+    let mut st = Stitcher::new(Config::default());
+    for o in [
+        0, 37, 120, 210, 300, 260, 180, 280, 380, 470, 570, 660, 740, 700, 800, 900, 1000,
+    ] {
+        assert_ne!(st.push(&frame(o)).unwrap(), Push::Lost, "{o}");
+    }
+    let out = st.finish().unwrap().frame;
+    assert_eq!(out.height as usize, rows);
+    // The page, but its scroll bar, and the last screen's lower part (the button is there).
+    let cols = (PW - 6) * 4;
+    for y in 0..rows - 50 {
+        assert!(out.row(y)[..cols] == page[y * rb..y * rb + cols], "row {y}");
+    }
+}

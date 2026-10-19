@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use vixeeny_capture::{CpuFrame, HdrCapture, HdrFrame, StreamTarget, VideoStream};
@@ -24,6 +24,8 @@ use vixeeny_ui::scroll_panel::{ScrollEvent, ScrollPanel, ScrollTexts};
 
 use crate::still::Snapshot;
 
+/// The live preview is shown at most this often (about 30 times a second).
+const PREVIEW_EVERY: Duration = Duration::from_millis(33);
 /// Logical width of the control window.
 const PANEL_WIDTH: f32 = 260.0;
 const PANEL_HEIGHT: f32 = 420.0;
@@ -45,41 +47,83 @@ fn tight(frame: &CpuFrame) -> Option<Frame> {
     Frame::new(frame.width, frame.height, data)
 }
 
-/// A frame of RGBA half floats (an HDR screen): what is matched (its SDR rendering, BGRA), and
-/// with `keep` what is kept with it (RGB half floats).
-fn hdr_frame(frame: &CpuFrame, info: &HdrInfo, keep: bool) -> Option<(Frame, Option<Vec<u8>>)> {
-    let (w, h) = (frame.width as usize, frame.height as usize);
-    let mut rgba = Vec::with_capacity(w * h * 4);
-    let mut layer = keep.then(|| Vec::with_capacity(w * h * 6));
-    for y in 0..h {
-        let row = frame.data.get(y * frame.stride..)?.get(..w * 8)?;
-        for px in row.as_chunks::<8>().0 {
-            let c = |i: usize| half::to_f32(u16::from_le_bytes([px[i], px[i + 1]]));
-            rgba.extend_from_slice(&[c(0), c(2), c(4), 1.0]);
-            if let Some(layer) = &mut layer {
-                layer.extend_from_slice(&px[..6]);
-            }
-        }
-    }
-    let bgra = crate::tonemap_hdr(&rgba, info);
-    Some((Frame::new(frame.width, frame.height, bgra)?, layer))
+/// An HDR screen: its levels, and a quick SDR rendering of its half floats for matching and
+/// for the preview (the picture itself is tone-mapped once, at the end).
+struct HdrScreen {
+    info: HdrInfo,
+    /// Every half float (by its bits) as an sRGB byte.
+    quick: Box<[u8]>,
 }
 
-/// The long picture as HDR, from the layer of RGB half floats.
-fn hdr_picture(frame: &Frame, layer: &[u8], info: HdrInfo) -> HdrCapture {
-    let rgba = layer
-        .as_chunks::<6>()
+impl HdrScreen {
+    fn new(info: HdrInfo) -> Self {
+        // scRGB: 1.0 is 80 nits; the SDR white of the screen is white.
+        let scale = 80.0 / info.sdr_white_nits.max(1.0);
+        let quick = (0..=u16::MAX)
+            .map(|bits| {
+                let v = (half::to_f32(bits) * scale).clamp(0.0, 1.0);
+                let v = if v.is_nan() {
+                    0.0
+                } else if v <= 0.003_130_8 {
+                    v * 12.92
+                } else {
+                    1.055 * v.powf(1.0 / 2.4) - 0.055
+                };
+                (v * 255.0 + 0.5) as u8
+            })
+            .collect();
+        Self { info, quick }
+    }
+
+    /// A frame of RGBA half floats: its quick rendering (BGRA), and its rows as they are.
+    fn frame(&self, frame: &CpuFrame) -> Option<(Frame, Vec<u8>)> {
+        let (w, h) = (frame.width as usize, frame.height as usize);
+        let mut bgra = Vec::with_capacity(w * h * 4);
+        let mut layer = Vec::with_capacity(w * h * 8);
+        for y in 0..h {
+            let row = frame.data.get(y * frame.stride..)?.get(..w * 8)?;
+            layer.extend_from_slice(row);
+            for px in row.as_chunks::<8>().0 {
+                let c = |i: usize| self.quick[usize::from(u16::from_le_bytes([px[i], px[i + 1]]))];
+                bgra.extend_from_slice(&[c(4), c(2), c(0), 255]);
+            }
+        }
+        Some((Frame::new(frame.width, frame.height, bgra)?, layer))
+    }
+}
+
+/// The light of `rows` rows of RGBA half floats, from row `from`.
+fn light(layer: &[u8], width: usize, from: usize, rows: usize) -> Vec<f32> {
+    layer[from * width * 8..(from + rows) * width * 8]
+        .as_chunks::<2>()
         .0
         .iter()
-        .flat_map(|px| {
-            let c = |i: usize| half::to_f32(u16::from_le_bytes([px[i], px[i + 1]]));
-            [c(0), c(2), c(4), 1.0]
-        })
-        .collect();
+        .map(|c| half::to_f32(u16::from_le_bytes(*c)))
+        .collect()
+}
+
+/// The long picture tone-mapped as every other capture is, a band of rows at a time.
+fn tonemapped(layer: &[u8], width: u32, height: u32, info: &HdrInfo) -> Option<Frame> {
+    const BAND: usize = 256;
+    let (w, h) = (width as usize, height as usize);
+    let mut bgra = Vec::with_capacity(w * h * 4);
+    for from in (0..h).step_by(BAND) {
+        let rows = BAND.min(h - from);
+        bgra.extend_from_slice(&crate::tonemap_hdr(&light(layer, w, from, rows), info));
+    }
+    Frame::new(width, height, bgra)
+}
+
+/// The long picture as HDR, from its rows of RGBA half floats.
+fn hdr_picture(width: u32, height: u32, layer: &[u8], info: HdrInfo) -> HdrCapture {
+    let mut rgba = light(layer, width as usize, 0, height as usize);
+    for px in rgba.as_chunks_mut::<4>().0 {
+        px[3] = 1.0;
+    }
     HdrCapture {
         frame: HdrFrame {
-            width: frame.width,
-            height: frame.height,
+            width,
+            height,
             rgba,
         },
         info,
@@ -137,42 +181,45 @@ impl Shared {
         self.told.1.notify_all();
     }
 
-    /// Sleeps until one of `flags`, the finish or the cancel is set; clears `arrived`.
-    fn wait_for(&self, flag: &AtomicBool) {
+    /// Sleeps until `flag`, the finish or the cancel is set (or `timeout` passed); clears
+    /// `arrived`.
+    fn wait_for(&self, flag: &AtomicBool, timeout: Option<Duration>) {
+        let idle = |(): &mut ()| {
+            ![flag, &self.finish, &self.cancel]
+                .iter()
+                .any(|f| f.load(Ordering::Relaxed))
+        };
         if let Ok(held) = self.told.0.lock() {
-            let _held = self.told.1.wait_while(held, |()| {
-                ![flag, &self.finish, &self.cancel]
-                    .iter()
-                    .any(|f| f.load(Ordering::Relaxed))
-            });
+            match timeout {
+                Some(t) => drop(self.told.1.wait_timeout_while(held, t, idle)),
+                None => drop(self.told.1.wait_while(held, idle)),
+            }
         }
         self.arrived.store(false, Ordering::Relaxed);
     }
 }
 
-/// Follows the zone until told to finish. Returns the assembled image, and the levels of its
-/// HDR layer when HDR is kept (`keep_hdr`) on an HDR screen.
-#[allow(clippy::too_many_arguments)]
+/// Follows the zone until told to finish. Returns the assembled image, and on an HDR screen
+/// its levels (the image's layer then holds the rows as captured, RGBA half floats).
 fn capture_loop(
     shared: &Arc<Shared>,
     monitor: MonitorInfo,
     rect: PhysicalRect,
-    keep_hdr: bool,
     max_height: u32,
     lang: Lang,
     preview: &vixeeny_ui::scroll_panel::ScrollHandle,
     preview_box: (u32, u32),
 ) -> anyhow::Result<Option<(Stitched, Option<HdrInfo>)>> {
     // The control window must be out of the capture before the first frame.
-    shared.wait_for(&shared.shown);
+    shared.wait_for(&shared.shown, None);
     // An HDR screen is read as it is and tone-mapped here, as every other capture is.
-    let hdr_info = vixeeny_platform::hdr_info(monitor.id);
+    let hdr = vixeeny_platform::hdr_info(monitor.id).map(HdrScreen::new);
     let target = StreamTarget::Region { monitor, rect };
     let told = shared.clone();
     let stream = VideoStream::start_notify(
         &target,
         false,
-        hdr_info.is_some(),
+        hdr.is_some(),
         Box::new(move || told.tell(&told.arrived)),
     )?;
     let buffers = stream.buffers();
@@ -182,6 +229,9 @@ fn capture_loop(
     });
     let mut lost = false;
     let mut warned_full = false;
+    // The preview is shown at most this often; the last change always shows.
+    let mut shown: Option<Instant> = None;
+    let mut unshown = false;
     loop {
         if shared.cancel.load(Ordering::Relaxed) {
             return Ok(None);
@@ -189,8 +239,8 @@ fn capture_loop(
         // Every frame, in order: the smaller the step between two, the surer the match.
         let mut changed = false;
         while let Some(captured) = stream.recv(Duration::ZERO)? {
-            let pushed = match &hdr_info {
-                Some(info) if captured.hdr => hdr_frame(&captured.frame, info, keep_hdr),
+            let pushed = match &hdr {
+                Some(hdr) if captured.hdr => hdr.frame(&captured.frame).map(|(f, l)| (f, Some(l))),
                 _ => tight(&captured.frame).map(|f| (f, None)),
             };
             buffers.give(captured.frame.data);
@@ -209,21 +259,27 @@ fn capture_loop(
             changed = true;
         }
         if shared.finish.load(Ordering::Relaxed) {
-            let info = hdr_info.filter(|_| keep_hdr);
-            return Ok(stitcher.finish().map(|s| (s, info)));
+            return Ok(stitcher.finish().map(|s| (s, hdr.map(|h| h.info))));
         }
-        if changed
-            && !warned_full
-            && let Some(p) = stitcher.preview(preview_box.0, preview_box.1)
-        {
-            let status = if lost {
-                tr(Key::ScrollLost, lang).to_owned()
-            } else {
-                tr(Key::ScrollCapturing, lang).replace("{height}", &stitcher.height().to_string())
-            };
-            preview.show_preview(p.width, p.height, to_rgba(&p), status);
+        unshown |= changed && !warned_full;
+        let due = shown.map_or(Duration::ZERO, |t| {
+            PREVIEW_EVERY.saturating_sub(t.elapsed())
+        });
+        if unshown && due.is_zero() {
+            unshown = false;
+            shown = Some(Instant::now());
+            if let Some(p) = stitcher.preview(preview_box.0, preview_box.1) {
+                let status = if lost {
+                    tr(Key::ScrollLost, lang).to_owned()
+                } else {
+                    tr(Key::ScrollCapturing, lang)
+                        .replace("{height}", &stitcher.height().to_string())
+                };
+                preview.show_preview(p.width, p.height, to_rgba(&p), status);
+            }
         }
-        shared.wait_for(&shared.arrived);
+        // A preview held back shows once its time comes, even if nothing else arrives.
+        shared.wait_for(&shared.arrived, unshown.then_some(due));
     }
 }
 
@@ -268,7 +324,6 @@ pub fn run(
         let shared = shared.clone();
         let monitor = monitor.clone();
         let max_height = config.scrolling.max_height.max(100);
-        let keep_hdr = crate::keep_hdr(config) && crate::image_output(config).0.holds_hdr();
         std::thread::Builder::new()
             .name("scroll-capture".into())
             .spawn(move || {
@@ -276,7 +331,6 @@ pub fn run(
                     &shared,
                     monitor,
                     relative,
-                    keep_hdr,
                     max_height,
                     lang,
                     &handle,
@@ -305,11 +359,16 @@ pub fn run(
     if stitched.truncated {
         tracing::warn!("scrolling capture cut at {} px", stitched.frame.height);
     }
-    let frame = stitched.frame;
-    let hdr = stitched
-        .layer
-        .zip(hdr_info)
-        .map(|(layer, info)| hdr_picture(&frame, &layer, info));
+    let mut frame = stitched.frame;
+    let mut hdr = None;
+    // On an HDR screen, the rows as captured: tone-mapped as every other capture is, and kept
+    // as HDR when the picture holds it.
+    if let (Some(layer), Some(info)) = (stitched.layer, hdr_info) {
+        let (w, h) = (frame.width, frame.height);
+        frame = tonemapped(&layer, w, h, &info).context("unexpected stitched image")?;
+        let keep = crate::keep_hdr(config) && crate::image_output(config).0.holds_hdr();
+        hdr = keep.then(|| hdr_picture(w, h, &layer, info));
+    }
     if config.scrolling.annotate {
         match annotate(
             config,
@@ -400,16 +459,17 @@ fn annotate(
 mod tests {
     use super::*;
 
-    /// The HDR layer carried by the stitcher gives back the captured light, beside an SDR
-    /// rendering of the same size.
+    /// An HDR frame keeps its light as captured, beside a quick SDR rendering of the same size
+    /// whose white is the screen's SDR white.
     #[test]
-    fn hdr_layer_round_trips() {
+    fn hdr_rows_round_trip() {
         let info = HdrInfo {
             sdr_white_nits: 240.0,
             peak_nits: 1000.0,
         };
+        let white = 240.0 / 80.0;
         let rgba: Vec<f32> = (0..8 * 4)
-            .flat_map(|i| [i as f32 * 0.25, 1.0, 6.5, 1.0])
+            .flat_map(|i| [i as f32 * 0.25, white, 6.5, 1.0])
             .collect();
         // Rows of 8 pixels, 16 bytes of padding after each.
         let stride = 8 * 8 + 16;
@@ -421,16 +481,18 @@ mod tests {
             }
         }
         let captured = CpuFrame::from_raw(8, 4, stride, data).unwrap();
-        let (frame, layer) = hdr_frame(&captured, &info, true).unwrap();
-        let layer = layer.unwrap();
+        let screen = HdrScreen::new(info);
+        let (frame, layer) = screen.frame(&captured).unwrap();
         assert_eq!((frame.width, frame.height), (8, 4));
-        assert_eq!(layer.len(), 8 * 4 * 6);
-        let back = hdr_picture(&frame, &layer, info);
+        assert_eq!(layer.len(), 8 * 4 * 8);
+        // Green at the SDR white is full; blue above it too; red 0 is black.
+        assert_eq!(&frame.data[..4], &[255, 255, 0, 255]);
+        let back = hdr_picture(8, 4, &layer, info);
         assert_eq!(back.info, info);
         for (a, b) in back.frame.rgba.iter().zip(&rgba) {
             assert!((a - b).abs() <= b.abs() * 1e-3, "{a} vs {b}");
         }
-        // Not kept: only what is matched.
-        assert!(hdr_frame(&captured, &info, false).unwrap().1.is_none());
+        let sdr = tonemapped(&layer, 8, 4, &info).unwrap();
+        assert_eq!(sdr.data.len(), 8 * 4 * 4);
     }
 }

@@ -2,14 +2,14 @@
 //! vixeeny-stitch — assembles a long image from frames captured while the user scrolls
 //!. Pure code, no OS: tested on synthetic sequences.
 //!
-//! Method: each new frame is compared with the previous one. Rows that are identical at the
-//! same position in both frames at the top and the bottom are a sticky header/footer; they are
-//! excluded from the search and kept once. In the rest, rows are fingerprinted and vote for a
-//! vertical shift, which is then verified on the whole overlap (with a small per-pixel
-//! tolerance). When no row fingerprint agrees (noise), a coarse luminance comparison is used.
+//! Method: every row gets a signature (the mean colour of 32 bands of columns). A new frame
+//! is placed where its rows' signatures agree with those of the image already assembled,
+//! looking first where the scrolling speed says it should be. What stays put on the screen
+//! while the content moves (a sticky header, a floating button, blank space) is left out of
+//! the comparison. Each row of the image keeps its view from nearest the middle of the screen,
+//! so that what floats over the content at the edges is not repeated down the image.
 
 mod frame;
-mod shift;
 mod stitcher;
 
 pub use frame::Frame;
