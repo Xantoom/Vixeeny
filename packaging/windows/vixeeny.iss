@@ -62,6 +62,8 @@ Name: "{group}\Vixeeny"; Filename: "{app}\Vixeeny.exe"; AppUserModelID: "Xantoom
 [Registry]
 ; The daemon keeps this entry in line with the `autostart` setting afterwards.
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Vixeeny"; ValueData: """{app}\Vixeeny.exe"""; Tasks: autostart; Flags: uninsdeletevalue
+; Removed on uninstall even when the setting, not this task, wrote it.
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "Vixeeny"; Flags: uninsdeletevalue
 
 [Run]
 Filename: "{app}\Vixeeny.exe"; Description: "Vixeeny"; Flags: nowait postinstall skipifsilent

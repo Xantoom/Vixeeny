@@ -14,7 +14,6 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
-auto-launch.workspace = true
 tracing.workspace = true
 vixeeny-capture = { path = "../vixeeny-capture" }
 vixeeny-common = { path = "../vixeeny-common" }
@@ -27,6 +26,7 @@ windows = { workspace = true, features = [
     "Win32_Graphics_Gdi",
     "Win32_System_LibraryLoader",
     "Win32_System_Power",
+    "Win32_System_Registry",
     "Win32_UI_WindowsAndMessaging",
 ] }
 
