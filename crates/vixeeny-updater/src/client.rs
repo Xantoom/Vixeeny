@@ -22,6 +22,10 @@ pub const DAEMON: &str = "Vixeeny.exe";
 /// (the same volume: moving a file is a rename, which works on a running program).
 const STAGED: &str = ".update-staged";
 const BACKUP: &str = ".update-backup";
+/// Where the archive arrives: a download cut short (sleep, no network) goes on from there.
+const DOWNLOAD: &str = ".update-download";
+/// Held while the files are swapped (see [`lock`]).
+const LOCK: &str = ".update-lock";
 /// The new daemon must answer within this long, else the old version comes back.
 const START_TIMEOUT: Duration = Duration::from_secs(20);
 const CURRENT: &str = env!("CARGO_PKG_VERSION");
@@ -35,27 +39,93 @@ fn agent() -> ureq::Agent {
         .into()
 }
 
-/// Downloads `url` (at most `limit` bytes); `progress(done, total)` follows it. Each request
-/// has [`agent`]'s minute: a slow connection that runs out of it goes on where it stopped
-/// (an HTTP range), and only a request that got nothing at all fails.
-fn get(
+/// Where a download goes: memory, or a file a later attempt goes on with.
+trait Sink {
+    fn len(&self) -> u64;
+    /// The server sends the whole file again.
+    fn restart(&mut self) -> std::io::Result<()>;
+    fn add(&mut self, bytes: &[u8]) -> std::io::Result<()>;
+}
+
+impl Sink for Vec<u8> {
+    fn len(&self) -> u64 {
+        Vec::len(self) as u64
+    }
+
+    fn restart(&mut self) -> std::io::Result<()> {
+        self.clear();
+        Ok(())
+    }
+
+    fn add(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        self.extend_from_slice(bytes);
+        Ok(())
+    }
+}
+
+/// A file being downloaded, kept from one attempt to the next.
+struct Part {
+    file: std::fs::File,
+    len: u64,
+}
+
+impl Part {
+    fn open(path: &Path) -> std::io::Result<Self> {
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)?;
+        let len = file.metadata()?.len();
+        Ok(Self { file, len })
+    }
+}
+
+impl Sink for Part {
+    fn len(&self) -> u64 {
+        self.len
+    }
+
+    fn restart(&mut self) -> std::io::Result<()> {
+        self.file.set_len(0)?;
+        self.len = 0;
+        Ok(())
+    }
+
+    fn add(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        std::io::Write::write_all(&mut self.file, bytes)?;
+        self.len += bytes.len() as u64;
+        Ok(())
+    }
+}
+
+/// Downloads `url` (at most `limit` bytes, `expected` when known) into `sink`, going on from
+/// what it already holds; `progress(done, total)` follows it. Each request has [`agent`]'s
+/// minute: a slow connection that runs out of it goes on where it stopped (an HTTP range), and
+/// only a request that got nothing at all fails.
+fn fetch(
     agent: &ureq::Agent,
     url: &str,
+    sink: &mut dyn Sink,
     limit: u64,
     expected: u64,
     progress: &mut dyn FnMut(u64, u64),
-) -> anyhow::Result<Vec<u8>> {
-    let mut bytes: Vec<u8> = Vec::new();
+) -> anyhow::Result<()> {
+    if expected > 0 && sink.len() > expected {
+        sink.restart()?;
+    }
+    if expected > 0 && sink.len() == expected {
+        return Ok(()); // all there already
+    }
     let mut total = expected;
     let mut chunk = vec![0; 256 * 1024];
     loop {
         let mut request = agent.get(url);
-        if !bytes.is_empty() {
-            request = request.header("Range", format!("bytes={}-", bytes.len()));
+        if sink.len() > 0 {
+            request = request.header("Range", format!("bytes={}-", sink.len()));
         }
         let response = request.call().with_context(|| format!("GET {url}"))?;
-        if !bytes.is_empty() && response.status().as_u16() != 206 {
-            bytes.clear(); // the server sends the whole file again
+        if sink.len() > 0 && response.status().as_u16() != 206 {
+            sink.restart()?;
         }
         let length: Option<u64> = response
             .headers()
@@ -63,32 +133,36 @@ fn get(
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.parse().ok());
         if let Some(length) = length {
-            total = bytes.len() as u64 + length;
+            total = sink.len() + length;
         }
         anyhow::ensure!(total <= limit, "{url} is larger than expected");
-        if bytes.capacity() == 0 {
-            bytes.reserve(usize::try_from(total).unwrap_or(0).min(512 << 20));
-        }
         let mut reader = response.into_body().into_reader();
-        let before = bytes.len();
+        let before = sink.len();
         let ended = loop {
             match reader.read(&mut chunk) {
                 Ok(0) => break Ok(()),
                 Ok(n) => {
-                    bytes.extend_from_slice(&chunk[..n]);
-                    anyhow::ensure!(bytes.len() as u64 <= limit, "{url} is larger than expected");
-                    progress(bytes.len() as u64, total.max(bytes.len() as u64));
+                    sink.add(&chunk[..n])?;
+                    anyhow::ensure!(sink.len() <= limit, "{url} is larger than expected");
+                    progress(sink.len(), total.max(sink.len()));
                 }
                 Err(e) => break Err(e),
             }
         };
         match ended {
-            Ok(()) => return Ok(bytes),
+            Ok(()) => return Ok(()),
             // Cut off after some progress: the rest in a new request.
-            Err(_) if bytes.len() > before && (bytes.len() as u64) < total => {}
+            Err(_) if sink.len() > before && sink.len() < total => {}
             Err(e) => return Err(e).with_context(|| format!("GET {url}")),
         }
     }
+}
+
+/// Downloads a small file (at most `limit` bytes) into memory.
+fn get(agent: &ureq::Agent, url: &str, limit: u64) -> anyhow::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    fetch(agent, url, &mut bytes, limit, 0, &mut |_, _| {})?;
+    Ok(bytes)
 }
 
 fn is_not_found(error: &anyhow::Error) -> bool {
@@ -120,8 +194,7 @@ fn install_dir() -> anyhow::Result<PathBuf> {
 pub fn check() -> anyhow::Result<Option<Release>> {
     let path = state_path()?;
     // 404: nothing is published yet (drafts are invisible to the API).
-    let mut nothing = |_, _| {};
-    let release = match get(&agent(), &check_url(REPOSITORY), 4 << 20, 0, &mut nothing) {
+    let release = match get(&agent(), &check_url(REPOSITORY), 4 << 20) {
         Ok(json) => Release::parse(std::str::from_utf8(&json)?)?,
         Err(e) if is_not_found(&e) => None,
         Err(e) => return Err(e),
@@ -159,26 +232,51 @@ pub fn download(progress: &mut dyn FnMut(u64, u64)) -> anyhow::Result<String> {
         .context("the release has no file for this system")?;
     let agent = agent();
     log(&format!("downloading {}", release.version));
-    let archive = get(
+    let folder = install_dir()?.join(DOWNLOAD);
+    std::fs::create_dir_all(&folder)?;
+    let part = folder.join(&files.archive.name);
+    // What another version left.
+    for entry in std::fs::read_dir(&folder)?.flatten() {
+        if entry.path() != part {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+    fetch(
         &agent,
         &files.archive.url,
+        &mut Part::open(&part)?,
         600 << 20,
         files.archive.size,
         progress,
     )?;
-    let mut nothing = |_, _| {};
-    let signature = get(&agent, &files.signature.url, 1 << 16, 0, &mut nothing)?;
-    let sums = get(&agent, &files.sums.url, 1 << 20, 0, &mut nothing)?;
-    // Nothing is unpacked before both checks pass.
-    verify::check_sum(&archive, &String::from_utf8(sums)?, &files.archive.name)?;
-    verify::check_signature(&archive, &String::from_utf8(signature)?, verify::PUBLIC_KEY)?;
+    let signature = String::from_utf8(get(&agent, &files.signature.url, 1 << 16)?)?;
+    let sums = match files.sums {
+        Some(sums) => Some(String::from_utf8(get(&agent, &sums.url, 1 << 20)?)?),
+        None => None,
+    };
+    // Nothing is unpacked before the checks pass; a file that fails them is downloaded anew.
+    let checked = verify::check(
+        std::io::BufReader::new(std::fs::File::open(&part)?),
+        &files.archive.name,
+        &signature,
+        sums.as_deref(),
+        verify::PUBLIC_KEY,
+    );
+    if let Err(e) = checked {
+        let _ = std::fs::remove_file(&part);
+        return Err(e.into());
+    }
     let staged = install_dir()?.join(STAGED);
     let _ = std::fs::remove_dir_all(&staged);
-    swap::extract(&archive, &staged)?;
+    swap::extract(
+        std::io::BufReader::new(std::fs::File::open(&part)?),
+        &staged,
+    )?;
     anyhow::ensure!(
         staged.join(DAEMON).exists(),
         "the archive does not have the expected layout"
     );
+    let _ = std::fs::remove_dir_all(&folder);
     state.ready = Some(release.version.clone());
     state.error = None;
     state.save(&path)?;
@@ -195,8 +293,9 @@ fn control(request: ControlRequest) -> std::io::Result<()> {
 }
 
 /// Asks the daemon to quit, then waits until its process is gone: at once, or at the end of a
-/// recording (the update waits for it). Windows tells when; nothing is asked again.
-fn stop_daemon() -> anyhow::Result<()> {
+/// recording (the update waits for it), at most `limit`. Windows tells when; nothing is asked
+/// again.
+pub fn stop_daemon(limit: Option<Duration>) -> anyhow::Result<()> {
     let pid = {
         let Ok(mut stream) = Endpoint::current_user().connect() else {
             return Ok(()); // not running
@@ -214,21 +313,27 @@ fn stop_daemon() -> anyhow::Result<()> {
         }),
         "cannot wait for Vixeeny to stop"
     );
-    let _ = end.recv();
+    match limit {
+        Some(limit) => anyhow::ensure!(end.recv_timeout(limit).is_ok(), "Vixeeny is still running"),
+        None => {
+            let _ = end.recv();
+        }
+    }
     Ok(())
 }
 
-/// Starts the daemon in `dir`. With `wait`, returns once it says it runs (`Ok(true)`), or
-/// `Ok(false)` if it ended or stayed silent for [`START_TIMEOUT`].
-fn start_daemon(dir: &Path, wait: bool) -> std::io::Result<bool> {
-    let mut command = std::process::Command::new(dir.join(DAEMON));
-    if !wait {
-        return command.spawn().map(|_| true);
-    }
-    let mut child = command.stdout(std::process::Stdio::piped()).spawn()?;
+/// Starts the daemon in `dir` and waits until it says it runs (`Ok(true)`), it ends, or it
+/// stays silent for [`START_TIMEOUT`] (`Ok(false)`). A new version that stays silent is
+/// stopped (`stop_silent`); the previous one, put back, is left to run whatever happens.
+fn start_daemon(dir: &Path, stop_silent: bool) -> std::io::Result<bool> {
+    let mut child = std::process::Command::new(dir.join(DAEMON))
+        .stdout(std::process::Stdio::piped())
+        .spawn()?;
     let Some(out) = child.stdout.take() else {
-        let _ = child.kill();
-        let _ = child.wait();
+        if stop_silent {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
         return Ok(false);
     };
     // Its first line, or the end of its output if it stops first.
@@ -239,17 +344,38 @@ fn start_daemon(dir: &Path, wait: bool) -> std::io::Result<bool> {
         let _ = said.send(line.trim() == "ready");
     });
     let ready = heard.recv_timeout(START_TIMEOUT).unwrap_or(false);
-    if !ready {
-        // Silent or failed: it must not go on running beside the version put back.
+    if !ready && stop_silent {
+        // It must not go on running beside the version put back.
         let _ = child.kill();
         let _ = child.wait();
     }
     Ok(ready)
 }
 
+/// Starts the version on disk again after an update that did not happen, and sends it
+/// `reopen` (the settings come back, with the error).
+fn restart(dir: &Path, reopen: Option<ControlRequest>) {
+    if start_daemon(dir, false).unwrap_or(false)
+        && let Some(request) = reopen
+    {
+        let _ = control(request);
+    }
+}
+
+/// Held while the files are swapped, so that nothing else takes the backup for one to clean
+/// or to undo. Windows lets it go when the process ends, however it ends. `None`: another
+/// process holds it.
+fn lock(dir: &Path) -> Option<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(false);
+    #[cfg(windows)]
+    std::os::windows::fs::OpenOptionsExt::share_mode(&mut options, 0);
+    options.open(dir.join(LOCK)).ok()
+}
+
 /// Installs the downloaded version and restarts Vixeeny with it; the previous version comes
-/// back if the new one does not start. `reopen` is sent to the new daemon once it runs (to
-/// show the settings again, for instance).
+/// back if the new one does not start. `reopen` is sent to the daemon once it runs (to show
+/// the settings again, for instance).
 pub fn install(reopen: Option<ControlRequest>) -> anyhow::Result<()> {
     let path = state_path()?;
     log(&format!("-- install (from {CURRENT})"));
@@ -266,7 +392,10 @@ pub fn install(reopen: Option<ControlRequest>) -> anyhow::Result<()> {
         Err(e) => {
             log(&format!("update failed: {e:#}"));
             state.error = Some(format!("{e:#}"));
-            state.ready = None;
+            // Not installed again by itself: only by hand.
+            if let Some(version) = state.ready.take() {
+                state.failed = Some(version);
+            }
         }
     }
     let _ = state.save(&path);
@@ -295,14 +424,24 @@ fn install_inner(reopen: Option<ControlRequest>) -> anyhow::Result<()> {
         }
         bail!("no update is ready");
     };
+    let _lock = lock(&dir).context("another update is running")?;
     let (staged, backup) = (dir.join(STAGED), dir.join(BACKUP));
-    // A backup left by an earlier update (its files were still in use then).
+    // A backup left by an earlier update: its files were still in use then, or it was cut
+    // short and never undone.
+    if swap::unconfirmed(&backup) {
+        let _ = swap::rollback(&dir, &backup);
+    }
     let _ = std::fs::remove_dir_all(&backup);
-    stop_daemon()?;
-    swap::install(&staged, &dir, &backup).context("cannot replace the files")?;
+    stop_daemon(None)?;
+    // From here Vixeeny is stopped: every way out starts a version again.
+    if let Err(e) = swap::install(&staged, &dir, &backup) {
+        // The files are as they were.
+        restart(&dir, reopen);
+        return Err(e).context("cannot replace the files");
+    }
     let _ = std::fs::remove_dir_all(&staged);
     log(&format!("starting {version}"));
-    if start_daemon(&dir, true)? {
+    if start_daemon(&dir, true).unwrap_or(false) {
         // The old programs that still run (this one included) keep the backup busy: what
         // cannot go now goes at the next start (`clean_up`).
         let _ = swap::commit(&backup);
@@ -311,9 +450,43 @@ fn install_inner(reopen: Option<ControlRequest>) -> anyhow::Result<()> {
         }
         return Ok(());
     }
-    swap::rollback(&dir, &backup)?;
-    start_daemon(&dir, false)?;
+    let back = swap::rollback(&dir, &backup);
+    restart(&dir, reopen);
+    back.context("the new version did not start, and the previous one could not be restored")?;
     bail!("the new version did not start; the previous one was restored")
+}
+
+/// Undoes an install cut short (power cut, process killed): the files of the previous version
+/// come back and it starts again. Run by the daemon as it starts (`--update pending`).
+/// `true` when there was one: that version is not installed again by itself.
+pub fn recover() -> anyhow::Result<bool> {
+    let dir = install_dir()?;
+    let backup = dir.join(BACKUP);
+    if !swap::unconfirmed(&backup) {
+        return Ok(false);
+    }
+    // Held: an install runs now (the daemon it started runs this).
+    let Some(_lock) = lock(&dir) else {
+        return Ok(false);
+    };
+    let path = state_path()?;
+    let mut state = State::load(&path);
+    state.error = Some("the install was cut short".into());
+    if let Some(version) = state.ready.take() {
+        state.failed = Some(version);
+    }
+    let _ = state.save(&path);
+    log("-- undoing an install cut short");
+    stop_daemon(None)?;
+    let back = swap::rollback(&dir, &backup);
+    if back.is_err() {
+        // Not tried again at each start.
+        let _ = swap::commit(&backup);
+    }
+    restart(&dir, None);
+    back.context("cannot restore the previous version")?;
+    log("previous version restored");
+    Ok(true)
 }
 
 /// Removes what an update left behind (the old files, still in use while it ran, and the
@@ -321,7 +494,11 @@ fn install_inner(reopen: Option<ControlRequest>) -> anyhow::Result<()> {
 pub fn clean_up() {
     if let Ok(dir) = install_dir() {
         let backup = dir.join(BACKUP);
-        if backup.exists() {
+        // Not while an update runs, and not an install to undo (`recover` does).
+        if backup.exists()
+            && !swap::unconfirmed(&backup)
+            && let Some(_lock) = lock(&dir)
+        {
             let _ = swap::commit(&backup);
         }
         // Files of older versions: the console updater (before 0.9.2), the daemon under its old

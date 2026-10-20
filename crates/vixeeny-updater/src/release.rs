@@ -51,7 +51,8 @@ struct ApiAsset {
 pub struct UpdateFiles<'a> {
     pub archive: &'a Asset,
     pub signature: &'a Asset,
-    pub sums: &'a Asset,
+    /// Not needed: the signature already covers the archive.
+    pub sums: Option<&'a Asset>,
 }
 
 impl Release {
@@ -75,19 +76,23 @@ impl Release {
         }))
     }
 
-    /// The archive for `platform` (`windows-x64`), its signature and the checksum list.
+    /// The archive of this version for `platform` (`windows-x64`), its signature and the
+    /// checksum list. The archive is found by its full name, version included: its signature
+    /// names it too, so an archive of another version is refused.
     pub fn files(&self, platform: &str) -> Option<UpdateFiles<'_>> {
         let find = |name: &str| self.assets.iter().find(|a| a.name == name);
-        let archive = self
-            .assets
-            .iter()
-            .find(|a| a.name.ends_with(&format!("-{platform}.zip")))?;
+        let archive = find(&archive_name(&self.version, platform))?;
         Some(UpdateFiles {
             archive,
             signature: find(&format!("{}.minisig", archive.name))?,
-            sums: find("SHA256SUMS")?,
+            sums: find("SHA256SUMS"),
         })
     }
+}
+
+/// The update archive of `version` (`xtask dist` writes it).
+pub fn archive_name(version: &str, platform: &str) -> String {
+    format!("Vixeeny-{version}-{platform}.zip")
 }
 
 /// Whether `latest` is a newer version than `current` (both `1.2.3`, a leading `v` allowed).
@@ -125,7 +130,15 @@ mod tests {
             .unwrap_or_else(|| panic!("no files"));
         assert_eq!(files.archive.url, "https://x/a.zip");
         assert_eq!(files.signature.url, "https://x/a.sig");
+        assert_eq!(files.sums.map(|s| s.url.as_str()), Some("https://x/sums"));
         assert!(release.files("windows-arm64").is_none());
+        let without_sums = JSON.replace("\"SHA256SUMS\"", "\"other\"");
+        let release = Release::parse(&without_sums).ok().flatten();
+        assert!(release.is_some_and(|r| r.files("windows-x64").is_some_and(|f| f.sums.is_none())));
+        // An archive named for another version is not this release's.
+        let renamed = JSON.replace("\"v0.5.1\"", "\"v0.6.0\"");
+        let release = Release::parse(&renamed).ok().flatten();
+        assert!(release.is_some_and(|r| r.files("windows-x64").is_none()));
     }
 
     #[test]

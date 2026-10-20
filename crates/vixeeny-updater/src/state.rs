@@ -41,6 +41,9 @@ pub struct State {
     pub ready: Option<String>,
     /// Why the last attempt to install failed (cleared by a new attempt or a success).
     pub error: Option<String>,
+    /// The version whose install failed: not downloaded and installed again by itself.
+    #[serde(default)]
+    pub failed: Option<String>,
 }
 
 impl State {
@@ -97,6 +100,7 @@ mod tests {
             notified: Some("1.0.0".into()),
             ready: Some("1.0.0".into()),
             error: Some("boom".into()),
+            failed: Some("0.9.0".into()),
         };
         state.save(&path).unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(State::load(&path), state);

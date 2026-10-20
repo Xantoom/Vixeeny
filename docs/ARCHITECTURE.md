@@ -65,13 +65,19 @@ Slint windows are rendered in the tests by the software renderer.
 ## Updates
 
 `Vixeeny.exe` starts `vixeeny-app --update background` shortly after it starts and after each
-wake from sleep. That process asks GitHub for the latest release and, when automatic updates are on, downloads
-the archive, checks its SHA-256 and minisign signature, unpacks it into `.update-staged` and
-installs it; otherwise it shows a toast once. Settings → About shows the same steps with a
-progress bar and a restart button. Installing renames the running files into `.update-backup`
+wake from sleep. That process asks GitHub for the latest release and, when automatic updates are
+on, downloads the archive into `.update-download` (a download cut short goes on from there),
+checks its minisign signature, which must name the archive of that version, and its SHA-256,
+unpacks it into `.update-staged`, and installs it at the next start; otherwise it shows a toast
+once. Settings → About shows the same steps with a progress bar and a restart button.
+
+Installing writes a journal of every move into `.update-backup`, renames the running files there
 (Windows allows renaming a running program), moves the new ones in, restarts `Vixeeny.exe` only,
-and puts the old files back if the new version does not answer within 20 seconds. A recording
-in progress delays the restart until it ends.
+and puts the old files back if the new version does not answer within 20 seconds; every failure
+starts the previous version again. An install cut short (power cut) is undone from the journal
+at the next start. A version that failed is not installed again by itself. A recording in
+progress delays the restart until it ends. The installer stops Vixeeny the same way
+(`vixeeny-app --update quit`) before it replaces or removes files.
 
 ## Files and data
 

@@ -42,9 +42,11 @@ fn listed(dir: &Path) -> Vec<PathBuf> {
 
 const JOURNAL: &str = "journal.json";
 
-/// Unpacks a zip into `dest`. Entries that would land outside of it are an error.
-pub fn extract(zip_bytes: &[u8], dest: &Path) -> io::Result<()> {
-    let mut archive = zip::ZipArchive::new(io::Cursor::new(zip_bytes)).map_err(io::Error::other)?;
+/// Unpacks a zip into `dest`. Entries that would land outside of it are an error. Each file
+/// is on the disk when this returns: the version is then marked ready, and a power cut must
+/// not leave it ready but half written.
+pub fn extract(zip: impl io::Read + io::Seek, dest: &Path) -> io::Result<()> {
+    let mut archive = zip::ZipArchive::new(zip).map_err(io::Error::other)?;
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i).map_err(io::Error::other)?;
         let Some(relative) = entry.enclosed_name() else {
@@ -64,7 +66,9 @@ pub fn extract(zip_bytes: &[u8], dest: &Path) -> io::Result<()> {
         if let Some(parent) = out.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        io::copy(&mut entry, &mut std::fs::File::create(&out)?)?;
+        let mut file = std::fs::File::create(&out)?;
+        io::copy(&mut entry, &mut file)?;
+        file.sync_all()?;
     }
     Ok(())
 }
@@ -100,39 +104,46 @@ fn move_file(from: &Path, to: &Path) -> io::Result<()> {
 }
 
 /// Puts the files of `staged` into `target`; whatever they replace goes to `backup`. On failure
-/// everything done so far is undone before the error is returned.
+/// everything done so far is undone before the error is returned. The journal, every move it
+/// plans, is on the disk before the first move: an install cut short (power cut, process
+/// killed) can be undone later by [`rollback`].
 pub fn install(staged: &Path, target: &Path, backup: &Path) -> io::Result<Journal> {
     std::fs::create_dir_all(backup)?;
-    let mut journal = Journal::default();
-    let result = files_under(staged).and_then(|files| {
-        // Read before the new manifest replaces it.
-        let obsolete: Vec<PathBuf> = listed(target)
-            .into_iter()
-            .filter(|old| !files.contains(old) && target.join(old).is_file())
-            .collect();
-        for relative in obsolete {
-            move_file(&target.join(&relative), &backup.join(&relative))?;
-            journal.removed.push(relative);
+    let files = files_under(staged)?;
+    // Read before the new manifest replaces it.
+    let removed: Vec<PathBuf> = listed(target)
+        .into_iter()
+        .filter(|old| !files.contains(old) && target.join(old).is_file())
+        .collect();
+    let (replaced, added) = files
+        .iter()
+        .cloned()
+        .partition(|relative| target.join(relative).exists());
+    let journal = Journal {
+        replaced,
+        added,
+        removed,
+    };
+    let text = serde_json::to_string(&journal).map_err(io::Error::other)?;
+    let mut file = std::fs::File::create(backup.join(JOURNAL))?;
+    io::Write::write_all(&mut file, text.as_bytes())?;
+    file.sync_all()?;
+    drop(file);
+    let moved = (|| {
+        for relative in &journal.removed {
+            move_file(&target.join(relative), &backup.join(relative))?;
         }
-        for relative in files {
-            let (from, to) = (staged.join(&relative), target.join(&relative));
-            if to.exists() {
-                move_file(&to, &backup.join(&relative))?;
-                journal.replaced.push(relative.clone());
-            } else {
-                journal.added.push(relative.clone());
+        for relative in &files {
+            let to = target.join(relative);
+            if journal.replaced.contains(relative) {
+                move_file(&to, &backup.join(relative))?;
             }
-            // The old file is already moved away when this fails: the caller's undo brings it back.
-            move_file(&from, &to)?;
+            move_file(&staged.join(relative), &to)?;
         }
         Ok(())
-    });
-    match result {
-        Ok(()) => {
-            let text = serde_json::to_string(&journal).map_err(io::Error::other)?;
-            std::fs::write(backup.join(JOURNAL), text)?;
-            Ok(journal)
-        }
+    })();
+    match moved {
+        Ok(()) => Ok(journal),
         Err(e) => {
             let _ = undo(&journal, target, backup);
             Err(e)
@@ -140,21 +151,30 @@ pub fn install(staged: &Path, target: &Path, backup: &Path) -> io::Result<Journa
     }
 }
 
+/// Undoes what the journal planned, as far as it was done: a file that never reached the
+/// backup was never moved.
 fn undo(journal: &Journal, target: &Path, backup: &Path) -> io::Result<()> {
     for relative in &journal.added {
         let _ = std::fs::remove_file(target.join(relative));
     }
-    for relative in &journal.replaced {
-        let _ = std::fs::remove_file(target.join(relative));
-        move_file(&backup.join(relative), &target.join(relative))?;
-    }
-    for relative in &journal.removed {
-        move_file(&backup.join(relative), &target.join(relative))?;
+    for relative in journal.replaced.iter().chain(&journal.removed) {
+        let saved = backup.join(relative);
+        if saved.is_file() {
+            let _ = std::fs::remove_file(target.join(relative));
+            move_file(&saved, &target.join(relative))?;
+        }
     }
     Ok(())
 }
 
-/// Restores the previous version from `backup` (after a failed start of the new one).
+/// Whether `backup` holds an install not yet known to work (or cut short): [`rollback`]
+/// undoes it, [`commit`] keeps it.
+pub fn unconfirmed(backup: &Path) -> bool {
+    backup.join(JOURNAL).is_file()
+}
+
+/// Restores the previous version from `backup` (after a failed start of the new one, or an
+/// install cut short).
 pub fn rollback(target: &Path, backup: &Path) -> io::Result<()> {
     let text = std::fs::read_to_string(backup.join(JOURNAL))?;
     let journal: Journal = serde_json::from_str(&text).map_err(io::Error::other)?;
@@ -162,8 +182,14 @@ pub fn rollback(target: &Path, backup: &Path) -> io::Result<()> {
     std::fs::remove_dir_all(backup)
 }
 
-/// Forgets the previous version once the new one runs.
+/// Keeps the new version once it runs. The journal goes first: the old files still in use
+/// (by programs of the previous version) may stay until the next start, and must then not be
+/// taken for an install to undo.
 pub fn commit(backup: &Path) -> io::Result<()> {
+    match std::fs::remove_file(backup.join(JOURNAL)) {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
+        _ => {}
+    }
     match std::fs::remove_dir_all(backup) {
         Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
         _ => Ok(()),
@@ -296,10 +322,44 @@ mod tests {
     }
 
     #[test]
+    fn an_install_cut_short_is_undone_later() {
+        let (_dir, staged, target, backup) = setup();
+        put(&target, "old.dll", "old library");
+        put(&target, MANIFEST, "vixeeny-daemon.exe\nold.dll\n");
+        put(
+            &staged,
+            MANIFEST,
+            "vixeeny-daemon.exe\nlicenses/THIRD-PARTY.txt\n",
+        );
+        install(&staged, &target, &backup).unwrap_or_else(|e| panic!("{e}"));
+        assert!(unconfirmed(&backup));
+        // As if the power went off before the daemon reached the backup: it never moved.
+        std::fs::remove_file(target.join("vixeeny-daemon.exe")).unwrap_or_else(|e| panic!("{e}"));
+        std::fs::rename(
+            backup.join("vixeeny-daemon.exe"),
+            target.join("vixeeny-daemon.exe"),
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
+        rollback(&target, &backup).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(
+            read(&target, "vixeeny-daemon.exe").as_deref(),
+            Some("old daemon")
+        );
+        assert_eq!(read(&target, "old.dll").as_deref(), Some("old library"));
+        assert_eq!(
+            read(&target, MANIFEST).as_deref(),
+            Some("vixeeny-daemon.exe\nold.dll\n")
+        );
+        assert_eq!(read(&target, "licenses/THIRD-PARTY.txt"), None);
+        assert!(!backup.exists());
+    }
+
+    #[test]
     fn commit_forgets_the_backup() {
         let (_dir, staged, target, backup) = setup();
         install(&staged, &target, &backup).unwrap_or_else(|e| panic!("{e}"));
         commit(&backup).unwrap_or_else(|e| panic!("{e}"));
+        assert!(!unconfirmed(&backup));
         assert!(!backup.exists());
         commit(&backup).unwrap_or_else(|e| panic!("{e}"));
     }
@@ -319,8 +379,8 @@ mod tests {
             out
         };
         let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
-        extract(&build("bin/a.exe"), dir.path()).unwrap_or_else(|e| panic!("{e}"));
+        extract(io::Cursor::new(build("bin/a.exe")), dir.path()).unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(read(dir.path(), "bin/a.exe").as_deref(), Some("data"));
-        assert!(extract(&build("../evil.exe"), dir.path()).is_err());
+        assert!(extract(io::Cursor::new(build("../evil.exe")), dir.path()).is_err());
     }
 }

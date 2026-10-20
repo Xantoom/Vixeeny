@@ -4,11 +4,14 @@
 //! updates on, a new version is downloaded and verified without a word, and installed at the next
 //! start of Vixeeny (or by the Restart button of the settings); otherwise the user is told once.
 //!
-//! `vixeeny-app --update pending`: run by the daemon as it starts; installs a downloaded version
-//! (the daemon stops, the new one starts).
+//! `vixeeny-app --update pending`: run by the daemon as it starts; undoes an install cut short,
+//! or installs a downloaded version (the daemon stops, the new one starts).
 //!
 //! `vixeeny-app --update install [--settings]`: installs the downloaded version (the Restart
 //! button of the settings), then shows the settings again.
+//!
+//! `vixeeny-app --update quit`: run by the installer; stops Vixeeny the way an update does (a
+//! recording ends first), waiting at most half a minute.
 
 use vixeeny_common::config::Config;
 use vixeeny_common::i18n::{Key, tr};
@@ -23,12 +26,10 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
             vixeeny_platform::run_in_background();
             background()
         }
-        Some("pending") => match client::ready() {
-            Some(version) => {
-                tracing::info!("installing {version}, downloaded before");
-                client::install(None)
-            }
-            None => Ok(()),
+        // A version restored is not installed again at once.
+        Some("pending") => match client::recover()? {
+            true => Ok(()),
+            false => pending(),
         },
         Some("install") => {
             let reopen = args
@@ -37,7 +38,18 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
                 .then_some(ControlRequest::OpenSettings);
             client::install(reopen)
         }
+        Some("quit") => client::stop_daemon(Some(std::time::Duration::from_secs(30))),
         _ => Ok(()),
+    }
+}
+
+fn pending() -> anyhow::Result<()> {
+    match client::ready() {
+        Some(version) => {
+            tracing::info!("installing {version}, downloaded before");
+            client::install(None)
+        }
+        None => Ok(()),
     }
 }
 
@@ -53,15 +65,18 @@ fn background() -> anyhow::Result<()> {
         return Ok(());
     };
     tracing::info!("version {} is available", release.version);
-    if config.general.auto_update {
-        client::download(&mut |_, _| {})?;
-        return Ok(());
-    }
-    // Told once per version.
     let Some(path) = state::file() else {
         return Ok(());
     };
     let mut state = State::load(&path);
+    if config.general.auto_update {
+        // A version whose install failed is downloaded again only by hand.
+        if state.failed.as_deref() != Some(release.version.as_str()) {
+            client::download(&mut |_, _| {})?;
+        }
+        return Ok(());
+    }
+    // Told once per version.
     if state.notified.as_deref() == Some(release.version.as_str()) {
         return Ok(());
     }
