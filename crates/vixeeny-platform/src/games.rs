@@ -616,6 +616,11 @@ mod tests {
         assert!(signals.installed_game(r"C:\GAMES\Indie\Indie.exe"));
         assert!(!signals.installed_game(r"D:\SteamLibrary\steamapps\commonX\a.exe"));
         assert!(!signals.installed_game(r"C:\Program Files\VideoLAN\VLC\vlc.exe"));
+        // The lists hold file names in lower case.
+        assert_eq!(
+            exe_name(r"C:\Games\Hades\Hades.EXE").as_deref(),
+            Some("hades.exe")
+        );
     }
 
     #[test]
@@ -696,13 +701,5 @@ mod tests {
         assert!(!is_game("hades.exe", facts(true, true, true), lists));
         // Still in full screen only.
         assert!(!is_game("indie.exe", facts(false, false, false), lists));
-    }
-
-    #[test]
-    fn the_lists_hold_file_names_in_lower_case() {
-        assert_eq!(
-            exe_name(r"C:\Games\Hades\Hades.EXE").as_deref(),
-            Some("hades.exe")
-        );
     }
 }

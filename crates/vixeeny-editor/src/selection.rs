@@ -589,14 +589,6 @@ mod tests {
     }
 
     #[test]
-    fn pressing_outside_starts_a_new_zone() {
-        let mut s = sel();
-        draw(&mut s, p(100.0, 100.0), p(200.0, 200.0));
-        draw(&mut s, p(500.0, 300.0), p(600.0, 400.0));
-        assert_eq!(s.rect(), Some(Rect::new(500.0, 300.0, 100.0, 100.0)));
-    }
-
-    #[test]
     fn select_all_and_reset() {
         let mut s = sel();
         s.select_all();

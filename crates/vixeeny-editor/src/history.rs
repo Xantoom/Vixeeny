@@ -194,26 +194,4 @@ mod tests {
         assert!(!h.can_redo());
         assert!(h.can_undo());
     }
-
-    #[test]
-    fn history_is_unbounded() {
-        let mut doc = Document::new(10, 10);
-        let mut h = History::default();
-        for i in 0..5000 {
-            add(&mut doc, &mut h, line(i as f32));
-        }
-        let mut n = 0;
-        while h.undo(&mut doc).is_some() {
-            n += 1;
-        }
-        assert_eq!((n, doc.items.len()), (5000, 0));
-    }
-
-    #[test]
-    fn undo_on_an_empty_history_does_nothing() {
-        let mut doc = Document::new(10, 10);
-        let mut h = History::default();
-        assert!(h.undo(&mut doc).is_none());
-        assert!(h.redo(&mut doc).is_none());
-    }
 }

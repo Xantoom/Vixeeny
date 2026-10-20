@@ -125,8 +125,8 @@ mod tests {
 
     use super::*;
 
-    /// What the former single-threaded path gives, for comparison.
-    fn legacy(src: &frame::Video, out: Pixel, hdr: bool) -> frame::Video {
+    /// What FFmpeg's own converter gives, in one piece: the reference.
+    fn reference(src: &frame::Video, out: Pixel, hdr: bool) -> frame::Video {
         let (w, h) = (src.width(), src.height());
         let mut ctx =
             scaling::Context::get(src.format(), w, h, out, w, h, scaling::Flags::BICUBIC).unwrap();
@@ -184,7 +184,7 @@ mod tests {
         for (i, b) in src.data_mut(0).iter_mut().enumerate() {
             *b = (i * 7919 % 251) as u8;
         }
-        let want = legacy(&src, out, hdr);
+        let want = reference(&src, out, hdr);
         let rows = Rows {
             bytes: src.data(0),
             stride,
@@ -198,14 +198,14 @@ mod tests {
     }
 
     #[test]
-    fn sdr_frames_convert_as_before() {
+    fn sdr_frames_convert_like_ffmpeg() {
         check(Pixel::BGRA, Pixel::YUV420P, false);
         check(Pixel::BGRA, Pixel::YUV444P, false);
         check(Pixel::BGRA, Pixel::NV12, false);
     }
 
     #[test]
-    fn hdr_frames_convert_as_before() {
+    fn hdr_frames_convert_like_ffmpeg() {
         check(Pixel::RGB48LE, Pixel::YUV420P10LE, true);
     }
 

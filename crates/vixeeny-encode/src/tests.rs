@@ -16,7 +16,7 @@ fn registry() -> Registry {
 }
 
 #[test]
-fn containers_follow_the_matrix_13_2() {
+fn containers_follow_the_codec_matrix() {
     for e in &registry().encoders {
         let webm = e.containers.contains(&Container::Webm);
         assert_eq!(
