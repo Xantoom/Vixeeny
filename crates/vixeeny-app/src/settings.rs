@@ -561,6 +561,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
         }
     });
     let result = panel.window().run().map_err(|e| anyhow::anyhow!("{e}"));
+    resume_hotkeys();
     if let Some(config) = unsaved.borrow_mut().take() {
         file.borrow_mut().write(&config);
         finish_saving();
@@ -786,20 +787,57 @@ fn meter(handle: PanelHandle) -> impl Fn(Option<String>) {
     }
 }
 
+/// The thread telling the daemon to release or give back its shortcuts, one request after the
+/// other: they arrive in the order they were made.
+static PAUSES: Mutex<Option<(std::sync::mpsc::Sender<bool>, std::thread::JoinHandle<()>)>> =
+    Mutex::new(None);
+/// The daemon's shortcuts were last asked to be released.
+static PAUSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Releases (or gives back) the global shortcuts of the daemon while a shortcut is recorded.
 fn pause_hotkeys(paused: bool) {
-    std::thread::spawn(move || {
-        let _ = Endpoint::current_user().connect().and_then(|mut stream| {
-            ipc::write_msg(
-                &mut stream,
-                &Hello::Control(ControlRequest::PauseHotkeys(paused)),
-            )
-            .map_err(std::io::Error::other)?;
-            ipc::read_msg::<_, ipc::ControlReply>(&mut stream)
-                .map(|_| ())
-                .map_err(std::io::Error::other)
+    PAUSED.store(paused, std::sync::atomic::Ordering::Relaxed);
+    let mut pauses = PAUSES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (tx, _) = pauses.get_or_insert_with(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<bool>();
+        let thread = std::thread::spawn(move || {
+            for paused in rx {
+                let told = Endpoint::current_user().connect().and_then(|mut stream| {
+                    ipc::write_msg(
+                        &mut stream,
+                        &Hello::Control(ControlRequest::PauseHotkeys(paused)),
+                    )
+                    .map_err(std::io::Error::other)?;
+                    ipc::read_msg::<_, ipc::ControlReply>(&mut stream)
+                        .map(|_| ())
+                        .map_err(std::io::Error::other)
+                });
+                if let Err(e) = told {
+                    tracing::debug!("the daemon was not told about the shortcuts: {e}");
+                }
+            }
         });
+        (tx, thread)
     });
+    let _ = tx.send(paused);
+}
+
+/// Gives the daemon its shortcuts back if the window closes while one is recorded, and waits
+/// until it is told (before the process ends).
+fn resume_hotkeys() {
+    if PAUSED.load(std::sync::atomic::Ordering::Relaxed) {
+        pause_hotkeys(false);
+    }
+    let pauses = PAUSES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take();
+    if let Some((tx, thread)) = pauses {
+        drop(tx);
+        let _ = thread.join();
+    }
 }
 
 /// The hardware probe for the video page: the cache if it exists, else a background run whose
