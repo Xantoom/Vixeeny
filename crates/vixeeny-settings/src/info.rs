@@ -169,8 +169,8 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
             "Adapte l'encodeur à un type d'image (film, animation, grain…).\nAuto : le réglage par défaut de l'encodeur.",
         ),
         "auto_update" => pick(
-            "Checks every 12 hours.\nA new version is downloaded in the background and installed at the next start.",
-            "Vérifie toutes les 12 heures.\nUne nouvelle version est téléchargée en arrière-plan et installée au prochain démarrage.",
+            "Checks when the PC starts and each time it wakes up.\nA new version is downloaded in the background and installed at the next start.",
+            "Vérifie au démarrage du PC et à chaque sortie de veille.\nUne nouvelle version est téléchargée en arrière-plan et installée au prochain démarrage.",
         ),
         "replay_enabled" => pick(
             "Keeps the last minutes of play in memory.\nThe shortcut saves them as a video.\nWorks only while a game is in full screen.",

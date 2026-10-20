@@ -64,8 +64,8 @@ Slint windows are rendered in the tests by the software renderer.
 
 ## Updates
 
-`Vixeeny.exe` starts `vixeeny-app --update background` shortly after it starts, then once a day.
-That process asks GitHub for the latest release and, when automatic updates are on, downloads
+`Vixeeny.exe` starts `vixeeny-app --update background` shortly after it starts and after each
+wake from sleep. That process asks GitHub for the latest release and, when automatic updates are on, downloads
 the archive, checks its SHA-256 and minisign signature, unpacks it into `.update-staged` and
 installs it; otherwise it shows a toast once. Settings → About shows the same steps with a
 progress bar and a restart button. Installing renames the running files into `.update-backup`
