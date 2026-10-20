@@ -566,7 +566,7 @@ export component TipLayer inherits Rectangle {
         property <bool> up: Tip.bottom + self.gap + self.height > root.height - 8px;
         x: clamp(Tip.left, 8px, max(8px, root.width - self.width - 8px));
         y: self.up ? Tip.top - self.gap - self.height : Tip.bottom + self.gap;
-        width: min(340px, body.preferred-width + 28px);
+        width: min(380px, body.preferred-width + 28px);
         height: body.preferred-height + 24px;
         background: Theme.flyout;
         border-radius: Theme.radius-flyout;

@@ -26,20 +26,20 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
             "Garde l'image exacte, pixel par pixel.\nFichiers plus gros.",
         ),
         "avif_speed" => pick(
-            "Higher saves faster, with a larger file.",
-            "Plus haut = enregistrement plus rapide, fichier plus gros.",
+            "Higher: faster saving, larger file.",
+            "Plus haut : enregistrement plus rapide, fichier plus gros.",
         ),
         "webp_effort" | "jxl_effort" => pick(
-            "More effort makes a smaller file at the same quality.\nSaving takes longer.",
-            "Plus d'effort donne un fichier plus petit, à qualité égale.\nL'enregistrement est plus long.",
+            "Higher: smaller file at the same quality, longer saving.",
+            "Plus haut : fichier plus petit à qualité égale, enregistrement plus long.",
         ),
         "avif_depth" => pick(
             "10 bits avoids bands in gradients.\nNeeded for HDR.",
             "10 bits évite les bandes dans les dégradés.\nNécessaire pour le HDR.",
         ),
         "window_backdrop" => pick(
-            "Window captures get a margin, rounded corners and a soft shadow, over a blur of the window or the accent colour of Windows.",
-            "Les captures de fenêtre reçoivent une marge, des coins arrondis et une ombre douce, sur un flou de la fenêtre ou la couleur d'accentuation de Windows.",
+            "Adds a margin, rounded corners and a shadow.\nBackground: a blur of the window or the accent colour of Windows.",
+            "Ajoute une marge, des coins arrondis et une ombre.\nFond : flou de la fenêtre ou couleur d'accentuation de Windows.",
         ),
         "image_hdr" if config.image.format == "webp" => pick(
             "WebP cannot keep HDR: its pictures are always converted.\nPNG, JPEG, AVIF and JPEG XL can keep it.",
@@ -50,20 +50,20 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
             "Garde les couleurs et la luminosité HDR de l'écran.\nDésactivé : l'image est convertie pour s'afficher correctement partout.",
         ),
         "encoder_kind" => pick(
-            "Hardware: the graphics card encodes, the game does not slow down.\nSoftware: the processor encodes, which can slow the game.",
-            "Matériel : la carte graphique encode, le jeu ne ralentit pas.\nLogiciel : le processeur encode, ce qui peut ralentir le jeu.",
+            "Hardware: encoded by the video chip of the graphics card.\nSoftware: encoded by the processor, which the game also uses.",
+            "Matériel : encodé par la puce vidéo de la carte graphique.\nLogiciel : encodé par le processeur, que le jeu utilise aussi.",
         ),
         "encoder" => pick(
-            "AV1: the lightest files.\nHEVC: a little heavier.\nH.264: plays everywhere, even on old devices.",
-            "AV1 : les fichiers les plus légers.\nHEVC : un peu plus lourds.\nH.264 : lu partout, même sur les vieux appareils.",
+            "AV1: smaller files at the same quality, played by recent devices.\nHEVC: in between.\nH.264: larger files, played by nearly every device.",
+            "AV1 : fichiers plus petits à qualité égale, lecture plus récente.\nHEVC : intermédiaire.\nH.264 : fichiers plus gros, lu par presque tous les appareils.",
         ),
         "container" => pick(
-            "The kind of video file.\nMP4: plays everywhere; a video cut by a crash still plays.\nMKV: takes every sound format.",
-            "Le type de fichier vidéo.\nMP4 : lu partout ; une vidéo coupée par un plantage reste lisible.\nMKV : accepte tous les formats de son.",
+            "MP4: the most common format; still plays after a crash.\nMKV: takes every sound format.",
+            "MP4 : format le plus répandu ; reste lisible après un plantage.\nMKV : accepte tous les formats de son.",
         ),
         "chroma" => pick(
-            "4:2:0: plays everywhere.\n4:4:4: more precise colours on fine text, but rarely read and heavier.",
-            "4:2:0 : lu partout.\n4:4:4 : couleurs plus précises sur le texte fin, mais rarement lu et plus lourd.",
+            "4:2:0: the standard format.\n4:4:4: more precise colours on fine text; heavier file, few players support it.",
+            "4:2:0 : format standard.\n4:4:4 : couleurs plus précises sur le texte fin ; fichier plus lourd, peu de lecteurs le prennent en charge.",
         ),
         "p:rc.mode" => {
             // The quality mode by the encoder's own name: CRF, CQ, ICQ, CQP.
@@ -72,11 +72,11 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
                 .map_or_else(|| "CQ".to_owned(), |e| e.rate_control.quality.name.clone());
             Some(if fr {
                 format!(
-                    "{name} : l'encodeur garde l'image au niveau choisi, la taille du fichier suit ce qui est filmé.\nVBR : vise une taille.\nCBR : taille fixe, pour le streaming."
+                    "{name} : qualité constante, la taille varie selon l'image.\nVBR : débit moyen visé.\nCBR : débit fixe, pour le streaming."
                 )
             } else {
                 format!(
-                    "{name}: the encoder keeps the picture at the chosen level, the file size follows what is filmed.\nVBR: aims at a size.\nCBR: a fixed size, for streaming."
+                    "{name}: constant quality, the size follows the picture.\nVBR: an average bitrate is aimed at.\nCBR: a fixed bitrate, for streaming."
                 )
             })
         }
@@ -85,8 +85,8 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
                 encoders::resolved(env, &config.video).and_then(|e| encoders::spec(&e.id));
             let default = encoder.map(|e| e.rate_control.quality.default);
             let base = pick(
-                "Lower is better quality, but much larger files.",
-                "Plus bas = meilleure qualité, mais fichiers beaucoup plus volumineux.",
+                "Lower: better quality, larger files.",
+                "Plus bas : meilleure qualité, fichiers plus gros.",
             )?;
             Some(match default {
                 Some(d) if fr => format!("{base}\n\nRecommandé : {d}."),
@@ -95,8 +95,8 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
             })
         }
         "p:rc.bitrate" => pick(
-            "The amount of data per second: higher is sharper and heavier.\n1080p60: 10 000 to 20 000.\n4K60: 40 000 to 60 000.",
-            "La quantité de données par seconde : plus haut = plus net et plus lourd.\n1080p60 : 10 000 à 20 000.\n4K60 : 40 000 à 60 000.",
+            "Data per second of video.\n1080p60: 10,000 to 20,000 kbit/s.\n4K60: 40,000 to 60,000 kbit/s.",
+            "Données par seconde de vidéo.\n1080p60 : 10 000 à 20 000 kbit/s.\n4K60 : 40 000 à 60 000 kbit/s.",
         ),
         "p:rc.maxrate" => pick(
             "The ceiling for very busy scenes.\n\nRecommended: 1.5 × the bitrate.",
@@ -113,14 +113,14 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
                 .filter(|(k, _)| format!("p:{k}") == key)
                 .map(|(k, v)| encoders::value_label(k, &v, lang));
             let mut text = pick(
-                "Slower is a better picture for the same size, but more computing.\nToo slow and frames are skipped.",
-                "Plus lent = meilleure image pour la même taille, mais plus de calcul.\nTrop lent, des images sautent.",
+                "Slower: better picture at the same size, more computing.\nIf the encoder cannot keep up, frames are lost.",
+                "Plus lent : meilleure image à taille égale, plus de calcul.\nSi l'encodeur ne suit pas, des images sont perdues.",
             )?;
             if nvenc {
                 text.push_str(if fr {
-                    "\n\nP6 et P7 : deux à trois fois plus de calcul que P5, pour une différence à peine mesurable.\nP1 et P2 : en 4K, partagent chaque image entre les encodeurs des grandes cartes (4K à 120 FPS)."
+                    "\n\nP6 et P7 : 2 à 3 fois le calcul de P5, gain très faible.\nP1 et P2 : seuls presets pour la 4K à 120 FPS sur les cartes à plusieurs encodeurs."
                 } else {
-                    "\n\nP6 and P7: two to three times the computing of P5, for a barely measurable difference.\nP1 and P2: in 4K, share each frame between the encoders of large cards (4K at 120 FPS)."
+                    "\n\nP6 and P7: 2 to 3 times the computing of P5, very small gain.\nP1 and P2: the only presets for 4K at 120 FPS on cards with several encoders."
                 });
             }
             if let Some(r) = recommended {
@@ -133,28 +133,32 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
             Some(text)
         }
         "p:multipass" => pick(
-            "Looks quickly at each image before encoding it, to spread the quality better.",
-            "Analyse rapidement chaque image avant de l'encoder, pour mieux répartir la qualité.",
+            "Two passes per frame: quality better spread, more computing.",
+            "Deux passes par image : qualité mieux répartie, plus de calcul.",
         ),
         "p:lookahead" => pick(
-            "Looks at the next images to spread the quality better.\nUses graphics memory.",
-            "Regarde les images suivantes pour mieux répartir la qualité.\nUtilise de la mémoire vidéo.",
+            "Analyses the next frames to spread the quality.\nUses graphics memory.",
+            "Analyse les images suivantes pour répartir la qualité.\nUtilise de la mémoire vidéo.",
         ),
-        "p:spatial-aq" | "p:temporal-aq" | "p:vbaq" => pick(
-            "Improves flat areas (skies, walls), where flaws show most.",
-            "Améliore les zones unies (ciel, murs), où les défauts se voient le plus.",
+        "p:spatial-aq" | "p:vbaq" => pick(
+            "Gives more quality to flat areas (skies, walls).",
+            "Donne plus de qualité aux zones unies (ciel, murs).",
+        ),
+        "p:temporal-aq" => pick(
+            "Gives more quality to areas that stay still from one frame to the next.",
+            "Donne plus de qualité aux zones immobiles d'une image à l'autre.",
         ),
         "p:preanalysis" => pick(
             "Analyses each image before encoding.\nA slight gain, more computing.",
             "Analyse chaque image avant l'encodage.\nGain léger, plus de calcul.",
         ),
         "p:bframes" => pick(
-            "Images rebuilt from their neighbours: lighter files.",
-            "Images reconstruites à partir de leurs voisines : fichiers plus légers.",
+            "Frames deduced from their neighbours: smaller files, more computing.",
+            "Images déduites de leurs voisines : fichiers plus petits, plus de calcul.",
         ),
         "p:keyint" => pick(
-            "How often a complete image is stored.\nMore often: smoother seeking, heavier file.\n0: automatic.",
-            "Tous les combien une image complète est enregistrée.\nPlus fréquent = avance rapide plus fluide, fichier plus lourd.\n0 : automatique.",
+            "The gap between two complete frames.\nShorter: more precise seeking in the video, heavier file.\nAuto: chosen by the encoder.",
+            "Écart entre deux images complètes.\nPlus court : déplacement plus précis dans la vidéo, fichier plus lourd.\nAuto : choisi par l'encodeur.",
         ),
         "audio_routing" => pick(
             "One track per source: separate tracks in Premiere Pro or DaVinci Resolve; a player such as VLC plays one of them only.\nEverything on one track: a single mix, heard the same everywhere.",
@@ -165,20 +169,20 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
             "Adapte l'encodeur à un type d'image (film, animation, grain…).\nAuto : le réglage par défaut de l'encodeur.",
         ),
         "auto_update" => pick(
-            "Looks for a new version every 12 hours, downloads it in the background and installs it at the next start.",
-            "Cherche une nouvelle version toutes les 12 heures, la télécharge en arrière-plan et l'installe au prochain démarrage.",
+            "Checks every 12 hours.\nA new version is downloaded in the background and installed at the next start.",
+            "Vérifie toutes les 12 heures.\nUne nouvelle version est téléchargée en arrière-plan et installée au prochain démarrage.",
         ),
         "replay_enabled" => pick(
-            "Vixeeny keeps the last minutes of play in memory.\nA shortcut saves them as a video, so nothing is missed.\nOnly in full screen.",
-            "Vixeeny garde en mémoire les dernières minutes de jeu.\nUn raccourci les enregistre en vidéo, pour ne rien rater.\nActif seulement en plein écran.",
+            "Keeps the last minutes of play in memory.\nThe shortcut saves them as a video.\nWorks only while a game is in full screen.",
+            "Garde en mémoire les dernières minutes de jeu.\nLe raccourci les enregistre en vidéo.\nFonctionne seulement pendant un jeu en plein écran.",
         ),
         "replay_after" => pick(
-            "The replay keeps recording a few seconds after the shortcut, to have the end of the action.",
-            "Le replay continue d'enregistrer quelques secondes après le raccourci, pour avoir la fin de l'action.",
+            "Seconds recorded after the shortcut is pressed.",
+            "Secondes enregistrées après l'appui sur le raccourci.",
         ),
         "replay_storage" => pick(
-            "Memory: spares the disk, but takes some from the game.\nDisk: for long replays or PCs with little memory.\nAutomatic chooses.",
-            "Mémoire : n'use pas le disque, mais en prend au jeu.\nDisque : pour les longs replays ou les PC avec peu de mémoire.\nAutomatique choisit.",
+            "Memory: uses RAM, nothing is written to the disk.\nDisk: writes to the disk continuously, little RAM used.\nAuto: chosen from the length and the PC's memory.",
+            "Mémoire : utilise de la mémoire vive, rien n'est écrit sur le disque.\nDisque : écrit en continu sur le disque, peu de mémoire vive utilisée.\nAuto : choisit selon la durée et la mémoire du PC.",
         ),
         _ => None,
     }
