@@ -55,12 +55,12 @@ pub struct Linear {
 }
 
 /// Margin and corner radius at 100 %, in pixels; they grow with the screen's scale.
-const MARGIN: f32 = 48.0;
+const MARGIN: f32 = 56.0;
 const RADIUS: f32 = 8.0;
 /// How much the blur backdrop is darkened (so the window stands out), and how much the shadow
 /// darkens at its heart.
 pub const DARKEN: f32 = 0.8;
-pub const SHADOW: f32 = 0.75;
+pub const SHADOW: f32 = 0.85;
 
 /// The sizes of a window set on its background, in pixels (what the graphics card draws too).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -69,8 +69,10 @@ pub struct Layout {
     pub size: (u32, u32),
     pub margin: u32,
     pub radius: f32,
-    /// How far down the shadow is, and the radius of its three box blurs.
+    /// How far down the shadow is, how far it reaches past the window on every side (so that
+    /// it shows dark around it, not only below), and the radius of its three box blurs.
     pub offset: u32,
+    pub spread: u32,
     pub softness: u32,
     /// The blur backdrop is worked out at this size, then blurred by three box blurs of
     /// `small_radius`.
@@ -88,8 +90,9 @@ pub fn layout(width: u32, height: u32, scale: f32) -> Layout {
         size: (w, h),
         margin,
         radius: RADIUS * scale,
-        offset: (margin as f32 * 0.25).round() as u32,
-        softness: (margin as f32 * 0.4).round().max(1.0) as u32,
+        offset: (margin as f32 * 0.3).round() as u32,
+        spread: (margin as f32 * 0.1).round() as u32,
+        softness: (margin as f32 * 0.3).round().max(1.0) as u32,
         small,
         small_radius: (small.0.max(small.1) / 12).max(2),
     }
@@ -124,19 +127,21 @@ pub fn set_on(window: &Linear, backdrop: &Backdrop, scale: f32, white: f32) -> L
         Backdrop::Blur => blurred(window, &layout),
         Backdrop::Picture(picture) => blurred_picture(picture, &layout, white),
     };
-    // The shadow: the window's shape, lower, softened, darkening what is under it.
+    // The shadow: the window's shape, wider, lower, softened, darkening what is under it.
     let shape = rounded(window.width, window.height, radius);
-    let offset = layout.offset as usize;
+    let spread = layout.spread.min(margin);
+    let (sw, sh) = (window.width + 2 * spread, window.height + 2 * spread);
+    let caster = rounded(sw, sh, radius + spread as f32);
+    let (left, top) = (
+        (margin - spread) as usize,
+        (margin - spread + layout.offset) as usize,
+    );
     let softness = layout.softness as usize;
     let mut shadow = vec![0.0_f32; w as usize * h as usize];
-    for y in 0..window.height as usize {
-        let dst = (y + margin as usize + offset) * w as usize + margin as usize;
-        if y + margin as usize + offset >= h as usize {
-            break;
-        }
-        let src = y * window.width as usize;
-        shadow[dst..dst + window.width as usize]
-            .copy_from_slice(&shape[src..src + window.width as usize]);
+    for y in 0..(sh as usize).min((h as usize).saturating_sub(top)) {
+        let dst = (y + top) * w as usize + left;
+        let src = y * sw as usize;
+        shadow[dst..dst + sw as usize].copy_from_slice(&caster[src..src + sw as usize]);
     }
     blur_plane(&mut shadow, w as usize, h as usize, softness);
     out.rgba
@@ -437,15 +442,17 @@ mod tests {
             1.0,
             1.0,
         );
-        assert_eq!((out.width, out.height), (296, 196));
+        assert_eq!((out.width, out.height), (312, 212));
         let px = |x: u32, y: u32| out.rgba[((y * out.width + x) * 4) as usize];
         // The middle of the window is the window.
-        assert!((px(148, 98) - 0.5).abs() < 1e-6);
+        assert!((px(156, 106) - 0.5).abs() < 1e-6);
         // Far from it, the colour as it is; the shadow darkens under the window.
         assert!((px(2, 2) - 1.0).abs() < 1e-3);
-        assert!(px(148, 100 + 48 + 8) < 0.9);
+        assert!(px(156, 100 + 56 + 8) < 0.5);
+        // It shows on the sides too.
+        assert!(px(56 - 4, 106) < 0.9);
         // The very corner of the window shows the background (and its shadow), not the window.
-        assert!(px(48, 48) > 0.6);
+        assert!(px(56, 56) > 0.6);
     }
 
     #[test]
@@ -469,7 +476,7 @@ mod tests {
             px[0] = 0.8; // red
         }
         let out = set_on(&w, &Backdrop::Blur, 1.5, 1.0);
-        assert_eq!((out.width, out.height), (160 + 144, 90 + 144));
+        assert_eq!((out.width, out.height), (160 + 168, 90 + 168));
         let corner = &out.rgba[..4];
         assert!(
             corner[0] > 0.4 && corner[1] < 0.05 && corner[2] < 0.05,

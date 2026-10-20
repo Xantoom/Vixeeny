@@ -56,6 +56,8 @@ pub struct Setting {
     pub margin: u32,
     pub radius: f32,
     pub offset: u32,
+    /// How far the shadow reaches past the window on every side.
+    pub spread: u32,
     /// The radius of the three box blurs of the processor's shadow.
     pub softness: u32,
     pub small: (u32, u32),
@@ -378,16 +380,16 @@ pub fn set_on_card(
             Some(output(&scale)?)
         }
     };
-    // The window's shape, lower down, for the shadow.
-    let window_rect = |dy: u32| D2D1_ROUNDED_RECT {
+    // The window's shape; wider by `grow` and lower by `dy`, for the shadow.
+    let window_rect = |dy: u32, grow: u32| D2D1_ROUNDED_RECT {
         rect: D2D_RECT_F {
-            left: m as f32,
-            top: (m + dy) as f32,
-            right: (m + ww) as f32,
-            bottom: (m + dy + wh) as f32,
+            left: m as f32 - grow as f32,
+            top: (m + dy) as f32 - grow as f32,
+            right: (m + ww + grow) as f32,
+            bottom: (m + dy + wh + grow) as f32,
         },
-        radiusX: setting.radius,
-        radiusY: setting.radius,
+        radiusX: setting.radius + grow as f32,
+        radiusY: setting.radius + grow as f32,
     };
     let shape = target(&dc, size, DXGI_FORMAT_B8G8R8A8_UNORM)?;
     draw_into(&dc, &shape, || {
@@ -403,7 +405,7 @@ pub fn set_on_card(
                 },
                 None,
             )?;
-            dc.FillRoundedRectangle(&window_rect(setting.offset), &white);
+            dc.FillRoundedRectangle(&window_rect(setting.offset, setting.spread), &white);
         }
         Ok(())
     })?;
@@ -462,7 +464,7 @@ pub fn set_on_card(
                 None,
             )?;
             brush.SetTransform(&Matrix3x2::translation(m as f32, m as f32));
-            dc.FillRoundedRectangle(&window_rect(0), &brush);
+            dc.FillRoundedRectangle(&window_rect(0, 0), &brush);
         }
         Ok(())
     })?;
@@ -544,6 +546,7 @@ mod tests {
             margin: layout.margin,
             radius: layout.radius,
             offset: layout.offset,
+            spread: layout.spread,
             softness: layout.softness,
             small: layout.small,
             small_radius: layout.small_radius,
@@ -611,6 +614,15 @@ mod tests {
             let at = ((h / 2) * w + w / 2) as usize * 4;
             assert_eq!(card[centre..centre + 3], bgra[at..at + 3], "{name}");
         }
+        // A gradient is only set by the processor: drawn to be looked at.
+        let gradient = Backdrop::Gradient([0x65, 0x4e, 0xa3], [0xea, 0xaf, 0xc8]);
+        let (sw, sh) = layout.size;
+        crate::tests::save(
+            "backdrop-gradient-cpu",
+            sw,
+            sh,
+            &cpu::linear_to_bgra(&cpu::set_on(&linear, &gradient, scale, 1.0)),
+        );
     }
 
     #[test]

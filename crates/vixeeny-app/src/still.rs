@@ -430,6 +430,7 @@ fn card_setting(layout: &backdrop::Layout, b: &Backdrop, white: f32) -> Option<c
         margin: layout.margin,
         radius: layout.radius,
         offset: layout.offset,
+        spread: layout.spread,
         softness: layout.softness,
         small: layout.small,
         small_radius: layout.small_radius,
@@ -584,8 +585,8 @@ mod tests {
             vixeeny_image::decode(&std::fs::read(path).unwrap()).unwrap()
         };
         let window = shoot(ActionId::CaptureWindow);
-        // 64×48 at 100 %: 48 pixels all around.
-        assert_eq!((window.width, window.height), (64 + 96, 48 + 96));
+        // 64×48 at 100 %: 56 pixels all around.
+        assert_eq!((window.width, window.height), (64 + 112, 48 + 112));
         assert_eq!(&window.bgra[..4], &[212, 120, 0, 255]);
         let screen = shoot(ActionId::CaptureFullscreen);
         assert_eq!((screen.width, screen.height), (160, 100));
