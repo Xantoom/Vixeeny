@@ -96,6 +96,7 @@ mod tests {
             available: Some(Release {
                 version: "1.0.0".into(),
                 assets: Vec::new(),
+                signatures: [("a.zip".to_owned(), "sig".to_owned())].into(),
             }),
             notified: Some("1.0.0".into()),
             ready: Some("1.0.0".into()),
@@ -116,6 +117,7 @@ mod tests {
         let release = Release {
             version: "0.5.0".into(),
             assets: Vec::new(),
+            signatures: Default::default(),
         };
         let state = State {
             available: Some(release),

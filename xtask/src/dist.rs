@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! `cargo xtask dist [--out <dir>]` (Windows release layout) and
-//! `cargo xtask sums <dir>`.
+//! `cargo xtask dist [--out <dir>]` (Windows release layout).
 //!
 //! `dist` expects `cargo build --release` to have produced the two programs, and gathers them
 //! with the FFmpeg DLLs and the licences into `<out>/stage` (what the installer packs), then
@@ -12,7 +11,6 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use sha2::{Digest, Sha256};
 
 const PROGRAMS: [&str; 2] = ["Vixeeny.exe", "vixeeny-app.exe"];
 
@@ -185,26 +183,6 @@ pub fn dist(args: &[String]) -> Result<()> {
         &out.join(format!("{base}-portable.zip")),
     )?;
     println!("wrote {}", out.display());
-    Ok(())
-}
-
-/// Writes `SHA256SUMS` (`<hex>  <name>`) for the files of `dir` (not the sums file itself).
-pub fn sums(args: &[String]) -> Result<()> {
-    let dir = PathBuf::from(args.first().context("usage: cargo xtask sums <dir>")?);
-    let mut text = String::new();
-    for entry in std::fs::read_dir(&dir)? {
-        let entry = entry?;
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if !entry.file_type()?.is_file() || name == "SHA256SUMS" || name.ends_with(".minisig") {
-            continue;
-        }
-        let hash = Sha256::digest(std::fs::read(entry.path())?);
-        let hex: String = hash.iter().map(|b| format!("{b:02x}")).collect();
-        let _ = writeln!(text, "{hex}  {name}");
-    }
-    let mut lines: Vec<&str> = text.lines().collect();
-    lines.sort_by_key(|l| l.split_once("  ").map(|(_, n)| n.to_owned()));
-    std::fs::write(dir.join("SHA256SUMS"), lines.join("\n") + "\n")?;
     Ok(())
 }
 

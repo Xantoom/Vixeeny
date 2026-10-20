@@ -42,7 +42,7 @@ runtime (`runtime.rs`); the platform layer (`platform/`) is a message-only windo
 | `vixeeny-ui` | Slint files and their Rust bindings | no |
 | `vixeeny-updater` | release check, download with progress, SHA-256 + minisign verification, file swap with rollback | no |
 | `vixeeny-app`, `vixeeny-daemon` | the two programs | yes |
-| `xtask` | `build-native`, `dist`, `sums`, `icons`, `verify-registry`, `bench-idle` | no |
+| `xtask` | `build-native`, `dist`, `icons`, `verify-registry`, `bench-idle` | no |
 
 Rule of thumb: logic that can be pure is pure and tested without a display, a GPU or an OS (the
 editor, the stitcher, the settings, the mixer, the replay ring, the codec rules); the OS crates
@@ -68,8 +68,9 @@ Slint windows are rendered in the tests by the software renderer.
 
 `Vixeeny.exe` starts `vixeeny-app --update background` shortly after it starts and after each
 wake from sleep. That process asks GitHub for the latest release and, when automatic updates are
-on, downloads the archive into `.update-download` (a download cut short goes on from there),
-checks its minisign signature, which must name the archive of that version, and its SHA-256,
+on, downloads the portable archive into `.update-download` (a download cut short goes on from
+there), checks it against the minisign signature written in the release notes, which must name
+the archive of that version,
 unpacks it into `.update-staged`, and installs it at the next start; otherwise it shows a toast
 once. Settings → About shows the same steps with a progress bar and a restart button.
 

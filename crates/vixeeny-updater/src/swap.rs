@@ -45,6 +45,9 @@ fn listed(dir: &Path) -> Vec<PathBuf> {
 
 const JOURNAL: &str = "journal.json";
 
+/// Marks a portable copy (kept in its folder, never brought by an update).
+const PORTABLE_FLAG: &str = "portable.flag";
+
 /// Unpacks a zip into `dest`. Entries that would land outside of it are an error. Each file
 /// is on the disk when this returns: the version is then marked ready, and a power cut must
 /// not leave it ready but half written.
@@ -61,6 +64,10 @@ pub fn extract(zip: impl io::Read + io::Seek, dest: &Path) -> io::Result<()> {
                 ),
             ));
         };
+        // The portable archive marks its folder as portable: an installed copy is not.
+        if relative == Path::new(PORTABLE_FLAG) {
+            continue;
+        }
         let out = dest.join(relative);
         if entry.is_dir() {
             std::fs::create_dir_all(&out)?;
@@ -424,5 +431,9 @@ mod tests {
         extract(io::Cursor::new(build("bin/a.exe")), dir.path()).unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(read(dir.path(), "bin/a.exe").as_deref(), Some("data"));
         assert!(extract(io::Cursor::new(build("../evil.exe")), dir.path()).is_err());
+        // The portable archive's flag does not make an installed copy portable.
+        extract(io::Cursor::new(build(PORTABLE_FLAG)), dir.path())
+            .unwrap_or_else(|e| panic!("{e}"));
+        assert!(!dir.path().join(PORTABLE_FLAG).exists());
     }
 }

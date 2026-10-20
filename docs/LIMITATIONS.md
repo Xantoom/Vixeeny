@@ -25,4 +25,4 @@ target. The licences are listed in `THIRD-PARTY-LICENSES.txt` inside every packa
 
 The installer and the programs carry no Authenticode signature (it costs money every year), so
 SmartScreen may warn the first time: "More info" → "Run anyway". Updates are verified with
-minisign and SHA-256 before anything is replaced.
+minisign before anything is replaced.

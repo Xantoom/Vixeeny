@@ -16,9 +16,8 @@ fn main() -> Result<()> {
         Some("verify-registry") => verify_registry(),
         Some("dist") => dist::dist(&args.collect::<Vec<_>>()),
         Some("icons") => icons::run(),
-        Some("sums") => dist::sums(&args.collect::<Vec<_>>()),
         _ => bail!(
-            "usage: cargo xtask <build-native [lib…]|dist [--out dir]|icons|sums <dir>|verify-registry|bench-idle>"
+            "usage: cargo xtask <build-native [lib…]|dist [--out dir]|icons|verify-registry|bench-idle>"
         ),
     }
 }

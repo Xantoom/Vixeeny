@@ -23,12 +23,12 @@ secrets `MINISIGN_KEY` (the content of `vixeeny.key`) and `MINISIGN_PASSWORD`.
 | File | Use |
 |---|---|
 | `Vixeeny-<v>-setup.exe` | Installer |
-| `Vixeeny-<v>-windows-x64.zip` | Update archive (what the app downloads) |
-| `Vixeeny-<v>-windows-x64-portable.zip` | Portable: same files plus `portable.flag` (settings in `data\`) |
-| `*.minisig` | minisign signature of each archive and of the installer |
-| `SHA256SUMS` | SHA-256 of every file above |
+| `Vixeeny-<v>-windows-x64-portable.zip` | Portable: the programs plus `portable.flag` (settings in `data\`); also what an update downloads |
 
-Updates replace the files of the install folder with those of the update archive, for the
-installed and the portable layout alike, while Vixeeny runs (Windows lets a running program be
+The minisign signature of the portable archive is in the release notes, in a comment the page
+does not show (`<!-- minisign <file name>` … `-->`): keep it when the notes are edited.
+
+Updates replace the files of the install folder with those of the portable archive (all but
+`portable.flag`), for the installed and the portable layout alike, while Vixeeny runs (Windows lets a running program be
 renamed); only `Vixeeny.exe` restarts. The previous files are kept in `.update-backup` until the
 new `Vixeeny.exe` answers, and put back if it does not.

@@ -11,6 +11,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::{Context, bail};
 use vixeeny_common::ipc::{self, ControlReply, ControlRequest, Endpoint, Hello};
 
+use crate::release::Signature;
 use crate::state::{self, State, log};
 use crate::{Release, check_url, is_newer, swap, verify};
 
@@ -249,7 +250,10 @@ pub fn download(progress: &mut dyn FnMut(u64, u64)) -> anyhow::Result<String> {
         files.archive.size,
         progress,
     )?;
-    let signature = String::from_utf8(get(&agent, &files.signature.url, 1 << 16)?)?;
+    let signature = match files.signature {
+        Signature::Text(text) => text.to_owned(),
+        Signature::Asset(asset) => String::from_utf8(get(&agent, &asset.url, 1 << 16)?)?,
+    };
     let sums = match files.sums {
         Some(sums) => Some(String::from_utf8(get(&agent, &sums.url, 1 << 20)?)?),
         None => None,
