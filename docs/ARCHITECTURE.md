@@ -40,7 +40,7 @@ runtime (`runtime.rs`); the platform layer (`platform/`) is a message-only windo
 | `vixeeny-stitch` | scrolling-capture assembly | no |
 | `vixeeny-settings` | the settings model: pages, rows, validation, reset | no |
 | `vixeeny-ui` | Slint files and their Rust bindings | no |
-| `vixeeny-updater` | release check, download with progress, SHA-256 + minisign verification, file swap with rollback | no |
+| `vixeeny-updater` | release check, download with progress, minisign verification, file swap with rollback | no |
 | `vixeeny-app`, `vixeeny-daemon` | the two programs | yes |
 | `xtask` | `build-native`, `dist`, `icons`, `verify-registry`, `bench-idle` | no |
 
@@ -92,5 +92,5 @@ keeps everything in a `data` folder. Nothing is sent anywhere except the GitHub 
 
 `cargo xtask dist` gathers the programs, the FFmpeg DLLs and the licences into `dist/stage` and
 writes the update archive and the portable archive; Inno Setup (`packaging/windows/vixeeny.iss`)
-builds the per-user installer. Releases are built by `.github/workflows/release.yml`, hashed
-(`SHA256SUMS`) and signed with minisign; the public key is embedded in `vixeeny-updater`.
+builds the per-user installer. Releases are built by `.github/workflows/release.yml`; the
+portable archive is signed with minisign and the public key is embedded in `vixeeny-updater`.

@@ -3,8 +3,7 @@
 //!
 //! A release holds the installer and the portable archive, which is also what an update
 //! installs. The archive's signature is in the release notes, in a comment the page does not
-//! show (see [`signatures`]). The releases before 0.20.2 held a separate update archive and
-//! signature files: they are still read.
+//! show (see [`signatures`]).
 
 use std::collections::BTreeMap;
 
@@ -58,22 +57,12 @@ struct ApiAsset {
     size: u64,
 }
 
-/// Where the archive's signature is.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Signature<'a> {
-    /// In the notes of the release.
-    Text(&'a str),
-    /// A file of the release (before 0.20.2).
-    Asset(&'a Asset),
-}
-
 /// The files that make one update, found by name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpdateFiles<'a> {
     pub archive: &'a Asset,
-    pub signature: Signature<'a>,
-    /// Not needed: the signature already covers the archive.
-    pub sums: Option<&'a Asset>,
+    /// The text of its `.minisig` file.
+    pub signature: &'a str,
 }
 
 /// The comment that opens a signature in the notes: `<!-- minisign NAME`, then the text of the
@@ -125,34 +114,16 @@ impl Release {
         }))
     }
 
-    /// The archive of this version for `platform` (`windows-x64`), its signature and the
-    /// checksum list: the portable archive signed in the notes, else (before 0.20.2) the update
-    /// archive and its signature file. The archive is found by its full name, version
-    /// included: its signature names it too, so an archive of another version is refused.
+    /// The archive of this version for `platform` (`windows-x64`) and its signature. The
+    /// archive is found by its full name, version included: its signature names it too, so an
+    /// archive of another version is refused.
     pub fn files(&self, platform: &str) -> Option<UpdateFiles<'_>> {
-        let find = |name: &str| self.assets.iter().find(|a| a.name == name);
-        let sums = find("SHA256SUMS");
-        let portable = portable_name(&self.version, platform);
-        if let (Some(archive), Some(signature)) = (find(&portable), self.signatures.get(&portable))
-        {
-            return Some(UpdateFiles {
-                archive,
-                signature: Signature::Text(signature),
-                sums,
-            });
-        }
-        let archive = find(&archive_name(&self.version, platform))?;
+        let name = portable_name(&self.version, platform);
         Some(UpdateFiles {
-            archive,
-            signature: Signature::Asset(find(&format!("{}.minisig", archive.name))?),
-            sums,
+            archive: self.assets.iter().find(|a| a.name == name)?,
+            signature: self.signatures.get(&name)?,
         })
     }
-}
-
-/// The update archive of `version` (`xtask dist` writes it; published until 0.20.2).
-pub fn archive_name(version: &str, platform: &str) -> String {
-    format!("Vixeeny-{version}-{platform}.zip")
 }
 
 /// The portable archive of `version`: the update archive and `portable.flag`.
@@ -174,76 +145,51 @@ pub fn is_newer(current: &str, latest: &str) -> bool {
 mod tests {
     use super::*;
 
-    const JSON: &str = r#"{
-        "tag_name": "v0.5.1", "body": "Fixes", "draft": false, "prerelease": false,
-        "assets": [
-            {"name": "Vixeeny-0.5.1-windows-x64.zip", "browser_download_url": "https://x/a.zip", "size": 10},
-            {"name": "Vixeeny-0.5.1-windows-x64.zip.minisig", "browser_download_url": "https://x/a.sig", "size": 1},
-            {"name": "SHA256SUMS", "browser_download_url": "https://x/sums", "size": 1},
-            {"name": "Vixeeny-0.5.1-setup.exe", "browser_download_url": "https://x/s.exe", "size": 5}
-        ]
-    }"#;
+    const SIGNATURE: &str = "untrusted comment: x\nRUQ=\ntrusted comment: y\nAAA=";
 
-    #[test]
-    fn the_latest_release_is_read_and_its_files_found() {
-        let release = Release::parse(JSON)
-            .unwrap_or_default()
-            .unwrap_or_else(|| panic!("none"));
-        assert_eq!(release.version, "0.5.1");
-        let files = release
-            .files("windows-x64")
-            .unwrap_or_else(|| panic!("no files"));
-        assert_eq!(files.archive.url, "https://x/a.zip");
-        assert!(matches!(files.signature, Signature::Asset(a) if a.url == "https://x/a.sig"));
-        assert_eq!(files.sums.map(|s| s.url.as_str()), Some("https://x/sums"));
-        assert!(release.files("windows-arm64").is_none());
-        let without_sums = JSON.replace("\"SHA256SUMS\"", "\"other\"");
-        let release = Release::parse(&without_sums).ok().flatten();
-        assert!(release.is_some_and(|r| r.files("windows-x64").is_some_and(|f| f.sums.is_none())));
-        // An archive named for another version is not this release's.
-        let renamed = JSON.replace("\"v0.5.1\"", "\"v0.6.0\"");
-        let release = Release::parse(&renamed).ok().flatten();
-        assert!(release.is_some_and(|r| r.files("windows-x64").is_none()));
-    }
-
-    /// From 0.20.2: the installer and the portable archive, signed in the notes.
-    #[test]
-    fn the_portable_archive_is_signed_in_the_notes() {
-        let signature = "untrusted comment: x\nRUQ=\ntrusted comment: y\nAAA=";
+    fn json(version: &str, signed: &str) -> String {
         let notes = format!(
             "## What's new\n- Things\n\n{}\n",
-            signature_comment("Vixeeny-0.6.0-windows-x64-portable.zip", signature)
+            signature_comment(
+                &format!("Vixeeny-{signed}-windows-x64-portable.zip"),
+                SIGNATURE
+            )
         );
-        let json = serde_json::json!({
-            "tag_name": "v0.6.0", "body": notes, "draft": false, "prerelease": false,
+        serde_json::json!({
+            "tag_name": format!("v{version}"), "body": notes, "draft": false, "prerelease": false,
             "assets": [
-                {"name": "Vixeeny-0.6.0-windows-x64-portable.zip",
+                {"name": format!("Vixeeny-{version}-windows-x64-portable.zip"),
                  "browser_download_url": "https://x/p.zip", "size": 10},
-                {"name": "Vixeeny-0.6.0-setup.exe",
+                {"name": format!("Vixeeny-{version}-setup.exe"),
                  "browser_download_url": "https://x/s.exe", "size": 5}
             ]
         })
-        .to_string();
-        let release = Release::parse(&json)
+        .to_string()
+    }
+
+    #[test]
+    fn the_portable_archive_is_found_with_its_signature_from_the_notes() {
+        let release = Release::parse(&json("0.6.0", "0.6.0"))
             .unwrap_or_default()
             .unwrap_or_else(|| panic!("none"));
+        assert_eq!(release.version, "0.6.0");
         let files = release
             .files("windows-x64")
             .unwrap_or_else(|| panic!("no files"));
         assert_eq!(files.archive.url, "https://x/p.zip");
-        assert_eq!(files.signature, Signature::Text(signature));
-        assert!(files.sums.is_none());
-        // A signature for another file signs nothing here.
-        let other = json.replace("minisign Vixeeny-0.6.0", "minisign Vixeeny-0.5.0");
-        let release = Release::parse(&other).ok().flatten();
+        assert_eq!(files.signature, SIGNATURE);
+        assert!(release.files("windows-arm64").is_none());
+        // A signature for another version signs nothing here.
+        let release = Release::parse(&json("0.6.0", "0.5.0")).ok().flatten();
         assert!(release.is_some_and(|r| r.files("windows-x64").is_none()));
     }
 
     #[test]
     fn drafts_and_prereleases_are_not_offered() {
-        let draft = JSON.replace("\"draft\": false", "\"draft\": true");
+        let json = json("0.6.0", "0.6.0");
+        let draft = json.replace("\"draft\":false", "\"draft\":true");
         assert_eq!(Release::parse(&draft).ok(), Some(None));
-        let pre = JSON.replace("\"prerelease\": false", "\"prerelease\": true");
+        let pre = json.replace("\"prerelease\":false", "\"prerelease\":true");
         assert_eq!(Release::parse(&pre).ok(), Some(None));
         assert!(Release::parse("nonsense").is_err());
     }

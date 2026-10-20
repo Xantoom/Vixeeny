@@ -120,14 +120,12 @@ jobs:
           path: dist
       # The release holds the installer and the portable archive, which updates install too; the
       # archive's signature goes in the notes, in a comment the page does not show (the updater
-      # reads it there). The update archive and its signature file are for the updater of 0.20.1
-      # and before: published with 0.20.2 only (LEGACY_UPDATE_FILES), then they go.
+      # reads it there).
       - name: Sign (minisign)
         env:
           MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
           MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
           RELEASE: ${{ github.event_name == 'push' || inputs.release }}
-          LEGACY_UPDATE_FILES: true
         run: |
           # Unsigned files cannot be installed by the updater: a release must not go without.
           if [ -z "$MINISIGN_KEY" ]; then
@@ -151,22 +149,15 @@ jobs:
             cat "$portable.minisig"
             printf '\n-->\n'
           } > dist/notes.md
-          rm "$portable.minisig"
-          if [ "$LEGACY_UPDATE_FILES" = true ]; then
-            for file in dist/*.zip; do
-              [ "$file" = "$portable" ] || sign "$file"
-            done
-          else
-            find dist -maxdepth 1 -name '*.zip' ! -name '*-portable.zip' -delete
-          fi
-          rm -f "$key"
+          rm "$portable.minisig" "$key"
+          # The update archive is what the portable one is made from: not published.
+          find dist -maxdepth 1 -name '*.zip' ! -name '*-portable.zip' -delete
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: vixeeny-windows
           path: |
             dist/*.zip
             dist/*.exe
-            dist/*.minisig
             dist/notes.md
       # The tests of this commit ran in CI, side by side with this build: a release waits for
       # them to pass.
@@ -186,5 +177,4 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           version=$(ls dist/Vixeeny-*-setup.exe | sed 's/.*Vixeeny-\(.*\)-setup\.exe/\1/')
-          shopt -s nullglob
-          gh release create "v$version" --target "${{ github.sha }}" --draft --notes-file dist/notes.md dist/*.zip dist/*.exe dist/*.minisig
+          gh release create "v$version" --target "${{ github.sha }}" --draft --notes-file dist/notes.md dist/*-setup.exe dist/*-portable.zip
