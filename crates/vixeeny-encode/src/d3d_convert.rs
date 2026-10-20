@@ -16,6 +16,7 @@ use windows::Win32::Graphics::Direct3D11::{
     D3D11_VPIV_DIMENSION_TEXTURE2D, D3D11_VPOV_DIMENSION_TEXTURE2DARRAY, D3D11CreateDevice,
     ID3D11Device, ID3D11DeviceContext, ID3D11Multithread, ID3D11Texture2D, ID3D11VideoContext1,
     ID3D11VideoDevice, ID3D11VideoProcessor, ID3D11VideoProcessorEnumerator,
+    ID3D11VideoProcessorInputView, ID3D11VideoProcessorOutputView,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709, DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709,
@@ -48,6 +49,41 @@ pub struct VideoConverter {
     processor: ID3D11VideoProcessor,
     video_device: ID3D11VideoDevice,
     out: (u32, u32),
+    /// The views of the textures already met: a capture and an encoder go round the same few,
+    /// so each view is made once rather than at every frame.
+    views: std::sync::Mutex<Views>,
+}
+
+/// Views by texture (its address: the view holds the texture, so no other takes the address
+/// while it is kept) and array slice.
+#[derive(Default)]
+struct Views {
+    inputs: Vec<((usize, u32), ID3D11VideoProcessorInputView)>,
+    outputs: Vec<((usize, u32), ID3D11VideoProcessorOutputView)>,
+}
+
+/// Input views kept: the two textures of a capture pool. No more: a view holds its texture, and
+/// a window resized gets new ones (the old ones must go, they are large).
+const KEPT_INPUTS: usize = 2;
+/// Output views kept: the slices of the encoder's frames, one texture.
+const KEPT_OUTPUTS: usize = 32;
+
+/// The view of `key` in `views`, made by `make` the first time (the oldest goes past `kept`).
+fn view<V: Clone>(
+    views: &mut Vec<((usize, u32), V)>,
+    kept: usize,
+    key: (usize, u32),
+    make: impl FnOnce() -> Result<V, String>,
+) -> Result<V, String> {
+    if let Some((_, v)) = views.iter().find(|(k, _)| *k == key) {
+        return Ok(v.clone());
+    }
+    let v = make()?;
+    if views.len() >= kept {
+        views.remove(0);
+    }
+    views.push((key, v.clone()));
+    Ok(v)
 }
 
 fn err(what: &str, e: impl std::fmt::Display) -> String {
@@ -173,6 +209,7 @@ impl VideoConverter {
             processor,
             video_device,
             out,
+            views: std::sync::Mutex::default(),
         })
     }
 
@@ -226,34 +263,58 @@ impl VideoConverter {
                 },
             },
         };
-        let mut input = None;
-        let mut output = None;
+        let mut views = self
+            .views
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let input = view(
+            &mut views.inputs,
+            KEPT_INPUTS,
+            (src.as_raw() as usize, src_slice),
+            || {
+                let mut input = None;
+                // SAFETY: the descriptor and out-pointer are valid for the call; the texture
+                // belongs to the device the converter was created on.
+                unsafe {
+                    self.video_device.CreateVideoProcessorInputView(
+                        src,
+                        &self.enumerator,
+                        &raw const input_desc,
+                        Some(&raw mut input),
+                    )
+                }
+                .map_err(|e| err("input view", e))?;
+                input.ok_or_else(|| "no input view".to_owned())
+            },
+        )?;
+        let output = view(
+            &mut views.outputs,
+            KEPT_OUTPUTS,
+            (dst.as_raw() as usize, dst_slice),
+            || {
+                let mut output = None;
+                // SAFETY: as above.
+                unsafe {
+                    self.video_device.CreateVideoProcessorOutputView(
+                        dst,
+                        &self.enumerator,
+                        &raw const output_desc,
+                        Some(&raw mut output),
+                    )
+                }
+                .map_err(|e| err("output view", e))?;
+                output.ok_or_else(|| "no output view".to_owned())
+            },
+        )?;
+        drop(views);
         let target = RECT {
             left: 0,
             top: 0,
             right: self.out.0 as i32,
             bottom: self.out.1 as i32,
         };
-        // SAFETY: the descriptors and out-pointers are valid for the calls; the textures belong
-        // to the device the converter was created on.
+        // SAFETY: the views belong to this converter's device and enumerator.
         unsafe {
-            self.video_device
-                .CreateVideoProcessorInputView(
-                    src,
-                    &self.enumerator,
-                    &raw const input_desc,
-                    Some(&raw mut input),
-                )
-                .map_err(|e| err("input view", e))?;
-            self.video_device
-                .CreateVideoProcessorOutputView(
-                    dst,
-                    &self.enumerator,
-                    &raw const output_desc,
-                    Some(&raw mut output),
-                )
-                .map_err(|e| err("output view", e))?;
-            let output = output.ok_or("no output view")?;
             self.video_context.VideoProcessorSetStreamSourceRect(
                 &self.processor,
                 0,
@@ -273,7 +334,7 @@ impl VideoConverter {
             );
             let mut streams = [D3D11_VIDEO_PROCESSOR_STREAM {
                 Enable: true.into(),
-                pInputSurface: std::mem::ManuallyDrop::new(input),
+                pInputSurface: std::mem::ManuallyDrop::new(Some(input)),
                 ..Default::default()
             }];
             let result =
