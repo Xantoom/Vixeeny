@@ -75,8 +75,24 @@ pub struct CapturedFrame {
 
 /// Receives each frame as a GPU texture: `(texture, content size, time in ns)`. The texture is
 /// only valid during the call (it goes back to the capture pool afterwards): convert or copy it
-/// there.
-pub type TextureSink = Box<dyn FnMut(&ID3D11Texture2D, (u32, u32), i64) + Send>;
+/// there. Returns whether the frame was taken.
+pub type TextureSink = Box<dyn FnMut(&ID3D11Texture2D, (u32, u32), i64) -> bool + Send>;
+
+/// Which frames a recording keeps, asked before a frame is read or converted: a frame the
+/// recording would drop costs nothing. Called on a capture thread.
+pub trait Gate: Send + Sync {
+    /// Whether a frame captured at `time_ns` would be kept.
+    fn wanted(&self, time_ns: i64) -> bool;
+    /// The frame captured at `time_ns` was handed over.
+    fn taken(&self, time_ns: i64);
+}
+
+/// The frame rate a recording keeps, and its [`Gate`].
+pub struct Pacing {
+    /// Frames per second, as `(numerator, denominator)`.
+    pub fps: (u32, u32),
+    pub gate: Arc<dyn Gate>,
+}
 
 /// Told (on a capture thread) that a frame is waiting in [`VideoStream::recv`].
 pub type Notify = Box<dyn Fn() + Send + Sync>;
@@ -97,6 +113,7 @@ struct Shared {
     region: Option<PhysicalRect>,
     hdr: bool,
     sink: Option<Mutex<TextureSink>>,
+    gate: Option<Arc<dyn Gate>>,
     /// Called once a CPU frame is queued.
     notify: Option<Notify>,
     last_size: Mutex<SizeInt32>,
@@ -206,18 +223,20 @@ pub struct VideoStream {
 impl VideoStream {
     /// `hdr`: ask for scRGB half floats (an HDR monitor); the frames then have `hdr` set.
     pub fn start(target: &StreamTarget, cursor: bool, hdr: bool) -> Result<Self, CaptureError> {
-        Self::start_with(target, cursor, hdr, None)
+        Self::start_with(target, cursor, hdr, None, None)
     }
 
     /// Like [`start`](Self::start); with `gpu`, frames go to its sink as textures and `recv`
-    /// only reports errors (the stream ending).
+    /// only reports errors (the stream ending). With `pacing`, only the frames its gate wants
+    /// are read or converted.
     pub fn start_with(
         target: &StreamTarget,
         cursor: bool,
         hdr: bool,
         gpu: Option<GpuCapture>,
+        pacing: Option<Pacing>,
     ) -> Result<Self, CaptureError> {
-        Self::open(target, cursor, hdr, gpu, None)
+        Self::open(target, cursor, hdr, gpu, None, pacing)
     }
 
     /// Like [`start`](Self::start), calling `notify` each time a frame waits in `recv`: the
@@ -228,7 +247,7 @@ impl VideoStream {
         hdr: bool,
         notify: Notify,
     ) -> Result<Self, CaptureError> {
-        Self::open(target, cursor, hdr, None, Some(notify))
+        Self::open(target, cursor, hdr, None, Some(notify), None)
     }
 
     fn open(
@@ -237,6 +256,7 @@ impl VideoStream {
         hdr: bool,
         gpu: Option<GpuCapture>,
         notify: Option<Notify>,
+        pacing: Option<Pacing>,
     ) -> Result<Self, CaptureError> {
         if !GraphicsCaptureSession::IsSupported().map_err(os("IsSupported"))? {
             return Err(CaptureError::Os(
@@ -309,6 +329,7 @@ impl VideoStream {
             region,
             hdr,
             sink,
+            gate: pacing.as_ref().map(|p| Arc::clone(&p.gate)),
             notify,
             last_size: Mutex::new(size),
             buffers: buffers.clone(),
@@ -337,6 +358,16 @@ impl VideoStream {
             .map_err(os("CreateCaptureSession"))?;
         let _ = session.SetIsCursorCaptureEnabled(cursor);
         let _ = session.SetIsBorderRequired(false);
+        if let Some(Pacing {
+            fps: (num, den), ..
+        }) = pacing
+        {
+            // Windows 11 24H2 and later: no more than two frames per period of the recording
+            // (a screen faster than that skips its other refreshes), so every period still gets
+            // a frame. Older versions refuse it and deliver every refresh: the gate sorts them.
+            let ticks = i64::from(den) * 10_000_000 / (2 * i64::from(num.max(1)));
+            let _ = session.SetMinUpdateInterval(windows::Foundation::TimeSpan { Duration: ticks });
+        }
         session.StartCapture().map_err(os("StartCapture"))?;
         Ok(Self {
             pool,
@@ -397,17 +428,26 @@ fn frame_handler(
                 let _ = pool.Recreate(&shared.winrt_device, pixel_format(shared.hdr), 2, content);
             }
             let time_ns = frame.SystemRelativeTime()?.Duration.saturating_mul(100);
+            // A frame the recording would drop is neither read nor converted.
+            if let Some(gate) = &shared.gate
+                && !gate.wanted(time_ns)
+            {
+                return Ok(());
+            }
             let surface = frame.Surface()?;
             let access: IDirect3DDxgiInterfaceAccess = surface.cast()?;
             // SAFETY: the surface is backed by a D3D11 texture on our device.
             let texture: ID3D11Texture2D = unsafe { access.GetInterface() }?;
             if let Some(sink) = &shared.sink {
-                if let Ok(mut sink) = sink.lock() {
-                    sink(
+                if let Ok(mut sink) = sink.lock()
+                    && sink(
                         &texture,
                         (content.Width.max(1) as u32, content.Height.max(1) as u32),
                         time_ns,
-                    );
+                    )
+                    && let Some(gate) = &shared.gate
+                {
+                    gate.taken(time_ns);
                 }
                 return Ok(());
             }
@@ -417,10 +457,14 @@ fn frame_handler(
                 frame,
             });
             // A full queue drops the frame: the consumer is behind.
-            if tx.try_send(result).is_ok()
-                && let Some(notify) = &shared.notify
-            {
-                notify();
+            let read = result.is_ok();
+            if tx.try_send(result).is_ok() {
+                if read && let Some(gate) = &shared.gate {
+                    gate.taken(time_ns);
+                }
+                if let Some(notify) = &shared.notify {
+                    notify();
+                }
             }
             Ok(())
         },

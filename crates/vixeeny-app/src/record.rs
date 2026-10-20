@@ -18,7 +18,7 @@ use anyhow::Context;
 use vixeeny_common::config::{self, Config};
 use vixeeny_common::ipc::RecState;
 use vixeeny_encode::audio::{AudioCodec, AudioTrackConfig};
-use vixeeny_encode::clock::Fps;
+use vixeeny_encode::clock::{Fps, Pacer};
 use vixeeny_encode::cut::Reencode;
 use vixeeny_encode::d3d_convert as d3d;
 use vixeeny_encode::gpu::{Feed, GpuPipeline, HwFrame, Source as GpuSource};
@@ -699,11 +699,39 @@ impl Watcher {
 /// Frames the GPU sink may queue for the recording thread.
 const GPU_BACKLOG: usize = 4;
 
+/// The recording's clock where frames arrive (capture times are on the OS clock, the
+/// recording's from its `origin`).
+struct ClockGate {
+    pacer: Pacer,
+    origin: i64,
+}
+
+impl vixeeny_capture::Gate for ClockGate {
+    fn wanted(&self, time_ns: i64) -> bool {
+        self.pacer.wanted((time_ns - self.origin).max(0))
+    }
+
+    fn taken(&self, time_ns: i64) {
+        self.pacer.taken((time_ns - self.origin).max(0));
+    }
+}
+
 fn launch(plan: Plan) -> anyhow::Result<Handle> {
     // The recording's time zero: video and audio timestamps are relative to it.
     let origin = vixeeny_platform::monotonic_ns();
     // Frames the GPU path could not hand over: lost, like those the encoder refuses.
     let gpu_lost = Arc::new(AtomicU64::new(0));
+    // The frames the recording's clock would drop are neither read nor converted.
+    let pacer = (!plan.config.vfr).then(|| Pacer::new(plan.config.fps));
+    let pacing = || {
+        pacer.as_ref().map(|pacer| vixeeny_capture::Pacing {
+            fps: (plan.config.fps.num, plan.config.fps.den),
+            gate: Arc::new(ClockGate {
+                pacer: pacer.clone(),
+                origin,
+            }),
+        })
+    };
     let (stream, gpu_frames) = {
         let target = match plan.window {
             Some(window) => vixeeny_capture::StreamTarget::Window(window),
@@ -711,7 +739,13 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
         };
         let (stream, gpu_frames) = match &plan.gpu {
             None => (
-                vixeeny_capture::VideoStream::start(&target, plan.cursor, plan.hdr)?,
+                vixeeny_capture::VideoStream::start_with(
+                    &target,
+                    plan.cursor,
+                    plan.hdr,
+                    None,
+                    pacing(),
+                )?,
                 None,
             ),
             Some(gpu) => {
@@ -735,6 +769,7 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
                         if !sent {
                             lost.fetch_add(1, Ordering::Relaxed);
                         }
+                        sent
                     });
                 let capture = vixeeny_capture::GpuCapture {
                     device: gpu.device.clone(),
@@ -747,6 +782,7 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
                         plan.cursor,
                         plan.hdr,
                         Some(capture),
+                        pacing(),
                     )?,
                     Some(rx),
                 )
@@ -792,6 +828,7 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
             let result = record_loop(
                 &stream,
                 gpu_frames.as_ref(),
+                pacer.as_ref(),
                 recorder,
                 rig,
                 widget,
@@ -881,6 +918,7 @@ fn save_replay(recorder: &Recorder, next_path: &mut SaveNamer, notice: &Config, 
 fn record_loop(
     stream: &Video,
     #[cfg(windows)] gpu_frames: Option<&std::sync::mpsc::Receiver<(i64, HwFrame)>>,
+    pacer: Option<&Pacer>,
     recorder: Recorder,
     mut rig: Option<Rig>,
     mut widget: Option<crate::widget::Widget>,
@@ -945,6 +983,13 @@ fn record_loop(
                 }
                 if let Some(w) = &mut widget {
                     w.state(paused, elapsed(paused, now(), paused_ns, paused_since));
+                }
+                if let Some(pacer) = pacer {
+                    if paused {
+                        pacer.pause(now());
+                    } else {
+                        pacer.resume(now());
+                    }
                 }
                 if paused {
                     recorder.pause(now());

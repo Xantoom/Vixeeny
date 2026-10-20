@@ -172,11 +172,79 @@ impl Cfr {
     }
 }
 
+/// The recording's clock, told the same frames and pauses, where frames arrive: a frame it
+/// says no to would be dropped by the recording, so it is not converted at all. It never says
+/// no to one the recording keeps: it does not see the repeats of a static screen, so its slots
+/// are never ahead of the recording's.
+#[derive(Debug, Clone)]
+pub struct Pacer(std::sync::Arc<std::sync::Mutex<Cfr>>);
+
+impl Pacer {
+    pub fn new(fps: Fps) -> Self {
+        Self(std::sync::Arc::new(std::sync::Mutex::new(Cfr::new(fps))))
+    }
+
+    fn with<T>(&self, f: impl FnOnce(&mut Cfr) -> T) -> T {
+        f(&mut self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner))
+    }
+
+    /// Whether the recording keeps a frame captured at `t`.
+    pub fn wanted(&self, t: i64) -> bool {
+        self.with(|c| !c.is_paused() && (c.start.is_none() || c.slot(t) >= c.next))
+    }
+
+    /// A frame captured at `t` went to the recording.
+    pub fn taken(&self, t: i64) {
+        self.with(|c| c.on_frame(t));
+    }
+
+    pub fn pause(&self, t: i64) {
+        self.with(|c| c.pause(t));
+    }
+
+    pub fn resume(&self, t: i64) {
+        self.with(|c| c.resume(t));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const MS: i64 = 1_000_000;
+
+    #[test]
+    fn the_pacer_lets_through_what_the_recording_keeps_and_nothing_more() {
+        // A 240 Hz screen recorded at 60 FPS, with a pause in the middle.
+        let fps = Fps::whole(60);
+        let (mut cfr, pacer) = (Cfr::new(fps), Pacer::new(fps));
+        let mut converted = 0;
+        for i in 0..480_i64 {
+            let t = 1_000 * MS + i * 1_000_000_000 / 240;
+            if i == 200 {
+                cfr.pause(t);
+                pacer.pause(t);
+            }
+            if i == 260 {
+                cfr.resume(t);
+                pacer.resume(t);
+            }
+            let wanted = pacer.wanted(t);
+            let kept =
+                !cfr.is_paused() && cfr.on_frame(t).iter().any(|e| matches!(e, Emit::New(_)));
+            assert!(wanted || !kept, "frame {i} was kept but not wanted");
+            if wanted {
+                pacer.taken(t);
+                converted += 1;
+                assert!(kept, "frame {i} was wanted but dropped");
+            }
+        }
+        // 420 frames outside the pause: about a quarter are converted.
+        assert!((100..=110).contains(&converted), "{converted}");
+    }
 
     /// Feeds frames at the given times; returns every emit in order.
     fn feed(cfr: &mut Cfr, times: &[i64]) -> Vec<Emit> {
