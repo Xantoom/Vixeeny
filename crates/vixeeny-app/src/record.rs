@@ -59,6 +59,39 @@ fn changed() {
     }
 }
 
+/// Replay files being written, each on a thread of its own: the app does not end before they
+/// are complete (a file cut short does not play).
+static SAVING: (std::sync::Mutex<usize>, std::sync::Condvar) =
+    (std::sync::Mutex::new(0), std::sync::Condvar::new());
+
+fn saves() -> std::sync::MutexGuard<'static, usize> {
+    SAVING
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// A replay file is being written.
+pub fn saving() -> bool {
+    *saves() > 0
+}
+
+/// Waits, when dropped, until the replay files being written are complete: the last thing the
+/// app does before it ends.
+pub struct SavesDone;
+
+impl Drop for SavesDone {
+    fn drop(&mut self) {
+        let mut count = saves();
+        while *count > 0 {
+            count = SAVING
+                .1
+                .wait(count)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+    }
+}
+
 const IDLE: u8 = 0;
 const RECORDING: u8 = 1;
 const PAUSED: u8 = 2;
@@ -884,25 +917,36 @@ fn save_replay(recorder: &Recorder, next_path: &mut SaveNamer, notice: &Config, 
         Ok(save) => {
             let seconds = save.seconds;
             let notice = notice.clone();
-            std::thread::spawn(move || match save.wait() {
-                Ok(path) => {
-                    tracing::info!(
-                        "replay saved ({seconds:.1} s, {:.2} s to write)",
-                        started.elapsed().as_secs_f64()
-                    );
-                    if edit {
-                        crate::cut::open(&path);
-                    } else {
-                        crate::toast::notify(&notice, &Toast::Saved(Saved::Replay, path));
-                    }
+            *saves() += 1;
+            std::thread::spawn(move || {
+                let written = save.wait();
+                // The file is complete: the app may end from now on (it is told to look again).
+                {
+                    let mut count = saves();
+                    *count = count.saturating_sub(1);
                 }
-                Err(e) => {
-                    tracing::error!("cannot save the replay: {e}");
-                    let text = failure_text(
-                        &anyhow::anyhow!("{e}"),
-                        crate::lang(&notice.general.language),
-                    );
-                    crate::toast::notify(&notice, &Toast::Failed(Failed::Replay, text));
+                SAVING.1.notify_all();
+                changed();
+                match written {
+                    Ok(path) => {
+                        tracing::info!(
+                            "replay saved ({seconds:.1} s, {:.2} s to write)",
+                            started.elapsed().as_secs_f64()
+                        );
+                        if edit {
+                            crate::cut::open(&path);
+                        } else {
+                            crate::toast::notify(&notice, &Toast::Saved(Saved::Replay, path));
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("cannot save the replay: {e}");
+                        let text = failure_text(
+                            &anyhow::anyhow!("{e}"),
+                            crate::lang(&notice.general.language),
+                        );
+                        crate::toast::notify(&notice, &Toast::Failed(Failed::Replay, text));
+                    }
                 }
             });
         }
@@ -1123,5 +1167,24 @@ fn replay_storage(config: &Config, encoder: &Encoder, size: (u32, u32)) -> repla
             );
             if fits { replay::Storage::Ram } else { disk() }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_app_ends_only_once_the_replay_files_are_written() {
+        let started = std::time::Instant::now();
+        *super::saves() += 1;
+        assert!(super::saving());
+        let writer = std::thread::spawn(|| {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            *super::saves() -= 1;
+            super::SAVING.1.notify_all();
+        });
+        drop(super::SavesDone);
+        assert!(started.elapsed() >= std::time::Duration::from_millis(200));
+        assert!(!super::saving());
+        let _ = writer.join();
     }
 }

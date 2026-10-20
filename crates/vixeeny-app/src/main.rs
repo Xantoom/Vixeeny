@@ -738,6 +738,8 @@ fn run() -> anyhow::Result<()> {
             let _ = wake.send(Wake::Recording);
         });
     }
+    // Dropped last, whatever ends the app: the replay files being written are completed first.
+    let _saves = record::SavesDone;
     let mut recording = Recording {
         look: Some(look),
         ..Recording::default()
@@ -755,7 +757,7 @@ fn run() -> anyhow::Result<()> {
         // While recording, or while the replay runs with a game, the app stays: it sleeps until
         // it is told something (the daemon, the recording, Windows). Otherwise it ends once
         // idle for a while; the daemon, which watches for games, starts it again with one.
-        let busy = recording.handle.is_some() || recording.replay.is_some();
+        let busy = recording.handle.is_some() || recording.replay.is_some() || record::saving();
         let woken = if busy {
             idle_from = std::time::Instant::now();
             rx.recv().map_err(|_| RecvTimeoutError::Disconnected)
