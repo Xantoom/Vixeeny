@@ -177,4 +177,4 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           version=$(ls dist/Vixeeny-*-setup.exe | sed 's/.*Vixeeny-\(.*\)-setup\.exe/\1/')
-          gh release create "v$version" --target "${{ github.sha }}" --draft --notes-file dist/notes.md dist/*-setup.exe dist/*-portable.zip
+          gh release create "v$version" --title "Vixeeny $version" --target "${{ github.sha }}" --draft --notes-file dist/notes.md dist/*-setup.exe dist/*-portable.zip
