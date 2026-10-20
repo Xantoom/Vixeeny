@@ -296,16 +296,20 @@ fn control(request: ControlRequest) -> std::io::Result<()> {
 /// recording (the update waits for it), at most `limit`. Windows tells when; nothing is asked
 /// again.
 pub fn stop_daemon(limit: Option<Duration>) -> anyhow::Result<()> {
-    let pid = {
-        let Ok(mut stream) = Endpoint::current_user().connect() else {
-            return Ok(()); // not running
-        };
-        ipc::write_msg(&mut stream, &Hello::Control(ControlRequest::QuitForUpdate))?;
-        match ipc::read_msg::<_, ControlReply>(&mut stream)? {
-            Some(ControlReply::Quitting { pid }) => pid,
-            _ => bail!("Vixeeny did not agree to stop"),
+    // The daemon of a version before 0.20 answers under another name (an update from it may
+    // have left it running).
+    for endpoint in [Some(Endpoint::current_user()), Endpoint::older_user()]
+        .into_iter()
+        .flatten()
+    {
+        if let Some(pid) = endpoint.ask_to_quit()? {
+            wait_for_exit(pid, limit)?;
         }
-    };
+    }
+    Ok(())
+}
+
+fn wait_for_exit(pid: u32, limit: Option<Duration>) -> anyhow::Result<()> {
     let (ended, end) = std::sync::mpsc::channel();
     anyhow::ensure!(
         vixeeny_platform::on_process_exit(pid, move || {
@@ -469,6 +473,11 @@ pub fn recover() -> anyhow::Result<bool> {
     let Some(_lock) = lock(&dir) else {
         return Ok(false);
     };
+    // Written by the updater of a version before 0.20, which takes no lock: it may still be at
+    // work (waiting for the new version, which runs this, to start), and finishes on its own.
+    if swap::older_and_recent(&backup, Duration::from_secs(600)) {
+        return Ok(false);
+    }
     let path = state_path()?;
     let mut state = State::load(&path);
     state.error = Some("the install was cut short".into());

@@ -36,6 +36,34 @@ fn log_clock() -> vixeeny_common::logging::Stamp {
     }
 }
 
+/// An update from a version before 0.20 may have left that version's daemon running (it answers
+/// under another name, see [`Endpoint::older_user`]): it is asked to stop, as an update does, so
+/// that this one gets the shortcuts. A recording it makes is finished first; it is waited for
+/// half a minute at most.
+fn stop_older_daemon() {
+    let Some(older) = Endpoint::older_user() else {
+        return;
+    };
+    let pid = match older.ask_to_quit() {
+        Ok(Some(pid)) => pid,
+        Ok(None) => return,
+        Err(e) => {
+            tracing::warn!("the daemon of an older version did not stop: {e}");
+            return;
+        }
+    };
+    tracing::info!("stopping the daemon of an older version (process {pid})");
+    let (ended, end) = std::sync::mpsc::channel();
+    if vixeeny_platform::on_process_exit(pid, move || {
+        let _ = ended.send(());
+    }) && end
+        .recv_timeout(std::time::Duration::from_secs(30))
+        .is_err()
+    {
+        tracing::warn!("the daemon of an older version is still running");
+    }
+}
+
 fn real_main() -> anyhow::Result<()> {
     // The frozen screens are placed in physical pixels.
     vixeeny_platform::ensure_dpi_aware();
@@ -50,6 +78,7 @@ fn real_main() -> anyhow::Result<()> {
         }
         Err(e) => return Err(e.into()),
     };
+    stop_older_daemon();
 
     let config_path = vixeeny_common::paths::config_file();
     let config = match &config_path {

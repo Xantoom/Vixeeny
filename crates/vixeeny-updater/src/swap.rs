@@ -19,6 +19,9 @@ pub struct Journal {
     /// Files of the previous version the new one no longer has, moved to the backup folder.
     #[serde(default)]
     pub removed: Vec<PathBuf>,
+    /// Written under the update lock (from 0.20): the updates before took none.
+    #[serde(default)]
+    pub locked: bool,
 }
 
 /// The list of the files of a version, one relative path per line (`/` separated).
@@ -123,6 +126,7 @@ pub fn install(staged: &Path, target: &Path, backup: &Path) -> io::Result<Journa
         replaced,
         added,
         removed,
+        locked: true,
     };
     let text = serde_json::to_string(&journal).map_err(io::Error::other)?;
     let mut file = std::fs::File::create(backup.join(JOURNAL))?;
@@ -171,6 +175,22 @@ fn undo(journal: &Journal, target: &Path, backup: &Path) -> io::Result<()> {
 /// undoes it, [`commit`] keeps it.
 pub fn unconfirmed(backup: &Path) -> bool {
     backup.join(JOURNAL).is_file()
+}
+
+/// The journal in `backup` was written by an update before 0.20 (it took no lock), less than
+/// `within` ago.
+pub fn older_and_recent(backup: &Path, within: std::time::Duration) -> bool {
+    let path = backup.join(JOURNAL);
+    let older = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<Journal>(&text).ok())
+        .is_some_and(|journal| !journal.locked);
+    let recent = std::fs::metadata(&path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|at| at.elapsed().ok())
+        .is_some_and(|age| age < within);
+    older && recent
 }
 
 /// Restores the previous version from `backup` (after a failed start of the new one, or an
@@ -352,6 +372,28 @@ mod tests {
         );
         assert_eq!(read(&target, "licenses/THIRD-PARTY.txt"), None);
         assert!(!backup.exists());
+    }
+
+    /// An update before 0.20 took no lock: its journal, while recent, may be of an install
+    /// still at work, which the new version's start must not undo.
+    #[test]
+    fn a_recent_journal_of_an_older_update_is_told_apart() {
+        let (_dir, staged, target, backup) = setup();
+        install(&staged, &target, &backup).unwrap_or_else(|e| panic!("{e}"));
+        let hour = std::time::Duration::from_secs(3600);
+        assert!(!older_and_recent(&backup, hour), "written under the lock");
+        // The journal as an older version wrote it: no `locked` field.
+        let journal = std::fs::read_to_string(backup.join(JOURNAL)).unwrap_or_default();
+        let older = journal.replace(",\"locked\":true", "");
+        assert_ne!(older, journal);
+        std::fs::write(backup.join(JOURNAL), older).unwrap_or_else(|e| panic!("{e}"));
+        assert!(older_and_recent(&backup, hour));
+        assert!(
+            !older_and_recent(&backup, std::time::Duration::ZERO),
+            "old enough"
+        );
+        commit(&backup).unwrap_or_else(|e| panic!("{e}"));
+        assert!(!older_and_recent(&backup, hour), "no journal");
     }
 
     #[test]

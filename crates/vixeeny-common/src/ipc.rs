@@ -288,6 +288,33 @@ impl Endpoint {
         )
     }
 
+    /// The name the versions before 0.20 gave the endpoint (after the user's name, not their
+    /// SID): only to stop the daemon of such a version, which an update from it may leave
+    /// running. `None` when it is the same, or the name is set by `VIXEENY_IPC_NAME` (tests).
+    pub fn older_user() -> Option<Self> {
+        if std::env::var_os("VIXEENY_IPC_NAME").is_some() {
+            return None;
+        }
+        let user = std::env::var("USERNAME").ok()?;
+        let older = Self::named(&format!("vixeeny-{user}"));
+        (older != Self::current_user()).then_some(older)
+    }
+
+    /// Asks the daemon here to stop the way an update does; returns its process, which ends
+    /// now or once a recording is finished. `Ok(None)`: no daemon of this user answers here.
+    pub fn ask_to_quit(&self) -> Result<Option<u32>, IpcError> {
+        let Ok(mut stream) = self.connect() else {
+            return Ok(None);
+        };
+        write_msg(&mut stream, &Hello::Control(ControlRequest::QuitForUpdate))?;
+        match read_msg::<_, ControlReply>(&mut stream)? {
+            Some(ControlReply::Quitting { pid }) => Ok(Some(pid)),
+            _ => Err(IpcError::Io(io::Error::other(
+                "the daemon did not agree to stop",
+            ))),
+        }
+    }
+
     /// An endpoint with an explicit name (tests).
     pub fn named(name: &str) -> Self {
         let base = name
@@ -549,6 +576,40 @@ mod tests {
         assert_eq!(
             server.join().unwrap(),
             Hello::Control(ControlRequest::OpenSettings)
+        );
+    }
+    /// What an update, or a newer daemon, asks a daemon of any version that answers.
+    #[test]
+    fn a_daemon_is_asked_to_quit_and_tells_its_process() {
+        let ep = unique("quit");
+        assert!(matches!(ep.ask_to_quit(), Ok(None)), "nobody answers yet");
+        let listener = ep.bind().unwrap();
+        let server = std::thread::spawn(move || {
+            let mut conn = listener.accept().unwrap();
+            let hello: Hello = read_msg(&mut conn).unwrap().unwrap();
+            write_msg(&mut conn, &ControlReply::Quitting { pid: 42 }).unwrap();
+            hello
+        });
+        assert_eq!(ep.ask_to_quit().unwrap(), Some(42));
+        assert_eq!(
+            server.join().unwrap(),
+            Hello::Control(ControlRequest::QuitForUpdate)
+        );
+    }
+
+    #[test]
+    fn the_older_name_is_the_users_name() {
+        // Tests name their endpoints: there is no older one to stop then.
+        if std::env::var_os("VIXEENY_IPC_NAME").is_some() {
+            assert_eq!(Endpoint::older_user(), None);
+            return;
+        }
+        let Ok(user) = std::env::var("USERNAME") else {
+            return;
+        };
+        assert_eq!(
+            Endpoint::older_user(),
+            Some(Endpoint::named(&format!("vixeeny-{user}")))
         );
     }
 }
