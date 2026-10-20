@@ -86,6 +86,9 @@ jobs:
     needs: ffmpeg
     runs-on: windows-latest
     env:
+      # No debug information: less to write, link and cache (as in `test`).
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
       FFMPEG_DIR: ${{ github.workspace }}\native\build\work\ffmpeg-prebuilt
       LIBCLANG_PATH: C:\Program Files\LLVM\bin
     steps:
