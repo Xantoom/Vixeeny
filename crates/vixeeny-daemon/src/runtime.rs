@@ -238,7 +238,12 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
                 }
             }
         }
-        let failures = self.hotkeys.apply(&resolution.bindings);
+        let mut bindings = resolution.bindings;
+        // The side bar turned off: its shortcut stays free.
+        if !self.config.overlay.enabled {
+            bindings.retain(|(action, _)| *action != ActionId::OverlayToggle);
+        }
+        let failures = self.hotkeys.apply(&bindings);
         for (hotkey, failure) in &failures {
             tracing::warn!("shortcut {hotkey} not registered: {failure}");
             trouble = true;
@@ -394,7 +399,9 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
                     self.apply_autostart();
                 }
                 // Registering them again would also repeat the warning about a taken shortcut.
-                if old.hotkeys != self.config.hotkeys {
+                if old.hotkeys != self.config.hotkeys
+                    || old.overlay.enabled != self.config.overlay.enabled
+                {
                     self.apply_hotkeys();
                 }
                 tracing::debug!("config reloaded");

@@ -82,13 +82,12 @@ fn show_update(w: &SettingsWindow, view: &UpdateView) {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Captured {
     Cancel,
-    Clear,
     /// `Ctrl+Shift+KeyR`, in the notation of the settings file.
     Combination(String),
 }
 
 /// The keys held while a shortcut is recorded: the modifiers in the order they went down, then
-/// the key. Letting go of a key ends the shortcut; Escape empties the slot.
+/// the key. Letting go of a key ends the shortcut; Escape cancels (the slot keeps its shortcut).
 #[derive(Debug, Default)]
 pub struct Chord {
     mods: Vec<&'static str>,
@@ -108,7 +107,7 @@ impl Chord {
     pub fn press(&mut self, code: &str) -> ChordStep {
         if code == "Escape" {
             *self = Self::default();
-            return ChordStep::Done(Captured::Clear);
+            return ChordStep::Done(Captured::Cancel);
         }
         match modifier(code) {
             Some(name) if !self.mods.contains(&name) => self.mods.push(name),
@@ -726,19 +725,6 @@ fn wire_chrome(window: &SettingsWindow) {
                 }
             }
         });
-        // Maximized by the system too (double click, Win+Up, a drag to the top): follow it.
-        let weak = window.as_weak();
-        window.window().on_winit_window_event(move |_, event| {
-            use slint::winit_030::EventResult;
-            use slint::winit_030::winit::event::WindowEvent;
-            if matches!(event, WindowEvent::Resized(_))
-                && let Some(w) = weak.upgrade()
-            {
-                let maximized = w.window().is_maximized();
-                w.set_zoomed(maximized);
-            }
-            EventResult::Propagate
-        });
         theme::when_native(window, {
             let weak = window.as_weak();
             move |_| {
@@ -1241,7 +1227,6 @@ impl SettingsPanel {
         };
         match pressed {
             Captured::Cancel => {}
-            Captured::Clear => self.set_shortcut(row, slot, ""),
             Captured::Combination(text) => self.set_shortcut(row, slot, &text),
         }
         self.record(None);
@@ -1274,8 +1259,9 @@ impl SettingsPanel {
         true
     }
 
-    /// Hooks the keyboard of the window so that a recorded shortcut is read from the keys
-    /// themselves. Needs the real (winit) backend.
+    /// Hooks the events of the window: the keys of a recorded shortcut are read from the keys
+    /// themselves, the size and the presses of the pointer followed. Needs the real (winit)
+    /// backend, which keeps one hook per window.
     #[cfg(feature = "desktop")]
     pub fn capture_keys(&self) {
         use slint::winit_030::winit::event::{ElementState, WindowEvent};
@@ -1290,6 +1276,22 @@ impl SettingsPanel {
                 })
             };
             match event {
+                // Maximized by the system too (double click, Win+Up, a drag to the top): follow it.
+                WindowEvent::Resized(_) => {
+                    if let Some(w) = weak.upgrade() {
+                        let maximized = w.window().is_maximized();
+                        w.set_zoomed(maximized);
+                    }
+                }
+                // A press outside the text field being typed in takes the focus away from it.
+                WindowEvent::MouseInput {
+                    state: ElementState::Pressed,
+                    ..
+                } => {
+                    if let Some(w) = weak.upgrade() {
+                        w.global::<crate::Fields>().invoke_pressed();
+                    }
+                }
                 // Elsewhere, the keys go to another program: the recording stops.
                 WindowEvent::Focused(false) => {
                     if let Some(p) = panel() {
@@ -1463,9 +1465,16 @@ impl SettingsPanel {
             let state = self.state.clone();
             move |on| state.slide(on)
         });
+        // A field also reports when it loses the focus, which happens while the page is
+        // rebuilt (another page, a row that goes): the change waits for the rebuild to end.
         w.on_row_text({
             let edit = edit.clone();
-            move |id, text| edit(&id, Value::Text(text.to_string()))
+            move |id, text| {
+                let edit = edit.clone();
+                slint::Timer::single_shot(std::time::Duration::ZERO, move || {
+                    edit(&id, Value::Text(text.to_string()));
+                });
+            }
         });
         w.on_row_chosen({
             let (edit, state) = (edit.clone(), self.state.clone());

@@ -530,6 +530,9 @@ pub struct Audio {
     /// the matching sources.
     pub capture: String,
     pub sources: Vec<String>,
+    /// The sources of the other modes (an output device, the programs ticked), back when their
+    /// mode is chosen again.
+    pub set_aside: Vec<String>,
     /// `auto` = Opus beside AV1 (and VP9, and in WebM), else AAC.
     pub codec: String,
     pub bitrate_kbps: u32,
@@ -562,6 +565,7 @@ impl Default for Audio {
             routing: "one_track_per_source".into(),
             capture: "system".into(),
             sources: vec!["system".into()],
+            set_aside: Vec::new(),
             codec: "auto".into(),
             bitrate_kbps: 160,
             vbr: true,
@@ -641,12 +645,15 @@ impl Default for Replay {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Overlay {
+    /// Off: its shortcut is free for other programs.
+    pub enabled: bool,
     pub edge: String,
 }
 
 impl Default for Overlay {
     fn default() -> Self {
         Self {
+            enabled: true,
             edge: "right".into(),
         }
     }

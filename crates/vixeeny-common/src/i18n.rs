@@ -344,6 +344,7 @@ pub enum Key {
     ShortcutModifierOnly,
     ShortcutUnknownKey,
     ShortcutNeedsModifier,
+    SetOverlayOn,
 }
 
 impl Key {
@@ -680,6 +681,7 @@ impl Key {
         Self::ShortcutModifierOnly,
         Self::ShortcutUnknownKey,
         Self::ShortcutNeedsModifier,
+        Self::SetOverlayOn,
     ];
 }
 
@@ -739,17 +741,15 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::AppCrashed, Lang::En) => "Vixeeny stopped unexpectedly",
         (Key::AppCrashed, Lang::Fr) => "Vixeeny s'est arrêté de façon inattendue",
         (Key::HotkeysUnavailable, Lang::En) => {
-            "Some shortcuts could not be registered (already used elsewhere?)"
+            "Some shortcuts are unavailable: see Settings → Shortcuts."
         }
         (Key::HotkeysUnavailable, Lang::Fr) => {
-            "Certains raccourcis n'ont pas pu être enregistrés (déjà utilisés ailleurs ?)"
+            "Des raccourcis sont indisponibles : voir Paramètres → Raccourcis."
         }
         (Key::ScrollTitle, Lang::En) => "Scrolling capture",
         (Key::ScrollTitle, Lang::Fr) => "Capture défilante",
-        (Key::ScrollIntro, Lang::En) => "Scroll the content. Enter or Finish when done.",
-        (Key::ScrollIntro, Lang::Fr) => {
-            "Faites défiler le contenu. Entrée ou Terminer une fois fini."
-        }
+        (Key::ScrollIntro, Lang::En) => "Scroll the content, then Enter or Finish.",
+        (Key::ScrollIntro, Lang::Fr) => "Faites défiler, puis Entrée ou Terminer.",
         (Key::ScrollFinish, Lang::En) => "Finish",
         (Key::ScrollFinish, Lang::Fr) => "Terminer",
         (Key::ScrollCancel, Lang::En) => "Cancel",
@@ -891,27 +891,21 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::SetPresetBest, Lang::En) => "Maximum quality",
         (Key::SetPresetBest, Lang::Fr) => "Qualité maximale",
         (Key::SetPresetLight, Lang::En) => "Light files",
-        (Key::SetPresetLight, Lang::Fr) => "Poids léger",
+        (Key::SetPresetLight, Lang::Fr) => "Fichiers légers",
         (Key::SetPresetCustom, Lang::En) => "Custom",
         (Key::SetPresetCustom, Lang::Fr) => "Personnalisé",
-        (Key::SetDetecting, Lang::En) => "Detecting the encoders of this computer…",
-        (Key::SetDetecting, Lang::Fr) => "Détection des encodeurs de cet ordinateur…",
-        (Key::SetNoHardware, Lang::En) => {
-            "No hardware encoder was found on this computer: the software encoders are used."
-        }
-        (Key::SetNoHardware, Lang::Fr) => {
-            "Aucun encodeur matériel détecté sur cet ordinateur : les encodeurs logiciels sont utilisés."
-        }
+        (Key::SetDetecting, Lang::En) => "Detecting the encoders of this PC…",
+        (Key::SetDetecting, Lang::Fr) => "Détection des encodeurs de ce PC…",
+        (Key::SetNoHardware, Lang::En) => "No hardware encoder found: the processor encodes.",
+        (Key::SetNoHardware, Lang::Fr) => "Aucun encodeur matériel trouvé : le processeur encode.",
         (Key::SrcMic, Lang::En) => "Windows default",
-        (Key::SrcMic, Lang::Fr) => "Celui par défaut de Windows",
-        (Key::SrcAbsent, Lang::En) => "not available right now",
-        (Key::SrcAbsent, Lang::Fr) => "indisponible pour le moment",
+        (Key::SrcMic, Lang::Fr) => "Par défaut (Windows)",
+        (Key::SrcAbsent, Lang::En) => "absent",
+        (Key::SrcAbsent, Lang::Fr) => "absent",
         (Key::UiPressKeys, Lang::En) => "Press keys…",
         (Key::UiPressKeys, Lang::Fr) => "Appuyez…",
-        (Key::UiKeysHelp, Lang::En) => "Hold the keys, release to save. Esc leaves none.",
-        (Key::UiKeysHelp, Lang::Fr) => {
-            "Maintenez les touches, relâchez pour valider. Échap n'en met aucun."
-        }
+        (Key::UiKeysHelp, Lang::En) => "Hold the keys, then release. Esc cancels.",
+        (Key::UiKeysHelp, Lang::Fr) => "Maintenez les touches, puis relâchez. Échap annule.",
         (Key::SetReplayStart, Lang::En) => "Replay",
         (Key::SetReplayStart, Lang::Fr) => "Replay",
         (Key::SetReplayDuration, Lang::En) => "Duration",
@@ -944,18 +938,16 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::ActReplayToggle, Lang::Fr) => "Activer / désactiver le replay",
         (Key::ActReplaySave, Lang::En) => "Save the replay",
         (Key::ActReplaySave, Lang::Fr) => "Sauvegarder le replay",
-        (Key::ActOverlay, Lang::En) => "Show the overlay",
-        (Key::ActOverlay, Lang::Fr) => "Afficher l'overlay",
+        (Key::ActOverlay, Lang::En) => "Open the side bar",
+        (Key::ActOverlay, Lang::Fr) => "Ouvrir la barre latérale",
         (Key::ActSettings, Lang::En) => "Open the settings",
         (Key::ActSettings, Lang::Fr) => "Ouvrir les paramètres",
         (Key::ShortcutConflict, Lang::En) => "Already used for “{action}”",
         (Key::ShortcutConflict, Lang::Fr) => "Déjà utilisé pour « {action} »",
         (Key::ShortcutDuplicate, Lang::En) => "Already in this list",
         (Key::ShortcutDuplicate, Lang::Fr) => "Déjà dans cette liste",
-        (Key::HwUnavailable, Lang::En) => "Hardware detection is not available in this build.",
-        (Key::HwUnavailable, Lang::Fr) => {
-            "La détection du matériel n'est pas disponible dans cette version."
-        }
+        (Key::HwUnavailable, Lang::En) => "Hardware detection is not available in this version.",
+        (Key::HwUnavailable, Lang::Fr) => "Détection du matériel indisponible dans cette version.",
         (Key::HwSoftware, Lang::En) => "Software encoders",
         (Key::HwSoftware, Lang::Fr) => "Encodeurs logiciels",
         (Key::HwNoGpu, Lang::En) => "No graphics card found.",
@@ -976,12 +968,12 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::ToastOpenFolder, Lang::Fr) => "Ouvrir le dossier",
         (Key::ToastOpenSettings, Lang::En) => "Open settings",
         (Key::ToastOpenSettings, Lang::Fr) => "Ouvrir les paramètres",
-        (Key::ToastCaptureFailed, Lang::En) => "The capture failed",
-        (Key::ToastCaptureFailed, Lang::Fr) => "La capture a échoué",
-        (Key::ToastRecordingFailed, Lang::En) => "The recording failed",
-        (Key::ToastRecordingFailed, Lang::Fr) => "L'enregistrement a échoué",
-        (Key::ToastReplayFailed, Lang::En) => "The replay could not be saved",
-        (Key::ToastReplayFailed, Lang::Fr) => "Le replay n'a pas pu être enregistré",
+        (Key::ToastCaptureFailed, Lang::En) => "Capture failed",
+        (Key::ToastCaptureFailed, Lang::Fr) => "Échec de la capture",
+        (Key::ToastRecordingFailed, Lang::En) => "Recording failed",
+        (Key::ToastRecordingFailed, Lang::Fr) => "Échec de l'enregistrement",
+        (Key::ToastReplayFailed, Lang::En) => "Replay not saved",
+        (Key::ToastReplayFailed, Lang::Fr) => "Replay non enregistré",
         (Key::ToastDiskFull, Lang::En) => {
             "The disk is full: free some space or pick another folder."
         }
@@ -995,7 +987,7 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::WizWelcomeTitle, Lang::En) => "Welcome to Vixeeny",
         (Key::WizWelcomeTitle, Lang::Fr) => "Bienvenue dans Vixeeny",
         (Key::WizWelcomeBody, Lang::En) => "Everything can be changed later in the settings.",
-        (Key::WizWelcomeBody, Lang::Fr) => "Tout se change ensuite dans les paramètres.",
+        (Key::WizWelcomeBody, Lang::Fr) => "Tout reste modifiable dans les paramètres.",
         (Key::WizLanguageLabel, Lang::En) => "Language",
         (Key::WizLanguageLabel, Lang::Fr) => "Langue",
         (Key::WizLanguageAuto, Lang::En) => "Automatic",
@@ -1042,19 +1034,17 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::UpdateFound, Lang::Fr) => "La version {version} est disponible",
         (Key::UpdateChecking, Lang::En) => "Checking…",
         (Key::UpdateChecking, Lang::Fr) => "Vérification…",
-        (Key::UpdateCheckFailed, Lang::En) => {
-            "The check failed: no network, or GitHub is unreachable."
-        }
+        (Key::UpdateCheckFailed, Lang::En) => "Check failed: no network, or GitHub unreachable.",
         (Key::UpdateCheckFailed, Lang::Fr) => {
-            "La vérification a échoué : pas de réseau, ou GitHub est injoignable."
+            "Vérification impossible : pas de réseau, ou GitHub injoignable."
         }
         (Key::UpdateInstalling, Lang::En) => "Restarting…",
         (Key::UpdateInstalling, Lang::Fr) => "Redémarrage…",
         (Key::ToastAudioLost, Lang::En) => {
-            "An audio source was lost (the track stays silent until it returns)"
+            "Audio source lost: its track stays silent until it returns."
         }
         (Key::ToastAudioLost, Lang::Fr) => {
-            "Une source audio a été perdue (la piste reste muette jusqu'à son retour)"
+            "Source audio perdue : sa piste reste muette jusqu'à son retour."
         }
         (Key::SetReplayStorage, Lang::En) => "Replay storage",
         (Key::SetReplayStorage, Lang::Fr) => "Stockage du replay",
@@ -1088,16 +1078,16 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::AboutTagline, Lang::Fr) => "Captures et enregistrement d'écran pour Windows.",
         (Key::UiRetry, Lang::En) => "Try again",
         (Key::UiRetry, Lang::Fr) => "Réessayer",
-        (Key::UpdateCheckFailedShort, Lang::En) => "Couldn't check for updates",
-        (Key::UpdateCheckFailedShort, Lang::Fr) => "Impossible de vérifier les mises à jour",
-        (Key::UpdateFailedShort, Lang::En) => "The update failed",
-        (Key::UpdateFailedShort, Lang::Fr) => "La mise à jour a échoué",
+        (Key::UpdateCheckFailedShort, Lang::En) => "Update check failed",
+        (Key::UpdateCheckFailedShort, Lang::Fr) => "Vérification des mises à jour impossible",
+        (Key::UpdateFailedShort, Lang::En) => "Update failed",
+        (Key::UpdateFailedShort, Lang::Fr) => "Échec de la mise à jour",
         (Key::SetMicOn, Lang::En) => "Record the microphone",
         (Key::SetMicOn, Lang::Fr) => "Enregistrer le micro",
         (Key::SetMicDevice, Lang::En) => "Device",
         (Key::SetMicDevice, Lang::Fr) => "Périphérique",
-        (Key::SrcNoPrograms, Lang::En) => "No program is playing sound right now.",
-        (Key::SrcNoPrograms, Lang::Fr) => "Aucun programme ne joue de son pour le moment.",
+        (Key::SrcNoPrograms, Lang::En) => "No program is playing sound.",
+        (Key::SrcNoPrograms, Lang::Fr) => "Aucun programme ne joue de son.",
         (Key::SecReplay, Lang::En) => "Replay",
         (Key::SecReplay, Lang::Fr) => "Replay",
         (Key::TipMove, Lang::En) => "Move the zone or an annotation",
@@ -1183,10 +1173,10 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::SetAudioChannels, Lang::En) => "Channels",
         (Key::SetAudioChannels, Lang::Fr) => "Canaux",
         (Key::SetSurroundHint, Lang::En) => {
-            "5.1 and 7.1 need MKV with Opus, FLAC or PCM: this recording will be stereo."
+            "5.1 and 7.1 need MKV with Opus, FLAC or PCM: recorded in stereo here."
         }
         (Key::SetSurroundHint, Lang::Fr) => {
-            "Le 5.1 et le 7.1 demandent le MKV avec Opus, FLAC ou PCM : cet enregistrement sera en stéréo."
+            "Le 5.1 et le 7.1 demandent le MKV avec Opus, FLAC ou PCM : enregistré en stéréo ici."
         }
         (Key::UiLicenses, Lang::En) => "Third-party licences",
         (Key::UiLicenses, Lang::Fr) => "Licences tierces",
@@ -1273,10 +1263,10 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::UiReport, Lang::En) => "Report a problem",
         (Key::UiReport, Lang::Fr) => "Signaler un problème",
         (Key::AboutReportReady, Lang::En) => {
-            "Report ready, without personal data: drop the selected file into the GitHub page."
+            "Report ready, without personal data. Drop the selected file into the GitHub page."
         }
         (Key::AboutReportReady, Lang::Fr) => {
-            "Rapport prêt, sans données personnelles : glisse le fichier sélectionné dans la page GitHub."
+            "Rapport prêt, sans données personnelles. Glissez le fichier sélectionné dans la page GitHub."
         }
         (Key::SetDiskAlert, Lang::En) => "Low disk space alert",
         (Key::SetDiskAlert, Lang::Fr) => "Alerte d'espace disque",
@@ -1311,10 +1301,10 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::ToastDiskLow, Lang::En) => "Disk almost full",
         (Key::ToastDiskLow, Lang::Fr) => "Disque presque plein",
         (Key::ToastReplayDiskLow, Lang::En) => {
-            "{size} free on the replays' disk: the next replays may fail."
+            "{size} free on the replays disk: the next replays may fail."
         }
         (Key::ToastReplayDiskLow, Lang::Fr) => {
-            "{size} libres sur le disque des replays : les prochains replays pourraient échouer."
+            "{size} libres sur le disque des replays : les prochains peuvent échouer."
         }
         (Key::SetWidgetPlaceHint, Lang::En) => {
             "Click anywhere on the screen for a place of your own."
@@ -1342,28 +1332,24 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::OptNotifyNone, Lang::Fr) => "Jamais",
         (Key::HdrGames, Lang::En) => "Games",
         (Key::HdrGames, Lang::Fr) => "Jeux",
-        (Key::OptGameAuto, Lang::En) => "Automatic",
-        (Key::OptGameAuto, Lang::Fr) => "Automatique",
-        (Key::OptGameAlways, Lang::En) => "Always a game",
-        (Key::OptGameAlways, Lang::Fr) => "Toujours un jeu",
-        (Key::OptGameNever, Lang::En) => "Never a game",
-        (Key::OptGameNever, Lang::Fr) => "Jamais un jeu",
+        (Key::OptGameAuto, Lang::En) => "Detect automatically",
+        (Key::OptGameAuto, Lang::Fr) => "Détecter automatiquement",
+        (Key::OptGameAlways, Lang::En) => "Always record",
+        (Key::OptGameAlways, Lang::Fr) => "Toujours enregistrer",
+        (Key::OptGameNever, Lang::En) => "Never record",
+        (Key::OptGameNever, Lang::Fr) => "Ne jamais enregistrer",
         (Key::CutSave, Lang::En) => "Save",
         (Key::CutSave, Lang::Fr) => "Enregistrer",
         (Key::CutSaveAs, Lang::En) => "Save as…",
         (Key::CutSaveAs, Lang::Fr) => "Enregistrer sous…",
         (Key::CutCancel, Lang::En) => "Cancel",
         (Key::CutCancel, Lang::Fr) => "Annuler",
-        (Key::CutLossless, Lang::En) => {
-            "Starts on a key frame: written as is, at once and without loss"
-        }
+        (Key::CutLossless, Lang::En) => "Starts on a key frame: copied as is, instant and lossless",
         (Key::CutLossless, Lang::Fr) => {
-            "Commence sur une image clé : écrit tel quel, aussitôt et sans perte"
+            "Début sur une image clé : copie directe, instantanée et sans perte"
         }
-        (Key::CutReencode, Lang::En) => "Does not start on a key frame: the video is encoded again",
-        (Key::CutReencode, Lang::Fr) => {
-            "Ne commence pas sur une image clé : la vidéo est encodée à nouveau"
-        }
+        (Key::CutReencode, Lang::En) => "Does not start on a key frame: the video is re-encoded",
+        (Key::CutReencode, Lang::Fr) => "Début hors image clé : la vidéo est réencodée",
         (Key::CutPlay, Lang::En) => "Play (Space)",
         (Key::CutPlay, Lang::Fr) => "Lecture (Espace)",
         (Key::CutPause, Lang::En) => "Pause (Space)",
@@ -1382,8 +1368,8 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::ToastTextCopied, Lang::Fr) => "Texte copié",
         (Key::ToastNoText, Lang::En) => "No text found",
         (Key::ToastNoText, Lang::Fr) => "Aucun texte trouvé",
-        (Key::ToastOcrFailed, Lang::En) => "The text could not be read",
-        (Key::ToastOcrFailed, Lang::Fr) => "Le texte n'a pas pu être lu",
+        (Key::ToastOcrFailed, Lang::En) => "Text could not be read",
+        (Key::ToastOcrFailed, Lang::Fr) => "Lecture du texte impossible",
         (Key::ToastOcrNoLanguage, Lang::En) => {
             "Windows has no language with text recognition: add one in Time & language → Language & region."
         }
@@ -1450,6 +1436,8 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::ShortcutUnknownKey, Lang::Fr) => "Touche inconnue : {key}",
         (Key::ShortcutNeedsModifier, Lang::En) => "{key} needs CTRL, ALT, SHIFT or WIN",
         (Key::ShortcutNeedsModifier, Lang::Fr) => "{key} demande CTRL, ALT, SHIFT ou WIN",
+        (Key::SetOverlayOn, Lang::En) => "Turn on the side bar",
+        (Key::SetOverlayOn, Lang::Fr) => "Activer la barre latérale",
     }
 }
 

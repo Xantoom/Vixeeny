@@ -74,6 +74,11 @@ pub fn is_game(exe: &str, facts: Facts, lists: Lists<'_>) -> bool {
     !LAUNCHERS.contains(&exe) && (facts.exclusive || facts.installed_game || facts.protected)
 }
 
+/// Whether `exe` (the executable's file name, lower case) is a launcher, not a game.
+pub fn is_launcher(exe: &str) -> bool {
+    LAUNCHERS.contains(&exe)
+}
+
 /// The executable's file name, lower case, as the lists hold it.
 pub fn exe_name(path: &str) -> Option<String> {
     Path::new(path)

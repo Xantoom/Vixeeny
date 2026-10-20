@@ -123,7 +123,15 @@ pub fn overlay(env: &Env, config: &Config) -> Vec<Row> {
     let t = |k| env.t(k);
     let mut rows = vec![
         header("h_side", t(Key::GrpSideBar)),
-        crate::picked(
+        toggle(
+            "overlay_enabled",
+            t(Key::SetOverlayOn),
+            |c| c.overlay.enabled,
+            |c, v| c.overlay.enabled = v,
+        ),
+    ];
+    if config.overlay.enabled {
+        rows.push(crate::picked(
             crate::Picker::Edge,
             choice(
                 "overlay_edge",
@@ -137,15 +145,15 @@ pub fn overlay(env: &Env, config: &Config) -> Vec<Row> {
                 |c| c.overlay.edge.clone(),
                 |c, v| c.overlay.edge = v,
             ),
-        ),
-        header("h_widget", t(Key::GrpWidget)),
-        toggle(
-            "widget",
-            t(Key::SetWidget),
-            |c| c.recording_widget.enabled,
-            |c, v| c.recording_widget.enabled = v,
-        ),
-    ];
+        ));
+    }
+    rows.push(header("h_widget", t(Key::GrpWidget)));
+    rows.push(toggle(
+        "widget",
+        t(Key::SetWidget),
+        |c| c.recording_widget.enabled,
+        |c, v| c.recording_widget.enabled = v,
+    ));
     if config.recording_widget.enabled {
         rows.push(hinted(
             crate::picked(
@@ -1050,20 +1058,46 @@ fn capture_mode(config: &Config) -> &str {
 }
 
 /// Switches what is recorded besides the microphone (the microphone is kept as it is).
+/// The device or the programs left are set aside, and come back with their mode.
 fn set_capture(config: &mut Config, mode: &str, first_output: Option<&str>) {
     let audio = &mut config.video.audio;
-    let kept_output = audio.sources.iter().find(|s| is_device(s)).cloned();
+    let program = |s: &String| s.starts_with("app:") && s != TARGET_SOURCE;
+    // What the mode left had chosen replaces what was set aside of the same kind.
+    let leaving: Vec<String> = audio
+        .sources
+        .iter()
+        .filter(|s| is_device(s) || program(s))
+        .cloned()
+        .collect();
+    if leaving.iter().any(|s| is_device(s)) {
+        audio.set_aside.retain(|s| !is_device(s));
+    }
+    if leaving.iter().any(program) {
+        audio.set_aside.retain(|s| !program(s));
+    }
+    audio.set_aside.extend(leaving);
     audio.sources.retain(|s| is_mic(s));
     match mode {
         "system" => audio.sources.push("system".into()),
         "target" => audio.sources.push(TARGET_SOURCE.into()),
         "output" => {
-            if let Some(out) = kept_output.or_else(|| first_output.map(str::to_owned)) {
+            let kept = audio.set_aside.iter().find(|s| is_device(s)).cloned();
+            if let Some(out) = kept.or_else(|| first_output.map(str::to_owned)) {
                 audio.sources.push(out);
             }
         }
+        "programs" => {
+            let kept: Vec<String> = audio
+                .set_aside
+                .iter()
+                .filter(|s| program(s))
+                .cloned()
+                .collect();
+            audio.sources.extend(kept);
+        }
         _ => {}
     }
+    audio.set_aside.retain(|s| !audio.sources.contains(s));
     audio.capture = mode.to_owned();
 }
 
@@ -1476,24 +1510,21 @@ pub fn replay(env: &Env, config: &Config) -> Vec<Row> {
         },
         |c, v| c.replay.after_seconds = v.parse().unwrap_or(0),
     );
-    // What only matters while the replay runs.
-    let running = |row: Row| {
-        if config.replay.enabled {
-            row
-        } else {
-            crate::greyed(row)
-        }
-    };
+    let enabled = toggle(
+        "replay_enabled",
+        t(Key::SetReplayStart),
+        |c| c.replay.enabled,
+        |c, v| c.replay.enabled = v,
+    );
+    // The rest only matters while the replay runs.
+    if !config.replay.enabled {
+        return vec![enabled];
+    }
     let mut rows = vec![
-        toggle(
-            "replay_enabled",
-            t(Key::SetReplayStart),
-            |c| c.replay.enabled,
-            |c, v| c.replay.enabled = v,
-        ),
-        running(duration),
-        running(after),
-        running(storage),
+        enabled,
+        duration,
+        after,
+        storage,
         choice(
             "replay_notify",
             t(Key::SetReplayNotify),
@@ -1531,8 +1562,8 @@ pub fn replay(env: &Env, config: &Config) -> Vec<Row> {
     rows
 }
 
-/// The programs open now, and those of the user's lists: each one automatic (the replay
-/// looks for signs of a game), always a game, or never one.
+/// The games open now, and the programs of the user's lists: each one automatic (the replay
+/// looks for signs of a game), always recorded, or never.
 fn game_rows(env: &Env, config: &Config) -> Vec<Row> {
     let t = |k| env.t(k);
     let (games, open) = crate::expander(env, "games", t(Key::HdrGames));
@@ -1545,6 +1576,7 @@ fn game_rows(env: &Env, config: &Config) -> Vec<Row> {
         .programs
         .iter()
         .map(|p| (p.id.to_lowercase(), p.name.clone(), p.icon.clone()))
+        .filter(|(id, ..)| env.audio.games.contains(id))
         .collect();
     for exe in config.replay.always.iter().chain(&config.replay.never) {
         if !programs.iter().any(|(id, ..)| id == exe) {

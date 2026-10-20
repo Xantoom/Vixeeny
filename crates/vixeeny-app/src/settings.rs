@@ -598,10 +598,12 @@ fn audio_devices() -> vixeeny_settings::AudioDevices {
                 })
                 .collect()
         };
+        let (programs, games) = programs(vixeeny_audio::list_applications());
         AudioDevices {
             outputs: devices(vixeeny_audio::list_outputs()),
             inputs: devices(vixeeny_audio::list_microphones()),
-            programs: programs(vixeeny_audio::list_applications()),
+            programs,
+            games,
         }
     }
 }
@@ -621,8 +623,12 @@ const SHELL_PROGRAMS: &[&str] = &[
 /// The programs that can be recorded, once each (a browser has many processes): those with an
 /// audio session, and those with a window (a browser closes its audio process while silent).
 /// Named as their executable describes itself ("Spotify" rather than "Spotify.exe"), with
-/// their icon; those playing first, then by name.
-fn programs(apps: Vec<vixeeny_audio::AppInfo>) -> Vec<vixeeny_settings::AudioEntry> {
+/// their icon; those playing first, then by name. With them, those that look like games
+/// (executable names, lower case).
+fn programs(apps: Vec<vixeeny_audio::AppInfo>) -> (Vec<vixeeny_settings::AudioEntry>, Vec<String>) {
+    use vixeeny_platform::games;
+    let signals = games::GameSignals::read();
+    let mut found = Vec::new();
     let windowed = vixeeny_platform::top_level_windows()
         .unwrap_or_default()
         .into_iter()
@@ -648,6 +654,12 @@ fn programs(apps: Vec<vixeeny_audio::AppInfo>) -> Vec<vixeeny_settings::AudioEnt
         .filter(|a| seen.insert(a.exe.to_ascii_lowercase()))
         .map(|a| {
             let path = vixeeny_platform::process_path(a.pid);
+            let exe = a.exe.to_ascii_lowercase();
+            if !games::is_launcher(&exe)
+                && path.as_deref().is_some_and(|p| signals.installed_game(p))
+            {
+                found.push(exe);
+            }
             let meta = path
                 .as_deref()
                 .map(vixeeny_platform::exe_metadata)
@@ -678,7 +690,7 @@ fn programs(apps: Vec<vixeeny_audio::AppInfo>) -> Vec<vixeeny_settings::AudioEnt
         b_on.cmp(a_on)
             .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
-    entries.into_iter().map(|(_, e)| e).collect()
+    (entries.into_iter().map(|(_, e)| e).collect(), found)
 }
 
 /// What this computer is made of, for the general page.

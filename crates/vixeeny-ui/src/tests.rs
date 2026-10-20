@@ -120,6 +120,8 @@ fn settings_apply_immediately() {
     w.invoke_row_chosen("widget_corner".into(), 4); // top left, centre, right, bottom…
     assert_eq!(panel.config().recording_widget.corner, "bottom_center");
     w.invoke_row_text("widget_corner".into(), "custom:300:700".into());
+    // A text is applied once the event in progress ends.
+    slint::platform::update_timers_and_animations();
     let c = panel.config();
     assert_eq!(c.recording_widget.corner, "custom");
     assert_eq!(c.recording_widget.custom, (0.3, 0.7));
@@ -386,10 +388,13 @@ fn shortcuts_are_edited_in_place_and_conflicts_are_explained() {
         !panel.key("ShiftLeft", false),
         "recorded: the keys are free again"
     );
-    // Escape empties the slot.
+    // Escape cancels: the slot keeps its shortcut.
     w.invoke_shortcut_record(7, 0);
     assert!(panel.key("Escape", true));
-    assert_eq!(panel.config().hotkeys.replay_toggle, ["Shift+Ctrl+F10"]);
+    assert_eq!(
+        panel.config().hotkeys.replay_toggle,
+        ["Ctrl+Shift+F9", "Shift+Ctrl+F10"]
+    );
 }
 
 #[test]
@@ -451,6 +456,7 @@ fn every_page_of_the_settings_renders() {
             },
             entry("chrome.exe", "Google Chrome"),
         ],
+        games: Vec::new(),
     });
     {
         use vixeeny_settings::machine::{Cpu, Disk, Gpu, Machine, Module, Screen};

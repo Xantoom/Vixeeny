@@ -1177,8 +1177,11 @@ pub fn exe_metadata(path: &str) -> crate::ExeMetadata {
             let (ptr, len) = query(&format!("\\StringFileInfo\\{lang}\\{name}"))?;
             // SAFETY: a string value is `len` UTF-16 units including the terminating NUL.
             let units = unsafe { std::slice::from_raw_parts(ptr.cast::<u16>(), len as usize) };
-            let text = String::from_utf16_lossy(units);
-            let text = text.trim_end_matches('\0').trim();
+            // Some files give a length that runs past the NUL, into the next entry: the text
+            // ends at the first NUL.
+            let end = units.iter().position(|u| *u == 0).unwrap_or(units.len());
+            let text = String::from_utf16_lossy(&units[..end]);
+            let text = text.trim();
             (!text.is_empty()).then(|| text.to_owned())
         })
     };

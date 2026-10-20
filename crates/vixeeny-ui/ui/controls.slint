@@ -198,6 +198,15 @@ export component Check inherits Rectangle {
     accessible-label: root.text;
 }
 
+// The text fields: a press outside the one with the focus takes the focus away from it.
+export global Fields {
+    // The pointer is over the field with the focus.
+    in-out property <bool> kept;
+    // Goes up for each press elsewhere: the fields let go of the focus.
+    in-out property <int> blur;
+    public function pressed() { if (!self.kept) { self.blur += 1; } }
+}
+
 export component TextBox inherits Rectangle {
     in property <string> text;
     in property <string> placeholder;
@@ -224,7 +233,8 @@ export component TextBox inherits Rectangle {
         x: (parent.width - self.width) / 2;
         border-radius: 1px;
         background: Theme.accent;
-        animate width, x { duration: Theme.t-normal; easing: cubic-bezier(0.2, 0, 0, 1); }
+        // The position follows the width: animating both would shift it off centre.
+        animate width { duration: Theme.t-normal; easing: cubic-bezier(0.2, 0, 0, 1); }
     }
     Text {
         x: 10px;
@@ -235,23 +245,32 @@ export component TextBox inherits Rectangle {
         font-size: 14px;
         vertical-alignment: center;
     }
-    touch := TouchArea { mouse-cursor: MouseCursor.text; }
-    input := TextInput {
-        x: 10px;
-        width: parent.width - 20px;
-        height: parent.height;
-        text: root.text;
-        enabled: root.enabled;
-        read-only: root.read-only;
-        color: Theme.text;
-        selection-background-color: Theme.accent;
-        selection-foreground-color: Theme.on-accent;
-        font-size: 14px;
-        vertical-alignment: center;
-        single-line: true;
-        edited => { root.edited(self.text); }
-        accepted => { root.accepted(self.text); }
-        changed has-focus => { if (!self.has-focus) { root.accepted(self.text); } }
+    // A press anywhere else in the window takes the focus away (`Fields`).
+    property <bool> kept: input.has-focus && touch.has-hover;
+    changed kept => { Fields.kept = self.kept; }
+    property <int> blur: Fields.blur;
+    changed blur => { input.clear-focus(); }
+    // The text inside: its hover covers the text too.
+    touch := TouchArea {
+        mouse-cursor: MouseCursor.text;
+        clicked => { input.focus(); }
+        input := TextInput {
+            x: 10px;
+            width: parent.width - 20px;
+            height: parent.height;
+            text: root.text;
+            enabled: root.enabled;
+            read-only: root.read-only;
+            color: Theme.text;
+            selection-background-color: Theme.accent;
+            selection-foreground-color: Theme.on-accent;
+            font-size: 14px;
+            vertical-alignment: center;
+            single-line: true;
+            edited => { root.edited(self.text); }
+            accepted => { root.accepted(self.text); }
+            changed has-focus => { if (!self.has-focus) { root.accepted(self.text); } }
+        }
     }
     accessible-role: text-input;
     accessible-label: root.placeholder;
@@ -841,6 +860,9 @@ export component ScrollArea inherits Rectangle {
     }
     // Back to the top.
     public function to-top() { fl.content-y = 0px; }
+    // A taller window or a shorter page: no room left under the end of the page.
+    property <length> lowest: min(0px, root.height - fl.content-height);
+    changed lowest => { if fl.content-y < self.lowest { fl.content-y = self.lowest; } }
     fl := Flickable {
         // What a tooltip belonged to has moved away from it.
         changed viewport-y => { Tip.text = ""; }
@@ -852,7 +874,7 @@ export component ScrollArea inherits Rectangle {
         visible: root.scrollable;
         property <bool> wide: bar-touch.has-hover || bar-touch.pressed;
         x: root.width - (self.wide ? 10px : 7px);
-        y: 2px + (root.height - 4px - self.height) * (-fl.content-y / max(1px, fl.content-height - root.height));
+        y: 2px + (root.height - 4px - self.height) * clamp(-fl.content-y / max(1px, fl.content-height - root.height), 0, 1);
         width: self.wide ? 8px : 4px;
         height: max(32px, (root.height - 4px) * root.height / max(1px, fl.content-height));
         border-radius: self.width / 2;
@@ -892,7 +914,10 @@ export component SearchBox inherits Rectangle {
     border-color: input.has-focus ? Theme.accent : Theme.control-stroke;
     background: input.has-focus ? (Theme.dark ? #1f1f1f : #ffffff) : (touch.has-hover ? Theme.control-hover : Theme.control);
     animate background, border-color { duration: Theme.t-fast; }
-    touch := TouchArea { mouse-cursor: MouseCursor.text; clicked => { input.focus(); } }
+    property <bool> kept: input.has-focus && touch.has-hover;
+    changed kept => { Fields.kept = self.kept; }
+    property <int> blur: Fields.blur;
+    changed blur => { input.clear-focus(); }
     Icon {
         x: 12px;
         y: (parent.height - self.height) / 2;
@@ -911,21 +936,25 @@ export component SearchBox inherits Rectangle {
         vertical-alignment: center;
         overflow: elide;
     }
-    input := TextInput {
-        x: 38px;
-        width: parent.width - 38px - 32px;
-        height: parent.height;
-        text <=> root.text;
-        color: Theme.text;
-        selection-background-color: Theme.accent;
-        selection-foreground-color: Theme.on-accent;
-        font-size: 14px;
-        vertical-alignment: center;
-        single-line: true;
-        edited => { root.edited(self.text); }
-        key-pressed(e) => {
-            if e.text == Key.Escape { root.clear(); return accept; }
-            reject
+    touch := TouchArea {
+        mouse-cursor: MouseCursor.text;
+        clicked => { input.focus(); }
+        input := TextInput {
+            x: 38px;
+            width: parent.width - 38px - 32px;
+            height: parent.height;
+            text <=> root.text;
+            color: Theme.text;
+            selection-background-color: Theme.accent;
+            selection-foreground-color: Theme.on-accent;
+            font-size: 14px;
+            vertical-alignment: center;
+            single-line: true;
+            edited => { root.edited(self.text); }
+            key-pressed(e) => {
+                if e.text == Key.Escape { root.clear(); return accept; }
+                reject
+            }
         }
     }
     if root.text != "" : IconButton {

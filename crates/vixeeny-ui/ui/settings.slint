@@ -493,8 +493,7 @@ component ShortcutLine inherits Rectangle {
     callback record(int);
     callback clear(int);
 
-    property <string> detail: root.entry.error != "" ? root.entry.error
-        : (root.recording-here ? root.t.keys-help : "");
+    property <string> detail: root.entry.error;
     property <bool> compact: root.second-w < root.key-w;
     height: max(56px, info.preferred-height + 24px);
     if root.divider : Rectangle {
@@ -518,7 +517,7 @@ component ShortcutLine inherits Rectangle {
         }
         if root.detail != "" : Text {
             text: root.detail;
-            color: root.entry.error != "" ? Theme.danger : Theme.text-2;
+            color: Theme.danger;
             font-size: 12px;
             wrap: word-wrap;
         }
@@ -799,6 +798,16 @@ export component SettingsWindow inherits Window {
             font-size: 24px;
             font-weight: 700;
             vertical-alignment: center;
+            overflow: elide;
+        }
+        // While a shortcut is recorded: how, under the title.
+        if root.section == 6 && root.recording-row >= 0 && !root.searching : Text {
+            x: 24px;
+            y: root.top + root.tab-h;
+            width: page.column;
+            text: root.t.keys-help;
+            color: Theme.accent;
+            font-size: 12px;
             overflow: elide;
         }
 

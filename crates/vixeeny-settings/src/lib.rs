@@ -266,6 +266,9 @@ pub struct AudioDevices {
     pub outputs: Vec<AudioEntry>,
     pub inputs: Vec<AudioEntry>,
     pub programs: Vec<AudioEntry>,
+    /// The programs (executable names, lower case) that look like games: those the replay
+    /// lists.
+    pub games: Vec<String>,
 }
 
 /// What the rows need to know about this machine.
@@ -923,6 +926,8 @@ mod tests {
     #[test]
     fn every_folder_sits_on_its_own_page() {
         let mut c = Config::default();
+        // The replay's settings show while it runs.
+        c.replay.enabled = true;
         for (section, id) in [
             (Section::Image, "dir_images"),
             (Section::Video, "dir_videos"),
@@ -995,10 +1000,12 @@ mod tests {
     #[test]
     fn the_replay_keeps_its_duration_and_storage() {
         let mut c = Config::default();
-        // Greyed while the replay is off.
+        // Only the switch while the replay is off.
         let off = rows(Section::Replay, &env(), &c);
-        assert!(row(&off, "replay_duration").greyed);
-        assert!(!row(&off, "replay_notify").greyed);
+        assert_eq!(
+            off.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+            ["replay_enabled"]
+        );
         c.replay.enabled = true;
         let replay = rows(Section::Replay, &env(), &c);
         let duration = row(&replay, "replay_duration");
@@ -1242,6 +1249,7 @@ mod tests {
                 name: "Spotify".into(),
                 icon: None,
             }],
+            games: Vec::new(),
         });
         let audio = rows(Section::Audio, &e, &c);
         // All the PC sound; the microphone is off, its choice left out.
@@ -1303,6 +1311,14 @@ mod tests {
             .apply(&mut c, Value::Bool(true))
             .unwrap();
         assert_eq!(c.video.audio.sources, ["mic:{in-1}", "app:spotify.exe"]);
+        // Another mode, then back: the device and the programs chosen come back.
+        c.video.audio.set_aside = vec!["out:{out-2}".into()];
+        set(&mut c, "system");
+        set(&mut c, "output");
+        assert_eq!(c.video.audio.sources, ["mic:{in-1}", "out:{out-2}"]);
+        set(&mut c, "programs");
+        assert_eq!(c.video.audio.sources, ["mic:{in-1}", "app:spotify.exe"]);
+        assert_eq!(c.video.audio.set_aside, ["out:{out-2}"]);
         // A ticked program that is closed now stays listed.
         c.video.audio.sources.push("app:game.exe".into());
         let audio = rows(Section::Audio, &e, &c);
@@ -1362,6 +1378,7 @@ mod tests {
         let fr = Env::new(Lang::Fr, "1");
         let mut c = Config::default();
         c.video.preset = "custom".into();
+        c.replay.enabled = true;
         assert!(matches("debit", "Débit audio (kbit/s)"));
         assert!(matches("AUDIO deb", "Débit audio (kbit/s)"));
         assert!(!matches("bit", "Débit audio"));
@@ -1405,6 +1422,7 @@ mod tests {
             })
         };
         let mut c = Config::default();
+        c.replay.enabled = true;
         c.replay.duration_seconds = 300;
         // Under the storage's name.
         let hint = |env: &Env, c: &Config| {
