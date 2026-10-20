@@ -41,7 +41,8 @@ use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
 use windows::Win32::System::Threading::{
-    CreateEventW, INFINITE, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+    AvRevertMmThreadCharacteristics, AvSetMmThreadCharacteristicsW, CreateEventW, INFINITE,
+    OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
     QueryFullProcessImageNameW, ResetEvent, SetEvent, WaitForMultipleObjects, WaitForSingleObject,
 };
 use windows::Win32::System::Variant::VT_BLOB;
@@ -876,8 +877,30 @@ impl WasapiSource {
     }
 }
 
+/// Has Windows schedule this thread as audio work (the "Audio" task of the multimedia class
+/// scheduler): a busy game does not delay it into gaps. Undone when dropped.
+struct AudioPriority(HANDLE);
+
+impl AudioPriority {
+    fn new() -> Option<Self> {
+        let mut index = 0;
+        // SAFETY: a constant task name and a valid out-pointer.
+        unsafe { AvSetMmThreadCharacteristicsW(windows::core::w!("Audio"), &raw mut index) }
+            .ok()
+            .map(Self)
+    }
+}
+
+impl Drop for AudioPriority {
+    fn drop(&mut self) {
+        // SAFETY: the handle `AvSetMmThreadCharacteristicsW` returned on this thread.
+        let _ = unsafe { AvRevertMmThreadCharacteristics(self.0) };
+    }
+}
+
 fn run(kind: &SourceKind, max_channels: usize, mut sink: Box<dyn AudioSink>, stop: &Event) {
     let _com = ComGuard::new();
+    let _priority = AudioPriority::new();
     let mut listening = match Listening::new() {
         Ok(l) => l,
         Err(e) => {
