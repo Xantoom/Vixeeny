@@ -562,6 +562,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     });
     let result = panel.window().run().map_err(|e| anyhow::anyhow!("{e}"));
     resume_hotkeys();
+    panel.flush();
     if let Some(config) = unsaved.borrow_mut().take() {
         file.borrow_mut().write(&config);
         finish_saving();

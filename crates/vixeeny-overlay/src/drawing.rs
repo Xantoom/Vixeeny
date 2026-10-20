@@ -5,17 +5,18 @@
 //! Everything is drawn into one bitmap the size of the area the annotations cover: the screens,
 //! then each annotation in order. A blur, a pixelation or a highlight works on what is under it,
 //! so the bitmap is copied aside first and the effect drawn back from the copy. Live, a second
-//! bitmap tells where something is drawn: only there does the result cover the screens.
+//! bitmap tells where something is drawn: only there does the result cover the screens, and
+//! the live pictures of the screens are copied in on the graphics card.
 
 use vixeeny_editor::render::{
     Segment, arrow_shape, letters, smooth, stroke_width, text_background,
 };
 use vixeeny_editor::{Annotation, Color, Point, Rect, RgbaImage};
 use windows::Win32::Graphics::Direct2D::Common::{
-    D2D_RECT_F, D2D_RECT_U, D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_BLEND_MODE_MULTIPLY,
+    D2D_RECT_F, D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_BLEND_MODE_MULTIPLY,
     D2D1_BORDER_MODE_HARD, D2D1_COLOR_F, D2D1_COMPOSITE_MODE, D2D1_COMPOSITE_MODE_DESTINATION_IN,
-    D2D1_COMPOSITE_MODE_SOURCE_OVER, D2D1_FIGURE_BEGIN_FILLED, D2D1_FIGURE_BEGIN_HOLLOW,
-    D2D1_FIGURE_END_CLOSED, D2D1_FIGURE_END_OPEN, D2D1_PIXEL_FORMAT,
+    D2D1_COMPOSITE_MODE_SOURCE_COPY, D2D1_COMPOSITE_MODE_SOURCE_OVER, D2D1_FIGURE_BEGIN_FILLED,
+    D2D1_FIGURE_BEGIN_HOLLOW, D2D1_FIGURE_END_CLOSED, D2D1_FIGURE_END_OPEN, D2D1_PIXEL_FORMAT,
 };
 use windows::Win32::Graphics::Direct2D::{
     CLSID_D2D1Blend, CLSID_D2D1Border, CLSID_D2D1ColorMatrix, CLSID_D2D1Crop,
@@ -34,28 +35,54 @@ use windows::Win32::Graphics::Direct2D::{
     D2D1_STROKE_STYLE_PROPERTIES1, D2D1_STROKE_TRANSFORM_TYPE_NORMAL, ID2D1Bitmap1,
     ID2D1DeviceContext, ID2D1Effect, ID2D1Image, ID2D1PathGeometry, ID2D1StrokeStyle1,
 };
+use windows::Win32::Graphics::Direct3D11::{D3D11_BOX, D3D11_TEXTURE2D_DESC, ID3D11Texture2D};
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
+use windows::Win32::Graphics::Dxgi::IDXGISurface;
 use windows::core::{Interface, Result};
 use windows_numerics::{Matrix3x2, Vector2};
 
 use crate::gfx::{Canvas, Gfx};
 
-/// A fresh picture of a part of the screens: BGRA rows `stride` bytes apart, with where its
-/// top-left corner is (whole-image pixels).
-#[derive(Debug, Clone)]
+/// A fresh picture of a part of the screens, on the graphics card: `width`×`height` pixels of
+/// `texture` (BGRA, on the editor's device) from `from`, to go at `x`, `y` (whole-image
+/// pixels).
 pub struct ScreenPart {
     pub x: u32,
     pub y: u32,
     pub width: u32,
     pub height: u32,
-    pub stride: usize,
-    pub bgra: Vec<u8>,
+    pub texture: ID3D11Texture2D,
+    pub from: (u32, u32),
+    /// Keeps the picture from being written over while it is used.
+    pub keep: Box<dyn std::any::Any>,
 }
 
-/// The letters of a text or of a marker's number, as a bitmap, and where it goes.
+impl std::fmt::Debug for ScreenPart {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ScreenPart")
+            .field("at", &(self.x, self.y, self.width, self.height))
+            .field("from", &self.from)
+            .finish_non_exhaustive()
+    }
+}
+
+/// The letters of a text or of a marker's number, as a bitmap, and where it goes from the
+/// whole pixels of the annotation's position (see [`letters_key`]).
 struct Letters {
     bitmap: ID2D1Bitmap1,
     at: D2D_RECT_F,
+}
+
+/// What a text's or a marker's letters look like, and the whole pixels the annotation is moved
+/// by from it: moved by whole pixels, the letters are the same bitmap. `None` for the others.
+fn letters_key(a: &Annotation) -> Option<(Annotation, (f32, f32))> {
+    let anchor = match a {
+        Annotation::Text { pos, .. } => *pos,
+        Annotation::Marker { center, .. } => *center,
+        _ => return None,
+    };
+    let shift = (anchor.x.floor(), anchor.y.floor());
+    Some((a.translated(-shift.0, -shift.1), shift))
 }
 
 /// What the drawing was last made from: the layers, the picture of the screens, live or not.
@@ -64,7 +91,7 @@ type Made = (usize, u64, u64, bool);
 pub struct Drawing {
     /// Whole-image pixels: x, y, width, height.
     pub area: (u32, u32, u32, u32),
-    /// The screens under the area.
+    /// The screens under the area (a target: live pictures are copied in).
     base: ID2D1Bitmap1,
     /// The picture of the screens `base` comes from (see `View::base_version`).
     pub base_version: u64,
@@ -312,9 +339,11 @@ impl Drawing {
             // SAFETY: plain creation call.
             unsafe { gfx.factory.CreateStrokeStyle(&props, None)? }
         };
+        let base = target(gfx, w, h)?;
+        Self::picture(gfx, &base, area, screens)?;
         Ok(Self {
             area,
-            base: Self::picture(gfx, area, screens)?,
+            base,
             base_version: version,
             feeds: 0,
             result: target(gfx, w, h)?,
@@ -328,37 +357,40 @@ impl Drawing {
         })
     }
 
-    /// The part of `screens` under `area`, as a bitmap.
+    /// Draws the part of `screens` under `area` into `base`: the image's rows go to the
+    /// graphics card as they are, which turns them to BGRA.
     fn picture(
         gfx: &Gfx,
-        (x, y, w, h): (u32, u32, u32, u32),
+        base: &ID2D1Bitmap1,
+        area: (u32, u32, u32, u32),
         screens: &RgbaImage,
-    ) -> Result<ID2D1Bitmap1> {
-        let mut bgra = Vec::with_capacity(w as usize * h as usize * 4);
-        for row in y..y + h {
-            let start = (row as usize * screens.width as usize + x as usize) * 4;
-            let Some(line) = screens.data.get(start..start + w as usize * 4) else {
-                return Err(windows::core::Error::from_hresult(
-                    windows::Win32::Foundation::E_INVALIDARG,
-                ));
-            };
-            for px in line.as_chunks::<4>().0 {
-                bgra.extend_from_slice(&[px[2], px[1], px[0], 255]);
+    ) -> Result<()> {
+        let source = gfx.bitmap(screens, area)?;
+        into(&gfx.dc, base, || {
+            // SAFETY: plain drawing call with a bitmap of the same device.
+            unsafe {
+                gfx.dc.DrawImage(
+                    &source,
+                    None,
+                    None,
+                    D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
+                    D2D1_COMPOSITE_MODE_SOURCE_COPY,
+                );
             }
-        }
-        gfx.bgra_bitmap(w, h, &bgra)
+            Ok(())
+        })
     }
 
     /// Takes picture `version` of the screens instead.
     pub fn set_screens(&mut self, gfx: &Gfx, screens: &RgbaImage, version: u64) -> Result<()> {
-        self.base = Self::picture(gfx, self.area, screens)?;
+        Self::picture(gfx, &self.base, self.area, screens)?;
         self.base_version = version;
         self.feeds += 1;
         Ok(())
     }
 
-    /// Takes a fresh picture of a part of the screens.
-    pub fn feed(&mut self, part: &ScreenPart) -> Result<()> {
+    /// Takes a fresh picture of a part of the screens, copied on the graphics card.
+    pub fn feed(&mut self, gfx: &Gfx, part: &ScreenPart) -> Result<()> {
         let (ax, ay, aw, ah) = self.area;
         let x0 = part.x.max(ax);
         let y0 = part.y.max(ay);
@@ -367,24 +399,43 @@ impl Drawing {
         if x1 <= x0 || y1 <= y0 {
             return Ok(());
         }
-        let offset = (y0 - part.y) as usize * part.stride + (x0 - part.x) as usize * 4;
-        let needed = offset + (y1 - y0 - 1) as usize * part.stride + (x1 - x0) as usize * 4;
-        if part.bgra.len() < needed {
+        let mut desc = D3D11_TEXTURE2D_DESC::default();
+        // SAFETY: `desc` is a valid out-pointer.
+        unsafe { part.texture.GetDesc(&mut desc) };
+        let (sx, sy) = (part.from.0 + (x0 - part.x), part.from.1 + (y0 - part.y));
+        let (w, h) = (
+            (x1 - x0).min(desc.Width.saturating_sub(sx)),
+            (y1 - y0).min(desc.Height.saturating_sub(sy)),
+        );
+        if w == 0 || h == 0 || desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM {
             return Ok(());
         }
-        let to = D2D_RECT_U {
-            left: x0 - ax,
-            top: y0 - ay,
-            right: x1 - ax,
-            bottom: y1 - ay,
+        // SAFETY: plain call.
+        let surface: IDXGISurface = unsafe { self.base.GetSurface()? };
+        let base: ID3D11Texture2D = surface.cast()?;
+        let source = D3D11_BOX {
+            left: sx,
+            top: sy,
+            front: 0,
+            right: sx + w,
+            bottom: sy + h,
+            back: 1,
         };
-        // SAFETY: the rows read lie inside `part.bgra` (checked above), `stride` bytes apart.
+        // SAFETY: both textures are BGRA on the editor's device; the box lies inside the
+        // source and, from `(x0 - ax, y0 - ay)`, inside the base (both checked above). The
+        // base is not being drawn into (only between `BeginDraw` and `EndDraw`).
         unsafe {
-            self.base.CopyFromMemory(
-                Some(&to),
-                part.bgra[offset..].as_ptr().cast(),
-                u32::try_from(part.stride).unwrap_or(u32::MAX),
-            )?;
+            let context = gfx.d3d.GetImmediateContext()?;
+            context.CopySubresourceRegion(
+                &base,
+                0,
+                x0 - ax,
+                y0 - ay,
+                0,
+                &part.texture,
+                0,
+                Some(&raw const source),
+            );
         }
         self.feeds += 1;
         Ok(())
@@ -429,17 +480,24 @@ impl Drawing {
                     | Annotation::Highlight { .. }
             )
         });
-        if uses_below && self.spare.is_none() {
+        // The bitmaps no longer needed go (one more may come with the next effect).
+        if !uses_below {
+            self.spare = None;
+        } else if self.spare.is_none() {
             self.spare = Some(target(gfx, w, h)?);
         }
         let needs_scratch = live
             || layers
                 .iter()
                 .any(|a| matches!(a, Annotation::Highlight { .. }));
-        if needs_scratch && self.scratch.is_none() {
+        if !needs_scratch {
+            self.scratch = None;
+        } else if self.scratch.is_none() {
             self.scratch = Some(target(gfx, w, h)?);
         }
-        if live && self.mask.is_none() {
+        if !live {
+            self.mask = None;
+        } else if self.mask.is_none() {
             self.mask = Some(target(gfx, w, h)?);
         }
         let result = &self.result;
@@ -625,18 +683,22 @@ impl Drawing {
         })
     }
 
-    /// The bitmaps of the letters of `layers`, kept from the last drawing when unchanged.
+    /// The bitmaps of the letters of `layers`, kept from the last drawing when unchanged or
+    /// only moved.
     fn make_letters(&mut self, gfx: &Gfx, layers: &[Annotation]) -> Result<()> {
         let mut old = std::mem::take(&mut self.letters);
         for a in layers {
-            if !matches!(a, Annotation::Text { .. } | Annotation::Marker { .. }) {
+            let Some((key, _)) = letters_key(a) else {
                 continue;
-            }
-            if let Some(i) = old.iter().position(|(was, _)| was == a) {
+            };
+            if let Some(i) = old.iter().position(|(was, _)| *was == key) {
                 self.letters.push(old.swap_remove(i));
                 continue;
             }
-            let made = match letters(a) {
+            if self.letters.iter().any(|(was, _)| *was == key) {
+                continue;
+            }
+            let made = match letters(&key) {
                 Some((image, x, y)) => Some(Letters {
                     bitmap: gfx.rgba_bitmap(image.width, image.height, &image.data)?,
                     at: D2D_RECT_F {
@@ -648,7 +710,7 @@ impl Drawing {
                 }),
                 None => None,
             };
-            self.letters.push((a.clone(), made));
+            self.letters.push((key, made));
         }
         Ok(())
     }
@@ -694,12 +756,21 @@ impl Drawing {
             Ok(())
         };
         let letters = |a: &Annotation| {
-            if let Some((_, Some(l))) = self.letters.iter().find(|(was, _)| was == a) {
+            let Some((key, (dx, dy))) = letters_key(a) else {
+                return;
+            };
+            if let Some((_, Some(l))) = self.letters.iter().find(|(was, _)| *was == key) {
+                let at = D2D_RECT_F {
+                    left: l.at.left + dx,
+                    top: l.at.top + dy,
+                    right: l.at.right + dx,
+                    bottom: l.at.bottom + dy,
+                };
                 // SAFETY: plain drawing call with a live bitmap.
                 unsafe {
                     dc.DrawBitmap(
                         &l.bitmap,
-                        Some(&l.at),
+                        Some(&at),
                         1.0,
                         D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
                         None,

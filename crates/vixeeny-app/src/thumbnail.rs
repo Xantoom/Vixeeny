@@ -14,7 +14,15 @@ pub fn thumbnail(path: &Path, max_side: u32) -> Option<(u32, u32, Vec<u8>)> {
     }
     let bytes = std::fs::read(path).ok()?;
     let img = vixeeny_image::decode(&bytes).ok()?;
-    let scale = (max_side as f32 / img.width.max(img.height) as f32).min(1.0);
+    Some(scaled(
+        &vixeeny_image::Bgra::new(img.width, img.height, img.width as usize * 4, &img.bgra),
+        max_side,
+    ))
+}
+
+/// `img` at most `max_side` pixels on its long side: RGBA.
+pub fn scaled(img: &vixeeny_image::Bgra<'_>, max_side: u32) -> (u32, u32, Vec<u8>) {
+    let scale = (max_side as f32 / img.width.max(img.height).max(1) as f32).min(1.0);
     let (w, h) = (
         ((img.width as f32 * scale).round() as u32).max(1),
         ((img.height as f32 * scale).round() as u32).max(1),
@@ -31,10 +39,13 @@ pub fn thumbnail(path: &Path, max_side: u32) -> Option<(u32, u32, Vec<u8>)> {
             let (mut b, mut g, mut r, mut n) = (0_u32, 0_u32, 0_u32, 0_u32);
             for sy in y0..y1.min(img.height as usize) {
                 for sx in x0..x1.min(img.width as usize) {
-                    let o = (sy * img.width as usize + sx) * 4;
-                    b += u32::from(img.bgra[o]);
-                    g += u32::from(img.bgra[o + 1]);
-                    r += u32::from(img.bgra[o + 2]);
+                    let o = sy * img.stride + sx * 4;
+                    let Some(px) = img.data.get(o..o + 3) else {
+                        continue;
+                    };
+                    b += u32::from(px[0]);
+                    g += u32::from(px[1]);
+                    r += u32::from(px[2]);
                     n += 1;
                 }
             }
@@ -42,7 +53,7 @@ pub fn thumbnail(path: &Path, max_side: u32) -> Option<(u32, u32, Vec<u8>)> {
             out.extend_from_slice(&[(r / n) as u8, (g / n) as u8, (b / n) as u8, 255]);
         }
     }
-    Some((w, h, out))
+    (w, h, out)
 }
 
 #[cfg(test)]
@@ -88,5 +99,19 @@ mod tests {
         assert_eq!(thumbnail(&path, 1000).map(|t| (t.0, t.1)), Some((400, 100)));
         assert!(thumbnail(&root.join("a.mp4"), 100).is_none());
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn an_image_in_memory_is_scaled_from_its_rows() {
+        // 4×2 BGRA, rows 20 bytes apart: left half blue, right half red.
+        let mut data = Vec::new();
+        for _ in 0..2 {
+            data.extend_from_slice(&[255, 0, 0, 255].repeat(2));
+            data.extend_from_slice(&[0, 0, 255, 255].repeat(2));
+            data.extend_from_slice(&[9; 4]);
+        }
+        let (w, h, rgba) = scaled(&vixeeny_image::Bgra::new(4, 2, 20, &data), 2);
+        assert_eq!((w, h), (2, 1));
+        assert_eq!(rgba, [0, 0, 255, 255, 255, 0, 0, 255]);
     }
 }

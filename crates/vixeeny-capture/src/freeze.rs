@@ -506,7 +506,12 @@ fn reader(adapter: i64) -> Result<(ID3D11Device, ID3D11DeviceContext), CaptureEr
     let mut kept = READER
         .lock()
         .map_err(|_| CaptureError::Os("reader lock".into()))?;
-    if kept.as_ref().is_none_or(|r| r.adapter != adapter) {
+    // SAFETY: plain call.
+    let removed = |r: &Reader| unsafe { r.device.GetDeviceRemovedReason() }.is_err();
+    if kept
+        .as_ref()
+        .is_none_or(|r| r.adapter != adapter || removed(r))
+    {
         let warming = WARMING.lock().ok().and_then(|mut w| w.take());
         *kept = Some(match warming.map(JoinHandle::join) {
             Some(Ok(Ok(made))) if made.adapter == adapter => made,
@@ -517,6 +522,12 @@ fn reader(adapter: i64) -> Result<(ID3D11Device, ID3D11DeviceContext), CaptureEr
         .as_ref()
         .ok_or_else(|| CaptureError::Os("no reader".into()))?;
     Ok((r.device.clone(), r.context.clone()))
+}
+
+/// The device that reads the frozen screens of `adapter` (made if needed): the editor draws
+/// with it too, rather than making one more.
+pub fn device(adapter: i64) -> Option<ID3D11Device> {
+    reader(adapter).ok().map(|(device, _)| device)
 }
 
 fn make_reader(adapter: i64) -> Result<Reader, CaptureError> {

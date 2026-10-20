@@ -773,7 +773,7 @@ const EXIT_TIMER: usize = 2;
 const DISMISS: usize = 1;
 
 struct Inner {
-    gfx: Gfx,
+    gfx: std::rc::Rc<Gfx>,
     theme: Theme,
     popup: Popup,
     strip: Piece<StripLook>,
@@ -1005,7 +1005,7 @@ impl SidePanel {
         geometry: (i32, i32, u32, u32),
         dpi: u32,
     ) -> Result<Self> {
-        let gfx = Gfx::new()?;
+        let gfx = Gfx::shared()?;
         let theme = Theme::new(Look {
             dark: state.dark,
             animations: state.animate,

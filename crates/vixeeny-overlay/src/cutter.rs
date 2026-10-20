@@ -392,7 +392,7 @@ impl Waker {
 type TipSize = ((u32, u32), (f32, f32));
 
 struct Inner {
-    gfx: Gfx,
+    gfx: std::rc::Rc<Gfx>,
     theme: Theme,
     u: f32,
     popup: Popup,
@@ -1188,7 +1188,7 @@ impl Cutter {
         frames: Frames,
         texts: CutterTexts,
     ) -> Result<Self> {
-        let gfx = Gfx::new()?;
+        let gfx = Gfx::shared()?;
         let u = dpi.max(48) as f32 / 96.0;
         let popup = Popup::new_window(&gfx, geometry, &texts.title)?;
         let layout = Layout::new(geometry.2 as f32 / u, geometry.3 as f32 / u, frames.aspect);

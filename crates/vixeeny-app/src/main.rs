@@ -98,9 +98,10 @@ fn perform(action: ActionId, config: &Config, frozen: Option<ipc::Frozen>) {
         }
         CaptureFullscreen | CaptureWindow | CaptureAllMonitors => {
             match direct_capture(action, config) {
-                Ok(path) => {
+                Ok((path, thumb)) => {
                     tracing::debug!("saved {}", path.display());
-                    toast::notify(config, &toast::Toast::Saved(toast::Saved::Image, path));
+                    let saved = toast::Toast::Saved(toast::Saved::Image, path);
+                    toast::notify_with(config, &saved, thumb);
                 }
                 Err(e) => {
                     tracing::error!("capture failed: {e:#}");
@@ -114,7 +115,12 @@ fn perform(action: ActionId, config: &Config, frozen: Option<ipc::Frozen>) {
     }
 }
 
-fn direct_capture(action: ActionId, config: &Config) -> anyhow::Result<std::path::PathBuf> {
+/// Takes and saves the capture; returns where, with the notification's thumbnail when it is
+/// shown.
+fn direct_capture(
+    action: ActionId,
+    config: &Config,
+) -> anyhow::Result<(std::path::PathBuf, Option<toast::Thumb>)> {
     use vixeeny_capture::{CaptureOptions, Capturer};
 
     let started = std::time::Instant::now();
@@ -142,13 +148,23 @@ fn direct_capture(action: ActionId, config: &Config) -> anyhow::Result<std::path
         tonemap: Some(tonemap_hdr),
     };
     let (format, settings) = image_output(config);
-    let copy = |image: &vixeeny_image::Bgra<'_>, encoded: Option<&[u8]>| {
-        if let Err(e) = clipboard::copy_bgra(config, image, encoded) {
+    // The notification's thumbnail is made from the picture saved, not from the file.
+    let thumb = std::sync::Mutex::new(None);
+    let after = |image: &vixeeny_image::Bgra<'_>, encoded: Option<&[u8]>| {
+        if config.general.notifications
+            && let Ok(mut slot) = thumb.lock()
+        {
+            *slot = Some(thumbnail::scaled(image, 640));
+        }
+        if config.image.copy_to_clipboard
+            && let Err(e) = clipboard::copy_bgra(config, image, encoded)
+        {
             tracing::warn!("clipboard: {e:#}");
         }
     };
     let destination = still::Destination {
-        after_save: config.image.copy_to_clipboard.then_some(&copy),
+        after_save: (config.image.copy_to_clipboard || config.general.notifications)
+            .then_some(&after),
         ..destination
     };
     let run = |backend: &mut vixeeny_capture::WgcBackend| {
@@ -183,7 +199,10 @@ fn direct_capture(action: ActionId, config: &Config) -> anyhow::Result<std::path
     }
     let path = result?;
     tracing::info!("screenshot taken in {:?}", started.elapsed());
-    Ok(path)
+    let thumb = thumb
+        .into_inner()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    Ok((path, thumb))
 }
 
 /// What a window capture is set on, by the setting: a blur of the window, or the accent colour
@@ -663,8 +682,15 @@ fn run() -> anyhow::Result<()> {
     let (first_action, first_frozen) = parse_action()?;
     // What the first action needs from the graphics card is made while the app starts: the
     // device reading the frozen screens, the capture device.
+    // The editor draws with the device reading the frozen screens; without them it makes its
+    // own, ahead too.
     if let Some(frozen) = &first_frozen {
         vixeeny_capture::freeze::warm(frozen);
+    } else if matches!(
+        first_action,
+        ActionId::CaptureRegion | ActionId::CaptureScrolling | ActionId::OverlayToggle
+    ) {
+        vixeeny_overlay::gfx::warm();
     }
     if matches!(
         first_action,

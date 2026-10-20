@@ -123,6 +123,11 @@ impl Editor {
         &self.recent
     }
 
+    /// Changes with every edit of the document (see [`History::revision`]).
+    pub fn revision(&self) -> u64 {
+        self.history.revision()
+    }
+
     pub fn can_undo(&self) -> bool {
         self.history.can_undo()
     }

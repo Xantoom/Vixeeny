@@ -406,7 +406,7 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
 }
 
 /// Tells the settings window which shortcuts did not register (the file is emptied when all
-/// did). Not in tests: they would write to the user's folder.
+/// did), when that changed. Not in tests: they would write to the user's folder.
 fn write_taken(failures: &[(Hotkey, String)]) {
     if cfg!(test) {
         return;
@@ -415,6 +415,10 @@ fn write_taken(failures: &[(Hotkey, String)]) {
         return;
     };
     let text: String = failures.iter().map(|(h, _)| format!("{h}\n")).collect();
+    // Unchanged, it is left alone: the settings window watches it.
+    if std::fs::read_to_string(&path).is_ok_and(|was| was == text) {
+        return;
+    }
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }

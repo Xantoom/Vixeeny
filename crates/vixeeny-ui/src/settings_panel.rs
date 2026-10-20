@@ -179,6 +179,10 @@ struct State {
     chord: RefCell<Chord>,
     on_recording: RefCell<Box<dyn Fn(bool)>>,
     on_change: RefCell<ChangeFn>,
+    /// A slider is held: its values are shown, and the host told once it is let go.
+    sliding: Cell<bool>,
+    /// A change the host was not told about yet (made while a slider was held).
+    unsaid: Cell<bool>,
     on_browse: RefCell<BrowseFn>,
     on_page_action: RefCell<PageFn>,
     on_section: RefCell<Box<dyn Fn(Section)>>,
@@ -639,8 +643,21 @@ impl State {
         )
     }
 
+    /// Tells the host the settings changed; while a slider is held, once it is let go.
     fn changed(&self) {
+        if self.sliding.get() {
+            self.unsaid.set(true);
+            return;
+        }
+        self.unsaid.set(false);
         (self.on_change.borrow())(&self.config.borrow());
+    }
+
+    fn slide(&self, on: bool) {
+        self.sliding.set(on);
+        if !on && self.unsaid.get() {
+            self.changed();
+        }
     }
 }
 
@@ -764,6 +781,8 @@ impl SettingsPanel {
             chord: RefCell::default(),
             on_recording: RefCell::new(Box::new(|_| {})),
             on_change: RefCell::new(Box::new(|_| {})),
+            sliding: Cell::new(false),
+            unsaid: Cell::new(false),
             on_browse: RefCell::new(Box::new(|_| None)),
             on_page_action: RefCell::new(Box::new(|_, _, _| {})),
             on_section: RefCell::new(Box::new(|_| {})),
@@ -790,9 +809,14 @@ impl SettingsPanel {
         self.state.config.borrow().clone()
     }
 
-    /// Called with the new settings after every change.
+    /// Called with the new settings after every change (a slider's, once it is let go).
     pub fn on_change(&self, f: impl Fn(&Config) + 'static) {
         *self.state.on_change.borrow_mut() = Box::new(f);
+    }
+
+    /// Tells about a change still held by a slider (the window closed while it was held).
+    pub fn flush(&self) {
+        self.state.slide(false);
     }
 
     /// Asks the host to choose a folder (starting at the given one).
@@ -1434,6 +1458,10 @@ impl SettingsPanel {
         w.on_row_number({
             let edit = edit.clone();
             move |id, n| edit(&id, Value::Int(i64::from(n)))
+        });
+        w.on_row_sliding({
+            let state = self.state.clone();
+            move |on| state.slide(on)
         });
         w.on_row_text({
             let edit = edit.clone();

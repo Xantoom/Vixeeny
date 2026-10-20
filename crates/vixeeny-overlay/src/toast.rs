@@ -375,10 +375,12 @@ impl Card {
 }
 
 struct Shared {
-    gfx: Gfx,
+    gfx: std::rc::Rc<Gfx>,
     /// The card on screen, numbered.
     current: RefCell<Option<(u64, Rc<Card>)>>,
     count: Cell<u64>,
+    /// A card went: what it held is given back once its message is done.
+    trim_due: Cell<bool>,
 }
 
 impl Shared {
@@ -399,9 +401,20 @@ impl Shared {
         if let Some(done) = done {
             done(event);
         }
+        self.trim_due.set(true);
     }
 
     fn message(&self, id: u64, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
+        let result = self.handle(id, msg, wparam, lparam);
+        // Once the card is gone (dropped with the message), unless `done` showed another: the
+        // process waits for the next one with as little as it can hold.
+        if self.trim_due.take() && self.current.borrow().is_none() {
+            self.gfx.trim();
+        }
+        result
+    }
+
+    fn handle(&self, id: u64, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
         if let Some(r) = popup::passive(msg) {
             return Some(r);
         }
@@ -510,9 +523,10 @@ impl Toasts {
     pub fn new() -> Result<Self> {
         Ok(Self {
             shared: Rc::new(Shared {
-                gfx: Gfx::new()?,
+                gfx: Gfx::shared()?,
                 current: RefCell::default(),
                 count: Cell::new(0),
+                trim_due: Cell::new(false),
             }),
         })
     }

@@ -48,7 +48,7 @@ use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_ALPHA_MODE_IGNORE, DXGI_ALPHA_MODE_PREMULTIPLIED, DXGI_FORMAT_B8G8R8A8_UNORM,
     DXGI_FORMAT_R8G8B8A8_UNORM,
 };
-use windows::Win32::Graphics::Dxgi::IDXGIDevice;
+use windows::Win32::Graphics::Dxgi::{IDXGIDevice, IDXGIDevice3};
 use windows::core::{HSTRING, Interface, Result, w};
 use windows_numerics::{Matrix3x2, Vector2};
 
@@ -146,12 +146,102 @@ fn inter_collection(dwrite: &IDWriteFactory) -> Result<IDWriteFontCollection> {
     }
 }
 
+/// A Direct3D device made ahead, for the next [`Gfx::shared`] of a thread.
+struct Offered(ID3D11Device);
+
+// SAFETY: a Direct3D 11 device is free-threaded; it is handed over, not shared.
+unsafe impl Send for Offered {}
+
+static OFFERED: std::sync::Mutex<Option<Offered>> = std::sync::Mutex::new(None);
+static WARMING: std::sync::Mutex<Option<std::thread::JoinHandle<Option<Offered>>>> =
+    std::sync::Mutex::new(None);
+
+thread_local! {
+    /// The devices of this thread's windows, kept from one window to the next.
+    static SHARED: RefCell<Option<std::rc::Rc<Gfx>>> = const { RefCell::new(None) };
+}
+
+/// Starts making the Direct3D device on a thread of its own (a tenth of a second), while the
+/// program starts: the first window does not wait for it.
+pub fn warm() {
+    let made = std::thread::Builder::new()
+        .name("gfx-warm".into())
+        .spawn(|| hardware_device().ok().map(Offered));
+    if let (Ok(handle), Ok(mut warming)) = (made, WARMING.lock()) {
+        *warming = Some(handle);
+    }
+}
+
+/// A device already made (the one that read the frozen screens): the windows of this thread
+/// use it rather than making their own, unless they have one.
+pub fn offer_device(device: ID3D11Device) {
+    if SHARED.with(|s| s.borrow().as_ref().is_some_and(|g| g.alive())) {
+        return;
+    }
+    if let Ok(mut offered) = OFFERED.lock() {
+        *offered = Some(Offered(device));
+    }
+}
+
+fn hardware_device() -> Result<ID3D11Device> {
+    d3d_device(D3D_DRIVER_TYPE_HARDWARE).or_else(|e| {
+        tracing::warn!("no hardware Direct3D device ({e}), using WARP");
+        d3d_device(D3D_DRIVER_TYPE_WARP)
+    })
+}
+
 impl Gfx {
     pub fn new() -> Result<Self> {
-        let d3d = d3d_device(D3D_DRIVER_TYPE_HARDWARE).or_else(|e| {
-            tracing::warn!("no hardware Direct3D device ({e}), using WARP");
-            d3d_device(D3D_DRIVER_TYPE_WARP)
-        })?;
+        Self::with_device(hardware_device()?)
+    }
+
+    /// This thread's devices: made once (from the device offered or warmed, if any) and kept
+    /// for the next windows; made again if the graphics card was reset.
+    pub fn shared() -> Result<std::rc::Rc<Self>> {
+        if let Some(gfx) = SHARED.with(|s| s.borrow().clone())
+            && gfx.alive()
+        {
+            return Ok(gfx);
+        }
+        let offered = OFFERED.lock().ok().and_then(|mut o| o.take()).or_else(|| {
+            let warming = WARMING.lock().ok().and_then(|mut w| w.take())?;
+            warming.join().ok().flatten()
+        });
+        let gfx = std::rc::Rc::new(match offered {
+            Some(Offered(device)) => Self::with_device(device)?,
+            None => Self::new()?,
+        });
+        SHARED.with(|s| *s.borrow_mut() = Some(gfx.clone()));
+        Ok(gfx)
+    }
+
+    /// Whether the graphics card still works with this device (a driver update or a reset
+    /// removes it).
+    /// Gives back what the graphics card and the system keep for this process while nothing
+    /// is on screen; the next drawing takes again what it needs. For a process that waits.
+    pub fn trim(&self) {
+        // SAFETY: plain calls; nothing is being drawn (the caller shows nothing).
+        unsafe {
+            self.d2d.ClearResources(0);
+            if let Ok(context) = self.d3d.GetImmediateContext() {
+                context.ClearState();
+                context.Flush();
+            }
+            if let Ok(dxgi) = self.d3d.cast::<IDXGIDevice3>() {
+                dxgi.Trim();
+            }
+            let _ = windows::Win32::System::ProcessStatus::EmptyWorkingSet(
+                windows::Win32::System::Threading::GetCurrentProcess(),
+            );
+        }
+    }
+
+    fn alive(&self) -> bool {
+        // SAFETY: plain call.
+        unsafe { self.d3d.GetDeviceRemovedReason() }.is_ok()
+    }
+
+    fn with_device(d3d: ID3D11Device) -> Result<Self> {
         let dxgi: IDXGIDevice = d3d.cast()?;
         // SAFETY: plain factory and device creation on live objects.
         let (factory, d2d, dc, dcomp, dwrite) = unsafe {

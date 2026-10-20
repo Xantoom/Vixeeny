@@ -9,9 +9,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use vixeeny_editor::{
-    BarSide, Color, Command, Key, KeyInput, Modifiers, Point, Rect, Session, Tool, View,
+    BarSide, Color, Command, CursorHint, Key, KeyInput, Modifiers, Point, Rect, Session, Tool, View,
 };
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Graphics::Direct3D11::ID3D11Device;
 use windows::Win32::Graphics::Dwm::DwmFlush;
 use windows::Win32::Graphics::Gdi::ValidateRect;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -62,8 +63,8 @@ pub trait Screens {
     fn grab(&self) -> Option<vixeeny_editor::RgbaImage>;
     /// Follows `area` (whole-image pixels: x, y, width, height) of the screens, the editor's
     /// windows left out, calling [`Wake::wake`] each time a new picture of it waits in
-    /// [`Screens::take`]. `None`: stops.
-    fn watch(&self, area: Option<(u32, u32, u32, u32)>, wake: Wake);
+    /// [`Screens::take`]. The pictures stay on `device`, the editor's. `None`: stops.
+    fn watch(&self, area: Option<(u32, u32, u32, u32)>, wake: Wake, device: &ID3D11Device);
     /// The newest pictures of the area followed.
     fn take(&self) -> Vec<ScreenPart>;
 }
@@ -92,6 +93,12 @@ const CARET_BLINK_MS: u32 = 530;
 /// The size ring stays this long after the wheel last turned.
 const BRUSH_TIMER: usize = 3;
 const BRUSH_MS: u32 = 700;
+/// Live pictures of the screens are shown at most once per this (60 a second): one that
+/// comes sooner waits for the rest of it.
+const LIVE_TIMER: usize = 4;
+/// A tooltip's surface size and its bubble's (see [`paint::tip_size`]).
+type TipSize = ((u32, u32), (f32, f32));
+const LIVE_PERIOD: std::time::Duration = std::time::Duration::from_micros(16_667);
 /// The opacity of a toolbar inside the zone while an annotation is drawn under it.
 const FADED: f32 = 0.12;
 
@@ -147,11 +154,13 @@ struct Ui {
 }
 
 struct Shared {
-    gfx: Gfx,
+    gfx: Rc<Gfx>,
     theme: Theme,
     u: f32,
     solids: Solids,
     session: RefCell<Session>,
+    /// The session as the windows show it now: what the pointer finds under it.
+    shown: RefCell<Option<Rc<View>>>,
     ui: RefCell<Ui>,
     panes: Vec<Pane>,
     handler: Box<CommandHandler>,
@@ -165,6 +174,12 @@ struct Shared {
     wake: Wake,
     /// The newest picture of each part followed.
     live_parts: RefCell<Vec<ScreenPart>>,
+    /// The size label's and the tooltip's last text, with their measured sizes.
+    label_size: RefCell<Option<(String, (u32, u32))>>,
+    tip_size: RefCell<Option<(String, TipSize)>>,
+    /// When live pictures were last shown, and whether newer ones wait for [`LIVE_TIMER`].
+    live_shown: Cell<Option<std::time::Instant>>,
+    live_deferred: Cell<bool>,
     /// The annotations as the graphics card draws them.
     drawing: RefCell<Option<Drawing>>,
     scrolling: Cell<bool>,
@@ -338,8 +353,46 @@ impl Shared {
         }
     }
 
+    /// The size of the size label showing `text`, measured when the text changes.
+    fn label_size(&self, text: &str) -> windows::core::Result<(u32, u32)> {
+        let mut cached = self.label_size.borrow_mut();
+        if let Some((was, size)) = cached.as_ref()
+            && was == text
+        {
+            return Ok(*size);
+        }
+        let size = paint::label_size(&self.gfx, self.u, text)?;
+        *cached = Some((text.to_owned(), size));
+        Ok(size)
+    }
+
+    /// The sizes of the tooltip showing `text` (see [`paint::tip_size`]), measured when the
+    /// text changes.
+    fn tip_size(&self, text: &str) -> windows::core::Result<TipSize> {
+        let mut cached = self.tip_size.borrow_mut();
+        if let Some((was, size)) = cached.as_ref()
+            && was == text
+        {
+            return Ok(*size);
+        }
+        let size = paint::tip_size(&self.gfx, self.u, text)?;
+        *cached = Some((text.to_owned(), size));
+        Ok(size)
+    }
+
+    /// The view the windows show (computed once per change, see [`Self::update`]).
+    fn shown(&self) -> Rc<View> {
+        if let Some(view) = self.shown.borrow().as_ref() {
+            return view.clone();
+        }
+        let view = Rc::new(self.session.borrow().view());
+        *self.shown.borrow_mut() = Some(view.clone());
+        view
+    }
+
     fn update(&self) -> windows::core::Result<()> {
-        let view = self.session.borrow().view();
+        let view = Rc::new(self.session.borrow().view());
+        *self.shown.borrow_mut() = Some(view.clone());
         self.sync_typing(&view);
         if let Err(e) = self.sync_drawing(&view) {
             tracing::warn!("annotations not drawn: {e}");
@@ -350,7 +403,7 @@ impl Shared {
             self.update_pane(pane, &view, &ui)?;
         }
         drop(ui);
-        self.update_pointer(&view);
+        self.update_pointer(view.cursor);
         self.follow(&view);
         // SAFETY: plain call.
         unsafe { self.gfx.dcomp.Commit() }
@@ -373,7 +426,7 @@ impl Shared {
             _ => {
                 let mut d = Drawing::new(&self.gfx, area, session.base(), view.base_version)?;
                 for part in self.live_parts.borrow().iter() {
-                    d.feed(part)?;
+                    d.feed(&self.gfx, part)?;
                 }
                 *slot = Some(d);
             }
@@ -467,7 +520,7 @@ impl Shared {
         // The size label.
         match &view.size_label {
             Some((text, at)) if zone.is_some_and(|z| pane.sees(z, 40.0 * u)) => {
-                let size = paint::label_size(gfx, u, text)?;
+                let size = self.label_size(text)?;
                 pane.label.show(
                     gfx,
                     text,
@@ -580,7 +633,7 @@ impl Shared {
                     .and_then(|k| Some((k, self.tip_text(k, &ui.picks, view.live)?)));
                 match tip {
                     Some((k, text)) if !text.is_empty() => {
-                        let ((w, h), bubble) = paint::tip_size(gfx, u, &text)?;
+                        let ((w, h), bubble) = self.tip_size(&text)?;
                         let look = TipLook { button: k, text };
                         pane.tip.show(
                             gfx,
@@ -650,7 +703,7 @@ impl Shared {
     }
 
     /// The pointer's shape where it is.
-    fn update_pointer(&self, view: &View) {
+    fn update_pointer(&self, cursor: CursorHint) {
         let mut ui = self.ui.borrow_mut();
         let shape = match (ui.press, ui.hover) {
             (Some(Press::Button(_) | Press::Panel(_)), _) | (None, Some(Hover::Button(_))) => {
@@ -660,7 +713,7 @@ impl Shared {
             (Some(Press::Picking(_)), _) | (None, Some(Hover::Bar | Hover::Panel(_))) => {
                 Pointer::Arrow
             }
-            _ => Pointer::Zone(view.cursor),
+            _ => Pointer::Zone(cursor),
         };
         if ui.pointer != Some(shape) && ui.pointer_pane.is_some() {
             ui.pointer = Some(shape);
@@ -671,7 +724,7 @@ impl Shared {
 
     /// The toolbar or panel control at `(x, y)` (window pixels of `pane`).
     fn hit(&self, pane: &Pane, x: f32, y: f32) -> Option<Hover> {
-        let view = self.session.borrow().view();
+        let view = self.shown();
         let ui = self.ui.borrow();
         let u = self.u;
         if let Some((px, py)) = self.panel_in(pane, &view, &ui) {
@@ -717,7 +770,7 @@ impl Shared {
                     .ui
                     .borrow()
                     .pointer
-                    .unwrap_or(Pointer::Zone(vixeeny_editor::CursorHint::Crosshair));
+                    .unwrap_or(Pointer::Zone(CursorHint::Crosshair));
                 // SAFETY: plain call with a system cursor.
                 unsafe { SetCursor(Some(window::cursor(shape))) };
                 return Some(LRESULT(1));
@@ -850,8 +903,8 @@ impl Shared {
                 // A hover that changes nothing on screen costs nothing (the size ring follows
                 // the pointer).
                 if !changed && !moved && !self.ui.borrow().brush {
-                    let view = self.session.borrow().view();
-                    self.update_pointer(&view);
+                    let cursor = self.session.borrow().cursor_hint();
+                    self.update_pointer(cursor);
                     return;
                 }
             }
@@ -999,7 +1052,7 @@ impl Shared {
     }
 
     fn panel_click(&self, hit: PanelHit) {
-        let view = self.session.borrow().view();
+        let view = self.shown();
         let mut session = self.session.borrow_mut();
         let mut ui = self.ui.borrow_mut();
         match hit {
@@ -1033,7 +1086,7 @@ impl Shared {
 
     /// Picks a colour in the picker from the pointer at `(x, y)`.
     fn pick(&self, pane: &Pane, hit: PanelHit, x: f32, y: f32) {
-        let view = self.session.borrow().view();
+        let view = self.shown();
         let Some((px, py)) = self.panel_in(pane, &view, &self.ui.borrow()) else {
             return;
         };
@@ -1253,6 +1306,12 @@ impl Shared {
                 drop(ui);
                 self.refresh();
             }
+            LIVE_TIMER => {
+                // SAFETY: plain call on a window of this thread.
+                let _ = unsafe { KillTimer(Some(self.panes[i].hwnd), LIVE_TIMER) };
+                self.live_deferred.set(false);
+                self.screens_changed();
+            }
             BRUSH_TIMER => {
                 // SAFETY: plain call on a window of this thread.
                 let _ = unsafe { KillTimer(Some(self.panes[i].hwnd), BRUSH_TIMER) };
@@ -1273,7 +1332,7 @@ impl Shared {
         if self.watched.take().is_some()
             && let Some(screens) = self.screens.borrow().as_ref()
         {
-            screens.watch(None, self.wake.clone());
+            screens.watch(None, self.wake.clone(), &self.gfx.d3d);
         }
     }
 
@@ -1287,13 +1346,29 @@ impl Shared {
         if self.watched.replace(area) != area {
             self.live_parts.borrow_mut().clear();
             if let Some(screens) = self.screens.borrow().as_ref() {
-                screens.watch(area, self.wake.clone());
+                screens.watch(area, self.wake.clone(), &self.gfx.d3d);
             }
         }
     }
 
     /// Takes the pictures of the screens waiting.
     fn screens_changed(&self) {
+        if self.live_deferred.get() {
+            return;
+        }
+        if let Some(wait) = self
+            .live_shown
+            .get()
+            .and_then(|shown| LIVE_PERIOD.checked_sub(shown.elapsed()))
+            .filter(|wait| !wait.is_zero())
+        {
+            // `pending` stays set: the pictures coming meanwhile wait for the timer too.
+            self.live_deferred.set(true);
+            let ms = u32::try_from(wait.as_millis() + 1).unwrap_or(u32::MAX);
+            // SAFETY: plain timer call on a window of this thread.
+            unsafe { SetTimer(Some(HWND(self.wake.hwnd as *mut _)), LIVE_TIMER, ms, None) };
+            return;
+        }
         self.wake.pending.store(false, Ordering::Release);
         let parts = match self.screens.borrow().as_ref() {
             Some(screens) if self.watched.get().is_some() => screens.take(),
@@ -1302,11 +1377,12 @@ impl Shared {
         if parts.is_empty() || self.closing.get() {
             return;
         }
+        self.live_shown.set(Some(std::time::Instant::now()));
         let mut kept = self.live_parts.borrow_mut();
         let mut drawing = self.drawing.borrow_mut();
         for part in parts {
             if let Some(d) = drawing.as_mut()
-                && let Err(e) = d.feed(&part)
+                && let Err(e) = d.feed(&self.gfx, &part)
             {
                 tracing::warn!("live screens not shown: {e}");
             }
@@ -1458,7 +1534,7 @@ impl Overlay {
     ) -> Result<Self, OverlayError> {
         session.set_ui_scale(ui_scale);
         let u = session.ui_scale();
-        let gfx = Gfx::new()?;
+        let gfx = Gfx::shared()?;
         let theme = Theme::new(look);
         let handle_side = paint::handle_side(u);
         let handle = gfx.surface(handle_side, handle_side)?;
@@ -1500,6 +1576,10 @@ impl Overlay {
             excluded: Cell::new(false),
             watched: Cell::new(None),
             live_parts: RefCell::default(),
+            label_size: RefCell::default(),
+            tip_size: RefCell::default(),
+            live_shown: Cell::new(None),
+            live_deferred: Cell::new(false),
             drawing: RefCell::default(),
             wake: Wake {
                 hwnd: first_hwnd,
@@ -1508,6 +1588,7 @@ impl Overlay {
             scrolling: Cell::new(false),
             busy: Cell::new(false),
             closing: Cell::new(false),
+            shown: RefCell::new(None),
         });
         CURRENT.with(|c| *c.borrow_mut() = Some(Rc::downgrade(&shared)));
         shared.refresh();

@@ -441,6 +441,8 @@ export component Slider inherits Rectangle {
     in property <int> step: 1;
     in property <bool> enabled: true;
     callback changed(int);
+    // Held (`true`) and let go: the values given meanwhile are only a preview of the last.
+    callback sliding(bool);
 
     min-width: 160px;
     height: 32px;
@@ -494,7 +496,14 @@ export component Slider inherits Rectangle {
     touch := TouchArea {
         enabled: root.enabled;
         mouse-cursor: pointer;
-        pointer-event(e) => { if (e.kind == PointerEventKind.down) { root.pick(self.mouse-x); } }
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) {
+                root.sliding(true);
+                root.pick(self.mouse-x);
+            } else if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) {
+                root.sliding(false);
+            }
+        }
         moved => { if (self.pressed) { root.pick(self.mouse-x); } }
     }
     accessible-role: slider;

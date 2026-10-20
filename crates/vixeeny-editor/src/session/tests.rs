@@ -512,4 +512,10 @@ fn the_layers_are_drawn_over_what_they_cover_by_blocks() {
     // Near the zone's edge, the zone bounds it.
     drag(&mut s, p(40.0, 40.0), p(50.0, 50.0));
     assert_eq!(s.view().layers_area, Some((10, 10, 374, 374)));
+    // Drawing past it: one more block out that way, so the next strokes fit.
+    drag(&mut s, p(390.0, 300.0), p(400.0, 310.0));
+    assert_eq!(s.view().layers_area, Some((10, 10, 630, 374)));
+    // Rubbing out what lay further: it stays as it is while the zone stays.
+    s.undo();
+    assert_eq!(s.view().layers_area, Some((10, 10, 630, 374)));
 }

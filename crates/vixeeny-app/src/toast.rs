@@ -3,7 +3,8 @@
 //! and a clear message with a way out when something fails. The cards are shown by a process of
 //! their own (`vixeeny-app --toast-host`), so they never hold up the next hotkey. It is started
 //! once and reads the next cards on its standard input: a card costs no new process. It ends with
-//! the process that started it (its input closes), once its card is gone.
+//! the process that started it (its input closes), once its card is gone. A capture's thumbnail
+//! goes along, made from the picture in memory: the card process does not read the file again.
 
 use std::path::PathBuf;
 
@@ -163,22 +164,49 @@ pub fn failure_text(error: &anyhow::Error, lang: vixeeny_common::i18n::Lang) -> 
     )
 }
 
+/// A thumbnail: width, height, RGBA.
+pub type Thumb = (u32, u32, Vec<u8>);
+
+/// The largest side of a thumbnail sent to the card process.
+const MAX_THUMB_SIDE: u32 = 1024;
+
 /// Shows the card, unless the user turned notifications off. Never blocks.
 pub fn notify(config: &Config, toast: &Toast) {
+    notify_with(config, toast, None);
+}
+
+/// [`notify`] with the thumbnail of the capture, made from the picture in memory.
+pub fn notify_with(config: &Config, toast: &Toast, thumb: Option<Thumb>) {
     // The general switch is about captures; a game starting has its own (`replay.notify`).
     if !config.general.notifications && !matches!(toast, Toast::Replay(..)) {
         return;
     }
-    let line = encode_line(&toast.to_args());
-    if let Err(e) = send_to_host(&line) {
+    if let Err(e) = send_to_host(&encode(toast, thumb.as_ref())) {
         tracing::warn!("cannot show the notification: {e}");
     }
+}
+
+/// The card's line, then the thumbnail's pixels when there is one (its size ends the line).
+fn encode(toast: &Toast, thumb: Option<&Thumb>) -> Vec<u8> {
+    let mut line = encode_line(&toast.to_args());
+    let Some((w, h, rgba)) = thumb.filter(|(w, h, rgba)| {
+        (1..=MAX_THUMB_SIDE).contains(w)
+            && (1..=MAX_THUMB_SIDE).contains(h)
+            && rgba.len() == *w as usize * *h as usize * 4
+    }) else {
+        return line.into_bytes();
+    };
+    line.pop();
+    line.push_str(&format!("\t{w}x{h}\n"));
+    let mut out = line.into_bytes();
+    out.extend_from_slice(rgba);
+    out
 }
 
 /// The card process of this process, if started.
 static HOST: std::sync::Mutex<Option<std::process::Child>> = std::sync::Mutex::new(None);
 
-fn send_to_host(line: &str) -> std::io::Result<()> {
+fn send_to_host(message: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
     let mut host = HOST
         .lock()
@@ -187,7 +215,7 @@ fn send_to_host(line: &str) -> std::io::Result<()> {
         && matches!(child.try_wait(), Ok(None))
         && let Some(stdin) = child.stdin.as_mut()
         && stdin
-            .write_all(line.as_bytes())
+            .write_all(message)
             .and_then(|()| stdin.flush())
             .is_ok()
     {
@@ -198,7 +226,7 @@ fn send_to_host(line: &str) -> std::io::Result<()> {
         .stdin(std::process::Stdio::piped())
         .spawn()?;
     if let Some(stdin) = child.stdin.as_mut() {
-        stdin.write_all(line.as_bytes())?;
+        stdin.write_all(message)?;
         stdin.flush()?;
     }
     *host = Some(child);
@@ -223,8 +251,21 @@ fn encode_line([kind, text]: &[String; 2]) -> String {
     out
 }
 
-fn decode_line(line: &str) -> Option<Toast> {
-    let (kind, escaped) = line.split_once('\t')?;
+/// The card, and the size of the thumbnail whose pixels follow the line.
+fn decode_line(line: &str) -> Option<(Toast, Option<(u32, u32)>)> {
+    let (kind, rest) = line.split_once('\t')?;
+    let (escaped, thumb) = match rest.split_once('\t') {
+        Some((escaped, size)) => {
+            let (w, h) = size.split_once('x')?;
+            let (w, h) = (w.parse().ok()?, h.parse().ok()?);
+            let sides = 1..=MAX_THUMB_SIDE;
+            if !sides.contains(&w) || !sides.contains(&h) {
+                return None;
+            }
+            (escaped, Some((w, h)))
+        }
+        None => (rest, None),
+    };
     let mut text = String::with_capacity(escaped.len());
     let mut chars = escaped.chars();
     while let Some(c) = chars.next() {
@@ -239,11 +280,12 @@ fn decode_line(line: &str) -> Option<Toast> {
             text.push(c);
         }
     }
-    Toast::from_args(kind, &text)
+    Some((Toast::from_args(kind, &text)?, thumb))
 }
 
-/// What the card shows, in the current language and theme.
-fn content_of(toast: &Toast) -> ToastContent {
+/// What the card shows, in the current language and theme; `thumb`, the capture's thumbnail
+/// when it came along (else it is made from the file).
+fn content_of(toast: &Toast, thumb: Option<Thumb>) -> ToastContent {
     use vixeeny_common::i18n::tr;
 
     let config = vixeeny_common::paths::config_file()
@@ -257,7 +299,7 @@ fn content_of(toast: &Toast) -> ToastContent {
     match toast {
         // A screenshot: its picture says it all.
         Toast::Saved(Saved::Image, path)
-            if let Some(thumb) = crate::thumbnail::thumbnail(path, 640) =>
+            if let Some(thumb) = thumb.or_else(|| crate::thumbnail::thumbnail(path, 640)) =>
         {
             ToastContent {
                 thumb: Some(thumb),
@@ -339,8 +381,8 @@ fn content_of(toast: &Toast) -> ToastContent {
 
 /// Shows the card for `toast` in a corner of the main monitor (see [`ToastContent::top`]);
 /// `act` runs once it is gone.
-fn show(toasts: &Toasts, toast: Toast) -> anyhow::Result<()> {
-    let content = content_of(&toast);
+fn show(toasts: &Toasts, toast: Toast, thumb: Option<Thumb>) -> anyhow::Result<()> {
+    let content = content_of(&toast, thumb);
     let monitors = vixeeny_platform::monitors()?;
     let monitor = monitors
         .iter()
@@ -398,7 +440,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
         Toast::from_args(kind, text).ok_or_else(|| anyhow::anyhow!("unknown toast `{kind}`"))?;
     vixeeny_platform::ensure_dpi_aware();
     let toasts = Toasts::new()?;
-    show(&toasts, toast)?;
+    show(&toasts, toast, None)?;
     vixeeny_overlay::popup::pump_while(|| !toasts.is_empty());
     Ok(())
 }
@@ -407,7 +449,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
 /// screen. Ends once the input is closed and no card is left.
 pub fn run_host() -> anyhow::Result<()> {
     use std::cell::Cell;
-    use std::io::BufRead;
+    use std::io::{BufRead, Read};
     use std::rc::Rc;
 
     vixeeny_platform::ensure_dpi_aware();
@@ -416,9 +458,9 @@ pub fn run_host() -> anyhow::Result<()> {
     // `None`: the input is closed.
     let (_mailbox, sender) = vixeeny_overlay::popup::mailbox({
         let (toasts, closed) = (toasts.clone(), closed.clone());
-        move |mail: Option<Toast>| match mail {
-            Some(toast) => {
-                if let Err(e) = show(&toasts, toast) {
+        move |mail: Option<(Toast, Option<Thumb>)>| match mail {
+            Some((toast, thumb)) => {
+                if let Err(e) = show(&toasts, toast, thumb) {
                     tracing::error!("notification: {e:#}");
                 }
             }
@@ -428,10 +470,29 @@ pub fn run_host() -> anyhow::Result<()> {
     std::thread::Builder::new()
         .name("toast-input".into())
         .spawn(move || {
-            for line in std::io::stdin().lock().lines().map_while(Result::ok) {
-                if let Some(toast) = decode_line(&line) {
-                    sender.send(Some(toast));
+            let mut input = std::io::stdin().lock();
+            let mut line = Vec::new();
+            loop {
+                line.clear();
+                match input.read_until(b'\n', &mut line) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {}
                 }
+                let text = String::from_utf8_lossy(&line);
+                let Some((toast, size)) = decode_line(text.trim_end_matches(['\n', '\r'])) else {
+                    continue;
+                };
+                let thumb = match size {
+                    Some((w, h)) => {
+                        let mut rgba = vec![0; w as usize * h as usize * 4];
+                        if input.read_exact(&mut rgba).is_err() {
+                            break;
+                        }
+                        Some((w, h, rgba))
+                    }
+                    None => None,
+                };
+                sender.send(Some((toast, thumb)));
             }
             sender.send(None);
         })?;
@@ -471,10 +532,28 @@ Merci"
         ] {
             let line = encode_line(&toast.to_args());
             assert_eq!(line.matches('\n').count(), 1);
-            assert_eq!(decode_line(line.trim_end_matches('\n')), Some(toast));
+            assert_eq!(
+                decode_line(line.trim_end_matches('\n')),
+                Some((toast, None))
+            );
         }
         assert_eq!(decode_line("nonsense\tx"), None);
         assert_eq!(decode_line("no tab"), None);
+    }
+
+    #[test]
+    fn a_thumbnail_follows_its_card_as_pixels() {
+        let toast = Toast::Saved(Saved::Image, PathBuf::from(r"C:\a\b.png"));
+        let rgba: Vec<u8> = (0..2 * 3 * 4).map(|i| i as u8).collect();
+        let message = encode(&toast, Some(&(2, 3, rgba.clone())));
+        let end = message.iter().position(|&b| b == b'\n').expect("a line");
+        let line = std::str::from_utf8(&message[..end]).expect("text");
+        assert_eq!(decode_line(line), Some((toast.clone(), Some((2, 3)))));
+        assert_eq!(&message[end + 1..], rgba);
+        // A thumbnail that does not match its size, or too large, is left out.
+        let bad = encode(&toast, Some(&(2, 3, vec![0; 5])));
+        assert_eq!(bad, encode_line(&toast.to_args()).into_bytes());
+        assert_eq!(decode_line("saved-image\tx\t5000x2"), None);
     }
 
     #[test]

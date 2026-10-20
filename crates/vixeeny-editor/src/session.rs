@@ -8,17 +8,21 @@ use std::rc::Rc;
 
 use crate::editor::{Editor, Modifiers, Outcome, Tool};
 use crate::geometry::{Point, Rect};
-use crate::model::{Annotation, Color};
+use crate::model::{Annotation, AnnotationId, Color};
 use crate::render::{RgbaImage, render_region};
 use crate::selection::{BarPlace, CursorHint, Selection, place_toolbar};
 
-/// Size of the toolbar, in image pixels (the UI lays out its content to fit).
 /// The drawing area of the layers grows by blocks of this many pixels (see
 /// [`View::layers_area`]).
 pub const LAYER_BLOCK: u32 = 128;
 /// Drawn around the annotations' bounds: joins and anti-aliasing reach a little past them.
 const LAYER_MARGIN: f32 = 8.0;
 
+type LayersKey = (u64, Option<AnnotationId>, Option<Annotation>);
+/// Whole image pixels: x, y, width, height.
+type Area = (u32, u32, u32, u32);
+
+/// Size of the toolbar, in image pixels (the UI lays out its content to fit).
 pub const TOOLBAR_SIZE: (f32, f32) = (651.0, 46.0);
 /// The thickness the tools start with, and the largest one, at 100 % (they grow with the
 /// interface scale).
@@ -88,8 +92,9 @@ pub struct View {
     /// gesture in progress. The same `Rc` comes back while nothing changes.
     pub layers: Rc<Vec<Annotation>>,
     /// Where they are drawn (whole image pixels: x, y, width, height): what they cover, in
-    /// the zone, rounded out to blocks of [`LAYER_BLOCK`] pixels so it changes seldom while
-    /// drawing. `None` while there is nothing to draw.
+    /// the zone, rounded out to blocks of [`LAYER_BLOCK`] pixels. It only grows while the zone
+    /// stays, by one more block where it grows, so it changes seldom while drawing. `None` while
+    /// there is nothing to draw.
     pub layers_area: Option<(u32, u32, u32, u32)>,
     /// Changes when the picture of the screens is replaced (see [`Session::replace_base`]).
     pub base_version: u64,
@@ -134,8 +139,11 @@ pub struct Session {
     ui_scale: f32,
     /// The monitors, in image pixels: the toolbar stays on one of them.
     screens: Vec<Rect>,
-    /// The layers last given (see [`View::layers`]).
-    layers: RefCell<Rc<Vec<Annotation>>>,
+    /// The layers last given (see [`View::layers`]), and what they were made from: the
+    /// document's revision, the annotation hidden and the gesture in progress.
+    layers: RefCell<(Rc<Vec<Annotation>>, Option<LayersKey>)>,
+    /// The last layers area given, and the zone it was for (see [`View::layers_area`]).
+    area: RefCell<Option<(Area, Area)>>,
     base_version: u64,
     /// The screens are shown live: the annotations are drawn over nothing (see
     /// [`Session::set_live`]).
@@ -160,6 +168,7 @@ impl Session {
             ui_scale: 1.0,
             screens: vec![bounds],
             layers: RefCell::default(),
+            area: RefCell::new(None),
             base_version: 0,
             live: false,
         }
@@ -577,6 +586,12 @@ impl Session {
     /// The annotations and the gesture in progress, bottom to top (see [`View::layers`]).
     fn layers(&self) -> Rc<Vec<Annotation>> {
         let hidden = self.editor.hidden();
+        let preview = self.editor.preview();
+        let key = (self.editor.revision(), hidden, preview);
+        let mut last = self.layers.borrow_mut();
+        if last.1.as_ref() == Some(&key) {
+            return last.0.clone();
+        }
         let layers: Vec<Annotation> = self
             .editor
             .doc
@@ -584,17 +599,30 @@ impl Session {
             .iter()
             .filter(|i| Some(i.id) != hidden)
             .map(|i| i.annotation.clone())
-            .chain(self.editor.preview())
+            .chain(key.2.clone())
             .collect();
-        let mut last = self.layers.borrow_mut();
-        if **last != layers {
-            *last = Rc::new(layers);
-        }
-        last.clone()
+        *last = (Rc::new(layers), Some(key));
+        last.0.clone()
     }
 
-    fn layers_area(&self, layers: &[Annotation]) -> Option<(u32, u32, u32, u32)> {
-        let (zx, zy, zw, zh) = self.zone_px()?;
+    fn layers_area(&self, layers: &[Annotation]) -> Option<Area> {
+        let mut kept = self.area.borrow_mut();
+        let zone = self.zone_px();
+        let needed = zone.and_then(|zone| Self::needed_area(zone, layers));
+        let (Some(zone), Some(needed)) = (zone, needed) else {
+            *kept = None;
+            return None;
+        };
+        let area = match *kept {
+            Some((z, last)) if z == zone => grown(last, needed, zone),
+            _ => needed,
+        };
+        *kept = Some((zone, area));
+        Some(area)
+    }
+
+    /// What `layers` cover in `zone`, by blocks.
+    fn needed_area((zx, zy, zw, zh): Area, layers: &[Annotation]) -> Option<Area> {
         let covered = layers
             .iter()
             .map(Annotation::bounds)
@@ -668,6 +696,35 @@ impl Session {
             dim: self.dim,
         }
     }
+}
+
+/// `last` if it holds `needed`; otherwise both, one more block out on each side where `needed`
+/// goes past `last`, inside `zone`.
+fn grown(last: Area, needed: Area, (zx, zy, zw, zh): Area) -> Area {
+    let block = LAYER_BLOCK;
+    let (lx1, ly1) = (last.0 + last.2, last.1 + last.3);
+    let (nx1, ny1) = (needed.0 + needed.2, needed.1 + needed.3);
+    let x0 = if needed.0 < last.0 {
+        needed.0.saturating_sub(block).max(zx)
+    } else {
+        last.0
+    };
+    let y0 = if needed.1 < last.1 {
+        needed.1.saturating_sub(block).max(zy)
+    } else {
+        last.1
+    };
+    let x1 = if nx1 > lx1 {
+        (nx1 + block).min(zx + zw)
+    } else {
+        lx1
+    };
+    let y1 = if ny1 > ly1 {
+        (ny1 + block).min(zy + zh)
+    } else {
+        ly1
+    };
+    (x0, y0, x1 - x0, y1 - y0)
 }
 
 #[cfg(test)]

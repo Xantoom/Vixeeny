@@ -359,6 +359,10 @@ fn frozen_desktop(
             canvas.blit(&scrgb, x, y);
         }
     })?;
+    // The editor draws with this device rather than making one more.
+    if let Some(device) = vixeeny_capture::freeze::device(frozen.adapter) {
+        vixeeny_overlay::gfx::offer_device(device);
+    }
     let image =
         RgbaImage::new(bounds.width, bounds.height, data).context("unexpected image size")?;
     let hdr = canvas
@@ -368,6 +372,18 @@ fn frozen_desktop(
 }
 
 /// The screens as they are now, for the editor shown live.
+/// At most this many pictures a second of the screens followed live.
+const LIVE_INTERVAL: std::time::Duration = std::time::Duration::from_micros(16_667);
+
+/// A part of a monitor followed live (physical pixels).
+struct LivePart {
+    /// Where it is in the editor's image.
+    at: (u32, u32),
+    /// Where it is in the monitor's picture.
+    from: (u32, u32),
+    size: (u32, u32),
+}
+
 struct LiveScreens {
     monitors: Vec<MonitorInfo>,
     /// The top-left corner of the desktop: the editor's image starts there.
@@ -375,8 +391,9 @@ struct LiveScreens {
     keep_hdr: bool,
     /// The HDR picture exported along (see [`output_command`]).
     hdr: std::rc::Rc<std::cell::RefCell<Option<HdrCapture>>>,
-    /// The part of each monitor followed, with where it goes in the editor's image.
-    streams: std::cell::RefCell<Vec<(u32, u32, vixeeny_capture::VideoStream)>>,
+    /// Each monitor followed: where the part followed is in the editor's image, where it is in
+    /// the monitor's picture, and its size.
+    streams: std::cell::RefCell<Vec<(LivePart, vixeeny_capture::VideoStream)>>,
 }
 
 impl vixeeny_overlay::Screens for LiveScreens {
@@ -393,7 +410,12 @@ impl vixeeny_overlay::Screens for LiveScreens {
         }
     }
 
-    fn watch(&self, area: Option<(u32, u32, u32, u32)>, wake: vixeeny_overlay::Wake) {
+    fn watch(
+        &self,
+        area: Option<(u32, u32, u32, u32)>,
+        wake: vixeeny_overlay::Wake,
+        device: &vixeeny_overlay::ID3D11Device,
+    ) {
         let mut streams = self.streams.borrow_mut();
         streams.clear();
         let Some((x, y, w, h)) = area else {
@@ -410,22 +432,27 @@ impl vixeeny_overlay::Screens for LiveScreens {
             let Some(part) = monitor.rect.intersection(&area) else {
                 continue;
             };
-            let target = vixeeny_capture::StreamTarget::Region {
-                monitor: monitor.clone(),
-                rect: vixeeny_platform::PhysicalRect {
-                    x: part.x - monitor.rect.x,
-                    y: part.y - monitor.rect.y,
-                    ..part
-                },
-            };
+            // The whole monitor is captured; only the part followed is copied, on the
+            // graphics card, by the editor.
+            let target = vixeeny_capture::StreamTarget::Monitor(monitor.clone());
             let wake = wake.clone();
-            match vixeeny_capture::VideoStream::start_notify(
+            match vixeeny_capture::VideoStream::start_held(
                 &target,
-                false,
-                false,
+                device.clone(),
+                Some(LIVE_INTERVAL),
                 Box::new(move || wake.wake()),
             ) {
-                Ok(stream) => streams.push(((part.x - ox) as u32, (part.y - oy) as u32, stream)),
+                Ok(stream) => streams.push((
+                    LivePart {
+                        at: ((part.x - ox) as u32, (part.y - oy) as u32),
+                        from: (
+                            (part.x - monitor.rect.x) as u32,
+                            (part.y - monitor.rect.y) as u32,
+                        ),
+                        size: (part.width, part.height),
+                    },
+                    stream,
+                )),
                 Err(e) => tracing::warn!("live screens not followed: {e}"),
             }
         }
@@ -433,22 +460,21 @@ impl vixeeny_overlay::Screens for LiveScreens {
 
     fn take(&self) -> Vec<vixeeny_overlay::ScreenPart> {
         let mut parts = Vec::new();
-        for (x, y, stream) in self.streams.borrow().iter() {
-            // Only the newest picture matters.
-            let mut newest = None;
-            while let Ok(Some(captured)) = stream.recv(std::time::Duration::ZERO) {
-                if let Some(old) = newest.replace(captured.frame) {
-                    stream.buffers().give(old.data);
-                }
-            }
-            if let Some(frame) = newest {
+        for (part, stream) in self.streams.borrow().iter() {
+            // Only the newest picture waits.
+            if let Some(frame) = stream.take_held() {
+                let (width, height) = (
+                    part.size.0.min(frame.content.0.saturating_sub(part.from.0)),
+                    part.size.1.min(frame.content.1.saturating_sub(part.from.1)),
+                );
                 parts.push(vixeeny_overlay::ScreenPart {
-                    x: *x,
-                    y: *y,
-                    width: frame.width,
-                    height: frame.height,
-                    stride: frame.stride,
-                    bgra: frame.data,
+                    x: part.at.0,
+                    y: part.at.1,
+                    width,
+                    height,
+                    texture: frame.texture.clone(),
+                    from: part.from,
+                    keep: Box::new(frame),
                 });
             }
         }

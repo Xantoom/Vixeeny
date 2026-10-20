@@ -324,7 +324,7 @@ struct TipWindow {
 }
 
 struct Inner {
-    gfx: Gfx,
+    gfx: std::rc::Rc<Gfx>,
     theme: Theme,
     u: f32,
     popup: Popup,
@@ -654,7 +654,7 @@ impl Widget {
         look: Look,
         display: Display,
     ) -> Result<Self> {
-        let gfx = Gfx::new()?;
+        let gfx = Gfx::shared()?;
         let u = dpi.max(48) as f32 / 96.0;
         // Never in the video, never stealing the keyboard.
         let popup = Popup::new(&gfx, geometry, false, true)?;

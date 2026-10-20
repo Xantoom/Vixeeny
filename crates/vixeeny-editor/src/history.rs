@@ -74,12 +74,15 @@ impl Edit {
 pub struct History {
     undo: Vec<Edit>,
     redo: Vec<Edit>,
+    /// Counts the changes made to the document: equal revisions, same annotations.
+    revision: u64,
 }
 
 impl History {
     /// Applies a new edit; the redo branch is dropped.
     pub fn commit(&mut self, doc: &mut Document, edit: Edit) {
         edit.apply(doc);
+        self.revision += 1;
         self.undo.push(edit);
         self.redo.clear();
     }
@@ -88,6 +91,7 @@ impl History {
     pub fn undo(&mut self, doc: &mut Document) -> Option<Edit> {
         let edit = self.undo.pop()?;
         edit.inverse().apply(doc);
+        self.revision += 1;
         self.redo.push(edit.clone());
         Some(edit)
     }
@@ -95,8 +99,13 @@ impl History {
     pub fn redo(&mut self, doc: &mut Document) -> Option<Edit> {
         let edit = self.redo.pop()?;
         edit.apply(doc);
+        self.revision += 1;
         self.undo.push(edit.clone());
         Some(edit)
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     pub fn can_undo(&self) -> bool {

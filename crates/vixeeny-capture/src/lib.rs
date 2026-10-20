@@ -19,7 +19,8 @@ pub use hdr::{HdrCapture, HdrFrame, reference};
 use vixeeny_platform::{HdrInfo, MonitorId, MonitorInfo, PhysicalRect, WindowId, virtual_bounds};
 pub use wgc::WgcBackend;
 pub use wgc_stream::{
-    CapturedFrame, Gate, GpuCapture, Notify, Pacing, StreamTarget, TextureSink, VideoStream,
+    CapturedFrame, Gate, GpuCapture, HeldFrame, Notify, Pacing, StreamTarget, TextureSink,
+    VideoStream,
 };
 use windows::Win32::Graphics::Direct3D11::ID3D11Device;
 

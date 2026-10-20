@@ -25,6 +25,8 @@ mod window;
 pub use drawing::ScreenPart;
 pub use overlay::{Overlay, OverlayError, Screen, Screens, Wake, post};
 pub use theme::{Look, dark_theme};
+/// The graphics card's types of [`Screens`] and [`ScreenPart`].
+pub use windows::Win32::Graphics::Direct3D11::{ID3D11Device, ID3D11Texture2D};
 
 #[cfg(test)]
 mod tests;

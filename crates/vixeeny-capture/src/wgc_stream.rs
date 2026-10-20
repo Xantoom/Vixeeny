@@ -4,8 +4,9 @@
 //! of the recording pipeline) as BGRA in RAM. WGC only produces a frame when the content
 //! changes: the consumer repeats the last one to keep a constant frame rate.
 //!
-//! This is the CPU path (GPU → staging texture → RAM). The zero-copy GPU path for hardware
-//! encoders builds on the same session.
+//! This is the CPU path (GPU → staging texture → RAM). The zero-copy GPU paths build on the
+//! same session: the hardware encoders take each frame as a texture ([`GpuCapture`]), and a
+//! viewer on the graphics card takes the newest one when it can ([`VideoStream::start_held`]).
 
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, sync_channel};
 use std::sync::{Arc, Mutex};
@@ -15,7 +16,7 @@ use vixeeny_common::buffers::BufferPool;
 use vixeeny_platform::{MonitorInfo, PhysicalRect, WindowId};
 use windows::Foundation::TypedEventHandler;
 use windows::Graphics::Capture::{
-    Direct3D11CaptureFramePool, GraphicsCaptureItem, GraphicsCaptureSession,
+    Direct3D11CaptureFrame, Direct3D11CaptureFramePool, GraphicsCaptureItem, GraphicsCaptureSession,
 };
 use windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;
 use windows::Graphics::DirectX::DirectXPixelFormat;
@@ -97,6 +98,38 @@ pub struct Pacing {
 /// Told (on a capture thread) that a frame is waiting in [`VideoStream::recv`].
 pub type Notify = Box<dyn Fn() + Send + Sync>;
 
+/// The newest frame of a stream, kept on the graphics card (see [`VideoStream::start_held`]).
+/// It goes back to the capture pool when dropped: the pool has two, so hold at most one.
+pub struct HeldFrame {
+    /// The whole picture of the monitor or window, BGRA, on the stream's device.
+    pub texture: ID3D11Texture2D,
+    /// The part of `texture` that holds the picture (the texture may be larger).
+    pub content: (u32, u32),
+    /// Nanoseconds on the OS monotonic clock.
+    pub time_ns: i64,
+    frame: Direct3D11CaptureFrame,
+}
+
+impl std::fmt::Debug for HeldFrame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HeldFrame")
+            .field("content", &self.content)
+            .field("time_ns", &self.time_ns)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Drop for HeldFrame {
+    fn drop(&mut self) {
+        let _ = self.frame.Close();
+    }
+}
+
+// SAFETY: a D3D11 texture is free-threaded and the frame is a WinRT object (agile).
+unsafe impl Send for HeldFrame {}
+
+type Held = Arc<Mutex<Option<HeldFrame>>>;
+
 /// An existing D3D11 device to capture on, and where the textures go (GPU recording).
 pub struct GpuCapture {
     pub device: ID3D11Device,
@@ -114,8 +147,10 @@ struct Shared {
     hdr: bool,
     sink: Option<Mutex<TextureSink>>,
     gate: Option<Arc<dyn Gate>>,
-    /// Called once a CPU frame is queued.
+    /// Called once a CPU frame is queued, or a frame is held.
     notify: Option<Notify>,
+    /// Where the newest frame waits (see [`VideoStream::start_held`]).
+    held: Option<Held>,
     last_size: Mutex<SizeInt32>,
     buffers: BufferPool,
 }
@@ -210,6 +245,14 @@ impl Shared {
     }
 }
 
+/// Where the frames go.
+enum Source {
+    /// Read into RAM, queued for [`VideoStream::recv`].
+    Cpu,
+    Sink(GpuCapture),
+    Held(ID3D11Device, Held),
+}
+
 pub struct VideoStream {
     pool: Direct3D11CaptureFramePool,
     session: GraphicsCaptureSession,
@@ -218,6 +261,7 @@ pub struct VideoStream {
     closed: i64,
     rx: Receiver<Result<CapturedFrame, CaptureError>>,
     buffers: BufferPool,
+    held: Option<Held>,
 }
 
 impl VideoStream {
@@ -239,6 +283,40 @@ impl VideoStream {
         Self::open(target, cursor, hdr, gpu, None, pacing)
     }
 
+    /// Captures on `device` and keeps only the newest frame, on the graphics card, until
+    /// [`take_held`](Self::take_held) takes it; `notify` is called each time one waits. No
+    /// more than one frame per `min_interval` is made (Windows 11 24H2 and later; older
+    /// versions make one per change). For a viewer: it shows the newest picture when it can,
+    /// and a frame left waiting is replaced, never queued.
+    pub fn start_held(
+        target: &StreamTarget,
+        device: ID3D11Device,
+        min_interval: Option<Duration>,
+        notify: Notify,
+    ) -> Result<Self, CaptureError> {
+        let held = Held::default();
+        let stream = Self::open_with(
+            target,
+            false,
+            false,
+            Source::Held(device, held.clone()),
+            Some(notify),
+            None,
+        )?;
+        if let Some(interval) = min_interval {
+            let ticks = i64::try_from(interval.as_nanos() / 100).unwrap_or(i64::MAX);
+            let _ = stream
+                .session
+                .SetMinUpdateInterval(windows::Foundation::TimeSpan { Duration: ticks });
+        }
+        Ok(stream)
+    }
+
+    /// The newest frame, if one came since the last taken (see [`start_held`](Self::start_held)).
+    pub fn take_held(&self) -> Option<HeldFrame> {
+        self.held.as_ref()?.lock().ok()?.take()
+    }
+
     /// Like [`start`](Self::start), calling `notify` each time a frame waits in `recv`: the
     /// consumer reads them when told rather than waiting on `recv`.
     pub fn start_notify(
@@ -255,6 +333,18 @@ impl VideoStream {
         cursor: bool,
         hdr: bool,
         gpu: Option<GpuCapture>,
+        notify: Option<Notify>,
+        pacing: Option<Pacing>,
+    ) -> Result<Self, CaptureError> {
+        let source = gpu.map_or(Source::Cpu, Source::Sink);
+        Self::open_with(target, cursor, hdr, source, notify, pacing)
+    }
+
+    fn open_with(
+        target: &StreamTarget,
+        cursor: bool,
+        hdr: bool,
+        source: Source,
         notify: Option<Notify>,
         pacing: Option<Pacing>,
     ) -> Result<Self, CaptureError> {
@@ -287,9 +377,17 @@ impl VideoStream {
         };
         let size = item.Size().map_err(os("item size"))?;
 
-        let (device, context, sink) = match gpu {
-            Some(g) => (g.device, g.context, Some(Mutex::new(g.sink))),
-            None => {
+        let mut held = None;
+        let (device, context, sink) = match source {
+            Source::Sink(g) => (g.device, g.context, Some(Mutex::new(g.sink))),
+            Source::Held(device, slot) => {
+                held = Some(slot);
+                // SAFETY: plain call. The context is never used from here: frames are only held.
+                let context =
+                    unsafe { device.GetImmediateContext() }.map_err(os("GetImmediateContext"))?;
+                (device, context, None)
+            }
+            Source::Cpu => {
                 let mut device = None;
                 let mut context = None;
                 // SAFETY: out-pointers are valid; default adapter, no feature-level list.
@@ -331,6 +429,7 @@ impl VideoStream {
             sink,
             gate: pacing.as_ref().map(|p| Arc::clone(&p.gate)),
             notify,
+            held: held.clone(),
             last_size: Mutex::new(size),
             buffers: buffers.clone(),
         });
@@ -377,6 +476,7 @@ impl VideoStream {
             closed,
             rx,
             buffers,
+            held,
         })
     }
 
@@ -438,6 +538,21 @@ fn frame_handler(
             let access: IDirect3DDxgiInterfaceAccess = surface.cast()?;
             // SAFETY: the surface is backed by a D3D11 texture on our device.
             let texture: ID3D11Texture2D = unsafe { access.GetInterface() }?;
+            if let Some(held) = &shared.held {
+                let frame = HeldFrame {
+                    texture,
+                    content: (content.Width.max(1) as u32, content.Height.max(1) as u32),
+                    time_ns,
+                    frame,
+                };
+                // The frame waiting before goes back to the pool.
+                let old = held.lock().ok().and_then(|mut slot| slot.replace(frame));
+                drop(old);
+                if let Some(notify) = &shared.notify {
+                    notify();
+                }
+                return Ok(());
+            }
             if let Some(sink) = &shared.sink {
                 if let Ok(mut sink) = sink.lock()
                     && sink(
@@ -469,4 +584,76 @@ fn frame_handler(
             Ok(())
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The editor's live view: the newest frame waits on the graphics card, on the device
+    /// given, the size of the monitor, and is replaced rather than queued.
+    #[test]
+    fn a_held_stream_keeps_the_newest_frame_on_the_device_given() {
+        vixeeny_platform::ensure_dpi_aware();
+        let Some(monitor) = vixeeny_platform::monitors()
+            .ok()
+            .and_then(|m| m.into_iter().next())
+        else {
+            vixeeny_common::skip_test("no monitor");
+            return;
+        };
+        let mut device = None;
+        // SAFETY: the out-pointer is valid; default adapter, no feature-level list.
+        let made = unsafe {
+            D3D11CreateDevice(
+                None,
+                D3D_DRIVER_TYPE_HARDWARE,
+                HMODULE::default(),
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                None,
+                D3D11_SDK_VERSION,
+                Some(&raw mut device),
+                None,
+                None,
+            )
+        };
+        let (Ok(()), Some(device)) = (made, device) else {
+            vixeeny_common::skip_test("no graphics card");
+            return;
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        let size = (monitor.rect.width, monitor.rect.height);
+        let stream = match VideoStream::start_held(
+            &StreamTarget::Monitor(monitor),
+            device.clone(),
+            Some(Duration::from_micros(16_667)),
+            Box::new(move || {
+                let _ = tx.send(());
+            }),
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                vixeeny_common::skip_test(&e);
+                return;
+            }
+        };
+        // A monitor stream gives a first frame without anything changing.
+        if rx.recv_timeout(Duration::from_secs(2)).is_err() {
+            vixeeny_common::skip_test("no frame");
+            return;
+        }
+        let frame = stream.take_held().expect("the frame told about waits");
+        assert_eq!(frame.content, size);
+        let mut desc = D3D11_TEXTURE2D_DESC::default();
+        // SAFETY: `desc` is a valid out-pointer.
+        unsafe { frame.texture.GetDesc(&mut desc) };
+        assert_eq!(
+            desc.Format,
+            windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM
+        );
+        // SAFETY: plain call.
+        let owner = unsafe { frame.texture.GetDevice() }.expect("device");
+        assert_eq!(owner, device, "the frame is on the device given");
+        assert!(stream.take_held().is_none(), "taken once");
+    }
 }

@@ -612,3 +612,79 @@ fn live_only_what_is_drawn_covers_the_screens() {
     assert_eq!(alpha(30, 25), 0);
     assert_eq!(alpha(5, 55), 0);
 }
+
+#[test]
+fn live_pictures_are_copied_in_on_the_graphics_card() {
+    use crate::drawing::{Drawing, ScreenPart};
+    use vixeeny_editor::{Annotation, Point, Style};
+    use windows::Win32::Graphics::Direct3D11::{
+        D3D11_BIND_SHADER_RESOURCE, D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE2D_DESC,
+        D3D11_USAGE_DEFAULT,
+    };
+    use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC};
+    let gfx = Gfx::new().expect("graphics devices");
+    let (w, h) = (100, 60);
+    // A monitor's picture, all one colour (BGRA).
+    let (tw, th) = (50u32, 40u32);
+    let pixels: Vec<u8> = [10u8, 200, 30, 255].repeat((tw * th) as usize);
+    let desc = D3D11_TEXTURE2D_DESC {
+        Width: tw,
+        Height: th,
+        MipLevels: 1,
+        ArraySize: 1,
+        Format: DXGI_FORMAT_B8G8R8A8_UNORM,
+        SampleDesc: DXGI_SAMPLE_DESC {
+            Count: 1,
+            Quality: 0,
+        },
+        Usage: D3D11_USAGE_DEFAULT,
+        BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as u32,
+        ..Default::default()
+    };
+    let data = D3D11_SUBRESOURCE_DATA {
+        pSysMem: pixels.as_ptr().cast(),
+        SysMemPitch: tw * 4,
+        SysMemSlicePitch: 0,
+    };
+    let mut texture = None;
+    // SAFETY: `data` holds the texture's rows; the out-pointer is valid.
+    unsafe {
+        gfx.d3d
+            .CreateTexture2D(&desc, Some(&raw const data), Some(&raw mut texture))
+    }
+    .expect("texture");
+    let part = ScreenPart {
+        x: 20,
+        y: 10,
+        width: 30,
+        height: 20,
+        texture: texture.expect("texture"),
+        from: (5, 5),
+        keep: Box::new(()),
+    };
+    let layers = std::rc::Rc::new(vec![Annotation::Line {
+        from: Point::new(90.0, 50.0),
+        to: Point::new(95.0, 55.0),
+        style: Style {
+            color: Color::rgb(255, 0, 0),
+            width: 2.0,
+        },
+    }]);
+    let base = screens(w, h);
+    let mut drawing = Drawing::new(&gfx, (0, 0, w, h), &base, 0).expect("drawing");
+    drawing.feed(&gfx, &part).expect("fed");
+    drawing.update(&gfx, &layers, false).expect("drawn");
+    let px = gfx
+        .render(w, h, |c| {
+            drawing.draw(c, (0.0, 0.0), false);
+            Ok(())
+        })
+        .expect("rendered");
+    let at = |x: usize, y: usize| &px[(y * w as usize + x) * 4..(y * w as usize + x) * 4 + 3];
+    // The part fed shows where it goes, the screens taken before elsewhere (as BGRA).
+    assert_eq!(at(25, 15), [10, 200, 30]);
+    assert_eq!(at(49, 29), [10, 200, 30]);
+    let o = (5 * w as usize + 5) * 4;
+    assert_eq!(at(5, 5), [base.data[o + 2], base.data[o + 1], base.data[o]]);
+    assert_ne!(at(50, 30), [10, 200, 30]);
+}

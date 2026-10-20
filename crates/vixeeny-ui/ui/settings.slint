@@ -282,6 +282,7 @@ component SettingLine inherits GroupRow {
     callback toggled(bool);
     callback chosen(int);
     callback number(int);
+    callback sliding(bool);
     callback text-edited(string);
     callback browse();
     callback action(string);
@@ -371,6 +372,7 @@ component SettingLine inherits GroupRow {
                 step: root.entry.step;
                 enabled: root.entry.enabled;
                 changed(v) => { root.number(v); }
+                sliding(on) => { root.sliding(on); }
             }
             Text {
                 width: 52px;
@@ -620,6 +622,7 @@ export component SettingsWindow inherits Window {
     callback row-toggled(string, bool);
     callback row-chosen(string, int);
     callback row-number(string, int);
+    callback row-sliding(bool);
     callback row-text(string, string);
     callback row-browse(string);
     callback row-action(string, string);
@@ -872,6 +875,7 @@ export component SettingsWindow inherits Window {
                             toggled(v) => { root.row-toggled(r.id, v); }
                             chosen(k) => { root.row-chosen(r.id, k); }
                             number(v) => { root.row-number(r.id, v); }
+                            sliding(on) => { root.row-sliding(on); }
                             text-edited(s) => { root.row-text(r.id, s); }
                             browse => { root.row-browse(r.id); }
                             action(a) => { root.row-action(r.id, a); }
