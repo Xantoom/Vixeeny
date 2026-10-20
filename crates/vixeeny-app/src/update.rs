@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! `vixeeny-app --update background`: the check the daemon starts every 12 hours. With automatic
+//! `vixeeny-app --update background`: the check the daemon starts after its own start and each
+//! wake from sleep. With automatic
 //! updates on, a new version is downloaded and verified without a word, and installed at the next
 //! start of Vixeeny (or by the Restart button of the settings); otherwise the user is told once.
 //!
@@ -17,7 +18,11 @@ use vixeeny_updater::state::{self, State};
 
 pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     match args.first().map(String::as_str) {
-        Some("background") => background(),
+        // Nobody waits for it: it gives way to everything else (a game).
+        Some("background") => {
+            vixeeny_platform::run_in_background();
+            background()
+        }
         Some("pending") => match client::ready() {
             Some(version) => {
                 tracing::info!("installing {version}, downloaded before");

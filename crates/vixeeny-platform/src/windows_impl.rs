@@ -1258,6 +1258,33 @@ pub fn attach_console() {
     }
 }
 
+/// Has this process give way to everything else: efficient cores and lower clocks (EcoQoS),
+/// and the lowest processor, disk and memory priorities. For work nobody waits for (the update
+/// check), so a game never feels it.
+pub fn run_in_background() {
+    use windows::Win32::System::Threading::{
+        GetCurrentProcess, PROCESS_MODE_BACKGROUND_BEGIN, PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+        PROCESS_POWER_THROTTLING_EXECUTION_SPEED, PROCESS_POWER_THROTTLING_STATE,
+        ProcessPowerThrottling, SetPriorityClass, SetProcessInformation,
+    };
+    let state = PROCESS_POWER_THROTTLING_STATE {
+        Version: PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+        ControlMask: PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
+        StateMask: PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
+    };
+    // SAFETY: the pseudo handle of this process; `state` outlives the call and has the size
+    // given.
+    unsafe {
+        let _ = SetProcessInformation(
+            GetCurrentProcess(),
+            ProcessPowerThrottling,
+            (&raw const state).cast(),
+            size_of::<PROCESS_POWER_THROTTLING_STATE>() as u32,
+        );
+        let _ = SetPriorityClass(GetCurrentProcess(), PROCESS_MODE_BACKGROUND_BEGIN);
+    }
+}
+
 /// Nanoseconds on the performance counter: the clock of WGC's `SystemRelativeTime`.
 pub fn monotonic_ns() -> i64 {
     use windows::Win32::System::Performance::{QueryPerformanceCounter, QueryPerformanceFrequency};

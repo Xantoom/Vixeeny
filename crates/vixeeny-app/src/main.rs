@@ -353,10 +353,11 @@ fn overlay(config: &Config, recording: &Recording) -> Option<ActionId> {
         }
     };
     STRIP_PINNED.set(outcome.pinned);
-    // The strip is gone once the loop ends, but give the compositor a moment to repaint before
-    // a capture freezes the screen: the strip must not be in it.
+    // The strip is gone once the loop ends, but the screen must show it gone before a capture
+    // freezes it: two compositions (the one under way may still have it).
     if outcome.action.is_some() {
-        std::thread::sleep(Duration::from_millis(120));
+        vixeeny_platform::wait_for_composition();
+        vixeeny_platform::wait_for_composition();
     }
     // Pinned: it comes back once the action is done (see `run_action`).
     REOPEN_STRIP.set(outcome.pinned && outcome.action.is_some());
@@ -623,7 +624,11 @@ fn run() -> anyhow::Result<()> {
     match args.first().map(String::as_str) {
         // The probe child: prints TOML on stdout (see `vixeeny_encode::probe::run_child`).
         Some("--probe") => return probe::child(),
-        Some("--warm-probe") => return probe::warm(),
+        // Ahead of time, nobody waiting: it gives way to everything else.
+        Some("--warm-probe") => {
+            vixeeny_platform::run_in_background();
+            return probe::warm();
+        }
         // The recording widget, a process of its own (see `widget`).
         Some("--widget") => return widget::run_child(&args[1..]),
         // The settings window and gallery, a process of its own (see `settings`).
