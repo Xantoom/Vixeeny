@@ -596,7 +596,7 @@ mod tests {
                     return;
                 }
             };
-            let expected = cpu::linear_to_bgra(&cpu::set_on(&linear, backdrop, scale, 1.0));
+            let expected = cpu::linear_to_bgra(&cpu::set_on(&linear, &backdrop, scale, 1.0));
             let (sw, sh) = layout.size;
             crate::tests::save(&format!("backdrop-{name}-card"), sw, sh, &card);
             crate::tests::save(&format!("backdrop-{name}-cpu"), sw, sh, &expected);
@@ -643,7 +643,7 @@ mod tests {
             height: h,
             rgba: rgba.clone(),
         };
-        let expected = cpu::set_on(&linear, Backdrop::Colour([255, 255, 255]), 1.0, white);
+        let expected = cpu::set_on(&linear, &Backdrop::Colour([255, 255, 255]), 1.0, white);
         assert_eq!(card.len(), expected.rgba.len());
         // Far from the window: SDR white of the screen; in the window: its own light, beyond 1.
         assert!((card[0] - 3.0).abs() < 1e-3, "{}", card[0]);

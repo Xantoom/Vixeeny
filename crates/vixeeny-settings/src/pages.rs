@@ -443,17 +443,6 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
             |c| c.image.show_cursor,
             |c, v| c.image.show_cursor = v,
         ),
-        choice(
-            "window_backdrop",
-            t(Key::SetWindowBackdrop),
-            vec![
-                opt("none", t(Key::OptBackdropNone)),
-                opt("blur", t(Key::OptBackdropBlur)),
-                opt("colour", t(Key::OptBackdropColour)),
-            ],
-            |c| c.image.window_backdrop.clone(),
-            |c, v| c.image.window_backdrop = v,
-        ),
     ]);
     // Only when Windows shows HDR: there is nothing to keep otherwise.
     if env.display.hdr {
@@ -470,6 +459,7 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
             hdr
         });
     }
+    rows.extend(backdrop_rows(env, config));
     rows
 }
 
@@ -1560,6 +1550,86 @@ pub fn replay(env: &Env, config: &Config) -> Vec<Row> {
         |c| &mut c.paths.naming.replays,
     ));
     rows
+}
+
+/// What a window capture is set on, and its colour or gradient.
+fn backdrop_rows(env: &Env, config: &Config) -> Vec<Row> {
+    use vixeeny_common::config::{BACKDROP_COLOURS, BACKDROP_GRADIENTS};
+    let t = |k| env.t(k);
+    let mut rows = vec![
+        header("h_window_capture", t(Key::GrpWindowCapture)),
+        choice(
+            "window_backdrop",
+            t(Key::SetWindowBackdrop),
+            vec![
+                opt("none", t(Key::OptBackdropNone)),
+                opt("wallpaper", t(Key::OptBackdropBlur)),
+                opt("colour", t(Key::OptBackdropColour)),
+                opt("gradient", t(Key::OptBackdropGradient)),
+            ],
+            |c| backdrop_kind(&c.image.window_backdrop).to_owned(),
+            |c, v| c.image.window_backdrop = v,
+        ),
+    ];
+    match backdrop_kind(&config.image.window_backdrop) {
+        "colour" => {
+            let names = [
+                Key::OptColourWhite,
+                Key::OptColourGrey,
+                Key::OptColourBlack,
+                Key::OptColourBlue,
+                Key::OptColourPurple,
+                Key::OptColourGreen,
+                Key::OptColourOrange,
+                Key::OptColourPink,
+            ];
+            let mut options = vec![opt("accent", t(Key::OptColourAccent))];
+            options.extend(
+                BACKDROP_COLOURS
+                    .iter()
+                    .zip(names)
+                    .map(|((id, _), name)| opt(id, t(name))),
+            );
+            rows.push(nested(choice(
+                "backdrop_colour",
+                t(Key::SetBackdropColour),
+                options,
+                |c| c.image.backdrop_colour.clone(),
+                |c, v| c.image.backdrop_colour = v,
+            )));
+        }
+        "gradient" => {
+            let names = [
+                Key::OptGradientDusk,
+                Key::OptGradientSunset,
+                Key::OptGradientOcean,
+                Key::OptGradientForest,
+                Key::OptGradientNight,
+            ];
+            rows.push(nested(choice(
+                "backdrop_gradient",
+                t(Key::SetBackdropGradient),
+                BACKDROP_GRADIENTS
+                    .iter()
+                    .zip(names)
+                    .map(|((id, ..), name)| opt(id, t(name)))
+                    .collect(),
+                |c| c.image.backdrop_gradient.clone(),
+                |c, v| c.image.backdrop_gradient = v,
+            )));
+        }
+        _ => {}
+    }
+    rows
+}
+
+/// The kind of background of a window capture; `blur`, from before, is now the wallpaper.
+fn backdrop_kind(setting: &str) -> &str {
+    match setting {
+        "blur" => "wallpaper",
+        "wallpaper" | "colour" | "gradient" => setting,
+        _ => "none",
+    }
 }
 
 /// The games open now, and the programs of the user's lists: each one automatic (the replay

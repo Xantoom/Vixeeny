@@ -98,7 +98,8 @@ fn perform(action: ActionId, config: &Config, frozen: Option<ipc::Frozen>) {
         }
         CaptureFullscreen | CaptureWindow | CaptureAllMonitors => {
             match direct_capture(action, config) {
-                Ok((path, thumb)) => {
+                Ok(None) => tracing::debug!("no window chosen"),
+                Ok(Some((path, thumb))) => {
                     tracing::debug!("saved {}", path.display());
                     let saved = toast::Toast::Saved(toast::Saved::Image, path);
                     toast::notify_with(config, &saved, thumb);
@@ -115,20 +116,60 @@ fn perform(action: ActionId, config: &Config, frozen: Option<ipc::Frozen>) {
     }
 }
 
+/// The window the user clicks among those on screen; `None` when they give up.
+fn pick_window(
+    monitors: &[vixeeny_platform::MonitorInfo],
+    cursor: (i32, i32),
+) -> anyhow::Result<Option<vixeeny_platform::WindowInfo>> {
+    let bounds =
+        vixeeny_platform::virtual_bounds(monitors.iter().map(|m| &m.rect)).context("no screen")?;
+    // Those on a screen (a minimized window is far outside), never Vixeeny's own.
+    let windows: Vec<vixeeny_platform::WindowInfo> = vixeeny_platform::top_level_windows()?
+        .into_iter()
+        .filter(|w| !still::is_ours(w) && w.rect.intersection(&bounds).is_some())
+        .collect();
+    let rects = windows
+        .iter()
+        .map(|w| (w.rect.x, w.rect.y, w.rect.width, w.rect.height))
+        .collect();
+    let scale = vixeeny_platform::monitor_at(monitors, cursor.0, cursor.1)
+        .map_or(1.0, |m| m.scale_factor() as f32);
+    let accent = vixeeny_platform::system_accent().unwrap_or([0, 120, 212]);
+    let chosen = vixeeny_overlay::picker::pick(
+        rects,
+        (bounds.x, bounds.y, bounds.width, bounds.height),
+        cursor,
+        accent,
+        scale,
+    )?;
+    Ok(chosen.and_then(|i| windows.into_iter().nth(i)))
+}
+
 /// Takes and saves the capture; returns where, with the notification's thumbnail when it is
-/// shown.
+/// shown. `None`: the user gave up choosing the window.
 fn direct_capture(
     action: ActionId,
     config: &Config,
-) -> anyhow::Result<(std::path::PathBuf, Option<toast::Thumb>)> {
+) -> anyhow::Result<Option<(std::path::PathBuf, Option<toast::Thumb>)>> {
     use vixeeny_capture::{CaptureOptions, Capturer};
 
-    let started = std::time::Instant::now();
     vixeeny_platform::ensure_dpi_aware();
+    let monitors = vixeeny_platform::monitors()?;
+    let cursor = vixeeny_platform::cursor_position()?;
+    let foreground = if action == ActionId::CaptureWindow {
+        // The user points at the window to capture.
+        match pick_window(&monitors, cursor)? {
+            Some(window) => Some(window),
+            None => return Ok(None),
+        }
+    } else {
+        vixeeny_platform::foreground_window()?
+    };
+    let started = std::time::Instant::now();
     let snapshot = still::Snapshot {
-        monitors: vixeeny_platform::monitors()?,
-        cursor: vixeeny_platform::cursor_position()?,
-        foreground: vixeeny_platform::foreground_window()?,
+        monitors,
+        cursor,
+        foreground,
     };
     let dir = vixeeny_common::paths::expand_user_dir(&config.paths.images)
         .context("cannot locate the images folder")?;
@@ -167,6 +208,9 @@ fn direct_capture(
             .then_some(&after),
         ..destination
     };
+    // Asked once the window is captured.
+    let backdrop = window_backdrop_kind(config)
+        .then_some(|| window_backdrop(config).unwrap_or(vixeeny_image::backdrop::Backdrop::Blur));
     let run = |backend: &mut vixeeny_capture::WgcBackend| {
         let mut capturer = Capturer::new(backend, snapshot.monitors.clone());
         still::run(
@@ -179,7 +223,9 @@ fn direct_capture(
                 format,
                 settings: &settings,
                 keep_hdr: keep_hdr(config),
-                backdrop: window_backdrop(config),
+                backdrop: backdrop
+                    .as_ref()
+                    .map(|b| b as &dyn Fn() -> vixeeny_image::backdrop::Backdrop),
             },
             &vixeeny_platform::exe_metadata,
         )
@@ -202,19 +248,56 @@ fn direct_capture(
     let thumb = thumb
         .into_inner()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    Ok((path, thumb))
+    Ok(Some((path, thumb)))
 }
 
-/// What a window capture is set on, by the setting: a blur of the window, or the accent colour
-/// of Windows; nothing by default.
+/// Whether window captures are set on a background.
+fn window_backdrop_kind(config: &Config) -> bool {
+    matches!(
+        config.image.window_backdrop.as_str(),
+        "wallpaper" | "blur" | "colour" | "gradient"
+    )
+}
+
+/// What a window capture is set on, by the setting: the wallpaper blurred (`blur`, from
+/// before, too), a plain colour or a gradient; nothing by default.
 fn window_backdrop(config: &Config) -> Option<vixeeny_image::backdrop::Backdrop> {
+    use vixeeny_common::config::{BACKDROP_COLOURS, BACKDROP_GRADIENTS};
     use vixeeny_image::backdrop::Backdrop;
-    match config.image.window_backdrop.as_str() {
-        "blur" => Some(Backdrop::Blur),
+    let image = &config.image;
+    match image.window_backdrop.as_str() {
+        "wallpaper" | "blur" => Some(wallpaper()),
         "colour" => Some(Backdrop::Colour(
-            vixeeny_platform::system_accent().unwrap_or([0, 120, 212]),
+            BACKDROP_COLOURS
+                .iter()
+                .find(|(id, _)| *id == image.backdrop_colour)
+                .map(|(_, c)| *c)
+                .or_else(vixeeny_platform::system_accent)
+                .unwrap_or([0, 120, 212]),
         )),
+        "gradient" => {
+            let (_, from, to) = BACKDROP_GRADIENTS
+                .iter()
+                .find(|(id, ..)| *id == image.backdrop_gradient)
+                .unwrap_or(&BACKDROP_GRADIENTS[0]);
+            Some(Backdrop::Gradient(*from, *to))
+        }
         _ => None,
+    }
+}
+
+/// The desktop's wallpaper as a background; the window itself, blurred, when its picture
+/// cannot be read (a format not read here, a file gone).
+fn wallpaper() -> vixeeny_image::backdrop::Backdrop {
+    use vixeeny_image::backdrop::{Backdrop, Picture};
+    match vixeeny_platform::wallpaper() {
+        vixeeny_platform::Wallpaper::Picture(path) => std::fs::read(&path)
+            .ok()
+            .and_then(|bytes| Picture::read(&bytes))
+            .map_or(Backdrop::Blur, |p| {
+                Backdrop::Picture(std::sync::Arc::new(p))
+            }),
+        vixeeny_platform::Wallpaper::Colour(c) => Backdrop::Colour(c),
     }
 }
 

@@ -740,6 +740,33 @@ pub fn on_dir_change(
         .is_ok()
 }
 
+/// The desktop's wallpaper: the file of its picture, or its plain colour (`[r, g, b]`) when it
+/// has none.
+pub fn wallpaper() -> crate::Wallpaper {
+    use windows::Win32::Graphics::Gdi::{COLOR_DESKTOP, GetSysColor};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SPI_GETDESKWALLPAPER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
+    };
+    let mut path = [0_u16; 1024];
+    // SAFETY: `path` holds `path.len()` UTF-16 units for the call.
+    let ok = unsafe {
+        SystemParametersInfoW(
+            SPI_GETDESKWALLPAPER,
+            path.len() as u32,
+            Some(path.as_mut_ptr().cast()),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+    };
+    let end = path.iter().position(|u| *u == 0).unwrap_or(path.len());
+    let file = String::from_utf16_lossy(&path[..end]);
+    if ok.is_ok() && !file.trim().is_empty() {
+        return crate::Wallpaper::Picture(file.into());
+    }
+    // SAFETY: plain call; 0x00BBGGRR.
+    let c = unsafe { GetSysColor(COLOR_DESKTOP) };
+    crate::Wallpaper::Colour([c as u8, (c >> 8) as u8, (c >> 16) as u8])
+}
+
 /// The accent colour the user chose in Windows (`[r, g, b]`).
 pub fn system_accent() -> Option<[u8; 3]> {
     use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};

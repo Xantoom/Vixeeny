@@ -161,7 +161,7 @@ pub fn set_offset(v: &IDCompositionVisual2, x: f32, y: f32) -> Result<()> {
 }
 
 /// A visual that shows `surface` scaled into rectangles (see [`place`]).
-fn solid_visual(gfx: &Gfx, surface: &IDCompositionSurface) -> Result<IDCompositionVisual2> {
+pub fn solid_visual(gfx: &Gfx, surface: &IDCompositionSurface) -> Result<IDCompositionVisual2> {
     let v = visual(gfx)?;
     // SAFETY: plain property calls on a new visual.
     unsafe {

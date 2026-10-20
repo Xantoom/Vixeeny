@@ -18,7 +18,7 @@ use windows::Win32::Graphics::Gdi::ValidateRect;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyState, ReleaseCapture, SetCapture, SetFocus, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent,
     VK_BACK, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_LEFT, VK_MENU, VK_NEXT,
-    VK_PRIOR, VK_RETURN, VK_RIGHT, VK_SHIFT, VK_UP,
+    VK_PRIOR, VK_RETURN, VK_RIGHT, VK_SHIFT, VK_SPACE, VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     DestroyWindow, DispatchMessageW, GetMessageW, KillTimer, MSG, SW_HIDE, SW_SHOW,
@@ -1172,6 +1172,13 @@ impl Shared {
                 self.scroll_by(step);
                 return true;
             }
+        }
+        // Space or K: the screen live or frozen, as a video plays or pauses.
+        if !ctrl && !alt && (vk == VK_SPACE || vk.0 == u16::from(b'K')) && self.can_live() {
+            let live = !self.session.borrow().is_live();
+            self.set_live(live);
+            self.refresh();
+            return true;
         }
         let key = match vk {
             VK_ESCAPE => Key::Escape,

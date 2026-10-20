@@ -343,9 +343,14 @@ pub struct Image {
     pub show_cursor: bool,
     pub hdr: String,
     pub copy_to_clipboard: bool,
-    /// What a window capture is set on: `none`, `blur` (the window blurred) or `colour` (the
-    /// accent colour of Windows), with a margin and a shadow.
+    /// What a window capture is set on, with a margin and a shadow: `none`, `wallpaper` (the
+    /// desktop's, blurred), `colour` or `gradient`. `blur` (from before 0.21) reads as
+    /// `wallpaper`.
     pub window_backdrop: String,
+    /// The `colour` one: `accent` (Windows') or one of [`BACKDROP_COLOURS`].
+    pub backdrop_colour: String,
+    /// The `gradient` one: one of [`BACKDROP_GRADIENTS`].
+    pub backdrop_gradient: String,
     pub png: Png,
     pub jpeg: Jpeg,
     pub webp: Webp,
@@ -361,6 +366,8 @@ impl Default for Image {
             hdr: "tonemap_sdr".into(),
             copy_to_clipboard: false,
             window_backdrop: "none".into(),
+            backdrop_colour: "accent".into(),
+            backdrop_gradient: "dusk".into(),
             png: Png::default(),
             jpeg: Jpeg::default(),
             webp: Webp::default(),
@@ -547,6 +554,27 @@ pub struct Audio {
     /// The tracks of `routing = "advanced"`.
     pub tracks: Vec<AudioTrack>,
 }
+
+/// The plain colours a window capture can be set on, besides Windows' accent (sRGB).
+pub const BACKDROP_COLOURS: &[(&str, [u8; 3])] = &[
+    ("white", [0xf3, 0xf3, 0xf3]),
+    ("grey", [0x8a, 0x8a, 0x8a]),
+    ("black", [0x1c, 0x1c, 0x1c]),
+    ("blue", [0x00, 0x63, 0xb1]),
+    ("purple", [0x74, 0x4d, 0xa9]),
+    ("green", [0x10, 0x7c, 0x10]),
+    ("orange", [0xca, 0x50, 0x10]),
+    ("pink", [0xe3, 0x00, 0x8c]),
+];
+
+/// The gradients a window capture can be set on: from the top left to the bottom right (sRGB).
+pub const BACKDROP_GRADIENTS: &[(&str, [u8; 3], [u8; 3])] = &[
+    ("dusk", [0x65, 0x4e, 0xa3], [0xea, 0xaf, 0xc8]),
+    ("sunset", [0xff, 0x51, 0x2f], [0xf0, 0x98, 0x19]),
+    ("ocean", [0x21, 0x93, 0xb0], [0x6d, 0xd5, 0xed]),
+    ("forest", [0x13, 0x4e, 0x5e], [0x71, 0xb2, 0x80]),
+    ("night", [0x0f, 0x20, 0x27], [0x2c, 0x53, 0x64]),
+];
 
 /// The audio source that stands for the program in the foreground when the recording starts.
 pub const TARGET_SOURCE: &str = "app:@target";

@@ -76,14 +76,15 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), StillError> {
 }
 
 /// How captures are encoded.
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct Output<'a> {
     pub format: ImageFormat,
     pub settings: &'a Settings,
     /// HDR screens are kept as HDR when the format can hold it, rather than tone-mapped.
     pub keep_hdr: bool,
-    /// A window capture is set on this background.
-    pub backdrop: Option<Backdrop>,
+    /// A window capture is set on the background this gives, asked once the window is
+    /// captured (reading the wallpaper takes a moment).
+    pub backdrop: Option<&'a dyn Fn() -> Backdrop>,
 }
 
 impl Output<'_> {
@@ -232,7 +233,8 @@ pub fn run<B: StillBackend>(
         });
     let path = if let Some(mut capture) = hdr {
         let grabbed = started.elapsed();
-        if let Some((b, scale)) = backdrop {
+        if let Some((make, scale)) = backdrop {
+            let b = make();
             let (w, h) = (capture.frame.width, capture.frame.height);
             let white = capture.info.sdr_white_nits / 80.0;
             let layout = backdrop::layout(w, h, scale);
@@ -241,31 +243,31 @@ pub fn run<B: StillBackend>(
                 height: h,
                 rgba: &capture.frame.rgba,
             };
-            capture.frame =
-                match card::set_on_card(device.as_ref(), &window, &card_setting(&layout, b, white))
-                {
-                    Ok(card::Set::Hdr(rgba)) => HdrFrame {
-                        width: layout.size.0,
-                        height: layout.size.1,
-                        rgba,
-                    },
-                    card => {
-                        if let Err(e) = card {
-                            tracing::debug!("backdrop on the processor: {e}");
-                        }
-                        let window = Linear {
-                            width: w,
-                            height: h,
-                            rgba: std::mem::take(&mut capture.frame.rgba),
-                        };
-                        let set = backdrop::set_on(&window, b, scale, white);
-                        HdrFrame {
-                            width: set.width,
-                            height: set.height,
-                            rgba: set.rgba,
-                        }
+            let on_card = card_setting(&layout, &b, white)
+                .map(|setting| card::set_on_card(device.as_ref(), &window, &setting));
+            capture.frame = match on_card {
+                Some(Ok(card::Set::Hdr(rgba))) => HdrFrame {
+                    width: layout.size.0,
+                    height: layout.size.1,
+                    rgba,
+                },
+                card => {
+                    if let Some(Err(e)) = card {
+                        tracing::debug!("backdrop on the processor: {e}");
                     }
-                };
+                    let window = Linear {
+                        width: w,
+                        height: h,
+                        rgba: std::mem::take(&mut capture.frame.rgba),
+                    };
+                    let set = backdrop::set_on(&window, &b, scale, white);
+                    HdrFrame {
+                        width: set.width,
+                        height: set.height,
+                        rgba: set.rgba,
+                    }
+                }
+            };
         }
         let path = save_hdr(action, snap, dest, output, metadata, &capture)?;
         tracing::debug!(
@@ -276,7 +278,8 @@ pub fn run<B: StillBackend>(
     } else {
         let frame = capturer.grab(&target, options)?;
         let grabbed = started.elapsed();
-        let set = backdrop.map(|(b, scale)| {
+        let set = backdrop.map(|(make, scale)| {
+            let b = make();
             let layout = backdrop::layout(frame.width, frame.height, scale);
             let window = card::Window::Sdr {
                 width: frame.width,
@@ -284,10 +287,12 @@ pub fn run<B: StillBackend>(
                 stride: frame.stride,
                 bgra: &frame.data,
             };
-            match card::set_on_card(device.as_ref(), &window, &card_setting(&layout, b, 1.0)) {
-                Ok(card::Set::Sdr(bgra)) => (layout.size.0, layout.size.1, bgra),
+            let on_card = card_setting(&layout, &b, 1.0)
+                .map(|setting| card::set_on_card(device.as_ref(), &window, &setting));
+            match on_card {
+                Some(Ok(card::Set::Sdr(bgra))) => (layout.size.0, layout.size.1, bgra),
                 card => {
-                    if let Err(e) = card {
+                    if let Some(Err(e)) = card {
                         tracing::debug!("backdrop on the processor: {e}");
                     }
                     let window = backdrop::linear_from_bgra(
@@ -296,7 +301,7 @@ pub fn run<B: StillBackend>(
                         frame.stride,
                         &frame.data,
                     );
-                    let set = backdrop::set_on(&window, b, scale, 1.0);
+                    let set = backdrop::set_on(&window, &b, scale, 1.0);
                     (set.width, set.height, backdrop::linear_to_bgra(&set))
                 }
             }
@@ -413,9 +418,15 @@ fn write_named(
     Ok(path)
 }
 
-/// The graphics card's version of `b`, with the processor's sizes.
-fn card_setting(layout: &backdrop::Layout, b: Backdrop, white: f32) -> card::Setting {
-    card::Setting {
+/// The graphics card's version of `b`, with the processor's sizes. A picture or a gradient
+/// behind is the processor's work.
+fn card_setting(layout: &backdrop::Layout, b: &Backdrop, white: f32) -> Option<card::Setting> {
+    let behind = match b {
+        Backdrop::Blur => card::Behind::Blur,
+        Backdrop::Colour(c) => card::Behind::Colour(backdrop::linear_colour(*c, white)),
+        Backdrop::Picture(_) | Backdrop::Gradient(..) => return None,
+    };
+    Some(card::Setting {
         margin: layout.margin,
         radius: layout.radius,
         offset: layout.offset,
@@ -424,11 +435,8 @@ fn card_setting(layout: &backdrop::Layout, b: Backdrop, white: f32) -> card::Set
         small_radius: layout.small_radius,
         darken: backdrop::DARKEN,
         shadow: backdrop::SHADOW,
-        behind: match b {
-            Backdrop::Blur => card::Behind::Blur,
-            Backdrop::Colour(c) => card::Behind::Colour(backdrop::linear_colour(c, white)),
-        },
-    }
+        behind,
+    })
 }
 
 #[cfg(test)]
@@ -568,7 +576,7 @@ mod tests {
                     format: ImageFormat::Png,
                     settings: &Settings::default(),
                     keep_hdr: false,
-                    backdrop: Some(Backdrop::Colour([0, 120, 212])),
+                    backdrop: Some(&|| Backdrop::Colour([0, 120, 212])),
                 },
                 &no_metadata,
             )

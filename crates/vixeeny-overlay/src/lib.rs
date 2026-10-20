@@ -13,6 +13,7 @@ pub mod icons {
 pub mod layout;
 mod overlay;
 pub mod paint;
+pub mod picker;
 pub mod popup;
 mod scene;
 pub mod side;

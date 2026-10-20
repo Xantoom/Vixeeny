@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! A captured window set on a background: a margin around it, its corners rounded as Windows 11
-//! draws them, a soft shadow under it, over a blur of the window itself or a plain colour.
+//! draws them, a soft shadow under it, over a blurred picture (the wallpaper, else the window
+//! itself), a plain colour or a gradient.
 //! Worked out in linear light, so that the same code serves SDR pictures (linear 0…1) and HDR
 //! ones (scRGB); the blur and the shadow blend as light does.
 
@@ -8,12 +9,41 @@ use rayon::prelude::*;
 use vixeeny_common::colour::srgb_decode;
 
 /// What goes behind the window.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Backdrop {
     /// The window itself, enlarged and heavily blurred.
     Blur,
+    /// A picture (the wallpaper), covering the background and heavily blurred.
+    Picture(std::sync::Arc<Picture>),
     /// A plain sRGB colour.
     Colour([u8; 3]),
+    /// From one sRGB colour at the top left to another at the bottom right.
+    Gradient([u8; 3], [u8; 3]),
+}
+
+/// A small sRGB picture, 3 bytes per pixel: blurred anyway, it needs no more than a few
+/// hundred pixels.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Picture {
+    pub width: u32,
+    pub height: u32,
+    pub rgb: Vec<u8>,
+}
+
+/// The longest side a picture is kept at.
+const PICTURE_SIDE: u32 = 512;
+
+impl Picture {
+    /// Reads a picture file (PNG, JPEG, WebP), made small. `None` when it cannot be read.
+    pub fn read(bytes: &[u8]) -> Option<Self> {
+        let picture = image::load_from_memory(bytes).ok()?;
+        let small = picture.thumbnail(PICTURE_SIDE, PICTURE_SIDE).to_rgb8();
+        (small.width() > 0 && small.height() > 0).then(|| Self {
+            width: small.width(),
+            height: small.height(),
+            rgb: small.into_raw(),
+        })
+    }
 }
 
 /// A picture in linear light, 4 floats per pixel (alpha ignored on input, 1 on output).
@@ -73,7 +103,7 @@ pub fn linear_colour(c: [u8; 3], white: f32) -> [f32; 3] {
 /// `window` on `backdrop`, at the interface `scale` of its screen. `white`: SDR white in the
 /// picture's units (1.0 for SDR, the screen's SDR white / 80 for scRGB), the brightness of the
 /// colour backdrop.
-pub fn set_on(window: &Linear, backdrop: Backdrop, scale: f32, white: f32) -> Linear {
+pub fn set_on(window: &Linear, backdrop: &Backdrop, scale: f32, white: f32) -> Linear {
     let layout = layout(window.width, window.height, scale);
     let Layout {
         size: (w, h),
@@ -83,14 +113,16 @@ pub fn set_on(window: &Linear, backdrop: Backdrop, scale: f32, white: f32) -> Li
     } = layout;
     let mut out = match backdrop {
         Backdrop::Colour(c) => {
-            let px = linear_colour(c, white);
+            let px = linear_colour(*c, white);
             Linear {
                 width: w,
                 height: h,
                 rgba: [px[0], px[1], px[2], 1.0].repeat(w as usize * h as usize),
             }
         }
+        Backdrop::Gradient(from, to) => gradient(*from, *to, (w, h), white),
         Backdrop::Blur => blurred(window, &layout),
+        Backdrop::Picture(picture) => blurred_picture(picture, &layout, white),
     };
     // The shadow: the window's shape, lower, softened, darkening what is under it.
     let shape = rounded(window.width, window.height, radius);
@@ -168,10 +200,34 @@ fn rounded(w: u32, h: u32, radius: f32) -> Vec<f32> {
     out
 }
 
+/// From `from` at the top left to `to` at the bottom right, mixed as the eye sees it (in sRGB),
+/// at `white`.
+fn gradient(from: [u8; 3], to: [u8; 3], (w, h): (u32, u32), white: f32) -> Linear {
+    let (from, to) = (from.map(f32::from), to.map(f32::from));
+    let mut rgba = vec![0.0_f32; w as usize * h as usize * 4];
+    let span = (w + h).saturating_sub(2).max(1) as f32;
+    rgba.par_chunks_mut(w as usize * 4)
+        .enumerate()
+        .for_each(|(y, row)| {
+            for x in 0..w as usize {
+                let t = (x + y) as f32 / span;
+                for c in 0..3 {
+                    let v = from[c] + (to[c] - from[c]) * t;
+                    row[x * 4 + c] = srgb_decode(v / 255.0) * white;
+                }
+                row[x * 4 + 3] = 1.0;
+            }
+        });
+    Linear {
+        width: w,
+        height: h,
+        rgba,
+    }
+}
+
 /// The window stretched over `w`×`h` and blurred well past recognition, a little darker so the
 /// window stands out.
 fn blurred(window: &Linear, layout: &Layout) -> Linear {
-    let (w, h) = layout.size;
     let (sw, sh) = (layout.small.0 as usize, layout.small.1 as usize);
     let (ww, wh) = (window.width as usize, window.height as usize);
     let mut small = vec![[0.0_f32; 3]; sw * sh];
@@ -192,6 +248,55 @@ fn blurred(window: &Linear, layout: &Layout) -> Linear {
         let n = ((y1.min(wh) - y0) * (x1.min(ww) - x0)).max(1) as f32;
         *px = sum.map(|s| s / n * DARKEN);
     }
+    enlarged(small, layout)
+}
+
+/// `picture` covering `w`×`h` (cut on the sides that overflow), blurred and a little darker,
+/// at `white`.
+fn blurred_picture(picture: &Picture, layout: &Layout, white: f32) -> Linear {
+    let (w, h) = layout.size;
+    let (sw, sh) = (layout.small.0 as usize, layout.small.1 as usize);
+    let (pw, ph) = (picture.width as f32, picture.height as f32);
+    // The part of the picture shown: as large as it can be with the background's proportions.
+    let fit = (pw / w as f32).min(ph / h as f32);
+    let (cw, ch) = (w as f32 * fit, h as f32 * fit);
+    let (left, top) = ((pw - cw) / 2.0, (ph - ch) / 2.0);
+    let lut: Vec<f32> = (0..=255)
+        .map(|v| srgb_decode(v as f32 / 255.0) * white * DARKEN)
+        .collect();
+    let mut small = vec![[0.0_f32; 3]; sw * sh];
+    for (i, px) in small.iter_mut().enumerate() {
+        let (x, y) = (i % sw, i / sw);
+        let (fx0, fx1) = (
+            left + x as f32 * cw / sw as f32,
+            left + (x + 1) as f32 * cw / sw as f32,
+        );
+        let (fy0, fy1) = (
+            top + y as f32 * ch / sh as f32,
+            top + (y + 1) as f32 * ch / sh as f32,
+        );
+        let (x0, y0) = (fx0 as usize, fy0 as usize);
+        let x1 = (fx1.ceil() as usize).clamp(x0 + 1, picture.width as usize);
+        let y1 = (fy1.ceil() as usize).clamp(y0 + 1, picture.height as usize);
+        let mut sum = [0.0_f32; 3];
+        for yy in y0..y1 {
+            for xx in x0..x1 {
+                let p = &picture.rgb[(yy * picture.width as usize + xx) * 3..];
+                sum[0] += lut[usize::from(p[0])];
+                sum[1] += lut[usize::from(p[1])];
+                sum[2] += lut[usize::from(p[2])];
+            }
+        }
+        let n = ((y1 - y0) * (x1 - x0)).max(1) as f32;
+        *px = sum.map(|s| s / n);
+    }
+    enlarged(small, layout)
+}
+
+/// The small background blurred, then smoothly enlarged to the full size.
+fn enlarged(mut small: Vec<[f32; 3]>, layout: &Layout) -> Linear {
+    let (w, h) = layout.size;
+    let (sw, sh) = (layout.small.0 as usize, layout.small.1 as usize);
     let radius = layout.small_radius as usize;
     for c in 0..3 {
         let mut plane: Vec<f32> = small.iter().map(|p| p[c]).collect();
@@ -328,7 +433,7 @@ mod tests {
     fn the_window_sits_in_a_margin_with_rounded_corners() {
         let out = set_on(
             &window(200, 100, 0.5),
-            Backdrop::Colour([255, 255, 255]),
+            &Backdrop::Colour([255, 255, 255]),
             1.0,
             1.0,
         );
@@ -348,7 +453,7 @@ mod tests {
         // scRGB on a screen whose SDR white is 240 nits: 3.0.
         let out = set_on(
             &window(64, 64, 10.0),
-            Backdrop::Colour([255, 255, 255]),
+            &Backdrop::Colour([255, 255, 255]),
             1.0,
             3.0,
         );
@@ -363,13 +468,47 @@ mod tests {
         for px in w.rgba.as_chunks_mut::<4>().0 {
             px[0] = 0.8; // red
         }
-        let out = set_on(&w, Backdrop::Blur, 1.5, 1.0);
+        let out = set_on(&w, &Backdrop::Blur, 1.5, 1.0);
         assert_eq!((out.width, out.height), (160 + 144, 90 + 144));
         let corner = &out.rgba[..4];
         assert!(
             corner[0] > 0.4 && corner[1] < 0.05 && corner[2] < 0.05,
             "{corner:?}"
         );
+    }
+
+    #[test]
+    fn a_picture_covers_the_background_and_a_gradient_crosses_it() {
+        // Left half red, right half blue: wider than the background, its middle shows.
+        let mut rgb = Vec::new();
+        for _ in 0..100 {
+            for x in 0..400 {
+                rgb.extend_from_slice(if x < 200 { &[255, 0, 0] } else { &[0, 0, 255] });
+            }
+        }
+        let picture = Picture {
+            width: 400,
+            height: 100,
+            rgb,
+        };
+        let out = set_on(
+            &window(100, 100, 0.0),
+            &Backdrop::Picture(std::sync::Arc::new(picture)),
+            1.0,
+            1.0,
+        );
+        let px = |x: u32, y: u32| &out.rgba[((y * out.width + x) * 4) as usize..][..3];
+        let (left, right) = (px(2, 2), px(out.width - 3, 2));
+        assert!(left[0] > 0.4 && left[2] < 0.05, "{left:?}");
+        assert!(right[2] > 0.4 && right[0] < 0.05, "{right:?}");
+        let out = set_on(
+            &window(100, 100, 0.0),
+            &Backdrop::Gradient([0, 0, 0], [255, 255, 255]),
+            1.0,
+            1.0,
+        );
+        let last = out.rgba.len() - 4;
+        assert!(out.rgba[0] < 1e-3 && (out.rgba[last] - 1.0).abs() < 1e-3);
     }
 
     #[test]

@@ -22,7 +22,7 @@ pub use windows_impl::{
     on_dir_change, on_foreground_change, on_process_exit, open_path, process_alive,
     process_ancestors, process_name, process_path, reveal, run_in_background, set_app_id,
     set_exe_icon, single_instance, style_window, system_accent, system_prefers_dark, tag_window,
-    top_level_windows, user_locale, wait_for_composition, window_info,
+    top_level_windows, user_locale, wait_for_composition, wallpaper, window_info,
 };
 
 /// A graphics adapter as the OS reports it (the encoder probe derives its own view from it).
@@ -47,6 +47,15 @@ pub fn format_driver_version(raw: i64) -> String {
         (v >> 16) & 0xFFFF,
         v & 0xFFFF
     )
+}
+
+/// What the desktop shows behind the windows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Wallpaper {
+    /// The file of its picture.
+    Picture(std::path::PathBuf),
+    /// No picture: a plain colour, `[r, g, b]`.
+    Colour([u8; 3]),
 }
 
 /// Version-resource strings of an executable, used to name captures after the application.
