@@ -298,7 +298,9 @@ struct GpuParts {
 }
 
 /// Keeps the D3D11 device alive for the length of the recording.
-struct KeepAlive(#[allow(dead_code)] Option<GpuParts>);
+struct KeepAlive {
+    _parts: Option<GpuParts>,
+}
 
 // SAFETY: the device is free-threaded and multithread protected; the value is only held, never
 // used, by the recording thread.
@@ -466,7 +468,6 @@ fn plan(
     // An SDR monitor has nothing to preserve: such a recording stays SDR.
     let hdr = monitor.hdr.is_some() && matches!(profile.hdr.as_str(), "keep_hdr" | "hdr");
     let storage = replay_storage(config, &encoder, output_size);
-    #[allow(unused_mut)]
     let mut record = RecordConfig {
         options,
         container,
@@ -854,7 +855,7 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
         gpu_lost,
     });
     let notice = plan.notice;
-    let keep_alive = KeepAlive(plan.gpu);
+    let keep_alive = KeepAlive { _parts: plan.gpu };
     let thread = std::thread::Builder::new()
         .name("recording".into())
         .spawn(move || {

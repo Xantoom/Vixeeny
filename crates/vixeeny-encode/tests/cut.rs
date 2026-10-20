@@ -18,11 +18,27 @@ use vixeeny_encode::registry::{Chroma, PresetName, Registry};
 const MS: i64 = 1_000_000;
 const FPS: usize = 30;
 
-fn scratch(name: &str) -> PathBuf {
+/// A folder of its own for a test, removed when the test ends, even early or failing.
+struct Scratch(PathBuf);
+
+impl std::ops::Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn scratch(name: &str) -> Scratch {
     let dir = std::env::temp_dir().join(format!("vixeeny-cut-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    dir
+    Scratch(dir)
 }
 
 /// Frame `i`: its number drawn as the brightness of the whole picture, so that a decoded frame
@@ -167,7 +183,6 @@ fn the_clip_lists_its_frames_and_key_frames() {
         .collect();
     assert_eq!(keys, [0, 30, 60]);
     assert!((clip.duration() - 3.0).abs() < 0.05, "{}", clip.duration());
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -187,7 +202,6 @@ fn the_preview_decodes_the_frame_asked_for_and_the_ones_after() {
             assert_eq!(pictures.read((160, 90)).unwrap().unwrap().0, target + 1);
         }
     }
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -199,7 +213,6 @@ fn the_graphics_card_and_the_processor_show_the_same_frames() {
     assert!(!cpu.hardware());
     if !card.hardware() {
         vixeeny_common::skip_test("no hardware video decoder");
-        let _ = std::fs::remove_dir_all(dir);
         return;
     }
     for target in [0, 37, 12, 59] {
@@ -223,7 +236,6 @@ fn the_graphics_card_and_the_processor_show_the_same_frames() {
         );
     }
     assert!(card.scaled_on_card(), "the card scales what it decodes");
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -249,7 +261,6 @@ fn an_hdr_clip_is_previewed_in_sdr() {
             pictures.hardware()
         );
     }
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -269,7 +280,6 @@ fn the_preview_sound_mixes_the_tracks_from_where_it_is_asked() {
     let seconds = total as f64 / 48_000.0;
     assert!((seconds - 2.0).abs() < 0.1, "{seconds} s");
     assert!(peak > 0.7, "peak {peak}");
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -345,5 +355,4 @@ fn a_part_from_a_key_frame_is_copied_and_another_one_encoded_again() {
     );
     assert!(!cancelled.exists());
     assert!(!cancelled.with_extension("part.tmp").exists());
-    let _ = std::fs::remove_dir_all(dir);
 }

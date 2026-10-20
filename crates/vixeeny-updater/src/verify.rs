@@ -36,10 +36,6 @@ fn key(public_key: &str) -> Result<minisign_verify::PublicKey, VerifyError> {
     .map_err(|_| VerifyError::NoKey)
 }
 
-pub fn sha256_hex(bytes: &[u8]) -> String {
-    hex(&Sha256::digest(bytes))
-}
-
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -111,6 +107,10 @@ pub fn check(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sha256_hex(bytes: &[u8]) -> String {
+        hex(&Sha256::digest(bytes))
+    }
 
     // Made with rsign2 for a file `Vixeeny-1.2.3-windows-x64.zip` holding `test`.
     const KEY: &str = "RWQDEdvIFG2/xcFcP0F/kgAuNjNDd0Soa5exPBdT85E2tu7atBLGtM55";

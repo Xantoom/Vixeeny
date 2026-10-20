@@ -116,11 +116,6 @@ impl Selection {
         !matches!(self.mode, Mode::Idle)
     }
 
-    /// The zone is being drawn (not resized nor moved).
-    pub fn is_drawing(&self) -> bool {
-        matches!(self.mode, Mode::Drawing { .. })
-    }
-
     /// The pointer still rests where the zone was just drawn.
     fn rests_on_fresh_zone(&self, p: Point) -> bool {
         self.fresh
@@ -563,10 +558,10 @@ mod tests {
         draw(&mut s, p(100.0, 100.0), p(300.0, 300.0));
         // The pointer is on the bottom-right handle, yet the zone moves from there.
         assert_eq!(s.cursor_at(p(300.0, 300.0)), CursorHint::Move);
-        assert!(!s.is_drawing());
+        assert!(!matches!(s.mode, Mode::Drawing { .. }));
         s.pointer_down(p(300.0, 300.0));
         s.pointer_move(p(350.0, 320.0));
-        assert!(s.is_dragging() && !s.is_drawing());
+        assert!(s.is_dragging() && !matches!(s.mode, Mode::Drawing { .. }));
         s.pointer_up(p(350.0, 320.0));
         assert_eq!(s.rect(), Some(Rect::new(150.0, 120.0, 200.0, 200.0)));
         // Once the pointer has gone away, the handle resizes again.
@@ -576,7 +571,7 @@ mod tests {
         s.pointer_move(p(400.0, 400.0));
         // Resized from the handle.
         assert_eq!(s.rect(), Some(Rect::new(150.0, 120.0, 250.0, 280.0)));
-        assert!(!s.is_drawing());
+        assert!(!matches!(s.mode, Mode::Drawing { .. }));
     }
 
     #[test]

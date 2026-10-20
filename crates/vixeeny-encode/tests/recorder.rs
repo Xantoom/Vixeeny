@@ -18,11 +18,27 @@ use vixeeny_encode::registry::{Chroma, PresetName, Registry};
 
 const MS: i64 = 1_000_000;
 
-fn scratch(name: &str) -> PathBuf {
+/// A folder of its own for a test, removed when the test ends, even early or failing.
+struct Scratch(PathBuf);
+
+impl std::ops::Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn scratch(name: &str) -> Scratch {
     let dir = std::env::temp_dir().join(format!("vixeeny-rec-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    dir
+    Scratch(dir)
 }
 
 /// A moving gradient, so that every frame differs.
@@ -172,7 +188,6 @@ fn every_software_encoder_in_every_allowed_container_is_readable() {
             assert_eq!(seen.codec, want, "{id} {container:?}");
         }
     }
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -205,7 +220,6 @@ fn output_is_constant_frame_rate_whatever_the_input_timing() {
         summary.repeated > 0 && summary.dropped_by_clock > 0,
         "{summary:?}"
     );
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -245,7 +259,6 @@ fn pause_leaves_no_hole_and_the_duration_excludes_it() {
     }
     let duration = seen.pts_ms.last().unwrap() - seen.pts_ms[0];
     assert!((1_933..=2_000).contains(&duration), "{duration}");
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -264,7 +277,6 @@ fn a_static_screen_keeps_its_frame_rate_through_ticks() {
     let summary = rec.stop(1_000 * MS).unwrap();
     assert_eq!(summary.frames, 20);
     assert_eq!(demux(&summary.files[0]).pts_ms.len(), 20);
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -279,7 +291,6 @@ fn frames_are_scaled_to_the_output_size() {
     }
     let summary = rec.stop(330 * MS).unwrap();
     assert_eq!(demux(&summary.files[0]).size, (160, 90));
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -309,7 +320,6 @@ fn ten_bit_and_444_formats_record() {
     let mut cfg = config(&registry, "libsvtav1", OutputContainer::Mkv, 30);
     cfg.chroma = Chroma::C444;
     assert!(Recorder::start(cfg, namer(&dir, "mkv")).is_err());
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -332,7 +342,6 @@ fn hdr_streams_are_tagged_bt2020_pq() {
         video.color_transfer_characteristic(),
         vixeeny_encode::ffmpeg::color::TransferCharacteristic::SMPTE2084
     );
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -352,7 +361,6 @@ fn splitting_by_duration_cuts_on_key_frames_and_loses_nothing() {
         total += seen.pts_ms.len();
     }
     assert_eq!(total, 30 * 7, "no frame lost between parts");
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -366,7 +374,6 @@ fn splitting_by_size_makes_several_playable_files() {
     assert!(summary.files.len() >= 2, "{}", summary.files.len());
     let total: usize = summary.files.iter().map(|f| demux(f).pts_ms.len()).sum();
     assert_eq!(total, 30 * 6);
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// Top-level boxes of an MP4 file, in order.
@@ -414,7 +421,6 @@ fn hybrid_mp4_ends_classic_and_fragmented_mp4_stays_fragmented() {
     );
     let b = boxes(&fragmented.files[0]);
     assert!(b.contains(&"moof".to_string()), "{b:?}");
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -460,7 +466,6 @@ fn a_hybrid_recording_cut_short_is_readable_up_to_the_last_fragment() {
         seen.pts_ms.len()
     );
     assert!(seen.pts_ms.len() <= 30 * 5);
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -495,7 +500,6 @@ fn a_slow_encoder_drops_input_frames_instead_of_blocking() {
     let summary = rec.stop(200 * 33 * MS).unwrap();
     assert_eq!(summary.dropped_by_queue, refused);
     let _ = started;
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -525,7 +529,6 @@ fn variable_frame_rate_keeps_every_frame_at_its_own_time() {
     for (got, want) in seen.pts_ms.iter().zip(expected) {
         assert!((got - want).abs() <= 1, "{:?}", seen.pts_ms);
     }
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -535,7 +538,6 @@ fn variable_frame_rate_is_refused_in_mp4() {
     let mut cfg = config(&registry, "libx264", OutputContainer::Mp4Hybrid, 30);
     cfg.vfr = true;
     assert!(Recorder::start(cfg, namer(&dir, "mp4")).is_err());
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// A uniform scRGB frame (all channels `half`, as raw half-float bits).
@@ -602,7 +604,6 @@ fn scrgb_frames_come_out_as_bt2020_pq_10_bit() {
     // Neutral grey: chroma at mid-scale (512).
     let cb = i32::from(u16::from_le_bytes([decoded.data(1)[0], decoded.data(1)[1]]));
     assert!((cb - 512).abs() <= 4, "cb {cb}");
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 // ---- audio ----
@@ -764,7 +765,6 @@ fn every_audio_codec_muxes_in_the_containers_that_allow_it() {
             assert_eq!(title.as_deref(), Some("Micro"), "{codec_:?} {container:?}");
         }
     }
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -806,7 +806,6 @@ fn surround_tracks_keep_their_channels_in_matroska() {
     }
     assert!(!AudioCodec::Aac.surround_in(OutputContainer::Mkv));
     assert!(!AudioCodec::Opus.surround_in(OutputContainer::WebM));
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -823,7 +822,6 @@ fn several_tracks_each_get_their_own_named_stream() {
     let seen = demux_audio(&summary.files[0]);
     let titles: Vec<_> = seen.streams.iter().map(|s| s.3.clone().unwrap()).collect();
     assert_eq!(titles, ["Micro", "Wuthering Waves", "Spotify"]);
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -847,7 +845,6 @@ fn audio_and_video_agree_on_time_zero_when_the_first_frame_is_late() {
         (a_last - v_last).abs() <= 80,
         "audio {a_last} vs video {v_last}"
     );
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -872,7 +869,6 @@ fn splitting_keeps_audio_in_every_part() {
         (6_700..=7_100).contains(&audio_total),
         "{audio_total} ms of audio"
     );
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -920,7 +916,6 @@ fn a_drifting_source_through_the_mixer_stays_in_sync_with_the_video() {
         (last - v_end).abs() <= 60,
         "audio {last} ms vs video {v_end} ms"
     );
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 // ---- replay buffer ----
@@ -931,7 +926,7 @@ fn replay_session(
     audio: bool,
     keep: u32,
     seconds: usize,
-) -> (Recorder, PathBuf) {
+) -> (Recorder, Scratch) {
     let registry = Registry::builtin().unwrap();
     let dir = scratch(&format!("replay-{}", container.extension()));
     let mut cfg = config(&registry, "libx264", container, 30);
@@ -978,7 +973,6 @@ fn a_replay_save_holds_the_requested_duration_without_writing_while_buffering() 
     // The buffer keeps running: the session ends with no file of its own.
     let summary = rec.stop(12_000 * MS).unwrap();
     assert!(summary.files.is_empty());
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -994,7 +988,6 @@ fn two_saves_in_a_row_make_two_valid_files_and_a_short_buffer_gives_what_it_has(
         assert!(seen.pts_ms.len() >= 100, "{}", seen.pts_ms.len());
     }
     drop(rec);
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -1011,7 +1004,6 @@ fn a_save_before_any_key_frame_is_refused_and_a_plain_recording_has_no_replay() 
     let rec = Recorder::start(cfg, namer(&dir, "mkv")).unwrap();
     assert!(rec.save_replay(dir.join("y.mkv")).is_err());
     rec.stop(0).unwrap();
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -1038,7 +1030,6 @@ fn a_replay_and_a_recording_share_one_encoder_session() {
     );
     // Starts where a recording starts (MP4 keeps the encoder delay as an offset).
     assert_eq!(demux(&path).pts_ms[0], demux(&summary.files[0]).pts_ms[0]);
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -1093,5 +1084,4 @@ fn a_replay_kept_on_disk_saves_the_same_file_as_one_kept_in_ram() {
         .map(|d| d.flatten().collect())
         .unwrap_or_default();
     assert!(left.iter().all(|e| e.path().is_dir()), "{left:?}");
-    let _ = std::fs::remove_dir_all(dir);
 }
