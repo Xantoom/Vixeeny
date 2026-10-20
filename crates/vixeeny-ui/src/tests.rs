@@ -322,6 +322,27 @@ fn shortcuts_that_cannot_work_are_marked() {
 }
 
 #[test]
+fn a_refused_shortcut_says_why_in_the_users_language() {
+    use slint::Model;
+    use vixeeny_settings::Section;
+    WINDOW.with(|_| ());
+    let panel = settings_panel::SettingsPanel::new(
+        vixeeny_common::config::Config::default(),
+        Some("fr-FR".into()),
+        "1.2.3",
+        crate::theme::Look::dark(),
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    panel.select_section(Section::Shortcuts);
+    let w = panel.window();
+    // A letter alone types text: refused, the key by its name.
+    w.invoke_shortcut_record(0, 1);
+    panel.captured(settings_panel::Captured::Combination("KeyR".into()));
+    let row = w.get_shortcuts().row_data(0).unwrap();
+    assert_eq!(row.error, "R demande CTRL, ALT, SHIFT ou WIN");
+}
+
+#[test]
 fn shortcuts_are_edited_in_place_and_conflicts_are_explained() {
     use slint::Model;
     use vixeeny_settings::Section;

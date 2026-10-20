@@ -8,6 +8,7 @@ use std::rc::Rc;
 
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use vixeeny_common::config::Config;
+use vixeeny_common::hotkey::HotkeyError;
 use vixeeny_common::i18n::{Key, Lang, tr};
 use vixeeny_common::ipc::ActionId;
 use vixeeny_encode::probe::ProbeResult;
@@ -1184,7 +1185,7 @@ impl SettingsPanel {
             Err(refusal) => vec![(
                 row,
                 match refusal {
-                    Refusal::Invalid(message) => message,
+                    Refusal::Invalid(error) => invalid_shortcut(&error, lang),
                     Refusal::Duplicate => tr(Key::ShortcutDuplicate, lang).to_owned(),
                     Refusal::Conflict(other) => tr(Key::ShortcutConflict, lang)
                         .replace("{action}", action_label(other, lang)),
@@ -1544,6 +1545,19 @@ impl SettingsPanel {
 }
 
 /// A shortcut as the field shows it: `Ctrl+Shift+KeyR` → `CTRL + SHIFT + R`.
+/// Why a shortcut is not a key combination, in the user's language.
+fn invalid_shortcut(error: &HotkeyError, lang: Lang) -> String {
+    match error {
+        HotkeyError::Empty | HotkeyError::ModifierOnly => {
+            tr(Key::ShortcutModifierOnly, lang).to_owned()
+        }
+        HotkeyError::UnknownKey(key) => tr(Key::ShortcutUnknownKey, lang).replace("{key}", key),
+        HotkeyError::NeedsModifier(code) => {
+            tr(Key::ShortcutNeedsModifier, lang).replace("{key}", &shortcut_label(code, lang))
+        }
+    }
+}
+
 pub fn shortcut_label(text: &str, lang: Lang) -> String {
     key_names(text, lang).join(" + ").to_uppercase()
 }

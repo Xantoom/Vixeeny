@@ -341,6 +341,9 @@ pub enum Key {
     UnitFrames,
     UnitMinutes,
     UnitMb,
+    ShortcutModifierOnly,
+    ShortcutUnknownKey,
+    ShortcutNeedsModifier,
 }
 
 impl Key {
@@ -674,6 +677,9 @@ impl Key {
         Self::UnitFrames,
         Self::UnitMinutes,
         Self::UnitMb,
+        Self::ShortcutModifierOnly,
+        Self::ShortcutUnknownKey,
+        Self::ShortcutNeedsModifier,
     ];
 }
 
@@ -1438,6 +1444,12 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::UnitMinutes, Lang::Fr) => "min",
         (Key::UnitMb, Lang::En) => "MB",
         (Key::UnitMb, Lang::Fr) => "Mo",
+        (Key::ShortcutModifierOnly, Lang::En) => "Add a key to the modifiers",
+        (Key::ShortcutModifierOnly, Lang::Fr) => "Ajoutez une touche aux modificateurs",
+        (Key::ShortcutUnknownKey, Lang::En) => "Unknown key: {key}",
+        (Key::ShortcutUnknownKey, Lang::Fr) => "Touche inconnue : {key}",
+        (Key::ShortcutNeedsModifier, Lang::En) => "{key} needs CTRL, ALT, SHIFT or WIN",
+        (Key::ShortcutNeedsModifier, Lang::Fr) => "{key} demande CTRL, ALT, SHIFT ou WIN",
     }
 }
 

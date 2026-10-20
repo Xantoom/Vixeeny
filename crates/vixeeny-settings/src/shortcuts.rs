@@ -2,14 +2,14 @@
 //! The shortcuts table: two slots per action, checked as they are typed.
 
 use vixeeny_common::config::{Config, Hotkeys};
-use vixeeny_common::hotkey::{Hotkey, MAX_PER_ACTION};
+use vixeeny_common::hotkey::{Hotkey, HotkeyError, MAX_PER_ACTION};
 use vixeeny_common::ipc::ActionId;
 
 /// What is wrong with a shortcut that was typed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Refusal {
-    /// Not a key combination (the parser's message).
-    Invalid(String),
+    /// Not a key combination (why, for the window to say in the user's language).
+    Invalid(HotkeyError),
     /// Already used by this action.
     Duplicate,
     /// Already used by another action.
@@ -65,7 +65,7 @@ pub fn set(config: &mut Config, action: ActionId, slot: usize, text: &str) -> Re
     if text.is_empty() {
         target.clear();
     } else {
-        let hotkey = Hotkey::parse(text).map_err(|e| Refusal::Invalid(e.to_string()))?;
+        let hotkey = Hotkey::parse(text).map_err(Refusal::Invalid)?;
         for (other, texts) in config.hotkeys.bindings() {
             for (index, used) in texts.iter().enumerate() {
                 if other == action && index == slot {
