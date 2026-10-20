@@ -123,10 +123,11 @@ fn pick_window(
 ) -> anyhow::Result<Option<vixeeny_platform::WindowInfo>> {
     let bounds =
         vixeeny_platform::virtual_bounds(monitors.iter().map(|m| &m.rect)).context("no screen")?;
-    // Those on a screen (a minimized window is far outside), never Vixeeny's own.
+    // Those on a screen (a minimized window is far outside). Vixeeny's settings can be taken
+    // too; its popups are not listed (tool windows).
     let windows: Vec<vixeeny_platform::WindowInfo> = vixeeny_platform::top_level_windows()?
         .into_iter()
-        .filter(|w| !still::is_ours(w) && w.rect.intersection(&bounds).is_some())
+        .filter(|w| w.pid != std::process::id() && w.rect.intersection(&bounds).is_some())
         .collect();
     let rects = windows
         .iter()
@@ -262,25 +263,19 @@ fn window_backdrop_kind(config: &Config) -> bool {
 /// What a window capture is set on, by the setting: the wallpaper blurred (`blur`, from
 /// before, too), a plain colour or a gradient; nothing by default.
 fn window_backdrop(config: &Config) -> Option<vixeeny_image::backdrop::Backdrop> {
-    use vixeeny_common::config::{BACKDROP_COLOURS, BACKDROP_GRADIENTS};
     use vixeeny_image::backdrop::Backdrop;
     let image = &config.image;
     match image.window_backdrop.as_str() {
         "wallpaper" | "blur" => Some(wallpaper()),
         "colour" => Some(Backdrop::Colour(
-            BACKDROP_COLOURS
-                .iter()
-                .find(|(id, _)| *id == image.backdrop_colour)
-                .map(|(_, c)| *c)
+            image
+                .backdrop_colour()
                 .or_else(vixeeny_platform::system_accent)
                 .unwrap_or([0, 120, 212]),
         )),
         "gradient" => {
-            let (_, from, to) = BACKDROP_GRADIENTS
-                .iter()
-                .find(|(id, ..)| *id == image.backdrop_gradient)
-                .unwrap_or(&BACKDROP_GRADIENTS[0]);
-            Some(Backdrop::Gradient(*from, *to))
+            let (from, to) = image.backdrop_gradient();
+            Some(Backdrop::Gradient(from, to))
         }
         _ => None,
     }

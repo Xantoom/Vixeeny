@@ -60,7 +60,7 @@ const RADIUS: f32 = 8.0;
 /// How much the blur backdrop is darkened (so the window stands out), and how much the shadow
 /// darkens at its heart.
 pub const DARKEN: f32 = 0.8;
-pub const SHADOW: f32 = 0.45;
+pub const SHADOW: f32 = 0.75;
 
 /// The sizes of a window set on its background, in pixels (what the graphics card draws too).
 #[derive(Debug, Clone, Copy, PartialEq)]

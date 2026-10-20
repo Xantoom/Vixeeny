@@ -7,7 +7,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
-use vixeeny_common::config::Config;
+use vixeeny_common::config::{Config, hex};
 use vixeeny_common::hotkey::HotkeyError;
 use vixeeny_common::i18n::{Key, Lang, tr};
 use vixeeny_common::ipc::ActionId;
@@ -160,6 +160,8 @@ type MeterFn = Box<dyn Fn(Option<String>)>;
 
 struct State {
     config: RefCell<Config>,
+    /// Windows' accent colour.
+    accent: [u8; 3],
     env: RefCell<Env>,
     os_locale: Option<String>,
     version: String,
@@ -366,6 +368,7 @@ fn same_row(a: &SettingRow, b: &SettingRow) -> bool {
         && a.min == b.min
         && a.max == b.max
         && a.step == b.step
+        && a.mark == b.mark
         && a.selected == b.selected
         && a.has_icon == b.has_icon
         && options(a) == options(b)
@@ -566,6 +569,11 @@ fn row_model(row: &Row, config: &Config, lang: Lang) -> SettingRow {
         min: 0,
         max: 0,
         step: 1,
+        mark: row.mark.map_or(-1, |m| m as i32),
+        colours: ModelRc::default(),
+        swatches: ModelRc::default(),
+        pairs: ModelRc::default(),
+        pair_values: ModelRc::default(),
         options: ModelRc::default(),
         headings: ModelRc::default(),
         selected: -1,
@@ -635,6 +643,26 @@ fn row_model(row: &Row, config: &Config, lang: Lang) -> SettingRow {
         (Kind::Folder, Value::Text(t)) => {
             out.kind = 4;
             out.text = vixeeny_common::paths::display_dir(&t).into();
+        }
+        (Kind::Colour { swatches, pairs }, Value::Text(t)) => {
+            let colours = |list: Vec<[u8; 3]>| {
+                ModelRc::from(Rc::new(VecModel::from(
+                    list.into_iter()
+                        .map(|[r, g, b]| slint::Color::from_rgb_u8(r, g, b))
+                        .collect::<Vec<_>>(),
+                )))
+            };
+            let current: Vec<[u8; 3]> = t
+                .split(',')
+                .filter_map(vixeeny_common::config::parse_hex)
+                .collect();
+            out.kind = 12;
+            out.options = strings(current.iter().map(|&c| hex(c).to_uppercase()));
+            out.colours = colours(current);
+            out.swatches = colours(swatches.clone());
+            out.pairs = colours(pairs.iter().flat_map(|&(a, b)| [a, b]).collect());
+            out.pair_values = strings(pairs.iter().map(|&(a, b)| format!("{},{}", hex(a), hex(b))));
+            out.text = t.into();
         }
         (_, Value::Text(t)) => out.text = t.into(),
         _ => {}
@@ -760,7 +788,8 @@ impl SettingsPanel {
         let window = SettingsWindow::new()?;
         let lang = Lang::resolve(&config.general.language, os_locale.as_deref());
         let state = Rc::new(State {
-            env: RefCell::new(Env::new(lang, version)),
+            env: RefCell::new(Env::new(lang, version).with_accent(look.accent)),
+            accent: look.accent,
             config: RefCell::new(config),
             os_locale,
             version: version.to_owned(),
@@ -1048,6 +1077,7 @@ impl SettingsPanel {
         let state = &self.state;
         let (probe, detecting) = state.probe.borrow().clone();
         *state.env.borrow_mut() = Env::new(state.lang(), &state.version)
+            .with_accent(state.accent)
             .with_auto_lang(Lang::resolve("auto", state.os_locale.as_deref()))
             .with_probe(probe, detecting)
             .with_audio(state.audio.borrow().clone())
@@ -1500,6 +1530,42 @@ impl SettingsPanel {
         w.on_row_number({
             let edit = edit.clone();
             move |id, n| edit(&id, Value::Int(i64::from(n)))
+        });
+        // One colour of a colour row changed: the row's value with it in its place.
+        let recolour = {
+            let state = self.state.clone();
+            Rc::new(move |id: &str, index: i32, colour: [u8; 3]| {
+                let rows = state.rows.borrow();
+                let row = rows.iter().find(|r| r.id == id)?;
+                let Value::Text(value) = row.value(&state.config.borrow()) else {
+                    return None;
+                };
+                let mut codes: Vec<String> = value.split(',').map(str::to_owned).collect();
+                *codes.get_mut(usize::try_from(index).ok()?)? = hex(colour);
+                Some(codes.join(","))
+            })
+        };
+        w.on_row_colour({
+            let (edit, recolour) = (edit.clone(), recolour.clone());
+            move |id, index, c| {
+                if let Some(value) = recolour(&id, index, [c.red(), c.green(), c.blue()]) {
+                    edit(&id, Value::Text(value));
+                }
+            }
+        });
+        w.on_row_code({
+            let edit = edit.clone();
+            move |id, index, code| {
+                let value =
+                    vixeeny_common::config::parse_hex(&code).and_then(|c| recolour(&id, index, c));
+                let edit = edit.clone();
+                // Typed in a field, as `row-text`: applied once the field is done with.
+                if let Some(value) = value {
+                    slint::Timer::single_shot(std::time::Duration::ZERO, move || {
+                        edit(&id, Value::Text(value));
+                    });
+                }
+            }
         });
         w.on_row_sliding({
             let state = self.state.clone();

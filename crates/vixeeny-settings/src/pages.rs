@@ -1122,7 +1122,7 @@ const CAPTURE_VOLUME: &str = "capture";
 
 /// A volume, in percent of the sound as it is (up to twice as loud).
 fn volume_row(id: &str, label: String, key: &'static str) -> Row {
-    row(
+    let mut volume = row(
         id,
         label,
         Kind::Slider {
@@ -1146,7 +1146,10 @@ fn volume_row(id: &str, label: String, key: &'static str) -> Row {
             }
             _ => Err(Invalid),
         }),
-    )
+    );
+    // The volume as it is.
+    volume.mark = Some(100);
+    volume
 }
 
 pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
@@ -1554,7 +1557,7 @@ pub fn replay(env: &Env, config: &Config) -> Vec<Row> {
 
 /// What a window capture is set on, and its colour or gradient.
 fn backdrop_rows(env: &Env, config: &Config) -> Vec<Row> {
-    use vixeeny_common::config::{BACKDROP_COLOURS, BACKDROP_GRADIENTS};
+    use vixeeny_common::config::{BACKDROP_COLOURS, BACKDROP_GRADIENTS, hex};
     let t = |k| env.t(k);
     let mut rows = vec![
         header("h_window_capture", t(Key::GrpWindowCapture)),
@@ -1571,52 +1574,52 @@ fn backdrop_rows(env: &Env, config: &Config) -> Vec<Row> {
             |c, v| c.image.window_backdrop = v,
         ),
     ];
+    let swatches: Vec<[u8; 3]> = std::iter::once(env.accent)
+        .chain(BACKDROP_COLOURS.iter().map(|(_, c)| *c))
+        .collect();
     match backdrop_kind(&config.image.window_backdrop) {
         "colour" => {
-            let names = [
-                Key::OptColourWhite,
-                Key::OptColourGrey,
-                Key::OptColourBlack,
-                Key::OptColourBlue,
-                Key::OptColourPurple,
-                Key::OptColourGreen,
-                Key::OptColourOrange,
-                Key::OptColourPink,
-            ];
-            let mut options = vec![opt("accent", t(Key::OptColourAccent))];
-            options.extend(
-                BACKDROP_COLOURS
-                    .iter()
-                    .zip(names)
-                    .map(|((id, _), name)| opt(id, t(name))),
-            );
-            rows.push(nested(choice(
+            let accent = env.accent;
+            rows.push(row(
                 "backdrop_colour",
                 t(Key::SetBackdropColour),
-                options,
-                |c| c.image.backdrop_colour.clone(),
-                |c, v| c.image.backdrop_colour = v,
-            )));
+                Kind::Colour {
+                    swatches,
+                    pairs: Vec::new(),
+                },
+                Box::new(move |c| Value::Text(hex(c.image.backdrop_colour().unwrap_or(accent)))),
+                Box::new(|c, v| match v {
+                    Value::Text(t) => {
+                        c.image.backdrop_colour = t;
+                        Ok(())
+                    }
+                    _ => Err(Invalid),
+                }),
+            ));
         }
         "gradient" => {
-            let names = [
-                Key::OptGradientDusk,
-                Key::OptGradientSunset,
-                Key::OptGradientOcean,
-                Key::OptGradientForest,
-                Key::OptGradientNight,
-            ];
-            rows.push(nested(choice(
+            rows.push(row(
                 "backdrop_gradient",
                 t(Key::SetBackdropGradient),
-                BACKDROP_GRADIENTS
-                    .iter()
-                    .zip(names)
-                    .map(|((id, ..), name)| opt(id, t(name)))
-                    .collect(),
-                |c| c.image.backdrop_gradient.clone(),
-                |c, v| c.image.backdrop_gradient = v,
-            )));
+                Kind::Colour {
+                    swatches,
+                    pairs: BACKDROP_GRADIENTS
+                        .iter()
+                        .map(|(_, from, to)| (*from, *to))
+                        .collect(),
+                },
+                Box::new(|c| {
+                    let (from, to) = c.image.backdrop_gradient();
+                    Value::Text(format!("{},{}", hex(from), hex(to)))
+                }),
+                Box::new(|c, v| match v {
+                    Value::Text(t) => {
+                        c.image.backdrop_gradient = t;
+                        Ok(())
+                    }
+                    _ => Err(Invalid),
+                }),
+            ));
         }
         _ => {}
     }

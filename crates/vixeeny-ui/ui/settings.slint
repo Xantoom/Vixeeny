@@ -4,7 +4,7 @@
 // on the right, its settings in cards, one card per group under the group's title. Rows are generic (a
 // toggle, a choice, a folder…); the shortcuts, the updates and the about page have their own
 // layouts. Plain Slint elements only (std-widgets would pull the SVG decoder in for its icons).
-import { Theme, Icons, Icon, Button, IconButton, Toggle, TextBox, ComboBox, NumberBox, Slider, NavItem, Group, GroupRow, InfoBar, ScrollArea, ProgressBar, SearchBox, ScreenPicker, LevelMeter, Tip, TipLayer } from "controls.slint";
+import { Theme, Icons, Icon, Button, IconButton, Toggle, TextBox, ComboBox, NumberBox, Slider, NavItem, Group, GroupRow, InfoBar, ScrollArea, ProgressBar, SearchBox, ScreenPicker, LevelMeter, ColourField, Tip, TipLayer } from "controls.slint";
 
 // A choice of a list with pictures (a program to record).
 export struct SettingRow {
@@ -20,7 +20,8 @@ export struct SettingRow {
     nested: bool,
     // 0 toggle, 1 choice, 2 number, 3 text, 4 folder, 5 info, 8 slider,
     // 9 expander (`on`: open), 10 choice of a screen edge, 11 choice of a place on the screen
-    // (its own place, if any, in `min` and `max`: thousandths across and down, else -1)
+    // (its own place, if any, in `min` and `max`: thousandths across and down, else -1),
+    // 12 colour (one, or a gradient's two: `colours`, their codes in `options`)
     kind: int,
     enabled: bool,
     on: bool,
@@ -33,6 +34,13 @@ export struct SettingRow {
     min: int,
     max: int,
     step: int,
+    // The value marked on a slider's track (-1: none).
+    mark: int,
+    colours: [color],
+    // Colours ready to take; gradients too, their ends one after the other, and their values.
+    swatches: [color],
+    pairs: [color],
+    pair-values: [string],
     options: [string],
     // The options that title the ones under them.
     headings: [bool],
@@ -292,6 +300,8 @@ component SettingLine inherits GroupRow {
     callback number(int);
     callback sliding(bool);
     callback text-edited(string);
+    callback colour(int, color);
+    callback code(int, string);
     callback browse();
     callback action(string);
 
@@ -378,6 +388,7 @@ component SettingLine inherits GroupRow {
                 lo: root.entry.min;
                 hi: root.entry.max;
                 step: root.entry.step;
+                mark: root.entry.mark;
                 enabled: root.entry.enabled;
                 changed(v) => { root.number(v); }
                 sliding(on) => { root.sliding(on); }
@@ -401,6 +412,18 @@ component SettingLine inherits GroupRow {
                 level: root.level;
             }
         }
+    }
+    if root.entry.kind == 12 : ColourField {
+        colours: root.entry.colours;
+        codes: root.entry.options;
+        swatches: root.entry.swatches;
+        pairs: root.entry.pairs;
+        pair-values: root.entry.pair-values;
+        enabled: root.entry.enabled;
+        picked(i, c) => { root.colour(i, c); }
+        typed(i, s) => { root.code(i, s); }
+        chosen(s) => { root.text-edited(s); }
+        sliding(on) => { root.sliding(on); }
     }
     if root.entry.kind == 3 : TextBox {
         width: Theme.value-w;
@@ -637,6 +660,9 @@ export component SettingsWindow inherits Window {
     callback row-number(string, int);
     callback row-sliding(bool);
     callback row-text(string, string);
+    // A colour of a colour row (by its place: a gradient's start or end), picked or typed.
+    callback row-colour(string, int, color);
+    callback row-code(string, int, string);
     callback row-browse(string);
     callback row-action(string, string);
     callback shortcut-record(int, int);
@@ -817,14 +843,13 @@ export component SettingsWindow inherits Window {
             overflow: elide;
         }
         // Back to how the page comes, at the end of the title's line: only once changed.
-        reset := Button {
+        reset := IconButton {
             visible: root.section != 8 && !root.searching;
-            width: self.preferred-width;
             x: 24px + page.column - self.width;
             y: page-title.y + (page-title.height - self.height) / 2;
-            icon: Icons.undo;
-            text: root.t.reset;
-            subtle: true;
+            icon: Icons.arrow-reset;
+            label: root.t.reset;
+            tip: root.page-changed ? root.t.reset : "";
             enabled: root.page-changed;
             clicked => { root.confirming = 1; }
         }
@@ -914,6 +939,8 @@ export component SettingsWindow inherits Window {
                             number(v) => { root.row-number(r.id, v); }
                             sliding(on) => { root.row-sliding(on); }
                             text-edited(s) => { root.row-text(r.id, s); }
+                            colour(i, c) => { root.row-colour(r.id, i, c); }
+                            code(i, s) => { root.row-code(r.id, i, s); }
                             browse => { root.row-browse(r.id); }
                             action(a) => { root.row-action(r.id, a); }
                         }
@@ -933,7 +960,7 @@ export component SettingsWindow inherits Window {
                             GroupRow {
                                 title: root.t.reset-all;
                                 description: root.t.reset-all-hint;
-                                glyph: Icons.undo;
+                                glyph: Icons.arrow-reset;
                                 Button {
                                     text: root.t.reset;
                                     danger: true;

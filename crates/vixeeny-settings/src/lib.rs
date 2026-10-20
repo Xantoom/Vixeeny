@@ -118,6 +118,12 @@ pub enum Kind {
     /// Shows or hides the rows under it (its value: whether they are shown). Its state is the
     /// window's, not a setting: see [`Env::open`].
     Expander,
+    /// A colour (`#rrggbb`), or the two ends of a gradient (`#rrggbb,#rrggbb`), with colours
+    /// and gradients ready to take.
+    Colour {
+        swatches: Vec<[u8; 3]>,
+        pairs: Vec<([u8; 3], [u8; 3])>,
+    },
 }
 
 /// The value was refused (not one of the choices, not a number, empty where it must not be).
@@ -166,6 +172,8 @@ pub struct Row {
     pub nested: bool,
     /// The microphone's level, drawn live under the slider.
     pub meter: bool,
+    /// A value marked on a slider's track, which it sticks to (100 % of a volume).
+    pub mark: Option<i64>,
     get: Get,
     set: Set,
 }
@@ -205,6 +213,20 @@ impl Row {
                 Value::Int(snapped.clamp(*min, *max))
             }
             (Kind::Text | Kind::Folder, Value::Text(t)) => Value::Text(t.trim().to_owned()),
+            (Kind::Colour { .. }, Value::Text(t)) => {
+                let colours = t
+                    .split(',')
+                    .map(|c| vixeeny_common::config::parse_hex(c).ok_or(Invalid))
+                    .collect::<Result<Vec<_>, _>>()?;
+                if !(1..=2).contains(&colours.len()) {
+                    return Err(Invalid);
+                }
+                let codes: Vec<String> = colours
+                    .into_iter()
+                    .map(vixeeny_common::config::hex)
+                    .collect();
+                Value::Text(codes.join(","))
+            }
             _ => return Err(Invalid),
         };
         (self.set)(config, value)
@@ -290,6 +312,8 @@ pub struct Env {
     pub machine: Machine,
     /// The expanders that are open (by row id); all closed at first.
     pub open: std::collections::BTreeSet<String>,
+    /// Windows' accent colour (what the `accent` colour stands for).
+    pub accent: [u8; 3],
 }
 
 /// What the monitors can show.
@@ -323,7 +347,13 @@ impl Env {
             display: Display::default(),
             machine: Machine::default(),
             open: std::collections::BTreeSet::new(),
+            accent: [0x00, 0x78, 0xd4],
         }
+    }
+
+    pub const fn with_accent(mut self, accent: [u8; 3]) -> Self {
+        self.accent = accent;
+        self
     }
 
     pub const fn with_auto_lang(mut self, lang: Lang) -> Self {
@@ -404,6 +434,7 @@ fn row(id: impl Into<String>, label: String, kind: Kind, get: Get, set: Set) -> 
         detail: String::new(),
         nested: false,
         meter: false,
+        mark: None,
         get,
         set,
     }

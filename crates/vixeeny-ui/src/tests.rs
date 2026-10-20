@@ -212,6 +212,63 @@ fn the_video_page_edits_the_current_profile_and_reports_problems() {
 }
 
 #[test]
+fn a_backdrop_colour_is_picked_or_typed() {
+    use vixeeny_settings::Section;
+    let (panel, seen) = settings_panel();
+    panel.select_section(Section::Image);
+    panel
+        .window()
+        .invoke_row_chosen("window_backdrop".into(), 3); // gradient
+    let w = panel.window();
+    w.invoke_row_colour(
+        "backdrop_gradient".into(),
+        1,
+        slint::Color::from_rgb_u8(1, 2, 3),
+    );
+    settings_render_at(&panel, "backdrop_gradient", (1040, 1500));
+    // Its start opens the picker.
+    let at = slint::LogicalPosition::new(726.0, 784.0);
+    let button = slint::platform::PointerEventButton::Left;
+    for event in [
+        slint::platform::WindowEvent::PointerMoved { position: at },
+        slint::platform::WindowEvent::PointerPressed {
+            position: at,
+            button,
+        },
+        slint::platform::WindowEvent::PointerReleased {
+            position: at,
+            button,
+        },
+    ] {
+        w.window().dispatch_event(event);
+    }
+    slint::platform::update_timers_and_animations();
+    settings_render_at(&panel, "backdrop_picker", (1040, 1500));
+    let last = |seen: &std::cell::RefCell<Vec<vixeeny_common::config::Config>>| {
+        seen.borrow().last().map(|c| c.image.clone())
+    };
+    assert_eq!(
+        last(&seen).map(|i| i.backdrop_gradient),
+        Some("#654ea3,#010203".into())
+    );
+    w.invoke_row_chosen("window_backdrop".into(), 2); // colour
+    w.invoke_row_code("backdrop_colour".into(), 0, "#ABCDEF".into());
+    slint::platform::update_timers_and_animations();
+    assert_eq!(
+        last(&seen).map(|i| i.backdrop_colour),
+        Some("#abcdef".into())
+    );
+    // Not a colour: nothing changes.
+    w.invoke_row_code("backdrop_colour".into(), 0, "#zz".into());
+    slint::platform::update_timers_and_animations();
+    assert_eq!(
+        last(&seen).map(|i| i.backdrop_colour),
+        Some("#abcdef".into())
+    );
+    settings_render_at(&panel, "backdrop_colour", (1040, 1500));
+}
+
+#[test]
 fn rows_that_appear_on_the_same_page_unfold() {
     use slint::Model;
     use vixeeny_settings::Section;

@@ -347,9 +347,11 @@ pub struct Image {
     /// desktop's, blurred), `colour` or `gradient`. `blur` (from before 0.21) reads as
     /// `wallpaper`.
     pub window_backdrop: String,
-    /// The `colour` one: `accent` (Windows') or one of [`BACKDROP_COLOURS`].
+    /// The `colour` one: `#rrggbb`, or `accent` (Windows'); one of [`BACKDROP_COLOURS`] by its
+    /// name, from before, reads as its colour.
     pub backdrop_colour: String,
-    /// The `gradient` one: one of [`BACKDROP_GRADIENTS`].
+    /// The `gradient` one: `#rrggbb,#rrggbb`, from the top left to the bottom right; one of
+    /// [`BACKDROP_GRADIENTS`] by its name, from before, reads as its colours.
     pub backdrop_gradient: String,
     pub png: Png,
     pub jpeg: Jpeg,
@@ -575,6 +577,50 @@ pub const BACKDROP_GRADIENTS: &[(&str, [u8; 3], [u8; 3])] = &[
     ("forest", [0x13, 0x4e, 0x5e], [0x71, 0xb2, 0x80]),
     ("night", [0x0f, 0x20, 0x27], [0x2c, 0x53, 0x64]),
 ];
+
+/// `#rrggbb` (or `rrggbb`, `#rgb`) as a colour.
+pub fn parse_hex(text: &str) -> Option<[u8; 3]> {
+    let digits = text.trim().trim_start_matches('#');
+    let digits: String = match digits.len() {
+        3 => digits.chars().flat_map(|c| [c, c]).collect(),
+        6 => digits.to_owned(),
+        _ => return None,
+    };
+    let byte = |i: usize| u8::from_str_radix(digits.get(i..i + 2)?, 16).ok();
+    Some([byte(0)?, byte(2)?, byte(4)?])
+}
+
+/// A colour as `#rrggbb`.
+pub fn hex([r, g, b]: [u8; 3]) -> String {
+    format!("#{r:02x}{g:02x}{b:02x}")
+}
+
+impl Image {
+    /// The plain colour a window capture is set on; `None`: Windows' accent.
+    pub fn backdrop_colour(&self) -> Option<[u8; 3]> {
+        BACKDROP_COLOURS
+            .iter()
+            .find(|(id, _)| *id == self.backdrop_colour)
+            .map(|(_, c)| *c)
+            .or_else(|| parse_hex(&self.backdrop_colour))
+    }
+
+    /// The ends of the gradient a window capture is set on.
+    pub fn backdrop_gradient(&self) -> ([u8; 3], [u8; 3]) {
+        let preset = |id: &str| {
+            BACKDROP_GRADIENTS
+                .iter()
+                .find(|(name, ..)| *name == id)
+                .map(|(_, from, to)| (*from, *to))
+        };
+        preset(&self.backdrop_gradient)
+            .or_else(|| {
+                let (from, to) = self.backdrop_gradient.split_once(',')?;
+                Some((parse_hex(from)?, parse_hex(to)?))
+            })
+            .unwrap_or((BACKDROP_GRADIENTS[0].1, BACKDROP_GRADIENTS[0].2))
+    }
+}
 
 /// The audio source that stands for the program in the foreground when the recording starts.
 pub const TARGET_SOURCE: &str = "app:@target";
@@ -868,6 +914,24 @@ pub fn merge(base: &Config, ours: &Config, theirs: &Config) -> Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn backdrop_colours_read_as_codes_or_names() {
+        assert_eq!(parse_hex("#0063B1"), Some([0x00, 0x63, 0xb1]));
+        assert_eq!(parse_hex("f80"), Some([0xff, 0x88, 0x00]));
+        assert_eq!(parse_hex("#12345"), None);
+        assert_eq!(parse_hex("#gg0000"), None);
+        assert_eq!(hex([0, 99, 177]), "#0063b1");
+        let mut image = Image::default();
+        assert_eq!(image.backdrop_colour(), None);
+        image.backdrop_colour = "blue".into();
+        assert_eq!(image.backdrop_colour(), Some([0x00, 0x63, 0xb1]));
+        image.backdrop_colour = "#102030".into();
+        assert_eq!(image.backdrop_colour(), Some([0x10, 0x20, 0x30]));
+        assert_eq!(image.backdrop_gradient().0, [0x65, 0x4e, 0xa3]);
+        image.backdrop_gradient = "#000000,#ffffff".into();
+        assert_eq!(image.backdrop_gradient(), ([0; 3], [255; 3]));
+    }
 
     #[test]
     fn a_merge_keeps_both_sides_changes() {

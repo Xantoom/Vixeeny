@@ -7,6 +7,17 @@ import { Icons } from "icons.slint";
 export { Theme } from "theme.slint";
 export { Icons } from "icons.slint";
 
+// The tooltip under the pointer. The window draws it above everything (`TipLayer`): a popup
+// would take the pointer from what it belongs to, and close again at once.
+export global Tip {
+    // Empty while none shows.
+    in-out property <string> text;
+    // What it belongs to, in window coordinates: it goes under it (above near the bottom).
+    in-out property <length> left;
+    in-out property <length> top;
+    in-out property <length> bottom;
+}
+
 // A 20-unit Fluent glyph (see `Icons`) drawn as a path, sharp at any scale.
 export component Icon inherits Rectangle {
     in property <string> data;
@@ -81,6 +92,8 @@ export component Button inherits Rectangle {
 export component IconButton inherits Rectangle {
     in property <string> icon;
     in property <string> label;
+    // Shown under it while the pointer rests on it.
+    in property <string> tip;
     in property <bool> enabled: true;
     in property <bool> active: false;
     in property <color> tint: Theme.text;
@@ -106,6 +119,16 @@ export component IconButton inherits Rectangle {
         enabled: root.enabled;
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
+        changed has-hover => {
+            if self.has-hover && root.tip != "" {
+                Tip.text = root.tip;
+                Tip.left = root.absolute-position.x;
+                Tip.top = root.absolute-position.y;
+                Tip.bottom = root.absolute-position.y + root.height;
+            } else if root.tip != "" && Tip.text == root.tip {
+                Tip.text = "";
+            }
+        }
     }
     accessible-role: button;
     accessible-label: root.label;
@@ -215,6 +238,8 @@ export component TextBox inherits Rectangle {
     callback edited(string);
     callback accepted(string);
     public function take-focus() { input.focus(); }
+    // Shows `s`, typed over or not.
+    public function show(s: string) { input.text = s; }
 
     min-width: 120px;
     height: 32px;
@@ -459,6 +484,8 @@ export component Slider inherits Rectangle {
     in property <int> hi: 100;
     in property <int> step: 1;
     in property <bool> enabled: true;
+    // A value marked on the track (100 % of a volume), which the thumb sticks to; -1: none.
+    in property <int> mark: -1;
     callback changed(int);
     // Held (`true`) and let go: the values given meanwhile are only a preview of the last.
     callback sliding(bool);
@@ -473,7 +500,9 @@ export component Slider inherits Rectangle {
         let r = clamp((x - 10px) / max(1px, root.width - 20px), 0, 1);
         let raw = root.lo + r * (root.hi - root.lo);
         let snapped = root.lo + round((raw - root.lo) / max(1, root.step)) * max(1, root.step);
-        root.changed(clamp(round(snapped), root.lo, root.hi));
+        // Within 3 % of the track from the mark, the mark.
+        let held = root.mark >= root.lo && abs(raw - root.mark) <= (root.hi - root.lo) * 0.03 ? root.mark : snapped;
+        root.changed(clamp(round(held), root.lo, root.hi));
     }
     Rectangle {
         x: 10px;
@@ -490,6 +519,14 @@ export component Slider inherits Rectangle {
             // Follows the pointer at once while dragged, glides otherwise.
             animate width { duration: touch.pressed ? 0ms : Theme.t-normal; easing: cubic-bezier(0.2, 0, 0, 1); }
         }
+    }
+    if root.mark >= root.lo && root.mark <= root.hi && root.hi > root.lo : Rectangle {
+        width: 2px;
+        height: 12px;
+        border-radius: 1px;
+        x: 10px + (root.mark - root.lo) / (root.hi - root.lo) * (parent.width - 20px) - 1px;
+        y: (parent.height - self.height) / 2;
+        background: Theme.text-3;
     }
     Rectangle {
         width: 20px;
@@ -527,6 +564,287 @@ export component Slider inherits Rectangle {
     }
     accessible-role: slider;
     accessible-value: root.value;
+}
+
+// A colour to open the picker with: a rounded square of it, outlined.
+component Swatch inherits Rectangle {
+    in property <color> colour;
+    in property <bool> enabled: true;
+    in property <bool> current;
+    callback clicked();
+
+    width: 24px;
+    height: 24px;
+    border-radius: Theme.radius;
+    background: root.colour;
+    border-width: root.current ? 2px : 1px;
+    border-color: root.current ? Theme.accent : (touch.has-hover ? Theme.text-2 : Theme.control-stroke);
+    animate border-color { duration: Theme.t-fast; }
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// One colour, or the two ends of a gradient with the gradient between them; each opens a
+// picker: a square of saturation (across) and brightness (down), a bar of hues, the code in
+// hexadecimal and a few colours ready to take.
+export component ColourField inherits Rectangle {
+    // One colour, or two: the ends of a gradient.
+    in property <[color]> colours;
+    // The same, in hexadecimal.
+    in property <[string]> codes;
+    // Colours ready to take.
+    in property <[color]> swatches;
+    // Gradients ready to take: their ends one after the other, and their values.
+    in property <[color]> pairs;
+    in property <[string]> pair-values;
+    in property <bool> enabled: true;
+    callback picked(int, color);
+    callback typed(int, string);
+    callback chosen(string);
+    // Dragged in the square or the bar (`true`) and let go.
+    callback sliding(bool);
+
+    // The end being picked, and its hue, saturation and brightness: kept here, so that the hue
+    // stays while the colour is grey.
+    property <int> editing;
+    property <float> hue;
+    property <float> sat;
+    property <float> val;
+    property <bool> gradient: root.colours.length > 1;
+    // The code of the end being picked: the field shows it as it changes.
+    property <string> code: root.editing < root.codes.length ? root.codes[root.editing] : "";
+    function open(i: int) {
+        root.editing = i;
+        let c = root.colours[i].to-hsv();
+        root.hue = c.hue;
+        root.sat = c.saturation;
+        root.val = c.value;
+        picker.show();
+    }
+    function send() { root.picked(root.editing, Colors.hsv(root.hue, root.sat, root.val)); }
+    function take(c: color) {
+        let h = c.to-hsv();
+        root.hue = h.hue;
+        root.sat = h.saturation;
+        root.val = h.value;
+        root.picked(root.editing, c);
+    }
+
+    width: Theme.value-w;
+    height: 32px;
+    opacity: root.enabled ? 1.0 : 0.45;
+
+    if !root.gradient && root.colours.length > 0 : Rectangle {
+        border-radius: Theme.radius;
+        border-width: 1px;
+        border-color: Theme.control-stroke;
+        background: one.pressed ? Theme.control-pressed : (one.has-hover ? Theme.control-hover : Theme.control);
+        animate background { duration: Theme.t-fast; }
+        HorizontalLayout {
+            padding-left: 6px;
+            padding-right: 10px;
+            spacing: 10px;
+            Rectangle {
+                width: 20px;
+                height: 20px;
+                y: (parent.height - self.height) / 2;
+                border-radius: Theme.radius - 1px;
+                border-width: 1px;
+                border-color: Theme.control-stroke;
+                background: root.colours[0];
+            }
+            Text {
+                horizontal-stretch: 1;
+                text: root.codes.length > 0 ? root.codes[0] : "";
+                color: Theme.text;
+                font-size: 14px;
+                vertical-alignment: center;
+            }
+            Icon {
+                y: (parent.height - self.height) / 2;
+                data: Icons.chevron-down;
+                tint: Theme.text-2;
+                size: 12px;
+            }
+        }
+        one := TouchArea {
+            enabled: root.enabled;
+            mouse-cursor: pointer;
+            clicked => { root.open(0); }
+        }
+    }
+    if root.gradient : HorizontalLayout {
+        spacing: 8px;
+        alignment: stretch;
+        Swatch {
+            y: (parent.height - self.height) / 2;
+            width: 28px;
+            height: 28px;
+            colour: root.colours[0];
+            enabled: root.enabled;
+            clicked => { root.open(0); }
+        }
+        Rectangle {
+            horizontal-stretch: 1;
+            height: 12px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 6px;
+            background: @linear-gradient(90deg, root.colours[0] 0%, root.colours[1] 100%);
+        }
+        Swatch {
+            y: (parent.height - self.height) / 2;
+            width: 28px;
+            height: 28px;
+            colour: root.colours[1];
+            enabled: root.enabled;
+            clicked => { root.open(1); }
+        }
+    }
+
+    picker := PopupWindow {
+        // Under the field, its right edge on the field's (the values sit at the right).
+        property <length> pad: 12px;
+        property <length> inner: 232px;
+        property <int> pair-count: root.pairs.length / 2;
+        x: root.width - self.width;
+        y: root.height + 2px;
+        width: self.inner + 2 * self.pad;
+        height: 160px + 14px + 32px + 3 * 12px + 22px + 2 * self.pad
+            + (self.pair-count > 0 ? 12px + 24px : 0px);
+        close-policy: close-on-click-outside;
+        Rectangle {
+            property <string> code: root.code;
+            changed code => { field.show(self.code); }
+            background: Theme.flyout;
+            border-radius: Theme.radius-flyout;
+            border-width: 1px;
+            border-color: Theme.stroke-strong;
+            drop-shadow-blur: 24px;
+            drop-shadow-color: #00000050;
+            drop-shadow-offset-y: 6px;
+            VerticalLayout {
+                padding: picker.pad;
+                spacing: 12px;
+                // Saturation across, brightness down.
+                square := Rectangle {
+                    height: 160px;
+                    border-radius: Theme.radius;
+                    clip: true;
+                    background: Colors.hsv(root.hue, 1, 1);
+                    Rectangle { background: @linear-gradient(90deg, #ffffff 0%, #ffffff00 100%); }
+                    Rectangle { background: @linear-gradient(0deg, #000000 0%, #00000000 100%); }
+                    Rectangle {
+                        width: 14px;
+                        height: 14px;
+                        x: root.sat * parent.width - self.width / 2;
+                        y: (1 - root.val) * parent.height - self.height / 2;
+                        border-radius: 7px;
+                        border-width: 2px;
+                        border-color: #ffffff;
+                        drop-shadow-blur: 3px;
+                        drop-shadow-color: #00000080;
+                    }
+                    TouchArea {
+                        mouse-cursor: crosshair;
+                        function at(x: length, y: length) {
+                            root.sat = clamp(x / max(1px, parent.width), 0, 1);
+                            root.val = 1 - clamp(y / max(1px, parent.height), 0, 1);
+                            root.send();
+                        }
+                        pointer-event(e) => {
+                            if (e.kind == PointerEventKind.down) {
+                                root.sliding(true);
+                                self.at(self.mouse-x, self.mouse-y);
+                            } else if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) {
+                                root.sliding(false);
+                            }
+                        }
+                        moved => { if (self.pressed) { self.at(self.mouse-x, self.mouse-y); } }
+                    }
+                }
+                // The hues.
+                Rectangle {
+                    height: 14px;
+                    border-radius: 7px;
+                    background: @linear-gradient(90deg, #ff0000 0%, #ffff00 16.67%, #00ff00 33.33%, #00ffff 50%, #0000ff 66.67%, #ff00ff 83.33%, #ff0000 100%);
+                    Rectangle {
+                        width: 14px;
+                        height: 14px;
+                        x: root.hue / 360 * (parent.width - self.width);
+                        border-radius: 7px;
+                        border-width: 2px;
+                        border-color: #ffffff;
+                        background: Colors.hsv(root.hue, 1, 1);
+                        drop-shadow-blur: 3px;
+                        drop-shadow-color: #00000080;
+                    }
+                    TouchArea {
+                        mouse-cursor: pointer;
+                        function at(x: length) {
+                            root.hue = clamp((x - 7px) / max(1px, parent.width - 14px), 0, 1) * 359.9;
+                            root.send();
+                        }
+                        pointer-event(e) => {
+                            if (e.kind == PointerEventKind.down) {
+                                root.sliding(true);
+                                self.at(self.mouse-x);
+                            } else if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) {
+                                root.sliding(false);
+                            }
+                        }
+                        moved => { if (self.pressed) { self.at(self.mouse-x); } }
+                    }
+                }
+                // The code, and the colour it gives.
+                HorizontalLayout {
+                    spacing: 8px;
+                    Rectangle {
+                        width: 32px;
+                        border-radius: Theme.radius;
+                        border-width: 1px;
+                        border-color: Theme.control-stroke;
+                        background: Colors.hsv(root.hue, root.sat, root.val);
+                    }
+                    field := TextBox {
+                        horizontal-stretch: 1;
+                        text: root.code;
+                        placeholder: "#RRGGBB";
+                        // A code that is not a colour gives way to the colour as it is.
+                        accepted(s) => { root.typed(root.editing, s); field.show(root.code); }
+                    }
+                }
+                // As many as there are, across the width.
+                HorizontalLayout {
+                    spacing: 6px;
+                    for c in root.swatches : Swatch {
+                        width: (picker.inner - (root.swatches.length - 1) * 6px) / max(1, root.swatches.length);
+                        height: 22px;
+                        colour: c;
+                        clicked => { root.take(c); }
+                    }
+                }
+                if picker.pair-count > 0 : HorizontalLayout {
+                    spacing: 6px;
+                    for i in picker.pair-count : Rectangle {
+                        height: 24px;
+                        horizontal-stretch: 1;
+                        border-radius: Theme.radius;
+                        border-width: 1px;
+                        border-color: pair.has-hover ? Theme.text-2 : Theme.control-stroke;
+                        background: @linear-gradient(135deg, root.pairs[2 * i] 0%, root.pairs[2 * i + 1] 100%);
+                        pair := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.chosen(root.pair-values[i]); picker.close(); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    accessible-role: button;
 }
 
 // An entry of the side navigation. The highlight of the current one is drawn by the list (it
@@ -576,16 +894,6 @@ export component Group inherits VerticalLayout {
     spacing: 8px;
 }
 
-// The tooltip under the pointer. The window draws it above everything (`TipLayer`): a popup
-// would take the pointer from what it belongs to, and close again at once.
-export global Tip {
-    // Empty while none shows.
-    in-out property <string> text;
-    // What it belongs to, in window coordinates: it goes under it (above near the bottom).
-    in-out property <length> left;
-    in-out property <length> top;
-    in-out property <length> bottom;
-}
 
 // The tooltip of the window, its last child.
 export component TipLayer inherits Rectangle {
@@ -873,14 +1181,15 @@ export component ScrollArea inherits Rectangle {
     bar := Rectangle {
         visible: root.scrollable;
         property <bool> wide: bar-touch.has-hover || bar-touch.pressed;
-        x: root.width - (self.wide ? 10px : 7px);
+        // Anchored to the right edge: an animated position would lag behind a resize.
+        x: root.width - self.width - 3px;
         y: 2px + (root.height - 4px - self.height) * clamp(-fl.content-y / max(1px, fl.content-height - root.height), 0, 1);
         width: self.wide ? 8px : 4px;
         height: max(32px, (root.height - 4px) * root.height / max(1px, fl.content-height));
         border-radius: self.width / 2;
         background: Theme.text-3;
         opacity: self.wide ? 0.9 : 0.55;
-        animate width, x, opacity { duration: Theme.t-fast; }
+        animate width, opacity { duration: Theme.t-fast; }
     }
     bar-touch := TouchArea {
         visible: root.scrollable;
