@@ -227,6 +227,8 @@ fn start_daemon(dir: &Path, wait: bool) -> std::io::Result<bool> {
     }
     let mut child = command.stdout(std::process::Stdio::piped()).spawn()?;
     let Some(out) = child.stdout.take() else {
+        let _ = child.kill();
+        let _ = child.wait();
         return Ok(false);
     };
     // Its first line, or the end of its output if it stops first.
@@ -236,7 +238,13 @@ fn start_daemon(dir: &Path, wait: bool) -> std::io::Result<bool> {
         let _ = std::io::BufRead::read_line(&mut std::io::BufReader::new(out), &mut line);
         let _ = said.send(line.trim() == "ready");
     });
-    Ok(heard.recv_timeout(START_TIMEOUT).unwrap_or(false))
+    let ready = heard.recv_timeout(START_TIMEOUT).unwrap_or(false);
+    if !ready {
+        // Silent or failed: it must not go on running beside the version put back.
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    Ok(ready)
 }
 
 /// Installs the downloaded version and restarts Vixeeny with it; the previous version comes

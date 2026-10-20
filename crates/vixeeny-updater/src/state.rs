@@ -56,7 +56,14 @@ impl State {
             std::fs::create_dir_all(dir)?;
         }
         let text = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
-        std::fs::write(path, text)
+        // Written whole, then put in place: the check in the background and the settings
+        // window write it, and a reader never finds it half written. One temporary file per
+        // process, so two writers do not mix theirs.
+        let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
+        std::fs::write(&tmp, text)?;
+        std::fs::rename(&tmp, path).inspect_err(|_| {
+            let _ = std::fs::remove_file(&tmp);
+        })
     }
 
     /// The release to offer, if it is newer than `current`.
@@ -93,6 +100,9 @@ mod tests {
         };
         state.save(&path).unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(State::load(&path), state);
+        // Saved in place: nothing else is left in the folder.
+        let files = std::fs::read_dir(dir.path()).map_or(0, Iterator::count);
+        assert_eq!(files, 1);
         std::fs::write(&path, "{broken").unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(State::load(&path), State::default());
     }
