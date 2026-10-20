@@ -266,6 +266,14 @@ export struct UiTexts {
     no-shortcut: string,
     recommended: string,
     this-pc: string,
+    reset: string,
+    cancel: string,
+    reset-page-body: string,
+    reset-all: string,
+    reset-all-hint: string,
+    reset-all-title: string,
+    reset-all-body: string,
+    reset-group: string,
 }
 
 component SettingLine inherits GroupRow {
@@ -616,6 +624,12 @@ export component SettingsWindow inherits Window {
     in property <string> update-detail;
     in property <float> update-progress: 0;
     in property <string> update-action;
+    // The page holds a setting changed from how it comes (its reset button works), and the
+    // question its reset asks.
+    in property <bool> page-changed;
+    in property <string> reset-page-title;
+    // The question on screen: 0 none, 1 reset the page, 2 reset everything.
+    in-out property <int> confirming: 0;
 
     callback section-changed(int);
     callback row-toggled(string, bool);
@@ -630,6 +644,8 @@ export component SettingsWindow inherits Window {
     callback page-action(string, string);
     callback search-edited(string);
     callback search-picked(int);
+    callback reset-page();
+    callback reset-all();
 
     // The window has no system frame: its title bar is drawn here.
     in property <bool> zoomed: false;
@@ -787,10 +803,10 @@ export component SettingsWindow inherits Window {
         // ---- the title of the page, on the line of the first tab: their texts share a baseline
         // (both are centred in the same height; the baseline sits ≈ 0.41 em under the centre,
         // so the larger title is raised by the difference).
-        Text {
+        page-title := Text {
             x: 24px;
             y: root.top - (24px - 14px) * 0.41;
-            width: page.column;
+            width: page.column - (reset.visible ? reset.width + 12px : 0px);
             height: root.tab-h - 2px;
             text: root.searching ? root.search-title
                 : (root.section >= 0 && root.section < root.section-titles.length ? root.section-titles[root.section] : "");
@@ -799,6 +815,18 @@ export component SettingsWindow inherits Window {
             font-weight: 700;
             vertical-alignment: center;
             overflow: elide;
+        }
+        // Back to how the page comes, at the end of the title's line: only once changed.
+        reset := Button {
+            visible: root.section != 8 && !root.searching;
+            width: self.preferred-width;
+            x: 24px + page.column - self.width;
+            y: page-title.y + (page-title.height - self.height) / 2;
+            icon: Icons.undo;
+            text: root.t.reset;
+            subtle: true;
+            enabled: root.page-changed;
+            clicked => { root.confirming = 1; }
         }
         // While a shortcut is recorded: how, under the title.
         if root.section == 6 && root.recording-row >= 0 && !root.searching : Text {
@@ -889,6 +917,28 @@ export component SettingsWindow inherits Window {
                             browse => { root.row-browse(r.id); }
                             action(a) => { root.row-action(r.id, a); }
                         }
+                            }
+                        }
+                    }
+                    // All the pages back to how they come.
+                    if root.section == 0 : VerticalLayout {
+                        spacing: 8px;
+                        Text {
+                            text: root.t.reset-group;
+                            color: Theme.text;
+                            font-size: 14px;
+                            font-weight: 600;
+                        }
+                        Group {
+                            GroupRow {
+                                title: root.t.reset-all;
+                                description: root.t.reset-all-hint;
+                                glyph: Icons.undo;
+                                Button {
+                                    text: root.t.reset;
+                                    danger: true;
+                                    clicked => { root.confirming = 2; }
+                                }
                             }
                         }
                     }
@@ -1094,6 +1144,73 @@ export component SettingsWindow inherits Window {
         TouchArea { x: root.width - e; y: 0px; width: e; height: e; mouse-cursor: nesw-resize; pointer-event(ev) => { if ev.kind == PointerEventKind.down { root.resize-window(2); } } }
         TouchArea { x: 0px; y: root.height - 2 * e; width: 2 * e; height: 2 * e; mouse-cursor: nesw-resize; pointer-event(ev) => { if ev.kind == PointerEventKind.down { root.resize-window(6); } } }
         TouchArea { x: root.width - 2 * e; y: root.height - 2 * e; width: 2 * e; height: 2 * e; mouse-cursor: nwse-resize; pointer-event(ev) => { if ev.kind == PointerEventKind.down { root.resize-window(5); } } }
+    }
+    // ---- the question before a reset: over the whole window, which it dims
+    if root.confirming != 0 : Rectangle {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        background: #00000066;
+        // A click beside the question, or Esc, leaves everything as it is.
+        TouchArea { clicked => { root.confirming = 0; } }
+        keys := FocusScope {
+            init => { self.focus(); }
+            key-pressed(e) => {
+                if e.text == Key.Escape { root.confirming = 0; return accept; }
+                reject
+            }
+        }
+        Rectangle {
+            width: min(440px, parent.width - 48px);
+            height: col.preferred-height;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            border-radius: Theme.radius-flyout;
+            border-width: 1px;
+            border-color: Theme.stroke;
+            background: Theme.flyout;
+            drop-shadow-blur: 24px;
+            drop-shadow-offset-y: 8px;
+            drop-shadow-color: #00000059;
+            // Clicks on the question stay on it.
+            TouchArea { }
+            col := VerticalLayout {
+                padding: 24px;
+                spacing: 12px;
+                Text {
+                    text: root.confirming == 1 ? root.reset-page-title : root.t.reset-all-title;
+                    color: Theme.text;
+                    font-size: 18px;
+                    font-weight: 600;
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: root.confirming == 1 ? root.t.reset-page-body : root.t.reset-all-body;
+                    color: Theme.text-2;
+                    font-size: 14px;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 8px;
+                    padding-top: 12px;
+                    Button {
+                        text: root.t.cancel;
+                        clicked => { root.confirming = 0; }
+                    }
+                    Button {
+                        text: root.t.reset;
+                        accent: true;
+                        danger: true;
+                        clicked => {
+                            if root.confirming == 1 { root.reset-page(); } else { root.reset-all(); }
+                            root.confirming = 0;
+                        }
+                    }
+                }
+            }
+        }
     }
     // Above everything; it takes no clicks.
     TipLayer {

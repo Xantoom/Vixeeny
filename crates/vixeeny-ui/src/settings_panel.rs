@@ -302,6 +302,14 @@ fn ui_texts(lang: Lang) -> UiTexts {
         restart: t(Key::UpdateRestart),
         recommended: t(Key::OptRecommended),
         this_pc: t(Key::GrpThisPc),
+        reset: t(Key::UiReset),
+        cancel: t(Key::UiCancel),
+        reset_page_body: t(Key::UiResetPageBody),
+        reset_all: t(Key::UiResetAll),
+        reset_all_hint: t(Key::UiResetAllHint),
+        reset_all_title: t(Key::UiResetAllTitle),
+        reset_all_body: t(Key::UiResetAllBody),
+        reset_group: t(Key::GrpReset),
     }
 }
 
@@ -1098,11 +1106,12 @@ impl SettingsPanel {
             format!("{}\n{notice}", tr(Key::SetProblems, env.lang))
         };
         self.window.set_notice(heading.into());
+        drop(config);
+        drop(env);
         if section == Section::Shortcuts {
-            drop(config);
-            drop(env);
             self.refresh_shortcuts(&[]);
         }
+        self.show_changes();
     }
 
     /// Starts or stops the measure of the microphone when what the page shows changes.
@@ -1115,6 +1124,36 @@ impl SettingsPanel {
         }
         *self.state.metered.borrow_mut() = metered.clone();
         (self.state.on_meter.borrow())(metered);
+    }
+
+    /// Whether the page can be reset, and the question its reset asks.
+    fn show_changes(&self) {
+        let section = self.current_section();
+        let lang = self.state.lang();
+        let changed = vixeeny_settings::differs(section, &self.state.config.borrow());
+        self.window.set_page_changed(changed);
+        let title = tr(Key::UiResetPageTitle, lang).replace("{page}", tr(section.title(), lang));
+        self.window.set_reset_page_title(title.into());
+    }
+
+    /// Puts the settings of the page on screen, or of every page, back as they come.
+    fn reset(&self, all: bool) {
+        let state = &self.state;
+        let section = self.current_section();
+        let language = state.config.borrow().general.language.clone();
+        {
+            let mut config = state.config.borrow_mut();
+            if all {
+                vixeeny_settings::reset_all(&mut config);
+            } else {
+                vixeeny_settings::reset(section, &mut config);
+            }
+        }
+        state.changed();
+        if state.config.borrow().general.language != language {
+            self.relabel();
+        }
+        self.refresh();
     }
 
     fn refresh_shortcuts(&self, errors: &[(usize, String)]) {
@@ -1203,6 +1242,7 @@ impl SettingsPanel {
             )],
         };
         self.refresh_shortcuts(&errors);
+        self.show_changes();
     }
 
     /// Starts (or stops, with `None`) recording the shortcut of `(row, slot)`.
@@ -1515,6 +1555,22 @@ impl SettingsPanel {
             }
         });
 
+        w.on_reset_page({
+            let (weak, state) = (weak.clone(), self.state.clone());
+            move || {
+                if let Some(p) = panel(&weak, &state) {
+                    p.reset(false);
+                }
+            }
+        });
+        w.on_reset_all({
+            let (weak, state) = (weak.clone(), self.state.clone());
+            move || {
+                if let Some(p) = panel(&weak, &state) {
+                    p.reset(true);
+                }
+            }
+        });
         w.on_search_edited({
             let (weak, state) = (weak.clone(), self.state.clone());
             move |text| {

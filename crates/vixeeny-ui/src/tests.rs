@@ -95,6 +95,31 @@ fn settings_render_at(
 }
 
 #[test]
+fn a_page_resets_once_changed_and_asked() {
+    use vixeeny_settings::Section;
+    let (panel, seen) = settings_panel();
+    panel.select_section(Section::General);
+    let w = panel.window();
+    assert!(!w.get_page_changed(), "as it comes: nothing to reset");
+    w.invoke_row_chosen("theme".into(), 1); // system, light, dark
+    assert!(w.get_page_changed());
+    w.set_confirming(1);
+    settings_render(&panel, "9-settings-reset-page");
+    w.invoke_reset_page();
+    assert_eq!(panel.config().general.theme, "system");
+    assert!(!w.get_page_changed());
+    assert_eq!(seen.borrow().len(), 2);
+    // Everything: from another page too.
+    w.invoke_row_chosen("theme".into(), 2);
+    panel.select_section(Section::Overlay);
+    w.invoke_row_toggled("overlay_enabled".into(), false);
+    w.set_confirming(2);
+    settings_render(&panel, "9-settings-reset-all");
+    w.invoke_reset_all();
+    assert_eq!(panel.config(), vixeeny_common::config::Config::default());
+}
+
+#[test]
 fn settings_apply_immediately() {
     use vixeeny_settings::Section;
     let (panel, seen) = settings_panel();

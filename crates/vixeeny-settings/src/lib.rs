@@ -602,6 +602,71 @@ pub fn rows(section: Section, env: &Env, config: &Config) -> Vec<Row> {
     rows
 }
 
+/// Puts the settings of a page back as they come (the about page has none).
+pub fn reset(section: Section, config: &mut Config) {
+    let new = Config::default();
+    match section {
+        Section::General => {
+            let g = &mut config.general;
+            g.language = new.general.language;
+            g.theme = new.general.theme;
+            g.autostart = new.general.autostart;
+            g.notifications = new.general.notifications;
+        }
+        Section::Overlay => {
+            config.overlay = new.overlay;
+            config.recording_widget = new.recording_widget;
+        }
+        Section::Image => {
+            config.image = new.image;
+            config.paths.images = new.paths.images;
+            config.paths.naming.images = new.paths.naming.images;
+            config.paths.per_app_subfolder.images = new.paths.per_app_subfolder.images;
+        }
+        Section::Video => {
+            // The sound has its own page.
+            let audio = std::mem::take(&mut config.video.audio);
+            config.video = new.video;
+            config.video.audio = audio;
+            config.paths.videos = new.paths.videos;
+            config.paths.naming.videos = new.paths.naming.videos;
+            config.paths.per_app_subfolder.videos = new.paths.per_app_subfolder.videos;
+        }
+        Section::Audio => {
+            // What other modes had chosen stays at hand.
+            let aside = std::mem::take(&mut config.video.audio.set_aside);
+            config.video.audio = new.video.audio;
+            config.video.audio.set_aside = aside;
+        }
+        Section::Replay => {
+            config.replay = new.replay;
+            config.paths.replays = new.paths.replays;
+            config.paths.naming.replays = new.paths.naming.replays;
+            config.paths.per_app_subfolder.replays = new.paths.per_app_subfolder.replays;
+        }
+        Section::Shortcuts => config.hotkeys = new.hotkeys,
+        Section::Updates => {
+            config.general.auto_update = new.general.auto_update;
+            config.general.check_updates = new.general.check_updates;
+        }
+        Section::About => {}
+    }
+}
+
+/// Whether a page holds a setting changed from how it comes.
+pub fn differs(section: Section, config: &Config) -> bool {
+    let mut fresh = config.clone();
+    reset(section, &mut fresh);
+    fresh != *config
+}
+
+/// All the settings as they come; the welcome assistant is not shown again.
+pub fn reset_all(config: &mut Config) {
+    let done = config.general.first_run_done;
+    *config = Config::default();
+    config.general.first_run_done = done;
+}
+
 /// A setting that answers a search.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Found {
@@ -1333,6 +1398,30 @@ mod tests {
         old.video.audio.sources = vec!["mic".into()];
         old.video.audio.capture = "system".into();
         assert_eq!(capture(&old), Value::Text("none".into()));
+    }
+
+    #[test]
+    fn a_page_goes_back_to_how_it_comes_alone() {
+        let mut c = Config::default();
+        assert!(Section::ALL.iter().all(|s| !differs(*s, &c)));
+        c.general.theme = "dark".into();
+        c.video.fps = 30;
+        c.video.audio.bitrate_kbps = 320;
+        c.video.audio.set_aside = vec!["out:{x}".into()];
+        c.general.first_run_done = true;
+        assert!(differs(Section::General, &c) && differs(Section::Video, &c));
+        assert!(!differs(Section::Image, &c));
+        reset(Section::Video, &mut c);
+        assert_eq!(c.video.fps, Config::default().video.fps);
+        // The sound is another page's.
+        assert_eq!(c.video.audio.bitrate_kbps, 320);
+        reset(Section::Audio, &mut c);
+        assert!(!differs(Section::Audio, &c));
+        assert_eq!(c.video.audio.set_aside, ["out:{x}"]);
+        assert_eq!(c.general.theme, "dark");
+        reset_all(&mut c);
+        assert_eq!(c.general.theme, Config::default().general.theme);
+        assert!(c.general.first_run_done);
     }
 
     #[test]

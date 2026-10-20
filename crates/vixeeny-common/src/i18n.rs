@@ -345,6 +345,15 @@ pub enum Key {
     ShortcutUnknownKey,
     ShortcutNeedsModifier,
     SetOverlayOn,
+    UiReset,
+    UiCancel,
+    UiResetPageTitle,
+    UiResetPageBody,
+    UiResetAll,
+    UiResetAllHint,
+    UiResetAllTitle,
+    UiResetAllBody,
+    GrpReset,
 }
 
 impl Key {
@@ -682,6 +691,15 @@ impl Key {
         Self::ShortcutUnknownKey,
         Self::ShortcutNeedsModifier,
         Self::SetOverlayOn,
+        Self::UiReset,
+        Self::UiCancel,
+        Self::UiResetPageTitle,
+        Self::UiResetPageBody,
+        Self::UiResetAll,
+        Self::UiResetAllHint,
+        Self::UiResetAllTitle,
+        Self::UiResetAllBody,
+        Self::GrpReset,
     ];
 }
 
@@ -1438,6 +1456,32 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::ShortcutNeedsModifier, Lang::Fr) => "{key} demande CTRL, ALT, SHIFT ou WIN",
         (Key::SetOverlayOn, Lang::En) => "Turn on the side bar",
         (Key::SetOverlayOn, Lang::Fr) => "Activer la barre latérale",
+        (Key::UiReset, Lang::En) => "Reset",
+        (Key::UiReset, Lang::Fr) => "Réinitialiser",
+        (Key::UiCancel, Lang::En) => "Cancel",
+        (Key::UiCancel, Lang::Fr) => "Annuler",
+        (Key::UiResetPageTitle, Lang::En) => "Reset the \"{page}\" page?",
+        (Key::UiResetPageTitle, Lang::Fr) => "Réinitialiser la page « {page} » ?",
+        (Key::UiResetPageBody, Lang::En) => {
+            "Its settings go back to their default values. The other pages do not change."
+        }
+        (Key::UiResetPageBody, Lang::Fr) => {
+            "Ses paramètres reprennent leur valeur par défaut. Les autres pages ne changent pas."
+        }
+        (Key::UiResetAll, Lang::En) => "Reset all settings",
+        (Key::UiResetAll, Lang::Fr) => "Réinitialiser tous les paramètres",
+        (Key::UiResetAllHint, Lang::En) => "Every page goes back to its default values.",
+        (Key::UiResetAllHint, Lang::Fr) => "Toutes les pages reprennent leurs valeurs par défaut.",
+        (Key::UiResetAllTitle, Lang::En) => "Reset all settings?",
+        (Key::UiResetAllTitle, Lang::Fr) => "Réinitialiser tous les paramètres ?",
+        (Key::UiResetAllBody, Lang::En) => {
+            "Every setting, on every page, goes back to its default value."
+        }
+        (Key::UiResetAllBody, Lang::Fr) => {
+            "Tous les paramètres, sur toutes les pages, reprennent leur valeur par défaut."
+        }
+        (Key::GrpReset, Lang::En) => "Reset",
+        (Key::GrpReset, Lang::Fr) => "Réinitialisation",
     }
 }
 
