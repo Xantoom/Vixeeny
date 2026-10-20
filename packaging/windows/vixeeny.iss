@@ -23,6 +23,8 @@ DefaultGroupName=Vixeeny
 PrivilegesRequired=lowest
 ArchitecturesInstallIn64BitMode=x64compatible
 ArchitecturesAllowed=x64compatible
+; Windows 10 1903: the first with the screen capture Vixeeny uses.
+MinVersion=10.0.18362
 OutputDir={#OutDir}
 OutputBaseFilename=Vixeeny-{#AppVersion}-setup
 Compression=lzma2/ultra
@@ -69,12 +71,12 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 Filename: "{app}\Vixeeny.exe"; Description: "Vixeeny"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
-; Hidden: no window shows.
+; Only if Vixeeny did not stop when asked (see StopVixeeny). Hidden: no window shows.
 Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM Vixeeny.exe /IM vixeeny-daemon.exe /IM vixeeny-app.exe"; RunOnceId: "StopVixeeny"; Flags: runhidden
 
 [InstallDelete]
-; Files of older versions: the console updater (before 0.9.2), the daemon under its old name
-; and FFmpeg's device library (before 0.9.4).
+; Files of versions older than the list `files.txt` (see CurStepChanged): the console updater
+; (before 0.9.2), the daemon under its old name and FFmpeg's device library (before 0.9.4).
 Type: files; Name: "{app}\vixeeny-updater.exe"
 Type: files; Name: "{app}\vixeeny-daemon.exe"
 Type: files; Name: "{app}\avdevice-*.dll"
@@ -82,16 +84,81 @@ Type: files; Name: "{app}\avdevice-*.dll"
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\.update-staged"
 Type: filesandordirs; Name: "{app}\.update-backup"
+Type: filesandordirs; Name: "{app}\.update-download"
+Type: files; Name: "{app}\.update-lock"
 
 [Code]
+var
+  OldFiles: TStringList;
+
+// Stops a running Vixeeny the way an update does: a recording ends first, and nothing is
+// killed. The program of the installed version asks; a version too old to know how does
+// nothing, and Windows' own closing (CloseApplications) follows.
+procedure StopVixeeny();
+var
+  App: String;
+  Code: Integer;
+begin
+  App := ExpandConstant('{app}\vixeeny-app.exe');
+  if FileExists(App) then
+    Exec(App, '--update quit', '', SW_HIDE, ewWaitUntilTerminated, Code);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  StopVixeeny();
+  Result := '';
+end;
+
+// The files the previous version listed (files.txt) and this one no longer has are removed,
+// as an update does; files of no list (settings, portable.flag) stay.
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  NewFiles: TStringList;
+  I: Integer;
+  Name: String;
+begin
+  if CurStep = ssInstall then
+  begin
+    OldFiles := TStringList.Create;
+    if FileExists(ExpandConstant('{app}\files.txt')) then
+      OldFiles.LoadFromFile(ExpandConstant('{app}\files.txt'));
+  end
+  else if (CurStep = ssPostInstall) and (OldFiles <> nil) then
+  begin
+    NewFiles := TStringList.Create;
+    try
+      NewFiles.LoadFromFile(ExpandConstant('{app}\files.txt'));
+      for I := 0 to OldFiles.Count - 1 do
+      begin
+        Name := Trim(OldFiles[I]);
+        // Only a path inside the folder.
+        if (Name <> '') and (NewFiles.IndexOf(Name) < 0) then
+          if (Pos('..', Name) = 0) and (Pos(':', Name) = 0) and (Pos('/', Name) <> 1) then
+          begin
+            StringChangeEx(Name, '/', '\', True);
+            DeleteFile(ExpandConstant('{app}\') + Name);
+          end;
+      end;
+    finally
+      NewFiles.Free;
+      OldFiles.Free;
+      OldFiles := nil;
+    end;
+  end;
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   Dir: String;
 begin
-  if CurUninstallStep = usPostUninstall then
+  if CurUninstallStep = usUninstall then
+    StopVixeeny()
+  else if CurUninstallStep = usPostUninstall then
   begin
     Dir := ExpandConstant('{userappdata}\Vixeeny');
-    if DirExists(Dir) and (MsgBox(CustomMessage('KeepSettings'), mbConfirmation, MB_YESNO) = IDNO) then
+    // Kept in a silent uninstall.
+    if DirExists(Dir) and (SuppressibleMsgBox(CustomMessage('KeepSettings'), mbConfirmation, MB_YESNO, IDYES) = IDNO) then
       DelTree(Dir, True, True, True);
   end;
 end;

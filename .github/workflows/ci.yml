@@ -74,6 +74,19 @@ jobs:
       # is built again (`-p` alone would rebuild the crate and its dependencies).
       - name: Real capture smoke test (output only)
         run: cargo test --workspace --test wgc_smoke -- --nocapture
+  installer:
+    # The installer script compiles; otherwise its code is only compiled by a release.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          New-Item -ItemType Directory dist\stage | Out-Null
+          Copy-Item LICENSE dist\stage
+          Set-Content dist\stage\files.txt "LICENSE"
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /Q "/DStageDir=$PWD\dist\stage" "/DOutDir=$PWD\dist" packaging\windows\vixeeny.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   deny:
     # cargo-deny runs in a Linux container; it only reads the Windows dependency graph.
     runs-on: ubuntu-latest
