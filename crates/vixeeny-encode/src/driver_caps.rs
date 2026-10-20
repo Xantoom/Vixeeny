@@ -17,7 +17,9 @@ use windows::Win32::Graphics::Direct3D11::{
 use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory1, IDXGIAdapter, IDXGIAdapter1, IDXGIFactory1,
 };
-use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
+use windows::Win32::System::LibraryLoader::{
+    GetProcAddress, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, LOAD_LIBRARY_SEARCH_SYSTEM32, LoadLibraryExW,
+};
 use windows::core::{GUID, Interface, PCSTR, PCWSTR, s};
 
 use crate::probe::{Adapter, DriverCaps};
@@ -38,11 +40,20 @@ fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
+/// Loads a driver library: a bare name from the system folder only (where the drivers put
+/// them), never from the current folder or the `PATH`; a full path from there, with what it
+/// needs from its own folder.
 fn load(name: &str) -> Result<HMODULE, String> {
     let name16 = wide(name);
+    let flags = if name.contains('\\') {
+        LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32
+    } else {
+        LOAD_LIBRARY_SEARCH_SYSTEM32
+    };
     // SAFETY: a NUL-terminated name; the module stays loaded for the life of the process (the
     // probe is a short-lived child).
-    unsafe { LoadLibraryW(PCWSTR(name16.as_ptr())) }.map_err(|e| format!("{name}: {e}"))
+    unsafe { LoadLibraryExW(PCWSTR(name16.as_ptr()), None, flags) }
+        .map_err(|e| format!("{name}: {e}"))
 }
 
 /// The address of `name` in `module`, as the function type `F`.
@@ -783,5 +794,21 @@ mod vpl {
         assert_eq!(std::mem::offset_of!(MemDesc, height), 16);
         assert_eq!(std::mem::offset_of!(MemDesc, num_color_formats), 42);
         assert_eq!(std::mem::offset_of!(MemDesc, color_formats), 48);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn driver_libraries_load_from_the_system_folder() {
+        assert!(super::load("kernel32.dll").is_ok());
+        // A library of the system folder by its full path, with what it needs beside it.
+        let system = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+        assert!(super::load(&format!(r"{system}\System32\kernel32.dll")).is_ok());
+        // An NVIDIA driver is found where it installs its library.
+        if std::path::Path::new(&format!(r"{system}\System32\nvEncodeAPI64.dll")).exists() {
+            assert!(super::load("nvEncodeAPI64.dll").is_ok());
+        }
+        assert!(super::load("not-a-driver-vixeeny.dll").is_err());
     }
 }

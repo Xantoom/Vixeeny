@@ -44,6 +44,14 @@ use crate::{
 
 const MONITORINFOF_PRIMARY: u32 = 1;
 
+/// Takes the current folder out of the places Windows looks for a DLL loaded by name: a
+/// program started from a downloads folder must not pick up a DLL lying there.
+pub fn harden_dll_search() {
+    use windows::Win32::System::LibraryLoader::SetDllDirectoryW;
+    // SAFETY: an empty constant string.
+    let _ = unsafe { SetDllDirectoryW(windows::core::w!("")) };
+}
+
 /// Opts the process into per-monitor DPI awareness (v2) so every API reports physical pixels.
 /// Failure means it was already set (manifest or earlier call), which is fine.
 pub fn ensure_dpi_aware() {

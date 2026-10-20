@@ -13,8 +13,9 @@ pub const DESKTOP_APP_NAME: &str = "Desktop";
 pub const MAX_NAME_CHARS: usize = 100;
 
 const RESERVED: &[&str] = &[
-    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
-    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$", "COM0", "COM1", "COM2", "COM3", "COM4",
+    "COM5", "COM6", "COM7", "COM8", "COM9", "COM¹", "COM²", "COM³", "LPT0", "LPT1", "LPT2", "LPT3",
+    "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9", "LPT¹", "LPT²", "LPT³",
 ];
 
 /// Turns arbitrary text into a name every file system accepts: forbidden characters removed,
@@ -227,6 +228,9 @@ mod tests {
         assert_eq!(sanitize("CON"), "_CON");
         assert_eq!(sanitize("nul.txt"), "_nul.txt");
         assert_eq!(sanitize("com1"), "_com1");
+        assert_eq!(sanitize("conout$"), "_conout$");
+        assert_eq!(sanitize("COM¹.png"), "_COM¹.png");
+        assert_eq!(sanitize("LPT0"), "_LPT0");
         assert_eq!(sanitize("CONSOLE"), "CONSOLE");
         assert_eq!(sanitize(""), DEFAULT_APP_NAME);
         assert_eq!(sanitize("???"), DEFAULT_APP_NAME);

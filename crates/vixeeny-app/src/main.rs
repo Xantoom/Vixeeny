@@ -32,6 +32,7 @@ use vixeeny_common::config::Config;
 use vixeeny_common::ipc::{self, ActionId, AppToDaemon, DaemonToApp, Endpoint, Hello};
 
 fn main() {
+    vixeeny_platform::harden_dll_search();
     // The helper processes share the file: `settings`, `probe`, `toast`… say which one runs.
     let program = std::env::args()
         .nth(1)

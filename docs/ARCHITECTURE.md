@@ -13,7 +13,9 @@ Vixeeny.exe (always on)                         vixeeny-app.exe (on demand)
 
 `Vixeeny.exe` is small so that being resident costs nothing; everything heavy lives in the app,
 which it starts when a shortcut fires and which exits when idle. They talk over a named pipe
-with length-prefixed `postcard` messages (`vixeeny-common::ipc`). Binding the pipe is also the
+with length-prefixed `postcard` messages (`vixeeny-common::ipc`). The pipe is named after the
+user's SID and only that user and the system may open it; a client checks that the process
+behind it runs as the same user before it writes anything. Binding the pipe is also the
 single-instance lock. Some work runs in processes of their own, all `vixeeny-app.exe` with a
 flag: the settings window (`--settings`), the recording pill (`--widget`), toasts (`--toast`),
 the hardware probe (`--probe`) and updates (`--update`). Both programs use the Windows

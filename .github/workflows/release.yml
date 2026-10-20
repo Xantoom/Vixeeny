@@ -14,17 +14,16 @@ on:
         description: Prepare the draft release (off = build the files only)
         type: boolean
         default: true
+# Read only; the job that signs and drafts the release is the one that writes.
 permissions:
-  contents: write
-  # To read the result of CI on the commit.
-  actions: read
+  contents: read
 jobs:
   version:
     runs-on: ubuntu-latest
     outputs:
       build: ${{ steps.check.outputs.build }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: check
         env:
           GH_TOKEN: ${{ github.token }}
@@ -48,13 +47,13 @@ jobs:
       FFMPEG_DIR: ${{ github.workspace }}\native\build\work\ffmpeg-prebuilt
       LIBCLANG_PATH: C:\Program Files\LLVM\bin
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@master
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: 1.99.1
-      - uses: Swatinem/rust-cache@v2
-      - uses: ilammy/msvc-dev-cmd@v1
-      - uses: actions/cache/restore@v6
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: native-cache
         with:
           path: native/build/work
@@ -74,7 +73,7 @@ jobs:
         run: |
           choco install nasm -y --no-progress
           "C:\Program Files\NASM" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ffmpeg
           path: native/build/work
@@ -101,28 +100,51 @@ jobs:
       - name: Checksums
         shell: pwsh
         run: target\release\xtask.exe sums dist
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: vixeeny-windows-unsigned
+          path: |
+            dist/*.zip
+            dist/*.exe
+            dist/SHA256SUMS
+  # Signing runs apart, on a fresh machine that runs nothing else: no build script, no
+  # third-party action and no package of the build can reach the key.
+  sign:
+    needs: windows
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+      # To read the result of CI on the commit.
+      actions: read
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: vixeeny-windows-unsigned
+          path: dist
       - name: Sign (minisign)
-        shell: pwsh
         env:
           MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
           MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+          RELEASE: ${{ github.event_name == 'push' || inputs.release }}
         run: |
           # Unsigned files cannot be installed by the updater: a release must not go without.
-          if (-not $env:MINISIGN_KEY) {
-            if ("${{ github.event_name }}" -eq "push" -or "${{ inputs.release }}" -eq "true") { throw "No MINISIGN_KEY secret: a release cannot be signed." }
-            Write-Warning "No MINISIGN_KEY secret: the files are not signed."; exit 0
-          }
+          if [ -z "$MINISIGN_KEY" ]; then
+            if [ "$RELEASE" = true ]; then echo "::error::No MINISIGN_KEY secret: a release cannot be signed."; exit 1; fi
+            echo "::warning::No MINISIGN_KEY secret: the files are not signed."; exit 0
+          fi
           cargo install rsign2 --version 0.6.7 --locked
-          Set-Content -Path "$env:RUNNER_TEMP\minisign.key" -Value $env:MINISIGN_KEY
-          Get-ChildItem dist -File | Where-Object { $_.Extension -in ".zip", ".exe" } | ForEach-Object {
-            if ($env:MINISIGN_PASSWORD) {
-              $env:MINISIGN_PASSWORD | rsign sign -s "$env:RUNNER_TEMP\minisign.key" -x "$($_.FullName).minisig" $_.FullName
-            } else {
-              rsign sign -W -s "$env:RUNNER_TEMP\minisign.key" -x "$($_.FullName).minisig" $_.FullName
-            }
-          }
-          Remove-Item "$env:RUNNER_TEMP\minisign.key"
-      - uses: actions/upload-artifact@v7
+          key="$RUNNER_TEMP/minisign.key"
+          printf '%s\n' "$MINISIGN_KEY" > "$key"
+          for file in dist/*.zip dist/*.exe; do
+            if [ -n "$MINISIGN_PASSWORD" ]; then
+              printf '%s' "$MINISIGN_PASSWORD" | rsign sign -s "$key" -x "$file.minisig" "$file"
+            else
+              rsign sign -W -s "$key" -x "$file.minisig" "$file"
+            fi
+          done
+          rm -f "$key"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: vixeeny-windows
           path: |
@@ -134,19 +156,18 @@ jobs:
       # them to pass.
       - name: CI passed on this commit
         if: github.event_name == 'push' || inputs.release
-        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          $run = gh run list --workflow ci.yml --commit "${{ github.sha }}" --limit 1 --json databaseId --jq '.[0].databaseId'
-          if (-not $run) { throw "CI did not run on this commit." }
-          gh run watch $run --interval 60 --exit-status
+          run=$(gh run list --workflow ci.yml --commit "${{ github.sha }}" --limit 1 --json databaseId --jq '.[0].databaseId')
+          if [ -z "$run" ]; then echo "::error::CI did not run on this commit."; exit 1; fi
+          gh run watch "$run" --interval 60 --exit-status
       - name: Draft release
         if: github.event_name == 'push' || inputs.release
-        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"').Matches[0].Groups[1].Value
-          $files = Get-ChildItem dist -File | Where-Object { $_.Extension -in ".zip", ".exe", ".minisig" -or $_.Name -eq "SHA256SUMS" } | ForEach-Object { $_.FullName }
-          gh release create "v$version" --target "${{ github.sha }}" --draft --generate-notes @files
+          version=$(ls dist/Vixeeny-*-setup.exe | sed 's/.*Vixeeny-\(.*\)-setup\.exe/\1/')
+          gh release create "v$version" --target "${{ github.sha }}" --draft --generate-notes dist/*.zip dist/*.exe dist/*.minisig dist/SHA256SUMS

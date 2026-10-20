@@ -8,6 +8,7 @@ use vixeeny_daemon::platform::{self, Startup};
 use vixeeny_daemon::server::{AppLink, ask_running_daemon};
 
 fn main() {
+    vixeeny_platform::harden_dll_search();
     vixeeny_common::logging::init(
         "vixeeny-daemon",
         "daemon",

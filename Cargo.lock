@@ -5473,6 +5473,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "widestring",
+ "windows",
 ]
 
 [[package]]

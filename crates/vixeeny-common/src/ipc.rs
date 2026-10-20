@@ -276,12 +276,13 @@ pub struct Endpoint {
 }
 
 impl Endpoint {
-    /// The per-user endpoint (one daemon per user session). `VIXEENY_IPC_NAME` overrides the
-    /// name, e.g. for benchmarks running next to a normal install.
+    /// The per-user endpoint (one daemon per user session), named after the user's SID: two
+    /// accounts never share it, whatever their names. `VIXEENY_IPC_NAME` overrides the name,
+    /// e.g. for benchmarks running next to a normal install.
     pub fn current_user() -> Self {
-        let user = std::env::var("USERNAME")
-            .or_else(|_| std::env::var("USER"))
-            .unwrap_or_else(|_| "user".into());
+        let user = identity::current_sid()
+            .or_else(|| std::env::var("USERNAME").ok())
+            .unwrap_or_else(|| "user".into());
         Self::named(
             &std::env::var("VIXEENY_IPC_NAME").unwrap_or_else(|_| format!("vixeeny-{user}")),
         )
@@ -306,9 +307,19 @@ impl Endpoint {
         self.base.clone().to_ns_name::<GenericNamespaced>()
     }
 
-    /// Connects to the running daemon.
+    /// Connects to the running daemon. The pipe must belong to this user: one another account
+    /// made under this name is left before anything is written to it (so it learns nothing and
+    /// cannot act as this user).
     pub fn connect(&self) -> io::Result<Stream> {
-        Stream::connect(self.name()?)
+        let stream = Stream::connect(self.name()?)?;
+        let server = interprocess::local_socket::traits::StreamCommon::peer_creds(&stream)?.pid();
+        if !server.is_some_and(identity::same_user) {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "the Vixeeny pipe belongs to another user",
+            ));
+        }
+        Ok(stream)
     }
 
     /// Listener options. The pipe is closed to everyone but the current user and the system: the
@@ -341,10 +352,95 @@ impl Endpoint {
     }
 }
 
+/// Who runs a process, from its access token.
+mod identity {
+    use windows::Win32::Foundation::{CloseHandle, HANDLE, HLOCAL, LocalFree};
+    use windows::Win32::Security::Authorization::ConvertSidToStringSidW;
+    use windows::Win32::Security::{
+        EqualSid, GetTokenInformation, PSID, TOKEN_QUERY, TOKEN_USER, TokenUser,
+    };
+    use windows::Win32::System::Threading::{
+        GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    use windows::core::PWSTR;
+
+    /// The `TOKEN_USER` of `process` (aligned for it).
+    fn token_user(process: HANDLE) -> Option<Vec<u64>> {
+        let mut token = HANDLE::default();
+        // SAFETY: a process handle with query access; `token` is closed below.
+        unsafe { OpenProcessToken(process, TOKEN_QUERY, &raw mut token) }.ok()?;
+        let mut size = 0_u32;
+        // SAFETY: asks for the size only.
+        let _ = unsafe { GetTokenInformation(token, TokenUser, None, 0, &raw mut size) };
+        let mut buffer = vec![0_u64; (size as usize).div_ceil(8)];
+        // SAFETY: `buffer` holds `size` bytes.
+        let read = unsafe {
+            GetTokenInformation(
+                token,
+                TokenUser,
+                Some(buffer.as_mut_ptr().cast()),
+                size,
+                &raw mut size,
+            )
+        };
+        // SAFETY: opened above, closed once.
+        let _ = unsafe { CloseHandle(token) };
+        read.ok()?;
+        Some(buffer)
+    }
+
+    fn sid(user: &[u64]) -> PSID {
+        // SAFETY: `user` is a `TOKEN_USER` filled by `GetTokenInformation`, aligned.
+        unsafe { (*user.as_ptr().cast::<TOKEN_USER>()).User.Sid }
+    }
+
+    /// This process's user, as text (`S-1-5-21-…`).
+    pub fn current_sid() -> Option<String> {
+        // SAFETY: the pseudo-handle of this process.
+        let user = token_user(unsafe { GetCurrentProcess() })?;
+        let mut text = PWSTR::null();
+        // SAFETY: a valid SID; `text` is freed below.
+        unsafe { ConvertSidToStringSidW(sid(&user), &raw mut text) }.ok()?;
+        // SAFETY: a terminated string from the call above.
+        let result = unsafe { text.to_string() }.ok();
+        // SAFETY: allocated by `ConvertSidToStringSidW`, freed once.
+        let _ = unsafe { LocalFree(Some(HLOCAL(text.0.cast()))) };
+        result
+    }
+
+    /// Whether `pid` runs as this process's user. `false` when it cannot be told (a process
+    /// of another user cannot be opened).
+    pub fn same_user(pid: u32) -> bool {
+        // SAFETY: the pseudo-handle of this process.
+        let Some(ours) = token_user(unsafe { GetCurrentProcess() }) else {
+            return false;
+        };
+        // SAFETY: plain arguments; the handle is closed below.
+        let Ok(process) = (unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) })
+        else {
+            return false;
+        };
+        let theirs = token_user(process);
+        // SAFETY: opened above, closed once.
+        let _ = unsafe { CloseHandle(process) };
+        // SAFETY: two valid SIDs.
+        theirs.is_some_and(|theirs| unsafe { EqualSid(sid(&ours), sid(&theirs)) }.is_ok())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    #[test]
+    fn the_pipe_is_this_users_and_another_users_is_refused() {
+        let sid = identity::current_sid().unwrap_or_default();
+        assert!(sid.starts_with("S-1-"), "{sid}");
+        assert!(identity::same_user(std::process::id()));
+        // The System process.
+        assert!(!identity::same_user(4));
+    }
 
     #[test]
     fn action_cli_names_roundtrip() {

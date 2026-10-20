@@ -18,11 +18,14 @@ use vixeeny_platform::{HdrInfo, MonitorInfo, PhysicalRect};
 use windows::Graphics::Capture::{Direct3D11CaptureFramePool, GraphicsCaptureSession};
 use windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;
 use windows::Graphics::DirectX::DirectXPixelFormat;
-use windows::Win32::Foundation::{HANDLE, HWND, LPARAM, LRESULT, LUID, WPARAM};
+use windows::Win32::Foundation::{
+    CloseHandle, HANDLE, HLOCAL, HWND, LPARAM, LRESULT, LUID, LocalFree, WPARAM,
+};
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_CPU_ACCESS_READ, D3D11_MAP_READ,
-    D3D11_MAPPED_SUBRESOURCE, D3D11_RESOURCE_MISC_SHARED, D3D11_TEXTURE2D_DESC,
-    D3D11_USAGE_DEFAULT, D3D11_USAGE_STAGING, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
+    D3D11_MAPPED_SUBRESOURCE, D3D11_RESOURCE_MISC_SHARED, D3D11_RESOURCE_MISC_SHARED_NTHANDLE,
+    D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, D3D11_USAGE_STAGING, ID3D11Device, ID3D11Device1,
+    ID3D11DeviceContext, ID3D11Texture2D,
 };
 use windows::Win32::Graphics::Dwm::{
     DWMWA_CLOAK, DWMWA_TRANSITIONS_FORCEDISABLED, DwmFlush, DwmSetWindowAttribute,
@@ -33,9 +36,9 @@ use windows::Win32::Graphics::Dxgi::Common::{
 };
 use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory1, DXGI_PRESENT, DXGI_SCALING_NONE, DXGI_SCALING_STRETCH,
-    DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_EFFECT_DISCARD, DXGI_SWAP_EFFECT_FLIP_DISCARD,
-    DXGI_USAGE_RENDER_TARGET_OUTPUT, IDXGIAdapter, IDXGIDevice, IDXGIFactory2, IDXGIFactory4,
-    IDXGIResource, IDXGISwapChain1, IDXGISwapChain3,
+    DXGI_SHARED_RESOURCE_READ, DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_EFFECT_DISCARD,
+    DXGI_SWAP_EFFECT_FLIP_DISCARD, DXGI_USAGE_RENDER_TARGET_OUTPUT, IDXGIAdapter, IDXGIDevice,
+    IDXGIFactory2, IDXGIFactory4, IDXGIResource1, IDXGISwapChain1, IDXGISwapChain3,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::WinRT::Direct3D11::IDirect3DDxgiInterfaceAccess;
@@ -101,10 +104,16 @@ struct Screen {
     window: HWND,
     swap_chain: Option<IDXGISwapChain1>,
     _texture: ID3D11Texture2D,
+    /// The named handle the app opens the texture by; the name goes with it.
+    shared: Option<HANDLE>,
 }
 
 impl Drop for Screen {
     fn drop(&mut self) {
+        if let Some(handle) = self.shared.take() {
+            // SAFETY: a handle this screen created and closes once.
+            let _ = unsafe { CloseHandle(handle) };
+        }
         self.swap_chain = None;
         // SAFETY: the window belongs to this thread and is destroyed once.
         let _ = unsafe { DestroyWindow(self.window) };
@@ -264,7 +273,7 @@ fn finish(
     desc.Usage = D3D11_USAGE_DEFAULT;
     desc.BindFlags = (D3D11_BIND_SHADER_RESOURCE.0 | D3D11_BIND_RENDER_TARGET.0) as u32;
     desc.CPUAccessFlags = 0;
-    desc.MiscFlags = D3D11_RESOURCE_MISC_SHARED.0 as u32;
+    desc.MiscFlags = SHARED_FLAGS;
     let mut texture = None;
     // SAFETY: a plain texture description; the out-pointer is valid.
     unsafe {
@@ -338,6 +347,7 @@ fn show_screen(
         window,
         swap_chain: None,
         _texture: texture.clone(),
+        shared: None,
     };
     let mut desc = D3D11_TEXTURE2D_DESC::default();
     // SAFETY: `desc` is a valid out-pointer.
@@ -395,15 +405,14 @@ fn show_screen(
             .map_err(os("Present"))?;
     }
     screen.swap_chain = Some(chain);
-    let resource: IDXGIResource = texture.cast().map_err(os("IDXGIResource"))?;
-    // SAFETY: a texture created shareable.
-    let handle = unsafe { resource.GetSharedHandle() }.map_err(os("GetSharedHandle"))?;
+    let id = next_shared_id();
+    screen.shared = Some(share(&texture, id)?);
     let shared = FrozenScreen {
         x: r.x,
         y: r.y,
         width: desc.Width,
         height: desc.Height,
-        texture: handle.0 as usize as u64,
+        texture: id,
         hdr,
         window: window.0 as usize as u64,
     };
@@ -529,6 +538,73 @@ fn make_reader(adapter: i64) -> Result<Reader, CaptureError> {
     })
 }
 
+/// How the frozen textures are created: shared through a named NT handle, which has an access
+/// control list (a legacy shared handle is a bare number any process can try).
+const SHARED_FLAGS: u32 =
+    (D3D11_RESOURCE_MISC_SHARED.0 | D3D11_RESOURCE_MISC_SHARED_NTHANDLE.0) as u32;
+
+/// Only this user and the system may open a frozen screen, and not a process of a lower
+/// integrity level (a sandboxed one).
+const SHARED_SDDL: windows::core::PCWSTR = w!("D:P(A;;GA;;;OW)(A;;GA;;;SY)S:(ML;;NWNRNX;;;ME)");
+
+/// A name no other frozen texture has: this process and a counter.
+fn next_shared_id() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    (u64::from(std::process::id()) << 32)
+        | u64::from(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+}
+
+fn shared_name(id: u64) -> windows::core::HSTRING {
+    windows::core::HSTRING::from(format!("Vixeeny-frozen-{id:016x}"))
+}
+
+/// Shares `texture` under the name of `id`; the name lasts as long as the handle.
+fn share(texture: &ID3D11Texture2D, id: u64) -> Result<HANDLE, CaptureError> {
+    use windows::Win32::Security::Authorization::{
+        ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+    };
+    use windows::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
+    let mut descriptor = PSECURITY_DESCRIPTOR::default();
+    // SAFETY: a constant SDDL string; the descriptor is freed below.
+    unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            SHARED_SDDL,
+            SDDL_REVISION_1,
+            &raw mut descriptor,
+            None,
+        )
+    }
+    .map_err(os("security descriptor"))?;
+    let attributes = SECURITY_ATTRIBUTES {
+        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: descriptor.0,
+        bInheritHandle: false.into(),
+    };
+    let resource: Result<IDXGIResource1, _> = texture.cast().map_err(os("IDXGIResource1"));
+    let handle = resource.and_then(|resource| {
+        // SAFETY: a texture created with `SHARED_FLAGS`; `attributes` outlives the call.
+        unsafe {
+            resource.CreateSharedHandle(
+                Some(&raw const attributes),
+                DXGI_SHARED_RESOURCE_READ.0,
+                &shared_name(id),
+            )
+        }
+        .map_err(os("CreateSharedHandle"))
+    });
+    // SAFETY: allocated by the conversion above, freed once.
+    let _ = unsafe { LocalFree(Some(HLOCAL(descriptor.0))) };
+    handle
+}
+
+/// Opens the frozen texture of `id` (in the app); one already released fails.
+fn open_shared(device: &ID3D11Device, id: u64) -> Result<ID3D11Texture2D, CaptureError> {
+    let device: ID3D11Device1 = device.cast().map_err(os("ID3D11Device1"))?;
+    // SAFETY: a name, and the access the daemon shared it with.
+    unsafe { device.OpenSharedResourceByName(&shared_name(id), DXGI_SHARED_RESOURCE_READ.0) }
+        .map_err(os("OpenSharedResourceByName"))
+}
+
 /// Reads the shared textures (in the app): `each` gets every screen's rows (`stride` bytes
 /// apart) while they are mapped, so it can convert them straight to where they go. The GPU
 /// copies of all screens are queued before the first is waited for.
@@ -546,17 +622,7 @@ pub fn read_with(
             .screens
             .iter()
             .map(|screen| {
-                let mut texture: Option<ID3D11Texture2D> = None;
-                // SAFETY: a handle the daemon got from `GetSharedHandle`; a stale one fails.
-                unsafe {
-                    device.OpenSharedResource(
-                        HANDLE(screen.texture as usize as *mut _),
-                        &raw mut texture,
-                    )
-                }
-                .map_err(os("OpenSharedResource"))?;
-                let texture =
-                    texture.ok_or_else(|| CaptureError::Os("no shared texture".into()))?;
+                let texture = open_shared(&device, screen.texture)?;
                 let whole = PhysicalRect::new(0, 0, screen.width, screen.height);
                 let card = sdr(screen).filter(|_| screen.hdr).and_then(|info| {
                     card_tonemap::stage(&device, &context, &texture, &whole, &info).ok()
@@ -656,7 +722,7 @@ mod tests {
             Usage: D3D11_USAGE_DEFAULT,
             BindFlags: (D3D11_BIND_SHADER_RESOURCE.0 | D3D11_BIND_RENDER_TARGET.0) as u32,
             CPUAccessFlags: 0,
-            MiscFlags: D3D11_RESOURCE_MISC_SHARED.0 as u32,
+            MiscFlags: SHARED_FLAGS,
         };
         let init = D3D11_SUBRESOURCE_DATA {
             pSysMem: pixels.as_ptr().cast(),
@@ -672,9 +738,8 @@ mod tests {
             gpu.context.Flush();
         }
         let texture = texture.unwrap();
-        let resource: IDXGIResource = texture.cast().unwrap();
-        // SAFETY: a texture created shareable.
-        let handle = unsafe { resource.GetSharedHandle() }.unwrap();
+        let id = next_shared_id();
+        let handle = share(&texture, id).unwrap();
         let frozen = Frozen {
             adapter: gpu.adapter,
             screens: vec![FrozenScreen {
@@ -682,7 +747,7 @@ mod tests {
                 y: 0,
                 width: w,
                 height: h,
-                texture: handle.0 as usize as u64,
+                texture: id,
                 hdr: false,
                 window: 0,
             }],
@@ -701,6 +766,11 @@ mod tests {
         let at = |x: usize, y: usize| &read[(y * w as usize + x) * 4..][..4];
         assert_eq!(at(2, 1), [20, 21, 22, 23]);
         assert_eq!(at(0, 0), [0, 1, 2, 3]);
+        // Once the daemon lets the texture go, its name opens nothing.
+        // SAFETY: the handle `share` returned, closed once.
+        let _ = unsafe { CloseHandle(handle) };
+        drop(texture);
+        assert!(read_with(&frozen, |_| None, |_, _, _, _| {}).is_err());
     }
 
     #[test]

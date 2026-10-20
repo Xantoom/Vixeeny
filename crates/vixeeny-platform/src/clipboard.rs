@@ -113,7 +113,19 @@ fn with_clipboard(
             }
             Ok(())
         };
-        fill(&put)
+        fill(&put)?;
+        // Captures can show anything on the screen: they stay on this PC (the clipboard
+        // history, Win+V, keeps them), never synced to the user's other devices.
+        // SAFETY: registering a named format has no preconditions.
+        let cloud = unsafe {
+            windows::Win32::System::DataExchange::RegisterClipboardFormatW(windows::core::w!(
+                "CanUploadToCloudClipboard"
+            ))
+        };
+        if cloud != 0 {
+            put(cloud, &0_u32.to_le_bytes())?;
+        }
+        Ok(())
     })();
     // SAFETY: the clipboard was opened above.
     let _ = unsafe { CloseClipboard() };

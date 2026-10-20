@@ -21,3 +21,8 @@ allow = [
 
 [bans]
 multiple-versions = "warn"
+
+# Crates come from crates.io only: no other registry, no git repository.
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
