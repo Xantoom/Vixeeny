@@ -353,11 +353,11 @@ mod tests {
     #[test]
     fn conflicts_block_the_later_action() {
         let mut k = Hotkeys::default();
-        k.open_settings = vec!["shift+control+r".into(), "Ctrl+Shift+R".into()];
+        k.open_settings = vec!["shift+control+f9".into(), "Ctrl+Shift+F9".into()];
         let r = resolve(&k);
         assert!(
             r.bindings
-                .contains(&(ActionId::RecordToggle, p("Ctrl+Shift+R")))
+                .contains(&(ActionId::RecordToggle, p("Ctrl+Shift+F9")))
         );
         assert!(!r.bindings.iter().any(|(a, _)| *a == ActionId::OpenSettings));
         assert_eq!(r.problems.len(), 2);

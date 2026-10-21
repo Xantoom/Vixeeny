@@ -140,14 +140,14 @@ mod tests {
             .iter()
             .find(|(a, _)| *a == ActionId::ReplaySave)
             .unwrap();
-        assert_eq!(save.1, ["Ctrl+Shift+S".to_owned(), String::new()]);
+        assert_eq!(save.1, ["Ctrl+Shift+F11".to_owned(), String::new()]);
     }
 
     #[test]
     fn a_shortcut_keeps_its_order_in_canonical_names_and_can_be_cleared() {
         let mut c = Config::default();
-        set(&mut c, ActionId::ReplayToggle, 0, "shift + ctrl + f9").unwrap();
-        assert_eq!(c.hotkeys.replay_toggle, ["Shift+Ctrl+F9"]);
+        set(&mut c, ActionId::ReplayToggle, 0, "shift + ctrl + f7").unwrap();
+        assert_eq!(c.hotkeys.replay_toggle, ["Shift+Ctrl+F7"]);
         set(&mut c, ActionId::ReplayToggle, 1, "Alt+F9").unwrap();
         assert_eq!(c.hotkeys.replay_toggle.len(), 2);
         set(&mut c, ActionId::ReplayToggle, 0, "").unwrap();
@@ -162,9 +162,9 @@ mod tests {
             set(&mut c, ActionId::ReplayToggle, 0, "Ctrl+Nope"),
             Err(Refusal::Invalid(_))
         ));
-        // Ctrl+Shift+S belongs to the replay save.
+        // Ctrl+Shift+F11 belongs to the replay save.
         assert_eq!(
-            set(&mut c, ActionId::ReplayToggle, 0, "Ctrl+Shift+S"),
+            set(&mut c, ActionId::ReplayToggle, 0, "Ctrl+Shift+F11"),
             Err(Refusal::Conflict(ActionId::ReplaySave))
         );
         assert_eq!(c.hotkeys, before);

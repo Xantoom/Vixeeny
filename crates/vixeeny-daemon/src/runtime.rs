@@ -717,7 +717,7 @@ mod tests {
         let hk = FakeHotkeys::default();
         let applied = hk.applied.clone();
         let mut config = Config::default();
-        config.hotkeys.open_settings = vec!["Ctrl+Shift+R".into()]; // conflicts with record
+        config.hotkeys.open_settings = vec!["Ctrl+Shift+F9".into()]; // conflicts with record
         let spawner = FakeSpawner {
             fail: false,
             spawned: Arc::default(),
@@ -735,7 +735,7 @@ mod tests {
         );
         rt.apply_config();
         let applied = applied.lock().unwrap();
-        assert!(applied.contains(&(ActionId::RecordToggle, "Ctrl+Shift+R".into())));
+        assert!(applied.contains(&(ActionId::RecordToggle, "Ctrl+Shift+F9".into())));
         assert!(!applied.iter().any(|(a, _)| *a == ActionId::OpenSettings));
         assert!(log.lock().unwrap().iter().any(|l| l.starts_with("notify")));
     }

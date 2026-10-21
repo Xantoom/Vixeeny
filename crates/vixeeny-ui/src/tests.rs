@@ -434,15 +434,15 @@ fn shortcuts_are_edited_in_place_and_conflicts_are_explained() {
     panel.select_section(Section::Shortcuts);
     settings_render(&panel, "9-settings-shortcuts");
     let w = panel.window();
-    // Row 7 is the replay toggle, row 8 the replay save (Ctrl+Shift+S). Keys are recorded, never typed.
+    // Row 7 is the replay toggle, row 8 the replay save (Ctrl+Shift+F11). Keys are recorded, never typed.
     let record = |row: i32, slot: i32, keys: &str| {
         w.invoke_shortcut_record(row, slot);
         panel.captured(settings_panel::Captured::Combination(keys.into()));
     };
-    record(7, 0, "Ctrl+Shift+F9");
-    assert_eq!(panel.config().hotkeys.replay_toggle, ["Ctrl+Shift+F9"]);
+    record(7, 0, "Ctrl+Shift+F7");
+    assert_eq!(panel.config().hotkeys.replay_toggle, ["Ctrl+Shift+F7"]);
     assert_eq!(seen.borrow().len(), 1);
-    record(7, 1, "Ctrl+Shift+S");
+    record(7, 1, "Ctrl+Shift+F11");
     assert_eq!(panel.config().hotkeys.replay_toggle.len(), 1, "refused");
     let row = w.get_shortcuts().row_data(7).unwrap();
     assert!(row.error.contains("Save the replay"), "{}", row.error);
@@ -457,14 +457,14 @@ fn shortcuts_are_edited_in_place_and_conflicts_are_explained() {
     assert_eq!(seen.borrow().len(), 1);
     // The keys show while held, in the order pressed; letting go saves them.
     w.invoke_shortcut_record(7, 1);
-    for code in ["ShiftLeft", "ControlRight", "ShiftRight", "F10"] {
+    for code in ["ShiftLeft", "ControlRight", "ShiftRight", "F6"] {
         assert!(panel.key(code, true));
     }
-    assert_eq!(w.get_recording_keys(), "SHIFT + CTRL + F10");
-    assert!(panel.key("F10", false));
+    assert_eq!(w.get_recording_keys(), "SHIFT + CTRL + F6");
+    assert!(panel.key("F6", false));
     assert_eq!(
         panel.config().hotkeys.replay_toggle,
-        ["Ctrl+Shift+F9", "Shift+Ctrl+F10"]
+        ["Ctrl+Shift+F7", "Shift+Ctrl+F6"]
     );
     assert!(
         !panel.key("ShiftLeft", false),
@@ -475,7 +475,7 @@ fn shortcuts_are_edited_in_place_and_conflicts_are_explained() {
     assert!(panel.key("Escape", true));
     assert_eq!(
         panel.config().hotkeys.replay_toggle,
-        ["Ctrl+Shift+F9", "Shift+Ctrl+F10"]
+        ["Ctrl+Shift+F7", "Shift+Ctrl+F6"]
     );
 }
 

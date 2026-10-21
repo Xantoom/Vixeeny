@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::ipc::ActionId;
 
 /// Schema version written by this build. Bump it and add a migration to [`MIGRATIONS`].
-pub const SCHEMA_VERSION: u32 = 7;
+pub const SCHEMA_VERSION: u32 = 8;
 
 /// `MIGRATIONS[n]` upgrades a table from schema `n + 1` to `n + 2`.
 pub type Migration = fn(&mut toml::Table);
@@ -20,6 +20,7 @@ pub const MIGRATIONS: &[Migration] = &[
     v4_widget_display,
     v5_two_shortcuts,
     v6_scrolling_shortcut,
+    v7_free_shortcuts,
 ];
 
 /// 0.9 → 1.0: MP4 recordings are fragmented (a recording cut short still plays), and the cursor
@@ -137,6 +138,43 @@ fn v6_scrolling_shortcut(table: &mut toml::Table) {
             "capture_scrolling".into(),
             toml::Value::Array(vec![SCROLLING_SHORTCUT.into()]),
         );
+    }
+}
+
+/// The shortcuts that were the defaults before 1.0 and the ones that replace them: Ctrl+Shift
+/// with a letter is taken by browsers and editors (reload, command palette, save as).
+const MOVED_SHORTCUTS: [(&str, &str, &str); 5] = [
+    ("record_toggle", "Ctrl+Shift+R", "Ctrl+Shift+F9"),
+    ("record_pause", "Ctrl+Shift+P", "Ctrl+Shift+F10"),
+    ("replay_save", "Ctrl+Shift+S", "Ctrl+Shift+F11"),
+    ("replay_edit", "Ctrl+Shift+E", "Ctrl+Shift+F12"),
+    ("overlay_toggle", "Ctrl+Shift+O", "Ctrl+Shift+F8"),
+];
+
+/// 1.0: an action still on its former default shortcut moves to the new one, unless the user
+/// gave that one to an action.
+fn v7_free_shortcuts(table: &mut toml::Table) {
+    let Some(hotkeys) = table.get_mut("hotkeys").and_then(|h| h.as_table_mut()) else {
+        return;
+    };
+    let parse = |text: &str| crate::hotkey::Hotkey::parse(text).ok();
+    for (action, old, new) in MOVED_SHORTCUTS {
+        let taken = hotkeys
+            .values()
+            .filter_map(|v| v.as_array())
+            .flatten()
+            .any(|v| v.as_str().is_some_and(|text| parse(text) == parse(new)));
+        if taken {
+            continue;
+        }
+        let Some(list) = hotkeys.get_mut(action).and_then(|v| v.as_array_mut()) else {
+            continue;
+        };
+        for entry in list.iter_mut() {
+            if entry.as_str().is_some_and(|text| parse(text) == parse(old)) {
+                *entry = new.into();
+            }
+        }
     }
 }
 
@@ -267,12 +305,12 @@ impl Default for Hotkeys {
             capture_fullscreen: one("Shift+PrintScreen"),
             capture_all_monitors: Vec::new(),
             capture_scrolling: one(SCROLLING_SHORTCUT),
-            record_toggle: one("Ctrl+Shift+R"),
-            record_pause: one("Ctrl+Shift+P"),
+            record_toggle: one("Ctrl+Shift+F9"),
+            record_pause: one("Ctrl+Shift+F10"),
             replay_toggle: Vec::new(),
-            replay_save: one("Ctrl+Shift+S"),
-            replay_edit: one("Ctrl+Shift+E"),
-            overlay_toggle: one("Ctrl+Shift+O"),
+            replay_save: one("Ctrl+Shift+F11"),
+            replay_edit: one("Ctrl+Shift+F12"),
+            overlay_toggle: one("Ctrl+Shift+F8"),
             open_settings: Vec::new(),
         }
     }
@@ -1101,6 +1139,26 @@ mod tests {
         assert_eq!(h.capture_scrolling, ["F7"]);
         let h = read("capture_scrolling = []\nopen_settings = [\"ctrl+printscreen\"]\n");
         assert!(h.capture_scrolling.is_empty());
+    }
+
+    #[test]
+    fn the_former_default_shortcuts_move_off_ctrl_shift_letters() {
+        let read = |hotkeys: &str| {
+            Config::from_toml(&format!("schema_version = 7\n[hotkeys]\n{hotkeys}"))
+                .unwrap()
+                .hotkeys
+        };
+        let h = read(
+            "record_toggle = [\"Ctrl+Shift+R\", \"F9\"]\nrecord_pause = [\"Shift+Ctrl+P\"]\n\
+             replay_save = [\"Alt+S\"]\n",
+        );
+        assert_eq!(h.record_toggle, ["Ctrl+Shift+F9", "F9"]);
+        assert_eq!(h.record_pause, ["Ctrl+Shift+F10"]);
+        // Changed by the user: kept.
+        assert_eq!(h.replay_save, ["Alt+S"]);
+        // The new one already given to another action: the old one stays.
+        let h = read("replay_edit = [\"Ctrl+Shift+E\"]\nopen_settings = [\"Ctrl+Shift+F12\"]\n");
+        assert_eq!(h.replay_edit, ["Ctrl+Shift+E"]);
     }
 
     #[test]

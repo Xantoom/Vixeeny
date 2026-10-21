@@ -12,7 +12,7 @@ system tray and answers to global shortcuts; nothing runs on screen until you as
   Settings → About), verified by signature, rolled back if the new version does not start.
 
 Default shortcuts: `PrintScreen` region · `Alt+PrintScreen` window · `Shift+PrintScreen` screen ·
-`Ctrl+Shift+R` record · `Ctrl+Shift+P` pause · `Ctrl+Shift+S` save the replay. Everything is
+`Ctrl+Shift+F9` record · `Ctrl+Shift+F10` pause · `Ctrl+Shift+F11` save the replay. Everything is
 configurable in the settings.
 
 ## Install
