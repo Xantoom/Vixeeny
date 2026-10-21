@@ -107,8 +107,16 @@ pub struct Drawing {
     letters: Vec<(Annotation, Option<Letters>)>,
     stroke: ID2D1StrokeStyle1,
     made: Option<Made>,
-    /// Changes each time the result is drawn again.
+    /// Changes each time the result is drawn again, and differs from every other drawing's: a
+    /// drawing made anew (the area moved or grew) is never taken for the one before.
     pub version: u64,
+}
+
+/// The next [`Drawing::version`].
+static NEXT_VERSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn next_version() -> u64 {
+    NEXT_VERSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 fn v2(x: f32, y: f32) -> Vector2 {
@@ -353,7 +361,7 @@ impl Drawing {
             letters: Vec::new(),
             stroke,
             made: None,
-            version: 0,
+            version: next_version(),
         })
     }
 
@@ -460,7 +468,7 @@ impl Drawing {
         self.made = None;
         self.compose(gfx, layers, live)?;
         self.made = Some(made);
-        self.version += 1;
+        self.version = next_version();
         Ok(())
     }
 

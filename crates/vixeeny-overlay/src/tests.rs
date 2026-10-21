@@ -688,3 +688,26 @@ fn live_pictures_are_copied_in_on_the_graphics_card() {
     assert_eq!(at(5, 5), [base.data[o + 2], base.data[o + 1], base.data[o]]);
     assert_ne!(at(50, 30), [10, 200, 30]);
 }
+
+#[test]
+fn a_drawing_made_anew_is_never_taken_for_the_one_before() {
+    use crate::drawing::Drawing;
+    use vixeeny_editor::{Annotation, Color, Rect, Style};
+    let gfx = Gfx::new().expect("graphics devices");
+    let (w, h) = (64, 64);
+    let layers = std::rc::Rc::new(vec![Annotation::Rect {
+        rect: Rect::new(4.0, 4.0, 20.0, 20.0),
+        style: Style {
+            color: Color::rgb(255, 0, 0),
+            width: 2.0,
+        },
+        filled: false,
+    }]);
+    // The zone moved: the same annotations, a new area, a new drawing. The windows show a
+    // drawing again only when its version changed.
+    let mut before = Drawing::new(&gfx, (0, 0, w, h), &screens(w, h), 0).expect("drawing");
+    before.update(&gfx, &layers, false).expect("drawn");
+    let mut after = Drawing::new(&gfx, (8, 0, w - 8, h), &screens(w, h), 0).expect("drawing");
+    after.update(&gfx, &layers, false).expect("drawn");
+    assert_ne!(before.version, after.version);
+}
