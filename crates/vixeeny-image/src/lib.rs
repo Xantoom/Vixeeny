@@ -135,7 +135,7 @@ impl Default for JpegSettings {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WebpSettings {
     pub lossless: bool,
-    /// 0 to 100 (for lossless: compression effort trade-off).
+    /// 0 to 100, for the lossy mode (lossless, the effort sets it).
     pub quality: f32,
     /// Effort 0 (fast) to 6 (slow).
     pub effort: u8,

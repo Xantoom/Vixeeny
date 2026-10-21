@@ -19,9 +19,19 @@ pub(crate) fn encode(image: &Bgra<'_>, settings: &WebpSettings) -> Result<Vec<u8
     }
     let rgb = image.to_rgb();
     let mut config = WebPConfig::new().map_err(|()| err("config init"))?;
-    config.lossless = i32::from(settings.lossless);
-    config.quality = settings.quality.clamp(0.0, 100.0);
-    config.method = i32::from(settings.effort.min(6));
+    if settings.lossless {
+        // Lossless, the quality is the effort too: libwebp's presets (`cwebp -z`) set both. Up to
+        // level 8: level 9 takes about five times as long for the same size.
+        const LEVELS: [i32; 7] = [0, 1, 2, 3, 5, 7, 8];
+        let level = LEVELS[usize::from(settings.effort.min(6))];
+        // SAFETY: `config` is initialised.
+        if unsafe { libwebp_sys::WebPConfigLosslessPreset(&raw mut config, level) } == 0 {
+            return Err(err("lossless preset"));
+        }
+    } else {
+        config.quality = settings.quality.clamp(0.0, 100.0);
+        config.method = i32::from(settings.effort.min(6));
+    }
     // SAFETY: `config` is initialised.
     if unsafe { libwebp_sys::WebPValidateConfig(&raw const config) } == 0 {
         return Err(err("invalid config"));
