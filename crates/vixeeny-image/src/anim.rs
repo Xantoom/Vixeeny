@@ -436,7 +436,8 @@ fn avif_encoder(
     let quantizer = (((100 - quality) * 63 + 50) / 100).max(1);
     let mut options = ffmpeg_next::Dictionary::new();
     options.set("crf", &quantizer.to_string());
-    options.set("preset", &settings.avif.speed.clamp(8, 10).to_string());
+    // SVT-AV1's preset 8: an animation is encoded whole, at the speed of a short video.
+    options.set("preset", "8");
     let encoder = ctx.open_with(options).map_err(avif_err("encoder"))?;
     let mut stream = octx.add_stream(codec).map_err(avif_err("stream"))?;
     stream.set_parameters(&encoder);

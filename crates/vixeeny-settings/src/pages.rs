@@ -399,8 +399,15 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
             rows.push(slider(
                 "avif_speed",
                 t(Key::SetAvifSpeed),
-                (0, 10, 1),
-                |c| i64::from(c.image.avif.speed),
+                (0, i64::from(vixeeny_common::config::AVIF_MAX_SPEED), 1),
+                |c| {
+                    i64::from(
+                        c.image
+                            .avif
+                            .speed
+                            .min(vixeeny_common::config::AVIF_MAX_SPEED),
+                    )
+                },
                 |c, v| c.image.avif.speed = v as u8,
             ));
         }

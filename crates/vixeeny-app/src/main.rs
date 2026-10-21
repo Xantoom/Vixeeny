@@ -331,7 +331,7 @@ fn image_output(config: &Config) -> (vixeeny_image::ImageFormat, vixeeny_image::
     settings.webp.effort = image.webp.effort.min(6);
     settings.avif.quality = image.avif.quality.min(100);
     settings.avif.depth = if image.avif.depth >= 10 { 10 } else { 8 };
-    settings.avif.speed = image.avif.speed.min(10);
+    settings.avif.speed = image.avif.speed.min(vixeeny_common::config::AVIF_MAX_SPEED);
     settings.jxl.lossless = image.jxl.lossless;
     settings.jxl.distance = jxl_distance(image.jxl.quality);
     settings.jxl.effort = image.jxl.effort.clamp(1, 9);

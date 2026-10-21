@@ -492,9 +492,12 @@ impl Default for Jxl {
 pub struct Avif {
     pub quality: u8,
     pub depth: u8,
-    /// 0 (slow, small) to 10 (fast).
+    /// 0 (slow, small) to [`AVIF_MAX_SPEED`] (fast).
     pub speed: u8,
 }
+
+/// The fastest AVIF speed: libaom's `cpu-used` 8, FFmpeg's last.
+pub const AVIF_MAX_SPEED: u8 = 6;
 
 impl Default for Avif {
     fn default() -> Self {

@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use ffmpeg_next::format::Pixel;
 use ffmpeg_next::util::color::{Primaries, Range, Space, TransferCharacteristic};
 use ffmpeg_next::{Packet, Rational, codec, decoder, encoder, ffi, format, frame, media};
+use vixeeny_common::config::AVIF_MAX_SPEED;
 
 use crate::{AvifSettings, Bgra, Chroma, Hdr, ImageError};
 
@@ -181,18 +182,28 @@ fn write(
     let quantizer = (((100 - quality) * 63 + 50) / 100).max(1);
     let mut options = ffmpeg_next::Dictionary::new();
     options.set("crf", &quantizer.to_string());
+    // Every core: FFmpeg's encoders take one unless told (libaom three times faster at 4K, the
+    // same file).
+    options.set("threads", "0");
     match av1 {
         // All-intra, the tune for still pictures (libaom 3.12 and later). Its speeds are slower
-        // than SVT-AV1's: two steps up keep a 4K capture near a second at the default speed (6).
+        // than SVT-AV1's: two steps up (2 to 8, FFmpeg's last) keep a 4K capture near a third of
+        // a second at the fastest.
         Av1::Aom => {
             options.set("usage", "allintra");
             options.set("still-picture", "1");
-            options.set("cpu-used", &(settings.speed + 2).min(8).to_string());
+            options.set(
+                "cpu-used",
+                &(settings.speed.min(AVIF_MAX_SPEED) + 2).to_string(),
+            );
             options.set("aom-params", "tune=iq");
         }
         // Still-picture mode and the tune for still pictures (IQ).
         Av1::Svt => {
-            options.set("preset", &settings.speed.min(10).to_string());
+            options.set(
+                "preset",
+                &(settings.speed.min(AVIF_MAX_SPEED) + 4).to_string(),
+            );
             options.set("svtav1-params", "avif=1:tune=3");
         }
     }
