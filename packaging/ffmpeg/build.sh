@@ -11,7 +11,7 @@
 # runs this (cached until this script changes) and hands the zip to the Windows jobs.
 set -euo pipefail
 
-IMAGE="ghcr.io/btbn/ffmpeg-builds/win64-gpl-shared-9.0@sha256:e6738cf07c5607353552e8df94e6293604f2af5307898df7ae8c93e2e8e90645"
+IMAGE="ghcr.io/btbn/ffmpeg-builds/win64-gpl-shared-9.0@sha256:97fa8df115ad339c2f2c671867d8d74ecbe9589cc32e3e8253902c9387ac942c"
 # release/9.0 after 9.0.2 (n9.0.2-33-g4cf298e66a): its fixes, among them D3D11VA decoding on
 # several threads and the AAC decoder.
 export FFMPEG_COMMIT="4cf298e66a20dd90e8b7c62333ab5812596835ec"
