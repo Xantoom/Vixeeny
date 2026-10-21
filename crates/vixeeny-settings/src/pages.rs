@@ -4,7 +4,8 @@
 use vixeeny_common::config::{Config, Naming, TARGET_SOURCE};
 use vixeeny_common::i18n::Key;
 use vixeeny_encode::registry::{
-    BITRATE_RANGE, DEFAULT_BITRATE, DEFAULT_MAXRATE, Family, ParamType, RateMode, rate_keys,
+    BITRATE_RANGE, DEFAULT_BITRATE, DEFAULT_MAXRATE, Family, ParamType, PresetName, RateMode,
+    rate_keys,
 };
 use vixeeny_encode::{replay, validate};
 
@@ -817,20 +818,37 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
             }),
         ));
     }
-    rows.push(choice(
+    let encoder = current.clone();
+    rows.push(row(
         "preset",
         t(Key::SetPreset),
-        vec![
+        Kind::Choice(vec![
             opt("quality", t(Key::SetPresetBest)),
             opt("small", t(Key::SetPresetLight)),
             opt("custom", t(Key::SetPresetCustom)),
-        ],
-        |c| match c.video.preset.as_str() {
-            "quality" | "small" => c.video.preset.clone(),
-            // The older presets were tuned by hand: they are the custom one now.
-            _ => "custom".to_owned(),
-        },
-        |c, v| c.video.preset = v,
+        ]),
+        Box::new(|c| {
+            Value::Text(match c.video.preset.as_str() {
+                "quality" | "small" => c.video.preset.clone(),
+                // The older presets were tuned by hand: they are the custom one now.
+                _ => "custom".to_owned(),
+            })
+        }),
+        Box::new(move |c, v| {
+            let Value::Text(v) = v else {
+                return Err(Invalid);
+            };
+            // Set by hand from where the preset left: the same picture to start from.
+            if v == "custom"
+                && let Some(left) = PresetName::from_setting(&c.video.preset)
+                && matches!(c.video.preset.as_str(), "quality" | "small")
+                && let Some(spec) = encoder.as_deref().and_then(encoders::spec)
+            {
+                c.video.params = spec.preset_params(left);
+            }
+            c.video.preset = v;
+            Ok(())
+        }),
     ));
     // Only when Windows shows HDR: there is nothing to keep otherwise.
     if env.display.hdr {

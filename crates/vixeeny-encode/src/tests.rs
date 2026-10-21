@@ -155,6 +155,37 @@ fn amf_quality_eases_the_right_way_from_4k() {
 }
 
 #[test]
+fn the_custom_preset_starts_from_the_simple_one() {
+    let r = registry();
+    for id in ["libx264", "nvenc_hevc", "amf_av1", "qsv_h264", "libsvtav1"] {
+        let encoder = r.get(id).unwrap();
+        for preset in [
+            crate::registry::PresetName::Quality,
+            crate::registry::PresetName::Small,
+        ] {
+            let custom = encoder.custom_options(&encoder.preset_params(preset));
+            // Every option of the preset that a parameter or the quality mode can set comes
+            // out the same.
+            for (key, value) in encoder.presets.get(preset) {
+                let settable = encoder.params.iter().any(|p| &p.ffmpeg_option == key)
+                    || encoder
+                        .rate_control
+                        .modes
+                        .get(&crate::registry::RateMode::Quality)
+                        .is_some_and(|m| m.contains_key(key));
+                if settable {
+                    assert_eq!(
+                        custom.get(key),
+                        Some(&value.to_ffmpeg()),
+                        "{id} {preset:?} {key}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn a_broken_registry_is_rejected() {
     let text = include_str!("../codecs/registry.toml");
     assert!(

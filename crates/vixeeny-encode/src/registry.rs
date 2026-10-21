@@ -414,6 +414,41 @@ impl Encoder {
         options
     }
 
+    /// The custom settings that reproduce `preset`, where the parameters allow: constant
+    /// quality at its level, and each parameter the preset sets (the others keep their default).
+    pub fn preset_params(&self, preset: PresetName) -> BTreeMap<String, String> {
+        let options = self.presets.get(preset);
+        let mut params = BTreeMap::from([(
+            rate_keys::MODE.to_owned(),
+            RateMode::Quality.name().to_owned(),
+        )]);
+        let scale = &self.rate_control.quality;
+        let level = self
+            .rate_control
+            .modes
+            .get(&RateMode::Quality)
+            .into_iter()
+            .flatten()
+            .filter(|(_, v)| v.to_ffmpeg().contains("{quality}"))
+            .find_map(|(k, _)| options.get(k)?.to_ffmpeg().parse::<i64>().ok());
+        if let Some(level) = level {
+            // The mirror of a mirrored scale is the user's value.
+            params.insert(
+                rate_keys::QUALITY.to_owned(),
+                scale.to_encoder(level).to_string(),
+            );
+        }
+        for param in &self.params {
+            if let Some(value) = options
+                .get(&param.ffmpeg_option)
+                .and_then(|v| param.parse(&v.to_ffmpeg()))
+            {
+                params.insert(param.key.clone(), value);
+            }
+        }
+        params
+    }
+
     /// The speed option that keeps up with `pixel_rate` (width × height × frames a second), and
     /// its value: the best one that still keeps up, with a margin, while a game runs.
     ///

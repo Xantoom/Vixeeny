@@ -1249,6 +1249,28 @@ mod tests {
     }
 
     #[test]
+    fn the_custom_preset_starts_from_the_one_left() {
+        let mut c = Config::default();
+        c.video.params.insert("rc.quality".into(), "40".into());
+        let env = with_nvenc();
+        let video = rows(Section::Video, &env, &c);
+        row(&video, "preset")
+            .apply(&mut c, Value::Text("custom".into()))
+            .unwrap();
+        assert_eq!(c.video.preset, "custom");
+        // NVENC's best quality: CQ 19, not the 40 left from before nor the scale's 23.
+        assert_eq!(c.video.params["rc.quality"], "19");
+        assert_eq!(c.video.params["multipass"], "qres");
+        // Back and forth within custom keeps what was set by hand.
+        c.video.params.insert("rc.quality".into(), "21".into());
+        let video = rows(Section::Video, &env, &c);
+        row(&video, "preset")
+            .apply(&mut c, Value::Text("custom".into()))
+            .unwrap();
+        assert_eq!(c.video.params["rc.quality"], "21");
+    }
+
+    #[test]
     fn expert_settings_stay_folded_until_opened() {
         let mut c = Config::default();
         c.video.preset = "custom".into();
