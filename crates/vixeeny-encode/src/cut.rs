@@ -18,6 +18,7 @@ use ffmpeg_next::util::format::sample::{Sample, Type as SampleType};
 use ffmpeg_next::{Dictionary, Packet, Rational, codec, color, encoder, ffi, format, frame, media};
 use vixeeny_common::colour;
 
+use crate::hdr::Hdr10;
 use crate::recorder::RecordError;
 use crate::registry::{Chroma, Encoder};
 
@@ -52,6 +53,8 @@ pub struct Clip {
     pub hdr: bool,
     /// More than 8 bits per component.
     pub deep: bool,
+    /// The HDR10 metadata a re-encode carries on, when `hdr`.
+    hdr10: Option<Hdr10>,
     video: usize,
 }
 
@@ -75,17 +78,19 @@ impl Clip {
         let rate = stream.avg_frame_rate();
         let params = stream.parameters();
         // SAFETY: the parameters belong to the stream, alive while `input` is.
-        let (width, height, hdr, deep) = unsafe {
+        let (width, height, hdr, deep, hdr10) = unsafe {
             let p = &*params.as_ptr();
             let deep =
                 ffi::av_pix_fmt_desc_get(std::mem::transmute::<i32, ffi::AVPixelFormat>(p.format))
                     .as_ref()
                     .is_some_and(|d| d.comp[0].depth > 8);
+            let hdr = p.color_trc == ffi::AVColorTransferCharacteristic::AVCOL_TRC_SMPTE2084;
             (
                 p.width.max(0) as u32,
                 p.height.max(0) as u32,
-                p.color_trc == ffi::AVColorTransferCharacteristic::AVCOL_TRC_SMPTE2084,
+                hdr,
                 deep,
+                hdr.then(|| Hdr10::of_stream(p)),
             )
         };
         let audio_tracks = input
@@ -124,6 +129,7 @@ impl Clip {
             audio_tracks,
             hdr,
             deep,
+            hdr10,
             video,
         })
     }
@@ -954,6 +960,7 @@ struct VideoOut {
     frame: Option<frame::Video>,
     pix: Pixel,
     time_base: Rational,
+    hdr10: Option<Hdr10>,
 }
 
 fn open_encoder(
@@ -984,6 +991,10 @@ fn open_encoder(
             ctx.set_colorspace(color::Space::BT2020NCL);
             ctx.set_color_primaries(color::Primaries::BT2020);
             ctx.set_color_transfer_characteristic(color::TransferCharacteristic::SMPTE2084);
+            if let Some(meta) = clip.hdr10 {
+                // SAFETY: the context is live and not open yet.
+                unsafe { meta.attach_to_context(ctx.as_mut_ptr()) };
+            }
         } else {
             ctx.set_colorspace(color::Space::BT709);
             ctx.set_color_primaries(color::Primaries::BT709);
@@ -1003,6 +1014,7 @@ fn open_encoder(
             frame: None,
             pix,
             time_base: clip.time_base,
+            hdr10: clip.hdr10,
         },
         codec,
     ))
@@ -1026,6 +1038,9 @@ impl VideoOut {
             let o = out.as_mut_ptr();
             (*o).colorspace = (*decoded.as_ptr()).colorspace;
             (*o).color_range = ffi::AVColorRange::AVCOL_RANGE_MPEG;
+            if let Some(meta) = self.hdr10 {
+                meta.attach_to_frame(o);
+            }
         }
         let scaled = self.scaler.scale_into(&mut out, decoded);
         out.set_pts(Some(pts));
@@ -1301,6 +1316,7 @@ mod tests {
             audio_tracks: 0,
             hdr: false,
             deep: false,
+            hdr10: None,
             video: 0,
         }
     }

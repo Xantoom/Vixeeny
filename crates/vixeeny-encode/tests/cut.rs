@@ -7,6 +7,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
+use ffmpeg_next::ffi;
+
 use vixeeny_encode::audio::{AudioCodec, AudioTrackConfig};
 use vixeeny_encode::clock::Fps;
 use vixeeny_encode::cut::{Clip, Pictures, Reencode, Sound, export};
@@ -102,7 +104,7 @@ fn recording_with(dir: &Path, seconds: usize, hdr: bool) -> PathBuf {
         depth: if hdr { 10 } else { 8 },
         chroma: Chroma::C420,
         hdr,
-        peak_nits: 1000.0,
+        peak_nits: 603.0,
         split: Split::Off,
         keyframe_seconds: 1.0,
         queue: 1_000,
@@ -281,6 +283,61 @@ fn the_preview_sound_mixes_the_tracks_from_where_it_is_asked() {
     let seconds = total as f64 / 48_000.0;
     assert!((seconds - 2.0).abs() < 0.1, "{seconds} s");
     assert!(peak > 0.7, "peak {peak}");
+}
+
+/// The peak brightness the HDR10 metadata of `path` names: the mastering display's and the
+/// brightest pixel's.
+fn hdr10_peaks(path: &Path) -> Option<(i32, u32)> {
+    let input = ffmpeg_next::format::input(path).unwrap();
+    let stream = input
+        .streams()
+        .best(ffmpeg_next::media::Type::Video)
+        .unwrap();
+    // SAFETY: the parameters of a live stream; the side data is read at FFmpeg's layouts
+    // (AVMasteringDisplayMetadata: 8 rationals, then the maximum; AVContentLightMetadata).
+    unsafe {
+        let par = stream.parameters().as_ptr();
+        let find = |kind| {
+            let sd = ffi::av_packet_side_data_get(
+                (*par).coded_side_data,
+                (*par).nb_coded_side_data,
+                kind,
+            );
+            (!sd.is_null()).then(|| (*sd).data)
+        };
+        let mastering = find(ffi::AVPacketSideDataType::AV_PKT_DATA_MASTERING_DISPLAY_METADATA)?;
+        let light = find(ffi::AVPacketSideDataType::AV_PKT_DATA_CONTENT_LIGHT_LEVEL)?;
+        let max = mastering.cast::<ffi::AVRational>().add(9).read_unaligned();
+        Some((
+            max.num / max.den.max(1),
+            light.cast::<u32>().read_unaligned(),
+        ))
+    }
+}
+
+#[test]
+fn an_hdr_part_keeps_the_hdr10_metadata_of_the_recording() {
+    let dir = scratch("hdr-export");
+    let clip = Clip::open(&recording_with(&dir, 2, true)).unwrap();
+    assert_eq!(hdr10_peaks(&clip.path), Some((603, 603)));
+    let registry = Registry::builtin().unwrap();
+    let encoder = registry.get("libx265").unwrap().clone();
+    let options = encoder
+        .presets
+        .get(PresetName::Performance)
+        .iter()
+        .map(|(k, v)| (k.clone(), v.to_ffmpeg()))
+        .collect();
+    let reencode = Reencode {
+        encoder,
+        options,
+        depth: 10,
+    };
+    let never = AtomicBool::new(false);
+    let encoded = dir.join("encoded.mp4");
+    export(&clip, (10, 40), &encoded, Some(&reencode), &|_| {}, &never).unwrap();
+    assert!(Clip::open(&encoded).unwrap().hdr);
+    assert_eq!(hdr10_peaks(&encoded), Some((603, 603)));
 }
 
 #[test]

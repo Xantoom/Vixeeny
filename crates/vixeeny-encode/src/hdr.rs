@@ -48,6 +48,7 @@ pub fn scrgb_half_to_pq(
 
 /// `AVMasteringDisplayMetadata` (libavutil/mastering_display_metadata.h).
 #[repr(C)]
+#[derive(Debug, Clone, Copy)]
 struct MasteringDisplay {
     display_primaries: [[ffi::AVRational; 2]; 3],
     white_point: [ffi::AVRational; 2],
@@ -59,6 +60,7 @@ struct MasteringDisplay {
 
 /// `AVContentLightMetadata`.
 #[repr(C)]
+#[derive(Debug, Clone, Copy)]
 struct ContentLight {
     max_cll: c_uint,
     max_fall: c_uint,
@@ -67,49 +69,85 @@ struct ContentLight {
 /// HDR10 static metadata, so players map the picture to their own screen: the mastering display
 /// is the recorded monitor (BT.2020 primaries, as the PQ pixels are, a D65 white and its peak
 /// brightness), and that peak bounds both the brightest pixel and the brightest frame average
-/// (not measured; readers drop a light level whose average is 0).
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// (not measured; readers drop a light level whose average is 0). A file already encoded keeps
+/// its own.
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct Hdr10 {
-    peak_nits: u32,
+    mastering: MasteringDisplay,
+    light: ContentLight,
 }
 
 impl Hdr10 {
     pub(crate) fn new(peak_nits: f32) -> Self {
-        Self {
-            peak_nits: peak_nits.clamp(80.0, 10_000.0).round() as u32,
-        }
-    }
-
-    fn mastering(self) -> MasteringDisplay {
+        let peak = peak_nits.clamp(80.0, 10_000.0).round() as u32;
         let xy = |x: f64, y: f64| {
             [x, y].map(|v| ffi::AVRational {
                 num: (v * 50_000.0).round() as c_int,
                 den: 50_000,
             })
         };
-        MasteringDisplay {
-            // Red, green, blue.
-            display_primaries: [xy(0.708, 0.292), xy(0.170, 0.797), xy(0.131, 0.046)],
-            white_point: xy(0.3127, 0.3290),
-            // The monitor's black is not read: the usual 0.0001 nits.
-            min_luminance: ffi::AVRational {
-                num: 1,
-                den: 10_000,
+        Self {
+            mastering: MasteringDisplay {
+                // Red, green, blue.
+                display_primaries: [xy(0.708, 0.292), xy(0.170, 0.797), xy(0.131, 0.046)],
+                white_point: xy(0.3127, 0.3290),
+                // The monitor's black is not read: the usual 0.0001 nits.
+                min_luminance: ffi::AVRational {
+                    num: 1,
+                    den: 10_000,
+                },
+                max_luminance: ffi::AVRational {
+                    num: peak as c_int,
+                    den: 1,
+                },
+                has_primaries: 1,
+                has_luminance: 1,
             },
-            max_luminance: ffi::AVRational {
-                num: self.peak_nits as c_int,
-                den: 1,
+            light: ContentLight {
+                max_cll: peak,
+                max_fall: peak,
             },
-            has_primaries: 1,
-            has_luminance: 1,
         }
     }
 
-    fn light(self) -> ContentLight {
-        ContentLight {
-            max_cll: self.peak_nits,
-            max_fall: self.peak_nits,
+    /// The metadata of a stream, as it is; what it lacks is that of a 1000-nit display, the
+    /// usual mastering peak.
+    ///
+    /// # Safety
+    /// `par` is the live parameters of a stream.
+    pub(crate) unsafe fn of_stream(par: *const ffi::AVCodecParameters) -> Self {
+        let mut meta = Self::new(1000.0);
+        // SAFETY: per the caller; an entry is read only when it is at least the struct's size.
+        unsafe {
+            let find = |kind| {
+                let sd = ffi::av_packet_side_data_get(
+                    (*par).coded_side_data,
+                    (*par).nb_coded_side_data,
+                    kind,
+                );
+                (!sd.is_null()).then(|| &*sd)
+            };
+            if let Some(sd) =
+                find(ffi::AVPacketSideDataType::AV_PKT_DATA_MASTERING_DISPLAY_METADATA)
+                && sd.size >= size_of::<MasteringDisplay>()
+            {
+                let m = sd.data.cast::<MasteringDisplay>().read_unaligned();
+                if m.has_primaries != 0 {
+                    meta.mastering.display_primaries = m.display_primaries;
+                    meta.mastering.white_point = m.white_point;
+                }
+                if m.has_luminance != 0 {
+                    meta.mastering.min_luminance = m.min_luminance;
+                    meta.mastering.max_luminance = m.max_luminance;
+                }
+            }
+            if let Some(sd) = find(ffi::AVPacketSideDataType::AV_PKT_DATA_CONTENT_LIGHT_LEVEL)
+                && sd.size >= size_of::<ContentLight>()
+            {
+                meta.light = sd.data.cast::<ContentLight>().read_unaligned();
+            }
         }
+        meta
     }
 
     /// Writes the metadata on an encoder before it opens: x265, SVT-AV1 and NVENC read it there,
@@ -125,9 +163,9 @@ impl Hdr10 {
             let add = |kind, size| ffi::av_frame_side_data_new(sd, nb, kind, size, 0);
             write(
                 add(MASTERING, size_of::<MasteringDisplay>()),
-                self.mastering(),
+                self.mastering,
             );
-            write(add(LIGHT, size_of::<ContentLight>()), self.light());
+            write(add(LIGHT, size_of::<ContentLight>()), self.light);
         }
     }
 
@@ -141,13 +179,13 @@ impl Hdr10 {
             if ffi::av_frame_get_side_data(frame, MASTERING).is_null() {
                 write(
                     ffi::av_frame_new_side_data(frame, MASTERING, size_of::<MasteringDisplay>()),
-                    self.mastering(),
+                    self.mastering,
                 );
             }
             if ffi::av_frame_get_side_data(frame, LIGHT).is_null() {
                 write(
                     ffi::av_frame_new_side_data(frame, LIGHT, size_of::<ContentLight>()),
-                    self.light(),
+                    self.light,
                 );
             }
         }
@@ -204,12 +242,12 @@ mod tests {
     #[test]
     fn hdr10_metadata_names_the_monitor_peak_on_bt2020() {
         let meta = Hdr10::new(603.4);
-        let m = meta.mastering();
+        let m = meta.mastering;
         assert_eq!((m.max_luminance.num, m.max_luminance.den), (603, 1));
         // Green of BT.2020, in steps of 1/50000.
         assert_eq!(m.display_primaries[1][1].num, 39_850);
-        assert_eq!(meta.light().max_cll, 603);
-        assert_eq!(Hdr10::new(0.0).peak_nits, 80);
+        assert_eq!(meta.light.max_cll, 603);
+        assert_eq!(Hdr10::new(0.0).light.max_cll, 80);
     }
 
     #[test]
