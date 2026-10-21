@@ -561,6 +561,7 @@ fn row_model(row: &Row, config: &Config, lang: Lang) -> SettingRow {
         meter: row.meter,
         shown: SharedString::new(),
         marks: ModelRc::default(),
+        cautions: ModelRc::default(),
         kind: 5,
         enabled: row.enabled(),
         on: false,
@@ -617,6 +618,11 @@ fn row_model(row: &Row, config: &Config, lang: Lang) -> SettingRow {
             if options.iter().any(|o| o.recommended) {
                 out.marks = ModelRc::from(Rc::new(VecModel::from(
                     options.iter().map(|o| o.recommended).collect::<Vec<_>>(),
+                )));
+            }
+            if options.iter().any(|o| o.caution) {
+                out.cautions = ModelRc::from(Rc::new(VecModel::from(
+                    options.iter().map(|o| o.caution).collect::<Vec<_>>(),
                 )));
             }
         }

@@ -108,6 +108,21 @@ pub struct QualityScale {
     pub min: i64,
     pub max: i64,
     pub default: i64,
+    /// The encoder's own scale runs the other way (AMF's QVBR: 51 is the best): the user's
+    /// value, lower is better as everywhere else, is mirrored into it.
+    #[serde(default)]
+    pub inverted: bool,
+}
+
+impl QualityScale {
+    /// The encoder's value of `quality`, a value of the user's scale.
+    pub fn to_encoder(&self, quality: i64) -> i64 {
+        if self.inverted {
+            self.min + self.max - quality
+        } else {
+            quality
+        }
+    }
 }
 
 /// The rate control of the custom preset.
@@ -355,7 +370,14 @@ impl Encoder {
         };
         let scale = &self.rate_control.quality;
         let mode = self.rate_mode(params);
-        let quality = number(rate_keys::QUALITY, scale.default, (scale.min, scale.max));
+        // A value off the scale was set on another one (the scale changed): the default.
+        let quality = params
+            .get(rate_keys::QUALITY)
+            .and_then(|v| v.parse::<f64>().ok())
+            .map(|v| v.round() as i64)
+            .filter(|q| (scale.min..=scale.max).contains(q))
+            .unwrap_or(scale.default);
+        let quality = scale.to_encoder(quality);
         let bitrate = number(rate_keys::BITRATE, DEFAULT_BITRATE, BITRATE_RANGE);
         let maxrate = number(rate_keys::MAXRATE, DEFAULT_MAXRATE, BITRATE_RANGE).max(bitrate);
         let peak = if self.rate_control.uses(mode, "{maxrate}") {
@@ -502,7 +524,8 @@ impl Encoder {
         if height >= 2000 {
             let scale = &self.rate_control.quality;
             // One step of a 0-51 scale, as much on the others.
-            let ease = ((scale.max - scale.min) as f64 / 51.0).round().max(1.0) as i64;
+            let step = ((scale.max - scale.min) as f64 / 51.0).round().max(1.0) as i64;
+            let ease = if scale.inverted { -step } else { step };
             let quality_options: Vec<String> = self
                 .rate_control
                 .modes

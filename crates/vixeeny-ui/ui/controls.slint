@@ -308,6 +308,8 @@ export component ComboBox inherits Rectangle {
     // The options advised: `mark-text` beside them in the list.
     in property <[bool]> marks;
     in property <string> mark-text;
+    // The options that usually do harm: in the warning colour.
+    in property <[bool]> cautions;
     in property <int> current: -1;
     in property <bool> enabled: true;
     in property <string> placeholder;
@@ -330,7 +332,8 @@ export component ComboBox inherits Rectangle {
         Text {
             horizontal-stretch: 1;
             text: root.current >= 0 && root.current < root.options.length ? root.options[root.current] : root.placeholder;
-            color: root.current >= 0 ? Theme.text : Theme.text-3;
+            color: root.current < 0 ? Theme.text-3
+                : (root.current < root.cautions.length && root.cautions[root.current] ? Theme.warning : Theme.text);
             font-size: 14px;
             vertical-alignment: center;
             overflow: elide;
@@ -386,6 +389,7 @@ export component ComboBox inherits Rectangle {
                 for option[i] in root.options : item-row := Rectangle {
                     property <bool> head: i < root.headings.length && root.headings[i];
                     property <bool> marked: i < root.marks.length && root.marks[i];
+                    property <bool> caution: i < root.cautions.length && root.cautions[i];
                     x: 4px;
                     y: 4px + i * 40px;
                     width: parent.width - 8px;
@@ -409,7 +413,7 @@ export component ComboBox inherits Rectangle {
                         height: parent.height;
                         overflow: elide;
                         text: option;
-                        color: parent.head ? Theme.text-3 : Theme.text;
+                        color: parent.head ? Theme.text-3 : (parent.caution ? Theme.warning : Theme.text);
                         font-size: parent.head ? 12px : 14px;
                         font-weight: parent.head ? 600 : 400;
                         vertical-alignment: parent.head ? bottom : center;

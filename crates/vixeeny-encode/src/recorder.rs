@@ -24,6 +24,7 @@ use crate::audio::{AudioEncoder, AudioTrackConfig, SAMPLE_RATE};
 use crate::clock::{Cfr, Emit, Fps};
 use crate::convert;
 use crate::gpu::{GpuPipeline, HwFrame};
+use crate::hdr::Hdr10;
 use crate::registry::{Chroma, Encoder};
 use crate::replay::{Ring, Snapshot, Storage};
 
@@ -116,6 +117,8 @@ pub struct RecordConfig {
     pub chroma: Chroma,
     /// Tag the stream BT.2020 / PQ (HDR10). The pixels must already be PQ-encoded.
     pub hdr: bool,
+    /// Peak brightness of the recorded monitor in nits, for the HDR10 metadata (unused in SDR).
+    pub peak_nits: f32,
     pub split: Split,
     /// Key frame interval, seconds (also the granularity of crash recovery and of splitting).
     pub keyframe_seconds: f64,
@@ -394,6 +397,46 @@ fn dictionary(options: &[(String, String)]) -> Dictionary<'static> {
     d
 }
 
+/// Options some GPUs or drivers refuse (NVENC's B-frames as references before Turing and its
+/// 10-bit encoding on the first Maxwell cards, the newer controls of AMF and Quick Sync): an
+/// encoder that does not open with them opens without.
+const OPTIONAL: [&str; 6] = [
+    "b_ref_mode",
+    "highbitdepth",
+    "preencode",
+    "high_motion_quality_boost_enable",
+    "extbrc",
+    "look_ahead_depth",
+];
+
+/// Opens a video encoder with `options` through `open` (which sets the context up anew each
+/// time), and once more without the [`OPTIONAL`] ones when it refuses.
+pub(crate) fn open_video(
+    options: &[(String, String)],
+    mut open: impl FnMut(Dictionary<'static>) -> Result<encoder::Video, RecordError>,
+) -> Result<encoder::Video, RecordError> {
+    let with_threads = |options: &[(String, String)]| {
+        let mut d = dictionary(options);
+        // FFmpeg's default is one thread: libvpx then encodes on a single core and x265 one
+        // frame at a time. Zero lets each encoder use the whole CPU (x264 does by itself).
+        if d.get("threads").is_none() {
+            d.set("threads", "0");
+        }
+        d
+    };
+    let optional = |(k, _): &&(String, String)| OPTIONAL.contains(&k.as_str());
+    match open(with_threads(options)) {
+        Err(e) if options.iter().any(|o| optional(&o)) => {
+            tracing::warn!(
+                "the encoder refused its options ({e}): trying without the optional ones"
+            );
+            let kept: Vec<_> = options.iter().filter(|o| !optional(o)).cloned().collect();
+            open(with_threads(&kept))
+        }
+        result => result,
+    }
+}
+
 struct Output {
     octx: format::context::Output,
     path: PathBuf,
@@ -439,6 +482,8 @@ struct Worker {
     codec: ffmpeg_next::Codec,
     pix: Pixel,
     enc_tb: Rational,
+    /// HDR10 metadata, written on every frame (AMF and Quick Sync read it there).
+    hdr10: Option<Hdr10>,
     converter: Option<convert::Converter>,
     /// HDR frames as 16-bit PQ RGB, kept from one frame to the next.
     hdr16: Vec<u8>,
@@ -483,15 +528,6 @@ impl Worker {
             .as_ref()
             .is_none_or(|(octx, _)| octx.format().flags().contains(format::Flags::GLOBAL_HEADER));
 
-        let mut ctx = codec::context::Context::new_with_codec(codec)
-            .encoder()
-            .video()?;
-        ctx.set_width(w);
-        ctx.set_height(h);
-        ctx.set_format(pix);
-        if let Some(gpu) = &cfg.gpu {
-            crate::gpu::attach(&mut ctx, gpu)?;
-        }
         if cfg.vfr && !matches!(cfg.container, OutputContainer::Mkv | OutputContainer::WebM) {
             return Err(RecordError::Config(
                 "variable frame rate needs Matroska or WebM".into(),
@@ -503,33 +539,43 @@ impl Worker {
         } else {
             Rational(cfg.fps.den as i32, cfg.fps.num as i32)
         };
-        ctx.set_time_base(enc_tb);
-        ctx.set_frame_rate(Some(Rational(cfg.fps.num as i32, cfg.fps.den as i32)));
         let gop = (f64::from(cfg.fps.num) / f64::from(cfg.fps.den) * cfg.keyframe_seconds).round();
-        ctx.set_gop(gop.max(1.0) as u32);
-        // Closed GOPs: a key frame never has leading frames that need the previous part.
-        let mut flags = codec::Flags::CLOSED_GOP;
-        ctx.set_color_range(color::Range::MPEG);
-        if cfg.hdr {
-            ctx.set_colorspace(color::Space::BT2020NCL);
-            ctx.set_color_primaries(color::Primaries::BT2020);
-            ctx.set_color_transfer_characteristic(color::TransferCharacteristic::SMPTE2084);
-        } else {
-            ctx.set_colorspace(color::Space::BT709);
-            ctx.set_color_primaries(color::Primaries::BT709);
-            ctx.set_color_transfer_characteristic(color::TransferCharacteristic::BT709);
-        }
-        if global {
-            flags |= codec::Flags::GLOBAL_HEADER;
-        }
-        ctx.set_flags(flags);
-        let mut options = dictionary(&cfg.options);
-        // FFmpeg's default is one thread: libvpx then encodes on a single core and x265 one
-        // frame at a time. Zero lets each encoder use the whole CPU (x264 does by itself).
-        if options.get("threads").is_none() {
-            options.set("threads", "0");
-        }
-        let encoder = ctx.open_with(options)?;
+        let hdr10 = cfg.hdr.then(|| Hdr10::new(cfg.peak_nits));
+        let encoder = open_video(&cfg.options, |options| {
+            let mut ctx = codec::context::Context::new_with_codec(codec)
+                .encoder()
+                .video()?;
+            ctx.set_width(w);
+            ctx.set_height(h);
+            ctx.set_format(pix);
+            if let Some(gpu) = &cfg.gpu {
+                crate::gpu::attach(&mut ctx, gpu)?;
+            }
+            ctx.set_time_base(enc_tb);
+            ctx.set_frame_rate(Some(Rational(cfg.fps.num as i32, cfg.fps.den as i32)));
+            ctx.set_gop(gop.max(1.0) as u32);
+            // Closed GOPs: a key frame never has leading frames that need the previous part.
+            let mut flags = codec::Flags::CLOSED_GOP;
+            ctx.set_color_range(color::Range::MPEG);
+            if cfg.hdr {
+                ctx.set_colorspace(color::Space::BT2020NCL);
+                ctx.set_color_primaries(color::Primaries::BT2020);
+                ctx.set_color_transfer_characteristic(color::TransferCharacteristic::SMPTE2084);
+            } else {
+                ctx.set_colorspace(color::Space::BT709);
+                ctx.set_color_primaries(color::Primaries::BT709);
+                ctx.set_color_transfer_characteristic(color::TransferCharacteristic::BT709);
+            }
+            if let Some(meta) = hdr10 {
+                // SAFETY: the context is live and not open yet.
+                unsafe { meta.attach_to_context(ctx.as_mut_ptr()) };
+            }
+            if global {
+                flags |= codec::Flags::GLOBAL_HEADER;
+            }
+            ctx.set_flags(flags);
+            Ok(ctx.open_with(options)?)
+        })?;
 
         let mut worker = Self {
             cfr: Cfr::new(cfg.fps),
@@ -541,6 +587,7 @@ impl Worker {
             codec,
             pix,
             enc_tb,
+            hdr10,
             converter: None,
             hdr16: Vec::new(),
             unpack: None,
@@ -935,6 +982,10 @@ impl Worker {
         match &mut self.last {
             None => return Ok(()),
             Some(Last::Sw(frame)) => {
+                if let Some(meta) = self.hdr10 {
+                    // SAFETY: a live frame.
+                    unsafe { meta.attach_to_frame(frame.as_mut_ptr()) };
+                }
                 frame.set_pts(Some(index as i64));
                 self.encoder.send_frame(frame)?;
             }
@@ -942,6 +993,9 @@ impl Worker {
                 // SAFETY: the frame is a live D3D11 `AVFrame`; the encoder takes its own
                 // reference to the pixels, so the same frame can be sent again for a repeat.
                 let code = unsafe {
+                    if let Some(meta) = self.hdr10 {
+                        meta.attach_to_frame(frame.as_ptr());
+                    }
                     (*frame.as_ptr()).pts = index as i64;
                     ffi::avcodec_send_frame(self.encoder.as_mut_ptr(), frame.as_ptr())
                 };

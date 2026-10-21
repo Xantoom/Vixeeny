@@ -4,7 +4,10 @@
 //! which swscale then turns into 10-bit YUV. This is the CPU path; the GPU path does the same
 //! with a shader.
 
+use std::ffi::{c_int, c_uint};
 use std::sync::OnceLock;
+
+use ffmpeg_next::ffi;
 
 use rayon::prelude::*;
 use vixeeny_common::colour;
@@ -43,6 +46,131 @@ pub fn scrgb_half_to_pq(
     Some(())
 }
 
+/// `AVMasteringDisplayMetadata` (libavutil/mastering_display_metadata.h).
+#[repr(C)]
+struct MasteringDisplay {
+    display_primaries: [[ffi::AVRational; 2]; 3],
+    white_point: [ffi::AVRational; 2],
+    min_luminance: ffi::AVRational,
+    max_luminance: ffi::AVRational,
+    has_primaries: c_int,
+    has_luminance: c_int,
+}
+
+/// `AVContentLightMetadata`.
+#[repr(C)]
+struct ContentLight {
+    max_cll: c_uint,
+    max_fall: c_uint,
+}
+
+/// HDR10 static metadata, so players map the picture to their own screen: the mastering display
+/// is the recorded monitor (BT.2020 primaries, as the PQ pixels are, a D65 white and its peak
+/// brightness), and that peak bounds both the brightest pixel and the brightest frame average
+/// (not measured; readers drop a light level whose average is 0).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Hdr10 {
+    peak_nits: u32,
+}
+
+impl Hdr10 {
+    pub(crate) fn new(peak_nits: f32) -> Self {
+        Self {
+            peak_nits: peak_nits.clamp(80.0, 10_000.0).round() as u32,
+        }
+    }
+
+    fn mastering(self) -> MasteringDisplay {
+        let xy = |x: f64, y: f64| {
+            [x, y].map(|v| ffi::AVRational {
+                num: (v * 50_000.0).round() as c_int,
+                den: 50_000,
+            })
+        };
+        MasteringDisplay {
+            // Red, green, blue.
+            display_primaries: [xy(0.708, 0.292), xy(0.170, 0.797), xy(0.131, 0.046)],
+            white_point: xy(0.3127, 0.3290),
+            // The monitor's black is not read: the usual 0.0001 nits.
+            min_luminance: ffi::AVRational {
+                num: 1,
+                den: 10_000,
+            },
+            max_luminance: ffi::AVRational {
+                num: self.peak_nits as c_int,
+                den: 1,
+            },
+            has_primaries: 1,
+            has_luminance: 1,
+        }
+    }
+
+    fn light(self) -> ContentLight {
+        ContentLight {
+            max_cll: self.peak_nits,
+            max_fall: self.peak_nits,
+        }
+    }
+
+    /// Writes the metadata on an encoder before it opens: x265, SVT-AV1 and NVENC read it there,
+    /// and FFmpeg passes it on to the container.
+    ///
+    /// # Safety
+    /// `ctx` is a live encoder context that is not open yet.
+    pub(crate) unsafe fn attach_to_context(self, ctx: *mut ffi::AVCodecContext) {
+        // SAFETY: per the caller; each entry is allocated at the size of the struct written.
+        unsafe {
+            let sd = &raw mut (*ctx).decoded_side_data;
+            let nb = &raw mut (*ctx).nb_decoded_side_data;
+            let add = |kind, size| ffi::av_frame_side_data_new(sd, nb, kind, size, 0);
+            write(
+                add(MASTERING, size_of::<MasteringDisplay>()),
+                self.mastering(),
+            );
+            write(add(LIGHT, size_of::<ContentLight>()), self.light());
+        }
+    }
+
+    /// Writes the metadata on a frame that has none: AMF and Quick Sync read it there.
+    ///
+    /// # Safety
+    /// `frame` is a live frame.
+    pub(crate) unsafe fn attach_to_frame(self, frame: *mut ffi::AVFrame) {
+        // SAFETY: per the caller; each entry is allocated at the size of the struct written.
+        unsafe {
+            if ffi::av_frame_get_side_data(frame, MASTERING).is_null() {
+                write(
+                    ffi::av_frame_new_side_data(frame, MASTERING, size_of::<MasteringDisplay>()),
+                    self.mastering(),
+                );
+            }
+            if ffi::av_frame_get_side_data(frame, LIGHT).is_null() {
+                write(
+                    ffi::av_frame_new_side_data(frame, LIGHT, size_of::<ContentLight>()),
+                    self.light(),
+                );
+            }
+        }
+    }
+}
+
+const MASTERING: ffi::AVFrameSideDataType =
+    ffi::AVFrameSideDataType::AV_FRAME_DATA_MASTERING_DISPLAY_METADATA;
+const LIGHT: ffi::AVFrameSideDataType = ffi::AVFrameSideDataType::AV_FRAME_DATA_CONTENT_LIGHT_LEVEL;
+
+/// Copies `value` into the side data `sd` (allocated at its size); a failed allocation is left
+/// out.
+///
+/// # Safety
+/// `sd` is null or a side data entry of `size_of::<T>()` bytes.
+unsafe fn write<T>(sd: *mut ffi::AVFrameSideData, value: T) {
+    if sd.is_null() {
+        return;
+    }
+    // SAFETY: per the caller; FFmpeg's buffers are aligned for any type.
+    unsafe { (*sd).data.cast::<T>().write(value) };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -71,6 +199,17 @@ mod tests {
             .iter()
             .map(|c| f64::from(u16::from_le_bytes(*c)) / 65535.0)
             .collect()
+    }
+
+    #[test]
+    fn hdr10_metadata_names_the_monitor_peak_on_bt2020() {
+        let meta = Hdr10::new(603.4);
+        let m = meta.mastering();
+        assert_eq!((m.max_luminance.num, m.max_luminance.den), (603, 1));
+        // Green of BT.2020, in steps of 1/50000.
+        assert_eq!(m.display_primaries[1][1].num, 39_850);
+        assert_eq!(meta.light().max_cll, 603);
+        assert_eq!(Hdr10::new(0.0).peak_nits, 80);
     }
 
     #[test]

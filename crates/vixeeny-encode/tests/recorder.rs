@@ -90,6 +90,7 @@ fn config(registry: &Registry, id: &str, container: OutputContainer, fps: u32) -
         depth: 8,
         chroma: Chroma::C420,
         hdr: false,
+        peak_nits: 1000.0,
         split: Split::Off,
         keyframe_seconds: 1.0,
         queue: 1_000,
@@ -342,6 +343,20 @@ fn hdr_streams_are_tagged_bt2020_pq() {
         video.color_transfer_characteristic(),
         vixeeny_encode::ffmpeg::color::TransferCharacteristic::SMPTE2084
     );
+    // The HDR10 metadata reached the file: the mastering display and the light level.
+    use vixeeny_encode::ffmpeg::ffi;
+    for kind in [
+        ffi::AVPacketSideDataType::AV_PKT_DATA_MASTERING_DISPLAY_METADATA,
+        ffi::AVPacketSideDataType::AV_PKT_DATA_CONTENT_LIGHT_LEVEL,
+    ] {
+        // SAFETY: the parameters of a live stream.
+        let found = unsafe {
+            let par = stream.parameters().as_ptr();
+            !ffi::av_packet_side_data_get((*par).coded_side_data, (*par).nb_coded_side_data, kind)
+                .is_null()
+        };
+        assert!(found, "{kind:?}");
+    }
 }
 
 #[test]

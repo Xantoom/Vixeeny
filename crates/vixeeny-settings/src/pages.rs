@@ -10,8 +10,8 @@ use vixeeny_encode::{replay, validate};
 
 use crate::encoders::{self, param_label, param_range};
 use crate::{
-    Env, Invalid, Kind, Opt, Row, Value, advised, choice, counted, folder, header, hinted, info,
-    nested, number, opt, row, slider, toggle,
+    Env, Invalid, Kind, Opt, Row, Value, advised, choice, counted, discouraged, folder, header,
+    hinted, info, nested, number, opt, row, slider, toggle,
 };
 
 /// `off`, `size:<MB>` or `duration:<minutes>` → (kind, amount).
@@ -582,6 +582,9 @@ fn custom_rows(env: &Env, config: &Config, encoder: &str) -> (Vec<Row>, Vec<Row>
                                 .is_some_and(|(k, r)| *k == param.key && r == v)
                             {
                                 advised(v, label)
+                            } else if param.key == "tune" && matches!(v.as_str(), "psnr" | "ssim") {
+                                // Tunes for measurements: they turn the psychovisual tools off.
+                                discouraged(v, label)
                             } else {
                                 opt(v, label)
                             }
@@ -620,7 +623,7 @@ fn custom_rows(env: &Env, config: &Config, encoder: &str) -> (Vec<Row>, Vec<Row>
                 row = counted(row, env.t(Key::UnitFrames));
                 row.zero = "Auto".into();
             }
-            ("lookahead", _) => row = counted(row, env.t(Key::UnitFrames)),
+            ("lookahead", ParamType::Int) => row = counted(row, env.t(Key::UnitFrames)),
             _ => {}
         }
         // The speed / quality trade-off is the one everybody may want to change.

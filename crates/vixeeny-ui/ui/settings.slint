@@ -46,6 +46,8 @@ export struct SettingRow {
     headings: [bool],
     // The options advised, marked so in the list.
     marks: [bool],
+    // The options that usually do harm, in the warning colour.
+    cautions: [bool],
     selected: int,
     // The choices of an "add" row.
     // A picture before the label (a program's icon).
@@ -352,6 +354,7 @@ component SettingLine inherits GroupRow {
         options: root.entry.options;
         headings: root.entry.headings;
         marks: root.entry.marks;
+        cautions: root.entry.cautions;
         mark-text: root.t.recommended;
         current: root.entry.selected;
         enabled: root.entry.enabled;

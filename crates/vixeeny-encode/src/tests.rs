@@ -107,19 +107,51 @@ fn the_custom_options_follow_the_rate_mode() {
     // A mode the encoder does not know falls back to constant quality.
     let o = custom("libsvtav1", &[("rc.mode", "nope")]);
     assert_eq!(o["crf"], "30");
-    // AMF quality sets every frame type; AV1 counts on 0-255.
-    let o = custom("amf_av1", &[("rc.quality", "300")]);
-    assert_eq!((o["rc"].as_str(), o["qp_b"].as_str()), ("cqp", "255"));
+    // AMF's QVBR counts the other way (51 the best): the user's scale is mirrored into it, and
+    // a value set on the former CQP scale (0-255) falls back to the default.
+    let o = custom("amf_av1", &[("rc.quality", "20")]);
+    assert_eq!(
+        (o["rc"].as_str(), o["qvbr_quality_level"].as_str()),
+        ("qvbr", "32")
+    );
+    assert_eq!(o["preencode"], "1");
+    assert_eq!(o["high_motion_quality_boost_enable"], "1");
+    let o = custom("amf_av1", &[("rc.quality", "120")]);
+    assert_eq!(o["qvbr_quality_level"], "28");
     // Values out of range are clamped, unknown ones fall back to the default, `auto` is left out.
     let o = custom(
         "libx264",
         &[("keyint", "120"), ("tune", "nope"), ("bframes", "99")],
     );
     assert_eq!(o["g"], "120");
-    assert_eq!(o["bf"], "16");
     assert!(!o.contains_key("tune"));
+    // x264's B-frames and look-ahead are the preset's until they are set.
+    assert!(!o.contains_key("bf") && !o.contains_key("rc-lookahead"));
+    assert_eq!(custom("libx264", &[("bframes", "2")])["bf"], "2");
     let o = custom("amf_h264", &[("bframes", "2")]);
     assert_eq!(o["bf"], "2");
+}
+
+#[test]
+fn the_aac_of_media_foundation_is_only_used_up_to_192_kbits() {
+    use crate::audio::AudioCodec;
+    assert_eq!(AudioCodec::Aac.encoder_names(192), ["aac_mf", "aac"]);
+    assert_eq!(AudioCodec::Aac.encoder_names(256), ["aac"]);
+    assert_eq!(AudioCodec::Opus.encoder_names(320), ["libopus"]);
+}
+
+#[test]
+fn amf_quality_eases_the_right_way_from_4k() {
+    let r = registry();
+    let amf = r.get("amf_hevc").unwrap();
+    let level = |h| {
+        amf.preset_options(crate::registry::PresetName::Quality, (3840, h), 60)
+            ["qvbr_quality_level"]
+            .clone()
+    };
+    // 51 is QVBR's best: easing lowers the level.
+    assert_eq!(level(1080), "32");
+    assert_eq!(level(2160), "31");
 }
 
 #[test]

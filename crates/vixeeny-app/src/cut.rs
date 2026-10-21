@@ -995,6 +995,7 @@ mod tests {
             depth: 8,
             chroma: Chroma::C420,
             hdr: false,
+            peak_nits: 1000.0,
             split: Split::Off,
             keyframe_seconds: 1.0,
             queue: 1_000,

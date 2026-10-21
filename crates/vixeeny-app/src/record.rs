@@ -477,6 +477,7 @@ fn plan(
         depth: validate::depth(&encoder, chroma, hdr, probe.as_ref()),
         chroma,
         hdr,
+        peak_nits: monitor.hdr.map_or(1000.0, |h| h.peak_nits),
         split: if replay {
             Split::Off
         } else {

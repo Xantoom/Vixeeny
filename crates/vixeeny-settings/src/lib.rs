@@ -89,6 +89,8 @@ pub struct Opt {
     pub heading: bool,
     /// The one advised: marked so in the list.
     pub recommended: bool,
+    /// One that usually does harm (a tune for measurements): shown in the warning colour.
+    pub caution: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -399,6 +401,7 @@ fn heading(label: impl Into<String>) -> Opt {
         label: label.into(),
         heading: true,
         recommended: false,
+        caution: false,
     }
 }
 
@@ -408,6 +411,15 @@ fn opt(value: &str, label: impl Into<String>) -> Opt {
         value: value.to_owned(),
         label: label.into(),
         recommended: false,
+        caution: false,
+    }
+}
+
+/// An option that usually does harm, shown in the warning colour.
+fn discouraged(value: &str, label: impl Into<String>) -> Opt {
+    Opt {
+        caution: true,
+        ..opt(value, label)
     }
 }
 

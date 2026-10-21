@@ -968,39 +968,34 @@ fn open_encoder(
             reencode.encoder.ffmpeg_encoder
         ))
     })?;
-    let mut ctx = codec::context::Context::new_with_codec(codec)
-        .encoder()
-        .video()?;
-    ctx.set_width(clip.width & !1);
-    ctx.set_height(clip.height & !1);
-    ctx.set_format(pix);
-    ctx.set_time_base(clip.time_base);
-    ctx.set_frame_rate(Some(clip.rate));
     let gop = (f64::from(clip.rate.0) / f64::from(clip.rate.1)).round() * 2.0;
-    ctx.set_gop(gop.max(1.0) as u32);
-    ctx.set_color_range(color::Range::MPEG);
-    if clip.hdr {
-        ctx.set_colorspace(color::Space::BT2020NCL);
-        ctx.set_color_primaries(color::Primaries::BT2020);
-        ctx.set_color_transfer_characteristic(color::TransferCharacteristic::SMPTE2084);
-    } else {
-        ctx.set_colorspace(color::Space::BT709);
-        ctx.set_color_primaries(color::Primaries::BT709);
-        ctx.set_color_transfer_characteristic(color::TransferCharacteristic::BT709);
-    }
-    let mut flags = codec::Flags::CLOSED_GOP;
-    if global_header {
-        flags |= codec::Flags::GLOBAL_HEADER;
-    }
-    ctx.set_flags(flags);
-    let mut options = Dictionary::new();
-    for (k, v) in &reencode.options {
-        options.set(k, v);
-    }
-    if options.get("threads").is_none() {
-        options.set("threads", "0");
-    }
-    let encoder = ctx.open_with(options)?;
+    let encoder = crate::recorder::open_video(&reencode.options, |options| {
+        let mut ctx = codec::context::Context::new_with_codec(codec)
+            .encoder()
+            .video()?;
+        ctx.set_width(clip.width & !1);
+        ctx.set_height(clip.height & !1);
+        ctx.set_format(pix);
+        ctx.set_time_base(clip.time_base);
+        ctx.set_frame_rate(Some(clip.rate));
+        ctx.set_gop(gop.max(1.0) as u32);
+        ctx.set_color_range(color::Range::MPEG);
+        if clip.hdr {
+            ctx.set_colorspace(color::Space::BT2020NCL);
+            ctx.set_color_primaries(color::Primaries::BT2020);
+            ctx.set_color_transfer_characteristic(color::TransferCharacteristic::SMPTE2084);
+        } else {
+            ctx.set_colorspace(color::Space::BT709);
+            ctx.set_color_primaries(color::Primaries::BT709);
+            ctx.set_color_transfer_characteristic(color::TransferCharacteristic::BT709);
+        }
+        let mut flags = codec::Flags::CLOSED_GOP;
+        if global_header {
+            flags |= codec::Flags::GLOBAL_HEADER;
+        }
+        ctx.set_flags(flags);
+        Ok(ctx.open_with(options)?)
+    })?;
     Ok((
         VideoOut {
             encoder,

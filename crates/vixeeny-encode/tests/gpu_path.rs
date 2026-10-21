@@ -67,11 +67,17 @@ fn texture(device: &Device) -> ID3D11Texture2D {
     out.unwrap()
 }
 
-fn config(registry: &Registry, id: &str, depth: u8, chroma: Chroma) -> RecordConfig {
+fn config(
+    registry: &Registry,
+    id: &str,
+    depth: u8,
+    chroma: Chroma,
+    preset: PresetName,
+) -> RecordConfig {
     let encoder = registry.get(id).unwrap().clone();
     let options = encoder
         .presets
-        .get(PresetName::Performance)
+        .get(preset)
         .iter()
         .map(|(k, v)| (k.clone(), v.to_ffmpeg()))
         .collect();
@@ -85,6 +91,7 @@ fn config(registry: &Registry, id: &str, depth: u8, chroma: Chroma) -> RecordCon
         depth,
         chroma,
         hdr: false,
+        peak_nits: 1000.0,
         split: Split::Off,
         keyframe_seconds: 1.0,
         queue: 1_000,
@@ -170,6 +177,24 @@ fn record_gpu(
     depth: u8,
     chroma: Chroma,
 ) -> Option<[i32; 3]> {
+    record_gpu_with(
+        device,
+        context,
+        id,
+        feed,
+        (depth, chroma),
+        PresetName::Performance,
+    )
+}
+
+fn record_gpu_with(
+    device: &Device,
+    context: &DeviceContext,
+    id: &str,
+    feed: Feed,
+    (depth, chroma): (u8, Chroma),
+    preset: PresetName,
+) -> Option<[i32; 3]> {
     let registry = Registry::builtin().unwrap();
     let pipeline = match GpuPipeline::new(
         device,
@@ -197,9 +222,9 @@ fn record_gpu(
         }
     };
     let pipeline = Arc::new(pipeline);
-    let mut cfg = config(&registry, id, depth, chroma);
+    let mut cfg = config(&registry, id, depth, chroma, preset);
     cfg.gpu = Some(Arc::clone(&pipeline));
-    let dir = scratch(&format!("{id}-{depth}-{}", chroma.name()));
+    let dir = scratch(&format!("{id}-{depth}-{}-{preset:?}", chroma.name()));
     let rec = Recorder::start(cfg, namer(&dir)).unwrap();
     let source = texture(device);
     let rect = Rect {
@@ -235,7 +260,17 @@ fn a_software_encoder_records_downloaded_gpu_frames_with_the_right_colours() {
     // The CPU path gives the same colour.
     let registry = Registry::builtin().unwrap();
     let dir = scratch("cpu");
-    let rec = Recorder::start(config(&registry, "libx264", 8, Chroma::C420), namer(&dir)).unwrap();
+    let rec = Recorder::start(
+        config(
+            &registry,
+            "libx264",
+            8,
+            Chroma::C420,
+            PresetName::Performance,
+        ),
+        namer(&dir),
+    )
+    .unwrap();
     for i in 0..10 {
         let frame = VideoFrame {
             width: W,
@@ -302,6 +337,40 @@ fn nvenc_reads_the_gpu_frames_directly_when_present() {
         .unwrap(),
         "NVENC from downloaded frames",
     );
+}
+
+/// The quality presets ask for B-frames as references, which only some cards accept: they open
+/// on any NVIDIA card, with them or without.
+#[test]
+fn nvenc_records_with_the_quality_presets() {
+    let Ok((device, context)) = d3d::create_device(Some(0x10DE)) else {
+        vixeeny_common::skip_test("no Direct3D device");
+        return;
+    };
+    let nvidia = {
+        use windows::core::Interface;
+        let dxgi: windows::Win32::Graphics::Dxgi::IDXGIDevice = device.cast().unwrap();
+        // SAFETY: plain queries of a live device.
+        let adapter = unsafe { dxgi.GetAdapter() }.unwrap();
+        // SAFETY: as above.
+        unsafe { adapter.GetDesc() }.unwrap().VendorId == 0x10DE
+    };
+    if !nvidia {
+        vixeeny_common::skip_test("no NVIDIA card");
+        return;
+    }
+    for id in ["nvenc_h264", "nvenc_hevc"] {
+        let got = record_gpu_with(
+            &device,
+            &context,
+            id,
+            Feed::Direct,
+            (8, Chroma::C420),
+            PresetName::Quality,
+        )
+        .unwrap();
+        assert_colour(got, id);
+    }
 }
 
 #[test]

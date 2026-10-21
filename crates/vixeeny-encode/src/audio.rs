@@ -57,9 +57,12 @@ impl AudioCodec {
         }
     }
 
-    /// FFmpeg encoder names to try, best first.
-    fn encoder_names(self) -> &'static [&'static str] {
+    /// FFmpeg encoder names to try, best first, for `kbps` kbit/s.
+    pub(crate) fn encoder_names(self, kbps: usize) -> &'static [&'static str] {
         match self {
+            // Media Foundation's AAC encoder only knows 96 to 192 kbit/s and quietly gives 192
+            // above: FFmpeg's own encoder takes the higher rates.
+            Self::Aac if kbps > 192 => &["aac"],
             Self::Aac => &["aac_mf", "aac"],
             Self::Opus => &["libopus"],
             Self::Flac => &["flac"],
@@ -104,9 +107,16 @@ pub(crate) struct AudioEncoder {
 
 impl AudioEncoder {
     pub(crate) fn open(cfg: &AudioTrackConfig, global_header: bool) -> Result<Self, RecordError> {
+        let channels = if matches!(cfg.channels, 1 | 2 | 6 | 8) {
+            cfg.channels
+        } else {
+            2
+        };
+        // The setting is for a stereo pair: surround gets its share per extra pair.
+        let kbps = cfg.bitrate_kbps as usize * channels.max(2) / 2;
         let codec = cfg
             .codec
-            .encoder_names()
+            .encoder_names(kbps)
             .iter()
             .find_map(|n| encoder::find_by_name(n))
             .ok_or_else(|| {
@@ -122,11 +132,6 @@ impl AudioEncoder {
             .and_then(|mut f| f.next())
             .ok_or_else(|| RecordError::Config("audio encoder without sample formats".into()))?;
         ctx.set_rate(SAMPLE_RATE as i32);
-        let channels = if matches!(cfg.channels, 1 | 2 | 6 | 8) {
-            cfg.channels
-        } else {
-            2
-        };
         let layout = layout_of(channels);
         ctx.set_channel_layout(layout);
         ctx.set_format(format);
@@ -135,8 +140,7 @@ impl AudioEncoder {
             cfg.codec,
             AudioCodec::Flac | AudioCodec::Pcm16 | AudioCodec::Pcm24
         ) {
-            // The setting is for a stereo pair: surround gets its share per extra pair.
-            ctx.set_bit_rate(cfg.bitrate_kbps as usize * channels.max(2) / 2 * 1000);
+            ctx.set_bit_rate(kbps * 1000);
         }
         if global_header {
             ctx.set_flags(codec::Flags::GLOBAL_HEADER);

@@ -102,6 +102,7 @@ fn recording_with(dir: &Path, seconds: usize, hdr: bool) -> PathBuf {
         depth: if hdr { 10 } else { 8 },
         chroma: Chroma::C420,
         hdr,
+        peak_nits: 1000.0,
         split: Split::Off,
         keyframe_seconds: 1.0,
         queue: 1_000,

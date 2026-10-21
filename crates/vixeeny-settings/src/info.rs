@@ -152,6 +152,18 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
             "Analyses each image before encoding.\nA slight gain, more computing.",
             "Analyse chaque image avant l'encodage.\nGain léger, plus de calcul.",
         ),
+        "p:highbitdepth" => pick(
+            "Encodes the 8-bit picture in 10 bits: smoother gradients (skies, fog).\nSome older players cannot read 10 bits.",
+            "Encode l'image 8 bits en 10 bits : dégradés plus lisses (ciel, brouillard).\nCertains anciens lecteurs ne lisent pas le 10 bits.",
+        ),
+        "p:preencode" => pick(
+            "A quick first pass over each image to spread the bitrate.\nA slight gain, a little more computing.",
+            "Une première passe rapide sur chaque image pour répartir le débit.\nGain léger, un peu plus de calcul.",
+        ),
+        "p:motion-boost" => pick(
+            "Fewer blocks in fast movements (camera turns, explosions).",
+            "Moins de blocs dans les mouvements rapides (rotations de caméra, explosions).",
+        ),
         "p:bframes" => pick(
             "Frames deduced from their neighbours: smaller files, more computing.",
             "Images déduites de leurs voisines : fichiers plus petits, plus de calcul.",
@@ -165,8 +177,8 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
             "Une piste par source : des pistes séparées dans Premiere Pro ou DaVinci Resolve ; un lecteur comme VLC n'en lit qu'une.\nTout sur une piste : un seul mélange, entendu pareil partout.",
         ),
         "p:tune" => pick(
-            "Adjusts the encoder to a kind of picture (film, animation, grain…).\nAuto: the encoder's default.",
-            "Adapte l'encodeur à un type d'image (film, animation, grain…).\nAuto : le réglage par défaut de l'encodeur.",
+            "Adjusts the encoder to a kind of picture (film, animation, grain…).\nAuto: the encoder's default.\nPSNR, SSIM: for measurements; the picture looks flatter.",
+            "Adapte l'encodeur à un type d'image (film, animation, grain…).\nAuto : le réglage par défaut de l'encodeur.\nPSNR, SSIM : pour les mesures ; l'image paraît plus plate.",
         ),
         "auto_update" => pick(
             "Checks when the PC starts and each time it wakes up.\nA new version is downloaded in the background and installed at the next start.",
