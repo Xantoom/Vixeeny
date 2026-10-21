@@ -359,7 +359,7 @@ fn nvenc_records_with_the_quality_presets() {
         vixeeny_common::skip_test("no NVIDIA card");
         return;
     }
-    for id in ["nvenc_h264", "nvenc_hevc"] {
+    for id in ["nvenc_h264", "nvenc_hevc", "nvenc_av1"] {
         let got = record_gpu_with(
             &device,
             &context,

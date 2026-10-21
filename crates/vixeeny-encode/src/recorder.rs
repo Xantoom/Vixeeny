@@ -397,12 +397,14 @@ fn dictionary(options: &[(String, String)]) -> Dictionary<'static> {
     d
 }
 
-/// Options some GPUs or drivers refuse (NVENC's B-frames as references before Turing and its
-/// 10-bit encoding on the first Maxwell cards, the newer controls of AMF and Quick Sync): an
-/// encoder that does not open with them opens without.
-const OPTIONAL: [&str; 6] = [
+/// Options some GPUs or drivers refuse (NVENC's B-frames as references before Turing, its
+/// 10-bit encoding on the first Maxwell cards and its temporal AQ in AV1 where the card lacks
+/// it, the newer controls of AMF and Quick Sync): an encoder that does not open with them opens
+/// without.
+const OPTIONAL: [&str; 7] = [
     "b_ref_mode",
     "highbitdepth",
+    "temporal-aq",
     "preencode",
     "high_motion_quality_boost_enable",
     "extbrc",

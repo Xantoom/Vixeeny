@@ -439,10 +439,10 @@ hdr = true
 containers = ["mkv", "mp4", "fmp4", "webm"]
 
 [encoder.presets]
-quality = { rc = "vbr", cq = 24, preset = "p5", tune = "hq", multipass = "qres", spatial-aq = 1, b_ref_mode = "middle" }
-balanced = { rc = "vbr", cq = 30, preset = "p4", tune = "hq", multipass = "qres", spatial-aq = 1, b_ref_mode = "middle" }
+quality = { rc = "vbr", cq = 24, preset = "p5", tune = "hq", multipass = "qres", spatial-aq = 1, temporal-aq = 1, b_ref_mode = "middle" }
+balanced = { rc = "vbr", cq = 30, preset = "p4", tune = "hq", multipass = "qres", spatial-aq = 1, temporal-aq = 1, b_ref_mode = "middle" }
 performance = { rc = "vbr", cq = 32, preset = "p2", tune = "hq" }
-small = { rc = "vbr", cq = 38, preset = "p5", tune = "hq", multipass = "qres", spatial-aq = 1, b_ref_mode = "middle" }
+small = { rc = "vbr", cq = 38, preset = "p5", tune = "hq", multipass = "qres", spatial-aq = 1, temporal-aq = 1, b_ref_mode = "middle" }
 
 [encoder.rate_control]
 quality = { name = "CQ", min = 1, max = 63, default = 30 }
@@ -475,6 +475,12 @@ default = 0
 [[encoder.params]]
 key = "spatial-aq"
 ffmpeg_option = "spatial-aq"
+type = "bool"
+default = true
+
+[[encoder.params]]
+key = "temporal-aq"
+ffmpeg_option = "temporal-aq"
 type = "bool"
 default = true
 
