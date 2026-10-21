@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! AVIF through the FFmpeg Vixeeny ships: SVT-AV1 encodes (in its still-picture mode, as libavif
-//! would set it), the `avif` muxer writes the file, dav1d decodes. The colours are described by
-//! the file's `nclx` box: sRGB, BT.601 matrix, full range.
+//! AVIF through the FFmpeg Vixeeny ships: libaom encodes (all-intra, tuned for still pictures, as
+//! libavif sets it; SVT-AV1 when this FFmpeg has no libaom), the `avif` muxer writes the file,
+//! dav1d decodes. The colours are described by the file's `nclx` box: sRGB, BT.601 matrix, full
+//! range.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -10,7 +11,7 @@ use ffmpeg_next::format::Pixel;
 use ffmpeg_next::util::color::{Primaries, Range, Space, TransferCharacteristic};
 use ffmpeg_next::{Packet, Rational, codec, decoder, encoder, ffi, format, frame, media};
 
-use crate::{AvifSettings, Bgra, Hdr, ImageError};
+use crate::{AvifSettings, Bgra, Chroma, Hdr, ImageError};
 
 fn err(what: &str) -> impl FnOnce(ffmpeg_next::Error) -> ImageError + '_ {
     move |e| ImageError::Avif(format!("{what}: {e}"))
@@ -37,16 +38,32 @@ impl Drop for Scratch {
     }
 }
 
+/// The AV1 encoder: libaom, else SVT-AV1 (which only encodes 4:2:0).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Av1 {
+    Aom,
+    Svt,
+}
+
+impl Av1 {
+    fn find() -> Result<(Self, ffmpeg_next::Codec), ImageError> {
+        encoder::find_by_name("libaom-av1")
+            .map(|c| (Self::Aom, c))
+            .or_else(|| encoder::find_by_name("libsvtav1").map(|c| (Self::Svt, c)))
+            .ok_or_else(|| ImageError::Avif("no AV1 encoder in this FFmpeg".into()))
+    }
+}
+
 pub(crate) fn encode(image: &Bgra<'_>, settings: &AvifSettings) -> Result<Vec<u8>, ImageError> {
-    let pixel = match settings.depth {
-        8 => Pixel::YUV420P,
-        10 => Pixel::YUV420P10LE,
-        other => return Err(ImageError::Avif(format!("unsupported depth {other}"))),
-    };
-    // The official SVT-AV1 only encodes 4:2:0; 4:4:4 needs another AV1 encoder (libaom or
-    // SVT-AV1-Tritium) and falls back to 4:2:0 until one is built in.
-    let _requested = settings.chroma;
     ffmpeg_next::init().map_err(err("init"))?;
+    let full = settings.chroma == Chroma::Yuv444 && Av1::find()?.0 == Av1::Aom;
+    let pixel = match (settings.depth, full) {
+        (8, false) => Pixel::YUV420P,
+        (10, false) => Pixel::YUV420P10LE,
+        (8, true) => Pixel::YUV444P,
+        (10, true) => Pixel::YUV444P10LE,
+        (other, _) => return Err(ImageError::Avif(format!("unsupported depth {other}"))),
+    };
     let mut source = frame::Video::new(Pixel::BGRA, image.width, image.height);
     let stride = source.stride(0);
     let row = image.width as usize * 4;
@@ -134,14 +151,13 @@ fn code(v: f32) -> u16 {
     (v.clamp(0.0, 1.0) * 1023.0).round() as u16
 }
 
-/// Encodes one picture with SVT-AV1 and wraps it in an AVIF file.
+/// Encodes one picture and wraps it in an AVIF file.
 fn write(
     mut yuv: frame::Video,
     (space, primaries, transfer): (Space, Primaries, TransferCharacteristic),
     settings: &AvifSettings,
 ) -> Result<Vec<u8>, ImageError> {
-    let codec = encoder::find_by_name("libsvtav1")
-        .ok_or_else(|| ImageError::Avif("no SVT-AV1 in this FFmpeg".into()))?;
+    let (av1, codec) = Av1::find()?;
     yuv.set_pts(Some(0));
     let scratch = Scratch::new();
     let mut octx = format::output_as(scratch.path(), "avif").map_err(err("muxer"))?;
@@ -165,8 +181,21 @@ fn write(
     let quantizer = (((100 - quality) * 63 + 50) / 100).max(1);
     let mut options = ffmpeg_next::Dictionary::new();
     options.set("crf", &quantizer.to_string());
-    options.set("preset", &settings.speed.min(10).to_string());
-    options.set("svtav1-params", "avif=1");
+    match av1 {
+        // All-intra, the tune for still pictures (libaom 3.12 and later). Its speeds are slower
+        // than SVT-AV1's: two steps up keep a 4K capture near a second at the default speed (6).
+        Av1::Aom => {
+            options.set("usage", "allintra");
+            options.set("still-picture", "1");
+            options.set("cpu-used", &(settings.speed + 2).min(8).to_string());
+            options.set("aom-params", "tune=iq");
+        }
+        // Still-picture mode and the tune for still pictures (IQ).
+        Av1::Svt => {
+            options.set("preset", &settings.speed.min(10).to_string());
+            options.set("svtav1-params", "avif=1:tune=3");
+        }
+    }
     let mut encoder = ctx.open_with(options).map_err(err("encoder"))?;
     let mut stream = octx.add_stream(codec).map_err(err("stream"))?;
     stream.set_parameters(&encoder);

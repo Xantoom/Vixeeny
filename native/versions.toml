@@ -1,15 +1,15 @@
 # Pinned native libraries.
-# Every library is fetched by exact commit; `tag` is informational. Versions resolved 2026-10-01.
+# Every library is fetched by exact commit; `tag` is informational. Versions resolved 2026-10-21.
 #
 # `cargo xtask build-native` reads this file, so keep the keys stable.
 
 [ffmpeg]
 # Built by packaging/ffmpeg/build.sh from the BtbN GPL image (image and commit pinned there):
-# FFmpeg n9.0.2-22-g46d8f462ee with only what Vixeeny uses (its encoders, decoders, containers and
-# filters), x264, x265, SVT-AV1 (video and AVIF), libvpx, dav1d, opus, NVENC, AMF, QSV and D3D11VA
+# FFmpeg n9.0.2-33-g4cf298e66a with only what Vixeeny uses (its encoders, decoders, containers and
+# filters), x264, x265, SVT-AV1, libaom (AVIF), libvpx, dav1d, opus, NVENC, AMF, QSV and D3D11VA
 # decoding. The CI builds it when its cache has none (.github/workflows/ffmpeg.yml); `cargo xtask build-native` unpacks the zip.
-tag = "n9.0.2"
-license = "GPL-3.0-or-later (--enable-gpl --enable-version3, no nonfree); bundles x264 and x265 (GPL-2.0-or-later), libvpx and opus (BSD-3-Clause), SVT-AV1 (BSD-3-Clause-Clear, AOM patent licence) and dav1d (BSD-2-Clause)"
+tag = "n9.0.2-33-g4cf298e66a"
+license = "GPL-3.0-or-later (--enable-gpl --enable-version3, no nonfree); bundles x264 and x265 (GPL-2.0-or-later), libvpx and opus (BSD-3-Clause), SVT-AV1 (BSD-3-Clause-Clear, AOM patent licence), libaom (BSD-2-Clause, AOM patent licence) and dav1d (BSD-2-Clause)"
 
 [libwebp]
 # Not built here: the libwebp-sys crate compiles its own copy of this release. Listed for its
@@ -35,8 +35,8 @@ license = "BSD-3-Clause"
 # The libjpeg of libultrahdr (decoding the SDR picture, encoding the gain map). The JPEG
 # screenshots themselves are jpegli's.
 url = "https://github.com/libjpeg-turbo/libjpeg-turbo"
-tag = "3.1.4.1"
-commit = "9217719d3a58633923b096af4c1d50d304768a64"
+tag = "3.2.0"
+commit = "c85e6b905bf237038faa936dab160ebfc5da0344"
 license = "IJG, BSD-3-Clause and zlib"
 
 [libultrahdr]

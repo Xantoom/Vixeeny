@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Builds the FFmpeg that Vixeeny ships: the same sources and libraries as the BtbN GPL build
 # (its Docker image holds x264, x265, SVT-AV1, libvpx, dav1d, opus, the NVENC, AMF and oneVPL
-# headers, all cross-compiled with MinGW), but only the parts Vixeeny uses: ≈ 30 MB of DLLs
+# headers, libaom, all cross-compiled with MinGW), but only the parts Vixeeny uses: ≈ 30 MB of DLLs
 # instead of ≈ 180 MB.
 #
 #   packaging/ffmpeg/build.sh <out.zip>
@@ -12,8 +12,9 @@
 set -euo pipefail
 
 IMAGE="ghcr.io/btbn/ffmpeg-builds/win64-gpl-shared-9.0@sha256:e6738cf07c5607353552e8df94e6293604f2af5307898df7ae8c93e2e8e90645"
-# release/9.0, the commit of the BtbN build Vixeeny used before (n9.0.2-22-g46d8f462ee).
-export FFMPEG_COMMIT="46d8f462ee"
+# release/9.0 after 9.0.2 (n9.0.2-33-g4cf298e66a): its fixes, among them D3D11VA decoding on
+# several threads and the AAC decoder.
+export FFMPEG_COMMIT="4cf298e66a20dd90e8b7c62333ab5812596835ec"
 # The NVENC headers of SDK 13.0 (driver 570+) instead of the image's 13.1, which asks for driver
 # 610+ while NVIDIA stopped at 580 for the GTX 900 and 10. FFmpeg uses 13.1 only for hierarchical
 # B-frames in AV1 and a timecode detail, neither of which Vixeeny sets.
@@ -25,8 +26,9 @@ trap 'rm -rf "$WORK"' EXIT
 
 # What Vixeeny asks FFmpeg for (crates/vixeeny-encode: codecs/registry.toml, audio.rs, denoise.rs,
 # thumbnail.rs, recorder.rs, cut.rs, and the decoders its tests read the recordings back with)
-# and crates/vixeeny-image (AVIF: libsvtav1, libdav1d, the avif muxer and the mov demuxer).
-export ENCODERS="libx264,libx265,libsvtav1,libvpx_vp9,h264_nvenc,hevc_nvenc,av1_nvenc,h264_amf,hevc_amf,av1_amf,h264_qsv,hevc_qsv,av1_qsv,vp9_qsv,aac,aac_mf,libopus,flac,pcm_s16le,pcm_s24le"
+# and crates/vixeeny-image (AVIF: libaom_av1, which encodes 4:4:4, libdav1d, the avif muxer and
+# the mov demuxer).
+export ENCODERS="libx264,libx265,libsvtav1,libaom_av1,libvpx_vp9,h264_nvenc,hevc_nvenc,av1_nvenc,h264_amf,hevc_amf,av1_amf,h264_qsv,hevc_qsv,av1_qsv,vp9_qsv,aac,aac_mf,libopus,flac,pcm_s16le,pcm_s24le"
 export DECODERS="h264,hevc,av1,libdav1d,vp9,aac,opus,libopus,flac,pcm_s16le,pcm_s24le"
 export MUXERS="mp4,mov,matroska,webm,avif"
 export DEMUXERS="mov,matroska"
@@ -54,7 +56,7 @@ git checkout -q $FFMPEG_COMMIT
     --disable-everything --disable-programs --disable-doc --disable-avdevice --disable-network \
     --enable-zlib --enable-d3d11va --enable-mediafoundation \
     --enable-ffnvcodec --enable-nvenc --enable-amf --enable-libvpl \
-    --enable-libx264 --enable-libx265 --enable-libsvtav1 --enable-libvpx --enable-libdav1d \
+    --enable-libx264 --enable-libx265 --enable-libsvtav1 --enable-libaom --enable-libvpx --enable-libdav1d \
     --enable-libopus \
     --enable-encoder=$ENCODERS --enable-decoder=$DECODERS \
     --enable-muxer=$MUXERS --enable-demuxer=$DEMUXERS --enable-parser=$PARSERS \

@@ -14,7 +14,7 @@ serde.workspace = true
 serde_json.workspace = true
 semver = "1.0.28"
 minisign-verify = "0.3.0"
-ureq = { version = "3.4.2", optional = true }
+ureq = { version = "3.5.0", optional = true }
 zip.workspace = true
 vixeeny-common = { path = "../vixeeny-common" }
 vixeeny-platform = { path = "../vixeeny-platform", optional = true }

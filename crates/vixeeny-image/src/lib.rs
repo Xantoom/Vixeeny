@@ -156,7 +156,8 @@ impl Default for WebpSettings {
 pub struct AvifSettings {
     /// 0 to 100.
     pub quality: u8,
-    /// SVT-AV1 preset 0 (slowest) to 10 (fastest).
+    /// The encoder's speed, 0 (slowest) to 10 (fastest): libaom's `cpu-used` two steps up (up to
+    /// 8), else SVT-AV1's preset.
     pub speed: u8,
     /// 8 or 10 bits per channel.
     pub depth: u8,
