@@ -105,6 +105,8 @@ pub fn output_command(
         Command::Close => Some(true),
         Command::Copy => {
             let img = session.export()?;
+            // The picture is in hand: the editor goes while it is encoded.
+            vixeeny_overlay::step_aside();
             Some(match copy_to_clipboard(config, &img) {
                 Ok(()) => true,
                 Err(e) => {
@@ -128,6 +130,7 @@ pub fn output_command(
             } else {
                 None
             };
+            vixeeny_overlay::step_aside();
             let hdr = hdr.and_then(|desktop| annotated_hdr(session, &img, desktop));
             Some(
                 match save(config, snapshot, action, &img, hdr.as_ref(), chosen) {

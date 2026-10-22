@@ -185,6 +185,10 @@ struct Shared {
     scrolling: Cell<bool>,
     /// A command is running (a dialog may be up): input waits.
     busy: Cell<bool>,
+    /// The windows are on screen (not headless).
+    visible: Cell<bool>,
+    /// The windows stepped aside for the command running (see [`step_aside`]).
+    aside: Cell<bool>,
     closing: Cell<bool>,
 }
 
@@ -1492,12 +1496,27 @@ impl Shared {
             }
         }
         self.busy.set(false);
+        let aside = self.aside.replace(false);
         if close {
             self.hide();
         } else {
+            // The command failed: the editor comes back as it was.
+            if aside {
+                for p in &self.panes {
+                    window::set_cloak(p.hwnd, false);
+                }
+            }
             self.refresh();
         }
         close
+    }
+
+    fn step_aside(&self) {
+        if self.busy.get() && self.visible.get() && !self.aside.replace(true) {
+            for p in &self.panes {
+                window::set_cloak(p.hwnd, true);
+            }
+        }
     }
 }
 
@@ -1594,6 +1613,8 @@ impl Overlay {
             },
             scrolling: Cell::new(false),
             busy: Cell::new(false),
+            visible: Cell::new(false),
+            aside: Cell::new(false),
             closing: Cell::new(false),
             shown: RefCell::new(None),
         });
@@ -1673,6 +1694,7 @@ impl Overlay {
             for p in &shared.panes {
                 window::set_cloak(p.hwnd, false);
             }
+            shared.visible.set(true);
             // SAFETY: plain call: waits for the composition that shows the windows.
             let _ = unsafe { DwmFlush() };
         }
@@ -1711,6 +1733,15 @@ impl Overlay {
         }
         CURRENT.with(|c| *c.borrow_mut() = None);
         Ok(())
+    }
+}
+
+/// Called by a command handler once it holds what it needs from the session (the exported
+/// picture, the file chosen): the editor's windows leave the screen at once while the command
+/// goes on (encoding, writing, the clipboard), and come back if it fails.
+pub fn step_aside() {
+    if let Some(shared) = CURRENT.with(|c| c.borrow().as_ref().and_then(Weak::upgrade)) {
+        shared.step_aside();
     }
 }
 

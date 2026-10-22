@@ -759,15 +759,19 @@ fn machine() -> vixeeny_settings::Machine {
 }
 
 /// Measures the microphone the audio page shows the level of: a capture of it while the page
-/// is on screen, its loudest sample every 50 ms sent to the window.
+/// is on screen, its loudest sample every 50 ms sent to the window when the bar would move
+/// (the window is drawn again for each level it is given).
 fn meter(handle: PanelHandle) -> impl Fn(Option<String>) {
     use vixeeny_audio::{
         AudioChunk, AudioSink, AudioSource, SourceEvent, SourceSpec, WasapiSource,
     };
+    /// Steps of the bar, one per decibel: a level that stays on the same step is not sent.
+    const STEPS: f32 = 60.0;
     struct Level {
         handle: PanelHandle,
         peak: f32,
         sent: std::time::Instant,
+        shown: f32,
     }
     impl AudioSink for Level {
         fn on_audio(&mut self, chunk: AudioChunk) {
@@ -776,13 +780,17 @@ fn meter(handle: PanelHandle) -> impl Fn(Option<String>) {
             if self.sent.elapsed() >= std::time::Duration::from_millis(50) {
                 // -60 dB to 0 dB across the bar: what the ear hears as even steps.
                 let db = 20.0 * self.peak.max(1e-6).log10();
-                self.handle
-                    .set_mic_level(((db + 60.0) / 60.0).clamp(0.0, 1.0));
+                let level = (((db + 60.0) / 60.0).clamp(0.0, 1.0) * STEPS).round() / STEPS;
+                if level != self.shown {
+                    self.shown = level;
+                    self.handle.set_mic_level(level);
+                }
                 self.peak = 0.0;
                 self.sent = std::time::Instant::now();
             }
         }
         fn on_event(&mut self, _: SourceEvent) {
+            self.shown = 0.0;
             self.handle.set_mic_level(0.0);
         }
     }
@@ -799,6 +807,7 @@ fn meter(handle: PanelHandle) -> impl Fn(Option<String>) {
             handle: handle.clone(),
             peak: 0.0,
             sent: std::time::Instant::now(),
+            shown: 0.0,
         };
         match source.start(Box::new(sink)) {
             Ok(()) => *running.borrow_mut() = Some(source),

@@ -303,3 +303,63 @@ fn the_clear_button_takes_every_annotation_away() {
     );
     assert_eq!(counts, Some((0, true)));
 }
+
+/// Whether DWM keeps `hwnd` off the screen.
+fn cloaked(hwnd: u64) -> bool {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
+    let mut value = 0_u32;
+    // SAFETY: `value` is a valid out-pointer of the size given.
+    let read = unsafe {
+        DwmGetWindowAttribute(
+            HWND(hwnd as usize as *mut _),
+            DWMWA_CLOAKED,
+            (&raw mut value).cast(),
+            size_of::<u32>() as u32,
+        )
+    };
+    read.is_ok() && value != 0
+}
+
+#[test]
+fn a_command_that_fails_after_stepping_aside_leaves_the_editor_open() {
+    let screen = Screen {
+        position: (0, 0),
+        size: (1200, 900),
+        area: Rect::new(0.0, 0.0, 1200.0, 900.0),
+    };
+    let log: Log = Rc::default();
+    let seen = log.clone();
+    let window = Rc::new(std::cell::Cell::new(0_u64));
+    let handle = window.clone();
+    let hidden = Rc::new(std::cell::Cell::new(false));
+    let hidden_seen = hidden.clone();
+    let overlay = Overlay::on_screens(
+        session(),
+        1.0,
+        &[screen],
+        Look::default(),
+        move |command, s| {
+            seen.borrow_mut().push((command, s.zone()));
+            if command == Command::Copy {
+                // The picture taken, the editor steps aside; then the command fails.
+                vixeeny_overlay::step_aside();
+                return false;
+            }
+            // A headless editor never comes on screen, even after a failed command.
+            hidden_seen.set(cloaked(handle.get()));
+            true
+        },
+    )
+    .expect("overlay")
+    .headless();
+    let hwnd = overlay.handles()[0];
+    window.set(hwnd);
+    draw_zone(hwnd);
+    click_button(hwnd, COPY);
+    post(hwnd, WM_CLOSE, 0, 0);
+    overlay.run((10, 10)).expect("ran");
+    let commands: Vec<Command> = log.borrow().iter().map(|(c, _)| *c).collect();
+    assert_eq!(commands, [Command::Copy, Command::Close]);
+    assert!(hidden.get());
+}
