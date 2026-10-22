@@ -428,6 +428,7 @@ impl Prober for Fake {
             ten_bit,
             chroma: chroma.to_vec(),
             max,
+            tools: None,
         };
         let all = [Chroma::C420, Chroma::C444];
         Ok(match (adapter.vendor, adapter.index) {
@@ -576,6 +577,7 @@ fn auto_prefers_av1_on_the_best_vendor_then_hevc_then_h264() {
                 uhd: true,
                 hdr: false,
             }],
+            tools: None,
         }],
         ..ProbeResult::default()
     };
@@ -800,4 +802,76 @@ fn simple_presets_follow_the_resolution_and_frame_rate() {
         av1.preset_options(PresetName::Performance, (1920, 1080), 60)["preset"],
         "p2"
     );
+}
+
+#[test]
+fn nvenc_options_follow_what_the_card_has() {
+    use crate::probe::Tools;
+    use crate::registry::PresetName;
+    use std::collections::BTreeMap;
+    let r = registry();
+    let fit = |id: &str, preset: PresetName, tools: Option<Tools>, choose: bool| {
+        let e = r.get(id).unwrap();
+        let mut o = e.preset_options(preset, (1920, 1080), 60);
+        e.fit_tools(&mut o, tools, choose);
+        o
+    };
+    let ada = Tools {
+        max_bframes: 4,
+        bframe_ref_middle: true,
+        lookahead: true,
+        temporal_aq: true,
+    };
+    // Everything there: the look-ahead, which places up to 4 B-frames, used as references.
+    let o = fit("nvenc_av1", PresetName::Small, Some(ada), true);
+    assert_eq!(o["rc-lookahead"], "8");
+    assert_eq!(o["bf"], "4");
+    assert_eq!(o["b_ref_mode"], "middle");
+    assert_eq!(o["temporal-aq"], "1");
+    // H.264 never takes B-frames as references.
+    let o = fit("nvenc_h264", PresetName::Quality, Some(ada), true);
+    assert!(!o.contains_key("b_ref_mode"));
+    assert_eq!(o["bf"], "4");
+    // HEVC on Pascal: no B-frames, so none as references; no temporal AQ where it lacks.
+    let pascal = Tools {
+        max_bframes: 0,
+        bframe_ref_middle: false,
+        lookahead: true,
+        temporal_aq: false,
+    };
+    let o = fit("nvenc_hevc", PresetName::Quality, Some(pascal), true);
+    assert_eq!(o["bf"], "0");
+    assert!(!o.contains_key("b_ref_mode") && !o.contains_key("temporal-aq"));
+    // Without the look-ahead: 2 B-frames.
+    let o = fit(
+        "nvenc_hevc",
+        PresetName::Quality,
+        Some(Tools {
+            lookahead: false,
+            ..ada
+        }),
+        true,
+    );
+    assert_eq!(o["bf"], "2");
+    assert!(!o.contains_key("rc-lookahead"));
+    // The fast preset keeps the encoder's own choices; an undescribed card is left alone.
+    let o = fit("nvenc_hevc", PresetName::Performance, Some(ada), false);
+    assert!(!o.contains_key("bf") && !o.contains_key("rc-lookahead"));
+    let before = r
+        .get("nvenc_hevc")
+        .unwrap()
+        .preset_options(PresetName::Quality, (1920, 1080), 60);
+    assert_eq!(fit("nvenc_hevc", PresetName::Quality, None, true), before);
+    // A count set by hand stays, within what the card takes.
+    let e = r.get("nvenc_hevc").unwrap();
+    let mut o = e.custom_options(&BTreeMap::from([("bframes".into(), "4".into())]));
+    e.fit_tools(
+        &mut o,
+        Some(Tools {
+            max_bframes: 2,
+            ..ada
+        }),
+        true,
+    );
+    assert_eq!(o["bf"], "2");
 }

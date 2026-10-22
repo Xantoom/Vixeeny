@@ -1147,6 +1147,7 @@ mod tests {
                     uhd: true,
                     hdr: false,
                 }],
+                tools: None,
             }],
             ..ProbeResult::default()
         };

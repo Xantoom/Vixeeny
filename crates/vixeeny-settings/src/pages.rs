@@ -589,7 +589,18 @@ fn custom_rows(env: &Env, config: &Config, encoder: &str) -> (Vec<Row>, Vec<Row>
         }
     }
     let mut expert = Vec::new();
+    // What the GPU's encoder has, when its driver says: only that is offered.
+    let tools = env.probe.as_ref().and_then(|p| p.tools(&spec.id));
     for param in &spec.params {
+        let lacks = tools.is_some_and(|t| match param.key.as_str() {
+            "lookahead" => !t.lookahead,
+            "temporal-aq" => !t.temporal_aq,
+            "bframes" => t.max_bframes == 0,
+            _ => false,
+        });
+        if lacks {
+            continue;
+        }
         let (min, max, step) = param_range(param.min, param.max);
         let (label, kind) = match param.kind {
             ParamType::Enum => (
@@ -598,6 +609,14 @@ fn custom_rows(env: &Env, config: &Config, encoder: &str) -> (Vec<Row>, Vec<Row>
                     param
                         .values
                         .iter()
+                        // No more B-frames than the encoder takes.
+                        .filter(|v| {
+                            param.key != "bframes"
+                                || v.parse::<u32>()
+                                    .ok()
+                                    .zip(tools)
+                                    .is_none_or(|(n, t)| n <= t.max_bframes)
+                        })
                         .map(|v| {
                             let label = encoders::value_label(&param.key, v, lang);
                             if speed

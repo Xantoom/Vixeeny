@@ -59,6 +59,23 @@ pub struct EncoderProbe {
     /// The GPU it runs on (`None` for software encoders).
     pub adapter: Option<u32>,
     pub formats: Vec<FormatProbe>,
+    /// The tools of the GPU's encoder for this codec, when its driver describes them.
+    #[serde(default)]
+    pub tools: Option<Tools>,
+}
+
+/// The coding tools a GPU's encoder has for one codec, as its driver describes them (NVENC's
+/// capability query).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Tools {
+    /// The most B-frames between two reference frames (0: none, as HEVC on Pascal).
+    pub max_bframes: u32,
+    /// The middle B-frame of a group can serve as a reference.
+    pub bframe_ref_middle: bool,
+    /// The look-ahead (it also picks how many B-frames each group takes).
+    pub lookahead: bool,
+    /// The temporal adaptive quantization.
+    pub temporal_aq: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -80,6 +97,14 @@ impl ProbeResult {
         })
     }
 
+    /// The tools of `encoder` on the first GPU that has it, when its driver describes them.
+    pub fn tools(&self, encoder: &str) -> Option<Tools> {
+        self.encoders
+            .iter()
+            .find(|e| e.id == encoder && !e.formats.is_empty())
+            .and_then(|e| e.tools)
+    }
+
     pub fn is_available(&self, encoder: &str) -> bool {
         self.encoders
             .iter()
@@ -96,6 +121,8 @@ pub struct DriverCaps {
     pub chroma: Vec<Chroma>,
     /// The largest picture (width, height).
     pub max: (u32, u32),
+    /// `None`: the driver does not describe them (AMF, oneVPL).
+    pub tools: Option<Tools>,
 }
 
 impl DriverCaps {
@@ -177,7 +204,7 @@ pub fn identity() -> String {
 }
 
 /// The way the probe works: bumped when a change of it must run it again everywhere.
-pub const PROBE_REVISION: u32 = 3;
+pub const PROBE_REVISION: u32 = 4;
 
 /// Probes every encoder. `version` is what the answer depends on besides the machine (see
 /// [`identity`]), part of the cache key.
@@ -210,10 +237,16 @@ pub fn probe(registry: &Registry, prober: &dyn Prober, version: &str) -> ProbeRe
                 },
             };
             if !formats.is_empty() {
+                let tools = adapter
+                    .and_then(|a| adapters.iter().position(|b| b == a))
+                    .and_then(|i| described[i].as_ref().ok())
+                    .and_then(|caps| caps.iter().find(|c| c.family == encoder.family))
+                    .and_then(|c| c.tools);
                 encoders.push(EncoderProbe {
                     id: encoder.id.clone(),
                     adapter: adapter.map(|a| a.index),
                     formats,
+                    tools,
                 });
             }
         }

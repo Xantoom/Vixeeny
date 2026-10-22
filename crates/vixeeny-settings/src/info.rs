@@ -140,6 +140,10 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
             "Two passes per frame: quality better spread, more computing.",
             "Deux passes par image : qualité mieux répartie, plus de calcul.",
         ),
+        "p:lookahead" if nvenc(env, config) => pick(
+            "Analyses the next frames to spread the quality and place the B-frames.\nUses graphics memory.\nAuto: 8 frames.",
+            "Analyse les images suivantes pour répartir la qualité et placer les images B.\nUtilise de la mémoire vidéo.\nAuto : 8 images.",
+        ),
         "p:lookahead" => pick(
             "Analyses the next frames to spread the quality.\nUses graphics memory.",
             "Analyse les images suivantes pour répartir la qualité.\nUtilise de la mémoire vidéo.",
@@ -163,6 +167,10 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
         "p:motion-boost" => pick(
             "Fewer blocks in fast movements (camera turns, explosions).",
             "Moins de blocs dans les mouvements rapides (rotations de caméra, explosions).",
+        ),
+        "p:bframes" if nvenc(env, config) => pick(
+            "Frames deduced from their neighbours: smaller files, more computing.\nAuto: up to 4, set scene by scene by the look-ahead (2 without it).",
+            "Images déduites de leurs voisines : fichiers plus petits, plus de calcul.\nAuto : jusqu'à 4, choisies scène par scène par l'anticipation (2 sans elle).",
         ),
         "p:bframes" => pick(
             "Frames deduced from their neighbours: smaller files, more computing.",
@@ -198,4 +206,9 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
         ),
         _ => None,
     }
+}
+
+/// Whether the video settings record with an NVIDIA encoder.
+fn nvenc(env: &Env, config: &Config) -> bool {
+    encoders::resolved(env, &config.video).is_some_and(|e| e.id.starts_with("nvenc"))
 }

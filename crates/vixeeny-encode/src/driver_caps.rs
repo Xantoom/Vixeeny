@@ -22,7 +22,7 @@ use windows::Win32::System::LibraryLoader::{
 };
 use windows::core::{GUID, Interface, PCSTR, PCWSTR, s};
 
-use crate::probe::{Adapter, DriverCaps};
+use crate::probe::{Adapter, DriverCaps, Tools};
 use crate::registry::{Chroma, Family, Vendor};
 
 /// The encoders of `adapter`'s GPU, one entry per codec it can encode. `Err` when the driver
@@ -110,11 +110,14 @@ fn caps(family: Family, ten_bit: bool, chroma: Vec<Chroma>, max: (u32, u32)) -> 
         ten_bit,
         chroma,
         max,
+        tools: None,
     }
 }
 
 mod nvenc {
-    use super::{Adapter, DriverCaps, GUID, Interface, c_void, caps, device, load, s, symbol};
+    use super::{
+        Adapter, DriverCaps, GUID, Interface, Tools, c_void, caps, device, load, s, symbol,
+    };
     use crate::registry::{Chroma, Family};
 
     /// The API version FFmpeg's NVENC is built with (`nv-codec-headers` of the pinned build). A
@@ -127,10 +130,16 @@ mod nvenc {
     }
 
     // NV_ENC_CAPS
+    const NUM_MAX_BFRAMES: u32 = 0;
     const WIDTH_MAX: u32 = 16;
     const HEIGHT_MAX: u32 = 17;
     const SUPPORT_YUV444_ENCODE: u32 = 33;
+    const SUPPORT_LOOKAHEAD: u32 = 37;
+    const SUPPORT_TEMPORAL_AQ: u32 = 38;
     const SUPPORT_10BIT_ENCODE: u32 = 39;
+    const SUPPORT_BFRAME_REF_MODE: u32 = 43;
+    /// `SUPPORT_BFRAME_REF_MODE` bit: the middle B-frame as a reference.
+    const BFRAME_REF_MIDDLE: i32 = 2;
     const SUPPORT_YUV422_ENCODE: u32 = 59;
 
     const CODECS: [(Family, GUID); 3] = [
@@ -288,7 +297,14 @@ mod nvenc {
                     u32::try_from(cap(guid, WIDTH_MAX)).unwrap_or(0),
                     u32::try_from(cap(guid, HEIGHT_MAX)).unwrap_or(0),
                 );
-                caps(family, cap(guid, SUPPORT_10BIT_ENCODE) != 0, chroma, max)
+                let mut found = caps(family, cap(guid, SUPPORT_10BIT_ENCODE) != 0, chroma, max);
+                found.tools = Some(Tools {
+                    max_bframes: u32::try_from(cap(guid, NUM_MAX_BFRAMES)).unwrap_or(0),
+                    bframe_ref_middle: cap(guid, SUPPORT_BFRAME_REF_MODE) & BFRAME_REF_MIDDLE != 0,
+                    lookahead: cap(guid, SUPPORT_LOOKAHEAD) != 0,
+                    temporal_aq: cap(guid, SUPPORT_TEMPORAL_AQ) != 0,
+                });
+                found
             })
             .collect();
         // SAFETY: the session opened above, destroyed once.

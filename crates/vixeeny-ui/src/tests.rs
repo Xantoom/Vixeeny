@@ -830,6 +830,7 @@ fn a_tooltip_goes_after_a_scroll() {
                     uhd: true,
                     hdr: false,
                 }],
+                tools: None,
             }],
             ..ProbeResult::default()
         }),

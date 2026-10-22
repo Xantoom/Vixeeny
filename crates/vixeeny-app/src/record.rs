@@ -230,11 +230,17 @@ pub fn reencoders(config: &Config, clip: &vixeeny_encode::cut::Clip) -> Vec<Reen
             continue;
         }
         let custom = profile.preset == "custom" && encoder.id == profile.encoder;
-        let options = if custom {
+        let mut options = if custom {
             encoder.custom_options(&profile.params)
         } else {
             encoder.preset_options(preset, size, fps.max(1))
         };
+        let tools = probe.as_ref().and_then(|p| p.tools(&encoder.id));
+        encoder.fit_tools(
+            &mut options,
+            tools,
+            custom || preset != PresetName::Performance,
+        );
         let depth = if clip.deep && encoder.supports_format(10, Chroma::C420) {
             10
         } else {
@@ -426,17 +432,19 @@ fn plan(
         _ => Chroma::C420,
     };
     let preset = PresetName::from_setting(&profile.preset).unwrap_or(PresetName::Balanced);
-    let options = if profile.preset == "custom" {
-        encoder
-            .custom_options(&profile.params)
-            .into_iter()
-            .collect()
+    let mut options = if profile.preset == "custom" {
+        encoder.custom_options(&profile.params)
     } else {
-        encoder
-            .preset_options(preset, output_size, profile.fps)
-            .into_iter()
-            .collect()
+        encoder.preset_options(preset, output_size, profile.fps)
     };
+    // What the GPU's encoder has: B-frames, look-ahead, temporal AQ.
+    let tools = probe.as_ref().and_then(|p| p.tools(&encoder.id));
+    encoder.fit_tools(
+        &mut options,
+        tools,
+        profile.preset == "custom" || preset != PresetName::Performance,
+    );
+    let options: Vec<(String, String)> = options.into_iter().collect();
     let (mut audio, unknown) = vixeeny_audio::plan_tracks(&with_target(&profile.audio));
     for name in unknown {
         tracing::warn!("unknown audio source `{name}` ignored");

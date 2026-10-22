@@ -581,12 +581,75 @@ impl Encoder {
         options
     }
 
+    /// Fits FFmpeg `options` to the tools of the GPU's encoder (`tools`: its driver's answer;
+    /// `None`, not described: they are left as they are).
+    ///
+    /// With `choose`, what the options leave open is chosen as NVIDIA advises for recording
+    /// (Video Codec SDK 13.1 programming guide, recommended settings; NVIDIA's broadcasting
+    /// guide): the look-ahead on, [`LOOKAHEAD_FRAMES`] of it, which then picks up to 4 B-frames
+    /// for each group, else 2 B-frames. Without `choose` (the fast preset), the encoder's own.
+    ///
+    /// What the encoder lacks is left out rather than refused when it opens: B-frames beyond
+    /// its most (none for HEVC on Pascal), B-frames as references (and always for H.264, which
+    /// some decoders play wrong with them, as OBS found), the look-ahead, the temporal AQ.
+    pub fn fit_tools(
+        &self,
+        options: &mut BTreeMap<String, String>,
+        tools: Option<crate::probe::Tools>,
+        choose: bool,
+    ) {
+        let Some(tools) = tools else {
+            return;
+        };
+        if self.vendor != Vendor::Nvidia {
+            return;
+        }
+        let number = |options: &BTreeMap<String, String>, key: &str| {
+            options.get(key).and_then(|v| v.parse::<u32>().ok())
+        };
+        let lookahead = match number(options, "rc-lookahead") {
+            _ if !tools.lookahead => 0,
+            Some(frames) => frames,
+            None if choose => LOOKAHEAD_FRAMES,
+            None => 0,
+        };
+        let bframes = match number(options, "bf") {
+            Some(n) => Some(n),
+            None if choose => Some(if lookahead > 0 { 4 } else { 2 }),
+            None => None,
+        }
+        .map(|n| n.min(tools.max_bframes));
+        if let Some(n) = bframes {
+            options.insert("bf".into(), n.to_string());
+        }
+        if lookahead > 0 {
+            // Its depth and the B-frames share NVENC's 31 frames.
+            let room = 31 - bframes.unwrap_or(4).min(31);
+            options.insert("rc-lookahead".into(), lookahead.min(room).to_string());
+        } else {
+            options.remove("rc-lookahead");
+        }
+        let references = self.family != Family::H264
+            && tools.bframe_ref_middle
+            && bframes.is_none_or(|n| n >= 2);
+        if !references {
+            options.remove("b_ref_mode");
+        }
+        if !tools.temporal_aq {
+            options.remove("temporal-aq");
+        }
+    }
+
     pub fn supports_format(&self, depth: u8, chroma: Chroma) -> bool {
         self.pixel_formats
             .iter()
             .any(|p| p.depth == depth && p.chroma == chroma)
     }
 }
+
+/// The look-ahead of the presets where the GPU has it, in frames: enough for NVENC to pick the
+/// B-frames of each group (OBS takes as many); more costs graphics memory, which the game uses.
+pub const LOOKAHEAD_FRAMES: u32 = 8;
 
 #[derive(Debug, thiserror::Error)]
 pub enum RegistryError {

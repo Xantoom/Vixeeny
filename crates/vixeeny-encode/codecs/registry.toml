@@ -257,6 +257,8 @@ default = 0
 auto = 0
 
 
+# NVENC: the B-frames, the look-ahead, B-frames as references and the temporal AQ are fitted
+# to what the card has when it records (`Encoder::fit_tools`, from the driver's capabilities).
 [[encoder]]
 id = "nvenc_h264"
 display_name = "NVIDIA NVENC H.264"
@@ -273,10 +275,10 @@ hdr = false
 containers = ["mkv", "mp4", "fmp4"]
 
 [encoder.presets]
-quality = { rc = "vbr", cq = 19, preset = "p5", tune = "hq", multipass = "qres", spatial-aq = 1, temporal-aq = 1, b_ref_mode = "middle" }
-balanced = { rc = "vbr", cq = 23, preset = "p4", tune = "hq", multipass = "qres", spatial-aq = 1, temporal-aq = 1, b_ref_mode = "middle" }
+quality = { rc = "vbr", cq = 19, preset = "p5", tune = "hq", multipass = "qres", spatial-aq = 1, temporal-aq = 1 }
+balanced = { rc = "vbr", cq = 23, preset = "p4", tune = "hq", multipass = "qres", spatial-aq = 1, temporal-aq = 1 }
 performance = { rc = "vbr", cq = 25, preset = "p2", tune = "hq" }
-small = { rc = "vbr", cq = 28, preset = "p5", tune = "hq", multipass = "qres", spatial-aq = 1, temporal-aq = 1, b_ref_mode = "middle" }
+small = { rc = "vbr", cq = 28, preset = "p5", tune = "hq", multipass = "qres", spatial-aq = 1, temporal-aq = 1 }
 
 [encoder.rate_control]
 quality = { name = "CQ", min = 1, max = 51, default = 23 }
@@ -301,10 +303,10 @@ default = "qres"
 [[encoder.params]]
 key = "lookahead"
 ffmpeg_option = "rc-lookahead"
-type = "int"
-min = 0
-max = 32
-default = 0
+type = "enum"
+values = ["auto", "0", "8", "16", "24"]
+default = "auto"
+auto = "auto"
 
 [[encoder.params]]
 key = "spatial-aq"
@@ -382,10 +384,10 @@ default = "qres"
 [[encoder.params]]
 key = "lookahead"
 ffmpeg_option = "rc-lookahead"
-type = "int"
-min = 0
-max = 32
-default = 0
+type = "enum"
+values = ["auto", "0", "8", "16", "24"]
+default = "auto"
+auto = "auto"
 
 [[encoder.params]]
 key = "spatial-aq"
@@ -461,10 +463,10 @@ default = "qres"
 [[encoder.params]]
 key = "lookahead"
 ffmpeg_option = "rc-lookahead"
-type = "int"
-min = 0
-max = 32
-default = 0
+type = "enum"
+values = ["auto", "0", "8", "16", "24"]
+default = "auto"
+auto = "auto"
 
 [[encoder.params]]
 key = "spatial-aq"
