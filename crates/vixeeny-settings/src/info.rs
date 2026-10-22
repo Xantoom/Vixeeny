@@ -113,7 +113,10 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
             let lang = env.lang;
             // What keeps up with these settings (resolution × frame rate) on this screen.
             let recommended = encoder
-                .and_then(|e| e.speed_for(crate::pages::pixel_rate(env, config)))
+                .and_then(|e| {
+                    let tools = env.probe.as_ref().and_then(|p| p.tools(&e.id));
+                    e.speed_for(crate::pages::pixel_rate(env, config), tools)
+                })
                 .filter(|(k, _)| format!("p:{k}") == key)
                 .map(|(k, v)| encoders::value_label(k, &v, lang));
             let mut text = pick(
@@ -157,8 +160,8 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
             "Donne plus de qualité aux zones immobiles d'une image à l'autre.",
         ),
         "p:preanalysis" => pick(
-            "Analyses each image before encoding.\nA slight gain, more computing.",
-            "Analyse chaque image avant l'encodage.\nGain léger, plus de calcul.",
+            "Analyses each image before encoding.\nA slight gain, about 3 times the computing.",
+            "Analyse chaque image avant l'encodage.\nGain léger, environ 3 fois plus de calcul.",
         ),
         "p:preencode" => pick(
             "A quick first pass over each image to spread the bitrate.\nA slight gain, a little more computing.",
@@ -171,6 +174,10 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
         "p:bframes" if nvenc(env, config) => pick(
             "Frames deduced from their neighbours: smaller files, more computing.\nAuto: up to 4, set scene by scene by the look-ahead (2 without it).",
             "Images déduites de leurs voisines : fichiers plus petits, plus de calcul.\nAuto : jusqu'à 4, choisies scène par scène par l'anticipation (2 sans elle).",
+        ),
+        "p:bframes" if amf(env, config) => pick(
+            "Frames deduced from their neighbours: smaller files, more computing.\nAuto: 2 when the encoder has speed to spare for these settings, else none.",
+            "Images déduites de leurs voisines : fichiers plus petits, plus de calcul.\nAuto : 2 si l'encodeur a de la marge pour ces réglages, sinon aucune.",
         ),
         "p:bframes" => pick(
             "Frames deduced from their neighbours: smaller files, more computing.",
@@ -211,4 +218,8 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
 /// Whether the video settings record with an NVIDIA encoder.
 fn nvenc(env: &Env, config: &Config) -> bool {
     encoders::resolved(env, &config.video).is_some_and(|e| e.id.starts_with("nvenc"))
+}
+
+fn amf(env: &Env, config: &Config) -> bool {
+    encoders::resolved(env, &config.video).is_some_and(|e| e.id.starts_with("amf"))
 }

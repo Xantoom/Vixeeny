@@ -230,16 +230,17 @@ pub fn reencoders(config: &Config, clip: &vixeeny_encode::cut::Clip) -> Vec<Reen
             continue;
         }
         let custom = profile.preset == "custom" && encoder.id == profile.encoder;
+        let tools = probe.as_ref().and_then(|p| p.tools(&encoder.id));
         let mut options = if custom {
             encoder.custom_options(&profile.params)
         } else {
-            encoder.preset_options(preset, size, fps.max(1))
+            encoder.preset_options(preset, size, fps.max(1), tools)
         };
-        let tools = probe.as_ref().and_then(|p| p.tools(&encoder.id));
         encoder.fit_tools(
             &mut options,
             tools,
             custom || preset != PresetName::Performance,
+            u64::from(size.0) * u64::from(size.1) * u64::from(fps.max(1)),
         );
         let depth = if clip.deep && encoder.supports_format(10, Chroma::C420) {
             10
@@ -432,17 +433,18 @@ fn plan(
         _ => Chroma::C420,
     };
     let preset = PresetName::from_setting(&profile.preset).unwrap_or(PresetName::Balanced);
+    // What the GPU's encoder has: B-frames, look-ahead, temporal AQ, its speed.
+    let tools = probe.as_ref().and_then(|p| p.tools(&encoder.id));
     let mut options = if profile.preset == "custom" {
         encoder.custom_options(&profile.params)
     } else {
-        encoder.preset_options(preset, output_size, profile.fps)
+        encoder.preset_options(preset, output_size, profile.fps, tools)
     };
-    // What the GPU's encoder has: B-frames, look-ahead, temporal AQ.
-    let tools = probe.as_ref().and_then(|p| p.tools(&encoder.id));
     encoder.fit_tools(
         &mut options,
         tools,
         profile.preset == "custom" || preset != PresetName::Performance,
+        u64::from(output_size.0) * u64::from(output_size.1) * u64::from(profile.fps.max(1)),
     );
     let options: Vec<(String, String)> = options.into_iter().collect();
     let (mut audio, unknown) = vixeeny_audio::plan_tracks(&with_target(&profile.audio));

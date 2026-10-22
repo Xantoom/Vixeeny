@@ -530,7 +530,9 @@ fn custom_rows(env: &Env, config: &Config, encoder: &str) -> (Vec<Row>, Vec<Row>
     let mode = spec.rate_mode(&config.video.params);
     let mut rows = Vec::new();
     // The speed that keeps up with these settings (resolution × frame rate).
-    let speed = spec.speed_for(pixel_rate(env, config));
+    // What the GPU's encoder has, when its driver says: only that is offered.
+    let tools = env.probe.as_ref().and_then(|p| p.tools(&spec.id));
+    let speed = spec.speed_for(pixel_rate(env, config), tools);
     let modes: Vec<Opt> = spec
         .rate_modes()
         .map(|m| opt(m.name(), encoders::rate_mode_label(m, spec)))
@@ -589,11 +591,9 @@ fn custom_rows(env: &Env, config: &Config, encoder: &str) -> (Vec<Row>, Vec<Row>
         }
     }
     let mut expert = Vec::new();
-    // What the GPU's encoder has, when its driver says: only that is offered.
-    let tools = env.probe.as_ref().and_then(|p| p.tools(&spec.id));
     for param in &spec.params {
         let lacks = tools.is_some_and(|t| match param.key.as_str() {
-            "lookahead" => !t.lookahead,
+            "lookahead" | "preanalysis" => !t.lookahead,
             "temporal-aq" => !t.temporal_aq,
             "bframes" => t.max_bframes == 0,
             _ => false,

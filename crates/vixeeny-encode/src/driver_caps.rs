@@ -303,6 +303,7 @@ mod nvenc {
                     bframe_ref_middle: cap(guid, SUPPORT_BFRAME_REF_MODE) & BFRAME_REF_MIDDLE != 0,
                     lookahead: cap(guid, SUPPORT_LOOKAHEAD) != 0,
                     temporal_aq: cap(guid, SUPPORT_TEMPORAL_AQ) != 0,
+                    engine_fps: 0,
                 });
                 found
             })
@@ -326,13 +327,33 @@ mod nvenc {
 
 mod amf {
     use super::{Adapter, DriverCaps, Interface, c_void, caps, device, load, s, symbol, wide};
+    use crate::probe::Tools;
     use crate::registry::{Chroma, Family};
 
-    const COMPONENTS: [(Family, &str); 3] = [
-        (Family::H264, "AMFVideoEncoderVCE_AVC"),
-        (Family::Hevc, "AMFVideoEncoderHW_HEVC"),
-        (Family::Av1, "AMFVideoEncoderHW_AV1"),
+    /// Each codec's component, then its capabilities saying it has B-frames (none for HEVC in
+    /// FFmpeg) and the pre-analysis (VideoEncoderVCE.h, VideoEncoderHEVC.h, VideoEncoderAV1.h).
+    const COMPONENTS: [(Family, &str, Option<&str>, &str); 3] = [
+        (
+            Family::H264,
+            "AMFVideoEncoderVCE_AVC",
+            Some("BFrames"),
+            "PreAnalysis",
+        ),
+        (Family::Hevc, "AMFVideoEncoderHW_HEVC", None, "HevcPreAnalysis"),
+        (
+            Family::Av1,
+            "AMFVideoEncoderHW_AV1",
+            Some("AV1BFrames"),
+            "Av1PreAnalysis",
+        ),
     ];
+    /// The most B-frames FFmpeg gives AMF.
+    const MAX_BFRAMES: u32 = 3;
+    /// Frames of 1080p a second at the balanced preset, the slowest chip of each generation in
+    /// rigaya's measurements (Dec. 2025, driver 25.11.1): Radeon 860M for the engines with AV1
+    /// (RDNA 3 and later, 194 for H.264), Ryzen 3 3200G's Vega for the older ones (107).
+    const ENGINE_FPS_AV1: u32 = 194;
+    const ENGINE_FPS_OLDER: u32 = 107;
     const AMF_DX11_0: i32 = 110;
     const AMF_SURFACE_P010: i32 = 10;
     const AMF_ACCEL_NOT_SUPPORTED: i32 = -1;
@@ -344,12 +365,23 @@ mod amf {
     const CONTEXT_TERMINATE: usize = 13;
     const CONTEXT_INIT_DX11: usize = 18;
     const COMPONENT_GET_CAPS: usize = 26;
+    const STORAGE_GET_PROPERTY: usize = 4;
     const CAPS_ACCELERATION_TYPE: usize = 13;
     const CAPS_INPUT: usize = 14;
     const IO_WIDTH_RANGE: usize = 3;
     const IO_HEIGHT_RANGE: usize = 4;
     const IO_FORMAT_COUNT: usize = 6;
     const IO_FORMAT_AT: usize = 7;
+
+    const AMF_VARIANT_BOOL: i32 = 1;
+
+    /// `AMFVariantStruct`: its type, then a union of 16 bytes aligned on 8.
+    #[repr(C)]
+    struct Variant {
+        kind: i32,
+        value: [u64; 2],
+    }
+    const _: () = assert!(std::mem::size_of::<Variant>() == 24);
 
     /// An AMF interface: a pointer to its vtable.
     #[repr(C)]
@@ -426,10 +458,19 @@ mod amf {
             return Ok(Vec::new()); // not an AMD encoder this runtime can drive
         }
         let mut out = Vec::new();
-        for (family, id) in COMPONENTS {
+        for (family, id, bframes, preanalysis) in COMPONENTS {
             // SAFETY: the calls below follow the AMF headers' vtables on live interfaces.
-            if let Some(found) = unsafe { component(factory, &context, family, id) } {
-                out.push(found);
+            let found = unsafe { component(factory, &context, family, id, bframes, preanalysis) };
+            out.extend(found);
+        }
+        let engine_fps = if out.iter().any(|c| c.family == Family::Av1) {
+            ENGINE_FPS_AV1
+        } else {
+            ENGINE_FPS_OLDER
+        };
+        for found in &mut out {
+            if let Some(tools) = &mut found.tools {
+                tools.engine_fps = engine_fps;
             }
         }
         // SAFETY: Terminate on the live context, before it is released.
@@ -452,6 +493,8 @@ mod amf {
         context: &Owned,
         family: Family,
         id: &str,
+        bframes: Option<&str>,
+        preanalysis: &str,
     ) -> Option<DriverCaps> {
         let id = wide(id);
         let mut component = std::ptr::null_mut();
@@ -496,6 +539,19 @@ mod amf {
         if accel == AMF_ACCEL_NOT_SUPPORTED {
             return None;
         }
+        // SAFETY: GetProperty on the live caps.
+        let flag = |name: &str| unsafe { flag(all.0, name) };
+        let tools = Tools {
+            max_bframes: if bframes.is_some_and(flag) {
+                MAX_BFRAMES
+            } else {
+                0
+            },
+            bframe_ref_middle: false,
+            lookahead: flag(preanalysis),
+            temporal_aq: false,
+            engine_fps: 0,
+        };
         let mut input = std::ptr::null_mut();
         // SAFETY: GetInputCaps on the live caps.
         unsafe {
@@ -534,17 +590,41 @@ mod amf {
             u32::try_from(w1).unwrap_or(0),
             u32::try_from(h1).unwrap_or(0),
         );
-        Some(caps(
+        let mut found = caps(
             family,
             formats.contains(&AMF_SURFACE_P010),
             vec![Chroma::C420],
             max,
-        ))
+        );
+        found.tools = Some(tools);
+        Some(found)
+    }
+
+    /// The boolean capability `name` of `caps` (false when it lacks it).
+    ///
+    /// # Safety
+    /// `caps` is a live `AMFCaps`.
+    unsafe fn flag(caps: *mut Object, name: &str) -> bool {
+        let name = wide(name);
+        let mut value = Variant {
+            kind: 0,
+            value: [0; 2],
+        };
+        // SAFETY: GetProperty of AMFPropertyStorage, with a valid out-pointer; a boolean
+        // holds no reference to release.
+        let status = unsafe {
+            method::<unsafe extern "system" fn(*mut Object, *const u16, *mut Variant) -> i32>(
+                caps,
+                STORAGE_GET_PROPERTY,
+            )(caps, name.as_ptr(), &raw mut value)
+        };
+        status == 0 && value.kind == AMF_VARIANT_BOOL && value.value[0] & 0xFF != 0
     }
 }
 
 mod vpl {
     use super::{Adapter, DriverCaps, HMODULE, c_void, caps, load, s, symbol, wide};
+    use crate::probe::{NOT_DESCRIBED, Tools};
     use crate::registry::{Chroma, Family};
 
     const fn fourcc(code: &[u8; 4]) -> u32 {
@@ -791,7 +871,31 @@ mod vpl {
             }
             out.push(caps(family, formats.contains(&P010), chroma, max));
         }
+        // oneVPL describes no coding tool: only the speed of the media engine, known from its
+        // generation.
+        let av1 = out.iter().any(|c| c.family == Family::Av1);
+        for found in &mut out {
+            found.tools = Some(Tools {
+                max_bframes: NOT_DESCRIBED,
+                bframe_ref_middle: false,
+                lookahead: false,
+                temporal_aq: false,
+                engine_fps: engine_fps(av1, found.family),
+            });
+        }
         out
+    }
+
+    /// Frames of 1080p a second at the medium preset, the slowest chip of each generation in
+    /// rigaya's measurements (Dec. 2025, driver 32.0.101.8250): Core Ultra 7 258V for the
+    /// engines with AV1 (Arc, Meteor Lake and later), else Core i5-2410M for H.264 and
+    /// Core i5-7500 for HEVC (its weakest codec there, VP9 taken as slow).
+    fn engine_fps(av1: bool, family: Family) -> u32 {
+        match (av1, family) {
+            (true, _) => 277,
+            (false, Family::H264) => 141,
+            (false, _) => 80,
+        }
     }
 
     #[cfg(test)]

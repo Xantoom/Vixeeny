@@ -457,10 +457,18 @@ impl Encoder {
     /// H.264 and HEVC, Ada for AV1). P5 at most: P6 and P7 cost two to three times more for a
     /// difference VMAF hardly measures. P1 and P2 split each frame between the encoders of the
     /// large cards (4K and above), so 4K at 120 FPS takes P2.
-    pub fn speed_for(&self, pixel_rate: u64) -> Option<(&'static str, String)> {
-        // In frames of 1080p a second, with a third to spare (clocks drop under a game's load,
-        // the quality presets add a quarter-resolution pass).
-        let needed = pixel_rate as f64 / (1920.0 * 1080.0) * 1.3;
+    ///
+    /// AMD and Intel: from the speed of the GPU's media engine at its default preset
+    /// ([`Tools::engine_fps`](crate::probe::Tools), measured per generation). AMF's quality
+    /// preset is taken as halving it (rigaya's quality settings, which add the pre-analysis,
+    /// cost 40 to 75 % on H.264 and AV1), its speed preset as what keeps up beyond.
+    pub fn speed_for(
+        &self,
+        pixel_rate: u64,
+        tools: Option<crate::probe::Tools>,
+    ) -> Option<(&'static str, String)> {
+        let needed = frames_needed(pixel_rate);
+        let engine = f64::from(tools.map_or(0, |t| t.engine_fps));
         let pick = |key: &'static str, steps: &[(&str, f64)]| {
             let value = steps
                 .iter()
@@ -503,8 +511,24 @@ impl Encoder {
                     ("p1", 741.0),
                 ],
             ),
-            // AMD and Intel publish no such figures: their media engines are rated for 4K at
-            // 60 FPS, so the best preset up to that, one step faster above.
+            _ if amf && engine > 0.0 => pick(
+                "quality",
+                &[
+                    ("quality", engine * AMF_QUALITY_SHARE),
+                    ("balanced", engine),
+                    ("speed", f64::MAX),
+                ],
+            ),
+            _ if qsv && engine > 0.0 => pick(
+                "preset",
+                &[
+                    ("medium", engine),
+                    ("fast", engine * 1.5),
+                    ("veryfast", f64::MAX),
+                ],
+            ),
+            // Not measured (no probe): their media engines are rated for 4K at 60 FPS, so the
+            // best preset up to that, one step faster above.
             _ if amf => pick(
                 "quality",
                 &[("quality", 312.0), ("balanced", 624.0), ("speed", f64::MAX)],
@@ -540,6 +564,7 @@ impl Encoder {
         preset: PresetName,
         (width, height): (u32, u32),
         fps: u32,
+        tools: Option<crate::probe::Tools>,
     ) -> BTreeMap<String, String> {
         let mut options: BTreeMap<String, String> = self
             .presets
@@ -550,7 +575,7 @@ impl Encoder {
         let rate = u64::from(width) * u64::from(height) * u64::from(fps.max(1));
         // The fast preset keeps its own speed.
         if preset != PresetName::Performance
-            && let Some((key, value)) = self.speed_for(rate)
+            && let Some((key, value)) = self.speed_for(rate, tools)
             && let Some(param) = self.params.iter().find(|p| p.key == key)
             && options.contains_key(&param.ffmpeg_option)
         {
@@ -592,21 +617,48 @@ impl Encoder {
     /// What the encoder lacks is left out rather than refused when it opens: B-frames beyond
     /// its most (none for HEVC on Pascal), B-frames as references (and always for H.264, which
     /// some decoders play wrong with them, as OBS found), the look-ahead, the temporal AQ.
+    ///
+    /// AMF: B-frames cost about 40 % of the engine's speed (RX 6900 XT, H.264: 139 to 84 FPS
+    /// for 1.3 VMAF), the pre-analysis two thirds (84 to 26 FPS for 0.4 to 0.7 VMAF), so the
+    /// latter is never chosen, and 2 B-frames (AMD's advice for recording) only when the
+    /// engine has that much to spare at `pixel_rate` beside the quality preset.
     pub fn fit_tools(
         &self,
         options: &mut BTreeMap<String, String>,
         tools: Option<crate::probe::Tools>,
         choose: bool,
+        pixel_rate: u64,
     ) {
         let Some(tools) = tools else {
             return;
         };
-        if self.vendor != Vendor::Nvidia {
-            return;
-        }
         let number = |options: &BTreeMap<String, String>, key: &str| {
             options.get(key).and_then(|v| v.parse::<u32>().ok())
         };
+        if self.vendor == Vendor::Amd {
+            let spare = f64::from(tools.engine_fps) * AMF_QUALITY_SHARE * AMF_BFRAMES_SHARE;
+            let bframes = match number(options, "bf") {
+                Some(n) => Some(n),
+                None if choose && frames_needed(pixel_rate) <= spare => Some(2),
+                None => None,
+            }
+            .map(|n| n.min(tools.max_bframes));
+            match bframes {
+                Some(n) if n > 0 => {
+                    options.insert("bf".into(), n.to_string());
+                }
+                _ => {
+                    options.remove("bf");
+                }
+            }
+            if !tools.lookahead {
+                options.remove("preanalysis");
+            }
+            return;
+        }
+        if self.vendor != Vendor::Nvidia {
+            return;
+        }
         let lookahead = match number(options, "rc-lookahead") {
             _ if !tools.lookahead => 0,
             Some(frames) => frames,
@@ -646,6 +698,17 @@ impl Encoder {
             .any(|p| p.depth == depth && p.chroma == chroma)
     }
 }
+
+/// The frames of 1080p a second an encoder must keep up with for `pixel_rate`, with a third to
+/// spare (clocks drop under a game's load, the quality presets add a quarter-resolution pass).
+fn frames_needed(pixel_rate: u64) -> f64 {
+    pixel_rate as f64 / (1920.0 * 1080.0) * 1.3
+}
+
+/// The share of AMF's balanced speed its quality preset keeps, and of that what is left with
+/// B-frames on (see [`Encoder::fit_tools`]).
+const AMF_QUALITY_SHARE: f64 = 0.5;
+const AMF_BFRAMES_SHARE: f64 = 0.6;
 
 /// The look-ahead of the presets where the GPU has it, in frames: enough for NVENC to pick the
 /// B-frames of each group (OBS takes as many); more costs graphics memory, which the game uses.

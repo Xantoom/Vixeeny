@@ -65,18 +65,28 @@ pub struct EncoderProbe {
 }
 
 /// The coding tools a GPU's encoder has for one codec, as its driver describes them (NVENC's
-/// capability query).
+/// and AMF's capability queries; oneVPL describes none of them).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Tools {
-    /// The most B-frames between two reference frames (0: none, as HEVC on Pascal).
+    /// The most B-frames between two reference frames (0: none, as HEVC on Pascal;
+    /// [`NOT_DESCRIBED`]: the driver does not say, it lowers what it cannot do).
     pub max_bframes: u32,
     /// The middle B-frame of a group can serve as a reference.
     pub bframe_ref_middle: bool,
-    /// The look-ahead (it also picks how many B-frames each group takes).
+    /// The look-ahead (NVENC, where it also picks how many B-frames each group takes) or the
+    /// pre-analysis (AMF).
     pub lookahead: bool,
     /// The temporal adaptive quantization.
     pub temporal_aq: bool,
+    /// AMD and Intel: frames of 1080p a second the media engine keeps up with at its default
+    /// speed, as measured on the slowest chip of its generation. 0: not known (NVENC's speeds
+    /// are per codec, in the registry).
+    #[serde(default)]
+    pub engine_fps: u32,
 }
+
+/// [`Tools::max_bframes`] when the driver does not describe it.
+pub const NOT_DESCRIBED: u32 = u32::MAX;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -121,7 +131,7 @@ pub struct DriverCaps {
     pub chroma: Vec<Chroma>,
     /// The largest picture (width, height).
     pub max: (u32, u32),
-    /// `None`: the driver does not describe them (AMF, oneVPL).
+    /// `None`: the driver does not describe them.
     pub tools: Option<Tools>,
 }
 
@@ -204,7 +214,7 @@ pub fn identity() -> String {
 }
 
 /// The way the probe works: bumped when a change of it must run it again everywhere.
-pub const PROBE_REVISION: u32 = 4;
+pub const PROBE_REVISION: u32 = 5;
 
 /// Probes every encoder. `version` is what the answer depends on besides the machine (see
 /// [`identity`]), part of the cache key.
