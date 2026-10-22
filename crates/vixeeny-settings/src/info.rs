@@ -57,6 +57,10 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
             "AV1: smaller files at the same quality, played by recent devices.\nHEVC: in between.\nH.264: larger files, played by nearly every device.",
             "AV1 : fichiers plus petits à qualité égale, lecture plus récente.\nHEVC : intermédiaire.\nH.264 : fichiers plus gros, lu par presque tous les appareils.",
         ),
+        "preset" => pick(
+            "Quality: for editing and keeping; large files.\nBalanced: in between.\nCompact: for sharing; light files.",
+            "Qualité : pour le montage et l'archivage ; fichiers lourds.\nÉquilibré : entre les deux.\nCompact : pour le partage ; fichiers légers.",
+        ),
         "container" => pick(
             "MP4: the most common format; still plays after a crash.\nMKV: takes every sound format.",
             "MP4 : format le plus répandu ; reste lisible après un plantage.\nMKV : accepte tous les formats de son.",
@@ -152,10 +156,6 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
             "Analyses each image before encoding.\nA slight gain, more computing.",
             "Analyse chaque image avant l'encodage.\nGain léger, plus de calcul.",
         ),
-        "p:highbitdepth" => pick(
-            "Encodes the 8-bit picture in 10 bits: smoother gradients (skies, fog).\nSome older players cannot read 10 bits.",
-            "Encode l'image 8 bits en 10 bits : dégradés plus lisses (ciel, brouillard).\nCertains anciens lecteurs ne lisent pas le 10 bits.",
-        ),
         "p:preencode" => pick(
             "A quick first pass over each image to spread the bitrate.\nA slight gain, a little more computing.",
             "Une première passe rapide sur chaque image pour répartir le débit.\nGain léger, un peu plus de calcul.",
@@ -169,8 +169,8 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
             "Images déduites de leurs voisines : fichiers plus petits, plus de calcul.",
         ),
         "p:keyint" => pick(
-            "The gap between two complete frames.\nShorter: more precise seeking in the video, heavier file.\nAuto: chosen by the encoder.",
-            "Écart entre deux images complètes.\nPlus court : déplacement plus précis dans la vidéo, fichier plus lourd.\nAuto : choisi par l'encodeur.",
+            "The gap between two complete frames.\nShorter: more precise seeking in the video, heavier file.\nAuto: one every 2 seconds.",
+            "Écart entre deux images complètes.\nPlus court : déplacement plus précis dans la vidéo, fichier plus lourd.\nAuto : une toutes les 2 secondes.",
         ),
         "audio_routing" => pick(
             "One track per source: separate tracks in Premiere Pro or DaVinci Resolve; a player such as VLC plays one of them only.\nEverything on one track: a single mix, heard the same everywhere.",

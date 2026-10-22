@@ -245,7 +245,6 @@ pub enum Key {
     SetAspect,
     OptAspectScreen,
     OptAspectCrop,
-    OptMp4Fragmented,
     SetExpert,
     SrcOutputs,
     SrcInputs,
@@ -372,6 +371,8 @@ pub enum Key {
     OptGradientOcean,
     OptGradientForest,
     OptGradientNight,
+    SetPresetBalanced,
+    SetFolderUnreachable,
 }
 
 impl Key {
@@ -609,7 +610,6 @@ impl Key {
         Self::SetAspect,
         Self::OptAspectScreen,
         Self::OptAspectCrop,
-        Self::OptMp4Fragmented,
         Self::SetExpert,
         Self::SrcOutputs,
         Self::SrcInputs,
@@ -736,6 +736,8 @@ impl Key {
         Self::OptGradientOcean,
         Self::OptGradientForest,
         Self::OptGradientNight,
+        Self::SetPresetBalanced,
+        Self::SetFolderUnreachable,
     ];
 }
 
@@ -942,10 +944,10 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::SetKindHardware, Lang::Fr) => "Matériel (GPU)",
         (Key::SetKindSoftware, Lang::En) => "Software (CPU)",
         (Key::SetKindSoftware, Lang::Fr) => "Logiciel (CPU)",
-        (Key::SetPresetBest, Lang::En) => "Maximum quality",
-        (Key::SetPresetBest, Lang::Fr) => "Qualité maximale",
-        (Key::SetPresetLight, Lang::En) => "Light files",
-        (Key::SetPresetLight, Lang::Fr) => "Fichiers légers",
+        (Key::SetPresetBest, Lang::En) => "Quality",
+        (Key::SetPresetBest, Lang::Fr) => "Qualité",
+        (Key::SetPresetLight, Lang::En) => "Compact",
+        (Key::SetPresetLight, Lang::Fr) => "Compact",
         (Key::SetPresetCustom, Lang::En) => "Custom",
         (Key::SetPresetCustom, Lang::Fr) => "Personnalisé",
         (Key::SetDetecting, Lang::En) => "Detecting the encoders of this PC…",
@@ -1274,8 +1276,6 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::OptAspectScreen, Lang::Fr) => "Celui de l'écran ({ratio})",
         (Key::OptAspectCrop, Lang::En) => "{ratio}, cropped in the middle",
         (Key::OptAspectCrop, Lang::Fr) => "{ratio}, recadré au centre",
-        (Key::OptMp4Fragmented, Lang::En) => "MP4 (fragmented)",
-        (Key::OptMp4Fragmented, Lang::Fr) => "MP4 (fragmenté)",
         (Key::SetExpert, Lang::En) => "Expert settings",
         (Key::SetExpert, Lang::Fr) => "Paramètres experts",
         (Key::SrcOutputs, Lang::En) => "Outputs",
@@ -1554,6 +1554,14 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::OptGradientForest, Lang::Fr) => "Forêt",
         (Key::OptGradientNight, Lang::En) => "Night",
         (Key::OptGradientNight, Lang::Fr) => "Nuit",
+        (Key::SetPresetBalanced, Lang::En) => "Balanced",
+        (Key::SetPresetBalanced, Lang::Fr) => "Équilibré",
+        (Key::SetFolderUnreachable, Lang::En) => {
+            "This folder cannot be reached: files go to the default folder."
+        }
+        (Key::SetFolderUnreachable, Lang::Fr) => {
+            "Dossier inaccessible : les fichiers vont dans le dossier par défaut."
+        }
     }
 }
 

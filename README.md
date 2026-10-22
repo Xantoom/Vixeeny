@@ -11,9 +11,9 @@ system tray and answers to global shortcuts; nothing runs on screen until you as
 - **Quiet updates** — downloaded and installed in the background (or with one click in
   Settings → About), verified by signature, rolled back if the new version does not start.
 
-Default shortcuts: `PrintScreen` region · `Alt+PrintScreen` window · `Shift+PrintScreen` screen ·
-`Ctrl+Shift+F9` record · `Ctrl+Shift+F10` pause · `Ctrl+Shift+F11` save the replay. Everything is
-configurable in the settings.
+Default shortcuts: `PrintScreen` region · `Alt+PrintScreen` window · `Ctrl+PrintScreen` screen ·
+`Shift+PrintScreen` scrolling capture · `Ctrl+F9` record · `Ctrl+F10` pause · `Ctrl+F11` save the
+replay. Everything is configurable in the settings.
 
 ## Install
 

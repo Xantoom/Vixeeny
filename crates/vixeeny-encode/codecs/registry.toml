@@ -276,7 +276,7 @@ containers = ["mkv", "mp4", "fmp4"]
 quality = { rc = "vbr", cq = 19, preset = "p5", tune = "hq", multipass = "qres", spatial-aq = 1, temporal-aq = 1, b_ref_mode = "middle" }
 balanced = { rc = "vbr", cq = 23, preset = "p4", tune = "hq", multipass = "qres", spatial-aq = 1, temporal-aq = 1, b_ref_mode = "middle" }
 performance = { rc = "vbr", cq = 25, preset = "p2", tune = "hq" }
-small = { rc = "vbr", cq = 30, preset = "p5", tune = "hq", multipass = "qres", spatial-aq = 1, temporal-aq = 1, b_ref_mode = "middle" }
+small = { rc = "vbr", cq = 28, preset = "p5", tune = "hq", multipass = "qres", spatial-aq = 1, temporal-aq = 1, b_ref_mode = "middle" }
 
 [encoder.rate_control]
 quality = { name = "CQ", min = 1, max = 51, default = 23 }
@@ -357,7 +357,7 @@ containers = ["mkv", "mp4", "fmp4"]
 quality = { rc = "vbr", cq = 19, preset = "p5", tune = "hq", multipass = "qres", spatial-aq = 1, temporal-aq = 1, b_ref_mode = "middle" }
 balanced = { rc = "vbr", cq = 23, preset = "p4", tune = "hq", multipass = "qres", spatial-aq = 1, temporal-aq = 1, b_ref_mode = "middle" }
 performance = { rc = "vbr", cq = 25, preset = "p2", tune = "hq" }
-small = { rc = "vbr", cq = 30, preset = "p5", tune = "hq", multipass = "qres", spatial-aq = 1, temporal-aq = 1, b_ref_mode = "middle" }
+small = { rc = "vbr", cq = 28, preset = "p5", tune = "hq", multipass = "qres", spatial-aq = 1, temporal-aq = 1, b_ref_mode = "middle" }
 
 [encoder.rate_control]
 quality = { name = "CQ", min = 1, max = 51, default = 23 }
@@ -400,12 +400,6 @@ type = "bool"
 default = true
 
 [[encoder.params]]
-key = "highbitdepth"
-ffmpeg_option = "highbitdepth"
-type = "bool"
-default = false
-
-[[encoder.params]]
 key = "bframes"
 ffmpeg_option = "bf"
 type = "enum"
@@ -442,7 +436,7 @@ containers = ["mkv", "mp4", "fmp4", "webm"]
 quality = { rc = "vbr", cq = 24, preset = "p5", tune = "hq", multipass = "qres", spatial-aq = 1, temporal-aq = 1, b_ref_mode = "middle" }
 balanced = { rc = "vbr", cq = 30, preset = "p4", tune = "hq", multipass = "qres", spatial-aq = 1, temporal-aq = 1, b_ref_mode = "middle" }
 performance = { rc = "vbr", cq = 32, preset = "p2", tune = "hq" }
-small = { rc = "vbr", cq = 38, preset = "p5", tune = "hq", multipass = "qres", spatial-aq = 1, temporal-aq = 1, b_ref_mode = "middle" }
+small = { rc = "vbr", cq = 36, preset = "p5", tune = "hq", multipass = "qres", spatial-aq = 1, temporal-aq = 1, b_ref_mode = "middle" }
 
 [encoder.rate_control]
 quality = { name = "CQ", min = 1, max = 63, default = 30 }
@@ -483,12 +477,6 @@ key = "temporal-aq"
 ffmpeg_option = "temporal-aq"
 type = "bool"
 default = true
-
-[[encoder.params]]
-key = "highbitdepth"
-ffmpeg_option = "highbitdepth"
-type = "bool"
-default = false
 
 [[encoder.params]]
 key = "bframes"

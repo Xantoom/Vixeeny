@@ -140,7 +140,7 @@ mod tests {
             .iter()
             .find(|(a, _)| *a == ActionId::ReplaySave)
             .unwrap();
-        assert_eq!(save.1, ["Ctrl+Shift+F11".to_owned(), String::new()]);
+        assert_eq!(save.1, ["Ctrl+F11".to_owned(), String::new()]);
     }
 
     #[test]
@@ -162,9 +162,9 @@ mod tests {
             set(&mut c, ActionId::ReplayToggle, 0, "Ctrl+Nope"),
             Err(Refusal::Invalid(_))
         ));
-        // Ctrl+Shift+F11 belongs to the replay save.
+        // Ctrl+F11 belongs to the replay save.
         assert_eq!(
-            set(&mut c, ActionId::ReplayToggle, 0, "Ctrl+Shift+F11"),
+            set(&mut c, ActionId::ReplayToggle, 0, "Ctrl+F11"),
             Err(Refusal::Conflict(ActionId::ReplaySave))
         );
         assert_eq!(c.hotkeys, before);

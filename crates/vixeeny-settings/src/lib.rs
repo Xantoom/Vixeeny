@@ -85,7 +85,8 @@ pub struct Opt {
     pub value: String,
     /// What the user reads.
     pub label: String,
-    /// The title of the options under it, not one to choose.
+    /// The title of the options under it, not one to choose (without a label: a line between
+    /// two groups).
     pub heading: bool,
     /// The one advised: marked so in the list.
     pub recommended: bool,
@@ -403,6 +404,11 @@ fn heading(label: impl Into<String>) -> Opt {
         recommended: false,
         caution: false,
     }
+}
+
+/// A line between two groups of options, in a list.
+fn separator() -> Opt {
+    heading(String::new())
 }
 
 fn opt(value: &str, label: impl Into<String>) -> Opt {
@@ -1005,10 +1011,10 @@ mod tests {
         let on = rows(Section::Video, &fast, &c);
         assert!(row(&on, "hdr").enabled());
         assert_eq!(row(&on, "hdr").value(&c), Value::Bool(true));
-        // Only fragmented MP4, which older settings read as.
-        c.video.container = "mp4_hybrid".into();
+        // Only hybrid MP4, which older settings read as.
+        c.video.container = "mp4_fragmented".into();
         let container = row(&on, "container");
-        assert_eq!(container.value(&c), Value::Text("mp4_fragmented".into()));
+        assert_eq!(container.value(&c), Value::Text("mp4_hybrid".into()));
         assert!(matches!(&container.kind, Kind::Choice(o) if o.len() == 3));
     }
 
@@ -1251,6 +1257,7 @@ mod tests {
     #[test]
     fn the_custom_preset_starts_from_the_one_left() {
         let mut c = Config::default();
+        c.video.preset = "quality".into();
         c.video.params.insert("rc.quality".into(), "40".into());
         let env = with_nvenc();
         let video = rows(Section::Video, &env, &c);
@@ -1319,7 +1326,7 @@ mod tests {
     }
 
     #[test]
-    fn presets_are_best_quality_light_or_custom_and_custom_shows_the_encoder_options() {
+    fn presets_are_quality_balanced_compact_or_custom_and_custom_shows_the_encoder_options() {
         let mut c = Config::default();
         c.video.encoder_kind = "software".into();
         let ids = |c: &Config| -> Vec<String> {
@@ -1329,8 +1336,17 @@ mod tests {
                 .collect()
         };
         assert!(!ids(&c).iter().any(|i| i.starts_with("p:")));
-        // Older presets are shown as custom.
+        assert_eq!(
+            row(&rows(Section::Video, &env(), &c), "preset").value(&c),
+            Value::Text("small".into())
+        );
         c.video.preset = "balanced".into();
+        assert_eq!(
+            row(&rows(Section::Video, &env(), &c), "preset").value(&c),
+            Value::Text("balanced".into())
+        );
+        // Older presets are shown as custom.
+        c.video.preset = "performance".into();
         let video = rows(Section::Video, &env(), &c);
         assert_eq!(
             row(&video, "preset").value(&c),
@@ -1363,6 +1379,10 @@ mod tests {
     #[test]
     fn the_sound_to_record_is_one_choice_and_the_microphone_another() {
         let mut c = Config::default();
+        // By default, the recorded program only; the test starts from all the PC sound.
+        assert_eq!(c.video.audio.sources, [TARGET_SOURCE]);
+        c.video.audio.capture = "system".into();
+        c.video.audio.sources = vec!["system".into()];
         let e = env().with_audio(AudioDevices {
             outputs: vec![AudioEntry {
                 id: "{out-1}".into(),
@@ -1625,7 +1645,7 @@ mod tests {
         assert_eq!(marked, ["P5"]);
         // A setting with nothing to add has no "i".
         assert!(row(&video, "video_cursor").info.is_empty());
-        assert!(row(&video, "preset").info.is_empty());
+        assert!(row(&video, "preset").info.contains("Compact"));
         c.image.format = "jpeg".into();
         let image = rows(Section::Image, &env(), &c);
         assert!(row(&image, "image_format").info.is_empty());

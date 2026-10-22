@@ -100,6 +100,13 @@ pub fn save(config: &Config) {
         tracing::error!("cannot save the settings: {e}");
         return;
     }
+    // The replay's folder exists from the moment the replay is on, not before.
+    if config.replay.enabled {
+        vixeeny_common::paths::ready_dir(
+            &config.paths.replays,
+            vixeeny_common::paths::DEFAULT_REPLAYS,
+        );
+    }
     let telling = std::thread::spawn(|| {
         let result = Endpoint::current_user().connect().and_then(|mut stream| {
             ipc::write_msg(&mut stream, &Hello::Control(ControlRequest::ReloadConfig))

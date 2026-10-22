@@ -172,8 +172,11 @@ fn direct_capture(
         cursor,
         foreground,
     };
-    let dir = vixeeny_common::paths::expand_user_dir(&config.paths.images)
-        .context("cannot locate the images folder")?;
+    let dir = vixeeny_common::paths::ready_dir(
+        &config.paths.images,
+        vixeeny_common::paths::DEFAULT_IMAGES,
+    )
+    .context("cannot make the images folder")?;
     let now = vixeeny_platform::local_time();
     let destination = still::Destination {
         dir: &dir,

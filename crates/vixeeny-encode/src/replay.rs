@@ -36,13 +36,13 @@ pub fn estimate_ram_bytes(total_kbps: u32, seconds: u32, keyframe_seconds: f64) 
 
 /// The bitrate (video and sound) a recording is expected to reach, in kbit/s: a generous guess
 /// for a busy game, as the constant-quality modes follow the picture. `bitrate` is the video
-/// target of a custom variable-bitrate profile, when it has one; `light` is the light-files
-/// preset.
+/// target of a custom variable-bitrate profile, when it has one; `share` is what the preset
+/// spends next to the quality one (1).
 pub fn expected_kbps(
     family: Family,
     (width, height): (u32, u32),
     fps: u32,
-    light: bool,
+    share: f64,
     bitrate: Option<u32>,
 ) -> u32 {
     let video = bitrate.map_or_else(
@@ -55,7 +55,7 @@ pub fn expected_kbps(
             };
             let pixels = f64::from(width) * f64::from(height) / (1920.0 * 1080.0);
             let scale = pixels.powf(0.8) * f64::from(fps.max(1)) / 60.0;
-            base * scale * if light { 0.5 } else { 1.0 }
+            base * scale * share
         },
         f64::from,
     );
@@ -78,7 +78,11 @@ pub fn profile_kbps(
         encoder.family,
         size,
         profile.fps,
-        profile.preset == "small",
+        match profile.preset.as_str() {
+            "balanced" => 0.7,
+            "small" => 0.5,
+            _ => 1.0,
+        },
         bitrate,
     )
 }
@@ -515,7 +519,7 @@ mod tests {
     #[test]
     fn the_size_of_a_replay_decides_where_it_is_kept() {
         // 4K60 AV1 for five minutes: a few gigabytes, in RAM on 64 GB but not on 12 GB.
-        let kbps = expected_kbps(Family::Av1, (3840, 2160), 60, false, None);
+        let kbps = expected_kbps(Family::Av1, (3840, 2160), 60, 1.0, None);
         assert!((40_000..80_000).contains(&kbps), "{kbps}");
         let bytes = expected_bytes(kbps, 300);
         assert!((1_500_000_000..3_000_000_000).contains(&bytes), "{bytes}");
@@ -524,10 +528,7 @@ mod tests {
         // Thirty minutes of it: on the disk, whatever the RAM.
         assert!(!fits_in_ram(expected_bytes(kbps, 1800), 128 << 30));
         // 30 s of 1080p60: in RAM from 16 GB; 8 GB is left to Windows and the game.
-        let small = expected_bytes(
-            expected_kbps(Family::H264, (1920, 1080), 60, false, None),
-            30,
-        );
+        let small = expected_bytes(expected_kbps(Family::H264, (1920, 1080), 60, 1.0, None), 30);
         assert!(fits_in_ram(small, 16 << 30));
         assert!(!fits_in_ram(small, 8 << 30));
         assert_eq!(ram_budget(16 << 30), 2 << 30);
@@ -537,7 +538,7 @@ mod tests {
         assert!(!fits_in_free_ram(small, 4 << 30));
         // A custom bitrate is taken as it is.
         assert_eq!(
-            expected_kbps(Family::Av1, (3840, 2160), 60, false, Some(8_000)),
+            expected_kbps(Family::Av1, (3840, 2160), 60, 1.0, Some(8_000)),
             8_512
         );
     }

@@ -224,8 +224,11 @@ pub fn save_bgra(
             Ok(path)
         });
     }
-    let dir = vixeeny_common::paths::expand_user_dir(&config.paths.images)
-        .context("cannot locate the images folder")?;
+    let dir = vixeeny_common::paths::ready_dir(
+        &config.paths.images,
+        vixeeny_common::paths::DEFAULT_IMAGES,
+    )
+    .context("cannot make the images folder")?;
     let now = vixeeny_platform::local_time();
     let dest = Destination {
         dir: &dir,
@@ -246,8 +249,10 @@ pub fn save_bgra(
 
 fn save_as_dialog(config: &Config) -> Option<PathBuf> {
     let mut dialog = rfd::FileDialog::new().set_title("Vixeeny");
-    if let Some(dir) = vixeeny_common::paths::expand_user_dir(&config.paths.images) {
-        let _ = std::fs::create_dir_all(&dir);
+    if let Some(dir) = vixeeny_common::paths::ready_dir(
+        &config.paths.images,
+        vixeeny_common::paths::DEFAULT_IMAGES,
+    ) {
         dialog = dialog.set_directory(dir);
     }
     for format in [

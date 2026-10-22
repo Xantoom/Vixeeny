@@ -44,6 +44,8 @@ export struct SettingRow {
     options: [string],
     // The options that title the ones under them.
     headings: [bool],
+    // How many of them are lines between groups.
+    separators: int,
     // The options advised, marked so in the list.
     marks: [bool],
     // The options that usually do harm, in the warning colour.
@@ -353,6 +355,7 @@ component SettingLine inherits GroupRow {
         width: Theme.value-w;
         options: root.entry.options;
         headings: root.entry.headings;
+        separators: root.entry.separators;
         marks: root.entry.marks;
         cautions: root.entry.cautions;
         mark-text: root.t.recommended;

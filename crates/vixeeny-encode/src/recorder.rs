@@ -9,7 +9,7 @@
 //! GPU ([`crate::gpu`]): handed to NVENC / AMF / QSV as they are, downloaded for a software
 //! encoder.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
@@ -50,7 +50,8 @@ impl From<ffmpeg_next::Error> for RecordError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputContainer {
     Mkv,
-    /// Fragmented while recording (readable after a crash), classic with `moov` first once done.
+    /// Fragmented while recording (readable after a crash), classic once done: the fragments
+    /// become one `mdat` and a full `moov` follows, in place (FFmpeg's `hybrid_fragmented`).
     Mp4Hybrid,
     Mp4Fragmented,
     WebM,
@@ -87,8 +88,13 @@ impl OutputContainer {
         let mut d = Dictionary::new();
         // Every packet reaches the disk at once: what a crash leaves behind is what was written.
         d.set("flush_packets", "1");
-        if matches!(self, Self::Mp4Hybrid | Self::Mp4Fragmented) {
-            d.set("movflags", "frag_keyframe+empty_moov+default_base_moof");
+        match self {
+            Self::Mp4Fragmented => d.set("movflags", "frag_keyframe+empty_moov+default_base_moof"),
+            Self::Mp4Hybrid => d.set(
+                "movflags",
+                "frag_keyframe+empty_moov+default_base_moof+hybrid_fragmented",
+            ),
+            Self::Mkv | Self::WebM => {}
         }
         d
     }
@@ -397,13 +403,11 @@ fn dictionary(options: &[(String, String)]) -> Dictionary<'static> {
     d
 }
 
-/// Options some GPUs or drivers refuse (NVENC's B-frames as references before Turing, its
-/// 10-bit encoding on the first Maxwell cards and its temporal AQ in AV1 where the card lacks
-/// it, the newer controls of AMF and Quick Sync): an encoder that does not open with them opens
-/// without.
-const OPTIONAL: [&str; 7] = [
+/// Options some GPUs or drivers refuse (NVENC's B-frames as references before Turing and its
+/// temporal AQ in AV1 where the card lacks it, the newer controls of AMF and Quick Sync): an
+/// encoder that does not open with them opens without.
+const OPTIONAL: [&str; 6] = [
     "b_ref_mode",
-    "highbitdepth",
     "temporal-aq",
     "preencode",
     "high_motion_quality_boost_enable",
@@ -441,7 +445,6 @@ pub(crate) fn open_video(
 
 struct Output {
     octx: format::context::Output,
-    path: PathBuf,
     stream_tb: Rational,
     /// pts of the first (key) packet of the part, in encoder time base: subtracted so each file
     /// starts at zero (the dts stay negative by the encoder delay, as in the first file).
@@ -724,17 +727,13 @@ impl Worker {
         octx: format::context::Output,
         path: PathBuf,
     ) -> Result<(), RecordError> {
-        self.files.push(path.clone());
-        self.out = Some(self.new_output(octx, path)?);
+        self.files.push(path);
+        self.out = Some(self.new_output(octx)?);
         Ok(())
     }
 
     /// The streams of a file (video, then the audio tracks) and its header.
-    fn new_output(
-        &self,
-        mut octx: format::context::Output,
-        path: PathBuf,
-    ) -> Result<Output, RecordError> {
+    fn new_output(&self, mut octx: format::context::Output) -> Result<Output, RecordError> {
         let mut stream = octx.add_stream(self.codec)?;
         stream.set_parameters(&self.encoder);
         for track in &self.audio {
@@ -756,7 +755,6 @@ impl Worker {
             .collect();
         Ok(Output {
             octx,
-            path,
             stream_tb,
             offset: None,
             first_pts: 0,
@@ -782,21 +780,15 @@ impl Worker {
             std::fs::create_dir_all(dir).map_err(|e| RecordError::Io(e.to_string()))?;
         }
         let octx = format::output_as(&path, self.cfg.container.muxer())?;
-        let mut out = self.new_output(octx, path.clone())?;
+        let mut out = self.new_output(octx)?;
         let enc_tb = self.enc_tb;
-        let container = self.cfg.container;
         let last = snapshot.video.last().map_or(snapshot.start, |(t, _)| *t);
         let span = (last - snapshot.start) as f64 / f64::from(SAMPLE_RATE);
         let join = std::thread::Builder::new()
             .name("vixeeny-replay-save".into())
             .spawn(move || {
                 write_snapshot(&mut out, &snapshot, enc_tb)?;
-                let path = out.path.clone();
                 out.octx.write_trailer()?;
-                drop(out);
-                if container == OutputContainer::Mp4Hybrid {
-                    faststart(&path)?;
-                }
                 Ok(())
             })
             .map_err(|e| RecordError::Io(e.to_string()))?;
@@ -1076,18 +1068,12 @@ impl Worker {
         self.write_ready_audio()
     }
 
-    /// Writes the trailer; a hybrid MP4 is then rewritten with `moov` in front, without
-    /// re-encoding.
+    /// Writes the trailer (a hybrid MP4 then turns classic).
     fn close_part(&mut self) -> Result<(), RecordError> {
         let Some(mut out) = self.out.take() else {
             return Ok(());
         };
         out.octx.write_trailer()?;
-        let path = out.path.clone();
-        drop(out);
-        if self.cfg.container == OutputContainer::Mp4Hybrid {
-            faststart(&path)?;
-        }
         Ok(())
     }
 
@@ -1174,49 +1160,6 @@ fn write_snapshot(
         }
     }
     Ok(())
-}
-
-/// Rewrites a fragmented MP4 as a classic one with the `moov` box first (packet copy).
-pub fn faststart(path: &Path) -> Result<(), RecordError> {
-    let tmp = path.with_extension("faststart.tmp");
-    let result = (|| -> Result<(), RecordError> {
-        let mut input = format::input(path)?;
-        let mut output = format::output_as(&tmp, "mp4")?;
-        let mut map = Vec::new();
-        for stream in input.streams() {
-            let mut out = output.add_stream(encoder::find(codec::Id::None))?;
-            out.set_parameters(stream.parameters());
-            // SAFETY: the parameters belong to the stream just created; a zero tag lets the MP4
-            // muxer choose its own.
-            unsafe { (*out.parameters().as_mut_ptr()).codec_tag = 0 };
-            map.push(out.index());
-        }
-        output.set_metadata(input.metadata().to_owned());
-        let mut options = Dictionary::new();
-        options.set("movflags", "faststart");
-        output.write_header_with(options)?;
-        for (stream, mut packet) in input.packets() {
-            let Some(&out_index) = map.get(stream.index()) else {
-                continue;
-            };
-            let Some(out_tb) = output.stream(out_index).map(|s| s.time_base()) else {
-                continue;
-            };
-            packet.rescale_ts(stream.time_base(), out_tb);
-            packet.set_position(-1);
-            packet.set_stream(out_index);
-            packet.write_interleaved(&mut output)?;
-        }
-        output.write_trailer()?;
-        Ok(())
-    })();
-    match result {
-        Ok(()) => std::fs::rename(&tmp, path).map_err(|e| RecordError::Io(e.to_string())),
-        Err(e) => {
-            let _ = std::fs::remove_file(&tmp);
-            Err(e)
-        }
-    }
 }
 
 /// Nobody else (the encoder) holds a reference to the pixels of `frame`.

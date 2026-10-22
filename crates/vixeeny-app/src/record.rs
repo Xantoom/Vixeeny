@@ -445,13 +445,9 @@ fn plan(
         .with_context(|| format!("unknown audio codec `{}`", profile.audio.codec))?;
     match profile.audio.channels.as_str() {
         "mono" => audio.iter_mut().for_each(|t| t.channels = 1),
-        // Surround keeps what the sources have, up to 5.1 or 7.1.
-        surround @ ("5.1" | "7.1") if audio_codec.surround_in(container) => {
-            vixeeny_audio::assign_channels(
-                &mut audio,
-                if surround == "5.1" { 6 } else { 8 },
-                vixeeny_audio::source_channels,
-            );
+        // Surround keeps what the sources have: 5.1 as 5.1, 7.1 as 7.1.
+        "surround" | "5.1" | "7.1" if audio_codec.surround_in(container) => {
+            vixeeny_audio::assign_channels(&mut audio, 8, vixeeny_audio::source_channels);
         }
         _ => {}
     }
@@ -511,8 +507,14 @@ fn plan(
     }
 
     let extension = container.extension();
+    // The replay's folder is made when the replay starts (not before it is ever used).
     let mut folder = replay
-        .then(|| vixeeny_common::paths::expand_user_dir(&config.paths.replays))
+        .then(|| {
+            vixeeny_common::paths::ready_dir(
+                &config.paths.replays,
+                vixeeny_common::paths::DEFAULT_REPLAYS,
+            )
+        })
         .flatten();
     let (namer, save_as): (Namer, Option<SaveNamer>) = if replay {
         let config = config.clone();
@@ -561,9 +563,10 @@ fn output_file(
     size: (u32, u32),
     extension: &str,
 ) -> anyhow::Result<PathBuf> {
-    let (folder, per_app, naming, action) = if replay {
+    let (folder, fallback, per_app, naming, action) = if replay {
         (
             &config.paths.replays,
+            vixeeny_common::paths::DEFAULT_REPLAYS,
             config.paths.per_app_subfolder.replays,
             &config.paths.naming.replays,
             vixeeny_common::ipc::ActionId::ReplaySave,
@@ -571,13 +574,14 @@ fn output_file(
     } else {
         (
             &config.paths.videos,
+            vixeeny_common::paths::DEFAULT_VIDEOS,
             config.paths.per_app_subfolder.videos,
             &config.paths.naming.videos,
             vixeeny_common::ipc::ActionId::RecordToggle,
         )
     };
-    let dir = vixeeny_common::paths::expand_user_dir(folder)
-        .context("cannot locate the videos folder")?;
+    let dir = vixeeny_common::paths::ready_dir(folder, fallback)
+        .context("cannot make the videos folder")?;
     let monitors = vixeeny_platform::monitors()?;
     let now = vixeeny_platform::local_time();
     let snapshot = crate::still::Snapshot {

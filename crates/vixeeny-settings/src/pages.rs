@@ -270,6 +270,16 @@ fn disk_alert(env: &Env, config: &Config) -> Row {
     )
 }
 
+/// A folder row, with a warning sign when the folder cannot be reached (a drive unplugged, a
+/// file in its place): the files then go to the default folder.
+fn folder_row(env: &Env, row: Row, setting: &str) -> Row {
+    if vixeeny_common::paths::reachable_dir(setting) {
+        row
+    } else {
+        crate::warned(row, env.t(Key::SetFolderUnreachable))
+    }
+}
+
 /// The thresholds offered for the disk alert, in percent.
 const DISK_ALERTS: [u8; 6] = [1, 2, 5, 10, 15, 20];
 
@@ -278,11 +288,15 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
     let t = |k| env.t(k);
     let mut rows = vec![
         header("h_location", t(Key::GrpLocation)),
-        folder(
-            "dir_images",
-            t(Key::SetFolder),
-            |c| c.paths.images.clone(),
-            |c, v| c.paths.images = v,
+        folder_row(
+            env,
+            folder(
+                "dir_images",
+                t(Key::SetFolder),
+                |c| c.paths.images.clone(),
+                |c, v| c.paths.images = v,
+            ),
+            &config.paths.images,
         ),
         toggle(
             "sub_images",
@@ -305,6 +319,7 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
             vec![
                 opt("png", "PNG"),
                 advised("jpeg", "JPEG"),
+                crate::separator(),
                 opt("webp", "WebP"),
                 opt("avif", "AVIF"),
                 opt("jxl", "JPEG XL"),
@@ -657,11 +672,15 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
 
     let mut rows = vec![
         header("h_location", t(Key::GrpLocation)),
-        folder(
-            "dir_videos",
-            t(Key::SetFolder),
-            |c| c.paths.videos.clone(),
-            |c, v| c.paths.videos = v,
+        folder_row(
+            env,
+            folder(
+                "dir_videos",
+                t(Key::SetFolder),
+                |c| c.paths.videos.clone(),
+                |c, v| c.paths.videos = v,
+            ),
+            &config.paths.videos,
         ),
         toggle(
             "sub_videos",
@@ -831,12 +850,14 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
         t(Key::SetPreset),
         Kind::Choice(vec![
             opt("quality", t(Key::SetPresetBest)),
-            opt("small", t(Key::SetPresetLight)),
+            opt("balanced", t(Key::SetPresetBalanced)),
+            advised("small", t(Key::SetPresetLight)),
+            crate::separator(),
             opt("custom", t(Key::SetPresetCustom)),
         ]),
         Box::new(|c| {
             Value::Text(match c.video.preset.as_str() {
-                "quality" | "small" => c.video.preset.clone(),
+                "quality" | "balanced" | "small" => c.video.preset.clone(),
                 // The older presets were tuned by hand: they are the custom one now.
                 _ => "custom".to_owned(),
             })
@@ -848,7 +869,7 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
             // Set by hand from where the preset left: the same picture to start from.
             if v == "custom"
                 && let Some(left) = PresetName::from_setting(&c.video.preset)
-                && matches!(c.video.preset.as_str(), "quality" | "small")
+                && matches!(c.video.preset.as_str(), "quality" | "balanced" | "small")
                 && let Some(spec) = encoder.as_deref().and_then(encoders::spec)
             {
                 c.video.params = spec.preset_params(left);
@@ -868,7 +889,7 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
     }
 
     // ---- the encoder's options, set by hand: right under the profile that shows them
-    if profile.preset == "custom" || !matches!(profile.preset.as_str(), "quality" | "small") {
+    if !matches!(profile.preset.as_str(), "quality" | "balanced" | "small") {
         let (basic, expert) = current
             .as_deref()
             .map(|id| custom_rows(env, config, id))
@@ -897,14 +918,15 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
     rows.push(choice(
         "container",
         t(Key::SetContainer),
-        // Fragmented MP4 only: a recording cut short (a crash, a full disk) still plays.
+        // Hybrid MP4 only: fragmented while it is written (a recording cut short by a crash or
+        // a full disk still plays), a classic MP4 once done (what every editor reads).
         vec![
-            opt("mp4_fragmented", t(Key::OptMp4Fragmented)),
+            opt("mp4_hybrid", "MP4"),
             opt("mkv", "MKV"),
             opt("webm", "WebM"),
         ],
         |c| match c.video.container.as_str() {
-            "mp4" | "mp4_hybrid" => "mp4_fragmented".to_owned(),
+            "mp4" | "mp4_fragmented" | "fmp4" => "mp4_hybrid".to_owned(),
             other => other.to_owned(),
         },
         |c, v| c.video.container = v,
@@ -1449,14 +1471,19 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
         vec![
             opt("mono", "Mono"),
             advised("stereo", t(Key::OptStereo)),
-            opt("5.1", "5.1"),
-            opt("7.1", "7.1"),
+            opt("surround", "5.1 / 7.1"),
         ],
-        |c| c.video.audio.channels.clone(),
+        |c| match c.video.audio.channels.as_str() {
+            "5.1" | "7.1" => "surround".to_owned(),
+            other => other.to_owned(),
+        },
         |c, v| c.video.audio.channels = v,
     );
     // Surround needs Matroska and a codec that carries it: say so when it falls back to stereo.
-    let surround = matches!(config.video.audio.channels.as_str(), "5.1" | "7.1");
+    let surround = matches!(
+        config.video.audio.channels.as_str(),
+        "surround" | "5.1" | "7.1"
+    );
     let carried = config.video.container == "mkv" && codec != "aac";
     rows.push(if surround && !carried {
         crate::warned(channels, t(Key::SetSurroundHint))
@@ -1561,11 +1588,15 @@ pub fn replay(env: &Env, config: &Config) -> Vec<Row> {
     rows.extend(game_rows(env, config));
     rows.extend([
         header("h_folder", t(Key::GrpLocation)),
-        folder(
-            "dir_replays",
-            t(Key::SetFolder),
-            |c| c.paths.replays.clone(),
-            |c, v| c.paths.replays = v,
+        folder_row(
+            env,
+            folder(
+                "dir_replays",
+                t(Key::SetFolder),
+                |c| c.paths.replays.clone(),
+                |c, v| c.paths.replays = v,
+            ),
+            &config.paths.replays,
         ),
         toggle(
             "sub_replays",

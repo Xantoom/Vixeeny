@@ -419,14 +419,12 @@ fn hybrid_mp4_ends_classic_and_fragmented_mp4_stays_fragmented() {
     );
     let b = boxes(&hybrid.files[0]);
     assert!(!b.contains(&"moof".to_string()), "{b:?}");
+    // The fragments are hidden in one `mdat`, the full `moov` after it.
     let (moov, mdat) = (
         b.iter().position(|x| x == "moov"),
         b.iter().position(|x| x == "mdat"),
     );
-    assert!(
-        moov.unwrap() < mdat.unwrap(),
-        "faststart: moov before mdat, {b:?}"
-    );
+    assert!(mdat.unwrap() < moov.unwrap(), "{b:?}");
     assert_eq!(demux(&hybrid.files[0]).pts_ms.len(), 60);
 
     let fragmented = record(
@@ -1039,10 +1037,9 @@ fn a_replay_and_a_recording_share_one_encoder_session() {
     let summary = rec.stop(8_000 * MS).unwrap();
     // The recording is whole, and the replay is a classic MP4 cut from the same packets.
     assert_eq!(demux(&summary.files[0]).pts_ms.len(), 240);
-    assert!(
-        boxes(&path).iter().position(|b| b == "moov")
-            < boxes(&path).iter().position(|b| b == "mdat")
-    );
+    let b = boxes(&path);
+    assert!(!b.iter().any(|x| x == "moof"), "{b:?}");
+    assert!(b.iter().any(|x| x == "moov"), "{b:?}");
     // Starts where a recording starts (MP4 keeps the encoder delay as an offset).
     assert_eq!(demux(&path).pts_ms[0], demux(&summary.files[0]).pts_ms[0]);
 }

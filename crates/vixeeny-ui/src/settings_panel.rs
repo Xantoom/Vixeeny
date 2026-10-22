@@ -577,6 +577,7 @@ fn row_model(row: &Row, config: &Config, lang: Lang) -> SettingRow {
         pair_values: ModelRc::default(),
         options: ModelRc::default(),
         headings: ModelRc::default(),
+        separators: 0,
         selected: -1,
         has_icon: row.icon.is_some(),
         fresh: false,
@@ -610,6 +611,10 @@ fn row_model(row: &Row, config: &Config, lang: Lang) -> SettingRow {
                 .position(|o| o.value == value)
                 .map_or(-1, |i| i as i32);
             out.options = strings(options.iter().map(|o| o.label.clone()));
+            out.separators = options
+                .iter()
+                .filter(|o| o.heading && o.label.is_empty())
+                .count() as i32;
             if options.iter().any(|o| o.heading) {
                 out.headings = ModelRc::from(Rc::new(VecModel::from(
                     options.iter().map(|o| o.heading).collect::<Vec<_>>(),

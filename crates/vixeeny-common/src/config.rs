@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::ipc::ActionId;
 
 /// Schema version written by this build. Bump it and add a migration to [`MIGRATIONS`].
-pub const SCHEMA_VERSION: u32 = 8;
+pub const SCHEMA_VERSION: u32 = 9;
 
 /// `MIGRATIONS[n]` upgrades a table from schema `n + 1` to `n + 2`.
 pub type Migration = fn(&mut toml::Table);
@@ -21,6 +21,7 @@ pub const MIGRATIONS: &[Migration] = &[
     v5_two_shortcuts,
     v6_scrolling_shortcut,
     v7_free_shortcuts,
+    v8_new_defaults,
 ];
 
 /// 0.9 → 1.0: MP4 recordings are fragmented (a recording cut short still plays), and the cursor
@@ -178,6 +179,114 @@ fn v7_free_shortcuts(table: &mut toml::Table) {
     }
 }
 
+/// The shortcuts that were the defaults before 1.0 and the ones that replace them: the screen
+/// and the scrolling capture swap theirs, and the other ones drop Shift.
+const MOVED_SHORTCUTS_V8: [(&str, &str, &str); 7] = [
+    (
+        "capture_fullscreen",
+        "Shift+PrintScreen",
+        "Ctrl+PrintScreen",
+    ),
+    ("capture_scrolling", "Ctrl+PrintScreen", "Shift+PrintScreen"),
+    ("record_toggle", "Ctrl+Shift+F9", "Ctrl+F9"),
+    ("record_pause", "Ctrl+Shift+F10", "Ctrl+F10"),
+    ("replay_save", "Ctrl+Shift+F11", "Ctrl+F11"),
+    ("replay_edit", "Ctrl+Shift+F12", "Ctrl+F12"),
+    ("overlay_toggle", "Ctrl+Shift+F8", "Ctrl+F8"),
+];
+
+/// The folders that were the defaults before 1.0 and the ones that replace them.
+const MOVED_FOLDERS: [(&str, &str, &str); 3] = [
+    ("images", "{pictures}/Vixeeny", crate::paths::DEFAULT_IMAGES),
+    ("videos", "{videos}/Vixeeny", crate::paths::DEFAULT_VIDEOS),
+    (
+        "replays",
+        "{videos}/Vixeeny/Replays",
+        crate::paths::DEFAULT_REPLAYS,
+    ),
+];
+
+/// 1.0: what is still on a former default moves to the new one. The shortcuts (unless the
+/// new one is held by an action that keeps it), the folders, and MP4: hybrid rather than
+/// fragmented, as some editors read fragmented files badly.
+fn v8_new_defaults(table: &mut toml::Table) {
+    if let Some(hotkeys) = table.get_mut("hotkeys").and_then(|h| h.as_table_mut()) {
+        move_shortcuts(hotkeys, &MOVED_SHORTCUTS_V8);
+    }
+    if let Some(paths) = table.get_mut("paths").and_then(|p| p.as_table_mut()) {
+        for (kind, old, new) in MOVED_FOLDERS {
+            if paths.get(kind).and_then(|v| v.as_str()) == Some(old) {
+                paths.insert(kind.into(), new.into());
+            }
+        }
+    }
+    if let Some(video) = table.get_mut("video").and_then(|v| v.as_table_mut())
+        && matches!(
+            video.get("container").and_then(|c| c.as_str()),
+            Some("mp4_fragmented" | "fmp4")
+        )
+    {
+        video.insert("container".into(), "mp4_hybrid".into());
+    }
+}
+
+/// Moves each action still on `old` to `new`, all at once (two actions may swap theirs). A move
+/// whose `new` is held by a shortcut that stays where it is does not happen.
+fn move_shortcuts(hotkeys: &mut toml::Table, moves: &[(&str, &str, &str)]) {
+    use crate::hotkey::Hotkey;
+    let parse = |text: &str| Hotkey::parse(text).ok();
+    let holds = |hotkeys: &toml::Table, action: &str, key: &Option<Hotkey>| {
+        hotkeys
+            .get(action)
+            .and_then(|v| v.as_array())
+            .is_some_and(|list| {
+                list.iter()
+                    .any(|v| v.as_str().is_some_and(|t| parse(t) == *key))
+            })
+    };
+    // The moves that can happen: dropped one by one until each lands on a free shortcut.
+    let mut moving: Vec<&(&str, &str, &str)> = moves
+        .iter()
+        .filter(|(action, old, _)| holds(hotkeys, action, &parse(old)))
+        .collect();
+    loop {
+        let staying =
+            |hotkeys: &toml::Table, moving: &[&(&str, &str, &str)], key: &Option<Hotkey>| {
+                hotkeys.iter().any(|(action, list)| {
+                    list.as_array().is_some_and(|list| {
+                        list.iter().any(|v| {
+                            v.as_str().is_some_and(|t| {
+                                parse(t) == *key
+                                    && !moving
+                                        .iter()
+                                        .any(|(a, old, _)| a == action && parse(old) == *key)
+                            })
+                        })
+                    })
+                })
+            };
+        let blocked = moving
+            .iter()
+            .position(|(_, _, new)| staying(hotkeys, &moving, &parse(new)));
+        match blocked {
+            Some(i) => {
+                moving.remove(i);
+            }
+            None => break,
+        }
+    }
+    for (action, old, new) in moving {
+        let Some(list) = hotkeys.get_mut(*action).and_then(|v| v.as_array_mut()) else {
+            continue;
+        };
+        for entry in list.iter_mut() {
+            if entry.as_str().is_some_and(|text| parse(text) == parse(old)) {
+                *entry = (*new).into();
+            }
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     #[error("cannot read or write {path}: {source}")]
@@ -302,15 +411,15 @@ impl Default for Hotkeys {
         Self {
             capture_region: one("PrintScreen"),
             capture_window: one("Alt+PrintScreen"),
-            capture_fullscreen: one("Shift+PrintScreen"),
+            capture_fullscreen: one("Ctrl+PrintScreen"),
             capture_all_monitors: Vec::new(),
-            capture_scrolling: one(SCROLLING_SHORTCUT),
-            record_toggle: one("Ctrl+Shift+F9"),
-            record_pause: one("Ctrl+Shift+F10"),
+            capture_scrolling: one("Shift+PrintScreen"),
+            record_toggle: one("Ctrl+F9"),
+            record_pause: one("Ctrl+F10"),
             replay_toggle: Vec::new(),
-            replay_save: one("Ctrl+Shift+F11"),
-            replay_edit: one("Ctrl+Shift+F12"),
-            overlay_toggle: one("Ctrl+Shift+F8"),
+            replay_save: one("Ctrl+F11"),
+            replay_edit: one("Ctrl+F12"),
+            overlay_toggle: one("Ctrl+F8"),
             open_settings: Vec::new(),
         }
     }
@@ -331,9 +440,9 @@ pub struct Paths {
 impl Default for Paths {
     fn default() -> Self {
         Self {
-            images: "{pictures}/Vixeeny".into(),
-            videos: "{videos}/Vixeeny".into(),
-            replays: "{videos}/Vixeeny/Replays".into(),
+            images: crate::paths::DEFAULT_IMAGES.into(),
+            videos: crate::paths::DEFAULT_VIDEOS.into(),
+            replays: crate::paths::DEFAULT_REPLAYS.into(),
             naming: PerKindNaming::default(),
             per_app_subfolder: PerAppSubfolder::default(),
             app_names: BTreeMap::new(),
@@ -404,7 +513,7 @@ impl Default for Image {
             format: "jpeg".into(),
             show_cursor: false,
             hdr: "tonemap_sdr".into(),
-            copy_to_clipboard: false,
+            copy_to_clipboard: true,
             window_backdrop: "none".into(),
             backdrop_colour: "accent".into(),
             backdrop_gradient: "dusk".into(),
@@ -526,7 +635,8 @@ pub struct Video {
     pub chroma: String,
     pub hdr: String,
     pub mode: String,
-    /// `quality` (best picture), `small` (light files) or `custom` (`params`).
+    /// `quality` (for editing and keeping), `balanced`, `small` (compact files, for sharing) or
+    /// `custom` (`params`).
     pub preset: String,
     /// The encoder options of the `custom` preset, by the registry's parameter key.
     pub params: BTreeMap<String, String>,
@@ -542,14 +652,14 @@ impl Default for Video {
         Self {
             encoder_kind: "hardware".into(),
             encoder: "auto".into(),
-            container: "mp4_fragmented".into(),
+            container: "mp4_hybrid".into(),
             resolution: "source".into(),
             aspect: "source".into(),
             fps: 60,
             chroma: "420".into(),
             hdr: "tonemap_sdr".into(),
             mode: "simple".into(),
-            preset: "quality".into(),
+            preset: "small".into(),
             params: BTreeMap::new(),
             show_cursor: false,
             vfr: false,
@@ -587,8 +697,8 @@ pub struct Audio {
     pub codec: String,
     pub bitrate_kbps: u32,
     pub vbr: bool,
-    /// `mono`, `stereo`, `5.1` or `7.1`. Surround keeps 5.1/7.1 sources so (Matroska with
-    /// Opus, FLAC or PCM; stereo elsewhere).
+    /// `mono`, `stereo` or `surround`: 5.1 and 7.1 sources are kept so, up to 7.1 (Matroska with
+    /// Opus, FLAC or PCM; stereo elsewhere). `5.1` and `7.1`, from before, read as `surround`.
     pub channels: String,
     /// Remove steady background noise from microphone sources (FFmpeg `afftdn`).
     pub mic_noise_reduction: bool,
@@ -678,8 +788,8 @@ impl Default for Audio {
     fn default() -> Self {
         Self {
             routing: "one_track_per_source".into(),
-            capture: "system".into(),
-            sources: vec!["system".into()],
+            capture: "target".into(),
+            sources: vec![TARGET_SOURCE.into()],
             set_aside: Vec::new(),
             codec: "auto".into(),
             bitrate_kbps: 160,
@@ -1069,7 +1179,8 @@ mod tests {
                     show_cursor = true\n[profiles.mkv]\ncontainer = \"mkv\"\n";
         let cfg = Config::from_toml(text).unwrap();
         assert_eq!(cfg.schema_version, SCHEMA_VERSION);
-        assert_eq!(cfg.video.container, "mp4_fragmented");
+        // Then hybrid (1.0).
+        assert_eq!(cfg.video.container, "mp4_hybrid");
         assert!(!cfg.video.show_cursor);
     }
 
@@ -1136,8 +1247,9 @@ mod tests {
                 .unwrap()
                 .hotkeys
         };
+        // Given its shortcut, then moved to the one of 1.0.
         let h = read("capture_scrolling = []\n");
-        assert_eq!(h.capture_scrolling, [SCROLLING_SHORTCUT]);
+        assert_eq!(h.capture_scrolling, ["Shift+PrintScreen"]);
         let h = read("capture_scrolling = [\"F7\"]\n");
         assert_eq!(h.capture_scrolling, ["F7"]);
         let h = read("capture_scrolling = []\nopen_settings = [\"ctrl+printscreen\"]\n");
@@ -1155,13 +1267,46 @@ mod tests {
             "record_toggle = [\"Ctrl+Shift+R\", \"F9\"]\nrecord_pause = [\"Shift+Ctrl+P\"]\n\
              replay_save = [\"Alt+S\"]\n",
         );
-        assert_eq!(h.record_toggle, ["Ctrl+Shift+F9", "F9"]);
-        assert_eq!(h.record_pause, ["Ctrl+Shift+F10"]);
+        // Moved, then without Shift (1.0).
+        assert_eq!(h.record_toggle, ["Ctrl+F9", "F9"]);
+        assert_eq!(h.record_pause, ["Ctrl+F10"]);
         // Changed by the user: kept.
         assert_eq!(h.replay_save, ["Alt+S"]);
         // The new one already given to another action: the old one stays.
         let h = read("replay_edit = [\"Ctrl+Shift+E\"]\nopen_settings = [\"Ctrl+Shift+F12\"]\n");
         assert_eq!(h.replay_edit, ["Ctrl+Shift+E"]);
+    }
+
+    #[test]
+    fn the_former_defaults_move_to_the_new_ones() {
+        let read = |text: &str| Config::from_toml(&format!("schema_version = 8\n{text}")).unwrap();
+        let cfg = read(
+            "[hotkeys]\ncapture_fullscreen = [\"Shift+PrintScreen\"]\n\
+             capture_scrolling = [\"Ctrl+PrintScreen\"]\nrecord_toggle = [\"Ctrl+Shift+F9\", \"F9\"]\n\
+             replay_save = [\"Alt+S\"]\n\
+             [paths]\nimages = \"{pictures}/Vixeeny\"\nvideos = \"D:\\\\Clips\"\n\
+             replays = \"{videos}/Vixeeny/Replays\"\n\
+             [video]\ncontainer = \"mp4_fragmented\"\n",
+        );
+        // The screen and the scrolling capture swap theirs.
+        assert_eq!(cfg.hotkeys.capture_fullscreen, ["Ctrl+PrintScreen"]);
+        assert_eq!(cfg.hotkeys.capture_scrolling, ["Shift+PrintScreen"]);
+        assert_eq!(cfg.hotkeys.record_toggle, ["Ctrl+F9", "F9"]);
+        assert_eq!(cfg.hotkeys.replay_save, ["Alt+S"]);
+        assert_eq!(cfg.paths.images, crate::paths::DEFAULT_IMAGES);
+        assert_eq!(cfg.paths.videos, "D:\\Clips");
+        assert_eq!(cfg.paths.replays, crate::paths::DEFAULT_REPLAYS);
+        assert_eq!(cfg.video.container, "mp4_hybrid");
+        // A new one held by an action that keeps it: that move does not happen, nor the one
+        // that would land on the shortcut left in place.
+        let cfg = read(
+            "[hotkeys]\ncapture_fullscreen = [\"Shift+PrintScreen\"]\n\
+             capture_scrolling = [\"Ctrl+PrintScreen\"]\nopen_settings = [\"Ctrl+PrintScreen\", \"Ctrl+F9\"]\n\
+             record_toggle = [\"Ctrl+Shift+F9\"]\n",
+        );
+        assert_eq!(cfg.hotkeys.capture_fullscreen, ["Shift+PrintScreen"]);
+        assert_eq!(cfg.hotkeys.capture_scrolling, ["Ctrl+PrintScreen"]);
+        assert_eq!(cfg.hotkeys.record_toggle, ["Ctrl+Shift+F9"]);
     }
 
     #[test]

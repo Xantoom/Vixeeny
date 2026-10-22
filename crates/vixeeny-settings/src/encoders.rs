@@ -152,7 +152,6 @@ pub fn param_label(key: &str, lang: Lang) -> String {
             "Quantification adaptative (VBAQ)",
         ),
         "preanalysis" => ("Pre-analysis", "Pré-analyse"),
-        "highbitdepth" => ("10-bit encoding", "Encodage 10 bits"),
         "preencode" => ("Pre-encoding", "Pré-encodage"),
         "motion-boost" => ("High-motion boost", "Renfort des mouvements rapides"),
         "row-mt" => ("Row multithreading", "Multithread par lignes"),

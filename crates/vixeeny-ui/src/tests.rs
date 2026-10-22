@@ -202,7 +202,7 @@ fn the_video_page_edits_the_current_profile_and_reports_problems() {
     // The custom options of x264 in VBR: a bitrate and a maximum instead of the quality.
     w.invoke_row_chosen("container".into(), 0);
     w.invoke_row_chosen("encoder".into(), 0);
-    w.invoke_row_chosen("preset".into(), 2); // best, light, custom
+    w.invoke_row_chosen("preset".into(), 4); // quality, balanced, compact, a line, custom
     w.invoke_row_chosen("p:rc.mode".into(), 1); // CRF, VBR, CBR
     assert_eq!(panel.config().video.params["rc.mode"], "vbr");
     // The rows that just appeared, shown at the end of their unfolding.
@@ -365,7 +365,7 @@ fn the_search_leads_to_the_setting() {
     // A folded expert setting: its section opens, the row is outlined.
     w.set_search_text(Default::default());
     panel.select_section(Section::Video);
-    w.invoke_row_chosen("preset".into(), 2); // best, light, custom
+    w.invoke_row_chosen("preset".into(), 4); // quality, balanced, compact, a line, custom
     panel.select_section(Section::General);
     w.set_search_text("chroma".into());
     w.invoke_search_edited("chroma".into());
@@ -434,7 +434,7 @@ fn shortcuts_are_edited_in_place_and_conflicts_are_explained() {
     panel.select_section(Section::Shortcuts);
     settings_render(&panel, "9-settings-shortcuts");
     let w = panel.window();
-    // Row 7 is the replay toggle, row 8 the replay save (Ctrl+Shift+F11). Keys are recorded, never typed.
+    // Row 7 is the replay toggle, row 8 the replay save (Ctrl+F11). Keys are recorded, never typed.
     let record = |row: i32, slot: i32, keys: &str| {
         w.invoke_shortcut_record(row, slot);
         panel.captured(settings_panel::Captured::Combination(keys.into()));
@@ -442,7 +442,7 @@ fn shortcuts_are_edited_in_place_and_conflicts_are_explained() {
     record(7, 0, "Ctrl+Shift+F7");
     assert_eq!(panel.config().hotkeys.replay_toggle, ["Ctrl+Shift+F7"]);
     assert_eq!(seen.borrow().len(), 1);
-    record(7, 1, "Ctrl+Shift+F11");
+    record(7, 1, "Ctrl+F11");
     assert_eq!(panel.config().hotkeys.replay_toggle.len(), 1, "refused");
     let row = w.get_shortcuts().row_data(7).unwrap();
     assert!(row.error.contains("Save the replay"), "{}", row.error);
@@ -836,7 +836,7 @@ fn a_tooltip_goes_after_a_scroll() {
         false,
     );
     panel.select_section(Section::Video);
-    panel.window().invoke_row_chosen("preset".into(), 2); // custom: the expert settings
+    panel.window().invoke_row_chosen("preset".into(), 4); // custom: the expert settings
     let window = WINDOW.with(Rc::clone);
     let size = (1040, 720);
     let at = |x: f32, y: f32| LogicalPosition::new(x, y);
