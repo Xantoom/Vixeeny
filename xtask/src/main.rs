@@ -5,6 +5,7 @@ mod bench;
 mod dist;
 mod icons;
 mod native;
+mod pe;
 
 use anyhow::{Result, bail};
 

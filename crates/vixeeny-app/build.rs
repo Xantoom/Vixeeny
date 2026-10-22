@@ -17,13 +17,14 @@ fn main() {
     }
 }
 
-/// FFmpeg's DLLs (≈ 180 MB) are loaded when a recording or a video thumbnail first needs them,
+/// FFmpeg's DLLs (≈ 65 MB) are loaded when a recording or a video thumbnail first needs them,
 /// not when the program starts: a screenshot, the side strip or a notification start without
-/// them. The DLLs are those of `FFMPEG_DIR/bin`, whatever their version numbers.
+/// them. The DLLs are those of `FFMPEG_DIR/bin`, whatever their version numbers;
+/// `cargo xtask dist` refuses a program that would load them at start.
 fn delay_load_ffmpeg() {
     println!("cargo:rerun-if-env-changed=FFMPEG_DIR");
     let msvc = std::env::var("CARGO_CFG_TARGET_ENV").is_ok_and(|e| e == "msvc");
-    if !msvc || std::env::var_os("CARGO_FEATURE_FFMPEG").is_none() {
+    if !msvc {
         return;
     }
     let Some(dir) = std::env::var_os("FFMPEG_DIR") else {

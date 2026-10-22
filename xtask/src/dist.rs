@@ -137,6 +137,25 @@ pub fn third_party_licenses() -> Result<String> {
     Ok(text)
 }
 
+/// An FFmpeg DLL (`avcodec-63.dll`, `swscale-10.dll`…); not `avrt.dll`, a Windows one.
+fn is_ffmpeg(dll: &str) -> bool {
+    const LIBRARIES: [&str; 7] = [
+        "avcodec",
+        "avdevice",
+        "avfilter",
+        "avformat",
+        "avutil",
+        "swresample",
+        "swscale",
+    ];
+    let dll = dll.to_ascii_lowercase();
+    dll.ends_with(".dll")
+        && LIBRARIES.iter().any(|lib| {
+            dll.strip_prefix(lib)
+                .is_some_and(|rest| rest.starts_with('-'))
+        })
+}
+
 pub fn dist(args: &[String]) -> Result<()> {
     let root = root();
     let mut out = root.join("dist");
@@ -155,6 +174,11 @@ pub fn dist(args: &[String]) -> Result<()> {
     for program in PROGRAMS {
         std::fs::copy(release.join(program), stage.join(program))
             .with_context(|| format!("{program} is missing: run `cargo build --release` first"))?;
+        let imports = crate::pe::imports(&std::fs::read(stage.join(program))?)
+            .with_context(|| format!("cannot read the imports of {program}"))?;
+        if let Some(dll) = imports.at_start.iter().find(|d| is_ffmpeg(d)) {
+            bail!("{program} loads {dll} when it starts: FFmpeg must be delay-loaded (FFMPEG_DIR)");
+        }
     }
     let ffmpeg_bin = root.join("native/build/work/ffmpeg-prebuilt/bin");
     if let Ok(entries) = std::fs::read_dir(&ffmpeg_bin) {
@@ -189,6 +213,13 @@ pub fn dist(args: &[String]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ffmpeg_dlls_are_told_from_the_others() {
+        assert!(is_ffmpeg("avcodec-63.dll") && is_ffmpeg("SWSCALE-10.DLL"));
+        assert!(!is_ffmpeg("avrt.dll") && !is_ffmpeg("KERNEL32.dll"));
+        assert!(!is_ffmpeg("avcodec-63.lib"));
+    }
 
     #[test]
     fn the_manifest_lists_every_file_with_forward_slashes() -> Result<()> {
