@@ -118,6 +118,7 @@ mod nvenc {
     use super::{
         Adapter, DriverCaps, GUID, Interface, Tools, c_void, caps, device, load, s, symbol,
     };
+    use crate::probe::NvencGeneration;
     use crate::registry::{Chroma, Family};
 
     /// The API version FFmpeg's NVENC is built with (`nv-codec-headers` of the pinned build). A
@@ -140,6 +141,8 @@ mod nvenc {
     const SUPPORT_BFRAME_REF_MODE: u32 = 43;
     /// `SUPPORT_BFRAME_REF_MODE` bit: the middle B-frame as a reference.
     const BFRAME_REF_MIDDLE: i32 = 2;
+    const NUM_ENCODER_ENGINES: u32 = 49;
+    const SUPPORT_LOOKAHEAD_LEVEL: u32 = 56;
     const SUPPORT_YUV422_ENCODE: u32 = 59;
 
     const CODECS: [(Family, GUID); 3] = [
@@ -282,6 +285,20 @@ mod nvenc {
             let status = unsafe { get_caps(encoder, codec, &raw mut param, &raw mut value) };
             if status == 0 { value } else { 0 }
         };
+        // AV1 came with Ada, 4:2:2 with Blackwell.
+        let generation = if CODECS
+            .iter()
+            .any(|&(_, guid)| found.contains(&guid) && cap(guid, SUPPORT_YUV422_ENCODE) != 0)
+        {
+            NvencGeneration::Blackwell
+        } else if CODECS
+            .iter()
+            .any(|&(family, guid)| family == Family::Av1 && found.contains(&guid))
+        {
+            NvencGeneration::Ada
+        } else {
+            NvencGeneration::Turing
+        };
         let out = CODECS
             .iter()
             .filter(|(_, guid)| found.contains(guid))
@@ -305,6 +322,9 @@ mod nvenc {
                     temporal_aq: cap(guid, SUPPORT_TEMPORAL_AQ) != 0,
                     engine_fps: 0,
                     amf_throughput: [0; 4],
+                    engines: u32::try_from(cap(guid, NUM_ENCODER_ENGINES)).unwrap_or(0),
+                    lookahead_level: u32::try_from(cap(guid, SUPPORT_LOOKAHEAD_LEVEL)).unwrap_or(0),
+                    generation,
                 });
                 found
             })
@@ -328,7 +348,7 @@ mod nvenc {
 
 mod amf {
     use super::{Adapter, DriverCaps, Interface, c_void, caps, device, load, s, symbol, wide};
-    use crate::probe::Tools;
+    use crate::probe::{NvencGeneration, Tools};
     use crate::registry::{Chroma, Family};
 
     /// The names one codec's component goes by (VideoEncoderVCE.h, VideoEncoderHEVC.h,
@@ -579,6 +599,9 @@ mod amf {
             engine_fps: 0,
             // SAFETY: the live component.
             amf_throughput: unsafe { throughput(&component, codec, bframes.is_some()) },
+            engines: 0,
+            lookahead_level: 0,
+            generation: NvencGeneration::Turing,
         };
         let mut input = std::ptr::null_mut();
         // SAFETY: GetInputCaps on the live caps.
@@ -739,7 +762,7 @@ mod amf {
 
 mod vpl {
     use super::{Adapter, DriverCaps, HMODULE, c_void, caps, load, s, symbol, wide};
-    use crate::probe::{NOT_DESCRIBED, Tools};
+    use crate::probe::{NOT_DESCRIBED, NvencGeneration, Tools};
     use crate::registry::{Chroma, Family};
 
     const fn fourcc(code: &[u8; 4]) -> u32 {
@@ -997,6 +1020,9 @@ mod vpl {
                 temporal_aq: false,
                 engine_fps: engine_fps(av1, found.family),
                 amf_throughput: [0; 4],
+                engines: 0,
+                lookahead_level: 0,
+                generation: NvencGeneration::Turing,
             });
         }
         out

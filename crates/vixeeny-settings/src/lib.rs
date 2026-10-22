@@ -846,8 +846,12 @@ fn problem_text(kind: &vixeeny_encode::validate::IssueKind, lang: Lang) -> Strin
             "La résolution ou la cadence n'est pas valide.".into(),
         ),
         I::TooLarge { max: (w, h) } => (
-            format!("This encoder takes pictures of {w} × {h} at most: choose HEVC or AV1, or a lower resolution."),
-            format!("Cet encodeur accepte des images de {w} × {h} au plus : choisissez HEVC ou AV1, ou une définition plus basse."),
+            format!(
+                "This encoder takes pictures of {w} × {h} at most: choose HEVC or AV1, or a lower resolution."
+            ),
+            format!(
+                "Cet encodeur accepte des images de {w} × {h} au plus : choisissez HEVC ou AV1, ou une définition plus basse."
+            ),
         ),
         I::FramerateTooHigh { max_fps } => (
             format!("Too many frames per second for this codec at this size (at most {max_fps})."),
@@ -1635,10 +1639,10 @@ mod tests {
         assert!(
             row(&video, "p:preset")
                 .info
-                .contains("Recommended here: P5")
+                .contains("Recommended here: P4")
         );
         assert!(row(&video, "p:preset").info.contains("P6 and P7"));
-        assert!(row(&video, "p:rc.quality").info.contains("Recommended: 23"));
+        assert!(row(&video, "p:rc.quality").info.contains("Recommended: 24"));
         // The speed that keeps up is marked in the list too, and only it.
         let Kind::Choice(presets) = &row(&video, "p:preset").kind else {
             panic!("the preset is a choice");
@@ -1648,7 +1652,7 @@ mod tests {
             .filter(|o| o.recommended)
             .map(|o| o.label.as_str())
             .collect();
-        assert_eq!(marked, ["P5"]);
+        assert_eq!(marked, ["P4"]);
         // A setting with nothing to add has no "i".
         assert!(row(&video, "video_cursor").info.is_empty());
         assert!(row(&video, "preset").info.contains("Compact"));

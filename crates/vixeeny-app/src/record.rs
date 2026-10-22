@@ -249,6 +249,7 @@ pub fn reencoders(config: &Config, clip: &vixeeny_encode::cut::Clip) -> Vec<Reen
         } else {
             8
         };
+        encoder.fit_depth(&mut options, depth);
         out.push(Reencode {
             encoder: encoder.clone(),
             options: options.into_iter().collect(),
@@ -448,6 +449,10 @@ fn plan(
         profile.preset == "custom" || preset != PresetName::Performance,
         u64::from(output_size.0) * u64::from(output_size.1) * u64::from(profile.fps.max(1)),
     );
+    // An SDR monitor has nothing to preserve: such a recording stays SDR.
+    let hdr = monitor.hdr.is_some() && matches!(profile.hdr.as_str(), "keep_hdr" | "hdr");
+    let depth = validate::depth(&encoder, chroma, hdr, probe.as_ref());
+    encoder.fit_depth(&mut options, depth);
     let options: Vec<(String, String)> = options.into_iter().collect();
     let (mut audio, unknown) = vixeeny_audio::plan_tracks(&with_target(&profile.audio));
     for name in unknown {
@@ -473,8 +478,6 @@ fn plan(
             channels: t.channels,
         })
         .collect();
-    // An SDR monitor has nothing to preserve: such a recording stays SDR.
-    let hdr = monitor.hdr.is_some() && matches!(profile.hdr.as_str(), "keep_hdr" | "hdr");
     let storage = replay_storage(config, &encoder, output_size);
     let mut record = RecordConfig {
         options,
@@ -482,7 +485,7 @@ fn plan(
         output_size,
         crop,
         fps: Fps::whole(profile.fps.clamp(1, 240)),
-        depth: validate::depth(&encoder, chroma, hdr, probe.as_ref()),
+        depth,
         chroma,
         hdr,
         peak_nits: monitor.hdr.map_or(1000.0, |h| h.peak_nits),

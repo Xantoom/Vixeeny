@@ -6,6 +6,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::probe::NvencGeneration;
+
 pub(crate) const REGISTRY: &str = include_str!("../codecs/registry.toml");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -452,11 +454,10 @@ impl Encoder {
     /// The speed option that keeps up with `pixel_rate` (width × height × frames a second), and
     /// its value: the best one that still keeps up, with a margin, while a game runs.
     ///
-    /// NVENC: frames a second at 1080p of one encoder (NVIDIA, NVENC Application Note, Video
-    /// Codec SDK 13.1, high-quality tuning; the oldest generation that has the codec: Turing for
-    /// H.264 and HEVC, Ada for AV1). P5 at most: P6 and P7 cost two to three times more for a
-    /// difference VMAF hardly measures. P1 and P2 split each frame between the encoders of the
-    /// large cards (4K and above), so 4K at 120 FPS takes P2.
+    /// NVENC: frames a second at 1080p of one encoder of its generation ([`nvenc_speeds`]).
+    /// P5 at most: P6 and P7 cost two to three times more for 1 to 3 % (SSIMULACRA 2, VMAF).
+    /// H.264 starts at P4, as good as P5 there and half as fast again. Where none keeps up,
+    /// the fastest, which [`Encoder::fit_tools`] may split between the encoders.
     ///
     /// AMD: the best preset whose throughput, as the driver gives it for this engine
     /// ([`Tools::amf_throughput`](crate::probe::Tools)), keeps up. Without it, and on Intel,
@@ -483,35 +484,9 @@ impl Encoder {
         let amf = self.id.starts_with("amf");
         let qsv = self.id.starts_with("qsv");
         match (self.family, self.id.as_str()) {
-            (Family::H264, _) if nvenc => pick(
+            _ if nvenc => pick(
                 "preset",
-                &[
-                    ("p5", 264.0),
-                    ("p4", 430.0),
-                    ("p3", 602.0),
-                    ("p2", 715.0),
-                    ("p1", 833.0),
-                ],
-            ),
-            (Family::Hevc, _) if nvenc => pick(
-                "preset",
-                &[
-                    ("p5", 334.0),
-                    ("p4", 440.0),
-                    ("p3", 552.0),
-                    ("p2", 735.0),
-                    ("p1", 920.0),
-                ],
-            ),
-            (Family::Av1, _) if nvenc => pick(
-                "preset",
-                &[
-                    ("p5", 440.0),
-                    ("p4", 495.0),
-                    ("p3", 549.0),
-                    ("p2", 645.0),
-                    ("p1", 741.0),
-                ],
+                nvenc_speeds(self.family, tools.map(|t| t.generation).unwrap_or_default()),
             ),
             _ if amf && amf_throughput[..3].iter().all(|&t| t > 0) => {
                 let [_, balanced, quality, _] = amf_throughput.map(frames_of_macroblocks);
@@ -596,8 +571,9 @@ impl Encoder {
         }
         if height >= 2000 {
             let scale = &self.rate_control.quality;
-            // One step of a 0-51 scale, as much on the others.
-            let step = ((scale.max - scale.min) as f64 / 51.0).round().max(1.0) as i64;
+            // Two steps of a 0-51 scale, as much on the others: at the same level a 4K picture
+            // measures 2 to 3 steps better per pixel than 1080p (SSIMULACRA 2), for 15 % less.
+            let step = 2 * ((scale.max - scale.min) as f64 / 51.0).round().max(1.0) as i64;
             let ease = if scale.inverted { -step } else { step };
             let quality_options: Vec<String> = self
                 .rate_control
@@ -642,6 +618,17 @@ impl Encoder {
         choose: bool,
         pixel_rate: u64,
     ) {
+        // Constant quality with no ceiling of its own is held to one all the same: NVENC's, of
+        // the smallest level the picture fits (HEVC at 1080p60: about 17 Mbit/s, which turns the
+        // busiest scenes of the quality presets to blocks), AMF's 30 Mbit/s. Half a bit per
+        // pixel leaves the quality to the encoder; NVENC then signals the level that holds it
+        // (HEVC at 1080p60: 5.0, high tier).
+        let constant_quality = ["cq", "qvbr_quality_level"]
+            .iter()
+            .any(|k| options.contains_key(*k));
+        if constant_quality && !options.contains_key("maxrate") {
+            options.insert("maxrate".into(), (pixel_rate / 2).max(1).to_string());
+        }
         let Some(tools) = tools else {
             return;
         };
@@ -706,6 +693,77 @@ impl Encoder {
         if !tools.temporal_aq {
             options.remove("temporal-aq");
         }
+        if matches!(self.family, Family::Hevc | Family::Av1) {
+            self.fit_speed(options, tools, choose && lookahead > 0, pixel_rate);
+        }
+    }
+
+    /// NVENC, HEVC and AV1: the deepest look-ahead when the encoder has the time for it, and a
+    /// frame split between the encoders only when its preset cannot keep up otherwise.
+    ///
+    /// Look-ahead level 3 gives the bits to the frames that need them: at the same size the
+    /// worst 5 % of the frames of fast games gain 9 to 36 % (SSIMULACRA 2), for 3 % of HEVC's
+    /// speed and a third of AV1's (RTX 5080), hence [`DEEP_LOOKAHEAD_SHARE`] of the speed
+    /// table. It does not run with the split.
+    ///
+    /// The split leaves a seam across the middle of the picture (the strongest edge of every
+    /// 4K encode measured, at all levels), so NVENC's own choice of it (P1 and P2 from 4K) is
+    /// turned off, and it is forced only when the preset (the fastest when none keeps up) is
+    /// too slow.
+    fn fit_speed(
+        &self,
+        options: &mut BTreeMap<String, String>,
+        tools: crate::probe::Tools,
+        deep_lookahead: bool,
+        pixel_rate: u64,
+    ) {
+        let speeds = nvenc_speeds(self.family, tools.generation);
+        let needed = frames_needed(pixel_rate);
+        // FFmpeg's default preset is P4; P6 and P7 are not in the table (slower than P5).
+        let preset = options
+            .get("preset")
+            .map_or("p4", String::as_str)
+            .to_owned();
+        let speed = speeds
+            .iter()
+            .find(|(p, _)| *p == preset)
+            .map(|(_, fps)| *fps);
+        if tools.engines >= 2 {
+            let split = speed.is_some_and(|fps| fps < needed);
+            let mode = if split { "forced" } else { "disabled" };
+            options.insert("split_encode_mode".into(), mode.into());
+            if split {
+                // The fastest preset, taken when none kept up, gives way to the best one the
+                // split keeps up with; a preset set by hand stays.
+                if speeds.last().is_some_and(|(p, _)| *p == preset)
+                    && let Some((better, _)) =
+                        speeds.iter().find(|(_, fps)| fps * SPLIT_GAIN >= needed)
+                {
+                    options.insert("preset".into(), (*better).into());
+                }
+                return;
+            }
+        }
+        let share = if self.family == Family::Av1 {
+            DEEP_LOOKAHEAD_SHARE.1
+        } else {
+            DEEP_LOOKAHEAD_SHARE.0
+        };
+        if deep_lookahead
+            && tools.lookahead_level >= 3
+            && !options.contains_key("lookahead_level")
+            && speed.is_some_and(|fps| fps * share >= needed)
+        {
+            options.insert("lookahead_level".into(), "3".into());
+        }
+    }
+
+    /// AMF's pre-analysis takes only 8-bit pictures: with 10 bits the encoder does not open
+    /// (AMD's AMF issue 399), so it is left out.
+    pub fn fit_depth(&self, options: &mut BTreeMap<String, String>, depth: u8) {
+        if self.vendor == Vendor::Amd && depth > 8 {
+            options.remove("preanalysis");
+        }
     }
 
     pub fn supports_format(&self, depth: u8, chroma: Chroma) -> bool {
@@ -725,6 +783,35 @@ fn frames_needed(pixel_rate: u64) -> f64 {
 fn frames_of_macroblocks(macroblocks: u64) -> f64 {
     macroblocks as f64 * 256.0 / (1920.0 * 1080.0)
 }
+
+/// The presets of an NVENC encoder that each gain speed, best first, and the frames of 1080p a
+/// second one encoder keeps up with at each, with the presets' other tools (look-ahead,
+/// quarter-resolution pass, B-frames). Measured on an RTX 5080 (Blackwell), the slower of
+/// 1080p and 4K: HEVC is no faster below P3, AV1 at P4 than P5, H.264 below P2. The older
+/// generations are scaled by their P5 in the NVENC Application Note (Video Codec SDK 13.0):
+/// Turing and Ampere encode at the same pace; AV1 starts with Ada.
+fn nvenc_speeds(family: Family, generation: NvencGeneration) -> &'static [(&'static str, f64)] {
+    use NvencGeneration::{Ada, Blackwell, Turing};
+    match (family, generation) {
+        (Family::H264, Turing) => &[("p4", 401.0), ("p3", 504.0), ("p2", 623.0)],
+        (Family::H264, Ada) => &[("p4", 430.0), ("p3", 540.0), ("p2", 668.0)],
+        (Family::H264, Blackwell) => &[("p4", 483.0), ("p3", 607.0), ("p2", 751.0)],
+        (Family::Hevc, Turing) => &[("p5", 242.0), ("p4", 284.0), ("p3", 401.0)],
+        (Family::Hevc, Ada) => &[("p5", 299.0), ("p4", 350.0), ("p3", 495.0)],
+        (Family::Hevc, Blackwell) => &[("p5", 378.0), ("p4", 443.0), ("p3", 626.0)],
+        (Family::Av1, Blackwell) => &[("p5", 363.0), ("p3", 425.0), ("p2", 459.0), ("p1", 544.0)],
+        (Family::Av1, _) => &[("p5", 290.0), ("p3", 340.0), ("p2", 367.0), ("p1", 435.0)],
+        _ => &[],
+    }
+}
+
+/// The share of NVENC's speed (HEVC, AV1) left with look-ahead level 3, the lower of 1080p and
+/// 4K (RTX 5080: HEVC 0.97 and 0.83, AV1 0.65 and 0.61).
+const DEEP_LOOKAHEAD_SHARE: (f64, f64) = (0.83, 0.61);
+
+/// The speed the split between two encoders gives (RTX 5080, 4K at P5: HEVC 124 to 207 FPS,
+/// AV1 118 to 194).
+const SPLIT_GAIN: f64 = 1.6;
 
 /// The share of AMF's balanced speed its quality preset keeps, and of that what is left with
 /// B-frames on (see [`Encoder::fit_tools`]).

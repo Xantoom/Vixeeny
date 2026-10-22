@@ -92,6 +92,25 @@ pub struct Tools {
     /// said). More precise than [`Tools::engine_fps`], which stands in for it.
     #[serde(default)]
     pub amf_throughput: [u64; 4],
+    /// NVENC: the encoders of the GPU (2 or more split a large frame between them).
+    #[serde(default)]
+    pub engines: u32,
+    /// NVENC: the deepest look-ahead analysis (0: none, 3: the most).
+    #[serde(default)]
+    pub lookahead_level: u32,
+    /// NVENC: the generation of the encoder, for its speed.
+    #[serde(default)]
+    pub generation: NvencGeneration,
+}
+
+/// The NVENC generations whose speeds differ (NVENC Application Note): Turing and Ampere encode
+/// at about the same pace, Ada (the first with AV1) and Blackwell (the first with 4:2:2) faster.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NvencGeneration {
+    #[default]
+    Turing,
+    Ada,
+    Blackwell,
 }
 
 /// [`Tools::max_bframes`] when the driver does not describe it.
@@ -232,7 +251,7 @@ pub fn identity() -> String {
 }
 
 /// The way the probe works: bumped when a change of it must run it again everywhere.
-pub const PROBE_REVISION: u32 = 5;
+pub const PROBE_REVISION: u32 = 6;
 
 /// Probes every encoder. `version` is what the answer depends on besides the machine (see
 /// [`identity`]), part of the cache key.

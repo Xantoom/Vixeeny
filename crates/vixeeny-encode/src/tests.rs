@@ -117,7 +117,7 @@ fn the_custom_options_follow_the_rate_mode() {
     assert_eq!(o["preencode"], "1");
     assert_eq!(o["high_motion_quality_boost_enable"], "1");
     let o = custom("amf_av1", &[("rc.quality", "120")]);
-    assert_eq!(o["qvbr_quality_level"], "28");
+    assert_eq!(o["qvbr_quality_level"], "44");
     // Values out of range are clamped, unknown ones fall back to the default, `auto` is left out.
     let o = custom(
         "libx264",
@@ -150,8 +150,8 @@ fn amf_quality_eases_the_right_way_from_4k() {
             .clone()
     };
     // 51 is QVBR's best: easing lowers the level.
-    assert_eq!(level(1080), "32");
-    assert_eq!(level(2160), "31");
+    assert_eq!(level(1080), "51");
+    assert_eq!(level(2160), "49");
 }
 
 #[test]
@@ -539,7 +539,10 @@ fn a_system_without_a_gpu_only_offers_software() {
         pick_auto(&r, Some(&result), None).map(|e| e.id.as_str()),
         Some("libx264")
     );
-    assert_eq!(pick_auto(&r, None, None).map(|e| e.id.as_str()), Some("libx264"));
+    assert_eq!(
+        pick_auto(&r, None, None).map(|e| e.id.as_str()),
+        Some("libx264")
+    );
 }
 
 #[test]
@@ -777,27 +780,29 @@ fn simple_presets_follow_the_resolution_and_frame_rate() {
     let preset = |id: &str, (w, h): (u64, u64), fps: u64| {
         r.get(id).unwrap().speed_for(w * h * fps, None).unwrap().1
     };
-    // P5 wherever one encoder keeps up: up to 4K at 60 FPS in HEVC and AV1.
-    for id in ["nvenc_hevc", "nvenc_av1"] {
-        assert_eq!(preset(id, (1920, 1080), 60), "p5");
-        assert_eq!(preset(id, (2560, 1440), 120), "p5");
-        assert_eq!(preset(id, (3840, 2160), 60), "p5");
-        // 4K at 120: split between the encoders of the large cards.
-        assert_eq!(preset(id, (3840, 2160), 120), "p2");
-    }
-    assert_eq!(preset("nvenc_h264", (2560, 1440), 60), "p5");
+    // Without the generation, Turing's speeds (AV1: Ada's): P5 up to 1440p60, faster above,
+    // the fastest where none keeps up.
+    assert_eq!(preset("nvenc_hevc", (1920, 1080), 60), "p5");
+    assert_eq!(preset("nvenc_hevc", (2560, 1440), 60), "p5");
+    assert_eq!(preset("nvenc_hevc", (3840, 2160), 60), "p3");
+    assert_eq!(preset("nvenc_hevc", (3840, 2160), 120), "p3");
+    assert_eq!(preset("nvenc_av1", (2560, 1440), 120), "p5");
+    assert_eq!(preset("nvenc_av1", (3840, 2160), 60), "p3");
+    assert_eq!(preset("nvenc_av1", (3840, 2160), 120), "p1");
+    // H.264 starts at P4, as good as P5 there.
+    assert_eq!(preset("nvenc_h264", (2560, 1440), 60), "p4");
     assert_eq!(preset("nvenc_h264", (3840, 2160), 60), "p4");
     assert_eq!(preset("amf_av1", (3840, 2160), 60), "quality");
     assert_eq!(preset("amf_av1", (3840, 2160), 120), "balanced");
     assert_eq!(preset("libx264", (1920, 1080), 60), "veryfast");
     assert_eq!(preset("libx264", (3840, 2160), 60), "ultrafast");
     assert!(r.encoders().all(|e| e.speed_for(1, None).is_some()));
-    // The registry's presets, at that speed; from 4K on, the quality scale eases a step.
+    // The registry's presets, at that speed; from 4K on, the quality scale eases two steps.
     let av1 = r.get("nvenc_av1").unwrap();
     let opts = |size, fps| av1.preset_options(PresetName::Quality, size, fps, None);
     assert_eq!(opts((1920, 1080), 60)["cq"], "24");
-    assert_eq!(opts((3840, 2160), 60)["cq"], "25");
-    assert_eq!(opts((3840, 2160), 120)["preset"], "p2");
+    assert_eq!(opts((3840, 2160), 60)["cq"], "26");
+    assert_eq!(opts((3840, 2160), 120)["preset"], "p1");
     // The fast preset keeps its own speed.
     assert_eq!(
         av1.preset_options(PresetName::Performance, (1920, 1080), 60, None)["preset"],
@@ -824,6 +829,9 @@ fn nvenc_options_follow_what_the_card_has() {
         temporal_aq: true,
         engine_fps: 0,
         amf_throughput: [0; 4],
+        engines: 0,
+        lookahead_level: 0,
+        generation: Default::default(),
     };
     // Everything there: the look-ahead, which places up to 4 B-frames, used as references.
     let o = fit("nvenc_av1", PresetName::Small, Some(ada), true);
@@ -843,6 +851,9 @@ fn nvenc_options_follow_what_the_card_has() {
         temporal_aq: false,
         engine_fps: 0,
         amf_throughput: [0; 4],
+        engines: 0,
+        lookahead_level: 0,
+        generation: Default::default(),
     };
     let o = fit("nvenc_hevc", PresetName::Quality, Some(pascal), true);
     assert_eq!(o["bf"], "0");
@@ -862,11 +873,14 @@ fn nvenc_options_follow_what_the_card_has() {
     // The fast preset keeps the encoder's own choices; an undescribed card is left alone.
     let o = fit("nvenc_hevc", PresetName::Performance, Some(ada), false);
     assert!(!o.contains_key("bf") && !o.contains_key("rc-lookahead"));
-    let before = r
-        .get("nvenc_hevc")
-        .unwrap()
-        .preset_options(PresetName::Quality, (1920, 1080), 60, None);
-    assert_eq!(fit("nvenc_hevc", PresetName::Quality, None, true), before);
+    let before =
+        r.get("nvenc_hevc")
+            .unwrap()
+            .preset_options(PresetName::Quality, (1920, 1080), 60, None);
+    let mut fitted = fit("nvenc_hevc", PresetName::Quality, None, true);
+    // Constant quality gets a ceiling all the same: half a bit per pixel.
+    assert_eq!(fitted.remove("maxrate").as_deref(), Some("62208000"));
+    assert_eq!(fitted, before);
     // A count set by hand stays, within what the card takes.
     let e = r.get("nvenc_hevc").unwrap();
     let mut o = e.custom_options(&BTreeMap::from([("bframes".into(), "4".into())]));
@@ -883,6 +897,104 @@ fn nvenc_options_follow_what_the_card_has() {
 }
 
 #[test]
+fn nvenc_analyses_deeper_when_it_has_the_time_and_splits_frames_last() {
+    use crate::probe::{NvencGeneration, Tools};
+    use crate::registry::PresetName;
+    let r = registry();
+    let blackwell = Tools {
+        max_bframes: 4,
+        bframe_ref_middle: true,
+        lookahead: true,
+        temporal_aq: true,
+        engine_fps: 0,
+        amf_throughput: [0; 4],
+        engines: 2,
+        lookahead_level: 3,
+        generation: NvencGeneration::Blackwell,
+    };
+    let fit = |id: &str, preset, tools: Tools, (w, h): (u32, u32), fps: u32| {
+        let e = r.get(id).unwrap();
+        let mut o = e.preset_options(preset, (w, h), fps, Some(tools));
+        e.fit_tools(
+            &mut o,
+            Some(tools),
+            preset != PresetName::Performance,
+            u64::from(w * h * fps),
+        );
+        o
+    };
+    // 1080p60: the deepest look-ahead, no split.
+    let o = fit("nvenc_hevc", PresetName::Small, blackwell, (1920, 1080), 60);
+    assert_eq!(o["lookahead_level"], "3");
+    assert_eq!(o["split_encode_mode"], "disabled");
+    assert_eq!(o["maxrate"], "62208000");
+    // 4K60: HEVC still has the time, AV1 no longer.
+    let o = fit("nvenc_hevc", PresetName::Small, blackwell, (3840, 2160), 60);
+    assert_eq!(
+        (o["preset"].as_str(), o["lookahead_level"].as_str()),
+        ("p5", "3")
+    );
+    let o = fit("nvenc_av1", PresetName::Small, blackwell, (3840, 2160), 60);
+    assert_eq!(o["preset"], "p5");
+    assert!(!o.contains_key("lookahead_level"));
+    // 4K120: HEVC at P3 keeps up alone; AV1 does not even at P1, so its frames are split,
+    // which P3 then keeps up with.
+    let o = fit(
+        "nvenc_hevc",
+        PresetName::Small,
+        blackwell,
+        (3840, 2160),
+        120,
+    );
+    assert_eq!(
+        (o["preset"].as_str(), o["split_encode_mode"].as_str()),
+        ("p3", "disabled")
+    );
+    let o = fit("nvenc_av1", PresetName::Small, blackwell, (3840, 2160), 120);
+    assert_eq!(
+        (o["preset"].as_str(), o["split_encode_mode"].as_str()),
+        ("p3", "forced")
+    );
+    assert!(!o.contains_key("lookahead_level"));
+    // 8K60: split at the fastest preset.
+    let o = fit("nvenc_hevc", PresetName::Small, blackwell, (7680, 4320), 60);
+    assert_eq!(
+        (o["preset"].as_str(), o["split_encode_mode"].as_str()),
+        ("p3", "forced")
+    );
+    assert!(!o.contains_key("lookahead_level"));
+    // One encoder: nothing to split; no level 3 on the card or in the fast preset: none.
+    let single = Tools {
+        engines: 1,
+        lookahead_level: 0,
+        ..blackwell
+    };
+    let o = fit("nvenc_hevc", PresetName::Small, single, (1920, 1080), 60);
+    assert!(!o.contains_key("split_encode_mode") && !o.contains_key("lookahead_level"));
+    let o = fit(
+        "nvenc_hevc",
+        PresetName::Performance,
+        blackwell,
+        (1920, 1080),
+        60,
+    );
+    assert!(!o.contains_key("lookahead_level"));
+    // AMF: a ceiling too; its pre-analysis only in 8 bits. Intel's ICQ has none.
+    let amf = r.get("amf_hevc").unwrap();
+    let mut o = amf.custom_options(&[("preanalysis".to_owned(), "1".to_owned())].into());
+    amf.fit_tools(&mut o, None, true, 1920 * 1080 * 60);
+    assert_eq!(o["maxrate"], "62208000");
+    amf.fit_depth(&mut o, 8);
+    assert_eq!(o["preanalysis"], "1");
+    amf.fit_depth(&mut o, 10);
+    assert!(!o.contains_key("preanalysis"));
+    let qsv = r.get("qsv_hevc").unwrap();
+    let mut o = qsv.preset_options(PresetName::Small, (1920, 1080), 60, None);
+    qsv.fit_tools(&mut o, None, true, 1920 * 1080 * 60);
+    assert!(!o.contains_key("maxrate"));
+}
+
+#[test]
 fn amd_and_intel_options_follow_their_media_engine() {
     use crate::probe::{NOT_DESCRIBED, Tools};
     use crate::registry::PresetName;
@@ -896,6 +1008,9 @@ fn amd_and_intel_options_follow_their_media_engine() {
         temporal_aq: false,
         engine_fps: 194,
         amf_throughput: [0; 4],
+        engines: 0,
+        lookahead_level: 0,
+        generation: Default::default(),
     };
     let av1 = r.get("amf_av1").unwrap();
     let speed = |tools, size, fps| av1.speed_for(rate(size, fps), Some(tools)).unwrap().1;
@@ -905,7 +1020,12 @@ fn amd_and_intel_options_follow_their_media_engine() {
     // B-frames only with room to spare beside the quality preset; never the pre-analysis.
     let fit = |tools: Tools, (w, h): (u32, u32), fps: u32| {
         let mut o = av1.preset_options(PresetName::Small, (w, h), fps, Some(tools));
-        av1.fit_tools(&mut o, Some(tools), true, rate((w.into(), h.into()), fps.into()));
+        av1.fit_tools(
+            &mut o,
+            Some(tools),
+            true,
+            rate((w.into(), h.into()), fps.into()),
+        );
         o
     };
     assert_eq!(fit(rdna, (1920, 1080), 30)["bf"], "2");
@@ -920,6 +1040,9 @@ fn amd_and_intel_options_follow_their_media_engine() {
     // 8160 a 1080p frame).
     let said = Tools {
         amf_throughput: [8160 * 400, 8160 * 200, 8160 * 100, 8160 * 70],
+        engines: 0,
+        lookahead_level: 0,
+        generation: Default::default(),
         ..rdna
     };
     assert_eq!(speed(said, (1920, 1080), 60), "quality");
@@ -937,6 +1060,9 @@ fn amd_and_intel_options_follow_their_media_engine() {
             temporal_aq: false,
             engine_fps,
             amf_throughput: [0; 4],
+            engines: 0,
+            lookahead_level: 0,
+            generation: Default::default(),
         };
         qsv.speed_for(rate(size, fps), Some(tools)).unwrap().1
     };
@@ -970,9 +1096,10 @@ fn pictures_larger_than_an_encoder_takes_go_to_one_that_takes_them() {
             probe: Some(&intel),
         },
     );
-    assert!(issues.iter().any(|i| i.kind
-        == IssueKind::TooLarge {
-            max: (4096, 4096)
-        }
-        && i.severity == Severity::Error));
+    assert!(
+        issues
+            .iter()
+            .any(|i| i.kind == IssueKind::TooLarge { max: (4096, 4096) }
+                && i.severity == Severity::Error)
+    );
 }

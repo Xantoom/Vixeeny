@@ -125,9 +125,9 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
             )?;
             if nvenc {
                 text.push_str(if fr {
-                    "\n\nP6 et P7 : 2 à 3 fois le calcul de P5, gain très faible.\nP1 et P2 : seuls presets pour la 4K à 120 FPS sur les cartes à plusieurs encodeurs."
+                    "\n\nP6 et P7 : 2 à 3 fois le calcul de P5, gain très faible.\nP1 et P2 : les plus rapides, environ 8 % de taille en plus à image égale."
                 } else {
-                    "\n\nP6 and P7: 2 to 3 times the computing of P5, very small gain.\nP1 and P2: the only presets for 4K at 120 FPS on cards with several encoders."
+                    "\n\nP6 and P7: 2 to 3 times the computing of P5, very small gain.\nP1 and P2: the fastest, about 8 % larger at the same picture."
                 });
             }
             if let Some(r) = recommended {
@@ -144,8 +144,8 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
             "Deux passes par image : qualité mieux répartie, plus de calcul.",
         ),
         "p:lookahead" if nvenc(env, config) => pick(
-            "Analyses the next frames to spread the quality and place the B-frames.\nUses graphics memory.\nAuto: 8 frames.",
-            "Analyse les images suivantes pour répartir la qualité et placer les images B.\nUtilise de la mémoire vidéo.\nAuto : 8 images.",
+            "Analyses the next frames to spread the quality and place the B-frames.\nUses graphics memory.\nAuto: 8 frames, analysed in depth (HEVC, AV1) when the encoder has the time.",
+            "Analyse les images suivantes pour répartir la qualité et placer les images B.\nUtilise de la mémoire vidéo.\nAuto : 8 images, analysées en profondeur (HEVC, AV1) quand l'encodeur en a le temps.",
         ),
         "p:lookahead" => pick(
             "Analyses the next frames to spread the quality.\nUses graphics memory.",
