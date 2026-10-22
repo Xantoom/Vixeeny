@@ -493,6 +493,7 @@ fn a_slow_encoder_drops_input_frames_instead_of_blocking() {
         ("preset".into(), "veryslow".into()),
         ("crf".into(), "18".into()),
     ];
+    let pool = cfg.buffers.clone();
     let rec = Recorder::start(cfg, namer(&dir, "mkv")).unwrap();
     let started = std::time::Instant::now();
     let mut refused = 0;
@@ -504,6 +505,8 @@ fn a_slow_encoder_drops_input_frames_instead_of_blocking() {
         }
     }
     assert!(refused > 0, "the queue must overflow");
+    // The pixels of a refused frame go back to the pool, for the next capture.
+    assert!(pool.take(0).capacity() >= big.data.len());
     assert_eq!(
         rec.stats()
             .queue_dropped

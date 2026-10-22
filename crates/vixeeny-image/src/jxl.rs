@@ -49,7 +49,7 @@ pub(crate) fn encode(image: &Bgra<'_>, settings: &JxlSettings) -> Result<Vec<u8>
 /// 16 bits per sample, BT.2020 / PQ.
 pub(crate) fn encode_hdr(image: &Hdr<'_>, settings: &JxlSettings) -> Result<Vec<u8>, ImageError> {
     // Native endianness, as the pixel format of `write` says.
-    let bytes: Vec<u8> = image.to_pq().iter().flat_map(|c| c.to_ne_bytes()).collect();
+    let bytes = image.to_pq_bytes(u16::to_ne_bytes);
     let colour = JxlColorEncoding {
         color_space: JxlColorSpace_JXL_COLOR_SPACE_RGB,
         white_point: JxlWhitePoint_JXL_WHITE_POINT_D65,

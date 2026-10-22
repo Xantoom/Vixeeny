@@ -231,6 +231,8 @@ pub struct Recorder {
     tx: SyncSender<Cmd>,
     join: JoinHandle<Result<Summary, RecordError>>,
     stats: Arc<Stats>,
+    /// Where the pixels of a frame the queue had no room for go back.
+    buffers: vixeeny_common::buffers::BufferPool,
 }
 
 type Namer = Box<dyn FnMut(u32) -> PathBuf + Send>;
@@ -243,6 +245,7 @@ impl Recorder {
         let (tx, rx) = sync_channel(config.queue.max(1));
         let (ready_tx, ready_rx) = sync_channel(1);
         let worker_stats = stats.clone();
+        let buffers = config.buffers.clone();
         let join = std::thread::Builder::new()
             .name("vixeeny-record".into())
             .spawn(move || {
@@ -262,7 +265,12 @@ impl Recorder {
             })
             .map_err(|e| RecordError::Io(e.to_string()))?;
         match ready_rx.recv() {
-            Ok(Ok(())) => Ok(Self { tx, join, stats }),
+            Ok(Ok(())) => Ok(Self {
+                tx,
+                join,
+                stats,
+                buffers,
+            }),
             Ok(Err(message)) => {
                 let _ = join.join();
                 Err(RecordError::Config(message))
@@ -291,8 +299,15 @@ impl Recorder {
     fn queue(&self, t: i64, input: Input) -> bool {
         match self.tx.try_send(Cmd::Frame(t, Box::new(input))) {
             Ok(()) => true,
-            Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => {
+            Err(TrySendError::Full(cmd) | TrySendError::Disconnected(cmd)) => {
                 self.stats.queue_dropped.fetch_add(1, Ordering::Relaxed);
+                // The pixels go back to the capture: the next frame does not allocate them
+                // again while the encoder is already behind.
+                if let Cmd::Frame(_, input) = cmd
+                    && let Input::Cpu(frame) = *input
+                {
+                    self.buffers.give(frame.data);
+                }
                 false
             }
         }

@@ -486,9 +486,14 @@ fn flatten<'a>(image: RgbaImage, annotations: impl Iterator<Item = &'a Annotatio
         return image;
     };
     let (width, height) = (image.width, image.height);
-    // The base is opaque, so straight and premultiplied RGBA are the same bytes.
-    let Some(mut pix) = Pixmap::from_vec(image.data.clone(), size) else {
+    if image.data.len() != width as usize * height as usize * 4 {
         return image;
+    }
+    // The base is opaque, so straight and premultiplied RGBA are the same bytes. Its pixels
+    // become the drawing's: no copy (two 4K screens are 66 MB).
+    let Some(mut pix) = Pixmap::from_vec(image.data, size) else {
+        // Not reached: the length was checked above.
+        return RgbaImage::filled(width, height, Color::rgb(0, 0, 0));
     };
     let (w, h) = (width as usize, height as usize);
     for annotation in annotations {

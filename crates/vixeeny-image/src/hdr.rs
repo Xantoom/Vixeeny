@@ -61,6 +61,27 @@ impl Hdr<'_> {
             });
         out
     }
+
+    /// [`to_pq`](Self::to_pq) as bytes, each sample laid out by `bytes` (`u16::to_be_bytes` for
+    /// PNG): written in place, without a copy of the samples.
+    pub(crate) fn to_pq_bytes(self, bytes: fn(u16) -> [u8; 2]) -> Vec<u8> {
+        let w = self.width as usize;
+        let mut out = vec![0; w * self.height as usize * 6];
+        out.par_chunks_mut(w * 6)
+            .zip(self.rgba.par_chunks(w * 4))
+            .for_each(|(out, row)| {
+                for (o, px) in out
+                    .as_chunks_mut::<6>()
+                    .0
+                    .iter_mut()
+                    .zip(row.as_chunks::<4>().0)
+                {
+                    let [r, g, b] = colour::scrgb_to_pq([px[0], px[1], px[2]]).map(bytes);
+                    *o = [r[0], r[1], g[0], g[1], b[0], b[1]];
+                }
+            });
+        out
+    }
 }
 
 /// PQ BT.2020 RGB (16 bits, any bit layout `signal` reads as 0…1) → opaque sRGB BGRA, tone-mapped

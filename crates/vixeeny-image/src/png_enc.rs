@@ -11,7 +11,7 @@ pub(crate) fn encode(image: &Bgra<'_>, settings: &PngSettings) -> Result<Vec<u8>
 
 /// 16-bit RGB PNG, BT.2020 / PQ, described by a `cICP` chunk (PNG third edition).
 pub(crate) fn encode_hdr(image: &Hdr<'_>, settings: &PngSettings) -> Result<Vec<u8>, ImageError> {
-    let samples: Vec<u8> = image.to_pq().iter().flat_map(|c| c.to_be_bytes()).collect();
+    let samples = image.to_pq_bytes(u16::to_be_bytes);
     write(image.width, image.height, &samples, settings, true)
 }
 
