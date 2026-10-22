@@ -845,6 +845,10 @@ fn problem_text(kind: &vixeeny_encode::validate::IssueKind, lang: Lang) -> Strin
             "The resolution or the frame rate is not valid.".into(),
             "La résolution ou la cadence n'est pas valide.".into(),
         ),
+        I::TooLarge { max: (w, h) } => (
+            format!("This encoder takes pictures of {w} × {h} at most: choose HEVC or AV1, or a lower resolution."),
+            format!("Cet encodeur accepte des images de {w} × {h} au plus : choisissez HEVC ou AV1, ou une définition plus basse."),
+        ),
         I::FramerateTooHigh { max_fps } => (
             format!("Too many frames per second for this codec at this size (at most {max_fps})."),
             format!("Trop d'images par seconde pour ce codec à cette taille ({max_fps} au plus)."),
@@ -1148,6 +1152,7 @@ mod tests {
                     hdr: false,
                 }],
                 tools: None,
+                max: None,
             }],
             ..ProbeResult::default()
         };

@@ -304,6 +304,7 @@ mod nvenc {
                     lookahead: cap(guid, SUPPORT_LOOKAHEAD) != 0,
                     temporal_aq: cap(guid, SUPPORT_TEMPORAL_AQ) != 0,
                     engine_fps: 0,
+                    amf_throughput: [0; 4],
                 });
                 found
             })
@@ -330,23 +331,62 @@ mod amf {
     use crate::probe::Tools;
     use crate::registry::{Chroma, Family};
 
-    /// Each codec's component, then its capabilities saying it has B-frames (none for HEVC in
-    /// FFmpeg) and the pre-analysis (VideoEncoderVCE.h, VideoEncoderHEVC.h, VideoEncoderAV1.h).
-    const COMPONENTS: [(Family, &str, Option<&str>, &str); 3] = [
-        (
-            Family::H264,
-            "AMFVideoEncoderVCE_AVC",
-            Some("BFrames"),
-            "PreAnalysis",
-        ),
-        (Family::Hevc, "AMFVideoEncoderHW_HEVC", None, "HevcPreAnalysis"),
-        (
-            Family::Av1,
-            "AMFVideoEncoderHW_AV1",
-            Some("AV1BFrames"),
-            "Av1PreAnalysis",
-        ),
+    /// The names one codec's component goes by (VideoEncoderVCE.h, VideoEncoderHEVC.h,
+    /// VideoEncoderAV1.h).
+    struct Codec {
+        family: Family,
+        component: &'static str,
+        usage: &'static str,
+        preset: &'static str,
+        /// The speed, balanced and quality presets.
+        presets: [i64; 3],
+        /// The capability saying it has B-frames (none for HEVC in FFmpeg), then the B-frame
+        /// pattern and the most consecutive ones.
+        bframes: Option<(&'static str, &'static str, &'static str)>,
+        preanalysis: &'static str,
+        max_throughput: &'static str,
+    }
+
+    const COMPONENTS: [Codec; 3] = [
+        Codec {
+            family: Family::H264,
+            component: "AMFVideoEncoderVCE_AVC",
+            usage: "Usage",
+            preset: "QualityPreset",
+            presets: [1, 0, 2],
+            bframes: Some(("BFrames", "BPicturesPattern", "MaxConsecutiveBPictures")),
+            preanalysis: "PreAnalysis",
+            max_throughput: "MaxThroughput",
+        },
+        Codec {
+            family: Family::Hevc,
+            component: "AMFVideoEncoderHW_HEVC",
+            usage: "HevcUsage",
+            preset: "HevcQualityPreset",
+            presets: [10, 5, 0],
+            bframes: None,
+            preanalysis: "HevcPreAnalysis",
+            max_throughput: "HevcMaxThroughput",
+        },
+        Codec {
+            family: Family::Av1,
+            component: "AMFVideoEncoderHW_AV1",
+            usage: "Av1Usage",
+            preset: "Av1QualityPreset",
+            presets: [100, 70, 30],
+            bframes: Some((
+                "AV1BFrames",
+                "Av1BPicturesPattern",
+                "Av1MaxConsecutiveBPictures",
+            )),
+            preanalysis: "Av1PreAnalysis",
+            max_throughput: "Av1CapMaxThroughput",
+        },
     ];
+    /// The transcoding usage, Vixeeny's, the same value for every codec.
+    const USAGE_TRANSCODING: i64 = 0;
+    /// The B-frames whose cost is asked (see [`crate::registry::Encoder::fit_tools`]).
+    const ASKED_BFRAMES: i64 = 2;
     /// The most B-frames FFmpeg gives AMF.
     const MAX_BFRAMES: u32 = 3;
     /// Frames of 1080p a second at the balanced preset, the slowest chip of each generation in
@@ -365,6 +405,7 @@ mod amf {
     const CONTEXT_TERMINATE: usize = 13;
     const CONTEXT_INIT_DX11: usize = 18;
     const COMPONENT_GET_CAPS: usize = 26;
+    const STORAGE_SET_PROPERTY: usize = 3;
     const STORAGE_GET_PROPERTY: usize = 4;
     const CAPS_ACCELERATION_TYPE: usize = 13;
     const CAPS_INPUT: usize = 14;
@@ -374,6 +415,7 @@ mod amf {
     const IO_FORMAT_AT: usize = 7;
 
     const AMF_VARIANT_BOOL: i32 = 1;
+    const AMF_VARIANT_INT64: i32 = 2;
 
     /// `AMFVariantStruct`: its type, then a union of 16 bytes aligned on 8.
     #[repr(C)]
@@ -458,9 +500,9 @@ mod amf {
             return Ok(Vec::new()); // not an AMD encoder this runtime can drive
         }
         let mut out = Vec::new();
-        for (family, id, bframes, preanalysis) in COMPONENTS {
+        for codec in &COMPONENTS {
             // SAFETY: the calls below follow the AMF headers' vtables on live interfaces.
-            let found = unsafe { component(factory, &context, family, id, bframes, preanalysis) };
+            let found = unsafe { component(factory, &context, codec) };
             out.extend(found);
         }
         let engine_fps = if out.iter().any(|c| c.family == Family::Av1) {
@@ -491,12 +533,9 @@ mod amf {
     unsafe fn component(
         factory: *mut Object,
         context: &Owned,
-        family: Family,
-        id: &str,
-        bframes: Option<&str>,
-        preanalysis: &str,
+        codec: &Codec,
     ) -> Option<DriverCaps> {
-        let id = wide(id);
+        let id = wide(codec.component);
         let mut component = std::ptr::null_mut();
         // SAFETY: per the caller.
         let status = unsafe {
@@ -518,18 +557,8 @@ mod amf {
             return None;
         }
         let component = Owned(component);
-        let mut caps_ptr = std::ptr::null_mut();
         // SAFETY: GetCaps on the live component.
-        unsafe {
-            method::<unsafe extern "system" fn(*mut Object, *mut *mut Object) -> i32>(
-                component.0,
-                COMPONENT_GET_CAPS,
-            )(component.0, &raw mut caps_ptr)
-        };
-        if caps_ptr.is_null() {
-            return None;
-        }
-        let all = Owned(caps_ptr);
+        let all = unsafe { caps_of(&component) }?;
         // SAFETY: GetAccelerationType on the live caps.
         let accel = unsafe {
             method::<unsafe extern "system" fn(*mut Object) -> i32>(all.0, CAPS_ACCELERATION_TYPE)(
@@ -541,16 +570,15 @@ mod amf {
         }
         // SAFETY: GetProperty on the live caps.
         let flag = |name: &str| unsafe { flag(all.0, name) };
+        let bframes = codec.bframes.filter(|(cap, _, _)| flag(cap));
         let tools = Tools {
-            max_bframes: if bframes.is_some_and(flag) {
-                MAX_BFRAMES
-            } else {
-                0
-            },
+            max_bframes: if bframes.is_some() { MAX_BFRAMES } else { 0 },
             bframe_ref_middle: false,
-            lookahead: flag(preanalysis),
+            lookahead: flag(codec.preanalysis),
             temporal_aq: false,
             engine_fps: 0,
+            // SAFETY: the live component.
+            amf_throughput: unsafe { throughput(&component, codec, bframes.is_some()) },
         };
         let mut input = std::ptr::null_mut();
         // SAFETY: GetInputCaps on the live caps.
@@ -591,13 +619,100 @@ mod amf {
             u32::try_from(h1).unwrap_or(0),
         );
         let mut found = caps(
-            family,
+            codec.family,
             formats.contains(&AMF_SURFACE_P010),
             vec![Chroma::C420],
             max,
         );
         found.tools = Some(tools);
         Some(found)
+    }
+
+    /// The capabilities of `component` as its properties stand.
+    ///
+    /// # Safety
+    /// `component` is a live `AMFComponent`.
+    unsafe fn caps_of(component: &Owned) -> Option<Owned> {
+        let mut caps = std::ptr::null_mut();
+        // SAFETY: GetCaps on the live component, with a valid out-pointer.
+        unsafe {
+            method::<unsafe extern "system" fn(*mut Object, *mut *mut Object) -> i32>(
+                component.0,
+                COMPONENT_GET_CAPS,
+            )(component.0, &raw mut caps)
+        };
+        (!caps.is_null()).then_some(Owned(caps))
+    }
+
+    /// The macroblocks a second the engine keeps up with at the speed, balanced and quality
+    /// presets, then the quality one with [`ASKED_BFRAMES`] (0: not said). The driver answers
+    /// for the properties set (OBS lowers its preset on the same answer), without the
+    /// encoder being opened.
+    ///
+    /// # Safety
+    /// `component` is a live `AMFComponent`, not initialised.
+    unsafe fn throughput(component: &Owned, codec: &Codec, bframes: bool) -> [u64; 4] {
+        let set = |name: &str, value: i64| {
+            let name = wide(name);
+            let value = Variant {
+                kind: AMF_VARIANT_INT64,
+                value: [value as u64, 0],
+            };
+            // SAFETY: SetProperty of AMFPropertyStorage on the live component; the variant
+            // is passed by value, as the C header declares it.
+            unsafe {
+                method::<unsafe extern "system" fn(*mut Object, *const u16, Variant) -> i32>(
+                    component.0,
+                    STORAGE_SET_PROPERTY,
+                )(component.0, name.as_ptr(), value)
+            }
+        };
+        let read = || {
+            // SAFETY: per this function's caller.
+            unsafe { caps_of(component) }
+                // SAFETY: the live caps just taken.
+                .and_then(|caps| unsafe { int(caps.0, codec.max_throughput) })
+                .and_then(|n| u64::try_from(n).ok())
+                .unwrap_or(0)
+        };
+        let mut out = [0; 4];
+        if set(codec.usage, USAGE_TRANSCODING) != 0 {
+            return out;
+        }
+        for (slot, preset) in out.iter_mut().zip(codec.presets) {
+            if set(codec.preset, preset) == 0 {
+                *slot = read();
+            }
+        }
+        if let Some((_, pattern, consecutive)) = codec.bframes.filter(|_| bframes)
+            && set(codec.preset, codec.presets[2]) == 0
+            && set(consecutive, ASKED_BFRAMES) == 0
+            && set(pattern, ASKED_BFRAMES) == 0
+        {
+            out[3] = read();
+        }
+        out
+    }
+
+    /// The integer capability `name` of `caps`.
+    ///
+    /// # Safety
+    /// `caps` is a live `AMFCaps`.
+    unsafe fn int(caps: *mut Object, name: &str) -> Option<i64> {
+        let name = wide(name);
+        let mut value = Variant {
+            kind: 0,
+            value: [0; 2],
+        };
+        // SAFETY: GetProperty of AMFPropertyStorage, with a valid out-pointer; an integer
+        // holds no reference to release.
+        let status = unsafe {
+            method::<unsafe extern "system" fn(*mut Object, *const u16, *mut Variant) -> i32>(
+                caps,
+                STORAGE_GET_PROPERTY,
+            )(caps, name.as_ptr(), &raw mut value)
+        };
+        (status == 0 && value.kind == AMF_VARIANT_INT64).then_some(value.value[0] as i64)
     }
 
     /// The boolean capability `name` of `caps` (false when it lacks it).
@@ -881,6 +996,7 @@ mod vpl {
                 lookahead: false,
                 temporal_aq: false,
                 engine_fps: engine_fps(av1, found.family),
+                amf_throughput: [0; 4],
             });
         }
         out

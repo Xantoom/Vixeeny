@@ -62,6 +62,10 @@ pub struct EncoderProbe {
     /// The tools of the GPU's encoder for this codec, when its driver describes them.
     #[serde(default)]
     pub tools: Option<Tools>,
+    /// The largest picture (width, height) the GPU's encoder takes, when its driver says
+    /// (H.264 stops at 4096 on NVIDIA and AMD, HEVC too on AMD's oldest engines).
+    #[serde(default)]
+    pub max: Option<(u32, u32)>,
 }
 
 /// The coding tools a GPU's encoder has for one codec, as its driver describes them (NVENC's
@@ -83,6 +87,11 @@ pub struct Tools {
     /// are per codec, in the registry).
     #[serde(default)]
     pub engine_fps: u32,
+    /// AMF: the macroblocks (16 × 16) a second its driver says the engine keeps up with at the
+    /// speed, balanced and quality presets, then the quality one with 2 B-frames (0: not
+    /// said). More precise than [`Tools::engine_fps`], which stands in for it.
+    #[serde(default)]
+    pub amf_throughput: [u64; 4],
 }
 
 /// [`Tools::max_bframes`] when the driver does not describe it.
@@ -105,6 +114,15 @@ impl ProbeResult {
                 .iter()
                 .any(|f| f.depth == depth && f.chroma == chroma && (!hdr || f.hdr))
         })
+    }
+
+    /// Whether `encoder` takes pictures of `size` on a GPU that has it (always when its
+    /// driver does not say how large).
+    pub fn fits(&self, encoder: &str, (width, height): (u32, u32)) -> bool {
+        self.encoders
+            .iter()
+            .filter(|e| e.id == encoder && !e.formats.is_empty())
+            .any(|e| e.max.is_none_or(|(w, h)| width <= w && height <= h))
     }
 
     /// The tools of `encoder` on the first GPU that has it, when its driver describes them.
@@ -247,16 +265,16 @@ pub fn probe(registry: &Registry, prober: &dyn Prober, version: &str) -> ProbeRe
                 },
             };
             if !formats.is_empty() {
-                let tools = adapter
+                let caps = adapter
                     .and_then(|a| adapters.iter().position(|b| b == a))
                     .and_then(|i| described[i].as_ref().ok())
-                    .and_then(|caps| caps.iter().find(|c| c.family == encoder.family))
-                    .and_then(|c| c.tools);
+                    .and_then(|caps| caps.iter().find(|c| c.family == encoder.family));
                 encoders.push(EncoderProbe {
                     id: encoder.id.clone(),
                     adapter: adapter.map(|a| a.index),
                     formats,
-                    tools,
+                    tools: caps.and_then(|c| c.tools),
+                    max: caps.map(|c| c.max).filter(|&(w, h)| w > 0 && h > 0),
                 });
             }
         }

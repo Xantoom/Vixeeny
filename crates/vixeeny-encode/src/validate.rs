@@ -44,6 +44,10 @@ pub enum IssueKind {
     UnknownPreset(String),
     ZeroFps,
     BadResolution(String),
+    /// A larger picture than the GPU's encoder takes.
+    TooLarge {
+        max: (u32, u32),
+    },
     /// More pixels per second than the codec's top level allows.
     FramerateTooHigh {
         max_fps: u32,
@@ -253,6 +257,17 @@ pub fn validate(profile: &Video, ctx: &Context<'_>) -> Vec<Issue> {
             issues.push(error(IssueKind::NotAvailable));
         }
     }
+    if let Some(probe) = ctx.probe
+        && let Some(size) = size
+        && !probe.fits(&encoder.id, size)
+        && let Some(max) = probe
+            .encoders
+            .iter()
+            .filter(|e| e.id == encoder.id)
+            .find_map(|e| e.max)
+    {
+        issues.push(error(IssueKind::TooLarge { max }));
+    }
     if wants_hdr {
         if !matches!(encoder.family, Family::Hevc | Family::Av1) {
             issues.push(error(IssueKind::HdrNeedsHevcOrAv1));
@@ -273,10 +288,14 @@ pub fn validate(profile: &Video, ctx: &Context<'_>) -> Vec<Issue> {
     issues
 }
 
-/// The encoder `auto` stands for: the best hardware encoder the probe validated for 8-bit 4:2:0,
-/// else libx264. Order: AV1 first (the smallest files for the quality), then HEVC, then H.264;
-/// NVIDIA, AMD, Intel…
-pub fn pick_auto<'a>(registry: &'a Registry, probe: Option<&ProbeResult>) -> Option<&'a Encoder> {
+/// The encoder `auto` stands for: the best hardware encoder the probe validated for 8-bit 4:2:0
+/// that takes pictures of `size` (when known), else libx264. Order: AV1 first (the smallest
+/// files for the quality), then HEVC, then H.264; NVIDIA, AMD, Intel…
+pub fn pick_auto<'a>(
+    registry: &'a Registry,
+    probe: Option<&ProbeResult>,
+    size: Option<(u32, u32)>,
+) -> Option<&'a Encoder> {
     let vendor_rank = |v: Vendor| match v {
         Vendor::Nvidia => 0,
         Vendor::Amd => 1,
@@ -293,6 +312,7 @@ pub fn pick_auto<'a>(registry: &'a Registry, probe: Option<&ProbeResult>) -> Opt
         registry
             .encoders()
             .filter(|e| e.kind == Kind::Hardware && probe.supports(&e.id, 8, Chroma::C420, false))
+            .filter(|e| size.is_none_or(|size| probe.fits(&e.id, size)))
             .min_by_key(|e| (family_rank(e.family), vendor_rank(e.vendor)))
     });
     best.or_else(|| registry.get("libx264"))

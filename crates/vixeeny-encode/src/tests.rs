@@ -536,10 +536,10 @@ fn a_system_without_a_gpu_only_offers_software() {
     assert!(result.supports("libx264", 8, Chroma::C420, false));
     let r = registry();
     assert_eq!(
-        pick_auto(&r, Some(&result)).map(|e| e.id.as_str()),
+        pick_auto(&r, Some(&result), None).map(|e| e.id.as_str()),
         Some("libx264")
     );
-    assert_eq!(pick_auto(&r, None).map(|e| e.id.as_str()), Some("libx264"));
+    assert_eq!(pick_auto(&r, None, None).map(|e| e.id.as_str()), Some("libx264"));
 }
 
 #[test]
@@ -547,7 +547,7 @@ fn auto_prefers_av1_on_the_best_vendor_then_hevc_then_h264() {
     let r = registry();
     let result = probe(&r, &multi_gpu(), "0.1");
     assert_eq!(
-        pick_auto(&r, Some(&result)).map(|e| e.id.as_str()),
+        pick_auto(&r, Some(&result), None).map(|e| e.id.as_str()),
         Some("nvenc_av1")
     );
     // Without AV1, HEVC wins; with only H.264, H.264.
@@ -556,7 +556,7 @@ fn auto_prefers_av1_on_the_best_vendor_then_hevc_then_h264() {
         .encoders
         .retain(|e| e.id.contains("hevc") || e.id.contains("h264") || e.id.starts_with("lib"));
     assert_eq!(
-        pick_auto(&r, Some(&only_hevc)).map(|e| e.id.as_str()),
+        pick_auto(&r, Some(&only_hevc), None).map(|e| e.id.as_str()),
         Some("nvenc_hevc")
     );
     let mut only_hevc = result;
@@ -564,7 +564,7 @@ fn auto_prefers_av1_on_the_best_vendor_then_hevc_then_h264() {
         .encoders
         .retain(|e| e.id == "nvenc_hevc" || e.id.starts_with("lib"));
     assert_eq!(
-        pick_auto(&r, Some(&only_hevc)).map(|e| e.id.as_str()),
+        pick_auto(&r, Some(&only_hevc), None).map(|e| e.id.as_str()),
         Some("nvenc_hevc")
     );
     let intel = ProbeResult {
@@ -578,11 +578,12 @@ fn auto_prefers_av1_on_the_best_vendor_then_hevc_then_h264() {
                 hdr: false,
             }],
             tools: None,
+            max: None,
         }],
         ..ProbeResult::default()
     };
     assert_eq!(
-        pick_auto(&r, Some(&intel)).map(|e| e.id.as_str()),
+        pick_auto(&r, Some(&intel), None).map(|e| e.id.as_str()),
         Some("qsv_h264")
     );
 }
@@ -822,6 +823,7 @@ fn nvenc_options_follow_what_the_card_has() {
         lookahead: true,
         temporal_aq: true,
         engine_fps: 0,
+        amf_throughput: [0; 4],
     };
     // Everything there: the look-ahead, which places up to 4 B-frames, used as references.
     let o = fit("nvenc_av1", PresetName::Small, Some(ada), true);
@@ -840,6 +842,7 @@ fn nvenc_options_follow_what_the_card_has() {
         lookahead: true,
         temporal_aq: false,
         engine_fps: 0,
+        amf_throughput: [0; 4],
     };
     let o = fit("nvenc_hevc", PresetName::Quality, Some(pascal), true);
     assert_eq!(o["bf"], "0");
@@ -892,6 +895,7 @@ fn amd_and_intel_options_follow_their_media_engine() {
         lookahead: true,
         temporal_aq: false,
         engine_fps: 194,
+        amf_throughput: [0; 4],
     };
     let av1 = r.get("amf_av1").unwrap();
     let speed = |tools, size, fps| av1.speed_for(rate(size, fps), Some(tools)).unwrap().1;
@@ -912,6 +916,17 @@ fn amd_and_intel_options_follow_their_media_engine() {
     };
     assert!(!fit(no_bframes, (1920, 1080), 30).contains_key("bf"));
     assert!(!fit(rdna, (1920, 1080), 30).contains_key("preanalysis"));
+    // The driver's own throughput, when it gives it, decides instead (macroblocks a second:
+    // 8160 a 1080p frame).
+    let said = Tools {
+        amf_throughput: [8160 * 400, 8160 * 200, 8160 * 100, 8160 * 70],
+        ..rdna
+    };
+    assert_eq!(speed(said, (1920, 1080), 60), "quality");
+    assert_eq!(speed(said, (2560, 1440), 60), "balanced");
+    assert_eq!(speed(said, (3840, 2160), 60), "speed");
+    assert_eq!(fit(said, (1920, 1080), 30)["bf"], "2");
+    assert!(!fit(said, (1920, 1080), 60).contains_key("bf"));
     // Intel: the medium preset as far as the engine keeps up, Arc's or an older one's.
     let qsv = r.get("qsv_hevc").unwrap();
     let intel = |engine_fps, size, fps| {
@@ -921,6 +936,7 @@ fn amd_and_intel_options_follow_their_media_engine() {
             lookahead: false,
             temporal_aq: false,
             engine_fps,
+            amf_throughput: [0; 4],
         };
         qsv.speed_for(rate(size, fps), Some(tools)).unwrap().1
     };
@@ -929,4 +945,34 @@ fn amd_and_intel_options_follow_their_media_engine() {
     assert_eq!(intel(277, (3840, 2160), 120), "veryfast");
     assert_eq!(intel(80, (1920, 1080), 60), "medium");
     assert_eq!(intel(80, (2560, 1440), 60), "veryfast");
+}
+
+#[test]
+fn pictures_larger_than_an_encoder_takes_go_to_one_that_takes_them() {
+    let r = registry();
+    let result = probe(&r, &multi_gpu(), "0.1");
+    let ultrawide = (5120, 1440);
+    // The RTX 5080 takes 8192 wide in every codec; the iGPU 4096.
+    assert!(result.fits("nvenc_h264", ultrawide));
+    assert!(!result.fits("qsv_av1", ultrawide));
+    assert!(result.fits("qsv_av1", (3840, 2160)));
+    let mut intel = result.clone();
+    intel.encoders.retain(|e| !e.id.starts_with("nvenc"));
+    let auto = |size| pick_auto(&r, Some(&intel), size).map(|e| e.id.clone());
+    assert_eq!(auto(Some((3840, 2160))).as_deref(), Some("qsv_av1"));
+    assert_eq!(auto(Some(ultrawide)).as_deref(), Some("libx264"));
+    // Chosen by hand, it is reported.
+    let issues = validate(
+        &profile("qsv_hevc", "mkv"),
+        &Context {
+            registry: &r,
+            source: ultrawide,
+            probe: Some(&intel),
+        },
+    );
+    assert!(issues.iter().any(|i| i.kind
+        == IssueKind::TooLarge {
+            max: (4096, 4096)
+        }
+        && i.severity == Severity::Error));
 }

@@ -96,9 +96,14 @@ pub fn choices(env: &Env, hardware: bool) -> Vec<&EncoderInfo> {
         .collect()
 }
 
-/// The best usable encoder of one kind (the one recommended).
+/// The best usable encoder of one kind (the one recommended), among those that take the main
+/// screen's pictures when one does (H.264 stops at 4096 wide on NVIDIA and AMD).
 pub fn best(env: &Env, hardware: bool) -> Option<&EncoderInfo> {
-    choices(env, hardware).into_iter().min_by_key(|e| e.rank)
+    let screen = crate::pages::main_screen(env);
+    let fits = |e: &EncoderInfo| env.probe.as_ref().is_none_or(|p| !e.hardware || p.fits(&e.id, screen));
+    choices(env, hardware)
+        .into_iter()
+        .min_by_key(|e| (!fits(e), e.rank))
 }
 
 /// Whether this computer may have a hardware encoder: one was found, or they are still being

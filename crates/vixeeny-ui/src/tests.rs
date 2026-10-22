@@ -831,6 +831,7 @@ fn a_tooltip_goes_after_a_scroll() {
                     hdr: false,
                 }],
                 tools: None,
+                max: None,
             }],
             ..ProbeResult::default()
         }),

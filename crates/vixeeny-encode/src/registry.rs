@@ -458,10 +458,11 @@ impl Encoder {
     /// difference VMAF hardly measures. P1 and P2 split each frame between the encoders of the
     /// large cards (4K and above), so 4K at 120 FPS takes P2.
     ///
-    /// AMD and Intel: from the speed of the GPU's media engine at its default preset
-    /// ([`Tools::engine_fps`](crate::probe::Tools), measured per generation). AMF's quality
-    /// preset is taken as halving it (rigaya's quality settings, which add the pre-analysis,
-    /// cost 40 to 75 % on H.264 and AV1), its speed preset as what keeps up beyond.
+    /// AMD: the best preset whose throughput, as the driver gives it for this engine
+    /// ([`Tools::amf_throughput`](crate::probe::Tools)), keeps up. Without it, and on Intel,
+    /// from the speed of the media engine at its default preset ([`Tools::engine_fps`],
+    /// measured per generation); AMF's quality preset is then taken as halving it (rigaya's
+    /// quality settings, which add the pre-analysis, cost 40 to 75 % on H.264 and AV1).
     pub fn speed_for(
         &self,
         pixel_rate: u64,
@@ -469,6 +470,7 @@ impl Encoder {
     ) -> Option<(&'static str, String)> {
         let needed = frames_needed(pixel_rate);
         let engine = f64::from(tools.map_or(0, |t| t.engine_fps));
+        let amf_throughput = tools.map_or([0; 4], |t| t.amf_throughput);
         let pick = |key: &'static str, steps: &[(&str, f64)]| {
             let value = steps
                 .iter()
@@ -511,6 +513,17 @@ impl Encoder {
                     ("p1", 741.0),
                 ],
             ),
+            _ if amf && amf_throughput[..3].iter().all(|&t| t > 0) => {
+                let [_, balanced, quality, _] = amf_throughput.map(frames_of_macroblocks);
+                pick(
+                    "quality",
+                    &[
+                        ("quality", quality),
+                        ("balanced", balanced),
+                        ("speed", f64::MAX),
+                    ],
+                )
+            }
             _ if amf && engine > 0.0 => pick(
                 "quality",
                 &[
@@ -636,7 +649,10 @@ impl Encoder {
             options.get(key).and_then(|v| v.parse::<u32>().ok())
         };
         if self.vendor == Vendor::Amd {
-            let spare = f64::from(tools.engine_fps) * AMF_QUALITY_SHARE * AMF_BFRAMES_SHARE;
+            let spare = match tools.amf_throughput {
+                [.., 0] => f64::from(tools.engine_fps) * AMF_QUALITY_SHARE * AMF_BFRAMES_SHARE,
+                [.., with_bframes] => frames_of_macroblocks(with_bframes),
+            };
             let bframes = match number(options, "bf") {
                 Some(n) => Some(n),
                 None if choose && frames_needed(pixel_rate) <= spare => Some(2),
@@ -703,6 +719,11 @@ impl Encoder {
 /// spare (clocks drop under a game's load, the quality presets add a quarter-resolution pass).
 fn frames_needed(pixel_rate: u64) -> f64 {
     pixel_rate as f64 / (1920.0 * 1080.0) * 1.3
+}
+
+/// Frames of 1080p a second in `macroblocks` (16 × 16) a second.
+fn frames_of_macroblocks(macroblocks: u64) -> f64 {
+    macroblocks as f64 * 256.0 / (1920.0 * 1080.0)
 }
 
 /// The share of AMF's balanced speed its quality preset keeps, and of that what is left with

@@ -189,18 +189,20 @@ fn with_target(audio: &config::Audio) -> config::Audio {
     audio
 }
 
-/// The encoder a profile asks for: its own, or the best detected one for `auto`.
+/// The encoder a profile asks for: its own, or the best detected one for `auto` that takes
+/// pictures of `size`.
 fn choose_encoder<'a>(
     registry: &'a Registry,
     profile: &config::Video,
     probe: Option<&ProbeResult>,
+    size: (u32, u32),
 ) -> anyhow::Result<&'a Encoder> {
     if profile.encoder == "auto" {
         // The kind the user chose: software never picks a GPU encoder.
         if profile.encoder_kind == "software" {
             return registry.get("libx264").context("no encoder available");
         }
-        return validate::pick_auto(registry, probe).context("no encoder available");
+        return validate::pick_auto(registry, probe, Some(size)).context("no encoder available");
     }
     registry
         .get(&profile.encoder)
@@ -215,13 +217,13 @@ pub fn reencoders(config: &Config, clip: &vixeeny_encode::cut::Clip) -> Vec<Reen
     };
     let profile = &config.video;
     let probe = crate::probe::current(false).ok();
-    let chosen = choose_encoder(&registry, profile, probe.as_ref()).ok();
+    let size = (clip.width & !1, clip.height & !1);
+    let chosen = choose_encoder(&registry, profile, probe.as_ref(), size).ok();
     let software = chosen.and_then(|chosen| {
         registry
             .encoders()
             .find(|e| e.family == chosen.family && e.kind == Kind::Software)
     });
-    let size = (clip.width & !1, clip.height & !1);
     let fps = (1.0 / clip.frame_seconds().max(1e-3)).round() as u32;
     let preset = PresetName::from_setting(&profile.preset).unwrap_or(PresetName::Balanced);
     let mut out: Vec<Reencode> = Vec::new();
@@ -419,14 +421,14 @@ fn plan(
     if let Some(issue) = issues.iter().find(|i| i.severity == Severity::Error) {
         anyhow::bail!("the video profile is not valid: {issue:?}");
     }
-    let encoder = choose_encoder(&registry, profile, probe.as_ref())?.clone();
-
-    let container = OutputContainer::from_setting(&profile.container)
-        .with_context(|| format!("unknown container `{}`", profile.container))?;
     let crop = validate::aspect(&profile.aspect);
     let (_, _, cw, ch) = validate::center_crop(source, crop);
     let (w, h) = validate::output_size(&profile.resolution, (cw, ch)).context("bad resolution")?;
     let output_size = (w.max(2) & !1, h.max(2) & !1);
+    let encoder = choose_encoder(&registry, profile, probe.as_ref(), output_size)?.clone();
+
+    let container = OutputContainer::from_setting(&profile.container)
+        .with_context(|| format!("unknown container `{}`", profile.container))?;
     let chroma = match profile.chroma.as_str() {
         "444" => Chroma::C444,
         "422" => Chroma::C422,
