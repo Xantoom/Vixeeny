@@ -116,8 +116,7 @@ fn real_main() -> anyhow::Result<()> {
     let config_path = vixeeny_common::paths::config_file();
     let config = match &config_path {
         // The very first start: starting with Windows is what the installer was told (the
-        // portable version, which has no installer, does not). Written now, so the welcome
-        // assistant shows that choice.
+        // portable version, which has no installer, does not).
         Some(path) if !path.exists() => {
             let mut config = Config::default();
             config.general.autostart = vixeeny_daemon::autostart::registered();

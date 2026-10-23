@@ -1,8 +1,10 @@
 # Packaging
 
-- `windows/vixeeny.iss` — Inno Setup script: for all users (Program Files; a scheduled task
-  of the user then starts Vixeeny with the administrator's rights) or for the user alone (their
-  own folders, no administrator rights). An install for all users removes the user's own one.
+- `windows/vixeeny.iss` — Inno Setup script (6.7 or later: Windows 11's style, light or dark):
+  for all users (Program Files; a scheduled task of the user then starts Vixeeny with the
+  administrator's rights) or for the user alone (their own folders, no administrator rights).
+  An install for all users removes the user's own one. The installer asks for the mode, then the
+  folder and the start with Windows on one page; an update asks only for the mode.
 - `minisign.pub` — the public key updates are verified with, embedded in `vixeeny-updater`
   (the library of `vixeeny-app` that downloads and installs updates). While it contains the
   word `unconfigured`, every update is refused.

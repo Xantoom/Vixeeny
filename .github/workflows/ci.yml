@@ -81,7 +81,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - shell: pwsh
         run: |
-          choco install innosetup -y --no-progress
+          choco upgrade innosetup -y --no-progress
           New-Item -ItemType Directory dist\stage | Out-Null
           Copy-Item LICENSE dist\stage
           Set-Content dist\stage\files.txt "LICENSE"

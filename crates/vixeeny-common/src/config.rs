@@ -349,8 +349,6 @@ pub struct General {
     pub check_updates: bool,
     /// New versions are downloaded and installed in the background, without asking.
     pub auto_update: bool,
-    /// The welcome assistant has been through (or skipped).
-    pub first_run_done: bool,
 }
 
 impl Default for General {
@@ -363,7 +361,6 @@ impl Default for General {
             notifications: true,
             check_updates: true,
             auto_update: true,
-            first_run_done: false,
         }
     }
 }

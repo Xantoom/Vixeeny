@@ -92,5 +92,5 @@ keeps everything in a `data` folder. Nothing is sent anywhere except the GitHub 
 
 `cargo xtask dist` gathers the programs, the FFmpeg DLLs and the licences into `dist/stage` and
 writes the update archive and the portable archive; Inno Setup (`packaging/windows/vixeeny.iss`)
-builds the per-user installer. Releases are built by `.github/workflows/release.yml`; the
+builds the installer. Releases are built by `.github/workflows/release.yml`; the
 portable archive is signed with minisign and the public key is embedded in `vixeeny-updater`.

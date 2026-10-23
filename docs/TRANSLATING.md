@@ -17,9 +17,9 @@ do not use the same placeholders.
 
 ## Adding a language
 
-1. Add the language to `enum Lang`, to `Lang::from_tag` (the primary tag, e.g. `"de"`) and, in
-   the settings and the assistant, to the language lists (`LANGUAGES` in
-   `crates/vixeeny-ui/src/wizard_panel.rs`, the `language` row in `crates/vixeeny-settings`).
+1. Add the language to `enum Lang`, to `Lang::from_tag` (the primary tag, e.g. `"de"`) and to
+   the `language` row in `crates/vixeeny-settings`. The installer has its own texts, in
+   `packaging/windows/vixeeny.iss` (`[Languages]`, `[Messages]`, `[CustomMessages]`).
 2. The compiler then points at every `(Key, Lang)` arm of `tr()` that is missing: add one per key.
    Nothing can be forgotten, the `match` is exhaustive.
 3. Dates and numbers follow the language through the OS; no extra work.

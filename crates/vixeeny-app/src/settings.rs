@@ -11,8 +11,6 @@ use anyhow::Context;
 use vixeeny_common::config::Config;
 use vixeeny_common::i18n::{Key, Lang, tr};
 use vixeeny_common::ipc::{self, ControlRequest, Endpoint, Hello};
-use vixeeny_encode::probe::ProbeResult;
-use vixeeny_encode::registry::Registry;
 use vixeeny_settings::Section;
 use vixeeny_ui::ComponentHandle;
 use vixeeny_ui::settings_panel::{Line, PanelHandle, SettingsPanel, UpdateStage, UpdateView};
@@ -134,56 +132,6 @@ fn finish_saving() {
     if let Some(telling) = telling {
         let _ = telling.join();
     }
-}
-
-pub fn hardware_lines(lang: Lang, result: &ProbeResult) -> Vec<Line> {
-    let registry = Registry::builtin().ok();
-    let name_of = |id: &str| {
-        registry
-            .as_ref()
-            .and_then(|r| r.get(id))
-            .map_or_else(|| id.to_owned(), |e| e.display_name.clone())
-    };
-    let vendor_of = |id: &str| registry.as_ref().and_then(|r| r.get(id)).map(|e| e.vendor);
-    let mut lines = Vec::new();
-    let real: Vec<_> = result.adapters.iter().filter(|a| !a.software).collect();
-    if real.is_empty() {
-        lines.push(Line {
-            text: tr(Key::HwNoGpu, lang).into(),
-            ..Line::default()
-        });
-    }
-    for adapter in real {
-        let encoders: Vec<String> = result
-            .encoders
-            .iter()
-            .filter(|e| {
-                e.adapter == Some(adapter.index) && vendor_of(&e.id) == Some(adapter.vendor)
-            })
-            .map(|e| name_of(&e.id))
-            .collect();
-        lines.push(Line {
-            text: adapter.name.clone(),
-            detail: format!(
-                "{} — {}",
-                tr(Key::HwDriver, lang).replace("{version}", &adapter.driver_version),
-                encoders.join(", ")
-            ),
-        });
-    }
-    let software: Vec<String> = result
-        .encoders
-        .iter()
-        .filter(|e| e.adapter.is_none())
-        .map(|e| name_of(&e.id))
-        .collect();
-    if !software.is_empty() {
-        lines.push(Line {
-            text: tr(Key::HwSoftware, lang).into(),
-            detail: software.join(", "),
-        });
-    }
-    lines
 }
 
 fn update_state() -> UpdateState {
@@ -435,9 +383,6 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
         return Ok(());
     };
     let look = look_of(&config);
-    if !config.general.first_run_done {
-        return first_run(&config, lang);
-    }
     let panel = SettingsPanel::new(
         config,
         vixeeny_platform::user_locale(),
@@ -956,51 +901,4 @@ fn start_probe_watch(panel: &SettingsPanel) {
         Some(cached) => panel.set_probe(Some(cached), false),
         None => panel.watch_probe(|| crate::probe::current(false).ok()),
     }
-}
-
-/// The welcome assistant, before the very first use of the settings. Closing it counts as
-/// skipping it: it is shown once.
-fn first_run(config: &Config, lang: Lang) -> anyhow::Result<()> {
-    use vixeeny_ui::wizard_panel::WizardPanel;
-
-    let look = look_of(config);
-    let browse = |current: &str| {
-        let mut dialog = rfd::FileDialog::new();
-        if let Some(dir) = vixeeny_common::paths::expand_user_dir(current) {
-            dialog = dialog.set_directory(dir);
-        }
-        dialog.pick_folder().map(|p| p.display().to_string())
-    };
-    let panel = WizardPanel::new(
-        config.clone(),
-        vixeeny_platform::user_locale(),
-        look,
-        Box::new(browse),
-    )
-    .map_err(|e| anyhow::anyhow!("{e}"))?;
-    let handle = panel.handle();
-    std::thread::spawn(move || {
-        let text = match crate::probe::current(false) {
-            Ok(result) => hardware_lines(lang, &result)
-                .iter()
-                .map(|l| {
-                    if l.detail.is_empty() {
-                        l.text.clone()
-                    } else {
-                        format!("{}\n{}", l.text, l.detail)
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("\n\n"),
-            Err(e) => {
-                tracing::warn!("hardware detection: {e:#}");
-                tr(Key::HwUnavailable, lang).to_owned()
-            }
-        };
-        handle.set_hardware(text);
-    });
-    let chosen = panel.run().map_err(|e| anyhow::anyhow!("{e}"))?;
-    save(&chosen);
-    finish_saving();
-    Ok(())
 }

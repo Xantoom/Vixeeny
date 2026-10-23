@@ -744,11 +744,9 @@ pub fn differs(section: Section, config: &Config) -> bool {
     fresh != *config
 }
 
-/// All the settings as they come; the welcome assistant is not shown again.
+/// All the settings as they come.
 pub fn reset_all(config: &mut Config) {
-    let done = config.general.first_run_done;
     *config = Config::default();
-    config.general.first_run_done = done;
 }
 
 /// A setting that answers a search.
@@ -1559,7 +1557,6 @@ mod tests {
         c.video.fps = 30;
         c.video.audio.bitrate_kbps = 320;
         c.video.audio.set_aside = vec!["out:{x}".into()];
-        c.general.first_run_done = true;
         assert!(differs(Section::General, &c) && differs(Section::Video, &c));
         assert!(!differs(Section::Image, &c));
         reset(Section::Video, &mut c);
@@ -1572,7 +1569,6 @@ mod tests {
         assert_eq!(c.general.theme, "dark");
         reset_all(&mut c);
         assert_eq!(c.general.theme, Config::default().general.theme);
-        assert!(c.general.first_run_done);
     }
 
     #[test]

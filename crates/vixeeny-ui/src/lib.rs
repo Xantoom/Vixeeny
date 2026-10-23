@@ -20,7 +20,6 @@ pub mod bell;
 pub mod scroll_panel;
 pub mod settings_panel;
 pub mod theme;
-pub mod wizard_panel;
 pub use slint;
 pub use slint::ComponentHandle;
 

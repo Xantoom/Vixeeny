@@ -18,14 +18,15 @@ replay. Everything is configurable in the settings.
 ## Install
 
 Download `Vixeeny-<v>-setup.exe` (or the portable `.zip`) from the
-[releases page](https://github.com/Xantoom/Vixeeny/releases). The installer offers two
-choices:
+[releases page](https://github.com/Xantoom/Vixeeny/releases). The installer asks who it is for:
 
-- **For all users** (the default): Vixeeny goes in Program Files and starts with the
+- **All accounts on this PC** (the default): Vixeeny goes in Program Files and starts with the
   administrator's rights, without asking each time. Its shortcuts and captures then also work
   in programs started as administrator (some games). Windows asks once, during the install.
-- **For me only**: Vixeeny goes in your own folders, without these rights. Settings → General
+- **My account only**: Vixeeny goes in your own folders, without these rights. Settings → General
   can move it to Program Files later.
+
+Then the folder and whether Vixeeny starts with Windows. Everything else is in the settings.
 
 See [docs/LIMITATIONS.md](docs/LIMITATIONS.md) for what does not work yet, and
 [docs/BETA.md](docs/BETA.md) if you want to help test.

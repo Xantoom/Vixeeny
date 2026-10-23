@@ -3,6 +3,12 @@
 ;   (add /ALLUSERS or /CURRENTUSER to skip the choice below).
 ; For all users (in Program Files, with the administrator's rights; Vixeeny can then have them
 ; too, see `--admin`), or for the user alone (in their own folders, without them).
+; The pages: the install mode, then one page with the folder and the start with Windows (not
+; shown again on an update), the progress and the end. The language is the one of Windows.
+
+#if Ver < EncodeVer(6, 7, 0)
+  #error Inno Setup 6.7 or later is needed (the windows11 style, dark mode, hidebevels)
+#endif
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
@@ -21,7 +27,12 @@ AppVersion={#AppVersion}
 AppPublisher=Xantoom
 AppPublisherURL=https://github.com/Xantoom/Vixeeny
 DefaultDirName={autopf}\Vixeeny
+; Only to find the Start menu folder of older versions (see [InstallDelete]): the entry is now
+; at the top of the Start menu, without a folder.
 DefaultGroupName=Vixeeny
+DisableProgramGroupPage=yes
+DisableReadyPage=yes
+ShowLanguageDialog=no
 PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=dialog commandline
 ; For all users, the first choice, even over an install for the user alone (which it moves).
@@ -38,39 +49,75 @@ Compression=lzma2/ultra
 SolidCompression=yes
 UninstallDisplayIcon={app}\Vixeeny.exe
 SetupIconFile=..\icons\vixeeny.ico
-LicenseFile={#StageDir}\LICENSE
 CloseApplications=yes
 RestartApplications=no
-WizardStyle=modern
+; Windows 11's look, light or dark as Windows is.
+WizardStyle=modern dynamic windows11 hidebevels
+; The logo, centred, at the size that fits the screen's scale.
+WizardImageFile=..\icons\vixeeny-128.png,..\icons\vixeeny-256.png
+WizardSmallImageFile=..\icons\vixeeny-48.png,..\icons\vixeeny-64.png
+WizardImageStretch=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "french"; MessagesFile: "compiler:Languages\French.isl"
 
-[Tasks]
-Name: "startmenu"; Description: "{cm:CreateStartMenu}"; GroupDescription: "{cm:ShortcutsGroup}"
-Name: "autostart"; Description: "{cm:StartWithWindows}"; GroupDescription: "{cm:ShortcutsGroup}"
+[Messages]
+english.PrivilegesRequiredOverrideTitle=Vixeeny Setup
+english.PrivilegesRequiredOverrideInstruction=Install for
+english.PrivilegesRequiredOverrideText1=For all accounts, %1 asks for the administrator's rights and can then capture games started as administrator.
+english.PrivilegesRequiredOverrideText2=For all accounts, %1 asks for the administrator's rights and can then capture games started as administrator.
+english.PrivilegesRequiredOverrideAllUsers=&All accounts on this PC
+english.PrivilegesRequiredOverrideAllUsersRecommended=&All accounts on this PC
+english.PrivilegesRequiredOverrideCurrentUser=&My account only
+english.PrivilegesRequiredOverrideCurrentUserRecommended=&My account only
+english.WizardSelectDir=Install Vixeeny
+english.SelectDirDesc=Folder and start-up
+english.SelectDirLabel3=Folder
+english.DiskSpaceGBLabel=[gb] GB needed.
+english.DiskSpaceMBLabel=[mb] MB needed.
+english.FinishedHeadingLabel=[name] is installed
+english.FinishedLabel=[name] is in the Start menu; once open, it stays in the notification area.
+english.FinishedLabelNoIcons=[name] is in the Start menu; once open, it stays in the notification area.
+english.ClickFinish=
+english.ConfirmUninstall=Uninstall %1?
+french.PrivilegesRequiredOverrideTitle=Installation de Vixeeny
+french.PrivilegesRequiredOverrideInstruction=Installer pour
+french.PrivilegesRequiredOverrideText1=Pour tous les comptes, %1 demande les droits administrateur et peut alors capturer les jeux lancés en administrateur.
+french.PrivilegesRequiredOverrideText2=Pour tous les comptes, %1 demande les droits administrateur et peut alors capturer les jeux lancés en administrateur.
+french.PrivilegesRequiredOverrideAllUsers=&Tous les comptes de ce PC
+french.PrivilegesRequiredOverrideAllUsersRecommended=&Tous les comptes de ce PC
+french.PrivilegesRequiredOverrideCurrentUser=&Mon compte uniquement
+french.PrivilegesRequiredOverrideCurrentUserRecommended=&Mon compte uniquement
+french.WizardSelectDir=Installer Vixeeny
+french.SelectDirDesc=Dossier et démarrage
+french.SelectDirLabel3=Dossier
+french.DiskSpaceGBLabel=[gb] Go nécessaires.
+french.DiskSpaceMBLabel=[mb] Mo nécessaires.
+french.FinishedHeadingLabel=[name] est installé
+french.FinishedLabel=[name] est dans le menu Démarrer ; une fois ouvert, il reste dans la zone de notification.
+french.FinishedLabelNoIcons=[name] est dans le menu Démarrer ; une fois ouvert, il reste dans la zone de notification.
+french.ClickFinish=
+french.ConfirmUninstall=Désinstaller %1 ?
 
 [CustomMessages]
-english.CreateStartMenu=Create a Start menu entry
-english.StartWithWindows=Start Vixeeny when I sign in
-english.ShortcutsGroup=Shortcuts
-english.KeepSettings=Keep your settings and the update information?
-french.CreateStartMenu=Créer une entrée dans le menu Démarrer
-french.StartWithWindows=Lancer Vixeeny à l'ouverture de session
-french.ShortcutsGroup=Raccourcis
-french.KeepSettings=Conserver vos paramètres et les informations de mise à jour ?
+english.StartWithWindows=Start Vixeeny with Windows
+english.OpenVixeeny=Open Vixeeny
+english.KeepSettings=Keep your settings for a later install?
+french.StartWithWindows=Démarrer Vixeeny avec Windows
+french.OpenVixeeny=Ouvrir Vixeeny
+french.KeepSettings=Conserver vos paramètres pour une prochaine installation ?
 
 [Files]
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 ; The same identity as the program's windows: Windows groups them under this entry.
-Name: "{group}\Vixeeny"; Filename: "{app}\Vixeeny.exe"; AppUserModelID: "Xantoom.Vixeeny"; Tasks: startmenu
+Name: "{autoprograms}\Vixeeny"; Filename: "{app}\Vixeeny.exe"; AppUserModelID: "Xantoom.Vixeeny"
 
 [Registry]
 ; The daemon keeps this entry in line with the `autostart` setting afterwards.
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Vixeeny"; ValueData: """{app}\Vixeeny.exe"""; Tasks: autostart; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Vixeeny"; ValueData: """{app}\Vixeeny.exe"""; Check: AutostartChosen; Flags: uninsdeletevalue
 ; Removed on uninstall even when the setting, not this task, wrote it.
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "Vixeeny"; Flags: uninsdeletevalue
 
@@ -78,7 +125,7 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 ; For all users: the user's task that starts Vixeeny with the administrator's rights.
 Filename: "{app}\vixeeny-app.exe"; Parameters: "--admin register"; Flags: runhidden waituntilterminated; Check: IsAdminInstallMode
 ; Started as the user (without the rights: the task gives them).
-Filename: "{app}\Vixeeny.exe"; Description: "Vixeeny"; Flags: nowait postinstall skipifsilent runasoriginaluser
+Filename: "{app}\Vixeeny.exe"; Description: "{cm:OpenVixeeny}"; Flags: nowait postinstall skipifsilent runasoriginaluser
 ; Moved from the user's folders by the settings' button (a silent install): it starts again.
 Filename: "{app}\Vixeeny.exe"; Flags: nowait runasoriginaluser; Check: MovedSilently
 
@@ -93,6 +140,9 @@ Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM Vixeeny.exe /IM vixeeny-daem
 Type: files; Name: "{app}\vixeeny-updater.exe"
 Type: files; Name: "{app}\vixeeny-daemon.exe"
 Type: files; Name: "{app}\avdevice-*.dll"
+; The Start menu folder of older versions (the entry is now at the top, without a folder).
+Type: files; Name: "{group}\Vixeeny.lnk"
+Type: dirifempty; Name: "{group}"
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\.update-staged"
@@ -111,6 +161,8 @@ var
   // its Start menu folder.
   UserDir: String;
   UserGroup: String;
+  // On the folder's page: the start with Windows.
+  AutostartBox: TNewCheckBox;
 
 // Stops a running Vixeeny the way an update does: a recording ends first, and nothing is
 // killed. The program of the installed version asks; a version too old to know how does
@@ -161,9 +213,36 @@ end;
 procedure RemoveUserInstall();
 begin
   DelTree(UserDir, True, True, True);
+  DeleteFile(ExpandConstant('{userprograms}\Vixeeny.lnk'));
   if UserGroup <> '' then
     DelTree(ExpandConstant('{userprograms}\') + UserGroup, True, True, True);
   RegDeleteKeyIncludingSubkeys(HKCU, UserInstallKey);
+end;
+
+// The folder's page only says where: the start with Windows goes under the folder, in the
+// place of the text about the buttons.
+procedure InitializeWizard();
+var
+  Shift: Integer;
+begin
+  Shift := WizardForm.DirEdit.Top - WizardForm.SelectDirBrowseLabel.Top;
+  WizardForm.SelectDirBrowseLabel.Visible := False;
+  WizardForm.DirEdit.Top := WizardForm.DirEdit.Top - Shift;
+  WizardForm.DirBrowseButton.Top := WizardForm.DirBrowseButton.Top - Shift;
+  AutostartBox := TNewCheckBox.Create(WizardForm);
+  AutostartBox.Parent := WizardForm.SelectDirPage;
+  AutostartBox.Caption := CustomMessage('StartWithWindows');
+  AutostartBox.Checked := True;
+  AutostartBox.Left := WizardForm.DirEdit.Left;
+  AutostartBox.Top := WizardForm.DirEdit.Top + WizardForm.DirEdit.Height + ScaleY(20);
+  AutostartBox.Width := WizardForm.SelectDirPage.Width - AutostartBox.Left;
+  AutostartBox.Height := ScaleY(17);
+end;
+
+// The first install only: on an update (the page is not shown) the setting stays as it is.
+function AutostartChosen(): Boolean;
+begin
+  Result := (WizardForm.PrevAppDir = '') and AutostartBox.Checked;
 end;
 
 function MovedSilently(): Boolean;

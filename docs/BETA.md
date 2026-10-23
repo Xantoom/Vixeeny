@@ -5,7 +5,7 @@ real machines are what we need**: other GPUs, other monitor layouts, other scali
 
 ## What to try
 
-1. Install it (see the [README](../README.md)) and walk through the first-run wizard.
+1. Install it (see the [README](../README.md)) and open it from the Start menu.
 2. Take a region screenshot, a window screenshot and a full-screen one, on each monitor if you
    have several; annotate one, copy it and paste it into another application.
 3. Record 30 seconds with system audio, pause, resume, stop; play the file.

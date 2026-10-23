@@ -2,7 +2,8 @@
 //! `cargo xtask icons`: draws the application icon (a near-black rounded tile with a white V
 //! framed by the corners of a capture zone, after the Vixely logo) at every size and writes
 //! `packaging/icons/`: `vixeeny.ico` (the programs and the installer), `vixeeny-recording.ico`
-//! (the tray while recording), and PNGs for the windows (64) and the repository page (256).
+//! (the tray while recording), and PNGs for the windows (64), the repository page (256) and
+//! the installer (48 to 256).
 //! The files are committed; run this again only when the drawing changes.
 
 use std::path::{Path, PathBuf};
@@ -16,7 +17,7 @@ use tiny_skia::{
 const INK: (u8, u8, u8) = (0x13, 0x14, 0x16);
 const SIZES: [u32; 7] = [16, 24, 32, 48, 64, 128, 256];
 /// The sizes also written as PNG files.
-const PNGS: [u32; 2] = [64, 256];
+const PNGS: [u32; 4] = [48, 64, 128, 256];
 /// Below this size the capture corners would blur into the letter: the small icons show the V
 /// alone, larger.
 const DETAILED_FROM: u32 = 32;

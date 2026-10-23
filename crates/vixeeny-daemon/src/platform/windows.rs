@@ -194,7 +194,6 @@ pub fn run(startup: Startup) -> anyhow::Result<()> {
     .with_games(Box::<ForegroundGames>::default());
     runtime.apply_config();
     runtime.start_replay_if_configured();
-    runtime.open_wizard_if_first_run();
     RUNTIME.with(|cell| *cell.borrow_mut() = Some(runtime));
     // Whoever started this daemon with a pipe (the updater) learns that it runs.
     {

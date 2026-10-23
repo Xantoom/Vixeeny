@@ -62,7 +62,7 @@ jobs:
       - name: Tools (Inno Setup, pkg-config)
         shell: pwsh
         run: |
-          choco install innosetup pkgconfiglite -y --no-progress
+          choco upgrade innosetup pkgconfiglite -y --no-progress
           "C:\ProgramData\chocolatey\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
           "$env:FFMPEG_DIR\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
           "C:\Program Files (x86)\Inno Setup 6" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
