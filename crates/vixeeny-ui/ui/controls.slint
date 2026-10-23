@@ -1058,8 +1058,12 @@ export component GroupRow inherits Rectangle {
     border-width: root.flash ? 2px : (root.framed ? 1px : 0px);
     border-color: root.flash ? Theme.accent : Theme.stroke;
     animate border-color { duration: Theme.t-slow; }
-    background: root.clickable && touch.pressed ? Theme.card-pressed
-        : (root.clickable && touch.has-hover ? Theme.card-hover : (root.framed ? Theme.card : transparent));
+    // A card of its own changes its fill; a row of a shared card shades it (another card's
+    // colour on top would whiten it behind Mica). At rest the shade keeps its colour, at no
+    // opacity: from `transparent` (black) the animation passes through grey.
+    background: root.framed
+        ? (root.clickable && touch.pressed ? Theme.card-pressed : (root.clickable && touch.has-hover ? Theme.card-hover : Theme.card))
+        : (root.clickable && touch.pressed ? Theme.subtle-pressed : (root.clickable && touch.has-hover ? Theme.subtle-hover : Theme.subtle-hover.with-alpha(0)));
     animate background { duration: Theme.t-fast; }
     if root.divider : Rectangle {
         x: 0px;
