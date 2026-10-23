@@ -1,6 +1,8 @@
 ; Vixeeny installer (Inno Setup 6). Built by the release workflow:
 ;   iscc /DAppVersion=0.5.0 /DStageDir=dist\stage /DOutDir=dist packaging\windows\vixeeny.iss
-; Per-user, no administrator rights.
+;   (add /ALLUSERS or /CURRENTUSER to skip the choice below).
+; For all users (in Program Files, with the administrator's rights; Vixeeny can then have them
+; too, see `--admin`), or for the user alone (in their own folders, without them).
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
@@ -18,9 +20,14 @@ AppName=Vixeeny
 AppVersion={#AppVersion}
 AppPublisher=Xantoom
 AppPublisherURL=https://github.com/Xantoom/Vixeeny
-DefaultDirName={localappdata}\Programs\Vixeeny
+DefaultDirName={autopf}\Vixeeny
 DefaultGroupName=Vixeeny
-PrivilegesRequired=lowest
+PrivilegesRequired=admin
+PrivilegesRequiredOverridesAllowed=dialog commandline
+; For all users, the first choice, even over an install for the user alone (which it moves).
+UsePreviousPrivileges=no
+; The autostart entry and the settings are the user's own, also in an install for all users.
+UsedUserAreasWarning=no
 ArchitecturesInstallIn64BitMode=x64compatible
 ArchitecturesAllowed=x64compatible
 ; Windows 10 1903: the first with the screen capture Vixeeny uses.
@@ -68,9 +75,15 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "Vixeeny"; Flags: uninsdeletevalue
 
 [Run]
-Filename: "{app}\Vixeeny.exe"; Description: "Vixeeny"; Flags: nowait postinstall skipifsilent
+; For all users: the user's task that starts Vixeeny with the administrator's rights.
+Filename: "{app}\vixeeny-app.exe"; Parameters: "--admin register"; Flags: runhidden waituntilterminated; Check: IsAdminInstallMode
+; Started as the user (without the rights: the task gives them).
+Filename: "{app}\Vixeeny.exe"; Description: "Vixeeny"; Flags: nowait postinstall skipifsilent runasoriginaluser
+; Moved from the user's folders by the settings' button (a silent install): it starts again.
+Filename: "{app}\Vixeeny.exe"; Flags: nowait runasoriginaluser; Check: MovedSilently
 
 [UninstallRun]
+Filename: "{app}\vixeeny-app.exe"; Parameters: "--admin remove"; RunOnceId: "RemoveTasks"; Flags: runhidden waituntilterminated; Check: IsAdminInstallMode
 ; Only if Vixeeny did not stop when asked (see StopVixeeny). Hidden: no window shows.
 Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM Vixeeny.exe /IM vixeeny-daemon.exe /IM vixeeny-app.exe"; RunOnceId: "StopVixeeny"; Flags: runhidden
 
@@ -88,8 +101,16 @@ Type: filesandordirs; Name: "{app}\.update-download"
 Type: files; Name: "{app}\.update-lock"
 
 [Code]
+const
+  // Where the install for the user alone is recorded (the AppId, then `_is1`).
+  UserInstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{C3B9682C-A50C-4D2D-A615-DB8FE7EC4EFD}_is1';
+
 var
   OldFiles: TStringList;
+  // An install for the user alone that this one, for all users, replaces ('' if none), and
+  // its Start menu folder.
+  UserDir: String;
+  UserGroup: String;
 
 // Stops a running Vixeeny the way an update does: a recording ends first, and nothing is
 // killed. The program of the installed version asks; a version too old to know how does
@@ -104,9 +125,58 @@ begin
     Exec(App, '--update quit', '', SW_HIDE, ewWaitUntilTerminated, Code);
 end;
 
+// The install for the user alone, when this one is for all users: it moves here.
+procedure FindUserInstall();
+var
+  Dir: String;
+begin
+  UserDir := '';
+  UserGroup := '';
+  if not IsAdminInstallMode then
+    Exit;
+  if not RegQueryStringValue(HKCU, UserInstallKey, 'Inno Setup: App Path', Dir) then
+    Exit;
+  Dir := RemoveBackslashUnlessRoot(Dir);
+  // Only a Vixeeny folder, and never this install's.
+  if (Dir <> '') and FileExists(Dir + '\vixeeny-app.exe') and not SameText(Dir, ExpandConstant('{app}')) then
+  begin
+    UserDir := Dir;
+    RegQueryStringValue(HKCU, UserInstallKey, 'Inno Setup: Icon Group', UserGroup);
+  end;
+end;
+
+// Stops the Vixeeny of the user's folders, as `StopVixeeny` does; what does not stop is ended
+// (its files are removed next).
+procedure StopUserVixeeny();
+var
+  Code: Integer;
+begin
+  Exec(UserDir + '\vixeeny-app.exe', '--update quit', '', SW_HIDE, ewWaitUntilTerminated, Code);
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM Vixeeny.exe /IM vixeeny-app.exe', '', SW_HIDE, ewWaitUntilTerminated, Code);
+end;
+
+// Removes the install for the user alone: its folder, its Start menu entry and its uninstall
+// entry. Its settings stay (they are not in its folder); the autostart entry follows the
+// program on its next start.
+procedure RemoveUserInstall();
+begin
+  DelTree(UserDir, True, True, True);
+  if UserGroup <> '' then
+    DelTree(ExpandConstant('{userprograms}\') + UserGroup, True, True, True);
+  RegDeleteKeyIncludingSubkeys(HKCU, UserInstallKey);
+end;
+
+function MovedSilently(): Boolean;
+begin
+  Result := WizardSilent and (UserDir <> '');
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   StopVixeeny();
+  FindUserInstall();
+  if UserDir <> '' then
+    StopUserVixeeny();
   Result := '';
 end;
 
@@ -124,7 +194,9 @@ begin
     if FileExists(ExpandConstant('{app}\files.txt')) then
       OldFiles.LoadFromFile(ExpandConstant('{app}\files.txt'));
   end
-  else if (CurStep = ssPostInstall) and (OldFiles <> nil) then
+  else if (CurStep = ssPostInstall) and (UserDir <> '') then
+    RemoveUserInstall();
+  if (CurStep = ssPostInstall) and (OldFiles <> nil) then
   begin
     NewFiles := TStringList.Create;
     try

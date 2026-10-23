@@ -1003,6 +1003,16 @@ pub fn open_path(path: &str) -> Result<()> {
     use windows::Win32::UI::Shell::ShellExecuteW;
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
     use windows::core::{PCWSTR, w};
+    if crate::elevation::rights() == crate::elevation::Rights::Elevated {
+        // What it opens (a browser, a picture viewer) must not get the administrator's rights:
+        // the Explorer already running, which does not have them, opens it.
+        let windows = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
+        return std::process::Command::new(std::path::Path::new(&windows).join("explorer.exe"))
+            .arg(path)
+            .spawn()
+            .map(drop)
+            .map_err(|e| PlatformError::Os(format!("cannot open {path}: {e}")));
+    }
     let wide = utf16z(path);
     // SAFETY: both strings are NUL-terminated and outlive the call.
     let result = unsafe {

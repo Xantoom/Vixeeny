@@ -21,7 +21,8 @@ export struct SettingRow {
     // 0 toggle, 1 choice, 2 number, 3 text, 4 folder, 5 info, 8 slider,
     // 9 expander (`on`: open), 10 choice of a screen edge, 11 choice of a place on the screen
     // (its own place, if any, in `min` and `max`: thousandths across and down, else -1),
-    // 12 colour (one, or a gradient's two: `colours`, their codes in `options`)
+    // 12 colour (one, or a gradient's two: `colours`, their codes in `options`),
+    // 13 button (its text in `text`)
     kind: int,
     enabled: bool,
     on: bool,
@@ -441,6 +442,11 @@ component SettingLine inherits GroupRow {
         spacing: 8px;
         Button { text: root.t.show; clicked => { root.action("open"); } }
         Button { text: root.t.change; clicked => { root.browse(); } }
+    }
+    if root.entry.kind == 13 : Button {
+        text: root.entry.text;
+        enabled: root.entry.enabled;
+        clicked => { root.action("press"); }
     }
     if root.entry.kind == 5 : Text {
         max-width: 300px;

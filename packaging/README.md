@@ -1,6 +1,8 @@
 # Packaging
 
-- `windows/vixeeny.iss` — Inno Setup script (per-user installer, no administrator rights).
+- `windows/vixeeny.iss` — Inno Setup script: for all users (Program Files; a scheduled task
+  of the user then starts Vixeeny with the administrator's rights) or for the user alone (their
+  own folders, no administrator rights). An install for all users removes the user's own one.
 - `minisign.pub` — the public key updates are verified with, embedded in `vixeeny-updater`
   (the library of `vixeeny-app` that downloads and installs updates). While it contains the
   word `unconfigured`, every update is refused.
@@ -22,7 +24,7 @@ secrets `MINISIGN_KEY` (the content of `vixeeny.key`) and `MINISIGN_PASSWORD`.
 
 | File | Use |
 |---|---|
-| `Vixeeny-<v>-setup.exe` | Installer |
+| `Vixeeny-<v>-setup.exe` | Installer; its signature is in the notes too (Settings → General downloads it to move an install to Program Files) |
 | `Vixeeny-<v>-windows-x64-portable.zip` | Portable: the programs plus `portable.flag` (settings in `data\`); also what an update downloads |
 
 The minisign signature of the portable archive is in the release notes, in a comment the page

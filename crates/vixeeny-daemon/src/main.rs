@@ -64,10 +64,43 @@ fn stop_older_daemon() {
     }
 }
 
+/// An install in Program Files whose user gave Vixeeny the administrator's rights, started
+/// without them (the Start menu, the start of the session): its task starts it again with them,
+/// and this one ends. `true` when it did.
+fn start_elevated(endpoint: &Endpoint) -> bool {
+    use vixeeny_platform::elevation::{self, Rights};
+    if elevation::rights() != Rights::Limited {
+        return false;
+    }
+    let Ok(exe) = std::env::current_exe() else {
+        return false;
+    };
+    if !exe.parent().is_some_and(elevation::protected_install) || !elevation::task_starts(&exe) {
+        return false;
+    }
+    // Already running: this start opens its settings, as any second start does.
+    if endpoint.connect().is_ok() {
+        return false;
+    }
+    match elevation::run_task() {
+        Ok(()) => {
+            tracing::info!("started again with the administrator's rights");
+            true
+        }
+        Err(e) => {
+            tracing::warn!("{e}");
+            false
+        }
+    }
+}
+
 fn real_main() -> anyhow::Result<()> {
     // The frozen screens are placed in physical pixels.
     vixeeny_platform::ensure_dpi_aware();
     let endpoint = Endpoint::current_user();
+    if start_elevated(&endpoint) {
+        return Ok(());
+    }
     // Binding the endpoint is the single-instance lock.
     let listener = match endpoint.bind() {
         Ok(listener) => listener,

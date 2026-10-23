@@ -14,8 +14,8 @@ use vixeeny_common::ipc::ActionId;
 use vixeeny_encode::probe::ProbeResult;
 use vixeeny_settings::shortcuts::{self, Refusal};
 use vixeeny_settings::{
-    AudioDevices, Display, Env, Found, Kind, Machine, Picker, Row, Section, Value, rows, search,
-    video_problems,
+    Admin, AudioDevices, Display, Env, Found, Kind, Machine, Picker, Row, Section, Value, rows,
+    search, video_problems,
 };
 
 use crate::theme::{self, Look};
@@ -175,6 +175,7 @@ struct State {
     /// Lists the devices and programs (slow: the programs' icons); run on another thread.
     audio_source: RefCell<Option<AudioFn>>,
     display: Cell<Display>,
+    admin: Cell<Admin>,
     /// The shortcut being recorded: `(row, slot)`.
     recording: Cell<Option<(usize, usize)>>,
     chord: RefCell<Chord>,
@@ -651,6 +652,10 @@ fn row_model(row: &Row, config: &Config, lang: Lang) -> SettingRow {
             out.kind = 3;
             out.text = t.into();
         }
+        (Kind::Button, Value::Text(t)) => {
+            out.kind = 13;
+            out.text = t.into();
+        }
         (Kind::Folder, Value::Text(t)) => {
             out.kind = 4;
             out.text = vixeeny_common::paths::display_dir(&t).into();
@@ -811,6 +816,7 @@ impl SettingsPanel {
             open: RefCell::default(),
             audio_source: RefCell::default(),
             display: Cell::default(),
+            admin: Cell::default(),
             recording: Cell::new(None),
             chord: RefCell::default(),
             on_recording: RefCell::new(Box::new(|_| {})),
@@ -872,6 +878,13 @@ impl SettingsPanel {
     /// What the monitors can show (HDR, refresh rate): the video page offers what fits.
     pub fn set_display(&self, display: Display) {
         self.state.display.set(display);
+        self.rebuild_env();
+        self.refresh();
+    }
+
+    /// Where Vixeeny is with the administrator's rights: the general page offers them.
+    pub fn set_admin(&self, admin: Admin) {
+        self.state.admin.set(admin);
         self.rebuild_env();
         self.refresh();
     }
@@ -1094,7 +1107,8 @@ impl SettingsPanel {
             .with_audio(state.audio.borrow().clone())
             .with_machine(state.machine.borrow().clone())
             .with_open(state.open.borrow().clone())
-            .with_display(state.display.get());
+            .with_display(state.display.get())
+            .with_admin(state.admin.get());
     }
 
     /// Rebuilds what the current page shows from the settings.
@@ -1683,13 +1697,18 @@ impl SettingsPanel {
             }
         });
 
-        // The button that opens a folder row's folder: the host opens it.
+        // The button that opens a folder row's folder: the host opens it. A button row: the
+        // host is told its id.
         w.on_row_action({
             let (weak, state) = (weak.clone(), self.state.clone());
             move |id, action| {
                 let Some(p) = panel(&weak, &state) else {
                     return;
                 };
+                if action == "press" {
+                    (state.on_page_action.borrow())(p.current_section(), &id, "");
+                    return;
+                }
                 let folder = state
                     .rows
                     .borrow()

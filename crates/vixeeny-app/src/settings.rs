@@ -277,6 +277,84 @@ fn check_for_update(handle: PanelHandle, lang: Lang) {
     });
 }
 
+/// Where this Vixeeny is with the administrator's rights.
+fn admin_state() -> vixeeny_settings::Admin {
+    use vixeeny_platform::elevation::{self, Rights};
+    use vixeeny_settings::Admin;
+    let Ok(exe) = std::env::current_exe() else {
+        return Admin::Hidden;
+    };
+    if vixeeny_common::paths::portable_dir().is_some() {
+        return Admin::Hidden;
+    }
+    let protected = exe.parent().is_some_and(elevation::protected_install);
+    match elevation::rights() {
+        Rights::Standard => Admin::Hidden,
+        Rights::Elevated
+            if protected && elevation::task_starts(&exe.with_file_name("Vixeeny.exe")) =>
+        {
+            Admin::Granted
+        }
+        Rights::Elevated | Rights::Limited => Admin::Missing { moves: !protected },
+    }
+}
+
+/// The button of the administrator's rights. In Program Files, a Vixeeny program with them
+/// (Windows asks) gives them and starts Vixeeny again; in the user's folders, the installer,
+/// downloaded, puts Vixeeny in Program Files and gives them. This window closes once either
+/// runs.
+fn grant_admin(handle: &PanelHandle, lang: Lang) {
+    static BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if BUSY.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    let handle = handle.clone();
+    std::thread::spawn(move || {
+        let result = start_granting(&handle, lang);
+        BUSY.store(false, std::sync::atomic::Ordering::Relaxed);
+        match result {
+            Ok(true) => handle.close(),
+            // The user said no to Windows.
+            Ok(false) => handle.set_extra(String::new()),
+            Err(e) => {
+                tracing::error!("administrator's rights: {e:#}");
+                handle.set_extra(format!("{e:#}"));
+            }
+        }
+    });
+}
+
+/// `Ok(false)`: the user said no to Windows' question.
+fn start_granting(handle: &PanelHandle, lang: Lang) -> anyhow::Result<bool> {
+    use vixeeny_platform::elevation::{self, ElevateError};
+    let exe = std::env::current_exe()?;
+    let started = if exe.parent().is_some_and(elevation::protected_install) {
+        elevation::run_as_admin(&exe, &format!("--admin grant {}", std::process::id()))
+    } else {
+        let mut shown = u64::MAX;
+        let setup = client::download_setup(&mut |done, total| {
+            let percent = (done * 100).checked_div(total).unwrap_or(0);
+            if percent != shown {
+                shown = percent;
+                handle.set_extra(
+                    tr(Key::SetAdminDownloading, lang).replace("{percent}", &percent.to_string()),
+                );
+            }
+        })?;
+        handle.set_extra(String::new());
+        // For all users, without its pages: it moves Vixeeny and starts it again.
+        elevation::run_as_admin(
+            &setup.path,
+            "/ALLUSERS /SILENT /SUPPRESSMSGBOXES /NORESTART /NOCANCEL",
+        )
+    };
+    match started {
+        Ok(()) => Ok(true),
+        Err(ElevateError::Cancelled) => Ok(false),
+        Err(e) => Err(e.into()),
+    }
+}
+
 fn megabytes(bytes: u64) -> String {
     format!("{:.1} MB", bytes as f64 / 1_000_000.0)
 }
@@ -374,6 +452,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
         hdr: vixeeny_platform::hdr_active(),
         max_refresh: vixeeny_platform::max_refresh_hz(),
     });
+    panel.set_admin(admin_state());
     panel.on_recording(pause_hotkeys);
     start_probe_watch(&panel);
     let handle = panel.handle();
@@ -509,6 +588,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
                     download_update(handle.clone(), lang);
                 }
                 (Section::Updates, "update-restart") => restart_for_update(&handle, lang),
+                (Section::General, "admin") => grant_admin(&handle, lang),
                 (Section::About, "github") => {
                     let _ = vixeeny_platform::open_path(REPO);
                 }

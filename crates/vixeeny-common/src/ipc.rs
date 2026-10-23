@@ -266,8 +266,13 @@ pub fn read_msg<R: Read, T: DeserializeOwned>(r: &mut R) -> Result<Option<T>, Ip
     Ok(Some(postcard::from_bytes(&payload)?))
 }
 
-/// Who may open the daemon's named pipe (SDDL): not network logons, the system and the owner.
-const PIPE_SDDL: &str = "D:P(D;;GA;;;NU)(A;;GA;;;SY)(A;;GA;;;OW)";
+/// Who may open the daemon's named pipe (SDDL): not network logons, the system and the user
+/// `sid`, by name: the owner of what a program with the administrator's rights makes is the
+/// Administrators group, which this user's other programs are not. The label lets them write
+/// to it all the same (it would take the creator's level otherwise).
+fn pipe_sddl(sid: &str) -> String {
+    format!("D:P(D;;GA;;;NU)(A;;GA;;;SY)(A;;GA;;;{sid})S:(ML;;NW;;;ME)")
+}
 
 /// A named local-socket endpoint.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -355,9 +360,11 @@ impl Endpoint {
     fn options(&self) -> io::Result<ListenerOptions<'static>> {
         use interprocess::os::windows::local_socket::ListenerOptionsExt;
         use interprocess::os::windows::security_descriptor::SecurityDescriptor;
-        // Protected DACL: deny network logons, allow the system and the owner (the user who
-        // started the daemon); nobody else.
-        let sddl = widestring::U16CString::from_str(PIPE_SDDL).map_err(io::Error::other)?;
+        // Protected DACL: deny network logons, allow the system and the user who started the
+        // daemon; nobody else.
+        let sid = identity::current_sid()
+            .ok_or_else(|| io::Error::other("cannot read this process's account"))?;
+        let sddl = widestring::U16CString::from_str(pipe_sddl(&sid)).map_err(io::Error::other)?;
         Ok(ListenerOptions::new()
             .name(self.name()?)
             .security_descriptor(SecurityDescriptor::deserialize(&sddl)?))

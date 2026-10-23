@@ -115,6 +115,8 @@ pub enum Kind {
     Folder,
     /// Read-only.
     Info,
+    /// A button (its value: its text) that the host answers; nothing to edit.
+    Button,
     /// Starts a new group of rows (shown apart from the one above), titled by its label when it
     /// has one; nothing to edit.
     Header,
@@ -317,6 +319,22 @@ pub struct Env {
     pub open: std::collections::BTreeSet<String>,
     /// Windows' accent colour (what the `accent` colour stands for).
     pub accent: [u8; 3],
+    pub admin: Admin,
+}
+
+/// Where Vixeeny is with the administrator's rights (to keep the input of the programs that
+/// have them, games often).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Admin {
+    /// Nothing to offer: a portable Vixeeny, a standard account.
+    #[default]
+    Hidden,
+    Granted,
+    /// The rights can be given; `moves`: Vixeeny is installed in Program Files first (it is in
+    /// the user's own folders).
+    Missing {
+        moves: bool,
+    },
 }
 
 /// What the monitors can show.
@@ -351,7 +369,13 @@ impl Env {
             machine: Machine::default(),
             open: std::collections::BTreeSet::new(),
             accent: [0x00, 0x78, 0xd4],
+            admin: Admin::Hidden,
         }
+    }
+
+    pub const fn with_admin(mut self, admin: Admin) -> Self {
+        self.admin = admin;
+        self
     }
 
     pub const fn with_accent(mut self, accent: [u8; 3]) -> Self {
@@ -615,6 +639,17 @@ fn expander(env: &Env, id: &str, label: String) -> (Row, bool) {
     (row, open)
 }
 
+/// A button showing `text`: the host is told when it is pressed (by the row's id).
+fn button(id: &str, label: String, text: String) -> Row {
+    row(
+        id,
+        label,
+        Kind::Button,
+        Box::new(move |_| Value::Text(text.clone())),
+        Box::new(|_, _| Err(Invalid)),
+    )
+}
+
 fn info(id: &str, label: String, value: String) -> Row {
     row(
         id,
@@ -875,6 +910,23 @@ mod tests {
     }
 
     #[test]
+    fn the_rights_are_offered_by_a_button_until_given() {
+        let config = Config::default();
+        let general = |admin| rows(Section::General, &env().with_admin(admin), &config);
+        assert!(general(Admin::Hidden).iter().all(|r| r.id != "admin"));
+        for moves in [false, true] {
+            let page = general(Admin::Missing { moves });
+            let admin = row(&page, "admin");
+            assert!(matches!(admin.kind, Kind::Button));
+            assert_eq!(admin.value(&config), Value::Text("Grant".into()));
+            // Moving to Program Files is said before it happens.
+            assert_eq!(admin.info.contains("Program Files"), moves);
+        }
+        let page = general(Admin::Granted);
+        assert!(matches!(row(&page, "admin").kind, Kind::Info));
+    }
+
+    #[test]
     fn every_section_with_rows_has_rows_and_the_others_have_none() {
         let config = Config::default();
         for section in Section::ALL {
@@ -894,7 +946,11 @@ mod tests {
             assert_eq!(ids.len(), rows.len(), "{section:?}");
             // A greyed row takes nothing (it may show what applies instead of the setting).
             for row in rows.iter().filter(|r| {
-                !r.greyed && !matches!(r.kind, Kind::Info | Kind::Header | Kind::Expander)
+                !r.greyed
+                    && !matches!(
+                        r.kind,
+                        Kind::Info | Kind::Header | Kind::Expander | Kind::Button
+                    )
             }) {
                 let mut copy = config.clone();
                 let value = row.value(&config);

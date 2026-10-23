@@ -69,7 +69,14 @@ fn background() -> anyhow::Result<()> {
         return Ok(());
     };
     let mut state = State::load(&path);
-    if config.general.auto_update {
+    // In Program Files, only a Vixeeny with the administrator's rights can change the files: one
+    // without them (a standard account) tells the user instead.
+    let writable = std::env::current_exe().is_ok_and(|exe| {
+        use vixeeny_platform::elevation::{self, Rights};
+        !exe.parent().is_some_and(elevation::protected_install)
+            || elevation::rights() == Rights::Elevated
+    });
+    if config.general.auto_update && writable {
         // A version whose install failed is downloaded again only by hand.
         if state.failed.as_deref() != Some(release.version.as_str()) {
             client::download(&mut |_, _| {})?;

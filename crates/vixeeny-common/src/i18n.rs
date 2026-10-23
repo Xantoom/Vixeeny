@@ -373,6 +373,12 @@ pub enum Key {
     OptGradientNight,
     SetPresetBalanced,
     SetFolderUnreachable,
+    SetAdmin,
+    SetAdminGrant,
+    SetAdminGranted,
+    SetAdminHint,
+    SetAdminHintMove,
+    SetAdminDownloading,
 }
 
 impl Key {
@@ -738,6 +744,12 @@ impl Key {
         Self::OptGradientNight,
         Self::SetPresetBalanced,
         Self::SetFolderUnreachable,
+        Self::SetAdmin,
+        Self::SetAdminGrant,
+        Self::SetAdminGranted,
+        Self::SetAdminHint,
+        Self::SetAdminHintMove,
+        Self::SetAdminDownloading,
     ];
 }
 
@@ -1562,6 +1574,26 @@ pub fn tr(key: Key, lang: Lang) -> &'static str {
         (Key::SetFolderUnreachable, Lang::Fr) => {
             "Dossier inaccessible : les fichiers vont dans le dossier par défaut."
         }
+        (Key::SetAdmin, Lang::En) => "Administrator rights",
+        (Key::SetAdmin, Lang::Fr) => "Droits administrateur",
+        (Key::SetAdminGrant, Lang::En) => "Grant",
+        (Key::SetAdminGrant, Lang::Fr) => "Accorder",
+        (Key::SetAdminGranted, Lang::En) => "Granted",
+        (Key::SetAdminGranted, Lang::Fr) => "Accordés",
+        (Key::SetAdminHint, Lang::En) => {
+            "Shortcuts and captures also work in programs started as administrator, games often. Windows asks once."
+        }
+        (Key::SetAdminHint, Lang::Fr) => {
+            "Les raccourcis et les captures fonctionnent aussi dans les programmes lancés en administrateur, souvent des jeux. Windows le demande une fois."
+        }
+        (Key::SetAdminHintMove, Lang::En) => {
+            "Shortcuts and captures also work in programs started as administrator, games often. Vixeeny is installed again in Program Files, where only administrators can change its files; your settings stay. Windows asks once."
+        }
+        (Key::SetAdminHintMove, Lang::Fr) => {
+            "Les raccourcis et les captures fonctionnent aussi dans les programmes lancés en administrateur, souvent des jeux. Vixeeny est réinstallé dans Program Files, où seuls les administrateurs peuvent modifier ses fichiers ; vos paramètres restent. Windows le demande une fois."
+        }
+        (Key::SetAdminDownloading, Lang::En) => "Downloading the installer… {percent} %",
+        (Key::SetAdminDownloading, Lang::Fr) => "Téléchargement de l'installateur… {percent} %",
     }
 }
 

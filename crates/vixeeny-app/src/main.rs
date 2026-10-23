@@ -8,6 +8,7 @@
 use std::sync::mpsc::{RecvTimeoutError, Sender, channel};
 use std::time::Duration;
 
+mod admin;
 mod audio_rig;
 mod capture_backend;
 mod clipboard;
@@ -743,6 +744,8 @@ fn run() -> anyhow::Result<()> {
         Some("--edit") => return region::run_edit(&args[1..]),
         // The daily update check, and the installation (see `update`).
         Some("--update") => return update::run_child(&args[1..]),
+        // The administrator's rights (see `admin`).
+        Some("--admin") => return admin::run_child(&args[1..]),
         Some("--system-info") => {
             vixeeny_platform::attach_console();
             // The displays in physical pixels, as the settings window reports them.

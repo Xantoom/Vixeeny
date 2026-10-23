@@ -11,8 +11,8 @@ use vixeeny_encode::{replay, validate};
 
 use crate::encoders::{self, param_label, param_range};
 use crate::{
-    Env, Invalid, Kind, Opt, Row, Value, advised, choice, counted, discouraged, folder, header,
-    hinted, info, nested, number, opt, row, slider, toggle,
+    Admin, Env, Invalid, Kind, Opt, Row, Value, advised, button, choice, counted, discouraged,
+    folder, header, hinted, info, nested, number, opt, row, slider, toggle,
 };
 
 /// `off`, `size:<MB>` or `duration:<minutes>` → (kind, amount).
@@ -53,7 +53,7 @@ pub fn general(env: &Env, config: &Config) -> Vec<Row> {
         vixeeny_common::i18n::Lang::Fr => "Français",
         vixeeny_common::i18n::Lang::En => "English",
     };
-    vec![
+    let mut rows = vec![
         choice(
             "language",
             t(Key::SetLanguage),
@@ -90,7 +90,32 @@ pub fn general(env: &Env, config: &Config) -> Vec<Row> {
         ),
         // The widget's warning sign, and a notification during a replay.
         disk_alert(env, config),
-    ]
+    ];
+    if let Some(admin) = admin(env) {
+        rows.push(admin);
+    }
+    rows
+}
+
+/// The administrator's rights: a button while they can be given, a mark once they are.
+fn admin(env: &Env) -> Option<Row> {
+    let t = |k| env.t(k);
+    let (row, hint) = match env.admin {
+        Admin::Hidden => return None,
+        Admin::Granted => (
+            info("admin", t(Key::SetAdmin), t(Key::SetAdminGranted)),
+            Key::SetAdminHint,
+        ),
+        Admin::Missing { moves } => (
+            button("admin", t(Key::SetAdmin), t(Key::SetAdminGrant)),
+            if moves {
+                Key::SetAdminHintMove
+            } else {
+                Key::SetAdminHint
+            },
+        ),
+    };
+    Some(hinted(row, t(hint)))
 }
 
 /// How the files of one kind are named. `get` and `naming` reach the settings of that kind.

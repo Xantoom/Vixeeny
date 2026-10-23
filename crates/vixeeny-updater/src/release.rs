@@ -124,6 +124,20 @@ impl Release {
             signature: self.signatures.get(&name)?,
         })
     }
+
+    /// The installer of this version and its signature.
+    pub fn setup(&self) -> Option<(&Asset, &str)> {
+        let name = setup_name(&self.version);
+        Some((
+            self.assets.iter().find(|a| a.name == name)?,
+            self.signatures.get(&name)?,
+        ))
+    }
+}
+
+/// The installer of `version`.
+pub fn setup_name(version: &str) -> String {
+    format!("Vixeeny-{version}-setup.exe")
 }
 
 /// The portable archive of `version`: the update archive and `portable.flag`.
@@ -182,6 +196,20 @@ mod tests {
         // A signature for another version signs nothing here.
         let release = Release::parse(&json("0.6.0", "0.5.0")).ok().flatten();
         assert!(release.is_some_and(|r| r.files("windows-x64").is_none()));
+    }
+
+    #[test]
+    fn the_installer_is_found_only_when_signed() {
+        let release = Release::parse(&json("0.6.0", "0.6.0")).ok().flatten();
+        // Only the archive is signed in these notes.
+        assert!(release.as_ref().is_some_and(|r| r.setup().is_none()));
+        let mut release = release.unwrap_or_else(|| panic!("none"));
+        release
+            .signatures
+            .insert(setup_name("0.6.0"), SIGNATURE.to_owned());
+        let (setup, signature) = release.setup().unwrap_or_else(|| panic!("no installer"));
+        assert_eq!(setup.url, "https://x/s.exe");
+        assert_eq!(signature, SIGNATURE);
     }
 
     #[test]

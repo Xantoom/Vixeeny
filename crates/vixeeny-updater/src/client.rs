@@ -360,6 +360,78 @@ fn restart(dir: &Path, reopen: Option<ControlRequest>) {
     }
 }
 
+/// Where [`download_setup`] puts the installer; removed at the next start ([`clean_up`]).
+fn setup_dir() -> PathBuf {
+    std::env::temp_dir().join("Vixeeny-setup")
+}
+
+/// The installer, downloaded and checked. Its file cannot be changed while this lives: what
+/// is started is what was checked.
+pub struct Setup {
+    pub path: PathBuf,
+    _held: std::fs::File,
+}
+
+/// Downloads the installer of the latest version and checks its signature (to install
+/// Vixeeny in Program Files). `progress(done, total)` is called as the bytes arrive.
+pub fn download_setup(progress: &mut dyn FnMut(u64, u64)) -> anyhow::Result<Setup> {
+    anyhow::ensure!(verify::has_key(), "this build cannot verify the installer");
+    let agent = agent();
+    let json = get(&agent, &check_url(REPOSITORY), 4 << 20)?;
+    let release =
+        Release::parse(std::str::from_utf8(&json)?)?.context("no version is published")?;
+    let (setup, signature) = release
+        .setup()
+        .context("the latest version has no signed installer")?;
+    let folder = setup_dir();
+    let _ = std::fs::remove_dir_all(&folder);
+    std::fs::create_dir_all(&folder)?;
+    let path = folder.join(&setup.name);
+    fetch(
+        &agent,
+        &setup.url,
+        &mut Part::open(&path)?,
+        300 << 20,
+        setup.size,
+        progress,
+    )?;
+    // Read only from now on, by everyone (Windows starts it all the same).
+    let held = {
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(windows)]
+        std::os::windows::fs::OpenOptionsExt::share_mode(&mut options, 1); // FILE_SHARE_READ
+        options.open(&path)?
+    };
+    let checked = verify::check(
+        std::io::BufReader::new(&held),
+        &setup.name,
+        signature,
+        verify::PUBLIC_KEY,
+    );
+    if let Err(e) = checked {
+        drop(held);
+        let _ = std::fs::remove_dir_all(&folder);
+        return Err(e.into());
+    }
+    Ok(Setup { path, _held: held })
+}
+
+/// Stops Vixeeny (at the end of a recording, at most `limit` later) and starts it again from
+/// its folder, from this process: with this process's rights. `reopen` is sent to it once it
+/// runs.
+pub fn restart_daemon(limit: Duration, reopen: Option<ControlRequest>) -> anyhow::Result<()> {
+    let dir = install_dir()?;
+    stop_daemon(Some(limit))?;
+    restart(&dir, reopen);
+    Ok(())
+}
+
+/// Sends `request` to the running daemon.
+pub fn tell_daemon(request: ControlRequest) -> std::io::Result<()> {
+    control(request)
+}
+
 /// Held while the files are swapped, so that nothing else takes the backup for one to clean
 /// or to undo. Windows lets it go when the process ends, however it ends. `None`: another
 /// process holds it.
@@ -514,6 +586,8 @@ pub fn clean_up() {
             let _ = std::fs::remove_file(dir.join(old));
         }
     }
+    // The installer that moved Vixeeny to Program Files.
+    let _ = std::fs::remove_dir_all(setup_dir());
 }
 
 #[cfg(test)]

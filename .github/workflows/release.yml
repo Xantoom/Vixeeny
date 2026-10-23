@@ -118,9 +118,9 @@ jobs:
         with:
           name: vixeeny-windows-unsigned
           path: dist
-      # The release holds the installer and the portable archive, which updates install too; the
-      # archive's signature goes in the notes, in a comment the page does not show (the updater
-      # reads it there).
+      # The release holds the installer and the portable archive, which updates install too;
+      # their signatures go in the notes, in comments the page does not show (the updater reads
+      # them there: the installer's for the move to Program Files).
       - name: Sign (minisign)
         env:
           MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
@@ -142,14 +142,17 @@ jobs:
               rsign sign -W -s "$key" -x "$1.minisig" "$1"
             fi
           }
-          portable=$(ls dist/*-portable.zip)
-          sign "$portable"
-          {
-            printf '<!-- minisign %s\n' "$(basename "$portable")"
-            cat "$portable.minisig"
-            printf '\n-->\n'
-          } > dist/notes.md
-          rm "$portable.minisig" "$key"
+          : > dist/notes.md
+          for file in dist/*-portable.zip dist/*-setup.exe; do
+            sign "$file"
+            {
+              printf '<!-- minisign %s\n' "$(basename "$file")"
+              cat "$file.minisig"
+              printf '\n-->\n'
+            } >> dist/notes.md
+            rm "$file.minisig"
+          done
+          rm "$key"
           # The update archive is what the portable one is made from: not published.
           find dist -maxdepth 1 -name '*.zip' ! -name '*-portable.zip' -delete
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
