@@ -4,12 +4,11 @@
 
 # Vixeeny
 
-**Screenshots and screen recording for Windows — free, open source, out of your way.**
+Screenshots and screen recording for Windows. Free and open source.
 
-[![Release](https://img.shields.io/github/v/release/Xantoom/Vixeeny?style=flat-square&color=0a84ff)](https://github.com/Xantoom/Vixeeny/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/Xantoom/Vixeeny/total?style=flat-square&color=0a84ff)](https://github.com/Xantoom/Vixeeny/releases)
-[![License](https://img.shields.io/badge/license-GPL--3.0-0a84ff?style=flat-square)](LICENSE)
-[![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0a84ff?style=flat-square&logo=windows11&logoColor=white)](#install)
+[![Latest release](https://img.shields.io/github/v/release/Xantoom/Vixeeny?style=flat&label=release&labelColor=18181b&color=0a84ff&logo=github&logoColor=white)](https://github.com/Xantoom/Vixeeny/releases/latest)
+[![Windows 10 and 11](https://img.shields.io/badge/Windows-10%20%C2%B7%2011-0a84ff?style=flat&labelColor=18181b&logo=windows11&logoColor=white)](#install)
+[![License](https://img.shields.io/github/license/Xantoom/Vixeeny?style=flat&label=license&labelColor=18181b&color=0a84ff)](LICENSE)
 
 [**Download**](https://github.com/Xantoom/Vixeeny/releases/latest) · [Limitations](docs/LIMITATIONS.md) · [Help test](docs/BETA.md) · [Contribute](CONTRIBUTING.md)
 
@@ -21,75 +20,31 @@
 
 <br>
 
-Vixeeny lives in the system tray and answers to global shortcuts. Nothing is on screen until you
-ask for it, and nothing runs in the background that you did not start.
+Vixeeny sits in the system tray and waits for a shortcut. Nothing shows on screen until you press
+one.
 
-## Features
+## What it does
 
-<table>
-<tr>
-<td width="50%" valign="top">
+**Screenshots.** A region, a window, the screen, every monitor at once, or a long page captured
+while it scrolls. The screen freezes while you choose, so menus and tooltips stay where they are.
+Files are saved as PNG, JPEG, WebP, AVIF or JPEG XL. On an HDR monitor, the capture keeps its HDR
+or is converted to SDR, as you prefer.
 
-### 📸 Screenshots
+**Annotations.** Arrows, shapes, text, highlighter, numbered steps, blur and pixelation, then save
+or copy. Text in the selection can be copied as text.
 
-- Region, window, full screen, all monitors, **scrolling capture**
-- The screens freeze while you choose
-- An editor to annotate: arrows, shapes, text, highlighter, blur, pixelate, numbered markers
-- Text recognition on the selected region
-- PNG, JPEG (jpegli), WebP, AVIF, JPEG XL
-- **HDR** kept as HDR (PQ, Ultra HDR for JPEG) or converted to SDR
+**Recording.** With the graphics card's encoder (NVIDIA, AMD, Intel) or the processor, in H.264,
+HEVC or AV1. The game, your microphone and single programs can go on separate audio tracks. A small
+widget shows the time and warns when the disk runs low; it never appears in the video.
 
-</td>
-<td width="50%" valign="top">
+**Replay.** While you play, Vixeeny keeps the last minutes, in memory or on disk. One shortcut
+saves them, another opens them in a cutter first so you keep only the moment that matters.
 
-### 🎬 Recording
+**Games.** Captures go into one folder per game, named after it. Shortcuts also work in games
+started as administrator.
 
-- Hardware encoders: **NVENC**, **AMF**, **QuickSync**, or the processor
-- H.264, HEVC, AV1
-- Several audio tracks: system, microphone, single programs
-- **Replay buffer**: save the last minutes after they happened
-- A built-in cutter to trim a replay before you share it
-- A small widget with the time and the disk space, never in your recordings
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-
-### 🎮 Made for games
-
-- Files sorted in one folder per game, named after it
-- Works in games started as administrator
-- Stays out of capture: no frame of Vixeeny in your shots
-
-</td>
-<td width="50%" valign="top">
-
-### 🔄 Quiet updates
-
-- Downloaded and installed in the background, or with one click
-- Verified by signature before anything is replaced
-- Rolled back on its own if the new version does not start
-
-</td>
-</tr>
-</table>
-
-## Shortcuts
-
-| Action | Default |
-| --- | --- |
-| Capture a region | <kbd>PrintScreen</kbd> |
-| Capture a window | <kbd>Alt</kbd> + <kbd>PrintScreen</kbd> |
-| Capture the screen | <kbd>Ctrl</kbd> + <kbd>PrintScreen</kbd> |
-| Scrolling capture | <kbd>SHIFT</kbd> + <kbd>PrintScreen</kbd> |
-| Start / stop recording | <kbd>Ctrl</kbd> + <kbd>F9</kbd> |
-| Pause recording | <kbd>Ctrl</kbd> + <kbd>F10</kbd> |
-| Save the replay | <kbd>Ctrl</kbd> + <kbd>F11</kbd> |
-| Save and edit the replay | <kbd>Ctrl</kbd> + <kbd>F12</kbd> |
-| Open the side bar | <kbd>Ctrl</kbd> + <kbd>F8</kbd> |
-
-Every shortcut can be changed in the settings.
+**Updates.** Downloaded in the background and checked against a signature before anything is
+replaced. If the new version fails to start, the previous one comes back.
 
 ## Install
 
