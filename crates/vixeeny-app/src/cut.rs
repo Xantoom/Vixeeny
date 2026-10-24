@@ -92,14 +92,8 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     let monitor = vixeeny_platform::monitor_at(&monitors, cursor.0, cursor.1)
         .or_else(|| monitors.first())
         .context("no monitor")?;
-    let work = (
-        monitor.work.x,
-        monitor.work.y,
-        monitor.work.width,
-        monitor.work.height,
-    );
     let u = monitor.dpi.max(48) as f32 / 96.0;
-    let geometry = vixeeny_overlay::cutter::placement(work, u, frames.aspect);
+    let geometry = vixeeny_overlay::cutter::placement(monitor.work, u, frames.aspect);
     let cutter = Cutter::new(
         geometry,
         monitor.dpi,

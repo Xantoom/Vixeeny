@@ -10,6 +10,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 use std::time::{Duration, Instant};
 
+use vixeeny_platform::PhysicalRect;
 use windows::Win32::Foundation::{LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -24,7 +25,7 @@ use crate::popup::{self, Popup};
 use crate::scene::{self, Piece};
 use crate::side::Box2;
 use crate::theme::{Look, Rgba, Theme};
-use crate::window::Pointer;
+use crate::window::{Capture, Focus, Pointer};
 
 /// What the buttons ask for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -510,7 +511,12 @@ impl Inner {
         let work = popup::work_area_at(centre).unwrap_or(bar);
         let (x, y) = tip_origin(bar, anchor, tip.size, work);
         // Never in the video either.
-        let popup = Popup::new(&self.gfx, (x, y, tip.size.0, tip.size.1), false, true)?;
+        let popup = Popup::new(
+            &self.gfx,
+            PhysicalRect::new(x, y, tip.size.0, tip.size.1),
+            Focus::Never,
+            Capture::Hidden,
+        )?;
         let piece = Piece::new(&self.gfx, false)?;
         scene::add(&popup.root, &piece.visual)?;
         piece.move_to(0.0, 0.0)?;
@@ -648,16 +654,11 @@ pub struct Widget {
 
 impl Widget {
     /// The widget over `geometry` (physical pixels) on a monitor at `dpi`.
-    pub fn new(
-        geometry: (i32, i32, u32, u32),
-        dpi: u32,
-        look: Look,
-        display: Display,
-    ) -> Result<Self> {
+    pub fn new(geometry: PhysicalRect, dpi: u32, look: Look, display: Display) -> Result<Self> {
         let gfx = Gfx::shared()?;
         let u = dpi.max(48) as f32 / 96.0;
         // Never in the video, never stealing the keyboard.
-        let popup = Popup::new(&gfx, geometry, false, true)?;
+        let popup = Popup::new(&gfx, geometry, Focus::Never, Capture::Hidden)?;
         let piece = Piece::new(&gfx, true)?;
         scene::add(&popup.root, &piece.visual)?;
         let inner = Rc::new(Inner {

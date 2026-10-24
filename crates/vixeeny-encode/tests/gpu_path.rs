@@ -288,7 +288,7 @@ fn a_software_encoder_records_downloaded_gpu_frames_with_the_right_colours() {
 
 #[test]
 fn nvenc_reads_the_gpu_frames_directly_when_present() {
-    let Ok((device, context)) = d3d::create_device(Some(0x10DE)) else {
+    let Ok((device, context)) = d3d::create_device(Some(0x10de)) else {
         vixeeny_common::skip_test("no Direct3D device");
         return;
     };
@@ -306,7 +306,7 @@ fn nvenc_reads_the_gpu_frames_directly_when_present() {
         // SAFETY: plain queries of a live device.
         let adapter = unsafe { dxgi.GetAdapter() }.unwrap();
         // SAFETY: as above.
-        unsafe { adapter.GetDesc() }.unwrap().VendorId == 0x10DE
+        unsafe { adapter.GetDesc() }.unwrap().VendorId == 0x10de
     };
     if !nvidia {
         vixeeny_common::skip_test("no NVIDIA card");
@@ -343,7 +343,7 @@ fn nvenc_reads_the_gpu_frames_directly_when_present() {
 /// on any NVIDIA card, with them or without.
 #[test]
 fn nvenc_records_with_the_quality_presets() {
-    let Ok((device, context)) = d3d::create_device(Some(0x10DE)) else {
+    let Ok((device, context)) = d3d::create_device(Some(0x10de)) else {
         vixeeny_common::skip_test("no Direct3D device");
         return;
     };
@@ -353,7 +353,7 @@ fn nvenc_records_with_the_quality_presets() {
         // SAFETY: plain queries of a live device.
         let adapter = unsafe { dxgi.GetAdapter() }.unwrap();
         // SAFETY: as above.
-        unsafe { adapter.GetDesc() }.unwrap().VendorId == 0x10DE
+        unsafe { adapter.GetDesc() }.unwrap().VendorId == 0x10de
     };
     if !nvidia {
         vixeeny_common::skip_test("no NVIDIA card");

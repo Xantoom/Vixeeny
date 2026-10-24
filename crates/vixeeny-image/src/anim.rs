@@ -225,12 +225,12 @@ impl Animation {
                 let mut source = frame::Video::new(Pixel::BGRA, w, h);
                 let stride = source.stride(0);
                 let row = w as usize * 4;
-                for (y, out) in source
+                let rows = source
                     .data_mut(0)
                     .chunks_mut(stride)
                     .take(h as usize)
-                    .enumerate()
-                {
+                    .enumerate();
+                for (y, out) in rows {
                     out[..row].copy_from_slice(&bgra[y * row..(y + 1) * row]);
                 }
                 source.set_color_space(Space::RGB);

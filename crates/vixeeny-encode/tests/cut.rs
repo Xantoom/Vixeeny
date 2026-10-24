@@ -143,7 +143,7 @@ fn recording_with(dir: &Path, seconds: usize, hdr: bool) -> PathBuf {
 
 /// An scRGB frame at 2.5 (200 nits, about the reference white of HDR).
 fn white_hdr() -> VideoFrame {
-    let px: Vec<u8> = [0x4100_u16, 0x4100, 0x4100, 0x3C00]
+    let px: Vec<u8> = [0x4100_u16, 0x4100, 0x4100, 0x3c00]
         .iter()
         .flat_map(|v| v.to_le_bytes())
         .collect();

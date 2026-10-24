@@ -68,12 +68,12 @@ pub(crate) fn encode(image: &Bgra<'_>, settings: &AvifSettings) -> Result<Vec<u8
     let mut source = frame::Video::new(Pixel::BGRA, image.width, image.height);
     let stride = source.stride(0);
     let row = image.width as usize * 4;
-    for (y, out) in source
+    let rows = source
         .data_mut(0)
         .chunks_mut(stride)
         .take(image.height as usize)
-        .enumerate()
-    {
+        .enumerate();
+    for (y, out) in rows {
         out[..row].copy_from_slice(&image.data[y * image.stride..y * image.stride + row]);
     }
     source.set_color_space(Space::RGB);
@@ -104,13 +104,13 @@ pub(crate) fn encode_hdr(image: &Hdr<'_>, settings: &AvifSettings) -> Result<Vec
     let luma = yuv.data_mut(0);
     for (y, row) in pq.chunks_exact(w * 3).enumerate() {
         let out = &mut luma[y * y_stride..y * y_stride + w * 2];
-        for (x, (o, px)) in out
+        let pixels = out
             .as_chunks_mut::<2>()
             .0
             .iter_mut()
             .zip(row.as_chunks::<3>().0)
-            .enumerate()
-        {
+            .enumerate();
+        for (x, (o, px)) in pixels {
             let [r, g, b] = px.map(|c| f32::from(c) / 65535.0);
             let l = 0.2627 * r + 0.6780 * g + 0.0593 * b;
             *o = code(l).to_le_bytes();

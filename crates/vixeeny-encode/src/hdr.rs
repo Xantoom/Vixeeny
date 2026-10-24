@@ -219,9 +219,9 @@ mod tests {
     }
 
     const ZERO: u16 = 0;
-    const ONE: u16 = 0x3C00;
+    const ONE: u16 = 0x3c00;
     const HALF: u16 = 0x3800;
-    const ONE_QUARTER_UP: u16 = 0x3D00; // 1.25
+    const ONE_QUARTER_UP: u16 = 0x3d00; // 1.25
     const TWO: u16 = 0x4000;
 
     fn pixel(r: u16, g: u16, b: u16) -> Vec<u8> {
@@ -278,8 +278,8 @@ mod tests {
     fn above_the_peak_clips_and_negatives_go_black() {
         // 2.0 is 160 nits: fine. Clipping is exercised through a huge half (65504).
         let mut px = pixel(TWO, ZERO, ZERO);
-        px[..2].copy_from_slice(&0x7BFFu16.to_le_bytes());
-        px[2..4].copy_from_slice(&0xBC00u16.to_le_bytes()); // −1.0
+        px[..2].copy_from_slice(&0x7bffu16.to_le_bytes());
+        px[2..4].copy_from_slice(&0xbc00u16.to_le_bytes()); // −1.0
         let c = codes(&to_pq(&px, 1, 1, 8).unwrap());
         assert!(c[0] <= 1.0 && c[0] > 0.99, "{c:?}");
         assert!(c[1] >= 0.0);

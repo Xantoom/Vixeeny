@@ -52,12 +52,12 @@ impl Denoiser {
         input.set_pts(Some(self.next_pts));
         self.next_pts += frames as i64;
         let bytes = frames * 2 * size_of::<f32>();
-        for (dst, sample) in input.data_mut(0)[..bytes]
+        let slots = input.data_mut(0)[..bytes]
             .as_chunks_mut::<4>()
             .0
             .iter_mut()
-            .zip(interleaved)
-        {
+            .zip(interleaved);
+        for (dst, sample) in slots {
             dst.copy_from_slice(&sample.to_ne_bytes());
         }
         self.graph

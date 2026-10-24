@@ -7,19 +7,19 @@ use std::ptr;
 
 use vixeeny_common::{colour, half};
 
-use crate::native::*;
+use crate::native as ffi;
 use crate::{Bgra, Hdr, ImageError, JpegSettings};
 
-struct Encoder(*mut uhdr_codec_private_t);
+struct Encoder(*mut ffi::uhdr_codec_private_t);
 impl Drop for Encoder {
     fn drop(&mut self) {
         // SAFETY: created by `uhdr_create_encoder`, released once.
-        unsafe { uhdr_release_encoder(self.0) };
+        unsafe { ffi::uhdr_release_encoder(self.0) };
     }
 }
 
-fn check(status: uhdr_error_info_t, what: &str) -> Result<(), ImageError> {
-    if status.error_code == uhdr_codec_err_UHDR_CODEC_OK {
+fn check(status: ffi::uhdr_error_info_t, what: &str) -> Result<(), ImageError> {
+    if status.error_code == ffi::uhdr_codec_err_UHDR_CODEC_OK {
         return Ok(());
     }
     let detail = if status.has_detail != 0 {
@@ -64,15 +64,15 @@ pub(crate) fn encode(image: &Hdr<'_>, settings: &JpegSettings) -> Result<Vec<u8>
     // `halves` and `base`, which outlive `uhdr_encode`; the encoded stream belongs to the
     // encoder and is copied out before it is released.
     unsafe {
-        let enc = Encoder(uhdr_create_encoder());
+        let enc = Encoder(ffi::uhdr_create_encoder());
         if enc.0.is_null() {
             return Err(ImageError::Jpeg("ultra hdr: out of memory".into()));
         }
-        let mut hdr = uhdr_raw_image_t {
-            fmt: uhdr_img_fmt_UHDR_IMG_FMT_64bppRGBAHalfFloat,
-            cg: uhdr_color_gamut_UHDR_CG_BT_709,
-            ct: uhdr_color_transfer_UHDR_CT_LINEAR,
-            range: uhdr_color_range_UHDR_CR_FULL_RANGE,
+        let mut hdr = ffi::uhdr_raw_image_t {
+            fmt: ffi::uhdr_img_fmt_UHDR_IMG_FMT_64bppRGBAHalfFloat,
+            cg: ffi::uhdr_color_gamut_UHDR_CG_BT_709,
+            ct: ffi::uhdr_color_transfer_UHDR_CT_LINEAR,
+            range: ffi::uhdr_color_range_UHDR_CR_FULL_RANGE,
             w: image.width,
             h: image.height,
             planes: [
@@ -83,39 +83,43 @@ pub(crate) fn encode(image: &Hdr<'_>, settings: &JpegSettings) -> Result<Vec<u8>
             stride: [image.width, 0, 0],
         };
         check(
-            uhdr_enc_set_raw_image(enc.0, &raw mut hdr, uhdr_img_label_UHDR_HDR_IMG),
+            ffi::uhdr_enc_set_raw_image(enc.0, &raw mut hdr, ffi::uhdr_img_label_UHDR_HDR_IMG),
             "hdr picture",
         )?;
-        let mut sdr = uhdr_compressed_image_t {
+        let mut sdr = ffi::uhdr_compressed_image_t {
             data: base.as_ptr().cast_mut().cast(),
             data_sz: base.len(),
             capacity: base.len(),
-            cg: uhdr_color_gamut_UHDR_CG_BT_709,
-            ct: uhdr_color_transfer_UHDR_CT_SRGB,
-            range: uhdr_color_range_UHDR_CR_FULL_RANGE,
+            cg: ffi::uhdr_color_gamut_UHDR_CG_BT_709,
+            ct: ffi::uhdr_color_transfer_UHDR_CT_SRGB,
+            range: ffi::uhdr_color_range_UHDR_CR_FULL_RANGE,
         };
         // Same codec in and out: jpegli's JPEG becomes the primary picture as it is.
         check(
-            uhdr_enc_set_compressed_image(enc.0, &raw mut sdr, uhdr_img_label_UHDR_SDR_IMG),
+            ffi::uhdr_enc_set_compressed_image(
+                enc.0,
+                &raw mut sdr,
+                ffi::uhdr_img_label_UHDR_SDR_IMG,
+            ),
             "sdr picture",
         )?;
         check(
-            uhdr_enc_set_quality(
+            ffi::uhdr_enc_set_quality(
                 enc.0,
                 i32::from(settings.quality.clamp(1, 100)),
-                uhdr_img_label_UHDR_GAIN_MAP_IMG,
+                ffi::uhdr_img_label_UHDR_GAIN_MAP_IMG,
             ),
             "quality",
         )?;
         check(
-            uhdr_enc_set_target_display_peak_brightness(
+            ffi::uhdr_enc_set_target_display_peak_brightness(
                 enc.0,
                 image.peak_nits.clamp(UHDR_WHITE_NITS, 10_000.0),
             ),
             "peak brightness",
         )?;
-        check(uhdr_encode(enc.0), "encode")?;
-        let out = uhdr_get_encoded_stream(enc.0);
+        check(ffi::uhdr_encode(enc.0), "encode")?;
+        let out = ffi::uhdr_get_encoded_stream(enc.0);
         if out.is_null() || (*out).data.is_null() {
             return Err(ImageError::Jpeg("ultra hdr: no output".into()));
         }

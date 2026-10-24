@@ -212,7 +212,7 @@ mod native {
         assert!(
             bytes
                 .windows(3)
-                .filter(|c| *c == [0xFF, 0xD8, 0xFF])
+                .filter(|c| *c == [0xff, 0xd8, 0xff])
                 .count()
                 >= 2
         );

@@ -119,10 +119,10 @@ fn count_packets(path: &PathBuf, kind: media::Type) -> usize {
 fn custom_rate_modes_encode() {
     ffmpeg::init().unwrap();
     let registry = vixeeny_encode::registry::Registry::builtin().unwrap();
-    for e in registry
+    let software = registry
         .encoders()
-        .filter(|e| e.kind == vixeeny_encode::registry::Kind::Software)
-    {
+        .filter(|e| e.kind == vixeeny_encode::registry::Kind::Software);
+    for e in software {
         for mode in e.rate_modes() {
             let params = [("rc.mode".to_owned(), mode.name().to_owned())].into();
             let options: Vec<String> = e
@@ -200,10 +200,10 @@ fn custom_rate_modes_on_this_gpu() {
             .collect::<Vec<_>>()
             .join(",")
     };
-    for e in registry
+    let hardware = registry
         .encoders()
-        .filter(|e| e.kind == vixeeny_encode::registry::Kind::Hardware)
-    {
+        .filter(|e| e.kind == vixeeny_encode::registry::Kind::Hardware);
+    for e in hardware {
         let balanced = e
             .presets
             .balanced
@@ -231,10 +231,10 @@ fn custom_rate_modes_on_this_gpu() {
 fn software_encoders_encode_every_declared_pixel_format() {
     let _ = ffmpeg::init();
     let registry = vixeeny_encode::registry::Registry::builtin().unwrap();
-    for e in registry
+    let software = registry
         .encoders()
-        .filter(|e| e.kind == vixeeny_encode::registry::Kind::Software)
-    {
+        .filter(|e| e.kind == vixeeny_encode::registry::Kind::Software);
+    for e in software {
         let options = VIDEO
             .iter()
             .find(|(name, ..)| *name == e.ffmpeg_encoder)

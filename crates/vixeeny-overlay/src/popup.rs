@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::mpsc;
 
+use vixeeny_platform::PhysicalRect;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::DirectComposition::{IDCompositionTarget, IDCompositionVisual2};
 use windows::Win32::Graphics::Dwm::DwmFlush;
@@ -30,7 +31,7 @@ use windows::core::Result;
 
 use crate::gfx::Gfx;
 use crate::scene;
-use crate::window::{self, Pointer};
+use crate::window::{self, Capture, Focus, Pointer};
 
 /// What a popup does with a message; `None` leaves it to Windows.
 type Handler = Rc<dyn Fn(u32, WPARAM, LPARAM) -> Option<LRESULT>>;
@@ -85,18 +86,13 @@ pub struct Popup {
     pub hwnd: HWND,
     _target: IDCompositionTarget,
     pub root: IDCompositionVisual2,
-    activate: bool,
+    focus: Focus,
 }
 
 impl Popup {
     /// A hidden window over `geometry` (physical pixels); see [`window::create_popup`].
-    pub fn new(
-        gfx: &Gfx,
-        geometry: (i32, i32, u32, u32),
-        activate: bool,
-        hidden_from_capture: bool,
-    ) -> Result<Self> {
-        let hwnd = window::create_popup(wndproc, geometry, activate, hidden_from_capture)?;
+    pub fn new(gfx: &Gfx, geometry: PhysicalRect, focus: Focus, capture: Capture) -> Result<Self> {
+        let hwnd = window::create_popup(wndproc, geometry, focus, capture)?;
         // SAFETY: plain creation calls for a window of this thread.
         let made = unsafe {
             gfx.dcomp
@@ -112,7 +108,7 @@ impl Popup {
                 hwnd,
                 _target: target,
                 root,
-                activate,
+                focus,
             }),
             Err(e) => {
                 // SAFETY: the window was created above by this thread.
@@ -124,7 +120,7 @@ impl Popup {
 
     /// A window of its own (taskbar, Alt+Tab) over `geometry`, titled `title`; see
     /// [`window::create_app_window`]. It takes the keyboard when shown.
-    pub fn new_window(gfx: &Gfx, geometry: (i32, i32, u32, u32), title: &str) -> Result<Self> {
+    pub fn new_window(gfx: &Gfx, geometry: PhysicalRect, title: &str) -> Result<Self> {
         let hwnd = window::create_app_window(wndproc, geometry, title)?;
         // SAFETY: plain creation calls for a window of this thread.
         let made = unsafe {
@@ -141,7 +137,7 @@ impl Popup {
                 hwnd,
                 _target: target,
                 root,
-                activate: true,
+                focus: Focus::Take,
             }),
             Err(e) => {
                 // SAFETY: the window was created above by this thread.
@@ -163,7 +159,7 @@ impl Popup {
         // SAFETY: plain calls on a window of this thread.
         unsafe {
             gfx.dcomp.WaitForCommitCompletion()?;
-            if self.activate {
+            if self.focus == Focus::Take {
                 let _ = ShowWindow(self.hwnd, SW_SHOW);
                 let _ = SetForegroundWindow(self.hwnd);
                 let _ = SetFocus(Some(self.hwnd));

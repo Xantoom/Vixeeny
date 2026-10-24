@@ -3,6 +3,7 @@
 //! written there as a PNG (over a desktop-like background), to be looked at.
 
 use vixeeny_editor::{Color, RgbaImage};
+use vixeeny_platform::PhysicalRect;
 
 use crate::gfx::{Canvas, Gfx, rect};
 use crate::layout::PanelHit;
@@ -184,7 +185,8 @@ fn the_side_strip_draws_in_both_themes_and_orientations() {
             pinned: false,
         };
         let entries = side::entries(&side_texts(), &state);
-        let (_, _, w, h) = side::panel_geometry(edge, (0, 0, 2560, 1440), dpi, &entries);
+        let r = side::panel_geometry(edge, PhysicalRect::new(0, 0, 2560, 1440), dpi, &entries);
+        let (w, h) = (r.width, r.height);
         let layout = StripLayout::new(edge, &entries, dpi, (w, h));
         let mut strip = Strip::new(entries.clone(), layout.clone(), true);
         strip.key(side::StripKey::Next);
@@ -233,7 +235,11 @@ fn the_notification_draws_with_a_thumbnail_and_as_an_error() {
     let saved = ToastContent {
         heading: "Image saved".into(),
         body: "capture-001.png".into(),
-        thumb: Some((64, 48, green)),
+        thumb: Some(RgbaImage {
+            width: 64,
+            height: 48,
+            data: green,
+        }),
         dark: true,
         action_label: "Open folder".into(),
         ..ToastContent::default()
@@ -258,7 +264,7 @@ fn the_notification_draws_with_a_thumbnail_and_as_an_error() {
         let thumb = content
             .thumb
             .as_ref()
-            .map(|(w, h, rgba)| gfx.rgba_bitmap(*w, *h, rgba).expect("bitmap"));
+            .map(|t| gfx.rgba_bitmap(t.width, t.height, &t.data).expect("bitmap"));
         let look = CardLook {
             hovered: true,
             hover: Some(crate::toast::CardTarget::Button),
@@ -391,7 +397,11 @@ fn a_screenshot_notification_is_its_picture_alone() {
     let (w, h) = (640u32, 360u32);
     let blue = [[200u8, 120, 40, 255]; 640 * 360].concat();
     let content = ToastContent {
-        thumb: Some((w, h, blue)),
+        thumb: Some(RgbaImage {
+            width: w,
+            height: h,
+            data: blue,
+        }),
         dark: true,
         picture_only: true,
         menu: vec!["Open".into(), "Show".into(), "Close".into()],
@@ -414,7 +424,7 @@ fn a_screenshot_notification_is_its_picture_alone() {
         dark: true,
         ..Look::default()
     });
-    let bitmap = gfx.rgba_bitmap(w, h, content.thumb.as_ref().unwrap().2.as_slice());
+    let bitmap = gfx.rgba_bitmap(w, h, content.thumb.as_ref().unwrap().data.as_slice());
     let bitmap = bitmap.expect("bitmap");
     let (sw, sh) = l.size;
     let pixels = gfx
@@ -549,12 +559,12 @@ fn the_graphics_card_draws_the_annotations_as_the_export_does() {
     // The same picture, but for anti-aliasing and the effects' filters.
     let mut total = 0u64;
     let mut far = 0;
-    for (g, c) in gpu
+    let pixels = gpu
         .as_chunks::<4>()
         .0
         .iter()
-        .zip(cpu_bgra.as_chunks::<4>().0)
-    {
+        .zip(cpu_bgra.as_chunks::<4>().0);
+    for (g, c) in pixels {
         let d = (0..3)
             .map(|i| u64::from(g[i].abs_diff(c[i])))
             .max()

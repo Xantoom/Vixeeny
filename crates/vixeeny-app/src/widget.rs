@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use vixeeny_common::config::RecordingWidget;
-use vixeeny_platform::MonitorInfo;
+use vixeeny_platform::{MonitorInfo, PhysicalRect};
 
 use crate::widget_math::{Alert, FromWidget, ToWidget, corner_geometry};
 
@@ -28,17 +28,12 @@ impl Widget {
         monitor: &MonitorInfo,
         on_press: impl Fn(FromWidget) + Send + 'static,
     ) -> anyhow::Result<Self> {
-        let (x, y, w, h) = corner_geometry(
-            &settings.corner,
-            settings.custom,
-            (
-                monitor.work.x,
-                monitor.work.y,
-                monitor.work.width,
-                monitor.work.height,
-            ),
-            monitor.dpi,
-        );
+        let PhysicalRect {
+            x,
+            y,
+            width: w,
+            height: h,
+        } = corner_geometry(&settings.corner, settings.custom, monitor.work, monitor.dpi);
         let mut command = Command::new(std::env::current_exe()?);
         command
             .arg("--widget")
@@ -116,7 +111,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
             .and_then(|a| a.parse().ok())
             .with_context(|| format!("bad widget argument {i}"))
     };
-    let (x, y, w, h) = (
+    let geometry = PhysicalRect::new(
         num(0)? as i32,
         num(1)? as i32,
         num(2)? as u32,
@@ -131,7 +126,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
         ..vixeeny_overlay::Look::default()
     };
     // Out of the captures from its creation, never stealing the keyboard.
-    let bar = Rc::new(Bar::new((x, y, w, h), dpi, look, display)?);
+    let bar = Rc::new(Bar::new(geometry, dpi, look, display)?);
     bar.on_event(move |event| {
         let press = match event {
             WidgetEvent::TogglePause => FromWidget::TogglePause,

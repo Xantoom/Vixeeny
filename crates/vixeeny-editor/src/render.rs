@@ -51,12 +51,12 @@ pub fn bgra_to_rgba(
                         return;
                     };
                     let out = &mut out[..width * 4];
-                    for (o, i) in out
+                    let pixels = out
                         .as_chunks_mut::<4>()
                         .0
                         .iter_mut()
-                        .zip(input.as_chunks::<4>().0)
-                    {
+                        .zip(input.as_chunks::<4>().0);
+                    for (o, i) in pixels {
                         *o = [i[2], i[1], i[0], 255];
                     }
                 }

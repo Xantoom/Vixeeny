@@ -3,14 +3,21 @@
 
 use std::path::Path;
 
+use vixeeny_editor::RgbaImage;
+
 const VIDEO_EXTENSIONS: [&str; 3] = ["mp4", "mkv", "webm"];
 
-/// A thumbnail of a capture, at most `max_side` pixels on its long side: RGBA. `None` for files
-/// that cannot be decoded.
-pub fn thumbnail(path: &Path, max_side: u32) -> Option<(u32, u32, Vec<u8>)> {
+/// A thumbnail of a capture, at most `max_side` pixels on its long side. `None` for files that
+/// cannot be decoded.
+pub fn thumbnail(path: &Path, max_side: u32) -> Option<RgbaImage> {
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
     if VIDEO_EXTENSIONS.contains(&ext.as_str()) {
-        return vixeeny_encode::thumbnail::video_thumbnail(path, max_side);
+        let (width, height, data) = vixeeny_encode::thumbnail::video_thumbnail(path, max_side)?;
+        return Some(RgbaImage {
+            width,
+            height,
+            data,
+        });
     }
     let bytes = std::fs::read(path).ok()?;
     let img = vixeeny_image::decode(&bytes).ok()?;
@@ -20,8 +27,8 @@ pub fn thumbnail(path: &Path, max_side: u32) -> Option<(u32, u32, Vec<u8>)> {
     ))
 }
 
-/// `img` at most `max_side` pixels on its long side: RGBA.
-pub fn scaled(img: &vixeeny_image::Bgra<'_>, max_side: u32) -> (u32, u32, Vec<u8>) {
+/// `img` at most `max_side` pixels on its long side.
+pub fn scaled(img: &vixeeny_image::Bgra<'_>, max_side: u32) -> RgbaImage {
     let scale = (max_side as f32 / img.width.max(img.height).max(1) as f32).min(1.0);
     let (w, h) = (
         ((img.width as f32 * scale).round() as u32).max(1),
@@ -53,7 +60,11 @@ pub fn scaled(img: &vixeeny_image::Bgra<'_>, max_side: u32) -> (u32, u32, Vec<u8
             out.extend_from_slice(&[(r / n) as u8, (g / n) as u8, (b / n) as u8, 255]);
         }
     }
-    (w, h, out)
+    RgbaImage {
+        width: w,
+        height: h,
+        data: out,
+    }
 }
 
 #[cfg(test)]
@@ -90,13 +101,20 @@ mod tests {
             w.write_image_data(&row.repeat(100)).unwrap();
         }
         std::fs::write(&path, data).unwrap();
-        let (w, h, rgba) = thumbnail(&path, 100).unwrap();
+        let RgbaImage {
+            width: w,
+            height: h,
+            data: rgba,
+        } = thumbnail(&path, 100).unwrap();
         assert_eq!((w, h), (100, 25));
         assert_eq!(rgba.len(), 100 * 25 * 4);
         assert_eq!(&rgba[..4], [255, 0, 0, 255]);
         assert_eq!(&rgba[(99) * 4..(99) * 4 + 4], [0, 0, 255, 255]);
         // A small picture is not enlarged.
-        assert_eq!(thumbnail(&path, 1000).map(|t| (t.0, t.1)), Some((400, 100)));
+        assert_eq!(
+            thumbnail(&path, 1000).map(|t| (t.width, t.height)),
+            Some((400, 100))
+        );
         assert!(thumbnail(&root.join("a.mp4"), 100).is_none());
         let _ = std::fs::remove_dir_all(root);
     }
@@ -110,8 +128,8 @@ mod tests {
             data.extend_from_slice(&[0, 0, 255, 255].repeat(2));
             data.extend_from_slice(&[9; 4]);
         }
-        let (w, h, rgba) = scaled(&vixeeny_image::Bgra::new(4, 2, 20, &data), 2);
-        assert_eq!((w, h), (2, 1));
-        assert_eq!(rgba, [0, 0, 255, 255, 255, 0, 0, 255]);
+        let thumb = scaled(&vixeeny_image::Bgra::new(4, 2, 20, &data), 2);
+        assert_eq!((thumb.width, thumb.height), (2, 1));
+        assert_eq!(thumb.data, [0, 0, 255, 255, 255, 0, 0, 255]);
     }
 }

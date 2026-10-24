@@ -8,6 +8,8 @@
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
+use vixeeny_editor::RgbaImage;
+use vixeeny_platform::PhysicalRect;
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -22,7 +24,7 @@ use crate::popup::{self, Popup};
 use crate::scene::{self, Piece};
 use crate::side::Box2;
 use crate::theme::{Look, Rgba, Theme};
-use crate::window::Pointer;
+use crate::window::{Capture, Focus, Pointer};
 
 /// What the card says and offers.
 #[derive(Debug, Clone, Default)]
@@ -30,7 +32,7 @@ pub struct ToastContent {
     pub heading: String,
     pub body: String,
     /// Width, height, RGBA.
-    pub thumb: Option<(u32, u32, Vec<u8>)>,
+    pub thumb: Option<RgbaImage>,
     pub error: bool,
     /// Something to know, not a failure: amber.
     pub warning: bool,
@@ -58,14 +60,13 @@ pub enum ToastEvent {
 
 /// Where the card goes: the bottom-right (or `top`-right) corner of the work area of a monitor
 /// (what the taskbar leaves free), `margin` physical pixels from its edges.
-pub fn corner(work: (i32, i32, u32, u32), size: (u32, u32), margin: u32, top: bool) -> (i32, i32) {
-    let (x, y, w, h) = work;
+pub fn corner(work: PhysicalRect, size: (u32, u32), margin: u32, top: bool) -> (i32, i32) {
     (
-        x + w as i32 - size.0 as i32 - margin as i32,
+        work.x + work.width as i32 - size.0 as i32 - margin as i32,
         if top {
-            y + margin as i32
+            work.y + margin as i32
         } else {
-            y + h as i32 - size.1 as i32 - margin as i32
+            work.y + work.height as i32 - size.1 as i32 - margin as i32
         },
     )
 }
@@ -116,9 +117,9 @@ impl CardLayout {
     pub fn new(gfx: &Gfx, content: &ToastContent, dpi: u32) -> Result<Self> {
         let u = dpi.max(48) as f32 / 96.0;
         if content.picture_only
-            && let Some((w, h, _)) = &content.thumb
+            && let Some(thumb) = &content.thumb
         {
-            return Self::picture(gfx, (*w, *h), u);
+            return Self::picture(gfx, (thumb.width, thumb.height), u);
         }
         let card_w = (WIDTH - 2.0 * SIDE) * u;
         let picture_side = if content.thumb.is_some() { THUMB } else { ICON };
@@ -260,7 +261,8 @@ pub fn paint_card(
 
     let (px, py, pw, ph) = l.picture;
     match (thumb, &content.thumb) {
-        (Some(bitmap), Some((w, h, _))) => {
+        (Some(bitmap), Some(picture)) => {
+            let (w, h) = (&picture.width, &picture.height);
             let frame = rect(px, py, pw, ph);
             c.fill_round(frame, 6.0 * u, t.bg_deep)?;
             // Contained: the whole picture, centred.
@@ -543,7 +545,7 @@ impl Toasts {
     pub fn show(
         &self,
         content: &ToastContent,
-        work: (i32, i32, u32, u32),
+        work: PhysicalRect,
         dpi: u32,
         animate: bool,
         done: impl FnOnce(Option<ToastEvent>) + 'static,
@@ -554,11 +556,16 @@ impl Toasts {
         let u = layout.u;
         let (x, y) = corner(work, layout.size, (12.0 * u) as u32, content.top);
         // Never in a capture or a recording: the card is about them, not part of them.
-        let popup = Popup::new(gfx, (x, y, layout.size.0, layout.size.1), false, true)?;
+        let popup = Popup::new(
+            gfx,
+            PhysicalRect::new(x, y, layout.size.0, layout.size.1),
+            Focus::Never,
+            Capture::Hidden,
+        )?;
         let piece = Piece::new(gfx, true)?;
         scene::add(&popup.root, &piece.visual)?;
         let thumb = match &content.thumb {
-            Some((w, h, rgba)) => match gfx.rgba_bitmap(*w, *h, rgba) {
+            Some(t) => match gfx.rgba_bitmap(t.width, t.height, &t.data) {
                 Ok(b) => Some(b),
                 Err(e) => {
                     tracing::warn!("notification thumbnail: {e}");
@@ -627,18 +634,31 @@ mod tests {
     fn the_card_sits_in_the_bottom_right_corner() {
         // Above a 48-pixel taskbar.
         assert_eq!(
-            corner((0, 0, 1920, 1032), (360, 96), 16, false),
+            corner(PhysicalRect::new(0, 0, 1920, 1032), (360, 96), 16, false),
             (1544, 920)
         );
         // A second monitor to the left keeps its own corner; a taskbar on top moves nothing.
         assert_eq!(
-            corner((-1920, 40, 1920, 1040), (360, 96), 16, false),
+            corner(
+                PhysicalRect::new(-1920, 40, 1920, 1040),
+                (360, 96),
+                16,
+                false
+            ),
             (-376, 968)
         );
         // At the top, under a taskbar on top.
-        assert_eq!(corner((0, 0, 1920, 1032), (360, 96), 16, true), (1544, 16));
         assert_eq!(
-            corner((-1920, 40, 1920, 1040), (360, 96), 16, true),
+            corner(PhysicalRect::new(0, 0, 1920, 1032), (360, 96), 16, true),
+            (1544, 16)
+        );
+        assert_eq!(
+            corner(
+                PhysicalRect::new(-1920, 40, 1920, 1040),
+                (360, 96),
+                16,
+                true
+            ),
             (-376, 56)
         );
     }

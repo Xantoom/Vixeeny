@@ -452,8 +452,8 @@ impl Prober for Fake {
 fn multi_gpu() -> Fake {
     Fake {
         adapters: vec![
-            gpu(0, "NVIDIA GeForce RTX 5080", 0x10DE, "32.0.15.7000"),
-            gpu(1, "NVIDIA GeForce GTX 960", 0x10DE, "32.0.15.7000"),
+            gpu(0, "NVIDIA GeForce RTX 5080", 0x10de, "32.0.15.7000"),
+            gpu(1, "NVIDIA GeForce GTX 960", 0x10de, "32.0.15.7000"),
             gpu(0, "Intel(R) UHD Graphics", 0x8086, "31.001.5000"),
             gpu(0, "Microsoft Basic Render Driver", 0x1414, "10.0"),
         ],

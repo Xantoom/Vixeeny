@@ -287,34 +287,34 @@ fn smbios_modules(tables: &[u8]) -> Vec<Module> {
         };
         match kind {
             17 => {
-                let size = word(0x0C);
+                let size = word(0x0c);
                 let bytes = match size {
-                    0 | 0xFFFF => 0,
-                    0x7FFF => u64::from(dword(0x1C) & 0x7FFF_FFFF) << 20,
-                    s if s & 0x8000 != 0 => u64::from(s & 0x7FFF) << 10,
+                    0 | 0xffff => 0,
+                    0x7fff => u64::from(dword(0x1c) & 0x7fff_ffff) << 20,
+                    s if s & 0x8000 != 0 => u64::from(s & 0x7fff) << 10,
                     s => u64::from(s) << 20,
                 };
                 // An empty slot.
                 if bytes > 0 {
                     let kind = match formatted.get(0x12) {
                         Some(0x18) => "DDR3",
-                        Some(0x1A) => "DDR4",
-                        Some(0x1B) => "LPDDR",
-                        Some(0x1D) => "LPDDR3",
-                        Some(0x1E) => "LPDDR4",
+                        Some(0x1a) => "DDR4",
+                        Some(0x1b) => "LPDDR",
+                        Some(0x1d) => "LPDDR3",
+                        Some(0x1e) => "LPDDR4",
                         Some(0x22) => "DDR5",
                         Some(0x23) => "LPDDR5",
                         _ => "",
                     };
                     let rated = match word(0x15) {
-                        0xFFFF => dword(0x54),
+                        0xffff => dword(0x54),
                         s => u32::from(s),
                     };
                     let configured = match word(0x20) {
-                        0xFFFF => dword(0x58),
+                        0xffff => dword(0x58),
                         s => u32::from(s),
                     };
-                    let part = formatted.get(0x1A).map_or_else(String::new, |i| string(*i));
+                    let part = formatted.get(0x1a).map_or_else(String::new, |i| string(*i));
                     out.push(Module {
                         bytes,
                         kind: kind.to_owned(),
@@ -793,14 +793,14 @@ mod tests {
     #[test]
     fn memory_sticks_read_from_smbios() {
         // One type 17 structure (DDR5, 32 GB, 6000 MT/s), then the end (type 127).
-        let mut t = vec![0u8; 0x5C];
+        let mut t = vec![0u8; 0x5c];
         t[0] = 17;
-        t[1] = 0x5C;
-        t[0x0C..0x0E].copy_from_slice(&0x7FFFu16.to_le_bytes());
-        t[0x1C..0x20].copy_from_slice(&32768u32.to_le_bytes());
+        t[1] = 0x5c;
+        t[0x0c..0x0e].copy_from_slice(&0x7fffu16.to_le_bytes());
+        t[0x1c..0x20].copy_from_slice(&32768u32.to_le_bytes());
         t[0x12] = 0x22;
         t[0x15..0x17].copy_from_slice(&4800u16.to_le_bytes());
-        t[0x1A] = 1;
+        t[0x1a] = 1;
         t[0x20..0x22].copy_from_slice(&6000u16.to_le_bytes());
         t.extend_from_slice(b"F5-6000J3038F16G\0\0");
         t.extend_from_slice(&[127, 4, 0, 0, 0, 0]);

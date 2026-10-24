@@ -141,7 +141,7 @@ fn to_rgba(frame: &Frame) -> Vec<u8> {
 
 /// Where to put the control window: beside the zone when there is room. It is left out of the
 /// capture anyway, but should not hide what the user scrolls.
-fn panel_rect(monitor: &PhysicalRect, zone: &PhysicalRect, scale: f32) -> (i32, i32, u32, u32) {
+fn panel_rect(monitor: &PhysicalRect, zone: &PhysicalRect, scale: f32) -> PhysicalRect {
     let width = (PANEL_WIDTH * scale) as u32;
     let height = ((PANEL_HEIGHT * scale) as u32)
         .max(zone.height.min(monitor.height))
@@ -159,7 +159,7 @@ fn panel_rect(monitor: &PhysicalRect, zone: &PhysicalRect, scale: f32) -> (i32, 
     } else {
         zone.right() - i64::from(width)
     };
-    (x as i32, y, width, height)
+    PhysicalRect::new(x as i32, y, width, height)
 }
 
 #[derive(Default)]
@@ -300,8 +300,8 @@ pub fn run(
         (y1 - y0) as u32,
     );
     let panel = ScrollPanel::new(&texts(lang)).map_err(|e| anyhow::anyhow!("window: {e}"))?;
-    let (px, py, pw, ph) = panel_rect(&monitor.rect, &zone, scale);
-    panel.set_position(px, py, pw, ph);
+    let at = panel_rect(&monitor.rect, &zone, scale);
+    panel.set_position(at.x, at.y, at.width, at.height);
 
     let shared = Arc::new(Shared::default());
     // Out of the capture as soon as Windows made the window.
@@ -313,7 +313,7 @@ pub fn run(
         excluded.tell(&excluded.shown);
     });
     let handle = panel.handle();
-    let preview_box = ((PANEL_WIDTH * scale) as u32, ph);
+    let preview_box = ((PANEL_WIDTH * scale) as u32, at.height);
     let worker = {
         let shared = shared.clone();
         let monitor = monitor.clone();

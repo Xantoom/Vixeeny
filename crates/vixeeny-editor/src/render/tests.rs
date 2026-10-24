@@ -324,12 +324,12 @@ fn reference_scene() {
         vec![
             Annotation::Rect {
                 rect: Rect::new(4.0, 4.0, 40.0, 24.0),
-                style: style(Color::rgb(0x1E, 0x88, 0xE5), 4.0),
+                style: style(Color::rgb(0x1e, 0x88, 0xe5), 4.0),
                 filled: false,
             },
             Annotation::Ellipse {
                 rect: Rect::new(50.0, 4.0, 40.0, 24.0),
-                style: style(Color::rgb(0x43, 0xA0, 0x47), 4.0),
+                style: style(Color::rgb(0x43, 0xa0, 0x47), 4.0),
                 filled: true,
             },
             Annotation::Arrow {

@@ -786,7 +786,7 @@ mod tests {
 
     #[test]
     fn frozen_hdr_screens_read_as_scrgb() {
-        let one = 0x3C00u16.to_le_bytes(); // 1.0
+        let one = 0x3c00u16.to_le_bytes(); // 1.0
         let half = 0x3800u16.to_le_bytes(); // 0.5
         // One pixel, then row padding.
         let rows = [one, half, [0, 0], one, [9, 9], [9, 9], [9, 9], [9, 9]].concat();

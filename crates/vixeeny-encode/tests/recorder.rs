@@ -558,7 +558,7 @@ fn variable_frame_rate_is_refused_in_mp4() {
 
 /// A uniform scRGB frame (all channels `half`, as raw half-float bits).
 fn hdr_frame(w: u32, h: u32, half: u16) -> VideoFrame {
-    let px: Vec<u8> = [half, half, half, 0x3C00]
+    let px: Vec<u8> = [half, half, half, 0x3c00]
         .iter()
         .flat_map(|v| v.to_le_bytes())
         .collect();
@@ -583,7 +583,7 @@ fn scrgb_frames_come_out_as_bt2020_pq_10_bit() {
     let rec = Recorder::start(cfg, namer(&dir, "mkv")).unwrap();
     // 1.25 in scRGB = 100 nits = PQ 0.508.
     for i in 0..10 {
-        rec.push_frame(i * 1_000 * MS / fps, hdr_frame(320, 180, 0x3D00));
+        rec.push_frame(i * 1_000 * MS / fps, hdr_frame(320, 180, 0x3d00));
     }
     let summary = rec.stop(10 * 1_000 * MS / fps).unwrap();
 

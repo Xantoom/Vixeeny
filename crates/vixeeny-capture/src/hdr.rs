@@ -70,12 +70,12 @@ impl HdrFrame {
         rgba.par_chunks_mut(w * 4)
             .zip(data.par_chunks(stride))
             .for_each(|(out, row)| {
-                for (o, px) in out
+                let pixels = out
                     .as_chunks_mut::<4>()
                     .0
                     .iter_mut()
-                    .zip(row.as_chunks::<4>().0)
-                {
+                    .zip(row.as_chunks::<4>().0);
+                for (o, px) in pixels {
                     let c = |i: usize| linear[usize::from(px[i])] * gain;
                     *o = [c(2), c(1), c(0), 1.0];
                 }
@@ -90,9 +90,11 @@ impl HdrFrame {
     /// Multiplies the light by `gain`.
     pub fn scale(&mut self, gain: f32) {
         if gain != 1.0 {
-            self.rgba
-                .par_chunks_mut(4 * 4096)
-                .for_each(|px| px.iter_mut().for_each(|c| *c *= gain));
+            self.rgba.par_chunks_mut(4 * 4096).for_each(|chunk| {
+                for c in chunk {
+                    *c *= gain;
+                }
+            });
         }
     }
 

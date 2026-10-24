@@ -20,12 +20,12 @@ fn png_bytes(rgb_like: &[u8], w: u32, h: u32) -> Vec<u8> {
 }
 
 fn crc32(data: &[u8]) -> u32 {
-    let mut crc = 0xFFFF_FFFFu32;
+    let mut crc = 0xffff_ffffu32;
     for &b in data {
         crc ^= u32::from(b);
         for _ in 0..8 {
             crc = if crc & 1 != 0 {
-                (crc >> 1) ^ 0xEDB8_8320
+                (crc >> 1) ^ 0xedb8_8320
             } else {
                 crc >> 1
             };

@@ -336,7 +336,7 @@ fn try_gpu(
     }
     // The encoder's GPU; a software encoder takes the default one.
     let vendor = match encoder.vendor {
-        Vendor::Nvidia => Some(0x10DE),
+        Vendor::Nvidia => Some(0x10de),
         Vendor::Amd => Some(0x1002),
         Vendor::Intel => Some(0x8086),
         Vendor::None => None,
@@ -461,7 +461,11 @@ fn plan(
     let audio_codec = AudioCodec::from_setting(&profile.audio.codec, container, encoder.family)
         .with_context(|| format!("unknown audio codec `{}`", profile.audio.codec))?;
     match profile.audio.channels.as_str() {
-        "mono" => audio.iter_mut().for_each(|t| t.channels = 1),
+        "mono" => {
+            for track in &mut audio {
+                track.channels = 1;
+            }
+        }
         // Surround keeps what the sources have: 5.1 as 5.1, 7.1 as 7.1.
         "surround" | "5.1" | "7.1" if audio_codec.surround_in(container) => {
             vixeeny_audio::assign_channels(&mut audio, 8, vixeeny_audio::source_channels);

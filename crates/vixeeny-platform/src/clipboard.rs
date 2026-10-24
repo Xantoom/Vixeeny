@@ -33,10 +33,10 @@ pub fn dibv5(width: u32, height: u32, bgra: &[u8]) -> Vec<u8> {
     put32(&mut out, 2835); // y
     put32(&mut out, 0); // colours used
     put32(&mut out, 0); // important colours
-    put32(&mut out, 0x00FF_0000); // red mask
-    put32(&mut out, 0x0000_FF00); // green mask
-    put32(&mut out, 0x0000_00FF); // blue mask
-    put32(&mut out, 0xFF00_0000); // alpha mask
+    put32(&mut out, 0x00ff_0000); // red mask
+    put32(&mut out, 0x0000_ff00); // green mask
+    put32(&mut out, 0x0000_00ff); // blue mask
+    put32(&mut out, 0xff00_0000); // alpha mask
     put32(&mut out, 0x7352_4742); // LCS_sRGB ('sRGB')
     out.resize(HEADER, 0); // colour endpoints, gamma: unused for sRGB; intent, profile fields 0
     for y in (0..height as usize).rev() {
@@ -213,7 +213,7 @@ mod tests {
         assert_eq!(utf16_z("a\r\nb"), utf16_z("a\nb"));
         // outside the BMP: a surrogate pair
         assert_eq!(utf16_z("😀").len(), 6);
-        assert_eq!(utf16_z("日"), [0xE5, 0x65, 0, 0]);
+        assert_eq!(utf16_z("日"), [0xe5, 0x65, 0, 0]);
     }
 
     #[test]
@@ -226,8 +226,8 @@ mod tests {
         assert_eq!(u32_at(0), 124);
         assert_eq!((u32_at(4), u32_at(8)), (2, 2));
         assert_eq!(u32_at(16), 3); // BI_BITFIELDS
-        assert_eq!(u32_at(40), 0x00FF_0000);
-        assert_eq!(u32_at(52), 0xFF00_0000);
+        assert_eq!(u32_at(40), 0x00ff_0000);
+        assert_eq!(u32_at(52), 0xff00_0000);
         assert_eq!(u32_at(56), 0x7352_4742);
         // the bottom row comes first
         assert_eq!(&d[124..128], &[7, 8, 9, 255]);

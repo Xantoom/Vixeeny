@@ -10,6 +10,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
+use vixeeny_platform::PhysicalRect;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyState, ReleaseCapture, SetCapture, VIRTUAL_KEY, VK_DOWN, VK_ESCAPE, VK_LEFT, VK_RETURN,
@@ -27,7 +28,7 @@ use crate::icons;
 use crate::popup::{self, Popup};
 use crate::scene::{self, Piece};
 use crate::theme::{Look, Rgba, Theme};
-use crate::window::Pointer;
+use crate::window::{Capture, Focus, Pointer};
 
 /// Which edge of the screen the strip sits on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -251,16 +252,16 @@ fn logical_size(entries: &[Entry], vertical: bool) -> (f64, f64) {
     }
 }
 
-/// Where the window goes on `monitor` (`x, y, width, height`, physical pixels; `dpi` 96 = 100 %):
-/// flush against `edge`, centred along it. Returns `x, y, width, height` in physical pixels.
+/// Where the window goes on `monitor` (physical pixels; `dpi` 96 = 100 %): flush against `edge`,
+/// centred along it.
 pub fn panel_geometry(
     edge: Edge,
-    monitor: (i32, i32, u32, u32),
+    monitor: PhysicalRect,
     dpi: u32,
     entries: &[Entry],
-) -> (i32, i32, u32, u32) {
+) -> PhysicalRect {
     let scale = f64::from(dpi.max(48)) / 96.0;
-    let (mx, my, mw, mh) = monitor;
+    let (mx, my, mw, mh) = (monitor.x, monitor.y, monitor.width, monitor.height);
     let (w, h) = logical_size(entries, edge.is_vertical());
     let w = ((w * scale).round() as u32).min(mw);
     let h = ((h * scale).round() as u32).min(mh);
@@ -272,7 +273,7 @@ pub fn panel_geometry(
         Edge::Top => (centred_x, my),
         Edge::Bottom => (centred_x, my + (mh - h) as i32),
     };
-    (x, y, w, h)
+    PhysicalRect::new(x, y, w, h)
 }
 
 /// Room around the strip's and the label's boxes for their shadows, logical pixels.
@@ -1002,7 +1003,7 @@ impl SidePanel {
     pub fn new(
         texts: &SideTexts,
         state: &SideState,
-        geometry: (i32, i32, u32, u32),
+        geometry: PhysicalRect,
         dpi: u32,
     ) -> Result<Self> {
         let gfx = Gfx::shared()?;
@@ -1012,9 +1013,9 @@ impl SidePanel {
             ..Look::default()
         });
         let entries = entries(texts, state);
-        let layout = StripLayout::new(state.edge, &entries, dpi, (geometry.2, geometry.3));
+        let layout = StripLayout::new(state.edge, &entries, dpi, (geometry.width, geometry.height));
         // Never in a capture: nor in a recording, a replay or a screen share.
-        let popup = Popup::new(&gfx, geometry, true, true)?;
+        let popup = Popup::new(&gfx, geometry, Focus::Take, Capture::Hidden)?;
         let strip = Piece::new(&gfx, true)?;
         scene::add(&popup.root, &strip.visual)?;
         let tip = Piece::new(&gfx, true)?;
@@ -1199,30 +1200,33 @@ mod tests {
     #[test]
     fn the_window_hugs_its_edge_and_is_centred_along_it() {
         let list = entries(&texts(), &state());
-        let monitor = (0, 0, 2560, 1440);
-        let (x, y, w, h) = panel_geometry(Edge::Right, monitor, 96, &list);
-        assert_eq!(x + w as i32, 2560);
-        assert_eq!(y, (1440 - h as i32) / 2);
-        assert_eq!(panel_geometry(Edge::Left, monitor, 96, &list).0, 0);
-        let (x, y, w, h) = panel_geometry(Edge::Bottom, monitor, 96, &list);
-        assert_eq!(y + h as i32, 1440);
-        assert_eq!(x, (2560 - w as i32) / 2);
-        assert_eq!(panel_geometry(Edge::Top, monitor, 96, &list).1, 0);
+        let monitor = PhysicalRect::new(0, 0, 2560, 1440);
+        let r = panel_geometry(Edge::Right, monitor, 96, &list);
+        assert_eq!(r.x + r.width as i32, 2560);
+        assert_eq!(r.y, (1440 - r.height as i32) / 2);
+        assert_eq!(panel_geometry(Edge::Left, monitor, 96, &list).x, 0);
+        let r = panel_geometry(Edge::Bottom, monitor, 96, &list);
+        assert_eq!(r.y + r.height as i32, 1440);
+        assert_eq!(r.x, (2560 - r.width as i32) / 2);
+        assert_eq!(panel_geometry(Edge::Top, monitor, 96, &list).y, 0);
         // A second monitor to the right, at 200 %: everything doubles and moves with it.
-        let second = (2560, 0, 3840, 2160);
-        let (x1, _, w1, h1) = panel_geometry(Edge::Right, second, 192, &list);
-        let (_, _, w0, h0) = panel_geometry(Edge::Right, second, 96, &list);
-        assert_eq!(x1 + w1 as i32, 2560 + 3840);
-        assert_eq!((w1, h1), (w0 * 2, h0 * 2));
+        let second = PhysicalRect::new(2560, 0, 3840, 2160);
+        let double = panel_geometry(Edge::Right, second, 192, &list);
+        let single = panel_geometry(Edge::Right, second, 96, &list);
+        assert_eq!(double.x + double.width as i32, 2560 + 3840);
+        assert_eq!(
+            (double.width, double.height),
+            (single.width * 2, single.height * 2)
+        );
         // Never bigger than the monitor.
-        let tiny = (0, 0, 300, 400);
-        let (_, _, w, h) = panel_geometry(Edge::Right, tiny, 96, &list);
-        assert!(w <= 300 && h <= 400);
+        let tiny = PhysicalRect::new(0, 0, 300, 400);
+        let r = panel_geometry(Edge::Right, tiny, 96, &list);
+        assert!(r.width <= 300 && r.height <= 400);
     }
     fn strip_at_100(edge: Edge, pinned: bool) -> Strip {
         let list = entries(&texts(), &state());
-        let (_, _, w, h) = panel_geometry(edge, (0, 0, 2560, 1440), 96, &list);
-        let layout = StripLayout::new(edge, &list, 96, (w, h));
+        let r = panel_geometry(edge, PhysicalRect::new(0, 0, 2560, 1440), 96, &list);
+        let layout = StripLayout::new(edge, &list, 96, (r.width, r.height));
         Strip::new(list, layout, pinned)
     }
 

@@ -7,6 +7,7 @@
 use std::sync::OnceLock;
 
 use vixeeny_editor::CursorHint;
+use vixeeny_platform::PhysicalRect;
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
     DWMWA_CLOAK, DWMWA_TRANSITIONS_FORCEDISABLED, DwmSetWindowAttribute,
@@ -52,11 +53,7 @@ fn register(class: PCWSTR, proc: WndProc, done: &'static OnceLock<bool>) -> bool
     })
 }
 
-fn popup_window(
-    class: PCWSTR,
-    ex: WINDOW_EX_STYLE,
-    (x, y, w, h): (i32, i32, u32, u32),
-) -> Result<HWND> {
+fn popup_window(class: PCWSTR, ex: WINDOW_EX_STYLE, rect: PhysicalRect) -> Result<HWND> {
     // SAFETY: the class is registered; the strings are static. Attributes are set on the window
     // just created.
     unsafe {
@@ -65,10 +62,10 @@ fn popup_window(
             class,
             w!("Vixeeny"),
             WS_POPUP,
-            x,
-            y,
-            i32::try_from(w).unwrap_or(i32::MAX),
-            i32::try_from(h).unwrap_or(i32::MAX),
+            rect.x,
+            rect.y,
+            i32::try_from(rect.width).unwrap_or(i32::MAX),
+            i32::try_from(rect.height).unwrap_or(i32::MAX),
             None,
             None,
             Some(instance()),
@@ -92,31 +89,49 @@ pub fn create(proc: WndProc, x: i32, y: i32, w: u32, h: u32) -> Result<HWND> {
     if !register(CLASS, proc, &DONE) {
         return Err(windows::core::Error::from_thread());
     }
-    popup_window(CLASS, WINDOW_EX_STYLE::default(), (x, y, w, h))
+    popup_window(
+        CLASS,
+        WINDOW_EX_STYLE::default(),
+        PhysicalRect::new(x, y, w, h),
+    )
 }
 
 const POPUP_CLASS: PCWSTR = w!("VixeenyPopup");
 static POPUP_DONE: OnceLock<bool> = OnceLock::new();
 
-/// A cloaked, hidden popup over `(x, y, w, h)` (physical pixels). One that does not `activate`
-/// never takes the keyboard, even when clicked. One `hidden_from_capture` is left out of every
-/// screen capture from its creation (Windows 10 2004 or later).
+/// Whether a popup takes the keyboard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Focus {
+    /// When shown or clicked.
+    Take,
+    /// Never, even when clicked.
+    Never,
+}
+
+/// Whether a popup shows in screen captures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Capture {
+    Shown,
+    /// Left out of every screen capture from its creation (Windows 10 2004 or later).
+    Hidden,
+}
+
+/// A cloaked, hidden popup over `geometry` (physical pixels).
 pub fn create_popup(
     proc: WndProc,
-    geometry: (i32, i32, u32, u32),
-    activate: bool,
-    hidden_from_capture: bool,
+    geometry: PhysicalRect,
+    focus: Focus,
+    capture: Capture,
 ) -> Result<HWND> {
     if !register(POPUP_CLASS, proc, &POPUP_DONE) {
         return Err(windows::core::Error::from_thread());
     }
-    let ex = if activate {
-        WINDOW_EX_STYLE::default()
-    } else {
-        WS_EX_NOACTIVATE
+    let ex = match focus {
+        Focus::Take => WINDOW_EX_STYLE::default(),
+        Focus::Never => WS_EX_NOACTIVATE,
     };
     let hwnd = popup_window(POPUP_CLASS, ex, geometry)?;
-    if hidden_from_capture {
+    if capture == Capture::Hidden {
         // SAFETY: plain call on the window just created.
         if let Err(e) = unsafe { SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE) } {
             tracing::error!("a window cannot be excluded from the capture: {e}");
@@ -125,13 +140,9 @@ pub fn create_popup(
     Ok(hwnd)
 }
 
-/// A cloaked, hidden window of its own over `(x, y, w, h)` (physical pixels): in the taskbar
-/// and Alt+Tab, under the windows that come after it, with rounded corners on Windows 11.
-pub fn create_app_window(
-    proc: WndProc,
-    (x, y, w, h): (i32, i32, u32, u32),
-    title: &str,
-) -> Result<HWND> {
+/// A cloaked, hidden window of its own over `rect` (physical pixels): in the taskbar and
+/// Alt+Tab, under the windows that come after it, with rounded corners on Windows 11.
+pub fn create_app_window(proc: WndProc, rect: PhysicalRect, title: &str) -> Result<HWND> {
     use windows::Win32::Graphics::Dwm::DWMWA_WINDOW_CORNER_PREFERENCE;
     use windows::Win32::UI::WindowsAndMessaging::{
         GetSystemMetrics, ICON_BIG, ICON_SMALL, IMAGE_ICON, LR_DEFAULTCOLOR, LoadImageW, SM_CXICON,
@@ -149,10 +160,10 @@ pub fn create_app_window(
             POPUP_CLASS,
             &title,
             WS_POPUP | WS_SYSMENU | WS_MINIMIZEBOX,
-            x,
-            y,
-            i32::try_from(w).unwrap_or(i32::MAX),
-            i32::try_from(h).unwrap_or(i32::MAX),
+            rect.x,
+            rect.y,
+            i32::try_from(rect.width).unwrap_or(i32::MAX),
+            i32::try_from(rect.height).unwrap_or(i32::MAX),
             None,
             None,
             Some(instance()),

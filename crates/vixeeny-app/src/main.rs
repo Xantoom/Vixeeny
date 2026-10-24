@@ -130,20 +130,11 @@ fn pick_window(
         .into_iter()
         .filter(|w| w.pid != std::process::id() && w.rect.intersection(&bounds).is_some())
         .collect();
-    let rects = windows
-        .iter()
-        .map(|w| (w.rect.x, w.rect.y, w.rect.width, w.rect.height))
-        .collect();
+    let rects = windows.iter().map(|w| w.rect).collect();
     let scale = vixeeny_platform::monitor_at(monitors, cursor.0, cursor.1)
         .map_or(1.0, |m| m.scale_factor() as f32);
     let accent = vixeeny_platform::system_accent().unwrap_or([0, 120, 212]);
-    let chosen = vixeeny_overlay::picker::pick(
-        rects,
-        (bounds.x, bounds.y, bounds.width, bounds.height),
-        cursor,
-        accent,
-        scale,
-    )?;
+    let chosen = vixeeny_overlay::picker::pick(rects, bounds, cursor, accent, scale)?;
     Ok(chosen.and_then(|i| windows.into_iter().nth(i)))
 }
 

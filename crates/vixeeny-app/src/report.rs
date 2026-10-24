@@ -3,7 +3,6 @@
 //! the user's name or folders, shown in the Explorer next to GitHub's bug form (already holding
 //! the system info), so that the file only has to be dropped there.
 
-use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
@@ -17,6 +16,8 @@ const NEW_ISSUE: &str = "https://github.com/Xantoom/Vixeeny/issues/new?template=
 
 /// Writes the report, shows it in the Explorer and opens the bug form.
 pub fn create(config: &Config) -> anyhow::Result<PathBuf> {
+    use std::fmt::Write as _;
+
     let logs = vixeeny_common::paths::log_dir().context("no logs folder")?;
     let probe = crate::probe::current(false).ok();
     let sysinfo = crate::sysinfo::format(&crate::sysinfo::collect(config, probe.as_ref()));
@@ -89,6 +90,8 @@ fn prune(dir: &Path) {
 
 /// GitHub's bug form with the system info filled in (the field `sysinfo` of `bug.yml`).
 fn issue_url(sysinfo: &str) -> String {
+    use std::fmt::Write as _;
+
     let mut url = format!("{NEW_ISSUE}&sysinfo=");
     for b in sysinfo.bytes() {
         if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {

@@ -2,9 +2,9 @@
 //! Turns the icon paths of `vixeeny-ui/ui/icons.slint` (Fluent UI System Icons, 20×20 outlines)
 //! into Rust constants, so both front-ends draw the very same icons.
 
-use std::fmt::Write as _;
-
 fn main() {
+    use std::fmt::Write as _;
+
     let source = "../vixeeny-ui/ui/icons.slint";
     println!("cargo:rerun-if-changed={source}");
     let text = std::fs::read_to_string(source).unwrap_or_else(|e| panic!("{source}: {e}"));

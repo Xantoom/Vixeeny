@@ -164,8 +164,8 @@ pub fn failure_text(error: &anyhow::Error, lang: vixeeny_common::i18n::Lang) -> 
     )
 }
 
-/// A thumbnail: width, height, RGBA.
-pub type Thumb = (u32, u32, Vec<u8>);
+/// A thumbnail.
+pub type Thumb = vixeeny_editor::RgbaImage;
 
 /// The largest side of a thumbnail sent to the card process.
 const MAX_THUMB_SIDE: u32 = 1024;
@@ -189,17 +189,17 @@ pub fn notify_with(config: &Config, toast: &Toast, thumb: Option<Thumb>) {
 /// The card's line, then the thumbnail's pixels when there is one (its size ends the line).
 fn encode(toast: &Toast, thumb: Option<&Thumb>) -> Vec<u8> {
     let mut line = encode_line(&toast.to_args());
-    let Some((w, h, rgba)) = thumb.filter(|(w, h, rgba)| {
-        (1..=MAX_THUMB_SIDE).contains(w)
-            && (1..=MAX_THUMB_SIDE).contains(h)
-            && rgba.len() == *w as usize * *h as usize * 4
+    let Some(thumb) = thumb.filter(|t| {
+        (1..=MAX_THUMB_SIDE).contains(&t.width)
+            && (1..=MAX_THUMB_SIDE).contains(&t.height)
+            && t.data.len() == t.width as usize * t.height as usize * 4
     }) else {
         return line.into_bytes();
     };
     line.pop();
-    line.push_str(&format!("\t{w}x{h}\n"));
+    line.push_str(&format!("\t{}x{}\n", thumb.width, thumb.height));
     let mut out = line.into_bytes();
-    out.extend_from_slice(rgba);
+    out.extend_from_slice(&thumb.data);
     out
 }
 
@@ -361,7 +361,11 @@ fn content_of(toast: &Toast, thumb: Option<Thumb>) -> ToastContent {
                 )
                 .into(),
                 body: name.clone(),
-                thumb: vixeeny_platform::exe_icon(&path, 64),
+                thumb: vixeeny_platform::exe_icon(&path, 64).map(|(width, height, data)| Thumb {
+                    width,
+                    height,
+                    data,
+                }),
                 dark,
                 top: true,
                 ..ToastContent::default()
@@ -391,12 +395,7 @@ fn show(toasts: &Toasts, toast: Toast, thumb: Option<Thumb>) -> anyhow::Result<(
         .ok_or_else(|| anyhow::anyhow!("no monitor"))?;
     toasts.show(
         &content,
-        (
-            monitor.work.x,
-            monitor.work.y,
-            monitor.work.width,
-            monitor.work.height,
-        ),
+        monitor.work,
         monitor.dpi,
         vixeeny_platform::animations_enabled(),
         move |event| act(event, &toast),
@@ -488,7 +487,11 @@ pub fn run_host() -> anyhow::Result<()> {
                         if input.read_exact(&mut rgba).is_err() {
                             break;
                         }
-                        Some((w, h, rgba))
+                        Some(Thumb {
+                            width: w,
+                            height: h,
+                            data: rgba,
+                        })
                     }
                     None => None,
                 };
@@ -545,13 +548,27 @@ Merci"
     fn a_thumbnail_follows_its_card_as_pixels() {
         let toast = Toast::Saved(Saved::Image, PathBuf::from(r"C:\a\b.png"));
         let rgba: Vec<u8> = (0..2 * 3 * 4).map(|i| i as u8).collect();
-        let message = encode(&toast, Some(&(2, 3, rgba.clone())));
+        let message = encode(
+            &toast,
+            Some(&Thumb {
+                width: 2,
+                height: 3,
+                data: rgba.clone(),
+            }),
+        );
         let end = message.iter().position(|&b| b == b'\n').expect("a line");
         let line = std::str::from_utf8(&message[..end]).expect("text");
         assert_eq!(decode_line(line), Some((toast.clone(), Some((2, 3)))));
         assert_eq!(&message[end + 1..], rgba);
         // A thumbnail that does not match its size, or too large, is left out.
-        let bad = encode(&toast, Some(&(2, 3, vec![0; 5])));
+        let bad = encode(
+            &toast,
+            Some(&Thumb {
+                width: 2,
+                height: 3,
+                data: vec![0; 5],
+            }),
+        );
         assert_eq!(bad, encode_line(&toast.to_args()).into_bytes());
         assert_eq!(decode_line("saved-image\tx\t5000x2"), None);
     }

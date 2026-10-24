@@ -1268,10 +1268,10 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
                     .map(|d| opt(&format!("{prefix}:{}", d.id), d.name.as_str()))
                     .collect();
                 // An unplugged device that the profile records.
-                for spec in chosen
+                let recorded = chosen
                     .iter()
-                    .filter(|s| s.starts_with(&format!("{prefix}:")))
-                {
+                    .filter(|s| s.starts_with(&format!("{prefix}:")));
+                for spec in recorded {
                     if !group.iter().any(|o| o.value == *spec) {
                         group.push(opt(
                             spec,

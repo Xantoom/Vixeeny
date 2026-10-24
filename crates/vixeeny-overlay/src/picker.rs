@@ -9,6 +9,7 @@
 use std::cell::Cell;
 use std::rc::{Rc, Weak};
 
+use vixeeny_platform::PhysicalRect;
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::DirectComposition::IDCompositionVisual2;
 use windows::Win32::UI::Input::KeyboardAndMouse::{VIRTUAL_KEY, VK_ESCAPE};
@@ -22,17 +23,15 @@ use crate::gfx::{self, Gfx};
 use crate::popup::{self, Popup};
 use crate::scene::{self, Px};
 use crate::theme::Rgba;
-use crate::window::Pointer;
+use crate::window::{Capture, Focus, Pointer};
 
 /// How dark the veil is, and how wide the outline is at 100 %.
 const VEIL: f32 = 0.35;
 const OUTLINE: f32 = 3.0;
 
 /// The window under `(x, y)`: the first of `windows` (front to back) holding it.
-pub fn window_at(windows: &[(i32, i32, u32, u32)], (x, y): (i32, i32)) -> Option<usize> {
-    windows.iter().position(|&(wx, wy, w, h)| {
-        (wx..wx + w as i32).contains(&x) && (wy..wy + h as i32).contains(&y)
-    })
+pub fn window_at(windows: &[PhysicalRect], (x, y): (i32, i32)) -> Option<usize> {
+    windows.iter().position(|w| w.contains(x, y))
 }
 
 struct Inner {
@@ -42,7 +41,7 @@ struct Inner {
     veil: [IDCompositionVisual2; 4],
     outline: [IDCompositionVisual2; 4],
     /// The windows, in screen pixels, front to back; where the popup starts.
-    windows: Vec<(i32, i32, u32, u32)>,
+    windows: Vec<PhysicalRect>,
     origin: (i32, i32),
     size: (u32, u32),
     width: f32,
@@ -56,12 +55,12 @@ impl Inner {
     fn point(&self, at: Option<usize>) -> Result<()> {
         self.pointed.set(at);
         let hole: Option<Px> = at.map(|i| {
-            let (x, y, w, h) = self.windows[i];
+            let w = self.windows[i];
             (
-                (x - self.origin.0) as f32,
-                (y - self.origin.1) as f32,
-                w as f32,
-                h as f32,
+                (w.x - self.origin.0) as f32,
+                (w.y - self.origin.1) as f32,
+                w.width as f32,
+                w.height as f32,
             )
         });
         let area = (0.0, 0.0, self.size.0 as f32, self.size.1 as f32);
@@ -118,19 +117,19 @@ impl Inner {
     }
 }
 
-/// Lets the user click one of `windows` (`(x, y, w, h)` in screen pixels, front to back) over
+/// Lets the user click one of `windows` (in screen pixels, front to back) over
 /// `bounds`, all the screens; `pointer` is where the pointer is now, `scale` the interface
 /// scale of the screens. Returns the index of the window taken, `None` when the user gave up.
 pub fn pick(
-    windows: Vec<(i32, i32, u32, u32)>,
-    bounds: (i32, i32, u32, u32),
+    windows: Vec<PhysicalRect>,
+    bounds: PhysicalRect,
     pointer: (i32, i32),
     accent: [u8; 3],
     scale: f32,
 ) -> Result<Option<usize>> {
     let gfx = Gfx::shared()?;
     // Never in a capture: the window taken is captured once the picker is gone anyway.
-    let popup = Popup::new(&gfx, bounds, true, true)?;
+    let popup = Popup::new(&gfx, bounds, Focus::Take, Capture::Hidden)?;
     let veil_colour = gfx::solid(&gfx, Rgba([0.0, 0.0, 0.0, VEIL]))?;
     let accent_colour = gfx::solid(&gfx, Rgba::rgb8(accent))?;
     let four = |surface| -> Result<[_; 4]> {
@@ -151,8 +150,8 @@ pub fn pick(
         veil,
         outline,
         windows,
-        origin: (bounds.0, bounds.1),
-        size: (bounds.2, bounds.3),
+        origin: (bounds.x, bounds.y),
+        size: (bounds.width, bounds.height),
         width: (OUTLINE * scale).round().max(2.0),
         pointed: Cell::new(None),
         chosen: Cell::new(None),
@@ -175,7 +174,10 @@ mod tests {
 
     #[test]
     fn the_front_window_under_the_pointer_is_taken() {
-        let windows = [(0, 0, 100, 100), (50, 50, 200, 200)];
+        let windows = [
+            PhysicalRect::new(0, 0, 100, 100),
+            PhysicalRect::new(50, 50, 200, 200),
+        ];
         assert_eq!(window_at(&windows, (60, 60)), Some(0));
         assert_eq!(window_at(&windows, (120, 60)), Some(1));
         assert_eq!(window_at(&windows, (300, 300)), None);

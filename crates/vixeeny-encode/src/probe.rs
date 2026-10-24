@@ -36,7 +36,7 @@ pub struct Adapter {
 /// PCI vendor ids.
 pub fn vendor_from_pci(id: u32) -> Vendor {
     match id {
-        0x10DE => Vendor::Nvidia,
+        0x10de => Vendor::Nvidia,
         0x1002 | 0x1022 => Vendor::Amd,
         0x8086 => Vendor::Intel,
         _ => Vendor::None,

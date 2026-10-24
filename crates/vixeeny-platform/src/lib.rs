@@ -44,9 +44,9 @@ pub fn format_driver_version(raw: i64) -> String {
     format!(
         "{}.{}.{}.{}",
         v >> 48,
-        (v >> 32) & 0xFFFF,
-        (v >> 16) & 0xFFFF,
-        v & 0xFFFF
+        (v >> 32) & 0xffff,
+        (v >> 16) & 0xffff,
+        v & 0xffff
     )
 }
 

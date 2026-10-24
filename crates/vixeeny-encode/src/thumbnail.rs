@@ -3,7 +3,8 @@
 
 use std::path::Path;
 
-use ffmpeg_next::{codec, format, frame, media, software::scaling};
+use ffmpeg_next::software::scaling;
+use ffmpeg_next::{codec, format, frame, media};
 
 /// RGBA pixels of a frame of `path` (width, height, bytes) at most `max_side` pixels on the long
 /// side, or `None` when the file has no video or cannot be decoded.

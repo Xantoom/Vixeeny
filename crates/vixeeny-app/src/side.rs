@@ -100,12 +100,7 @@ pub fn run(
     let texts = texts(lang);
     let geometry = panel_geometry(
         state.edge,
-        (
-            monitor.rect.x,
-            monitor.rect.y,
-            monitor.rect.width,
-            monitor.rect.height,
-        ),
+        monitor.rect,
         monitor.dpi,
         &entries(&texts, &state),
     );

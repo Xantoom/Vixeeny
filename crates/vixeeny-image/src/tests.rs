@@ -181,7 +181,7 @@ mod native {
                 ..Settings::default()
             };
             let bytes = encode(ImageFormat::Jpeg, &img, &settings).unwrap();
-            assert_eq!(&bytes[..2], &[0xFF, 0xD8]);
+            assert_eq!(&bytes[..2], &[0xff, 0xd8]);
             assert!(bytes.windows(11).any(|w| w == b"ICC_PROFILE"));
             let got = decode(&bytes, image::ImageFormat::Jpeg);
             assert_eq!((got.width(), got.height()), (64, 48));
@@ -202,7 +202,7 @@ mod native {
         let (data, stride) = sample(57, 43);
         let img = Bgra::new(57, 43, stride, &data);
         let bytes = encode(ImageFormat::Jxl, &img, &Settings::default()).unwrap();
-        assert!(bytes.starts_with(&[0xFF, 0x0A]) || bytes.starts_with(b"\0\0\0\x0cJXL "));
+        assert!(bytes.starts_with(&[0xff, 0x0a]) || bytes.starts_with(b"\0\0\0\x0cJXL "));
         let image = jxl_oxide::JxlImage::builder()
             .read(std::io::Cursor::new(&bytes))
             .unwrap();

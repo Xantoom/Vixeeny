@@ -4,14 +4,14 @@
 use std::ffi::c_void;
 use std::ptr;
 
-use crate::native::*;
+use crate::native as ffi;
 use crate::{Bgra, Hdr, ImageError, JxlSettings};
 
-struct Encoder(*mut JxlEncoder);
+struct Encoder(*mut ffi::JxlEncoder);
 impl Drop for Encoder {
     fn drop(&mut self) {
         // SAFETY: created by `JxlEncoderCreate`, destroyed once.
-        unsafe { JxlEncoderDestroy(self.0) };
+        unsafe { ffi::JxlEncoderDestroy(self.0) };
     }
 }
 
@@ -19,12 +19,12 @@ struct Runner(*mut c_void);
 impl Drop for Runner {
     fn drop(&mut self) {
         // SAFETY: created by `JxlThreadParallelRunnerCreate`, destroyed once after the encoder.
-        unsafe { JxlThreadParallelRunnerDestroy(self.0) };
+        unsafe { ffi::JxlThreadParallelRunnerDestroy(self.0) };
     }
 }
 
-fn check(status: JxlEncoderStatus, what: &str) -> Result<(), ImageError> {
-    if status == JxlEncoderStatus_JXL_ENC_SUCCESS {
+fn check(status: ffi::JxlEncoderStatus, what: &str) -> Result<(), ImageError> {
+    if status == ffi::JxlEncoderStatus_JXL_ENC_SUCCESS {
         Ok(())
     } else {
         Err(ImageError::Jxl(format!("{what} (status {status})")))
@@ -33,14 +33,14 @@ fn check(status: JxlEncoderStatus, what: &str) -> Result<(), ImageError> {
 
 pub(crate) fn encode(image: &Bgra<'_>, settings: &JxlSettings) -> Result<Vec<u8>, ImageError> {
     let rgb = image.to_rgb();
-    let mut srgb = JxlColorEncoding::default();
+    let mut srgb = ffi::JxlColorEncoding::default();
     // SAFETY: `srgb` is a valid out-pointer.
-    unsafe { JxlColorEncodingSetToSRGB(&raw mut srgb, 0) };
+    unsafe { ffi::JxlColorEncodingSetToSRGB(&raw mut srgb, 0) };
     let samples = Samples {
         width: image.width,
         height: image.height,
         bits: 8,
-        data_type: JxlDataType_JXL_TYPE_UINT8,
+        data_type: ffi::JxlDataType_JXL_TYPE_UINT8,
         bytes: &rgb,
     };
     write(&samples, &srgb, settings)
@@ -50,19 +50,19 @@ pub(crate) fn encode(image: &Bgra<'_>, settings: &JxlSettings) -> Result<Vec<u8>
 pub(crate) fn encode_hdr(image: &Hdr<'_>, settings: &JxlSettings) -> Result<Vec<u8>, ImageError> {
     // Native endianness, as the pixel format of `write` says.
     let bytes = image.to_pq_bytes(u16::to_ne_bytes);
-    let colour = JxlColorEncoding {
-        color_space: JxlColorSpace_JXL_COLOR_SPACE_RGB,
-        white_point: JxlWhitePoint_JXL_WHITE_POINT_D65,
-        primaries: JxlPrimaries_JXL_PRIMARIES_2100,
-        transfer_function: JxlTransferFunction_JXL_TRANSFER_FUNCTION_PQ,
-        rendering_intent: JxlRenderingIntent_JXL_RENDERING_INTENT_RELATIVE,
-        ..JxlColorEncoding::default()
+    let colour = ffi::JxlColorEncoding {
+        color_space: ffi::JxlColorSpace_JXL_COLOR_SPACE_RGB,
+        white_point: ffi::JxlWhitePoint_JXL_WHITE_POINT_D65,
+        primaries: ffi::JxlPrimaries_JXL_PRIMARIES_2100,
+        transfer_function: ffi::JxlTransferFunction_JXL_TRANSFER_FUNCTION_PQ,
+        rendering_intent: ffi::JxlRenderingIntent_JXL_RENDERING_INTENT_RELATIVE,
+        ..ffi::JxlColorEncoding::default()
     };
     let samples = Samples {
         width: image.width,
         height: image.height,
         bits: 16,
-        data_type: JxlDataType_JXL_TYPE_UINT16,
+        data_type: ffi::JxlDataType_JXL_TYPE_UINT16,
         bytes: &bytes,
     };
     write(&samples, &colour, settings)
@@ -73,13 +73,13 @@ struct Samples<'a> {
     width: u32,
     height: u32,
     bits: u32,
-    data_type: JxlDataType,
+    data_type: ffi::JxlDataType,
     bytes: &'a [u8],
 }
 
 fn write(
     samples: &Samples<'_>,
-    colour: &JxlColorEncoding,
+    colour: &ffi::JxlColorEncoding,
     settings: &JxlSettings,
 ) -> Result<Vec<u8>, ImageError> {
     // SAFETY: libjxl objects are created and destroyed through the RAII wrappers; the samples
@@ -87,56 +87,62 @@ fn write(
     // pixel data in `JxlEncoderAddImageFrame`).
     unsafe {
         // The runner must outlive the encoder: declared first, dropped last.
-        let runner = Runner(JxlThreadParallelRunnerCreate(
+        let runner = Runner(ffi::JxlThreadParallelRunnerCreate(
             ptr::null(),
-            JxlThreadParallelRunnerDefaultNumWorkerThreads(),
+            ffi::JxlThreadParallelRunnerDefaultNumWorkerThreads(),
         ));
-        let enc = Encoder(JxlEncoderCreate(ptr::null()));
+        let enc = Encoder(ffi::JxlEncoderCreate(ptr::null()));
         if enc.0.is_null() || runner.0.is_null() {
             return Err(ImageError::Jxl("out of memory".into()));
         }
         check(
-            JxlEncoderSetParallelRunner(enc.0, Some(JxlThreadParallelRunner), runner.0),
+            ffi::JxlEncoderSetParallelRunner(enc.0, Some(ffi::JxlThreadParallelRunner), runner.0),
             "parallel runner",
         )?;
 
-        let mut info = JxlBasicInfo::default();
-        JxlEncoderInitBasicInfo(&raw mut info);
+        let mut info = ffi::JxlBasicInfo::default();
+        ffi::JxlEncoderInitBasicInfo(&raw mut info);
         info.xsize = samples.width;
         info.ysize = samples.height;
         info.bits_per_sample = samples.bits;
         info.num_color_channels = 3;
         info.alpha_bits = 0;
         info.uses_original_profile = i32::from(settings.lossless);
-        check(JxlEncoderSetBasicInfo(enc.0, &raw const info), "basic info")?;
-
-        check(JxlEncoderSetColorEncoding(enc.0, colour), "colour encoding")?;
-
-        let frame = JxlEncoderFrameSettingsCreate(enc.0, ptr::null());
         check(
-            JxlEncoderFrameSettingsSetOption(
+            ffi::JxlEncoderSetBasicInfo(enc.0, &raw const info),
+            "basic info",
+        )?;
+
+        check(
+            ffi::JxlEncoderSetColorEncoding(enc.0, colour),
+            "colour encoding",
+        )?;
+
+        let frame = ffi::JxlEncoderFrameSettingsCreate(enc.0, ptr::null());
+        check(
+            ffi::JxlEncoderFrameSettingsSetOption(
                 frame,
-                JxlEncoderFrameSettingId_JXL_ENC_FRAME_SETTING_EFFORT,
+                ffi::JxlEncoderFrameSettingId_JXL_ENC_FRAME_SETTING_EFFORT,
                 i64::from(settings.effort.clamp(1, 9)),
             ),
             "effort",
         )?;
         if settings.lossless {
-            check(JxlEncoderSetFrameLossless(frame, 1), "lossless")?;
+            check(ffi::JxlEncoderSetFrameLossless(frame, 1), "lossless")?;
         } else {
             check(
-                JxlEncoderSetFrameDistance(frame, settings.distance.clamp(0.0, 25.0)),
+                ffi::JxlEncoderSetFrameDistance(frame, settings.distance.clamp(0.0, 25.0)),
                 "distance",
             )?;
         }
-        let format = JxlPixelFormat {
+        let format = ffi::JxlPixelFormat {
             num_channels: 3,
             data_type: samples.data_type,
-            endianness: JxlEndianness_JXL_NATIVE_ENDIAN,
+            endianness: ffi::JxlEndianness_JXL_NATIVE_ENDIAN,
             align: 0,
         };
         check(
-            JxlEncoderAddImageFrame(
+            ffi::JxlEncoderAddImageFrame(
                 frame,
                 &raw const format,
                 samples.bytes.as_ptr().cast::<c_void>(),
@@ -144,16 +150,16 @@ fn write(
             ),
             "add frame",
         )?;
-        JxlEncoderCloseInput(enc.0);
+        ffi::JxlEncoderCloseInput(enc.0);
 
         let mut out = vec![0u8; 64 * 1024];
         let mut written = 0usize;
         loop {
             let mut next = out.as_mut_ptr().add(written);
             let mut avail = out.len() - written;
-            let status = JxlEncoderProcessOutput(enc.0, &raw mut next, &raw mut avail);
+            let status = ffi::JxlEncoderProcessOutput(enc.0, &raw mut next, &raw mut avail);
             written = out.len() - avail;
-            if status == JxlEncoderStatus_JXL_ENC_NEED_MORE_OUTPUT {
+            if status == ffi::JxlEncoderStatus_JXL_ENC_NEED_MORE_OUTPUT {
                 out.resize(out.len() * 2, 0);
             } else {
                 check(status, "process output")?;

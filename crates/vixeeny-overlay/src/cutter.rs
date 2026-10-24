@@ -18,6 +18,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 use std::time::Duration;
 
+use vixeeny_platform::PhysicalRect;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Direct2D::ID2D1Bitmap1;
 use windows::Win32::Graphics::DirectComposition::{IDCompositionSurface, IDCompositionVisual2};
@@ -292,9 +293,8 @@ impl Layout {
 
 /// The window's place: centred on `work` (the monitor's free area, physical pixels), as tall
 /// as it leaves with a margin above and below, as wide as the picture needs.
-pub fn placement(work: (i32, i32, u32, u32), u: f32, aspect: f32) -> (i32, i32, u32, u32) {
-    let (x, y, w, h) = work;
-    let (w, h) = (w as f32, h as f32);
+pub fn placement(work: PhysicalRect, u: f32, aspect: f32) -> PhysicalRect {
+    let (w, h) = (work.width as f32, work.height as f32);
     let margin_y = (h * 0.06).max(24.0 * u);
     let margin_x = (w * 0.04).max(24.0 * u);
     let height = h - 2.0 * margin_y;
@@ -303,9 +303,9 @@ pub fn placement(work: (i32, i32, u32, u32), u: f32, aspect: f32) -> (i32, i32, 
     let min_w = 760.0 * u;
     let width = (video_h * aspect).clamp(min_w.min(w - 2.0 * margin_x), w - 2.0 * margin_x);
     let (width, height) = (width.round() as u32, height.round() as u32);
-    (
-        x + ((w - width as f32) / 2.0).round() as i32,
-        y + ((h - height as f32) / 2.0).round() as i32,
+    PhysicalRect::new(
+        work.x + ((w - width as f32) / 2.0).round() as i32,
+        work.y + ((h - height as f32) / 2.0).round() as i32,
         width,
         height,
     )
@@ -563,9 +563,9 @@ impl Inner {
             0x23 => self.seek(s.to),
             // I, O: the part starts or ends at the playhead.
             0x49 => self.set_state(|s| s.from = s.position.min(s.to)),
-            0x4F => self.set_state(|s| s.to = s.position.max(s.from)),
+            0x4f => self.set_state(|s| s.to = s.position.max(s.from)),
             // M: mute.
-            0x4D => self.set_state(|s| s.muted = !s.muted),
+            0x4d => self.set_state(|s| s.muted = !s.muted),
             // Ctrl+S, Ctrl+Shift+S
             0x53 if control() && !self.busy() => self.emit(if shift() {
                 CutterEvent::SaveAs
@@ -573,7 +573,7 @@ impl Inner {
                 CutterEvent::Save
             }),
             // Escape: stops the writing, else closes.
-            0x1B => self.emit(if self.busy() {
+            0x1b => self.emit(if self.busy() {
                 CutterEvent::Cancel
             } else {
                 CutterEvent::Close
@@ -1182,7 +1182,7 @@ pub struct Cutter {
 impl Cutter {
     /// The window over `geometry` (physical pixels; see [`placement`]) on a monitor at `dpi`.
     pub fn new(
-        geometry: (i32, i32, u32, u32),
+        geometry: PhysicalRect,
         dpi: u32,
         look: Look,
         frames: Frames,
@@ -1191,7 +1191,11 @@ impl Cutter {
         let gfx = Gfx::shared()?;
         let u = dpi.max(48) as f32 / 96.0;
         let popup = Popup::new_window(&gfx, geometry, &texts.title)?;
-        let layout = Layout::new(geometry.2 as f32 / u, geometry.3 as f32 / u, frames.aspect);
+        let layout = Layout::new(
+            geometry.width as f32 / u,
+            geometry.height as f32 / u,
+            frames.aspect,
+        );
         let video = scene::visual(&gfx)?;
         let title = Piece::new(&gfx, false)?;
         let bottom = Piece::new(&gfx, false)?;
@@ -1474,8 +1478,13 @@ mod tests {
 
     #[test]
     fn the_window_leaves_a_margin_above_and_below_and_is_centred() {
-        let work = (0, 0, 2560, 1400);
-        let (x, y, w, h) = placement(work, 1.0, 16.0 / 9.0);
+        let work = PhysicalRect::new(0, 0, 2560, 1400);
+        let PhysicalRect {
+            x,
+            y,
+            width: w,
+            height: h,
+        } = placement(work, 1.0, 16.0 / 9.0);
         assert!(y > 0 && y + h as i32 <= 1400);
         assert!(
             (y - (1400 - (y + h as i32))).abs() <= 1,
@@ -1486,8 +1495,8 @@ mod tests {
         let video_h = h as f32 - TITLE_H - BOTTOM_H;
         assert!((w as f32 - video_h * 16.0 / 9.0).abs() <= 1.0);
         // A narrow screen: never wider than it.
-        let (_, _, w, _) = placement((0, 0, 1000, 1400), 1.0, 16.0 / 9.0);
-        assert!(w <= 1000);
+        let narrow = placement(PhysicalRect::new(0, 0, 1000, 1400), 1.0, 16.0 / 9.0);
+        assert!(narrow.width <= 1000);
     }
 
     #[test]

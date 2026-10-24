@@ -63,12 +63,12 @@ pub fn tonemap_frame(rgba: &[f32], params: &ToneMapParams) -> Vec<u8> {
     out.par_chunks_mut(4 * 4096)
         .zip(rgba.par_chunks(4 * 4096))
         .for_each(|(out, rgba)| {
-            for (o, px) in out
+            let pixels = out
                 .as_chunks_mut::<4>()
                 .0
                 .iter_mut()
-                .zip(rgba.as_chunks::<4>().0)
-            {
+                .zip(rgba.as_chunks::<4>().0);
+            for (o, px) in pixels {
                 let [r, g, b] = tonemap_pixel([px[0], px[1], px[2]], params);
                 let q = |v: f32| (v * 255.0 + 0.5) as u8;
                 *o = [q(b), q(g), q(r), 255];

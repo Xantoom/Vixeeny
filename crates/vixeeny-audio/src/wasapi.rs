@@ -277,9 +277,9 @@ pub(crate) fn wave_format(channels: usize) -> WAVEFORMATEXTENSIBLE {
     };
     let mut mask = 0;
     if channels > 2 {
-        format.wFormatTag = 0xFFFE; // WAVE_FORMAT_EXTENSIBLE
+        format.wFormatTag = 0xfffe; // WAVE_FORMAT_EXTENSIBLE
         format.cbSize = 22;
-        mask = if channels >= 8 { 0x63F } else { 0x3F };
+        mask = if channels >= 8 { 0x63f } else { 0x3f };
     }
     WAVEFORMATEXTENSIBLE {
         Format: format,
@@ -335,7 +335,7 @@ struct Stream {
     event: HANDLE,
     /// The endpoint it was opened on (to notice a change of default device).
     device_id: Option<String>,
-    follows_default: bool,
+    follow: Follow,
     /// Channels of the samples this stream delivers.
     channels: usize,
     /// For an application: its process, signalled when it ends.
@@ -355,17 +355,37 @@ impl Drop for Stream {
     }
 }
 
-/// Initialises `client` for event-driven float capture; `loopback` for render endpoints.
-fn initialise(
-    client: &IAudioClient,
-    loopback: bool,
-    channels: usize,
-) -> Result<HANDLE, AudioError> {
+/// What a stream reads from its endpoint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Read {
+    /// What a microphone hears.
+    Capture,
+    /// What a render endpoint (speakers, a process) plays.
+    Loopback,
+}
+
+/// Whether a stream ends when Windows picks another default device, so that it opens again on
+/// the new one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Follow {
+    Default,
+    Fixed,
+}
+
+/// The endpoint a speakers or microphone source reads.
+struct Endpoint {
+    device: IMMDevice,
+    read: Read,
+    follow: Follow,
+}
+
+/// Initialises `client` for event-driven float capture.
+fn initialise(client: &IAudioClient, read: Read, channels: usize) -> Result<HANDLE, AudioError> {
     let format = wave_format(channels);
     let mut flags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK
         | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM
         | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
-    if loopback {
+    if read == Read::Loopback {
         flags |= AUDCLNT_STREAMFLAGS_LOOPBACK;
     }
     // SAFETY: `format` outlives the call; the event is created, attached and returned.
@@ -388,9 +408,9 @@ fn initialise(
 
 fn finish_open(
     client: IAudioClient,
-    loopback: bool,
+    read: Read,
     device_id: Option<String>,
-    follows_default: bool,
+    follow: Follow,
     max_channels: usize,
 ) -> Result<Stream, AudioError> {
     // Endpoints keep their layout; the process loopback has no mix format and stays stereo.
@@ -399,7 +419,7 @@ fn finish_open(
     } else {
         CHANNELS
     };
-    let event = initialise(&client, loopback, channels)?;
+    let event = initialise(&client, read, channels)?;
     // SAFETY: the client is initialised; the service is requested for the capture interface.
     let capture: IAudioCaptureClient =
         unsafe { client.GetService() }.map_err(os("GetService(capture)"))?;
@@ -410,26 +430,21 @@ fn finish_open(
         capture,
         event,
         device_id,
-        follows_default,
+        follow,
         channels,
         process: None,
     })
 }
 
-fn open_device(
-    device: &IMMDevice,
-    loopback: bool,
-    follows_default: bool,
-    max_channels: usize,
-) -> Result<Stream, AudioError> {
+fn open_device(endpoint: &Endpoint, max_channels: usize) -> Result<Stream, AudioError> {
     // SAFETY: activating the audio client of a live endpoint.
     let client: IAudioClient =
-        unsafe { device.Activate(CLSCTX_ALL, None) }.map_err(os("Activate"))?;
+        unsafe { endpoint.device.Activate(CLSCTX_ALL, None) }.map_err(os("Activate"))?;
     finish_open(
         client,
-        loopback,
-        Some(device_id(device)),
-        follows_default,
+        endpoint.read,
+        Some(device_id(&endpoint.device)),
+        endpoint.follow,
         max_channels,
     )
 }
@@ -497,22 +512,28 @@ fn open_process_loopback(pid: u32) -> Result<Stream, AudioError> {
             .cast::<IAudioClient>()
             .map_err(os("IAudioClient"))?
     };
-    let mut stream = finish_open(client, true, None, false, CHANNELS)?;
+    let mut stream = finish_open(client, Read::Loopback, None, Follow::Fixed, CHANNELS)?;
     // SAFETY: a plain call; the handle is closed with the stream.
     stream.process = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, false, pid) }.ok();
     Ok(stream)
 }
 
-/// The endpoint a speakers/microphone source reads, `None` for an application. The flag says
-/// whether it follows the default device.
-fn endpoint(kind: &SourceKind) -> Result<Option<(IMMDevice, bool, bool)>, AudioError> {
+/// The endpoint a speakers/microphone source reads, `None` for an application.
+fn endpoint(kind: &SourceKind) -> Result<Option<Endpoint>, AudioError> {
+    let at = |device, read, follow| {
+        Some(Endpoint {
+            device,
+            read,
+            follow,
+        })
+    };
     Ok(match kind {
         SourceKind::System => {
             let e = enumerator()?;
             // SAFETY: a live enumerator.
             let device = unsafe { e.GetDefaultAudioEndpoint(eRender, eConsole) }
                 .map_err(os("default output"))?;
-            Some((device, true, true))
+            at(device, Read::Loopback, Follow::Default)
         }
         SourceKind::Output(wanted) => {
             let e = enumerator()?;
@@ -532,14 +553,14 @@ fn endpoint(kind: &SourceKind) -> Result<Option<(IMMDevice, bool, bool)>, AudioE
             let device = found.ok_or_else(|| {
                 AudioError::Unavailable(format!("no output device matches `{wanted}`"))
             })?;
-            Some((device, true, false))
+            at(device, Read::Loopback, Follow::Fixed)
         }
         SourceKind::Microphone(None) => {
             let e = enumerator()?;
             // SAFETY: a live enumerator.
             let device = unsafe { e.GetDefaultAudioEndpoint(eCapture, eConsole) }
                 .map_err(os("default microphone"))?;
-            Some((device, false, true))
+            at(device, Read::Capture, Follow::Default)
         }
         SourceKind::Microphone(Some(wanted)) | SourceKind::Input(wanted) => {
             let e = enumerator()?;
@@ -559,15 +580,15 @@ fn endpoint(kind: &SourceKind) -> Result<Option<(IMMDevice, bool, bool)>, AudioE
             let device = found.ok_or_else(|| {
                 AudioError::Unavailable(format!("no microphone matches `{wanted}`"))
             })?;
-            Some((device, false, false))
+            at(device, Read::Capture, Follow::Fixed)
         }
         SourceKind::Application(_) => None,
     })
 }
 
 fn open(kind: &SourceKind, max_channels: usize) -> Result<Stream, AudioError> {
-    if let Some((device, loopback, follows_default)) = endpoint(kind)? {
-        return open_device(&device, loopback, follows_default, max_channels);
+    if let Some(endpoint) = endpoint(kind)? {
+        return open_device(&endpoint, max_channels);
     }
     let SourceKind::Application(exe) = kind else {
         return Err(AudioError::Unsupported);
@@ -581,7 +602,7 @@ fn open(kind: &SourceKind, max_channels: usize) -> Result<Stream, AudioError> {
 /// (stereo, 5.1 or 7.1), stereo for an application or when the device cannot be examined.
 pub fn source_channels(kind: &SourceKind, max: usize) -> usize {
     let _com = ComGuard::new();
-    let Ok(Some((device, ..))) = endpoint(kind) else {
+    let Ok(Some(Endpoint { device, .. })) = endpoint(kind) else {
         return CHANNELS;
     };
     // SAFETY: activating the audio client of a live endpoint, only to read its mix format.
@@ -771,7 +792,7 @@ fn capture_loop(
             0 => {}
             1 => return Ended::Stopped,
             2 => {
-                if stream.follows_default && default_changed(stream, kind) {
+                if stream.follow == Follow::Default && default_changed(stream, kind) {
                     return Ended::Lost("default device changed".into());
                 }
                 // A device that went away fails here.

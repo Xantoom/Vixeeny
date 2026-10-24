@@ -420,12 +420,12 @@ impl ToneMap {
                 s.spawn(move || {
                     for (r, line) in out.chunks_exact_mut(w * 4).enumerate() {
                         let row = &data[(chunk * rows + r) * stride..][..w * N];
-                        for (px, dst) in row
+                        let pixels = row
                             .as_chunks::<N>()
                             .0
                             .iter()
-                            .zip(line.as_chunks_mut::<4>().0)
-                        {
+                            .zip(line.as_chunks_mut::<4>().0);
+                        for (px, dst) in pixels {
                             *dst = self.pixel(codes(px));
                         }
                     }

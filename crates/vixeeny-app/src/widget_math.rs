@@ -5,16 +5,16 @@
 use vixeeny_common::i18n::{Key, Lang, size_label, tr};
 /// The window's size at 96 DPI, in pixels: the bar and room around it for its shadow.
 pub use vixeeny_overlay::widget::{Alert, HEIGHT, WIDTH};
+use vixeeny_platform::PhysicalRect;
 /// Gap from the window to the screen edge at 96 DPI (the bar is 16 px from it).
 pub const MARGIN: u32 = 6;
 
-/// Where the widget's window can be on a monitor's work area (`x, y, width, height`, physical
-/// pixels; `dpi` 96 = 100 %): its left-most and right-most x, its top-most and lowest y, and
-/// its size.
-fn room(work: (i32, i32, u32, u32), dpi: u32) -> ((i32, i32), (i32, i32), (u32, u32)) {
+/// Where the widget's window can be on a monitor's work area (physical pixels; `dpi` 96 =
+/// 100 %): its left-most and right-most x, its top-most and lowest y, and its size.
+fn room(work: PhysicalRect, dpi: u32) -> ((i32, i32), (i32, i32), (u32, u32)) {
     let scale = |v: u32| (u64::from(v) * u64::from(dpi.max(48)) / 96) as u32;
     let (w, h, m) = (scale(WIDTH), scale(HEIGHT), scale(MARGIN));
-    let (mx, my, mw, mh) = work;
+    let (mx, my, mw, mh) = (work.x, work.y, work.width, work.height);
     let left = mx + m as i32;
     let right = (mx + mw as i32 - w as i32 - m as i32).max(left);
     let top = my + m as i32;
@@ -22,15 +22,15 @@ fn room(work: (i32, i32, u32, u32), dpi: u32) -> ((i32, i32), (i32, i32), (u32, 
     ((left, right), (top, bottom), (w, h))
 }
 
-/// Top-left corner and size, in physical pixels, of the widget at `corner` of a monitor's work
+/// The widget's window, in physical pixels, at `corner` of a monitor's work
 /// area (`custom`: at `custom`, fractions of the room across and down, see
 /// [`vixeeny_common::config::RecordingWidget::custom`]).
 pub fn corner_geometry(
     corner: &str,
     custom: (f32, f32),
-    work: (i32, i32, u32, u32),
+    work: PhysicalRect,
     dpi: u32,
-) -> (i32, i32, u32, u32) {
+) -> PhysicalRect {
     let ((left, right), (top, bottom), (w, h)) = room(work, dpi);
     let along =
         |lo: i32, hi: i32, f: f32| lo + ((hi - lo) as f32 * f.clamp(0.0, 1.0)).round() as i32;
@@ -43,7 +43,7 @@ pub fn corner_geometry(
         "custom" => custom,
         _ => (0.0, 0.0),
     };
-    (along(left, right, fx), along(top, bottom, fy), w, h)
+    PhysicalRect::new(along(left, right, fx), along(top, bottom, fy), w, h)
 }
 
 /// A message from the recorder to the widget.
@@ -200,50 +200,50 @@ mod tests {
 
     #[test]
     fn corners_hug_the_edges_with_a_margin_scaled_by_dpi() {
-        let monitor = (1920, 0, 2560, 1440); // a second monitor to the right
+        let monitor = PhysicalRect::new(1920, 0, 2560, 1440); // a second monitor to the right
         assert_eq!(
             corner_geometry("top_left", (0.0, 0.0), monitor, 96),
-            (1926, 6, 216, 60)
+            PhysicalRect::new(1926, 6, 216, 60)
         );
         assert_eq!(
             corner_geometry("top_right", (0.0, 0.0), monitor, 96),
-            (1920 + 2560 - 216 - 6, 6, 216, 60)
+            PhysicalRect::new(1920 + 2560 - 216 - 6, 6, 216, 60)
         );
         assert_eq!(
             corner_geometry("bottom_left", (0.0, 0.0), monitor, 96),
-            (1926, 1440 - 60 - 6, 216, 60)
+            PhysicalRect::new(1926, 1440 - 60 - 6, 216, 60)
         );
         assert_eq!(
             corner_geometry("bottom_right", (0.0, 0.0), monitor, 96),
-            (1920 + 2560 - 222, 1440 - 66, 216, 60)
+            PhysicalRect::new(1920 + 2560 - 222, 1440 - 66, 216, 60)
         );
         // 200 % scaling doubles everything; an unknown corner is the default one.
         assert_eq!(
-            corner_geometry("???", (0.0, 0.0), (0, 0, 3840, 2160), 192),
-            (12, 12, 432, 120)
+            corner_geometry("???", (0.0, 0.0), PhysicalRect::new(0, 0, 3840, 2160), 192),
+            PhysicalRect::new(12, 12, 432, 120)
         );
     }
 
     #[test]
     fn the_middles_and_a_custom_place_share_the_room_left() {
-        let work = (0, 0, 1920, 1032); // above a 48-pixel taskbar
+        let work = PhysicalRect::new(0, 0, 1920, 1032); // above a 48-pixel taskbar
         // 1920 - 216 - 2 × 6 = 1692 pixels of room across, 1032 - 60 - 12 = 960 down.
         assert_eq!(
             corner_geometry("top_center", (0.0, 0.0), work, 96),
-            (852, 6, 216, 60)
+            PhysicalRect::new(852, 6, 216, 60)
         );
         assert_eq!(
             corner_geometry("bottom_center", (0.0, 0.0), work, 96),
-            (852, 966, 216, 60)
+            PhysicalRect::new(852, 966, 216, 60)
         );
         assert_eq!(
             corner_geometry("custom", (0.25, 0.5), work, 96),
-            (429, 486, 216, 60)
+            PhysicalRect::new(429, 486, 216, 60)
         );
         // A place out of range stays on the screen.
         assert_eq!(
             corner_geometry("custom", (3.0, -1.0), work, 96),
-            (1698, 6, 216, 60)
+            PhysicalRect::new(1698, 6, 216, 60)
         );
     }
 

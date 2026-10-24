@@ -29,7 +29,7 @@ fn sections(bytes: &[u8]) -> Result<(usize, Vec<Section>)> {
     if bytes.get(..2) != Some(b"MZ") {
         bail!("not a Windows program");
     }
-    let pe = u32_at(bytes, 0x3C)? as usize;
+    let pe = u32_at(bytes, 0x3c)? as usize;
     if bytes.get(pe..pe + 4) != Some(b"PE\0\0") {
         bail!("no PE header");
     }
@@ -96,7 +96,7 @@ fn table(
 
 pub fn imports(bytes: &[u8]) -> Result<Imports> {
     let (optional, sections) = sections(bytes)?;
-    if u16_at(bytes, optional)? != 0x20B {
+    if u16_at(bytes, optional)? != 0x20b {
         bail!("not a 64-bit program");
     }
     Ok(Imports {
@@ -117,18 +117,18 @@ mod tests {
     fn program(at_start: &[&str], delayed: &[&str]) -> Vec<u8> {
         let mut b = vec![0_u8; 0x1000];
         b[..2].copy_from_slice(b"MZ");
-        put32(&mut b, 0x3C, 0x80);
+        put32(&mut b, 0x3c, 0x80);
         b[0x80..0x84].copy_from_slice(b"PE\0\0");
         let coff = 0x84;
         b[coff + 2] = 1; // one section
         b[coff + 16] = 240; // optional header size (PE32+, 16 directories)
         let optional = coff + 20;
-        b[optional..optional + 2].copy_from_slice(&0x20B_u16.to_le_bytes());
+        b[optional..optional + 2].copy_from_slice(&0x20b_u16.to_le_bytes());
         put32(&mut b, optional + 108, 16);
         let section = optional + 240;
-        put32(&mut b, section + 8, 0xE00);
+        put32(&mut b, section + 8, 0xe00);
         put32(&mut b, section + 12, 0x1000);
-        put32(&mut b, section + 16, 0xE00);
+        put32(&mut b, section + 16, 0xe00);
         put32(&mut b, section + 20, 0x200);
         // The tables at 0x1000 (imports) and 0x1100 (delay-load), the names from 0x1800 on.
         let raw = |rva: usize| rva - 0x1000 + 0x200;

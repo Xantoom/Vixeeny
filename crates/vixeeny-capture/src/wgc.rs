@@ -524,9 +524,9 @@ mod tests {
     #[test]
     fn padded_rows_of_halves() {
         // Two pixels per row, a 4-byte row padding.
-        let one = 0x3C00u16.to_le_bytes();
+        let one = 0x3c00u16.to_le_bytes();
         let two = 0x4000u16.to_le_bytes();
-        let row = |h: [u8; 2]| [[h; 8].concat(), vec![0xFF; 4]].concat();
+        let row = |h: [u8; 2]| [[h; 8].concat(), vec![0xff; 4]].concat();
         let data = [row(one), row(two)].concat();
         let out = super::halves_to_f32(&data, 20, 2, 2);
         assert_eq!(out, [[1.0; 8], [2.0; 8]].concat());

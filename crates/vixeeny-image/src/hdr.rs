@@ -50,12 +50,12 @@ impl Hdr<'_> {
         out.par_chunks_mut(w * 3)
             .zip(self.rgba.par_chunks(w * 4))
             .for_each(|(out, row)| {
-                for (o, px) in out
+                let pixels = out
                     .as_chunks_mut::<3>()
                     .0
                     .iter_mut()
-                    .zip(row.as_chunks::<4>().0)
-                {
+                    .zip(row.as_chunks::<4>().0);
+                for (o, px) in pixels {
                     *o = colour::scrgb_to_pq([px[0], px[1], px[2]]);
                 }
             });
@@ -70,12 +70,12 @@ impl Hdr<'_> {
         out.par_chunks_mut(w * 6)
             .zip(self.rgba.par_chunks(w * 4))
             .for_each(|(out, row)| {
-                for (o, px) in out
+                let pixels = out
                     .as_chunks_mut::<6>()
                     .0
                     .iter_mut()
-                    .zip(row.as_chunks::<4>().0)
-                {
+                    .zip(row.as_chunks::<4>().0);
+                for (o, px) in pixels {
                     let [r, g, b] = colour::scrgb_to_pq([px[0], px[1], px[2]]).map(bytes);
                     *o = [r[0], r[1], g[0], g[1], b[0], b[1]];
                 }

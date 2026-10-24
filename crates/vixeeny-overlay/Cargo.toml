@@ -14,6 +14,7 @@ workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 vixeeny-editor = { path = "../vixeeny-editor" }
+vixeeny-platform = { path = "../vixeeny-platform" }
 windows-numerics = "0.3.1"
 windows = { workspace = true, features = [
     "Win32_Foundation",
@@ -41,5 +42,4 @@ vixeeny-common = { path = "../vixeeny-common" }
 vixeeny-image = { path = "../vixeeny-image" }
 png.workspace = true
 vixeeny-capture = { path = "../vixeeny-capture" }
-vixeeny-platform = { path = "../vixeeny-platform" }
 tracing-subscriber.workspace = true

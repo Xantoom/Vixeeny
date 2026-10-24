@@ -11,7 +11,8 @@ use std::io::{self, Read, Write};
 pub use interprocess::local_socket::traits::{Listener as ListenerTrait, Stream as StreamTrait};
 use interprocess::local_socket::{GenericNamespaced, ListenerOptions, Name, ToNsName};
 pub use interprocess::local_socket::{Listener, RecvHalf, SendHalf, Stream};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 
 /// Hard cap on a message, so a corrupt length prefix cannot make us allocate gigabytes.
 pub const MAX_MESSAGE_BYTES: u32 = 16 * 1024 * 1024;

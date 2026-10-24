@@ -27,7 +27,7 @@ impl SourceFormat {
         let starts = |p: &[u8]| bytes.starts_with(p);
         if starts(b"\x89PNG\r\n\x1a\n") {
             Some(Self::Png)
-        } else if starts(&[0xFF, 0xD8, 0xFF]) {
+        } else if starts(&[0xff, 0xd8, 0xff]) {
             Some(Self::Jpeg)
         } else if bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
             Some(Self::WebP)
@@ -36,7 +36,7 @@ impl SourceFormat {
             && matches!(&bytes[8..12], b"avif" | b"avis")
         {
             Some(Self::Avif)
-        } else if starts(&[0xFF, 0x0A]) || starts(b"\0\0\0\x0cJXL \r\n\x87\n") {
+        } else if starts(&[0xff, 0x0a]) || starts(b"\0\0\0\x0cJXL \r\n\x87\n") {
             Some(Self::Jxl)
         } else {
             None
@@ -222,12 +222,12 @@ fn convert_to_srgb(rgba: &mut [u8], profile: &[u8]) {
     let mut out = vec![0u8; rgba.len()];
     if transform.transform(rgba, &mut out).is_ok() {
         // The transform does not carry alpha reliably across versions: keep the source's.
-        for (dst, src) in out
+        let pixels = out
             .as_chunks_mut::<4>()
             .0
             .iter_mut()
-            .zip(rgba.as_chunks::<4>().0)
-        {
+            .zip(rgba.as_chunks::<4>().0);
+        for (dst, src) in pixels {
             dst[3] = src[3];
         }
         rgba.copy_from_slice(&out);

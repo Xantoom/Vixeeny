@@ -339,10 +339,26 @@ mod nvenc {
     #[test]
     fn layouts_match_the_header() {
         // Offsets of nvEncodeAPI.h on 64-bit Windows.
-        assert_eq!(std::mem::offset_of!(OpenParams, api_version), 24);
-        assert_eq!(std::mem::size_of::<OpenParams>(), 1552);
-        assert_eq!(std::mem::size_of::<CapsParam>(), 256);
-        assert_eq!(std::mem::offset_of!(FunctionList, entries), 8);
+        assert_eq!(
+            std::mem::offset_of!(OpenParams, api_version),
+            24,
+            "nvEncodeAPI.h: OpenParams.api_version at byte 24"
+        );
+        assert_eq!(
+            std::mem::size_of::<OpenParams>(),
+            1552,
+            "nvEncodeAPI.h: OpenParams is 1552 bytes"
+        );
+        assert_eq!(
+            std::mem::size_of::<CapsParam>(),
+            256,
+            "nvEncodeAPI.h: CapsParam is 256 bytes"
+        );
+        assert_eq!(
+            std::mem::offset_of!(FunctionList, entries),
+            8,
+            "nvEncodeAPI.h: FunctionList.entries at byte 8"
+        );
     }
 }
 
@@ -443,7 +459,10 @@ mod amf {
         kind: i32,
         value: [u64; 2],
     }
-    const _: () = assert!(std::mem::size_of::<Variant>() == 24);
+    const _: () = assert!(
+        std::mem::size_of::<Variant>() == 24,
+        "AMFVariantStruct is 24 bytes in the AMF headers"
+    );
 
     /// An AMF interface: a pointer to its vtable.
     #[repr(C)]
@@ -756,7 +775,7 @@ mod amf {
                 STORAGE_GET_PROPERTY,
             )(caps, name.as_ptr(), &raw mut value)
         };
-        status == 0 && value.kind == AMF_VARIANT_BOOL && value.value[0] & 0xFF != 0
+        status == 0 && value.kind == AMF_VARIANT_BOOL && value.value[0] & 0xff != 0
     }
 }
 
@@ -1044,18 +1063,66 @@ mod vpl {
     #[test]
     fn layouts_match_the_header() {
         // Sizes and offsets of mfxcommon.h on 64-bit (computed from the header).
-        assert_eq!(std::mem::offset_of!(Encoders, num_codecs), 16);
-        assert_eq!(std::mem::offset_of!(Encoders, codecs), 24);
-        assert_eq!(std::mem::size_of::<Codec>(), 32);
-        assert_eq!(std::mem::offset_of!(Codec, num_profiles), 22);
-        assert_eq!(std::mem::offset_of!(Codec, profiles), 24);
-        assert_eq!(std::mem::size_of::<Profile>(), 32);
-        assert_eq!(std::mem::offset_of!(Profile, num_mem_types), 18);
-        assert_eq!(std::mem::offset_of!(Profile, mem_desc), 24);
-        assert_eq!(std::mem::size_of::<MemDesc>(), 56);
-        assert_eq!(std::mem::offset_of!(MemDesc, height), 16);
-        assert_eq!(std::mem::offset_of!(MemDesc, num_color_formats), 42);
-        assert_eq!(std::mem::offset_of!(MemDesc, color_formats), 48);
+        assert_eq!(
+            std::mem::offset_of!(Encoders, num_codecs),
+            16,
+            "mfxcommon.h: Encoders.num_codecs at byte 16"
+        );
+        assert_eq!(
+            std::mem::offset_of!(Encoders, codecs),
+            24,
+            "mfxcommon.h: Encoders.codecs at byte 24"
+        );
+        assert_eq!(
+            std::mem::size_of::<Codec>(),
+            32,
+            "mfxcommon.h: Codec is 32 bytes"
+        );
+        assert_eq!(
+            std::mem::offset_of!(Codec, num_profiles),
+            22,
+            "mfxcommon.h: Codec.num_profiles at byte 22"
+        );
+        assert_eq!(
+            std::mem::offset_of!(Codec, profiles),
+            24,
+            "mfxcommon.h: Codec.profiles at byte 24"
+        );
+        assert_eq!(
+            std::mem::size_of::<Profile>(),
+            32,
+            "mfxcommon.h: Profile is 32 bytes"
+        );
+        assert_eq!(
+            std::mem::offset_of!(Profile, num_mem_types),
+            18,
+            "mfxcommon.h: Profile.num_mem_types at byte 18"
+        );
+        assert_eq!(
+            std::mem::offset_of!(Profile, mem_desc),
+            24,
+            "mfxcommon.h: Profile.mem_desc at byte 24"
+        );
+        assert_eq!(
+            std::mem::size_of::<MemDesc>(),
+            56,
+            "mfxcommon.h: MemDesc is 56 bytes"
+        );
+        assert_eq!(
+            std::mem::offset_of!(MemDesc, height),
+            16,
+            "mfxcommon.h: MemDesc.height at byte 16"
+        );
+        assert_eq!(
+            std::mem::offset_of!(MemDesc, num_color_formats),
+            42,
+            "mfxcommon.h: MemDesc.num_color_formats at byte 42"
+        );
+        assert_eq!(
+            std::mem::offset_of!(MemDesc, color_formats),
+            48,
+            "mfxcommon.h: MemDesc.color_formats at byte 48"
+        );
     }
 }
 

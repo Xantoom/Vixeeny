@@ -3,8 +3,6 @@
 //! maintainers need to reproduce a problem — version, system, display, GPUs, encoders — and
 //! nothing personal: no user name, no folder, no file name.
 
-use std::fmt::Write as _;
-
 use vixeeny_common::config::Config;
 
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -21,6 +19,8 @@ pub struct Info {
 
 /// The report as Markdown, ready to paste into an issue.
 pub fn format(info: &Info) -> String {
+    use std::fmt::Write as _;
+
     let mut out = String::from("<details><summary>Vixeeny system info</summary>\n\n```text\n");
     let _ = writeln!(
         out,
