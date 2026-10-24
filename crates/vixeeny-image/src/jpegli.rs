@@ -7,8 +7,8 @@ use std::ffi::{c_int, c_uint, c_ulong, c_void};
 use std::ptr;
 
 use crate::native::{
-    J_COLOR_SPACE_JCS_RGB as JCS_RGB, JPEG_LIB_VERSION, JSAMPARRAY, JSAMPROW, jpeg_compress_struct,
-    jpeg_error_mgr,
+    J_COLOR_SPACE_JCS_EXT_BGRA as JCS_EXT_BGRA, JPEG_LIB_VERSION, JSAMPARRAY, JSAMPROW,
+    jpeg_compress_struct, jpeg_error_mgr,
 };
 use crate::{Bgra, Chroma, ImageError, JpegSettings, icc};
 
@@ -18,7 +18,7 @@ unsafe extern "C" {
     fn jpegli_mem_dest(cinfo: *mut jpeg_compress_struct, buffer: *mut *mut u8, size: *mut c_ulong);
     fn jpegli_set_defaults(cinfo: *mut jpeg_compress_struct);
     fn jpegli_set_quality(cinfo: *mut jpeg_compress_struct, quality: c_int, force_baseline: c_int);
-    fn jpegli_simple_progression(cinfo: *mut jpeg_compress_struct);
+    fn jpegli_set_progressive_level(cinfo: *mut jpeg_compress_struct, level: c_int);
     fn jpegli_start_compress(cinfo: *mut jpeg_compress_struct, write_all_tables: c_int);
     fn jpegli_write_icc_profile(cinfo: *mut jpeg_compress_struct, data: *const u8, len: c_uint);
     fn jpegli_write_scanlines(
@@ -46,16 +46,11 @@ pub(crate) fn encode(image: &Bgra<'_>, settings: &JpegSettings) -> Result<Vec<u8
         ));
     }
     let profile = icc::srgb()?;
-    let rgb = image.to_rgb();
-    let row_bytes = image.width as usize * 3;
-    let mut rows: Vec<JSAMPROW> = rgb
-        .chunks_exact(row_bytes)
-        .map(|r| r.as_ptr().cast_mut())
-        .collect();
+    let mut rows: Vec<JSAMPROW> = image.rows().map(|r| r.as_ptr().cast_mut()).collect();
 
     // SAFETY: `cinfo` and `err` live for the whole block; the libjpeg call sequence is the
     // documented one (create, destination, parameters, start, scanlines, finish, destroy).
-    // `rows` points into `rgb`, which outlives the compression; libjpeg only reads them.
+    // `rows` points into `image`, which outlives the compression; libjpeg only reads them.
     unsafe {
         let mut err = std::mem::MaybeUninit::<jpeg_error_mgr>::zeroed();
         let mut cinfo = std::mem::MaybeUninit::<jpeg_compress_struct>::zeroed();
@@ -74,8 +69,8 @@ pub(crate) fn encode(image: &Bgra<'_>, settings: &JpegSettings) -> Result<Vec<u8
 
         (*cinfo_ptr).image_width = image.width;
         (*cinfo_ptr).image_height = image.height;
-        (*cinfo_ptr).input_components = 3;
-        (*cinfo_ptr).in_color_space = JCS_RGB;
+        (*cinfo_ptr).input_components = 4;
+        (*cinfo_ptr).in_color_space = JCS_EXT_BGRA;
         jpegli_set_defaults(cinfo_ptr);
         jpegli_set_quality(cinfo_ptr, c_int::from(settings.quality.clamp(1, 100)), 1);
         // Luma sampling factors decide the chroma subsampling: 2×2 is 4:2:0, 1×1 is 4:4:4.
@@ -88,7 +83,11 @@ pub(crate) fn encode(image: &Bgra<'_>, settings: &JpegSettings) -> Result<Vec<u8
         (*comp).h_samp_factor = luma_factor;
         (*comp).v_samp_factor = luma_factor;
         if settings.progressive {
-            jpegli_simple_progression(cinfo_ptr);
+            jpegli_set_progressive_level(cinfo_ptr, 2);
+        } else {
+            // Huffman tables made for the image rather than the standard ones: 4 % smaller for
+            // a tenth more time.
+            (*cinfo_ptr).optimize_coding = 1;
         }
         jpegli_start_compress(cinfo_ptr, 1);
         jpegli_write_icc_profile(cinfo_ptr, profile.as_ptr(), profile.len() as c_uint);

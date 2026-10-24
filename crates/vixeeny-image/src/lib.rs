@@ -126,8 +126,9 @@ impl Default for JpegSettings {
             quality: 90,
             // Full colour: screenshots are text and interfaces, which 4:2:0 fringes.
             chroma: Chroma::Yuv444,
-            // A few percent smaller, at the same quality.
-            progressive: true,
+            // Progressive is 1 % smaller but takes three times as long (4K game frame: 110 ms
+            // against 38), and decodes slower.
+            progressive: false,
         }
     }
 }

@@ -5521,6 +5521,7 @@ version = "0.27.0"
 dependencies = [
  "bindgen 0.73.2",
  "ffmpeg-next",
+ "flate2",
  "gif",
  "image",
  "imagequant",
@@ -5531,6 +5532,7 @@ dependencies = [
  "pkg-config",
  "png",
  "rayon",
+ "simd-adler32",
  "thiserror 2.0.21",
  "vixeeny-common",
 ]

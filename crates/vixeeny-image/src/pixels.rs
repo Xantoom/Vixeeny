@@ -31,7 +31,7 @@ impl<'a> Bgra<'a> {
         Ok(())
     }
 
-    fn rows(&self) -> impl Iterator<Item = &'a [u8]> + use<'a> {
+    pub(crate) fn rows(&self) -> impl Iterator<Item = &'a [u8]> + use<'a> {
         let (stride, row, data) = (self.stride, self.width as usize * 4, self.data);
         (0..self.height as usize).map(move |y| &data[y * stride..y * stride + row])
     }

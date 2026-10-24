@@ -37,29 +37,36 @@ fn decode(bytes: &[u8], format: image::ImageFormat) -> image::RgbImage {
 
 #[test]
 fn png_is_lossless_and_oxipng_keeps_it_so() {
-    let (data, stride) = sample(61, 37);
-    let img = Bgra::new(61, 37, stride, &data);
-    let want = rgb_of(&data, stride, 61, 37);
-    for settings in [
-        PngSettings::default(),
-        PngSettings {
-            compression: PngCompression::High,
-            oxipng_level: Some(1),
-        },
-    ] {
-        let bytes = encode(
-            ImageFormat::Png,
-            &img,
-            &Settings {
-                png: settings,
-                ..Settings::default()
+    // The tall one is cut in bands, written apart and joined.
+    for (w, h) in [(61, 37), (61, 701)] {
+        let (data, stride) = sample(w, h);
+        let img = Bgra::new(w, h, stride, &data);
+        let want = rgb_of(&data, stride, w, h);
+        for settings in [
+            PngSettings::default(),
+            PngSettings {
+                compression: PngCompression::Default,
+                oxipng_level: None,
             },
-        )
-        .unwrap();
-        assert!(bytes.windows(4).any(|w| w == b"sRGB"));
-        let got = decode(&bytes, image::ImageFormat::Png);
-        assert_eq!((got.width(), got.height()), (61, 37));
-        assert_eq!(got.as_raw(), &want);
+            PngSettings {
+                compression: PngCompression::High,
+                oxipng_level: Some(1),
+            },
+        ] {
+            let bytes = encode(
+                ImageFormat::Png,
+                &img,
+                &Settings {
+                    png: settings,
+                    ..Settings::default()
+                },
+            )
+            .unwrap();
+            assert!(bytes.windows(4).any(|w| w == b"sRGB"));
+            let got = decode(&bytes, image::ImageFormat::Png);
+            assert_eq!((got.width(), got.height()), (w, h));
+            assert_eq!(got.as_raw(), &want, "{w}x{h} {settings:?}");
+        }
     }
 }
 
