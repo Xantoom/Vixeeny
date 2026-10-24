@@ -446,16 +446,17 @@ fn hdr_texture(device: &Device, rgb: [f32; 3]) -> ID3D11Texture2D {
 }
 
 /// Records 10 frames of a solid HDR colour through the GPU path of `id`, kept as HDR or tone
-/// mapped; the centre of the first frame, on 8 bits.
+/// mapped; the centre of the first frame, on 8 bits. `None` (skipped) without a GPU video
+/// processor.
 fn record_hdr(
     device: &Device,
     context: &DeviceContext,
     (id, feed, depth): (&str, Feed, u8),
     keep_hdr: bool,
     rgb: [f32; 3],
-) -> [i32; 3] {
+) -> Option<[i32; 3]> {
     let registry = Registry::builtin().unwrap();
-    let pipeline = GpuPipeline::new(
+    let pipeline = match GpuPipeline::new(
         device,
         context,
         Source {
@@ -468,8 +469,13 @@ fn record_hdr(
         depth == 10,
         Chroma::C420,
         feed,
-    )
-    .unwrap();
+    ) {
+        Ok(p) => p,
+        Err(e) => {
+            vixeeny_common::skip_test(format!("no GPU video processor ({e})"));
+            return None;
+        }
+    };
     let pipeline = Arc::new(pipeline);
     let mut cfg = config(&registry, id, depth, Chroma::C420, PresetName::Performance);
     cfg.hdr = keep_hdr;
@@ -493,7 +499,7 @@ fn record_hdr(
     let summary = rec.stop(10 * 1_000 * MS / 30).unwrap();
     let got = centre(&summary.files[0]);
     let _ = std::fs::remove_dir_all(dir);
-    got
+    Some(got)
 }
 
 /// An HDR monitor recorded on the GPU, whatever the video processor of the card takes: kept as
@@ -511,13 +517,15 @@ fn hdr_monitors_are_recorded_on_the_gpu_kept_or_tone_mapped() {
         512.0 + 896.0 * (r - y) / 1.4746,
     ]
     .map(|v| (v / 4.0).round() as i32);
-    let got = record_hdr(
+    let Some(got) = record_hdr(
         &device,
         &context,
         ("libx265", Feed::Download, 10),
         true,
         orange,
-    );
+    ) else {
+        return;
+    };
     for (g, w) in got.iter().zip(want) {
         assert!((g - w).abs() <= 2, "HDR: got {got:?}, want {want:?}");
     }
@@ -529,7 +537,8 @@ fn hdr_monitors_are_recorded_on_the_gpu_kept_or_tone_mapped() {
         ("libx264", Feed::Download, 8),
         false,
         [white * 0.5; 3],
-    );
+    )
+    .unwrap();
     let code = (vixeeny_common::colour::srgb_encode(0.5) * 255.0).round();
     let luma = (16.0 + 219.0 * code / 255.0).round() as i32;
     assert!(
@@ -568,14 +577,16 @@ fn nvenc_records_hdr_from_the_shaders() {
         ("nvenc_hevc", Feed::Direct, 10),
         true,
         [white; 3],
-    );
+    )
+    .unwrap();
     let downloaded = record_hdr(
         &device,
         &context,
         ("libx265", Feed::Download, 10),
         true,
         [white; 3],
-    );
+    )
+    .unwrap();
     for (a, b) in kept.iter().zip(downloaded) {
         assert!((a - b).abs() <= 2, "NVENC {kept:?}, x265 {downloaded:?}");
     }
