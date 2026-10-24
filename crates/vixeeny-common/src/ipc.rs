@@ -80,6 +80,12 @@ impl ActionId {
         matches!(self, Self::CaptureRegion | Self::CaptureScrolling)
     }
 
+    /// The daemon captures the screens the moment the shortcut is pressed, for the app to
+    /// save (they are not shown).
+    pub const fn holds_screen(self) -> bool {
+        matches!(self, Self::CaptureFullscreen | Self::CaptureAllMonitors)
+    }
+
     pub fn from_cli_name(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|a| a.cli_name() == name)
     }

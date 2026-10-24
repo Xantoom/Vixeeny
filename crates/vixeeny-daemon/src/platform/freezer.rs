@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The frozen screens of a zone capture, made by the daemon on its own thread (it has the
-//! message loop the windows need) with a Direct3D device kept ready.
+//! The frozen screens of a zone capture (and those held for a full-screen one), made by the
+//! daemon on its own thread (it has the message loop the windows need) with a Direct3D device
+//! kept ready.
 
 use std::time::Instant;
 
@@ -26,10 +27,10 @@ impl GpuFreezer {
             .map_err(|e| tracing::warn!("no device for the frozen screens: {e}"))
             .ok()
     }
-}
 
-impl Freezer for GpuFreezer {
-    fn freeze(&mut self) -> Option<Frozen> {
+    /// Freezes (`show`) or holds the screens; a second try on a new device when the old one
+    /// was lost (driver update, sleep).
+    fn take(&mut self, show: bool, cursor: bool) -> Option<Frozen> {
         if freeze::is_active() {
             return None;
         }
@@ -37,16 +38,22 @@ impl Freezer for GpuFreezer {
         let monitors = vixeeny_platform::monitors()
             .map_err(|e| tracing::warn!("cannot list the monitors: {e}"))
             .ok()?;
-        // A second try on a new device: the old one may have been lost (driver update, sleep).
         for _ in 0..2 {
             if self.gpu.is_none() {
                 self.gpu = Self::device();
             }
-            match freeze::freeze(self.gpu.as_ref()?, &monitors) {
+            let gpu = self.gpu.as_ref()?;
+            let taken = if show {
+                freeze::freeze(gpu, &monitors)
+            } else {
+                freeze::hold(gpu, &monitors, cursor)
+            };
+            match taken {
                 Ok(frozen) => {
                     tracing::debug!(
-                        "{} screen(s) frozen in {:?}",
+                        "{} screen(s) {} in {:?}",
                         frozen.screens.len(),
+                        if show { "frozen" } else { "held" },
                         started.elapsed()
                     );
                     return Some(frozen);
@@ -59,6 +66,16 @@ impl Freezer for GpuFreezer {
             }
         }
         None
+    }
+}
+
+impl Freezer for GpuFreezer {
+    fn freeze(&mut self) -> Option<Frozen> {
+        self.take(true, false)
+    }
+
+    fn hold(&mut self, cursor: bool) -> Option<Frozen> {
+        self.take(false, cursor)
     }
 
     fn thaw(&mut self) {

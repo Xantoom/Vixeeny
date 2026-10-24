@@ -103,7 +103,7 @@ fn perform(action: ActionId, config: &Config, frozen: Option<ipc::Frozen>) {
             vixeeny_capture::freeze::trim_reader();
         }
         CaptureFullscreen | CaptureWindow | CaptureAllMonitors => {
-            match direct_capture(action, config) {
+            match direct_capture(action, config, frozen) {
                 Ok(None) => tracing::debug!("no window chosen"),
                 Ok(Some((path, thumb))) => {
                     tracing::debug!("saved {}", path.display());
@@ -143,11 +143,13 @@ fn pick_window(
     Ok(chosen.and_then(|i| windows.into_iter().nth(i)))
 }
 
-/// Takes and saves the capture; returns where, with the notification's thumbnail when it is
-/// shown. `None`: the user gave up choosing the window.
+/// Takes and saves the capture (from the screens the daemon `held` at the press, when it did);
+/// returns where, with the notification's thumbnail when it is shown. `None`: the user gave up
+/// choosing the window.
 fn direct_capture(
     action: ActionId,
     config: &Config,
+    held: Option<ipc::Frozen>,
 ) -> anyhow::Result<Option<(std::path::PathBuf, Option<toast::Thumb>)>> {
     use vixeeny_capture::{CaptureOptions, Capturer};
 
@@ -184,7 +186,6 @@ fn direct_capture(
         now: &now,
         after_save: None,
     };
-    let mut backend = capture_backend::Lent::take()?;
     let options = CaptureOptions {
         show_cursor: false,
         tonemap: Some(tonemap_hdr),
@@ -212,7 +213,7 @@ fn direct_capture(
     // Asked once the window is captured.
     let backdrop = window_backdrop_kind(config)
         .then_some(|| window_backdrop(config).unwrap_or(vixeeny_image::backdrop::Backdrop::Blur));
-    let run = |backend: &mut vixeeny_capture::WgcBackend| {
+    let run = |backend: &mut dyn vixeeny_capture::StillBackend| {
         let mut capturer = Capturer::new(backend, snapshot.monitors.clone());
         still::run(
             action,
@@ -231,20 +232,37 @@ fn direct_capture(
             &vixeeny_platform::exe_metadata,
         )
     };
-    let mut result = run(&mut backend);
-    if backend.kept
-        && let Err(still::StillError::Capture(e)) = &result
-    {
-        // The kept device may be gone (a driver update, the computer asleep): once more with
-        // a new one.
-        tracing::debug!("capture with the kept device failed ({e}), with a new one");
-        backend.renew()?;
-        result = run(&mut backend);
+    // The screens the daemon held at the press; captured now if they cannot be read (the
+    // monitors changed, the device was lost).
+    let mut result = held.as_ref().map(|frozen| {
+        let result = run(&mut vixeeny_capture::freeze::Held::new(frozen));
+        vixeeny_capture::freeze::release(frozen);
+        result
+    });
+    if let Some(Err(still::StillError::Capture(e))) = &result {
+        tracing::debug!("the held screens cannot be read ({e}), captured now");
+        result = None;
     }
-    if matches!(result, Err(still::StillError::Capture(_))) {
-        backend.discard();
-    }
-    let path = result?;
+    let path = match result {
+        Some(result) => result?,
+        None => {
+            let mut backend = capture_backend::Lent::take()?;
+            let mut result = run(&mut *backend);
+            if backend.kept
+                && let Err(still::StillError::Capture(e)) = &result
+            {
+                // The kept device may be gone (a driver update, the computer asleep): once more
+                // with a new one.
+                tracing::debug!("capture with the kept device failed ({e}), with a new one");
+                backend.renew()?;
+                result = run(&mut *backend);
+            }
+            if matches!(result, Err(still::StillError::Capture(_))) {
+                backend.discard();
+            }
+            result?
+        }
+    };
     tracing::info!("screenshot taken in {:?}", started.elapsed());
     let thumb = thumb
         .into_inner()
@@ -772,13 +790,15 @@ fn run() -> anyhow::Result<()> {
     ) {
         vixeeny_overlay::gfx::warm();
     }
+    // Not for screens the daemon held: the capture device is made only if they fail.
     if matches!(
         first_action,
         ActionId::CaptureFullscreen
             | ActionId::CaptureWindow
             | ActionId::CaptureAllMonitors
             | ActionId::CaptureScrolling
-    ) {
+    ) && (first_frozen.is_none() || !first_action.holds_screen())
+    {
         capture_backend::warm();
     }
     let mut config = vixeeny_common::paths::config_file()

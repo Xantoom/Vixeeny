@@ -68,6 +68,11 @@ pub trait HotkeyBackend {
 pub trait Freezer {
     /// `None` when the screens cannot be frozen, or already are.
     fn freeze(&mut self) -> Option<Frozen>;
+    /// The screens captured for the app without being shown (with the pointer when `cursor`),
+    /// as [`freeze`](Self::freeze) otherwise.
+    fn hold(&mut self, _cursor: bool) -> Option<Frozen> {
+        None
+    }
     fn thaw(&mut self);
 }
 
@@ -274,10 +279,23 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
         flow
     }
 
-    /// The screens freeze before anything else happens for a zone capture; they go when the
-    /// app that should take over from them is gone (the app itself removes them otherwise).
+    /// The screens freeze before anything else happens for a zone capture, and are held for a
+    /// full-screen one; they go when the app that should take over from them is gone (the app
+    /// itself removes them otherwise).
     fn freeze_or_thaw(&mut self, event: &Event) {
         match *event {
+            Event::Action(action) | Event::Control(ControlRequest::Action(action))
+                if action.holds_screen() =>
+            {
+                // Screens of an earlier press no action took: not this one's.
+                if self.frozen.is_some() && self.frozen_for.is_none() {
+                    self.thaw();
+                }
+                if let Some(frozen) = self.freezer.hold(self.config.image.show_cursor) {
+                    self.frozen = Some(frozen);
+                    self.frozen_for = None;
+                }
+            }
             Event::Action(action) | Event::Control(ControlRequest::Action(action))
                 if action.freezes_screen() =>
             {
@@ -303,7 +321,10 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
 
     /// The frozen screens, for the app that runs `action`.
     fn take_frozen(&mut self, action: ActionId, receiver: FrozenFor) -> Option<Frozen> {
-        let frozen = self.frozen.take().filter(|_| action.freezes_screen());
+        let frozen = self
+            .frozen
+            .take()
+            .filter(|_| action.freezes_screen() || action.holds_screen());
         if frozen.is_some() {
             self.frozen_for = Some(receiver);
         }
@@ -639,9 +660,48 @@ mod tests {
                 screens: Vec::new(),
             })
         }
+        fn hold(&mut self, cursor: bool) -> Option<Frozen> {
+            self.log
+                .lock()
+                .unwrap()
+                .push(if cursor { "hold with cursor" } else { "hold" });
+            Some(Frozen {
+                adapter: 1,
+                screens: Vec::new(),
+            })
+        }
         fn thaw(&mut self) {
             self.log.lock().unwrap().push("thaw");
         }
+    }
+
+    #[test]
+    fn a_full_screen_capture_gets_the_screens_of_its_press() {
+        let mut config = Config::default();
+        config.image.show_cursor = true;
+        let (rt, tx, _, spawned) = runtime(false, config);
+        let freezer = FakeFreezer::default();
+        let mut rt = rt.with_freezer(Box::new(freezer.clone()));
+        tx.send(Event::Action(ActionId::CaptureFullscreen));
+        rt.pump();
+        assert_eq!(*freezer.log.lock().unwrap(), vec!["hold with cursor"]);
+        assert_eq!(
+            spawned.lock().unwrap().last(),
+            Some(&(1, ActionId::CaptureFullscreen))
+        );
+        assert!(rt.frozen.is_none());
+        // Screens no action took go before new ones are held.
+        rt.frozen = Some(Frozen {
+            adapter: 1,
+            screens: Vec::new(),
+        });
+        rt.frozen_for = None;
+        rt.freeze_or_thaw(&Event::Action(ActionId::CaptureAllMonitors));
+        assert_eq!(
+            *freezer.log.lock().unwrap(),
+            vec!["hold with cursor", "thaw", "hold with cursor"]
+        );
+        assert!(rt.frozen.is_some());
     }
 
     #[test]

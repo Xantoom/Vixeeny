@@ -13,8 +13,9 @@ Vixeeny.exe (always on)                         vixeeny-app.exe (on demand)
 
 `Vixeeny.exe` is small so that being resident costs little; everything heavy lives in the app,
 which it starts when a shortcut fires and which exits when idle. Nearly all of its memory is the
-Direct3D device it keeps to freeze the screens the moment a zone capture is pressed (making one
-takes over 100 ms); the driver's memory for the frozen screens is given back once they go. They talk over a named pipe
+Direct3D device it keeps to freeze the screens the moment a zone capture is pressed, and to take
+them for a full-screen one (making one takes over 100 ms); the driver's memory for the frozen
+screens is given back once they go. They talk over a named pipe
 with length-prefixed `postcard` messages (`vixeeny-common::ipc`). The pipe is named after the
 user's SID and only that user and the system may open it; a client checks that the process
 behind it runs as the same user before it writes anything. Binding the pipe is also the
@@ -56,7 +57,8 @@ Slint windows are rendered in the tests by the software renderer.
 - **Images**: a `StillBackend` grabs a monitor, a window or a region into a `CpuFrame` (BGRA).
   The `Capturer` stitches monitors and applies the HDR tone mapper. The capture shortcut freezes
   every screen at once: one overlay window per monitor shows the screen as it was and dims it,
-  then the editor works on that image.
+  then the editor works on that image. A full-screen capture uses the screens the daemon took
+  at the press, shown nowhere, so it holds that moment however long the app takes to start.
 - **Video**: Windows.Graphics.Capture delivers frames with master-clock timestamps; the
   `Recorder` (`vixeeny-encode`) converts, encodes and muxes on its own threads, with constant or
   variable frame rate, pause, splitting on key frames and a crash-safe MP4. Frames can stay on

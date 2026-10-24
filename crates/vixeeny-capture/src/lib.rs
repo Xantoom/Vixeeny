@@ -487,7 +487,7 @@ impl<B: StillBackend> Capturer<B> {
     }
 }
 
-fn tonemapped(
+pub(crate) fn tonemapped(
     hdr: &HdrFrame,
     info: &HdrInfo,
     tonemap: ToneMapFn,

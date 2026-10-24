@@ -54,7 +54,7 @@ use crate::wgc::{
     FRAME_TIMEOUT, d3d_device, frame_handler, halves_to_f32, monitor_item, os, winrt_device,
 };
 
-use crate::{CaptureError, HdrFrame, card_tonemap};
+use crate::{CaptureError, CpuFrame, HdrFrame, card_tonemap};
 
 /// The frozen screens go by themselves after this, whatever happens to the app.
 const SAFETY_TIMEOUT_MS: u32 = 10_000;
@@ -221,7 +221,7 @@ impl Drop for Pending {
     }
 }
 
-fn start(gpu: &Gpu, monitor: &MonitorInfo) -> Result<Pending, CaptureError> {
+fn start(gpu: &Gpu, monitor: &MonitorInfo, cursor: bool) -> Result<Pending, CaptureError> {
     let item = monitor_item(monitor)?;
     let format = if monitor.hdr.is_some() {
         DirectXPixelFormat::R16G16B16A16Float
@@ -245,7 +245,7 @@ fn start(gpu: &Gpu, monitor: &MonitorInfo) -> Result<Pending, CaptureError> {
         arrived,
     };
     // The cursor and border switches need recent Windows builds; ignore their absence.
-    let _ = pending.session.SetIsCursorCaptureEnabled(false);
+    let _ = pending.session.SetIsCursorCaptureEnabled(cursor);
     let _ = pending.session.SetIsBorderRequired(false);
     pending.session.StartCapture().map_err(os("StartCapture"))?;
     Ok(pending)
@@ -296,7 +296,8 @@ fn finish(
     Ok(texture)
 }
 
-/// A hidden (cloaked) top-most window over `monitor`, showing `texture`.
+/// A hidden (cloaked) top-most window over `monitor`, showing `texture` when `show` (otherwise
+/// it only receives [`THAW_MESSAGE`] and the safety timer).
 ///
 /// The window must stay an ordinary window for the compositor. One that covers a monitor
 /// exactly with a flip-model swap chain is taken for a full-screen game: the screen switches to
@@ -308,6 +309,7 @@ fn show_screen(
     monitor: &MonitorInfo,
     monitors: &[MonitorInfo],
     texture: ID3D11Texture2D,
+    show: bool,
 ) -> Result<(Screen, FrozenScreen), CaptureError> {
     let r = monitor.rect;
     let hdr = monitor.hdr.is_some();
@@ -360,6 +362,33 @@ fn show_screen(
     let mut desc = D3D11_TEXTURE2D_DESC::default();
     // SAFETY: `desc` is a valid out-pointer.
     unsafe { texture.GetDesc(&mut desc) };
+    if show {
+        present(gpu, &mut screen, &texture, &desc, hdr, extra)?;
+    }
+    let id = next_shared_id();
+    screen.shared = Some(share(&texture, id)?);
+    let shared = FrozenScreen {
+        x: r.x,
+        y: r.y,
+        width: desc.Width,
+        height: desc.Height,
+        texture: id,
+        hdr,
+        window: window.0 as usize as u64,
+    };
+    Ok((screen, shared))
+}
+
+/// Gives `screen`'s window a swap chain showing `texture` (still cloaked).
+fn present(
+    gpu: &Gpu,
+    screen: &mut Screen,
+    texture: &ID3D11Texture2D,
+    desc: &D3D11_TEXTURE2D_DESC,
+    hdr: bool,
+    extra: u32,
+) -> Result<(), CaptureError> {
+    let window = screen.window;
     let chain_desc = DXGI_SWAP_CHAIN_DESC1 {
         Width: desc.Width,
         Height: desc.Height + extra,
@@ -406,36 +435,41 @@ fn show_screen(
         let _ = ShowWindow(window, SW_SHOWNOACTIVATE);
         let back: ID3D11Texture2D = chain.GetBuffer(0).map_err(os("GetBuffer"))?;
         gpu.context
-            .CopySubresourceRegion(&back, 0, 0, 0, 0, &texture, 0, None);
+            .CopySubresourceRegion(&back, 0, 0, 0, 0, texture, 0, None);
         chain
             .Present(0, DXGI_PRESENT(0))
             .ok()
             .map_err(os("Present"))?;
     }
     screen.swap_chain = Some(chain);
-    let id = next_shared_id();
-    screen.shared = Some(share(&texture, id)?);
-    let shared = FrozenScreen {
-        x: r.x,
-        y: r.y,
-        width: desc.Width,
-        height: desc.Height,
-        texture: id,
-        hdr,
-        window: window.0 as usize as u64,
-    };
-    Ok((screen, shared))
+    Ok(())
 }
 
 /// Freezes every monitor. Must run on a thread with a message loop (the windows live there).
 /// The screens go on [`thaw`], on [`THAW_MESSAGE`] or after ten seconds.
 pub fn freeze(gpu: &Gpu, monitors: &[MonitorInfo]) -> Result<Frozen, CaptureError> {
+    take(gpu, monitors, true, false)
+}
+
+/// Captures every monitor for the app without showing anything (a full-screen capture takes
+/// the screen of the moment the shortcut is pressed, however long the app takes to start).
+/// Shared and released as frozen screens are.
+pub fn hold(gpu: &Gpu, monitors: &[MonitorInfo], cursor: bool) -> Result<Frozen, CaptureError> {
+    take(gpu, monitors, false, cursor)
+}
+
+fn take(
+    gpu: &Gpu,
+    monitors: &[MonitorInfo],
+    show: bool,
+    cursor: bool,
+) -> Result<Frozen, CaptureError> {
     thaw();
     register_class()?;
     // Every capture starts before any is waited for: they run side by side.
     let pending = monitors
         .iter()
-        .map(|m| start(gpu, m))
+        .map(|m| start(gpu, m, cursor))
         .collect::<Result<Vec<_>, _>>()?;
     let deadline = Instant::now() + FRAME_TIMEOUT;
     let textures = pending
@@ -447,18 +481,19 @@ pub fn freeze(gpu: &Gpu, monitors: &[MonitorInfo]) -> Result<Frozen, CaptureErro
     let mut screens = Vec::with_capacity(monitors.len());
     let mut shared = Vec::with_capacity(monitors.len());
     for (monitor, texture) in monitors.iter().zip(textures) {
-        let (screen, frozen) = show_screen(gpu, monitor, monitors, texture)?;
+        let (screen, frozen) = show_screen(gpu, monitor, monitors, texture, show)?;
         screens.push(screen);
         shared.push(frozen);
     }
-    // SAFETY: plain calls. The copies reach the GPU now; once the compositor has taken the
-    // presented frames, the windows appear all at once with their content.
-    unsafe {
-        gpu.context.Flush();
-        let _ = DwmFlush();
-    }
-    for s in &screens {
-        set_bool_attribute(s.window, DWMWA_CLOAK, false);
+    // SAFETY: plain call: the copies reach the GPU before the app reads them.
+    unsafe { gpu.context.Flush() };
+    if show {
+        // SAFETY: plain call. Once the compositor has taken the presented frames, the windows
+        // appear all at once with their content.
+        let _ = unsafe { DwmFlush() };
+        for s in &screens {
+            set_bool_attribute(s.window, DWMWA_CLOAK, false);
+        }
     }
     if let Some(first) = screens.first() {
         // SAFETY: a timer on our own window; its WM_TIMER thaws.
@@ -737,10 +772,149 @@ pub fn release(frozen: &Frozen) {
     }
 }
 
+/// Still captures of the screens the daemon held for the app ([`hold`]): a full-screen capture
+/// of the moment of the press. Windows are not held (their capture sees behind what covers
+/// them): asking for one fails.
+pub struct Held<'a> {
+    frozen: &'a Frozen,
+}
+
+impl<'a> Held<'a> {
+    pub fn new(frozen: &'a Frozen) -> Self {
+        Self { frozen }
+    }
+
+    /// The held screen of `monitor`, alone; none when the monitors moved since the press.
+    fn screen(&self, monitor: &MonitorInfo) -> Result<Frozen, CaptureError> {
+        let r = monitor.rect;
+        self.frozen
+            .screens
+            .iter()
+            .find(|s| (s.x, s.y, s.width, s.height) == (r.x, r.y, r.width, r.height))
+            .map(|s| Frozen {
+                adapter: self.frozen.adapter,
+                screens: vec![*s],
+            })
+            .ok_or(CaptureError::UnknownMonitor)
+    }
+
+    /// `monitor`'s screen as BGRA (tone-mapped on the graphics card when `sdr` gives the levels
+    /// of an HDR one) or, failing that, as scRGB.
+    fn read(
+        &self,
+        monitor: &MonitorInfo,
+        sdr: Option<HdrInfo>,
+    ) -> Result<Result<CpuFrame, HdrFrame>, CaptureError> {
+        let one = self.screen(monitor)?;
+        let mut out = None;
+        read_with(
+            &one,
+            |_| sdr,
+            false,
+            |screen, rows, data, stride| {
+                out = Some(match rows {
+                    Rows::Bgra => {
+                        CpuFrame::from_raw(screen.width, screen.height, stride, data.to_vec())
+                            .map(Ok)
+                    }
+                    Rows::Halves => Ok(Err(scrgb(screen, data, stride))),
+                });
+            },
+        )?;
+        out.ok_or(CaptureError::Unsupported)?
+    }
+}
+
+fn cropped<T>(
+    frame: T,
+    area: Option<&PhysicalRect>,
+    crop: impl FnOnce(&T, &PhysicalRect) -> Result<T, CaptureError>,
+) -> Result<T, CaptureError> {
+    match area {
+        Some(area) => crop(&frame, area),
+        None => Ok(frame),
+    }
+}
+
+impl crate::StillBackend for Held<'_> {
+    fn grab_monitor(
+        &mut self,
+        monitor: &MonitorInfo,
+        _cursor: bool,
+    ) -> Result<CpuFrame, CaptureError> {
+        self.read(monitor, None)?
+            .map_err(|_| CaptureError::Unsupported)
+    }
+
+    fn grab_monitor_hdr(
+        &mut self,
+        monitor: &MonitorInfo,
+        area: Option<&PhysicalRect>,
+        _cursor: bool,
+    ) -> Result<HdrFrame, CaptureError> {
+        match self.read(monitor, None)? {
+            Err(hdr) => cropped(hdr, area, HdrFrame::crop),
+            Ok(_) => Err(CaptureError::Unsupported),
+        }
+    }
+
+    fn grab_monitor_sdr(
+        &mut self,
+        monitor: &MonitorInfo,
+        area: Option<&PhysicalRect>,
+        _cursor: bool,
+        info: &HdrInfo,
+        tonemap: crate::ToneMapFn,
+    ) -> Result<CpuFrame, CaptureError> {
+        let sdr = match self.read(monitor, Some(*info))? {
+            Ok(sdr) => sdr,
+            Err(hdr) => crate::tonemapped(&hdr, info, tonemap)?,
+        };
+        cropped(sdr, area, CpuFrame::crop)
+    }
+
+    fn grab_window(
+        &mut self,
+        _window: vixeeny_platform::WindowId,
+        _cursor: bool,
+    ) -> Result<CpuFrame, CaptureError> {
+        Err(CaptureError::Unsupported)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use windows::Win32::Graphics::Direct3D11::D3D11_SUBRESOURCE_DATA;
+
+    /// The screens held at a press (nothing shown) are read back whole, as the app saves them.
+    #[test]
+    fn held_screens_are_read_back() {
+        use crate::StillBackend;
+        // Physical pixels, as the daemon and the app see the monitors.
+        vixeeny_platform::ensure_dpi_aware();
+        let (Ok(gpu), Ok(monitors)) = (Gpu::new(), vixeeny_platform::monitors()) else {
+            vixeeny_common::skip_test("no Direct3D device");
+            return;
+        };
+        let started = Instant::now();
+        let frozen = hold(&gpu, &monitors, false).unwrap();
+        eprintln!("held in {:?}", started.elapsed());
+        assert_eq!(frozen.screens.len(), monitors.len());
+        let monitor = &monitors[0];
+        let mut held = Held::new(&frozen);
+        let frame = match monitor.hdr {
+            Some(info) => held.grab_monitor_sdr(monitor, None, false, &info, |_, _| Vec::new()),
+            None => held.grab_monitor(monitor, false),
+        }
+        .unwrap();
+        assert_eq!(
+            (frame.width, frame.height),
+            (monitor.rect.width, monitor.rect.height)
+        );
+        thaw();
+        assert!(!is_active());
+    }
 
     /// A texture shared by one device is read by another, as the app reads the daemon's.
     #[test]
