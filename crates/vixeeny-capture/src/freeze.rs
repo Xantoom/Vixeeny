@@ -38,7 +38,7 @@ use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory1, DXGI_PRESENT, DXGI_SCALING_NONE, DXGI_SCALING_STRETCH,
     DXGI_SHARED_RESOURCE_READ, DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_EFFECT_DISCARD,
     DXGI_SWAP_EFFECT_FLIP_DISCARD, DXGI_USAGE_RENDER_TARGET_OUTPUT, IDXGIAdapter, IDXGIDevice,
-    IDXGIFactory2, IDXGIFactory4, IDXGIResource1, IDXGISwapChain1, IDXGISwapChain3,
+    IDXGIDevice3, IDXGIFactory2, IDXGIFactory4, IDXGIResource1, IDXGISwapChain1, IDXGISwapChain3,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::WinRT::Direct3D11::IDirect3DDxgiInterfaceAccess;
@@ -122,6 +122,9 @@ impl Drop for Screen {
 
 thread_local! {
     static ACTIVE: RefCell<Vec<Screen>> = const { RefCell::new(Vec::new()) };
+    /// The device the frozen screens were made on, trimmed once they go.
+    static MADE_ON: RefCell<Option<(ID3D11DeviceContext, IDXGIDevice3)>> =
+        const { RefCell::new(None) };
 }
 
 /// `true` while frozen screens are shown.
@@ -136,7 +139,17 @@ pub fn thaw() {
         // SAFETY: windows of this thread; hiding them all first makes them go together.
         let _ = unsafe { ShowWindow(s.window, SW_HIDE) };
     }
+    let any = !screens.is_empty();
     drop(screens);
+    // The driver keeps the memory of the textures and swap chains it freed (over 100 MB for a
+    // 4K screen) for later ones: given back now, at about a millisecond on the next freeze.
+    if any && let Some((context, device)) = MADE_ON.with(|m| m.borrow_mut().take()) {
+        // SAFETY: plain calls on this thread's device; nothing of it is bound any more.
+        unsafe {
+            context.ClearState();
+            device.Trim();
+        }
+    }
 }
 
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -457,6 +470,9 @@ pub fn freeze(gpu: &Gpu, monitors: &[MonitorInfo]) -> Result<Frozen, CaptureErro
         unsafe { SetTimer(Some(first.window), 1, SAFETY_TIMEOUT_MS, None) };
     }
     ACTIVE.with(|a| *a.borrow_mut() = screens);
+    if let Ok(device) = gpu.device.cast::<IDXGIDevice3>() {
+        MADE_ON.with(|m| *m.borrow_mut() = Some((gpu.context.clone(), device)));
+    }
     Ok(Frozen {
         adapter: gpu.adapter,
         screens: shared,
@@ -616,50 +632,60 @@ fn open_shared(device: &ID3D11Device, id: u64) -> Result<ID3D11Texture2D, Captur
         .map_err(os("OpenSharedResourceByName"))
 }
 
+/// How the rows [`read_with`] hands are laid out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rows {
+    /// BGRA bytes: an SDR screen, or an HDR one tone-mapped on the graphics card.
+    Bgra,
+    /// RGBA half floats (scRGB): an HDR screen as it is.
+    Halves,
+}
+
 /// Reads the shared textures (in the app): `each` gets every screen's rows (`stride` bytes
 /// apart) while they are mapped, so it can convert them straight to where they go. The GPU
-/// copies of all screens are queued before the first is waited for.
+/// work of all screens is queued before the first is waited for.
 ///
 /// An HDR screen for which `sdr` gives its levels is tone-mapped to BGRA on the graphics card;
-/// `each` is told whether that was done (`false`: half floats, as for the screens `sdr` skips).
+/// it comes as half floats too with `halves`, or when that tone mapping failed (and always
+/// after its BGRA rows).
 pub fn read_with(
     frozen: &Frozen,
     sdr: impl Fn(&FrozenScreen) -> Option<HdrInfo>,
-    mut each: impl FnMut(&FrozenScreen, &[u8], usize, bool),
+    halves: bool,
+    mut each: impl FnMut(&FrozenScreen, Rows, &[u8], usize),
 ) -> Result<(), CaptureError> {
     let result = (|| {
         let (device, context) = reader(frozen.adapter)?;
-        let staged = frozen
-            .screens
-            .iter()
-            .map(|screen| {
-                let texture = open_shared(&device, screen.texture)?;
-                let whole = PhysicalRect::new(0, 0, screen.width, screen.height);
-                let card = sdr(screen).filter(|_| screen.hdr).and_then(|info| {
-                    card_tonemap::stage(&device, &context, &texture, &whole, &info).ok()
-                });
-                let on_card = card.is_some();
-                let staging = match card {
-                    Some(staging) => staging,
-                    None => stage(&device, &context, &texture)?,
-                };
-                Ok((screen, staging, on_card))
-            })
-            .collect::<Result<Vec<_>, CaptureError>>()?;
-        for (screen, staging, on_card) in staged {
+        let mut staged = Vec::with_capacity(frozen.screens.len() * 2);
+        for screen in &frozen.screens {
+            let texture = open_shared(&device, screen.texture)?;
+            let whole = PhysicalRect::new(0, 0, screen.width, screen.height);
+            let card = sdr(screen).filter(|_| screen.hdr).and_then(|info| {
+                card_tonemap::stage(&device, &context, &texture, &whole, &info).ok()
+            });
+            let on_card = card.is_some();
+            if let Some(staging) = card {
+                staged.push((screen, Rows::Bgra, staging));
+            }
+            if !on_card || halves && screen.hdr {
+                let rows = if screen.hdr { Rows::Halves } else { Rows::Bgra };
+                staged.push((screen, rows, stage(&device, &context, &texture)?));
+            }
+        }
+        for (screen, rows, staging) in staged {
             let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
             // SAFETY: a staging texture with CPU read access; `mapped` is a valid out-pointer.
             unsafe { context.Map(&staging, 0, D3D11_MAP_READ, 0, Some(&raw mut mapped)) }
                 .map_err(os("Map"))?;
             let stride = mapped.RowPitch as usize;
             // SAFETY: a mapped texture exposes `RowPitch * Height` readable bytes until `Unmap`.
-            let rows = unsafe {
+            let data = unsafe {
                 std::slice::from_raw_parts(
                     mapped.pData.cast::<u8>(),
                     stride * screen.height as usize,
                 )
             };
-            each(screen, rows, stride, on_card);
+            each(screen, rows, data, stride);
             // SAFETY: matches the successful Map above.
             unsafe { context.Unmap(&staging, 0) };
         }
@@ -767,7 +793,9 @@ mod tests {
         read_with(
             &frozen,
             |_| None,
-            |_, rows, stride, _| {
+            false,
+            |_, kind, rows, stride| {
+                assert_eq!(kind, Rows::Bgra);
                 read.extend(
                     (0..h as usize).flat_map(|y| &rows[y * stride..y * stride + w as usize * 4]),
                 )
@@ -781,7 +809,7 @@ mod tests {
         // SAFETY: the handle `share` returned, closed once.
         let _ = unsafe { CloseHandle(handle) };
         drop(texture);
-        assert!(read_with(&frozen, |_| None, |_, _, _, _| {}).is_err());
+        assert!(read_with(&frozen, |_| None, false, |_, _, _, _| {}).is_err());
     }
 
     #[test]

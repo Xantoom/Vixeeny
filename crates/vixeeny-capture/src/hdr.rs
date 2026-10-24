@@ -61,13 +61,31 @@ impl HdrFrame {
 
     /// [`from_sdr`](Self::from_sdr) for BGRA rows `stride` bytes apart.
     pub fn from_bgra(width: u32, height: u32, stride: usize, data: &[u8], white_nits: f32) -> Self {
+        let mut frame = Self {
+            width,
+            height,
+            rgba: vec![0.0; width as usize * height as usize * 4],
+        };
+        frame.put_bgra(0, 0, (width, height), stride, data, white_nits);
+        frame
+    }
+
+    /// Writes BGRA rows (`stride` bytes apart) of `size` with their top-left corner at
+    /// `(x, y)`, their white at `white_nits`. They must fit in the frame.
+    pub fn put_bgra(
+        &mut self,
+        x: u32,
+        y: u32,
+        size: (u32, u32),
+        stride: usize,
+        data: &[u8],
+        white_nits: f32,
+    ) {
         static LINEAR: OnceLock<[f32; 256]> = OnceLock::new();
         let linear =
             LINEAR.get_or_init(|| std::array::from_fn(|i| colour::srgb_decode(i as f32 / 255.0)));
         let gain = white_nits / 80.0;
-        let w = width as usize;
-        let mut rgba = vec![0.0; w * height as usize * 4];
-        rgba.par_chunks_mut(w * 4)
+        self.rows_at(x, y, size)
             .zip(data.par_chunks(stride))
             .for_each(|(out, row)| {
                 let pixels = out
@@ -80,11 +98,51 @@ impl HdrFrame {
                     *o = [c(2), c(1), c(0), 1.0];
                 }
             });
-        Self {
-            width,
-            height,
-            rgba,
-        }
+    }
+
+    /// Writes rows of RGBA half floats (`stride` bytes apart) of `size` with their top-left
+    /// corner at `(x, y)`, their light (not their alpha) multiplied by `gain`. They must fit in
+    /// the frame.
+    pub fn put_halves(
+        &mut self,
+        x: u32,
+        y: u32,
+        size: (u32, u32),
+        stride: usize,
+        data: &[u8],
+        gain: f32,
+    ) {
+        let n = size.0 as usize * 4;
+        self.rows_at(x, y, size)
+            .zip(data.par_chunks(stride))
+            .for_each(|(out, row)| {
+                let pixels = out
+                    .as_chunks_mut::<4>()
+                    .0
+                    .iter_mut()
+                    .zip(row[..n * 2].as_chunks::<8>().0);
+                for (o, px) in pixels {
+                    let c = |i: usize| {
+                        vixeeny_common::half::to_f32(u16::from_le_bytes([px[2 * i], px[2 * i + 1]]))
+                    };
+                    *o = [c(0) * gain, c(1) * gain, c(2) * gain, c(3)];
+                }
+            });
+    }
+
+    /// The parts of the rows that `size` at `(x, y)` covers.
+    fn rows_at(
+        &mut self,
+        x: u32,
+        y: u32,
+        (w, h): (u32, u32),
+    ) -> impl IndexedParallelIterator<Item = &mut [f32]> {
+        let (x, w) = (x as usize * 4, w as usize * 4);
+        self.rgba
+            .par_chunks_mut(self.width as usize * 4)
+            .skip(y as usize)
+            .take(h as usize)
+            .map(move |row| &mut row[x..x + w])
     }
 
     /// Multiplies the light by `gain`.
@@ -148,6 +206,22 @@ mod tests {
         let hdr = HdrFrame::from_sdr(&sdr, 240.0);
         assert_eq!(&hdr.rgba[..4], &[3.0, 3.0, 3.0, 1.0]);
         assert_eq!(&hdr.rgba[4..], &[0.0, 0.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn rows_are_put_in_place() {
+        let mut frame = HdrFrame::new(3, 2);
+        // One pixel of half floats (1.0, 0.5, 0.0, 1.0), then one byte of padding per row.
+        let halves: Vec<u8> = [0x3c00_u16, 0x3800, 0, 0x3c00]
+            .iter()
+            .flat_map(|h| h.to_le_bytes())
+            .chain([0])
+            .collect();
+        frame.put_halves(2, 1, (1, 1), 9, &halves, 2.0);
+        assert_eq!(&frame.rgba[20..], &[2.0, 1.0, 0.0, 1.0]);
+        frame.put_bgra(0, 0, (1, 1), 4, &[0, 0, 255, 255], 80.0);
+        assert_eq!(&frame.rgba[..4], &[1.0, 0.0, 0.0, 1.0]);
+        assert_eq!(&frame.rgba[4..8], &[0.0, 0.0, 0.0, 1.0]);
     }
 
     #[test]

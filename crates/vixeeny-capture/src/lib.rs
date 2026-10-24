@@ -164,6 +164,26 @@ pub trait StillBackend {
             })
             .collect()
     }
+    /// Every monitor of `monitors` both tone-mapped to SDR (as
+    /// [`grab_monitors`](Self::grab_monitors) gives it) and, for an HDR one, as scRGB too, both
+    /// from the same frame. A backend may capture them side by side.
+    fn grab_monitors_both(
+        &mut self,
+        monitors: &[MonitorInfo],
+        cursor: bool,
+        tonemap: ToneMapFn,
+    ) -> Result<Vec<(CpuFrame, Option<HdrFrame>)>, CaptureError> {
+        let shown = self.grab_monitors_shown(monitors, cursor)?;
+        monitors
+            .iter()
+            .zip(shown)
+            .map(|(m, shown)| match (shown, m.hdr) {
+                (Shown::Hdr(hdr), Some(info)) => Ok((tonemapped(&hdr, &info, tonemap)?, Some(hdr))),
+                (Shown::Hdr(_), None) => Err(CaptureError::Unsupported),
+                (Shown::Sdr(sdr), _) => Ok((sdr, None)),
+            })
+            .collect()
+    }
     /// The Direct3D device the captures are made on, for further work on the graphics card.
     fn d3d_device(&self) -> Option<ID3D11Device> {
         None
@@ -233,6 +253,14 @@ impl<B: StillBackend + ?Sized> StillBackend for &mut B {
         cursor: bool,
     ) -> Result<Vec<Shown>, CaptureError> {
         (**self).grab_monitors_shown(monitors, cursor)
+    }
+    fn grab_monitors_both(
+        &mut self,
+        monitors: &[MonitorInfo],
+        cursor: bool,
+        tonemap: ToneMapFn,
+    ) -> Result<Vec<(CpuFrame, Option<HdrFrame>)>, CaptureError> {
+        (**self).grab_monitors_both(monitors, cursor, tonemap)
     }
     fn d3d_device(&self) -> Option<ID3D11Device> {
         (**self).d3d_device()
@@ -370,6 +398,49 @@ impl<B: StillBackend> Capturer<B> {
         }
     }
 
+    /// Every monitor as [`grab`](Self::grab) (tone-mapped with `tonemap`) and
+    /// [`grab_hdr`](Self::grab_hdr) give them for [`CaptureTarget::AllMonitors`], from one
+    /// capture: both show the same moment.
+    pub fn grab_all_both(
+        &mut self,
+        cursor: bool,
+        tonemap: ToneMapFn,
+    ) -> Result<(CpuFrame, Option<HdrCapture>), CaptureError> {
+        let options = CaptureOptions {
+            show_cursor: cursor,
+            tonemap: Some(tonemap),
+        };
+        let Some(info) = reference(&self.monitors) else {
+            return Ok((self.grab_all(options)?, None));
+        };
+        let bounds =
+            virtual_bounds(self.monitors.iter().map(|m| &m.rect)).ok_or(CaptureError::NoMonitor)?;
+        let mut sdr = CpuFrame::new(bounds.width, bounds.height);
+        let mut hdr = HdrFrame::new(bounds.width, bounds.height);
+        let frames = self
+            .backend
+            .grab_monitors_both(&self.monitors, cursor, tonemap)?;
+        for (monitor, (toned, scrgb)) in self.monitors.iter().zip(frames) {
+            let at = monitor.rect.relative_to(&bounds);
+            sdr.blit(&toned, at.x, at.y);
+            let (x, y) = (at.x as u32, at.y as u32);
+            match scrgb {
+                Some(mut frame) => {
+                    let own = monitor
+                        .hdr
+                        .map_or(info.sdr_white_nits, |o| o.sdr_white_nits);
+                    frame.scale(info.sdr_white_nits / own.max(1.0));
+                    hdr.blit(&frame, at.x, at.y);
+                }
+                None => {
+                    let size = (toned.width, toned.height);
+                    hdr.put_bgra(x, y, size, toned.stride, &toned.data, info.sdr_white_nits);
+                }
+            }
+        }
+        Ok((sdr, Some(HdrCapture { frame: hdr, info })))
+    }
+
     fn grab_all_hdr(&mut self, cursor: bool) -> Result<Option<HdrCapture>, CaptureError> {
         let Some(info) = reference(&self.monitors) else {
             return Ok(None);
@@ -379,16 +450,18 @@ impl<B: StillBackend> Capturer<B> {
         let mut canvas = HdrFrame::new(bounds.width, bounds.height);
         let shown = self.backend.grab_monitors_shown(&self.monitors, cursor)?;
         for (monitor, shown) in self.monitors.iter().zip(shown) {
-            let frame = match (shown, monitor.hdr) {
+            let at = monitor.rect.relative_to(&bounds);
+            match (shown, monitor.hdr) {
                 (Shown::Hdr(mut frame), own) => {
                     let own = own.map_or(info.sdr_white_nits, |o| o.sdr_white_nits);
                     frame.scale(info.sdr_white_nits / own.max(1.0));
-                    frame
+                    canvas.blit(&frame, at.x, at.y);
                 }
-                (Shown::Sdr(frame), _) => HdrFrame::from_sdr(&frame, info.sdr_white_nits),
-            };
-            let at = monitor.rect.relative_to(&bounds);
-            canvas.blit(&frame, at.x, at.y);
+                (Shown::Sdr(frame), _) => {
+                    let (x, y, size) = (at.x as u32, at.y as u32, (frame.width, frame.height));
+                    canvas.put_bgra(x, y, size, frame.stride, &frame.data, info.sdr_white_nits);
+                }
+            }
         }
         Ok(Some(HdrCapture {
             frame: canvas,

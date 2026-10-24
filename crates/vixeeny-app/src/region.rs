@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use anyhow::Context;
+use vixeeny_capture::freeze::Rows;
 use vixeeny_capture::{CaptureOptions, CaptureTarget, Capturer, HdrCapture, HdrFrame};
 use vixeeny_common::config::Config;
 use vixeeny_common::ipc::{ActionId, Frozen};
@@ -343,30 +344,42 @@ fn frozen_desktop(
             peak_nits: 1000.0,
         })
     };
-    // Kept as HDR, the screens are needed in floats anyway: the tone mapping stays with them.
-    let on_card = |s: &vixeeny_common::ipc::FrozenScreen| (!keep_hdr).then(|| levels(s));
-    vixeeny_capture::freeze::read_with(frozen, on_card, |s, rows, stride, mapped| {
-        let at = (s.y - bounds.y) as usize * row + (s.x - bounds.x) as usize * 4;
-        let size = (s.width as usize, s.height as usize);
-        let (x, y) = (s.x - bounds.x, s.y - bounds.y);
-        if !s.hdr || mapped {
-            vixeeny_editor::bgra_to_rgba(rows, stride, &mut data[at..], row, size);
-            if let (Some(canvas), Some(reference)) = (&mut canvas, reference) {
-                let sdr =
-                    HdrFrame::from_bgra(s.width, s.height, stride, rows, reference.sdr_white_nits);
-                canvas.blit(&sdr, x, y);
+    // The HDR screens tone-mapped on the graphics card (the others are done here).
+    let mut toned = Vec::new();
+    let halves = canvas.is_some();
+    vixeeny_capture::freeze::read_with(
+        frozen,
+        |s| Some(levels(s)),
+        halves,
+        |s, kind, rows, stride| {
+            let at = (s.y - bounds.y) as usize * row + (s.x - bounds.x) as usize * 4;
+            let size = (s.width as usize, s.height as usize);
+            let (x, y) = ((s.x - bounds.x) as u32, (s.y - bounds.y) as u32);
+            match kind {
+                Rows::Bgra => {
+                    vixeeny_editor::bgra_to_rgba(rows, stride, &mut data[at..], row, size);
+                    if s.hdr {
+                        toned.push(s.texture);
+                    } else if let (Some(canvas), Some(reference)) = (&mut canvas, reference) {
+                        let white = reference.sdr_white_nits;
+                        canvas.put_bgra(x, y, (s.width, s.height), stride, rows, white);
+                    }
+                }
+                Rows::Halves => {
+                    let info = levels(s);
+                    if let (Some(canvas), Some(reference)) = (&mut canvas, reference) {
+                        let gain = reference.sdr_white_nits / info.sdr_white_nits.max(1.0);
+                        canvas.put_halves(x, y, (s.width, s.height), stride, rows, gain);
+                    }
+                    if !toned.contains(&s.texture) {
+                        let scrgb = vixeeny_capture::freeze::scrgb(s, rows, stride);
+                        let bgra = crate::tonemap_hdr(&scrgb.rgba, &info);
+                        vixeeny_editor::bgra_to_rgba(&bgra, size.0 * 4, &mut data[at..], row, size);
+                    }
+                }
             }
-            return;
-        }
-        let info = levels(s);
-        let mut scrgb = vixeeny_capture::freeze::scrgb(s, rows, stride);
-        let bgra = crate::tonemap_hdr(&scrgb.rgba, &info);
-        vixeeny_editor::bgra_to_rgba(&bgra, size.0 * 4, &mut data[at..], row, size);
-        if let (Some(canvas), Some(reference)) = (&mut canvas, reference) {
-            scrgb.scale(reference.sdr_white_nits / info.sdr_white_nits.max(1.0));
-            canvas.blit(&scrgb, x, y);
-        }
-    })?;
+        },
+    )?;
     // The editor draws with this device rather than making one more.
     if let Some(device) = vixeeny_capture::freeze::device(frozen.adapter) {
         vixeeny_overlay::gfx::offer_device(device);
@@ -496,16 +509,15 @@ fn grab_screens(
     keep_hdr: bool,
 ) -> anyhow::Result<(RgbaImage, Option<HdrCapture>)> {
     let mut backend = crate::capture_backend::Lent::take()?;
-    let options = CaptureOptions {
-        show_cursor: false,
-        tonemap: Some(crate::tonemap_hdr),
-    };
     let mut capturer = Capturer::new(&mut *backend, monitors.to_vec());
-    let frame = capturer.grab(&CaptureTarget::AllMonitors, options)?;
-    let hdr = if keep_hdr {
-        capturer.grab_hdr(&CaptureTarget::AllMonitors, false)?
+    let (frame, hdr) = if keep_hdr {
+        capturer.grab_all_both(false, crate::tonemap_hdr)?
     } else {
-        None
+        let options = CaptureOptions {
+            show_cursor: false,
+            tonemap: Some(crate::tonemap_hdr),
+        };
+        (capturer.grab(&CaptureTarget::AllMonitors, options)?, None)
     };
     let base = RgbaImage::from_bgra(frame.width, frame.height, frame.stride, &frame.data)
         .context("unexpected capture buffer")?;

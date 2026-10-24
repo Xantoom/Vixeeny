@@ -256,6 +256,26 @@ mod tests {
     }
 
     #[test]
+    fn one_capture_gives_the_sdr_and_hdr_pictures() {
+        let mut monitors = vec![mon(1, 0, 0, 2, 1, 96), mon(2, 2, 0, 2, 1, 96)];
+        monitors[1].hdr = Some(hdr(160.0, 600.0));
+        let tonemap: crate::ToneMapFn = |rgba, _| [7, 7, 7, 255].repeat(rgba.len() / 4);
+        let options = CaptureOptions {
+            tonemap: Some(tonemap),
+            ..CaptureOptions::default()
+        };
+        let mut apart = Capturer::new(FakeBackend::default(), monitors.clone());
+        let sdr = apart.grab(&CaptureTarget::AllMonitors, options).unwrap();
+        let hdr = apart.grab_hdr(&CaptureTarget::AllMonitors, false).unwrap();
+        let mut once = Capturer::new(FakeBackend::default(), monitors);
+        assert_eq!(once.grab_all_both(false, tonemap).unwrap(), (sdr, hdr));
+        assert_eq!(
+            once.backend.grabs,
+            vec!["monitor 1 cursor=false", "hdr monitor 2 cursor=false"]
+        );
+    }
+
+    #[test]
     fn a_window_on_an_hdr_monitor_is_hdr_and_tone_mapped_for_sdr() {
         let mut monitors = vec![mon(1, 0, 0, 4, 2, 96)];
         monitors[0].hdr = Some(hdr(200.0, 800.0));

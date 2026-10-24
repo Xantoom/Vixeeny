@@ -92,8 +92,8 @@ pub fn expected_bytes(kbps: u32, seconds: u32) -> u64 {
     estimate_ram_bytes(kbps, clamp_seconds(seconds), 2.0)
 }
 
-/// Where `storage = "auto"` keeps a replay of `bytes`: in RAM up to a tenth of the installed
-/// memory (512 MB when it is not known), on the disk beyond.
+/// Where `storage = "auto"` keeps a replay of `bytes`: in RAM up to [`ram_budget`] of the
+/// installed memory, on the disk beyond.
 pub fn fits_in_ram(bytes: u64, ram_bytes: u64) -> bool {
     bytes <= ram_budget(ram_bytes)
 }

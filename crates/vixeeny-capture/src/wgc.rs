@@ -496,6 +496,37 @@ impl StillBackend for WgcBackend {
             .collect()
     }
 
+    fn grab_monitors_both(
+        &mut self,
+        monitors: &[MonitorInfo],
+        cursor: bool,
+        tonemap: ToneMapFn,
+    ) -> Result<Vec<(CpuFrame, Option<HdrFrame>)>, CaptureError> {
+        // Every capture starts before any is waited for: they run side by side.
+        let started = monitors
+            .iter()
+            .map(|m| {
+                let format = match m.hdr {
+                    Some(_) => DirectXPixelFormat::R16G16B16A16Float,
+                    None => DirectXPixelFormat::B8G8R8A8UIntNormalized,
+                };
+                self.start(&monitor_item(m)?, cursor, format)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        monitors
+            .iter()
+            .zip(started)
+            .map(|(m, started)| match m.hdr {
+                Some(info) => started.finish(|t| {
+                    let toned = self.read_tonemapped(t, None, &info, tonemap)?;
+                    let raw = read_back(&self.device, &self.context, t)?;
+                    Ok((toned, Some(raw_hdr(&raw, None)?)))
+                }),
+                None => started.finish(|t| Ok((self.read_sdr(t)?, None))),
+            })
+            .collect()
+    }
+
     fn d3d_device(&self) -> Option<ID3D11Device> {
         Some(self.device.clone())
     }

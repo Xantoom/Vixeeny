@@ -7,12 +7,14 @@ This page is the map of the code. Vixeeny is a Windows program (10 and 11, x64).
 ```
 Vixeeny.exe (always on)                         vixeeny-app.exe (on demand)
   tray icon, global shortcuts, IPC server  ←──→  captures, editor, recording, settings…
-  no Slint, no FFmpeg, no capture code            started by Vixeeny.exe for an action,
-  idles at ~0 % CPU and a few MB                  exits after `app_idle_exit_seconds`
+  no Slint, no FFmpeg; freezes the screens        started by Vixeeny.exe for an action,
+  idles at 0 % CPU and about 55 MB                exits after `app_idle_exit_seconds`
 ```
 
-`Vixeeny.exe` is small so that being resident costs nothing; everything heavy lives in the app,
-which it starts when a shortcut fires and which exits when idle. They talk over a named pipe
+`Vixeeny.exe` is small so that being resident costs little; everything heavy lives in the app,
+which it starts when a shortcut fires and which exits when idle. Nearly all of its memory is the
+Direct3D device it keeps to freeze the screens the moment a zone capture is pressed (making one
+takes over 100 ms); the driver's memory for the frozen screens is given back once they go. They talk over a named pipe
 with length-prefixed `postcard` messages (`vixeeny-common::ipc`). The pipe is named after the
 user's SID and only that user and the system may open it; a client checks that the process
 behind it runs as the same user before it writes anything. Binding the pipe is also the
