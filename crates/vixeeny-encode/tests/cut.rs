@@ -222,7 +222,7 @@ fn a_seek_goes_on_from_the_decoder_and_a_read_can_be_given_up() {
     let dir = scratch("seek-on");
     let clip = Clip::open(&recording(&dir, 3)).unwrap();
     let mut pictures = Pictures::open_with(&clip, false).unwrap();
-    let mut shown = |pictures: &mut Pictures, frame: usize| {
+    let shown = |pictures: &mut Pictures, frame: usize| {
         pictures.seek(frame).unwrap();
         let (i, picture) = pictures.read((320, 180)).unwrap().unwrap();
         assert_eq!((i, number(&picture.bgra)), (frame, frame));
