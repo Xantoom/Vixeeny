@@ -10,6 +10,9 @@
 //! `vixeeny-app --update install [--settings]`: installs the downloaded version (the Restart
 //! button of the settings), then shows the settings again.
 //!
+//! `vixeeny-app --update off`: run by the installer when its updates box is left unchecked;
+//! turns the update check off in the user's settings.
+//!
 //! `vixeeny-app --update quit`: run by the installer; stops Vixeeny the way an update does (a
 //! recording ends first), waiting at most half a minute.
 
@@ -39,6 +42,15 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
             client::install(reopen)
         }
         Some("quit") => client::stop_daemon(Some(std::time::Duration::from_secs(30))),
+        Some("off") => {
+            let path = vixeeny_common::paths::config_file()
+                .ok_or_else(|| anyhow::anyhow!("no settings folder"))?;
+            let mut config = Config::load(&path)?;
+            config.general.check_updates = false;
+            config.general.auto_update = false;
+            config.save(&path)?;
+            Ok(())
+        }
         _ => Ok(()),
     }
 }

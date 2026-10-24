@@ -10,7 +10,7 @@ Screenshots and screen recording for Windows. Free and open source.
 [![Windows 10 and 11](https://img.shields.io/badge/Windows-10%20%C2%B7%2011-0a84ff?style=flat&labelColor=18181b&logo=windows11&logoColor=white)](#install)
 [![License](https://img.shields.io/github/license/Xantoom/Vixeeny?style=flat&label=license&labelColor=18181b&color=0a84ff)](LICENSE)
 
-[**Download**](https://github.com/Xantoom/Vixeeny/releases/latest) · [Limitations](docs/LIMITATIONS.md) · [Help test](docs/BETA.md) · [Contribute](CONTRIBUTING.md)
+[**Download**](https://github.com/Xantoom/Vixeeny/releases/latest) · [Limitations](docs/LIMITATIONS.md) · [Help test](docs/BETA.md) · [Contribute](CONTRIBUTING.md) · [Code signing policy](docs/CODE_SIGNING.md)
 
 <br>
 
@@ -52,7 +52,8 @@ The installer asks who Vixeeny is for:
 
 > [!NOTE]
 > The installer is not signed with a paid certificate, so SmartScreen may warn the first time:
-> **More info → Run anyway**. Updates are verified with [minisign](packaging/minisign.pub).
+> **More info → Run anyway**. Updates are verified with [minisign](packaging/minisign.pub). See the
+> [code signing policy](docs/CODE_SIGNING.md).
 
 ## Build from source
 

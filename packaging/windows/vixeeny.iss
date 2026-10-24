@@ -3,8 +3,8 @@
 ;   (add /ALLUSERS or /CURRENTUSER to skip the choice below).
 ; For all users (in Program Files, with the administrator's rights; Vixeeny can then have them
 ; too, see `--admin`), or for the user alone (in their own folders, without them).
-; The pages: the install mode, then one page with the folder and the start with Windows (not
-; shown again on an update), the progress and the end. The language is the one of Windows.
+; The pages: the install mode, then one page with the folder, the start with Windows and the
+; updates (not shown again on an update), the progress and the end. The language is the one of Windows.
 
 #if Ver < EncodeVer(6, 7, 0)
   #error Inno Setup 6.7 or later is needed (the windows11 style, dark mode, hidebevels)
@@ -26,6 +26,9 @@ AppName=Vixeeny
 AppVersion={#AppVersion}
 AppPublisher=Xantoom
 AppPublisherURL=https://github.com/Xantoom/Vixeeny
+; What code signing checks: the product is the project, at the version of its programs.
+VersionInfoProductName=Vixeeny
+VersionInfoVersion={#AppVersion}
 DefaultDirName={autopf}\Vixeeny
 ; Only to find the Start menu folder of older versions (see [InstallDelete]): the entry is now
 ; at the top of the Start menu, without a folder.
@@ -104,9 +107,13 @@ french.ConfirmUninstall=Désinstaller %1 ?
 english.StartWithWindows=Start Vixeeny with Windows
 english.OpenVixeeny=Open Vixeeny
 english.KeepSettings=Keep your settings for a later install?
+english.AutoUpdate=Install updates automatically
+english.AutoUpdateNote=Vixeeny connects to github.com only to check for and download its updates. Nothing else leaves your PC.
 french.StartWithWindows=Démarrer Vixeeny avec Windows
 french.OpenVixeeny=Ouvrir Vixeeny
 french.KeepSettings=Conserver vos paramètres pour une prochaine installation ?
+french.AutoUpdate=Installer les mises à jour automatiquement
+french.AutoUpdateNote=Vixeeny se connecte à github.com uniquement pour vérifier et télécharger ses mises à jour. Rien d'autre ne quitte votre PC.
 
 [Files]
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -124,6 +131,8 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 [Run]
 ; For all users: the user's task that starts Vixeeny with the administrator's rights.
 Filename: "{app}\vixeeny-app.exe"; Parameters: "--admin register"; Flags: runhidden waituntilterminated; Check: IsAdminInstallMode
+; Updates declined on the folder's page: the user's settings say so before the first start.
+Filename: "{app}\vixeeny-app.exe"; Parameters: "--update off"; Flags: runhidden waituntilterminated runasoriginaluser; Check: UpdatesDeclined
 ; Started as the user (without the rights: the task gives them).
 Filename: "{app}\Vixeeny.exe"; Description: "{cm:OpenVixeeny}"; Flags: nowait postinstall skipifsilent runasoriginaluser
 ; Moved from the user's folders by the settings' button (a silent install): it starts again.
@@ -163,6 +172,8 @@ var
   UserGroup: String;
   // On the folder's page: the start with Windows.
   AutostartBox: TNewCheckBox;
+  UpdateBox: TNewCheckBox;
+  UpdateNote: TNewStaticText;
 
 // Stops a running Vixeeny the way an update does: a recording ends first, and nothing is
 // killed. The program of the installed version asks; a version too old to know how does
@@ -237,6 +248,31 @@ begin
   AutostartBox.Top := WizardForm.DirEdit.Top + WizardForm.DirEdit.Height + ScaleY(20);
   AutostartBox.Width := WizardForm.SelectDirPage.Width - AutostartBox.Left;
   AutostartBox.Height := ScaleY(17);
+  // The only data Vixeeny sends on its own, said where it can be turned off.
+  UpdateBox := TNewCheckBox.Create(WizardForm);
+  UpdateBox.Parent := WizardForm.SelectDirPage;
+  UpdateBox.Caption := CustomMessage('AutoUpdate');
+  UpdateBox.Checked := True;
+  UpdateBox.Left := AutostartBox.Left;
+  UpdateBox.Top := AutostartBox.Top + AutostartBox.Height + ScaleY(10);
+  UpdateBox.Width := AutostartBox.Width;
+  UpdateBox.Height := AutostartBox.Height;
+  UpdateNote := TNewStaticText.Create(WizardForm);
+  UpdateNote.Parent := WizardForm.SelectDirPage;
+  UpdateNote.Caption := CustomMessage('AutoUpdateNote');
+  UpdateNote.AutoSize := False;
+  UpdateNote.WordWrap := True;
+  UpdateNote.Left := UpdateBox.Left + ScaleX(18);
+  UpdateNote.Top := UpdateBox.Top + UpdateBox.Height + ScaleY(4);
+  UpdateNote.Width := UpdateBox.Width - ScaleX(18);
+  UpdateNote.Height := ScaleY(30);
+  UpdateNote.Enabled := False;
+end;
+
+// The first install only, as the start with Windows.
+function UpdatesDeclined(): Boolean;
+begin
+  Result := (WizardForm.PrevAppDir = '') and not UpdateBox.Checked;
 end;
 
 // The first install only: on an update (the page is not shown) the setting stays as it is.
