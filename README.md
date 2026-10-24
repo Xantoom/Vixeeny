@@ -23,28 +23,19 @@ Screenshots and screen recording for Windows. Free and open source.
 Vixeeny sits in the system tray and waits for a shortcut. Nothing shows on screen until you press
 one.
 
-## What it does
+## Features
 
-**Screenshots.** A region, a window, the screen, every monitor at once, or a long page captured
-while it scrolls. The screen freezes while you choose, so menus and tooltips stay where they are.
-Files are saved as PNG, JPEG, WebP, AVIF or JPEG XL. On an HDR monitor, the capture keeps its HDR
-or is converted to SDR, as you prefer.
-
-**Annotations.** Arrows, shapes, text, highlighter, numbered steps, blur and pixelation, then save
-or copy. Text in the selection can be copied as text.
-
-**Recording.** With the graphics card's encoder (NVIDIA, AMD, Intel) or the processor, in H.264,
-HEVC or AV1. The game, your microphone and single programs can go on separate audio tracks. A small
-widget shows the time and warns when the disk runs low; it never appears in the video.
-
-**Replay.** While you play, Vixeeny keeps the last minutes, in memory or on disk. One shortcut
-saves them, another opens them in a cutter first so you keep only the moment that matters.
-
-**Games.** Captures go into one folder per game, named after it. Shortcuts also work in games
-started as administrator.
-
-**Updates.** Downloaded in the background and checked against a signature before anything is
-replaced. If the new version fails to start, the previous one comes back.
+<table>
+<tr><td><b>Capture</b></td><td>Region · Window · Screen · All monitors · Scrolling page</td></tr>
+<tr><td><b>Image formats</b></td><td>PNG · JPEG · WebP · AVIF · JPEG XL, HDR kept or converted to SDR</td></tr>
+<tr><td><b>Editor</b></td><td>Arrows · Shapes · Text · Highlighter · Numbered steps · Blur · Pixelate</td></tr>
+<tr><td><b>Text recognition</b></td><td>Copy the text of any selection</td></tr>
+<tr><td><b>Video</b></td><td>NVIDIA NVENC · AMD AMF · Intel QuickSync · Processor, in H.264 · HEVC · AV1</td></tr>
+<tr><td><b>Audio</b></td><td>Game, microphone and single programs on separate tracks</td></tr>
+<tr><td><b>Replay</b></td><td>Keeps the last minutes, saved with one shortcut, trimmed before saving</td></tr>
+<tr><td><b>Games</b></td><td>One folder per game · Works in games started as administrator</td></tr>
+<tr><td><b>Updates</b></td><td>In the background · Signature checked · Rolled back if the new version fails</td></tr>
+</table>
 
 ## Install
 
