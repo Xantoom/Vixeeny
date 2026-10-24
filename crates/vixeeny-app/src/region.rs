@@ -509,6 +509,15 @@ fn grab_screens(
     keep_hdr: bool,
 ) -> anyhow::Result<(RgbaImage, Option<HdrCapture>)> {
     let mut backend = crate::capture_backend::Lent::take()?;
+    // Assembled on the graphics card and read once, when no screen is HDR (nothing HDR to
+    // keep then).
+    match backend.grab_desktop(monitors, |w, h, rows, stride| {
+        RgbaImage::from_bgra(w, h, stride, rows)
+    }) {
+        Ok(base) => return Ok((base.context("unexpected capture buffer")?, None)),
+        Err(vixeeny_capture::CaptureError::Unsupported) => {}
+        Err(e) => return Err(e.into()),
+    }
     let mut capturer = Capturer::new(&mut *backend, monitors.to_vec());
     let (frame, hdr) = if keep_hdr {
         capturer.grab_all_both(false, crate::tonemap_hdr)?
