@@ -1228,7 +1228,7 @@ pub fn exe_metadata(path: &str) -> crate::ExeMetadata {
     }
 }
 
-/// The graphics adapters, in DXGI order.
+/// The graphics adapters, in DXGI order, each card once.
 pub fn gpu_adapters() -> Result<Vec<crate::GpuInfo>> {
     use windows::core::Interface;
     // SAFETY: plain DXGI enumeration; every interface is released when dropped.
@@ -1236,12 +1236,16 @@ pub fn gpu_adapters() -> Result<Vec<crate::GpuInfo>> {
         let factory: IDXGIFactory1 =
             CreateDXGIFactory1().map_err(|e| PlatformError::Os(format!("DXGI factory: {e}")))?;
         let mut out = Vec::new();
+        let mut seen = Vec::new();
         let mut index = 0;
         while let Ok(adapter) = factory.EnumAdapters1(index) {
             index += 1;
             let Ok(desc) = adapter.GetDesc1() else {
                 continue;
             };
+            if !crate::machine::first_sight(&mut seen, &desc) {
+                continue;
+            }
             let len = desc
                 .Description
                 .iter()

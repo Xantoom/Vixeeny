@@ -15,7 +15,8 @@ use windows::Win32::Graphics::Direct3D12::{
     D3D12_FEATURE_ARCHITECTURE, D3D12_FEATURE_DATA_ARCHITECTURE, D3D12CreateDevice, ID3D12Device,
 };
 use windows::Win32::Graphics::Dxgi::{
-    CreateDXGIFactory1, DXGI_ADAPTER_FLAG_SOFTWARE, IDXGIAdapter1, IDXGIFactory1,
+    CreateDXGIFactory1, DXGI_ADAPTER_DESC1, DXGI_ADAPTER_FLAG_SOFTWARE, IDXGIAdapter1,
+    IDXGIFactory1,
 };
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE, GetDiskFreeSpaceExW,
@@ -375,6 +376,7 @@ fn gpus() -> Vec<Gpu> {
         return Vec::new();
     };
     let mut out = Vec::new();
+    let mut seen = Vec::new();
     let mut index = 0;
     // SAFETY: as above.
     while let Ok(adapter) = unsafe { factory.EnumAdapters1(index) } {
@@ -383,7 +385,7 @@ fn gpus() -> Vec<Gpu> {
         let Ok(desc) = (unsafe { adapter.GetDesc1() }) else {
             continue;
         };
-        if desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 != 0 {
+        if desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 != 0 || !first_sight(&mut seen, &desc) {
             continue;
         }
         let len = desc
@@ -405,6 +407,27 @@ fn gpus() -> Vec<Gpu> {
     // The graphics card first, the processor's graphics after.
     out.sort_by_key(|g| g.integrated);
     out
+}
+
+/// Whether this adapter is a card not met yet in the enumeration. On some multi-GPU PCs
+/// Windows lists the card driving the desktop twice, at times under another LUID: the same
+/// model, board and memory is taken for the same card (two identical cards show as one).
+pub(crate) fn first_sight(
+    seen: &mut Vec<(u32, u32, u32, u32, usize)>,
+    desc: &DXGI_ADAPTER_DESC1,
+) -> bool {
+    let card = (
+        desc.VendorId,
+        desc.DeviceId,
+        desc.SubSysId,
+        desc.Revision,
+        desc.DedicatedVideoMemory,
+    );
+    if seen.contains(&card) {
+        return false;
+    }
+    seen.push(card);
+    true
 }
 
 /// Whether the adapter works in the system memory (Direct3D 12 calls it UMA): the graphics of

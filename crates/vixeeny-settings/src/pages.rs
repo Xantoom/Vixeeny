@@ -46,7 +46,7 @@ fn hdr_on(setting: &str) -> bool {
     matches!(setting, "keep_hdr" | "hdr")
 }
 
-pub fn general(env: &Env, config: &Config) -> Vec<Row> {
+pub fn general(env: &Env) -> Vec<Row> {
     let t = |k| env.t(k);
     // `auto` with the language it stands for.
     let system = match env.auto_lang {
@@ -89,7 +89,7 @@ pub fn general(env: &Env, config: &Config) -> Vec<Row> {
             |c, v| c.general.notifications = v,
         ),
         // The widget's warning sign, and a notification during a replay.
-        disk_alert(env, config),
+        disk_alert(env),
     ];
     if let Some(admin) = admin(env) {
         rows.push(admin);
@@ -251,27 +251,11 @@ fn set_widget_place(c: &mut Config, value: String) {
     widget.corner = corner;
 }
 
-/// The free space under which the widget warns, in percent of the videos' disk, each with what
-/// it is in bytes on that disk.
-fn disk_alert(env: &Env, config: &Config) -> Row {
-    let total = vixeeny_common::paths::expand_user_dir(&config.paths.videos).and_then(|dir| {
-        let dir = dir.to_string_lossy().to_uppercase();
-        env.machine
-            .disks
-            .iter()
-            .find(|d| dir.starts_with(&d.letter.to_uppercase()))
-            .map(|d| d.bytes)
-    });
+/// The free space under which the widget warns, in percent of the videos' disk.
+fn disk_alert(env: &Env) -> Row {
     let mut options = vec![opt("0", env.t(Key::OptDiskAlertOff))];
     for pct in DISK_ALERTS {
-        let size = total.map_or_else(String::new, |bytes| {
-            vixeeny_common::i18n::size_label(bytes / 100 * u64::from(pct), env.lang)
-        });
-        let label = env
-            .t(Key::OptDiskAlert)
-            .replace("{pct}", &pct.to_string())
-            .replace(" ({size})", if size.is_empty() { "" } else { " ({size})" })
-            .replace("{size}", &size);
+        let label = env.t(Key::OptDiskAlert).replace("{pct}", &pct.to_string());
         options.push(opt(&pct.to_string(), label));
     }
     choice(

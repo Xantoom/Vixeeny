@@ -472,12 +472,22 @@ pub struct PerKindNaming {
     pub replays: Naming,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PerAppSubfolder {
     pub images: bool,
     pub videos: bool,
     pub replays: bool,
+}
+
+impl Default for PerAppSubfolder {
+    fn default() -> Self {
+        Self {
+            images: true,
+            videos: true,
+            replays: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

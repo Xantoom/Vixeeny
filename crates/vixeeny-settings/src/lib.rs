@@ -664,7 +664,7 @@ fn info(id: &str, label: String, value: String) -> Row {
 /// not apply with the current settings are left out, so a page only shows what matters.
 pub fn rows(section: Section, env: &Env, config: &Config) -> Vec<Row> {
     let mut rows = match section {
-        Section::General => pages::general(env, config),
+        Section::General => pages::general(env),
         Section::Overlay => pages::overlay(env, config),
         Section::Image => pages::image(env, config),
         Section::Video => pages::video(env, config),
