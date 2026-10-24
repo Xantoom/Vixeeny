@@ -85,6 +85,10 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     if clip.frames.is_empty() {
         anyhow::bail!("{} has no frame", path.display());
     }
+    // The decoder is opened while the window is made (on the graphics card: about 0.2 s).
+    let (tx, rx) = channel();
+    let (give_waker, waker_given) = channel();
+    let video = Video::start(&clip, tx.clone(), waker_given);
     let frames = Frames {
         times: (0..clip.frames.len()).map(|i| clip.time(i)).collect(),
         keys: (0..clip.frames.len())
@@ -111,9 +115,8 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     )
     .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    let (tx, rx) = channel();
     let waker = cutter.waker();
-    let video = Video::start(&clip, tx.clone(), waker.clone());
+    let _ = give_waker.send(waker.clone());
     let sound = Speaker::start(&clip, waker.clone());
     thumbnails(&clip, &cutter, tx.clone(), waker.clone());
     let mut host = Host {
@@ -168,7 +171,8 @@ struct Video {
 }
 
 impl Video {
-    fn start(clip: &Clip, mail: Sender<Mail>, waker: Waker) -> Self {
+    /// The window's waker comes once it is made: the decoder opens meanwhile.
+    fn start(clip: &Clip, mail: Sender<Mail>, waker: Receiver<Waker>) -> Self {
         let (asks, rx) = channel();
         let clip = clip.clone();
         let newest = Arc::new(AtomicU64::new(0));
@@ -224,9 +228,12 @@ fn video_thread(
     rx: &Receiver<ToVideo>,
     newest: &AtomicU64,
     mail: &Sender<Mail>,
-    waker: &Waker,
+    waker: &Receiver<Waker>,
 ) -> Result<(), vixeeny_encode::recorder::RecordError> {
     let mut pictures = Pictures::open(clip)?;
+    let Ok(waker) = waker.recv() else {
+        return Ok(());
+    };
     // When the last still frame was asked for: a drag asks for one after another.
     let mut last_still: Option<Instant> = None;
     // Where the decoder is: the next read gives this frame (no seek needed to go on).

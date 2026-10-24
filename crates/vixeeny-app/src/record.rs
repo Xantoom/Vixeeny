@@ -317,6 +317,24 @@ struct KeepAlive {
 // used, by the recording thread.
 unsafe impl Send for KeepAlive {}
 
+/// The D3D11 device of the encoder's GPU, made on a thread of its own while the rest of the
+/// recording is planned: it takes longer than all the rest (110 to 160 ms).
+struct MadeDevice(Result<(d3d::Device, d3d::DeviceContext), String>);
+
+// SAFETY: a D3D11 device is free-threaded (and multithread protected): made on one thread, it
+// is used on another.
+unsafe impl Send for MadeDevice {}
+
+/// The encoder's GPU; a software encoder takes the default one.
+fn vendor_of(encoder: &Encoder) -> Option<u32> {
+    match encoder.vendor {
+        Vendor::Nvidia => Some(0x10de),
+        Vendor::Amd => Some(0x1002),
+        Vendor::Intel => Some(0x8086),
+        Vendor::None => None,
+    }
+}
+
 /// The GPU path: the video processor converts the captured textures; NVENC / AMF read them as
 /// they are, QSV through a QSV view, software encoders get them downloaded (4:2:0 only). `None`
 /// (with the reason logged) when the encoder or the machine cannot do it: the CPU path then
@@ -326,6 +344,7 @@ fn try_gpu(
     config: &RecordConfig,
     source: (u32, u32),
     source_hdr: Option<vixeeny_encode::card_hdr::Levels>,
+    made: Option<JoinHandle<MadeDevice>>,
 ) -> Option<GpuParts> {
     let feed = vixeeny_encode::gpu::feed(encoder)?;
     // 4:2:2 and 4:4:4 come back packed from the GPU, for a software encoder to unpack.
@@ -335,15 +354,11 @@ fn try_gpu(
     {
         return None;
     }
-    // The encoder's GPU; a software encoder takes the default one.
-    let vendor = match encoder.vendor {
-        Vendor::Nvidia => Some(0x10de),
-        Vendor::Amd => Some(0x1002),
-        Vendor::Intel => Some(0x8086),
-        Vendor::None => None,
-    };
+    let vendor = vendor_of(encoder);
+    let made = std::cell::Cell::new(made.and_then(|thread| thread.join().ok()).map(|m| m.0));
     let build = |feed: Feed| {
-        d3d::create_device(vendor).and_then(|(device, context)| {
+        let device = made.take().unwrap_or_else(|| d3d::create_device(vendor));
+        device.and_then(|(device, context)| {
             GpuPipeline::new(
                 &device,
                 &context,
@@ -428,6 +443,15 @@ fn plan(
     let (w, h) = validate::output_size(&profile.resolution, (cw, ch)).context("bad resolution")?;
     let output_size = (w.max(2) & !1, h.max(2) & !1);
     let encoder = choose_encoder(&registry, profile, probe.as_ref(), output_size)?.clone();
+    let made = (allow_gpu && vixeeny_encode::gpu::feed(&encoder).is_some())
+        .then(|| {
+            let vendor = vendor_of(&encoder);
+            std::thread::Builder::new()
+                .name("encoder-device".into())
+                .spawn(move || MadeDevice(d3d::create_device(vendor)))
+                .ok()
+        })
+        .flatten();
 
     let container = OutputContainer::from_setting(&profile.container)
         .with_context(|| format!("unknown container `{}`", profile.container))?;
@@ -530,7 +554,7 @@ fn plan(
         peak_nits: h.peak_nits,
     });
     let gpu = if allow_gpu {
-        try_gpu(&record.encoder, &record, source, levels)
+        try_gpu(&record.encoder, &record, source, levels, made)
     } else {
         None
     };
@@ -680,17 +704,25 @@ fn start_session(
     game: Option<&vixeeny_platform::WindowInfo>,
 ) -> anyhow::Result<Handle> {
     let replay = game.is_some();
+    let started = std::time::Instant::now();
     let first = plan(config, true, replay, game)?;
-    if first.gpu.is_none() {
-        return launch(first);
-    }
-    match launch(first) {
-        Ok(handle) => Ok(handle),
-        Err(e) => {
-            tracing::warn!("GPU recording failed to start ({e:#}); using the CPU path");
-            launch(plan(config, false, replay, game)?)
+    let planned = started.elapsed();
+    let handle = if first.gpu.is_none() {
+        launch(first)?
+    } else {
+        match launch(first) {
+            Ok(handle) => handle,
+            Err(e) => {
+                tracing::warn!("GPU recording failed to start ({e:#}); using the CPU path");
+                launch(plan(config, false, replay, game)?)?
+            }
         }
-    }
+    };
+    tracing::info!(
+        "capturing {:?} after the shortcut reached the app (planned in {planned:?})",
+        started.elapsed()
+    );
+    Ok(handle)
 }
 
 /// What the widget's warning sign watches during a recording.
