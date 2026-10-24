@@ -1,6 +1,5 @@
 name: Release
-# Builds the Windows packages (installer, update archive, portable archive), signs them
-# (Authenticode by SignPath, once set up; minisign) and
+# Builds the Windows packages (installer, update archive, portable archive), signs them and
 # prepares the draft GitHub release `v<version of Cargo.toml>`, whose tag is made when the draft
 # is published. It runs on the release branch when the version changes (and by hand), not on a
 # tag: a tag cannot read the caches of the branch, and every release would build everything from
@@ -47,8 +46,6 @@ jobs:
     env:
       FFMPEG_DIR: ${{ github.workspace }}\native\build\work\ffmpeg-prebuilt
       LIBCLANG_PATH: C:\Program Files\LLVM\bin
-      # Authenticode signing by SignPath (docs/CODE_SIGNING.md), once its token is set.
-      SIGNPATH: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
@@ -91,30 +88,6 @@ jobs:
       - name: Idle smoke test (20 s)
         continue-on-error: true
         run: target\release\xtask.exe bench-idle --seconds 20
-      # Signed before they are packed, so the installer and the archives hold the signed ones.
-      # FFmpeg's DLLs are not ours to sign.
-      - name: Programs to sign
-        id: programs
-        if: env.SIGNPATH == 'true'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: vixeeny-programs-unsigned
-          path: |
-            target/release/Vixeeny.exe
-            target/release/vixeeny-app.exe
-      - name: Sign the programs (SignPath)
-        if: env.SIGNPATH == 'true'
-        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3.0
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: Vixeeny
-          signing-policy-slug: release-signing
-          artifact-configuration-slug: programs
-          github-artifact-id: ${{ steps.programs.outputs.artifact-id }}
-          # Each request waits for a manual approval.
-          wait-for-completion-timeout-in-seconds: 3600
-          output-artifact-directory: target/release
       # The release build of xtask, built above: its compression is many times faster.
       - name: Package (stage, update archive, portable archive)
         shell: pwsh
@@ -124,25 +97,6 @@ jobs:
         run: |
           $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"').Matches[0].Groups[1].Value
           iscc "/DAppVersion=$version" "/DStageDir=$PWD\dist\stage" "/DOutDir=$PWD\dist" packaging\windows\vixeeny.iss
-      - name: Installer to sign
-        id: installer
-        if: env.SIGNPATH == 'true'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: vixeeny-installer-unsigned
-          path: dist/*-setup.exe
-      - name: Sign the installer (SignPath)
-        if: env.SIGNPATH == 'true'
-        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3.0
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: Vixeeny
-          signing-policy-slug: release-signing
-          artifact-configuration-slug: installer
-          github-artifact-id: ${{ steps.installer.outputs.artifact-id }}
-          wait-for-completion-timeout-in-seconds: 3600
-          output-artifact-directory: dist
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: vixeeny-windows-unsigned
@@ -199,8 +153,6 @@ jobs:
             rm "$file.minisig"
           done
           rm "$key"
-          # SignPath Foundation asks for the policy on the release page.
-          printf '\n[Code signing policy](https://github.com/%s/blob/main/docs/CODE_SIGNING.md)\n' "$GITHUB_REPOSITORY" >> dist/notes.md
           # The update archive is what the portable one is made from: not published.
           find dist -maxdepth 1 -name '*.zip' ! -name '*-portable.zip' -delete
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

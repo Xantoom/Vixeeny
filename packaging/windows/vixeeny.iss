@@ -26,9 +26,6 @@ AppName=Vixeeny
 AppVersion={#AppVersion}
 AppPublisher=Xantoom
 AppPublisherURL=https://github.com/Xantoom/Vixeeny
-; What code signing checks: the product is the project, at the version of its programs.
-VersionInfoProductName=Vixeeny
-VersionInfoVersion={#AppVersion}
 DefaultDirName={autopf}\Vixeeny
 ; Only to find the Start menu folder of older versions (see [InstallDelete]): the entry is now
 ; at the top of the Start menu, without a folder.
