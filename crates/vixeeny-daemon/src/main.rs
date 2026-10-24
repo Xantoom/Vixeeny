@@ -15,6 +15,10 @@ fn main() {
         log_clock,
         &vixeeny_platform::os_version(),
     );
+    if let Some(dir) = vixeeny_common::paths::crash_dir() {
+        vixeeny_platform::crash::catch(&dir, "vixeeny-daemon", "daemon");
+        vixeeny_platform::crash::prune(&dir);
+    }
     if let Err(e) = real_main() {
         tracing::error!("fatal: {e:#}");
         std::process::exit(1);
@@ -112,6 +116,9 @@ fn real_main() -> anyhow::Result<()> {
         Err(e) => return Err(e.into()),
     };
     stop_older_daemon();
+    if let Err(e) = vixeeny_platform::crash::restart_after_crash() {
+        tracing::warn!("no restart after a crash: {e}");
+    }
 
     let config_path = vixeeny_common::paths::config_file();
     let config = match &config_path {

@@ -7,7 +7,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Mutex;
 use std::thread::JoinHandle;
 
-use vixeeny_capture::{CaptureError, WgcBackend};
+use vixeeny_capture::{CaptureError, StillBackend, WgcBackend};
 
 /// The kept backend, between captures (any thread may take it: the scrolling capture runs on
 /// its own).
@@ -92,6 +92,10 @@ impl DerefMut for Lent {
 
 impl Drop for Lent {
     fn drop(&mut self) {
+        // Kept for the next capture, without the memory of this one.
+        if let Some(device) = self.backend.as_ref().and_then(|b| b.d3d_device()) {
+            vixeeny_capture::trim(&device);
+        }
         if let (Some(backend), Ok(mut kept)) = (self.backend.take(), KEPT.lock()) {
             *kept = Some(backend);
         }

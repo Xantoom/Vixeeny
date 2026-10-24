@@ -23,11 +23,31 @@ pub fn create(config: &Config) -> anyhow::Result<PathBuf> {
     let sysinfo = crate::sysinfo::format(&crate::sysinfo::collect(config, probe.as_ref()));
     let private = Private::of_this_user();
 
+    let logs_read: Vec<(String, String)> = newest_logs(&logs)
+        .into_iter()
+        .map(|name| {
+            let content = std::fs::read_to_string(logs.join(&name)).unwrap_or_default();
+            (name, content)
+        })
+        .collect();
+
     let mut text = String::new();
     let _ = writeln!(text, "Vixeeny report, {}\n", crate::log_clock());
+    let _ = writeln!(text, "===== Problems of the last {DAYS} days =====");
+    text.push_str(&problems(
+        logs_read.iter().map(|(_, content)| content.as_str()),
+    ));
+    let _ = writeln!(text, "\n===== Crashes =====");
+    text.push_str(&crashes());
+    text.push('\n');
     text.push_str(&sysinfo);
-    for name in newest_logs(&logs) {
-        let content = std::fs::read_to_string(logs.join(&name)).unwrap_or_default();
+    let _ = writeln!(text, "\n===== Settings =====");
+    text.push_str(&config.to_toml().unwrap_or_default());
+    let _ = writeln!(text, "\n===== Encoder detection =====");
+    let detection =
+        vixeeny_common::paths::hw_cache_file().and_then(|p| std::fs::read_to_string(p).ok());
+    text.push_str(detection.as_deref().unwrap_or("(none)\n"));
+    for (name, content) in &logs_read {
         let _ = write!(text, "\n===== {name} =====\n{content}");
     }
     let text = private.hide(&text);
@@ -44,6 +64,87 @@ pub fn create(config: &Config) -> anyhow::Result<PathBuf> {
     let _ = vixeeny_platform::reveal(&path.display().to_string());
     let _ = vixeeny_platform::open_path(&issue_url(&sysinfo));
     Ok(path)
+}
+
+/// Problems listed in the summary at most.
+const MAX_PROBLEMS: usize = 40;
+
+/// The warnings and errors of `logs` (crashes included), each once: how many times, when last,
+/// and its last wording; the most recent first. Numbers do not make two problems different.
+fn problems<'a>(logs: impl Iterator<Item = &'a str>) -> String {
+    use std::collections::HashMap;
+    use std::fmt::Write as _;
+
+    // Key → (count, last stamp, last line).
+    let mut seen: HashMap<String, (usize, &str, &str)> = HashMap::new();
+    for line in logs.flat_map(str::lines) {
+        let Some((stamp, rest)) = line.split_at_checked(vixeeny_common::logging::STAMP_LEN) else {
+            continue;
+        };
+        let rest = rest.trim_start();
+        if !(rest.starts_with("WARN") || rest.starts_with("ERROR")) {
+            continue;
+        }
+        // A run of digits counts as one `#`.
+        let mut key = String::with_capacity(rest.len());
+        for c in rest.chars() {
+            if !c.is_ascii_digit() {
+                key.push(c);
+            } else if !key.ends_with('#') {
+                key.push('#');
+            }
+        }
+        let entry = seen.entry(key).or_insert((0, stamp, rest));
+        entry.0 += 1;
+        if stamp >= entry.1 {
+            (entry.1, entry.2) = (stamp, rest);
+        }
+    }
+    if seen.is_empty() {
+        return "(none)\n".to_owned();
+    }
+    let mut list: Vec<_> = seen.into_values().collect();
+    list.sort_by(|a, b| b.1.cmp(a.1));
+    let mut out = String::new();
+    for (count, stamp, line) in list.iter().take(MAX_PROBLEMS) {
+        let _ = writeln!(out, "{count:>4} x, last {stamp}: {line}");
+    }
+    if list.len() > MAX_PROBLEMS {
+        let _ = writeln!(out, "… and {} more", list.len() - MAX_PROBLEMS);
+    }
+    out
+}
+
+/// The notes of the crashes kept, and the minidumps to attach when asked.
+fn crashes() -> String {
+    use std::fmt::Write as _;
+
+    let Some(dir) = vixeeny_common::paths::crash_dir() else {
+        return "(none)\n".to_owned();
+    };
+    let mut names: Vec<String> = std::fs::read_dir(&dir)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    if names.is_empty() {
+        return "(none)\n".to_owned();
+    }
+    names.sort();
+    let mut out = String::new();
+    for note in names.iter().rev().filter(|n| n.ends_with(".txt")) {
+        let text = std::fs::read_to_string(dir.join(note)).unwrap_or_default();
+        let _ = write!(out, "{note}: {text}");
+    }
+    let dumps: Vec<&String> = names.iter().filter(|n| n.ends_with(".dmp")).collect();
+    if !dumps.is_empty() {
+        let _ = writeln!(out, "Minidumps in {}:", dir.display());
+        for dump in dumps {
+            let _ = writeln!(out, "  {dump}");
+        }
+    }
+    out
 }
 
 /// The log files of the newest [`DAYS`] days, newest day first (the daemon's, then the app's).
@@ -124,6 +225,8 @@ impl Private {
         if let Some(p) = profile {
             words.push((p.to_owned(), "%USERPROFILE%"));
             words.push((p.replace('\\', "/"), "%USERPROFILE%"));
+            // As the settings file writes it.
+            words.push((p.replace('\\', "\\\\"), "%USERPROFILE%"));
         }
         if let Some(u) = user {
             words.push((u.to_owned(), "<user>"));
@@ -178,13 +281,34 @@ mod tests {
             Some("DESKTOP-1234"),
         );
         let text = "started C:\\Users\\Xavier\\AppData\\x.exe\n\
+                    folder = \"C:\\\\Users\\\\Xavier\\\\Videos\"\n\
                     cannot write c:\\users\\xavier\\Pictures\\a.png on DESKTOP-1234\n\
                     C:/Users/Xavier/Videos and xavier";
         assert_eq!(
             private.hide(text),
             "started %USERPROFILE%\\AppData\\x.exe\n\
+             folder = \"%USERPROFILE%\\\\Videos\"\n\
              cannot write %USERPROFILE%\\Pictures\\a.png on <computer>\n\
              %USERPROFILE%/Videos and <user>"
+        );
+    }
+
+    #[test]
+    fn each_problem_is_listed_once_newest_first() {
+        let log = "2026-10-20 18:33:34.641 +02:00 ERROR vixeeny_app: fatal: process 18400 gone\n\
+                   2026-10-20 18:33:35.000 +02:00  INFO vixeeny_app: fine\n\
+                   2026-10-21 09:00:00.000 +02:00  WARN vixeeny_app::record: 3 frame(s) lost\n\
+                   2026-10-22 10:00:00.000 +02:00 ERROR vixeeny_app: fatal: process 9156 gone\n\
+                   short line";
+        assert_eq!(
+            problems([log].into_iter()),
+            "   2 x, last 2026-10-22 10:00:00.000 +02:00: ERROR vixeeny_app: fatal: process 9156 \
+             gone\n   1 x, last 2026-10-21 09:00:00.000 +02:00: WARN vixeeny_app::record: 3 \
+             frame(s) lost\n"
+        );
+        assert_eq!(
+            problems(["2026-10-22 10:00:00.000 +02:00  INFO ok"].into_iter()),
+            "(none)\n"
         );
     }
 

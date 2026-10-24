@@ -353,6 +353,10 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
                 let text = tr(key, self.lang);
                 tracing::warn!("notification: {text}");
                 self.tray.notify(text);
+                // A crash is told on a card whose click prepares a report.
+                if key == Key::AppCrashed {
+                    self.spawner.show_card("failed-crash", "");
+                }
             }
             Effect::PauseHotkeys(true) => {
                 let _ = self.hotkeys.apply(&[]);

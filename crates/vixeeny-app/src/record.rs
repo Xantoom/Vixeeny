@@ -705,7 +705,12 @@ struct Watcher {
     lost: Option<u64>,
     /// The bytes written when the free space was last read.
     measured: Option<u64>,
+    /// When the frames lost changed, and their count since: what a replay's saved seconds lost.
+    losses: std::collections::VecDeque<(i64, u64)>,
 }
+
+/// The changes of the frames lost a replay remembers (older ones are forgotten first).
+const LOSSES_KEPT: usize = 64;
 
 impl Watcher {
     fn new(watch: Watch) -> Self {
@@ -715,12 +720,13 @@ impl Watcher {
             shown: (Alert::None, String::new()),
             lost: None,
             measured: None,
+            losses: std::collections::VecDeque::new(),
         }
     }
 
     /// The alert, when it changed since the last call. Only what changed is looked at again:
     /// the frames lost (two counters), the free space once enough more is written.
-    fn check(&mut self, recorder: &Recorder) -> Option<(Alert, String)> {
+    fn check(&mut self, recorder: &Recorder, now_ns: i64) -> Option<(Alert, String)> {
         let stats = recorder.stats();
         let lost = stats.queue_dropped.load(Ordering::Relaxed)
             + self.watch.gpu_lost.load(Ordering::Relaxed);
@@ -731,6 +737,12 @@ impl Watcher {
                 .is_none_or(|at| written.saturating_sub(at) >= DISK_EVERY_BYTES);
         if self.lost == Some(lost) && !disk_due {
             return None;
+        }
+        if self.lost.is_some_and(|before| before != lost) {
+            if self.losses.len() == LOSSES_KEPT {
+                self.losses.pop_front();
+            }
+            self.losses.push_back((now_ns, lost));
         }
         self.lost = Some(lost);
         self.health.lost_frames = lost;
@@ -751,6 +763,22 @@ impl Watcher {
         }
         self.shown = alert.clone();
         Some(alert)
+    }
+
+    /// The frames lost since `since_ns`.
+    fn lost_since(&self, since_ns: i64) -> u64 {
+        let now = self.lost.unwrap_or(0);
+        let before = self
+            .losses
+            .iter()
+            .rev()
+            .find(|(t, _)| *t <= since_ns)
+            .map_or_else(
+                // Every change came after: what was lost before the first one.
+                || self.losses.front().map_or(now, |_| 0),
+                |(_, n)| *n,
+            );
+        now.saturating_sub(before)
     }
 
     /// The disk is under the alert's share of free space.
@@ -780,6 +808,37 @@ impl vixeeny_capture::Gate for ClockGate {
 }
 
 fn launch(plan: Plan) -> anyhow::Result<Handle> {
+    // What anyone looking into a recording needs first (no file name: it is the user's).
+    let c = &plan.config;
+    let options: Vec<String> = c.options.iter().map(|(k, v)| format!("{k}={v}")).collect();
+    tracing::info!(
+        "{} {}x{} at {}/{} fps with {} ({}-bit {:?}{}, {:?}, {}{}): {}",
+        if c.replay_seconds.is_some() {
+            "replay"
+        } else {
+            "recording"
+        },
+        c.output_size.0,
+        c.output_size.1,
+        c.fps.num,
+        c.fps.den,
+        c.encoder.id,
+        c.depth,
+        c.chroma,
+        if c.hdr { ", HDR" } else { "" },
+        c.container,
+        if plan.gpu.is_some() {
+            "GPU frames"
+        } else {
+            "CPU frames"
+        },
+        if plan.window.is_some() {
+            ", one window"
+        } else {
+            ""
+        },
+        options.join(" ")
+    );
     // The recording's time zero: video and audio timestamps are relative to it.
     let origin = vixeeny_platform::monotonic_ns();
     // Frames the GPU path could not hand over: lost, like those the encoder refuses.
@@ -925,8 +984,12 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
                         summary.dropped_by_queue,
                         lost_on_gpu.load(Ordering::Relaxed)
                     );
+                    let lost = summary.dropped_by_queue + lost_on_gpu.load(Ordering::Relaxed);
+                    if lost > 0 {
+                        tracing::warn!("{lost} frame(s) lost during the recording");
+                    }
                     if let Some(file) = summary.files.first() {
-                        let saved = Toast::Saved(Saved::Recording, file.clone());
+                        let saved = Toast::saved(Saved::Recording, file.clone(), lost);
                         crate::toast::notify(&notice, &saved);
                     }
                 }
@@ -947,7 +1010,14 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
 
 /// Starts writing the replay; the file is finished (and reported) by a thread of its own, so the
 /// recording goes on, and a second save right after does not wait for the first.
-fn save_replay(recorder: &Recorder, next_path: &mut SaveNamer, notice: &Config, edit: bool) {
+/// `lost`: the frames lost in the seconds saved.
+fn save_replay(
+    recorder: &Recorder,
+    next_path: &mut SaveNamer,
+    notice: &Config,
+    edit: bool,
+    lost: u64,
+) {
     let started = std::time::Instant::now();
     let save = next_path().and_then(|path| Ok(recorder.save_replay(path)?));
     match save {
@@ -967,13 +1037,14 @@ fn save_replay(recorder: &Recorder, next_path: &mut SaveNamer, notice: &Config, 
                 match written {
                     Ok(path) => {
                         tracing::info!(
-                            "replay saved ({seconds:.1} s, {:.2} s to write)",
+                            "replay saved ({seconds:.1} s, {:.2} s to write, {lost} frame(s) \
+                             lost)",
                             started.elapsed().as_secs_f64()
                         );
                         if edit {
                             crate::cut::open(&path);
                         } else {
-                            crate::toast::notify(&notice, &Toast::Saved(Saved::Replay, path));
+                            crate::toast::notify(&notice, &Toast::saved(Saved::Replay, path, lost));
                         }
                     }
                     Err(e) => {
@@ -1012,6 +1083,13 @@ fn record_loop(
 ) -> anyhow::Result<vixeeny_encode::recorder::Summary> {
     let now = || vixeeny_platform::monotonic_ns() - origin;
     let mut watch = watch.map(Watcher::new);
+    // What a replay save keeps: its seconds, and those after the shortcut.
+    let kept_ns = i64::from(
+        replay::clamp_seconds(notice.replay.duration_seconds) + notice.replay.after_seconds.min(60),
+    ) * 1_000_000_000;
+    let lost_in_save = |watch: &Option<Watcher>, now: i64| {
+        watch.as_ref().map_or(0, |w| w.lost_since(now - kept_ns))
+    };
     // A replay tells about a filling disk once.
     let mut disk_told = false;
     let mut paused = false;
@@ -1037,14 +1115,26 @@ fn record_loop(
         {
             save_at = None;
             if let Some(next_path) = &mut save_as {
-                save_replay(&recorder, next_path, notice, edit);
+                save_replay(
+                    &recorder,
+                    next_path,
+                    notice,
+                    edit,
+                    lost_in_save(&watch, now()),
+                );
             }
         }
         match ctl.try_recv() {
             Ok(Ctl::Save(edit)) => {
                 if let Some(next_path) = &mut save_as {
                     if after.is_zero() {
-                        save_replay(&recorder, next_path, notice, edit);
+                        save_replay(
+                            &recorder,
+                            next_path,
+                            notice,
+                            edit,
+                            lost_in_save(&watch, now()),
+                        );
                     } else if let Some((_, editing)) = &mut save_at {
                         // A second press while it waits only asks for the editor.
                         *editing |= edit;
@@ -1093,7 +1183,13 @@ fn record_loop(
                 if let Some((_, edit)) = save_at.take()
                     && let Some(next_path) = &mut save_as
                 {
-                    save_replay(&recorder, next_path, notice, edit);
+                    save_replay(
+                        &recorder,
+                        next_path,
+                        notice,
+                        edit,
+                        lost_in_save(&watch, now()),
+                    );
                 }
                 break;
             }
@@ -1103,7 +1199,7 @@ fn record_loop(
             rig.pump(now(), &recorder);
         }
         if let Some(watcher) = &mut watch
-            && let Some((level, text)) = watcher.check(&recorder)
+            && let Some((level, text)) = watcher.check(&recorder, now())
         {
             if let Some(w) = &mut widget {
                 w.alert(level, &text);
@@ -1209,6 +1305,26 @@ fn replay_storage(config: &Config, encoder: &Encoder, size: (u32, u32)) -> repla
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn a_replay_save_counts_the_frames_lost_in_its_seconds() {
+        let mut watcher = Watcher::new(Watch {
+            folder: None,
+            disk_percent: 0,
+            lang: vixeeny_common::i18n::Lang::En,
+            gpu_lost: Arc::new(AtomicU64::new(0)),
+        });
+        watcher.lost = Some(0);
+        assert_eq!(watcher.lost_since(0), 0);
+        // 3 frames lost at 10 s, 2 more at 50 s.
+        watcher.losses.extend([(10, 3), (50, 5)]);
+        watcher.lost = Some(5);
+        assert_eq!(watcher.lost_since(0), 5);
+        assert_eq!(watcher.lost_since(20), 2);
+        assert_eq!(watcher.lost_since(60), 0);
+    }
+
     #[test]
     fn the_app_ends_only_once_the_replay_files_are_written() {
         let started = std::time::Instant::now();

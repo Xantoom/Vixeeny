@@ -38,7 +38,7 @@ use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory1, DXGI_PRESENT, DXGI_SCALING_NONE, DXGI_SCALING_STRETCH,
     DXGI_SHARED_RESOURCE_READ, DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_EFFECT_DISCARD,
     DXGI_SWAP_EFFECT_FLIP_DISCARD, DXGI_USAGE_RENDER_TARGET_OUTPUT, IDXGIAdapter, IDXGIDevice,
-    IDXGIDevice3, IDXGIFactory2, IDXGIFactory4, IDXGIResource1, IDXGISwapChain1, IDXGISwapChain3,
+    IDXGIFactory2, IDXGIFactory4, IDXGIResource1, IDXGISwapChain1, IDXGISwapChain3,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::WinRT::Direct3D11::IDirect3DDxgiInterfaceAccess;
@@ -123,8 +123,7 @@ impl Drop for Screen {
 thread_local! {
     static ACTIVE: RefCell<Vec<Screen>> = const { RefCell::new(Vec::new()) };
     /// The device the frozen screens were made on, trimmed once they go.
-    static MADE_ON: RefCell<Option<(ID3D11DeviceContext, IDXGIDevice3)>> =
-        const { RefCell::new(None) };
+    static MADE_ON: RefCell<Option<ID3D11Device>> = const { RefCell::new(None) };
 }
 
 /// `true` while frozen screens are shown.
@@ -143,12 +142,8 @@ pub fn thaw() {
     drop(screens);
     // The driver keeps the memory of the textures and swap chains it freed (over 100 MB for a
     // 4K screen) for later ones: given back now, at about a millisecond on the next freeze.
-    if any && let Some((context, device)) = MADE_ON.with(|m| m.borrow_mut().take()) {
-        // SAFETY: plain calls on this thread's device; nothing of it is bound any more.
-        unsafe {
-            context.ClearState();
-            device.Trim();
-        }
+    if any && let Some(device) = MADE_ON.with(|m| m.borrow_mut().take()) {
+        crate::trim(&device);
     }
 }
 
@@ -470,9 +465,7 @@ pub fn freeze(gpu: &Gpu, monitors: &[MonitorInfo]) -> Result<Frozen, CaptureErro
         unsafe { SetTimer(Some(first.window), 1, SAFETY_TIMEOUT_MS, None) };
     }
     ACTIVE.with(|a| *a.borrow_mut() = screens);
-    if let Ok(device) = gpu.device.cast::<IDXGIDevice3>() {
-        MADE_ON.with(|m| *m.borrow_mut() = Some((gpu.context.clone(), device)));
-    }
+    MADE_ON.with(|m| *m.borrow_mut() = Some(gpu.device.clone()));
     Ok(Frozen {
         adapter: gpu.adapter,
         screens: shared,
@@ -538,6 +531,18 @@ fn reader(adapter: i64) -> Result<(ID3D11Device, ID3D11DeviceContext), CaptureEr
         .as_ref()
         .ok_or_else(|| CaptureError::Os("no reader".into()))?;
     Ok((r.device.clone(), r.context.clone()))
+}
+
+/// Gives back the driver's memory of the device that read the frozen screens, once the editor
+/// that drew with it is gone (see [`crate::trim`]).
+pub fn trim_reader() {
+    if let Some(device) = READER
+        .lock()
+        .ok()
+        .and_then(|r| r.as_ref().map(|r| r.device.clone()))
+    {
+        crate::trim(&device);
+    }
 }
 
 /// The device that reads the frozen screens of `adapter` (made if needed): the editor draws

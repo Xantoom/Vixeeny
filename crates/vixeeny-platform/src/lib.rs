@@ -5,6 +5,7 @@
 //! [`ensure_dpi_aware`] first, otherwise Windows hands out scaled (virtualised) values.
 
 pub mod clipboard;
+pub mod crash;
 pub mod elevation;
 pub mod games;
 mod geometry;

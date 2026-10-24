@@ -17,6 +17,8 @@ use vixeeny_overlay::toast::{ToastContent, ToastEvent, Toasts};
 pub enum Toast {
     /// A file was written.
     Saved(Saved, PathBuf),
+    /// A recording or a replay was written, with frames lost (the encoder could not keep up).
+    Lossy(Saved, PathBuf, u64),
     /// Something failed; the message is already user-facing.
     Failed(Failed, String),
     /// The text read in a zone is on the clipboard.
@@ -48,6 +50,8 @@ pub enum Failed {
     NoText,
     /// The text of a zone could not be read.
     Ocr,
+    /// The app stopped unexpectedly (sent by the daemon); a click prepares a report.
+    Crash,
 }
 
 impl Saved {
@@ -78,6 +82,7 @@ impl Failed {
             Self::DiskLow => "disk-low",
             Self::NoText => "no-text",
             Self::Ocr => "ocr",
+            Self::Crash => "crash",
         }
     }
 
@@ -90,17 +95,31 @@ impl Failed {
             Self::DiskLow => Key::ToastDiskLow,
             Self::NoText => Key::ToastNoText,
             Self::Ocr => Key::ToastOcrFailed,
+            Self::Crash => Key::AppCrashed,
         }
     }
 }
 
 impl Toast {
+    /// The card for `path`, written with `lost` frames lost.
+    pub fn saved(kind: Saved, path: PathBuf, lost: u64) -> Self {
+        if lost > 0 {
+            Self::Lossy(kind, path, lost)
+        } else {
+            Self::Saved(kind, path)
+        }
+    }
+
     /// The arguments after `--toast`.
     pub fn to_args(&self) -> [String; 2] {
         match self {
             Self::Saved(kind, path) => {
                 [format!("saved-{}", kind.name()), path.display().to_string()]
             }
+            Self::Lossy(kind, path, lost) => [
+                format!("lossy-{}", kind.name()),
+                format!("{lost}|{}", path.display()),
+            ],
             Self::Failed(kind, message) => [format!("failed-{}", kind.name()), message.clone()],
             Self::Update(text) => ["update".to_owned(), text.clone()],
             Self::TextCopied(text) => ["text-copied".to_owned(), text.clone()],
@@ -119,6 +138,15 @@ impl Toast {
             "saved-image" => saved(Saved::Image),
             "saved-recording" => saved(Saved::Recording),
             "saved-replay" => saved(Saved::Replay),
+            "lossy-recording" | "lossy-replay" => {
+                let (lost, path) = text.split_once('|')?;
+                let kind = if kind == "lossy-replay" {
+                    Saved::Replay
+                } else {
+                    Saved::Recording
+                };
+                Some(Self::Lossy(kind, PathBuf::from(path), lost.parse().ok()?))
+            }
             "failed-capture" => failed(Failed::Capture),
             "failed-recording" => failed(Failed::Recording),
             "failed-replay" => failed(Failed::Replay),
@@ -126,6 +154,7 @@ impl Toast {
             "failed-disk-low" => failed(Failed::DiskLow),
             "failed-no-text" => failed(Failed::NoText),
             "failed-ocr" => failed(Failed::Ocr),
+            "failed-crash" => failed(Failed::Crash),
             "text-copied" => Some(Self::TextCopied(text.to_owned())),
             "update" => Some(Self::Update(text.to_owned())),
             "replay-on" | "replay-off" => {
@@ -327,6 +356,15 @@ fn content_of(toast: &Toast, thumb: Option<Thumb>) -> ToastContent {
             action_label: tr(Key::ToastOpenFolder, lang).into(),
             ..ToastContent::default()
         },
+        Toast::Lossy(kind, path, lost) => ToastContent {
+            heading: tr(kind.title(), lang).into(),
+            body: tr(Key::WidgetFramesLost, lang).replace("{n}", &lost.to_string()),
+            thumb: crate::thumbnail::thumbnail(path, 256),
+            warning: true,
+            dark,
+            action_label: tr(Key::ToastOpenFolder, lang).into(),
+            ..ToastContent::default()
+        },
         Toast::Failed(kind, message) => ToastContent {
             heading: tr(kind.title(), lang).into(),
             body: message.clone(),
@@ -338,6 +376,7 @@ fn content_of(toast: &Toast, thumb: Option<Thumb>) -> ToastContent {
             action_label: match kind {
                 Failed::NoText => String::new(),
                 Failed::Ocr => tr(Key::ToastOcrLanguages, lang).into(),
+                Failed::Crash => tr(Key::UiReport, lang).into(),
                 _ => tr(Key::ToastOpenSettings, lang).into(),
             },
             ..ToastContent::default()
@@ -406,10 +445,10 @@ fn show(toasts: &Toasts, toast: Toast, thumb: Option<Thumb>) -> anyhow::Result<(
 /// Does what the user clicked on the card.
 fn act(event: Option<ToastEvent>, toast: &Toast) {
     match (event, toast) {
-        (Some(ToastEvent::Activated), Toast::Saved(_, path)) => {
+        (Some(ToastEvent::Activated), Toast::Saved(_, path) | Toast::Lossy(_, path, _)) => {
             let _ = vixeeny_platform::open_path(&path.display().to_string());
         }
-        (Some(ToastEvent::Action), Toast::Saved(_, path)) => {
+        (Some(ToastEvent::Action), Toast::Saved(_, path) | Toast::Lossy(_, path, _)) => {
             let _ = vixeeny_platform::reveal(&path.display().to_string());
         }
         (Some(ToastEvent::Edit), Toast::Saved(_, path)) => crate::region::open_editor(path),
@@ -418,6 +457,14 @@ fn act(event: Option<ToastEvent>, toast: &Toast) {
         // The languages page of Windows, where a recognition language is added.
         (Some(_), Toast::Failed(Failed::Ocr, _)) => {
             let _ = vixeeny_platform::open_path("ms-settings:regionlanguage");
+        }
+        (Some(_), Toast::Failed(Failed::Crash, _)) => {
+            let config = vixeeny_common::paths::config_file()
+                .and_then(|p| Config::load(&p).ok())
+                .unwrap_or_default();
+            if let Err(e) = crate::report::create(&config) {
+                tracing::error!("report: {e:#}");
+            }
         }
         (Some(_), Toast::Failed(..)) => crate::open_settings(),
         (Some(_), Toast::Replay(..)) => {}
@@ -512,6 +559,9 @@ mod tests {
         for toast in [
             Toast::Saved(Saved::Image, PathBuf::from(r"C:\Users\x\a b\tc.png")),
             Toast::Saved(Saved::Replay, PathBuf::from("r.mp4")),
+            Toast::Lossy(Saved::Recording, PathBuf::from(r"C:\v\a|b.mp4"), 12),
+            Toast::Lossy(Saved::Replay, PathBuf::from("r.mp4"), 1),
+            Toast::Failed(Failed::Crash, String::new()),
             Toast::Failed(Failed::Recording, "line one\nline two\\n\r \"x\"".into()),
             Toast::Failed(Failed::Audio, "mic: device removed".into()),
             Toast::Update("Version 1.2 is available".into()),
@@ -540,6 +590,10 @@ Merci"
                 Some((toast, None))
             );
         }
+        assert_eq!(
+            Toast::saved(Saved::Replay, PathBuf::from("r.mp4"), 0),
+            Toast::Saved(Saved::Replay, PathBuf::from("r.mp4"))
+        );
         assert_eq!(decode_line("nonsense\tx"), None);
         assert_eq!(decode_line("no tab"), None);
     }

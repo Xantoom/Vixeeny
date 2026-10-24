@@ -46,6 +46,9 @@ fn main() {
         log_clock,
         &vixeeny_platform::os_version(),
     );
+    if let Some(dir) = vixeeny_common::paths::crash_dir() {
+        vixeeny_platform::crash::catch(&dir, "vixeeny-app", &program);
+    }
     if let Err(e) = run() {
         tracing::error!("fatal: {e:#}");
         eprintln!("vixeeny-app: {e:#}");
@@ -91,11 +94,13 @@ fn perform(action: ActionId, config: &Config, frozen: Option<ipc::Frozen>) {
             if let Err(e) = region::run(config, region::Mode::Editor, frozen) {
                 tracing::error!("editor failed: {e:#}");
             }
+            vixeeny_capture::freeze::trim_reader();
         }
         ActionId::CaptureScrolling => {
             if let Err(e) = region::run(config, region::Mode::Scroll, frozen) {
                 tracing::error!("scrolling capture failed: {e:#}");
             }
+            vixeeny_capture::freeze::trim_reader();
         }
         CaptureFullscreen | CaptureWindow | CaptureAllMonitors => {
             match direct_capture(action, config) {

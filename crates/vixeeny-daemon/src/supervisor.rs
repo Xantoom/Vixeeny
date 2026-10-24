@@ -21,6 +21,9 @@ pub trait Spawner {
         frozen: Option<&Frozen>,
         tx: EventTx,
     ) -> io::Result<()>;
+
+    /// Shows the app's notification card `kind` (see its `--toast`) with `text`.
+    fn show_card(&mut self, _kind: &str, _text: &str) {}
 }
 
 /// Launches the `vixeeny-app` executable installed next to the daemon.
@@ -85,9 +88,33 @@ impl Spawner for ProcessSpawner {
             .name(format!("app-wait-{id}"))
             .stack_size(64 * 1024)
             .spawn(move || {
-                let success = child.wait().is_ok_and(|status| status.success());
+                let status = child.wait();
+                let code = status
+                    .as_ref()
+                    .ok()
+                    .and_then(std::process::ExitStatus::code);
+                // What a crash was (the app's own errors are in its log).
+                if let Some(code) = code.filter(|c| *c != 0).map(|c| c as u32) {
+                    match vixeeny_platform::crash::describe_exit(code) {
+                        Some(what) => {
+                            tracing::error!("the app crashed: exception 0x{code:08x} ({what})");
+                        }
+                        None => tracing::warn!("the app exited with code {code}"),
+                    }
+                }
+                let success = status.is_ok_and(|status| status.success());
                 tx.send(Event::AppExited { id, success });
             })?;
         Ok(())
+    }
+
+    fn show_card(&mut self, kind: &str, text: &str) {
+        let card = Command::new(&self.app_path)
+            .arg("--toast")
+            .args([kind, text])
+            .spawn();
+        if let Err(e) = card {
+            tracing::warn!("cannot show the card: {e}");
+        }
     }
 }

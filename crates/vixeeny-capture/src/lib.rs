@@ -267,6 +267,23 @@ impl<B: StillBackend + ?Sized> StillBackend for &mut B {
     }
 }
 
+/// Gives back the memory the driver keeps for the textures `device` freed (over 100 MB after a
+/// few 4K captures): the next ones cost about a millisecond more to make. Call it once the
+/// device's work is done (its immediate context is reset).
+pub fn trim(device: &ID3D11Device) {
+    use windows::Win32::Graphics::Dxgi::IDXGIDevice3;
+    use windows::core::Interface;
+    // SAFETY: plain calls on a live device; its immediate context is not in use.
+    unsafe {
+        if let Ok(context) = device.GetImmediateContext() {
+            context.ClearState();
+        }
+        if let Ok(dxgi) = device.cast::<IDXGIDevice3>() {
+            dxgi.Trim();
+        }
+    }
+}
+
 pub struct Capturer<B: StillBackend> {
     backend: B,
     monitors: Vec<MonitorInfo>,

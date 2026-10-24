@@ -76,6 +76,11 @@ pub fn log_dir() -> Option<PathBuf> {
     })
 }
 
+/// Directory for what crashes leave (notes and minidumps), beside the logs.
+pub fn crash_dir() -> Option<PathBuf> {
+    log_dir().and_then(|d| d.parent().map(|p| p.join("crashes")))
+}
+
 /// Expands the `{pictures}` and `{videos}` placeholders of the `[paths]` settings. Unknown
 /// placeholders are left alone; a leading `~` is not special.
 pub fn expand_user_dir(template: &str) -> Option<PathBuf> {

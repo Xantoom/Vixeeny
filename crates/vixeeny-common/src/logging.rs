@@ -63,7 +63,7 @@ impl std::fmt::Display for Stamp {
 pub type Clock = fn() -> Stamp;
 
 /// Length of a formatted [`Stamp`]: what precedes the message on each line.
-const STAMP_LEN: usize = "2026-10-10 16:32:05.123 +02:00".len();
+pub const STAMP_LEN: usize = "2026-10-10 16:32:05.123 +02:00".len();
 
 struct LocalTimer(Clock);
 
