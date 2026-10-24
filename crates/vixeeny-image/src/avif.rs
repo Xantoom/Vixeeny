@@ -12,6 +12,7 @@ use ffmpeg_next::util::color::{Primaries, Range, Space, TransferCharacteristic};
 use ffmpeg_next::{Packet, Rational, codec, decoder, encoder, ffi, format, frame, media};
 use vixeeny_common::config::AVIF_MAX_SPEED;
 
+use crate::hdr::Light;
 use crate::{AvifSettings, Bgra, Chroma, Hdr, ImageError};
 
 fn err(what: &str) -> impl FnOnce(ffmpeg_next::Error) -> ImageError + '_ {
@@ -144,7 +145,9 @@ pub(crate) fn encode_hdr(image: &Hdr<'_>, settings: &AvifSettings) -> Result<Vec
         depth: 10,
         ..*settings
     };
-    write(yuv, colours, &settings)
+    let avif = write(yuv, colours, &settings)?;
+    // Without them the file is still a correct HDR picture, tone mapped from 10 000 nits.
+    Ok(with_light(&avif, &image.light()).unwrap_or(avif))
 }
 
 /// 0…1 → a full-range 10-bit code.
@@ -223,6 +226,158 @@ fn write(
     octx.write_trailer().map_err(err("trailer"))?;
     drop(octx);
     std::fs::read(scratch.path()).map_err(|e| ImageError::Avif(format!("read back: {e}")))
+}
+
+/// A box of an ISO BMFF file: its type and where it starts, its contents start and it ends.
+struct Bmff {
+    kind: [u8; 4],
+    start: usize,
+    body: usize,
+    end: usize,
+}
+
+/// The boxes laid one after another in `data[range]`; `None` if they do not fill it exactly
+/// (or use the 64-bit and to-the-end sizes, which FFmpeg's AVIF never does).
+fn boxes(data: &[u8], range: std::ops::Range<usize>) -> Option<Vec<Bmff>> {
+    let mut out = Vec::new();
+    let mut at = range.start;
+    while at < range.end {
+        let size = u32::from_be_bytes(data.get(at..at + 4)?.try_into().ok()?) as usize;
+        let kind = data.get(at + 4..at + 8)?.try_into().ok()?;
+        if size < 8 || at + size > range.end {
+            return None;
+        }
+        out.push(Bmff {
+            kind,
+            start: at,
+            body: at + 8,
+            end: at + size,
+        });
+        at += size;
+    }
+    Some(out)
+}
+
+fn find<'a>(boxes: &'a [Bmff], kind: &[u8; 4]) -> Option<&'a Bmff> {
+    boxes.iter().find(|b| &b.kind == kind)
+}
+
+fn u16_at(data: &[u8], at: usize) -> Option<u16> {
+    Some(u16::from_be_bytes(data.get(at..at + 2)?.try_into().ok()?))
+}
+
+/// The AVIF FFmpeg wrote with `clli` and `mdcv` properties on its picture (its muxer writes them
+/// for MP4 tracks only), so viewers tone map from the picture's light and screen rather than
+/// 10 000 nits; `None` when the file is not laid out as that muxer lays it.
+fn with_light(avif: &[u8], light: &Light) -> Option<Vec<u8>> {
+    let top = boxes(avif, 0..avif.len())?;
+    let meta = find(&top, b"meta")?;
+    // A full box: version and flags first.
+    let in_meta = boxes(avif, meta.body + 4..meta.end)?;
+    let iloc = find(&in_meta, b"iloc")?;
+    let iprp = find(&in_meta, b"iprp")?;
+    let primary = match find(&in_meta, b"pitm") {
+        Some(pitm) => u16_at(avif, pitm.body + 4)?,
+        None => 1,
+    };
+    let in_iprp = boxes(avif, iprp.body..iprp.end)?;
+    let ipco = find(&in_iprp, b"ipco")?;
+    let ipma = find(&in_iprp, b"ipma")?;
+    let first = boxes(avif, ipco.body..ipco.end)?.len() + 1;
+
+    // Associations as single bytes: version 0, flags without bit 0.
+    if avif.get(ipma.body..ipma.body + 4)? != [0, 0, 0, 0] || first + 1 > 0x7f {
+        return None;
+    }
+    let entries = u32::from_be_bytes(avif.get(ipma.body + 4..ipma.body + 8)?.try_into().ok()?);
+    let mut at = ipma.body + 8;
+    let mut count_at = None;
+    for _ in 0..entries {
+        let (item, count) = (u16_at(avif, at)?, *avif.get(at + 2)?);
+        if item == primary {
+            count_at = Some(at + 2);
+        }
+        at += 3 + usize::from(count);
+    }
+    let count_at = count_at?;
+    let associated = count_at + 1 + usize::from(avif[count_at]);
+    if avif[count_at] > 0xff - 2 || at != ipma.end {
+        return None;
+    }
+
+    let mut properties = Vec::with_capacity(44);
+    properties.extend_from_slice(&12u32.to_be_bytes());
+    properties.extend_from_slice(b"clli");
+    for nits in [light.max_cll.ceil(), light.max_fall.round()] {
+        properties.extend_from_slice(&(nits.min(65_535.0) as u16).to_be_bytes());
+    }
+    properties.extend_from_slice(&32u32.to_be_bytes());
+    properties.extend_from_slice(b"mdcv");
+    // Green, blue, red, as HEVC's SEI orders them, then the white; x, y in 0.00002.
+    let [red, green, blue] = Light::PRIMARIES;
+    for v in [green, blue, red, Light::WHITE].iter().flatten() {
+        properties.extend_from_slice(&((v * 50_000.0).round() as u16).to_be_bytes());
+    }
+    // The brightest and the darkest light, in 0.0001 nits.
+    for nits in [f64::from(light.peak), Light::BLACK_NITS] {
+        properties.extend_from_slice(&((nits * 10_000.0).round() as u32).to_be_bytes());
+    }
+    let associations = [first as u8, first as u8 + 1];
+
+    // Where the bytes go, in the order of the file; a byte of the original moves by all that is
+    // put at or before it.
+    let mut inserts = [
+        (ipco.end, properties.as_slice()),
+        (associated, associations.as_slice()),
+    ];
+    inserts.sort_by_key(|i| i.0);
+    let moved = |p: usize| {
+        p + inserts
+            .iter()
+            .filter(|i| i.0 <= p)
+            .map(|i| i.1.len())
+            .sum::<usize>()
+    };
+    let mut out = Vec::with_capacity(avif.len() + 46);
+    let mut from = 0;
+    for (at, bytes) in inserts {
+        out.extend_from_slice(&avif[from..at]);
+        out.extend_from_slice(bytes);
+        from = at;
+    }
+    out.extend_from_slice(&avif[from..]);
+
+    let grow = |out: &mut [u8], at: usize, by: usize| -> Option<()> {
+        let field = out.get_mut(at..at + 4)?;
+        let size = u32::from_be_bytes((&*field).try_into().ok()?) as usize + by;
+        field.copy_from_slice(&u32::try_from(size).ok()?.to_be_bytes());
+        Some(())
+    };
+    let added = properties.len() + associations.len();
+    grow(&mut out, moved(meta.start), added)?;
+    grow(&mut out, moved(iprp.start), added)?;
+    grow(&mut out, moved(ipco.start), properties.len())?;
+    grow(&mut out, moved(ipma.start), associations.len())?;
+    out[moved(count_at)] += 2;
+
+    // The pictures' places in the file: version 0, 32-bit offsets and lengths, no base offset.
+    if avif.get(iloc.body..iloc.body + 6)? != [0, 0, 0, 0, 0x44, 0] {
+        return None;
+    }
+    let items = u16_at(avif, iloc.body + 6)?;
+    let mut at = iloc.body + 8;
+    for _ in 0..items {
+        let extents = u16_at(avif, at + 4)?;
+        at += 6;
+        for _ in 0..extents {
+            let offset = u32::from_be_bytes(avif.get(at..at + 4)?.try_into().ok()?) as usize;
+            let field = moved(at);
+            out[field..field + 4]
+                .copy_from_slice(&u32::try_from(moved(offset)).ok()?.to_be_bytes());
+            at += 8;
+        }
+    }
+    (at == iloc.end).then_some(out)
 }
 
 /// What dav1d decoded: tightly packed RGBA8.

@@ -990,6 +990,7 @@ mod tests {
             chroma: Chroma::C420,
             hdr: false,
             peak_nits: 1000.0,
+            sdr_white_nits: 203.0,
             split: Split::Off,
             keyframe_seconds: 1.0,
             queue: 1_000,

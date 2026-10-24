@@ -8,6 +8,7 @@ use flate2::{Compress, Compression, FlushCompress, Status};
 use png::{BitDepth, ColorType, Encoder, SrgbRenderingIntent};
 use rayon::prelude::*;
 
+use crate::hdr::Light;
 use crate::{Bgra, Hdr, ImageError, PngCompression, PngSettings};
 
 /// RGB PNG tagged sRGB. Alpha is dropped: screen captures are opaque, and RGB compresses faster.
@@ -23,19 +24,43 @@ pub(crate) fn encode(image: &Bgra<'_>, settings: &PngSettings) -> Result<Vec<u8>
             *o = [px[2], px[1], px[0]];
         }
     };
-    write(image.width, image.height, 3, &row, settings, false)
+    write(image.width, image.height, 3, &row, settings, None)
 }
 
-/// 16-bit RGB PNG, BT.2020 / PQ, described by a `cICP` chunk (PNG third edition).
+/// 16-bit RGB PNG, BT.2020 / PQ, described by a `cICP` chunk, its light by `cLLI` and the
+/// screen it was seen on by `mDCV` (PNG third edition).
 pub(crate) fn encode_hdr(image: &Hdr<'_>, settings: &PngSettings) -> Result<Vec<u8>, ImageError> {
     let samples = image.to_pq_bytes(u16::to_be_bytes);
     let n = image.width as usize * 6;
     let row = |y: usize, out: &mut [u8]| out.copy_from_slice(&samples[y * n..(y + 1) * n]);
-    write(image.width, image.height, 6, &row, settings, true)
+    let light = image.light();
+    write(image.width, image.height, 6, &row, settings, Some(light))
 }
 
 /// BT.2020 primaries, PQ, RGB, full range (ITU-T H.273).
 const CICP_BT2100_PQ: [u8; 4] = [9, 16, 0, 1];
+
+/// `cLLI`: MaxCLL and MaxFALL in 0.0001 nits (the brightest pixel rounded up, a bound).
+fn clli(light: &Light) -> [u8; 8] {
+    let units = |nits: f32| f64::from(nits) * 10_000.0;
+    let mut out = [0; 8];
+    out[..4].copy_from_slice(&(units(light.max_cll).ceil() as u32).to_be_bytes());
+    out[4..].copy_from_slice(&(units(light.max_fall).round() as u32).to_be_bytes());
+    out
+}
+
+/// `mDCV`: red, green, blue and white as x, y in 0.00002, then the brightest and darkest light
+/// in 0.0001 nits.
+fn mdcv(light: &Light) -> [u8; 24] {
+    let mut out = [0; 24];
+    let xy = Light::PRIMARIES.iter().chain([&Light::WHITE]).flatten();
+    for (o, v) in out.as_chunks_mut::<2>().0.iter_mut().zip(xy) {
+        *o = ((v * 50_000.0).round() as u16).to_be_bytes();
+    }
+    out[16..20].copy_from_slice(&((f64::from(light.peak) * 10_000.0).round() as u32).to_be_bytes());
+    out[20..].copy_from_slice(&((Light::BLACK_NITS * 10_000.0).round() as u32).to_be_bytes());
+    out
+}
 
 /// The fewest rows a band gets: below, the bands' ends cost more than the cores give.
 const BAND_ROWS: usize = 64;
@@ -47,7 +72,7 @@ fn write(
     bpp: usize,
     row: &(dyn Fn(usize, &mut [u8]) + Sync),
     settings: &PngSettings,
-    hdr: bool,
+    hdr: Option<Light>,
 ) -> Result<Vec<u8>, ImageError> {
     // zlib-rs levels; at 4K, 2 is a fifth smaller than the png crate's fastest for a quarter
     // more time, and 6 and 9 are as small as its own.
@@ -83,15 +108,17 @@ fn write(
     let mut out = Vec::with_capacity(zlib.len() + 128);
     let mut encoder = Encoder::new(&mut out, width, height);
     encoder.set_color(ColorType::Rgb);
-    if hdr {
+    if hdr.is_some() {
         encoder.set_depth(BitDepth::Sixteen);
     } else {
         encoder.set_depth(BitDepth::Eight);
         encoder.set_source_srgb(SrgbRenderingIntent::Perceptual);
     }
     let mut writer = encoder.write_header()?;
-    if hdr {
+    if let Some(light) = &hdr {
         writer.write_chunk(png::chunk::cICP, &CICP_BT2100_PQ)?;
+        writer.write_chunk(png::chunk::mDCV, &mdcv(light))?;
+        writer.write_chunk(png::chunk::cLLI, &clli(light))?;
     }
     writer.write_chunk(png::chunk::IDAT, &zlib)?;
     writer.finish()?;

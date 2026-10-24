@@ -10,14 +10,15 @@
 //! 2. Bring colours wider than sRGB (negative channels) inside it, keeping hue and brightness
 //!    ([`into_gamut`]).
 //! 3. Compute the luminance `Y` (BT.709) and map it with [`roll_off`]: identity up to a
-//!    knee, then an extended-Reinhard roll-off of the excess so that the display peak lands
-//!    exactly on `1.0` (smooth, monotonic, no clipping).
+//!    knee, then an extended-Reinhard roll-off of the excess so that the brightest pixel of the
+//!    picture (no brighter than the display's peak) lands exactly on `1.0` (smooth, monotonic,
+//!    no clipping). A picture with nothing above SDR white is left as it is: white stays 255.
 //! 4. Scale RGB by `Y'/Y` (hue and saturation are preserved). If a channel then exceeds `1.0`,
 //!    divide all channels by the largest one: a very bright saturated colour becomes a little
 //!    darker but keeps its hue and saturation, instead of being clipped or washed out to white.
 //! 5. Encode with the sRGB transfer function and quantise to 8 bits.
 
-use vixeeny_common::colour::{into_gamut, luminance, roll_off, srgb_encode};
+use vixeeny_common::colour::{brightness, headroom, into_gamut, luminance, roll_off, srgb_encode};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ToneMapParams {
@@ -36,10 +37,16 @@ impl Default for ToneMapParams {
     }
 }
 
-/// Maps one scRGB pixel to sRGB-encoded `[r, g, b]` in `0.0..=1.0`.
+/// Maps one scRGB pixel to sRGB-encoded `[r, g, b]` in `0.0..=1.0`, rolled off up to the
+/// display's peak (a whole picture is rolled off up to its own brightest pixel: see
+/// [`tonemap_frame`]).
 pub fn tonemap_pixel(rgb: [f32; 3], params: &ToneMapParams) -> [f32; 3] {
     let scale = 80.0 / params.sdr_white_nits;
-    let headroom = params.peak_nits / params.sdr_white_nits;
+    map(rgb, scale, params.peak_nits / params.sdr_white_nits)
+}
+
+/// One pixel scaled by `scale` (SDR white becomes 1), rolled off up to `headroom`.
+fn map(rgb: [f32; 3], scale: f32, headroom: f32) -> [f32; 3] {
     let [r, g, b] = into_gamut(rgb.map(|c| c * scale));
     let y = luminance([r, g, b]);
     if y <= f32::EPSILON {
@@ -55,10 +62,24 @@ pub fn tonemap_pixel(rgb: [f32; 3], params: &ToneMapParams) -> [f32; 3] {
 }
 
 /// Converts a whole frame: `rgba` has 4 floats per pixel (alpha ignored), the result is
-/// 8-bit BGRA with opaque alpha. Spread over every core: a 4K frame takes 200 ms on one.
+/// 8-bit BGRA with opaque alpha, rolled off up to the frame's brightest pixel (see
+/// [`headroom`]). Spread over every core: a 4K frame takes 200 ms on one.
 pub fn tonemap_frame(rgba: &[f32], params: &ToneMapParams) -> Vec<u8> {
     use rayon::prelude::*;
 
+    let scale = 80.0 / params.sdr_white_nits;
+    let brightest = rgba
+        .par_chunks(4 * 4096)
+        .map(|chunk| {
+            chunk
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|px| brightness([px[0], px[1], px[2]], scale))
+                .fold(0.0_f32, f32::max)
+        })
+        .reduce(|| 0.0, f32::max);
+    let headroom = headroom(brightest, params.peak_nits / params.sdr_white_nits);
     let mut out = vec![0; rgba.len()];
     out.par_chunks_mut(4 * 4096)
         .zip(rgba.par_chunks(4 * 4096))
@@ -69,7 +90,7 @@ pub fn tonemap_frame(rgba: &[f32], params: &ToneMapParams) -> Vec<u8> {
                 .iter_mut()
                 .zip(rgba.as_chunks::<4>().0);
             for (o, px) in pixels {
-                let [r, g, b] = tonemap_pixel([px[0], px[1], px[2]], params);
+                let [r, g, b] = map([px[0], px[1], px[2]], scale, headroom);
                 let q = |v: f32| (v * 255.0 + 0.5) as u8;
                 *o = [q(b), q(g), q(r), 255];
             }
@@ -105,6 +126,25 @@ mod tests {
         // A moderately bright one keeps visible saturation.
         let [r, g, b] = tonemap_pixel([2.0, 0.8, 0.0], &ToneMapParams::default());
         assert!(r - b > 0.3, "{r} {g} {b}");
+    }
+
+    #[test]
+    fn a_frame_without_highlights_is_an_sdr_capture() {
+        // SDR white at 240 nits on a 1000-nit screen: a white page and a light grey.
+        let params = ToneMapParams {
+            sdr_white_nits: 240.0,
+            peak_nits: 1000.0,
+        };
+        let white = 240.0 / 80.0;
+        let grey = white * 0.8;
+        let out = tonemap_frame(&[white, white, white, 1.0, grey, grey, grey, 1.0], &params);
+        assert_eq!(&out[..4], &[255, 255, 255, 255]);
+        let srgb = (srgb_encode(0.8) * 255.0 + 0.5) as u8;
+        assert_eq!(&out[4..7], &[srgb; 3]);
+        // A highlight in the frame: white is rolled off a little, the highlight lands on 255.
+        let out = tonemap_frame(&[white, white, white, 1.0, 12.5, 12.5, 12.5, 1.0], &params);
+        assert!(out[0] < 255 && out[0] > 230, "{}", out[0]);
+        assert_eq!(&out[4..7], &[255; 3]);
     }
 
     #[test]

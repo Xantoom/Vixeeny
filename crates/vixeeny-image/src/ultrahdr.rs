@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! JPEG Ultra HDR through libultrahdr: the SDR rendering (tone-mapped, encoded by jpegli) is
 //! the picture every viewer shows; a gain map computed from the HDR capture lets HDR screens
-//! restore its highlights.
+//! restore its highlights. The HDR picture goes in on BT.2020 primaries: the gain map, one per
+//! channel, is then computed there (ISO 21496-1's alternate colour space, named by its ICC
+//! profile), and HDR screens get back the colours wider than sRGB too.
 
 use std::ptr;
 
@@ -55,7 +57,7 @@ pub(crate) fn encode(image: &Hdr<'_>, settings: &JpegSettings) -> Result<Vec<u8>
         .0
         .iter()
         .flat_map(|px| {
-            let [r, g, b] = colour::into_gamut([px[0], px[1], px[2]]);
+            let [r, g, b] = colour::scrgb_to_bt2020([px[0], px[1], px[2]]);
             [r, g, b, 1.0].map(|c| half::from_f32((c * scale).clamp(0.0, top)))
         })
         .collect();
@@ -70,7 +72,7 @@ pub(crate) fn encode(image: &Hdr<'_>, settings: &JpegSettings) -> Result<Vec<u8>
         }
         let mut hdr = ffi::uhdr_raw_image_t {
             fmt: ffi::uhdr_img_fmt_UHDR_IMG_FMT_64bppRGBAHalfFloat,
-            cg: ffi::uhdr_color_gamut_UHDR_CG_BT_709,
+            cg: ffi::uhdr_color_gamut_UHDR_CG_BT_2100,
             ct: ffi::uhdr_color_transfer_UHDR_CT_LINEAR,
             range: ffi::uhdr_color_range_UHDR_CR_FULL_RANGE,
             w: image.width,

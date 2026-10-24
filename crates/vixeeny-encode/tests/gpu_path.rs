@@ -92,6 +92,7 @@ fn config(
         chroma,
         hdr: false,
         peak_nits: 1000.0,
+        sdr_white_nits: 203.0,
         split: Split::Off,
         keyframe_seconds: 1.0,
         queue: 1_000,
@@ -201,7 +202,7 @@ fn record_gpu_with(
         context,
         Source {
             size: (W, H),
-            hdr: false,
+            hdr: None,
         },
         (W, H),
         Fps::whole(30),
@@ -403,5 +404,179 @@ fn full_and_half_chroma_come_from_the_gpu_for_a_software_encoder() {
                 &format!("{id} {depth}-bit {} via the GPU", chroma.name()),
             );
         }
+    }
+}
+
+/// The levels of the HDR monitor the HDR tests record.
+const LEVELS: vixeeny_encode::card_hdr::Levels = vixeeny_encode::card_hdr::Levels {
+    sdr_white_nits: 240.0,
+    peak_nits: 1000.0,
+};
+
+/// A solid scRGB texture, as an HDR monitor's capture frame is.
+fn hdr_texture(device: &Device, rgb: [f32; 3]) -> ID3D11Texture2D {
+    let [r, g, b] = rgb;
+    let pixels: Vec<u16> = [r, g, b, 1.0]
+        .map(vixeeny_common::half::from_f32)
+        .repeat((W * H) as usize);
+    let desc = D3D11_TEXTURE2D_DESC {
+        Width: W,
+        Height: H,
+        MipLevels: 1,
+        ArraySize: 1,
+        Format: windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_R16G16B16A16_FLOAT,
+        SampleDesc: DXGI_SAMPLE_DESC {
+            Count: 1,
+            Quality: 0,
+        },
+        Usage: D3D11_USAGE_DEFAULT,
+        BindFlags: (D3D11_BIND_SHADER_RESOURCE.0 | D3D11_BIND_RENDER_TARGET.0) as u32,
+        ..Default::default()
+    };
+    let data = D3D11_SUBRESOURCE_DATA {
+        pSysMem: pixels.as_ptr().cast(),
+        SysMemPitch: W * 8,
+        SysMemSlicePitch: 0,
+    };
+    let mut out = None;
+    // SAFETY: valid descriptions; `pixels` outlives the call.
+    unsafe { device.CreateTexture2D(&raw const desc, Some(&raw const data), Some(&raw mut out)) }
+        .unwrap();
+    out.unwrap()
+}
+
+/// Records 10 frames of a solid HDR colour through the GPU path of `id`, kept as HDR or tone
+/// mapped; the centre of the first frame, on 8 bits.
+fn record_hdr(
+    device: &Device,
+    context: &DeviceContext,
+    (id, feed, depth): (&str, Feed, u8),
+    keep_hdr: bool,
+    rgb: [f32; 3],
+) -> [i32; 3] {
+    let registry = Registry::builtin().unwrap();
+    let pipeline = GpuPipeline::new(
+        device,
+        context,
+        Source {
+            size: (W, H),
+            hdr: Some(LEVELS),
+        },
+        (W, H),
+        Fps::whole(30),
+        keep_hdr,
+        depth == 10,
+        Chroma::C420,
+        feed,
+    )
+    .unwrap();
+    let pipeline = Arc::new(pipeline);
+    let mut cfg = config(&registry, id, depth, Chroma::C420, PresetName::Performance);
+    cfg.hdr = keep_hdr;
+    cfg.gpu = Some(Arc::clone(&pipeline));
+    // Tests run side by side: each recording has its own folder.
+    static RUN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let run = RUN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = scratch(&format!("hdr-{id}-{keep_hdr}-{run}"));
+    let rec = Recorder::start(cfg, namer(&dir)).unwrap();
+    let source = hdr_texture(device, rgb);
+    let rect = Rect {
+        left: 0,
+        top: 0,
+        right: W as i32,
+        bottom: H as i32,
+    };
+    for i in 0..10 {
+        let frame = pipeline.convert(&source, rect).unwrap();
+        assert!(rec.push_hw(i * 1_000 * MS / 30, frame));
+    }
+    let summary = rec.stop(10 * 1_000 * MS / 30).unwrap();
+    let got = centre(&summary.files[0]);
+    let _ = std::fs::remove_dir_all(dir);
+    got
+}
+
+/// An HDR monitor recorded on the GPU, whatever the video processor of the card takes: kept as
+/// PQ (the codes the processor's coding gives), or tone mapped to SDR as the screenshots are.
+#[test]
+fn hdr_monitors_are_recorded_on_the_gpu_kept_or_tone_mapped() {
+    let (device, context) = d3d::create_device(None).unwrap();
+    // A 1000-nit orange kept as HDR: its BT.2020 / PQ Y, Cb, Cr.
+    let orange = [10.0, 4.0, 0.2];
+    let [r, g, b] = vixeeny_common::colour::scrgb_to_pq(orange).map(|c| f64::from(c) / 65535.0);
+    let y = 0.2627 * r + 0.6780 * g + 0.0593 * b;
+    let want = [
+        64.0 + 876.0 * y,
+        512.0 + 896.0 * (b - y) / 1.8814,
+        512.0 + 896.0 * (r - y) / 1.4746,
+    ]
+    .map(|v| (v / 4.0).round() as i32);
+    let got = record_hdr(
+        &device,
+        &context,
+        ("libx265", Feed::Download, 10),
+        true,
+        orange,
+    );
+    for (g, w) in got.iter().zip(want) {
+        assert!((g - w).abs() <= 2, "HDR: got {got:?}, want {want:?}");
+    }
+    // A grey at half SDR white made SDR: nothing brighter, so as an SDR capture shows it.
+    let white = LEVELS.sdr_white_nits / 80.0;
+    let got = record_hdr(
+        &device,
+        &context,
+        ("libx264", Feed::Download, 8),
+        false,
+        [white * 0.5; 3],
+    );
+    let code = (vixeeny_common::colour::srgb_encode(0.5) * 255.0).round();
+    let luma = (16.0 + 219.0 * code / 255.0).round() as i32;
+    assert!(
+        (got[0] - luma).abs() <= 2,
+        "SDR: got {got:?}, want Y {luma}"
+    );
+    assert!(
+        got[1..].iter().all(|c| (c - 128).abs() <= 2),
+        "SDR: {got:?}"
+    );
+}
+
+/// NVENC reads the HDR frames the shaders write as they are.
+#[test]
+fn nvenc_records_hdr_from_the_shaders() {
+    let Ok((device, context)) = d3d::create_device(Some(0x10de)) else {
+        vixeeny_common::skip_test("no Direct3D device");
+        return;
+    };
+    let nvidia = {
+        use windows::core::Interface;
+        let dxgi: windows::Win32::Graphics::Dxgi::IDXGIDevice = device.cast().unwrap();
+        // SAFETY: plain queries of a live device.
+        let adapter = unsafe { dxgi.GetAdapter() }.unwrap();
+        // SAFETY: as above.
+        unsafe { adapter.GetDesc() }.unwrap().VendorId == 0x10de
+    };
+    if !nvidia || vixeeny_encode::ffmpeg::encoder::find_by_name("hevc_nvenc").is_none() {
+        vixeeny_common::skip_test("no NVENC");
+        return;
+    }
+    let white = LEVELS.sdr_white_nits / 80.0;
+    let kept = record_hdr(
+        &device,
+        &context,
+        ("nvenc_hevc", Feed::Direct, 10),
+        true,
+        [white; 3],
+    );
+    let downloaded = record_hdr(
+        &device,
+        &context,
+        ("libx265", Feed::Download, 10),
+        true,
+        [white; 3],
+    );
+    for (a, b) in kept.iter().zip(downloaded) {
+        assert!((a - b).abs() <= 2, "NVENC {kept:?}, x265 {downloaded:?}");
     }
 }

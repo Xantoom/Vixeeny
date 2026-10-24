@@ -192,6 +192,26 @@ impl Hdr10 {
     }
 }
 
+impl Hdr10 {
+    /// The brightest the picture is said to be, in nits: its brightest pixel when known, else
+    /// the mastering display's peak.
+    pub(crate) fn peak_nits(&self) -> f32 {
+        if self.light.max_cll > 0 {
+            return self.light.max_cll as f32;
+        }
+        let max = self.mastering.max_luminance;
+        if max.num > 0 && max.den > 0 {
+            max.num as f32 / max.den as f32
+        } else {
+            1000.0
+        }
+    }
+}
+
+/// The file tag of an HDR recording holding the SDR white of the monitor it was made on, in
+/// nits: its SDR rendering (the video editor's) shows the desktop as it was.
+pub const SDR_WHITE_TAG: &str = "sdr_white_nits";
+
 const MASTERING: ffi::AVFrameSideDataType =
     ffi::AVFrameSideDataType::AV_FRAME_DATA_MASTERING_DISPLAY_METADATA;
 const LIGHT: ffi::AVFrameSideDataType = ffi::AVFrameSideDataType::AV_FRAME_DATA_CONTENT_LIGHT_LEVEL;

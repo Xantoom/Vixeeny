@@ -283,7 +283,8 @@ struct Plan {
     /// the user switches away). `None`: the whole monitor.
     window: Option<vixeeny_platform::WindowId>,
     cursor: bool,
-    /// The monitor shows HDR and the profile keeps it: frames are scRGB half floats.
+    /// Frames are captured as scRGB half floats: the monitor shows HDR, and the profile keeps
+    /// it or the GPU path tone maps it.
     hdr: bool,
     namer: Namer,
     /// Replay only: the path of the next save.
@@ -324,7 +325,7 @@ fn try_gpu(
     encoder: &Encoder,
     config: &RecordConfig,
     source: (u32, u32),
-    source_hdr: bool,
+    source_hdr: Option<vixeeny_encode::card_hdr::Levels>,
 ) -> Option<GpuParts> {
     let feed = vixeeny_encode::gpu::feed(encoder)?;
     // 4:2:2 and 4:4:4 come back packed from the GPU, for a software encoder to unpack.
@@ -498,6 +499,7 @@ fn plan(
         chroma,
         hdr,
         peak_nits: monitor.hdr.map_or(1000.0, |h| h.peak_nits),
+        sdr_white_nits: monitor.hdr.map_or(203.0, |h| h.sdr_white_nits),
         split: if replay {
             Split::Off
         } else {
@@ -521,11 +523,18 @@ fn plan(
         files: !replay,
         buffers: Default::default(),
     };
+    // An HDR monitor is captured as it is on the GPU path, which keeps it or tone maps it as
+    // the screenshots are; without it, a recording to SDR leaves the conversion to Windows.
+    let levels = monitor.hdr.map(|h| vixeeny_encode::card_hdr::Levels {
+        sdr_white_nits: h.sdr_white_nits,
+        peak_nits: h.peak_nits,
+    });
     let gpu = if allow_gpu {
-        try_gpu(&record.encoder, &record, source, hdr)
+        try_gpu(&record.encoder, &record, source, levels)
     } else {
         None
     };
+    let capture_hdr = if gpu.is_some() { levels.is_some() } else { hdr };
     {
         record.gpu = gpu.as_ref().map(|g| Arc::clone(&g.pipeline));
     }
@@ -566,7 +575,7 @@ fn plan(
         monitor,
         window: game.map(|g| g.id),
         cursor: profile.show_cursor,
-        hdr,
+        hdr: capture_hdr,
         namer,
         save_as,
         gpu,

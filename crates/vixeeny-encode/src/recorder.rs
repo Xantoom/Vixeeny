@@ -89,10 +89,14 @@ impl OutputContainer {
         // Every packet reaches the disk at once: what a crash leaves behind is what was written.
         d.set("flush_packets", "1");
         match self {
-            Self::Mp4Fragmented => d.set("movflags", "frag_keyframe+empty_moov+default_base_moof"),
+            // Tags of its own (the SDR white of an HDR recording) are written too.
+            Self::Mp4Fragmented => d.set(
+                "movflags",
+                "frag_keyframe+empty_moov+default_base_moof+use_metadata_tags",
+            ),
             Self::Mp4Hybrid => d.set(
                 "movflags",
-                "frag_keyframe+empty_moov+default_base_moof+hybrid_fragmented",
+                "frag_keyframe+empty_moov+default_base_moof+hybrid_fragmented+use_metadata_tags",
             ),
             Self::Mkv | Self::WebM => {}
         }
@@ -125,6 +129,9 @@ pub struct RecordConfig {
     pub hdr: bool,
     /// Peak brightness of the recorded monitor in nits, for the HDR10 metadata (unused in SDR).
     pub peak_nits: f32,
+    /// SDR white on the recorded monitor in nits, tagged in an HDR file (unused in SDR; see
+    /// [`crate::hdr::SDR_WHITE_TAG`]).
+    pub sdr_white_nits: f32,
     pub split: Split,
     /// Key frame interval, seconds (also the granularity of crash recovery and of splitting).
     pub keyframe_seconds: f64,
@@ -759,6 +766,12 @@ impl Worker {
             // MP4 keeps a stream's name in the handler, not in a title tag.
             meta.set("handler_name", &track.title);
             stream.set_metadata(meta);
+        }
+        if self.cfg.hdr {
+            let mut tags = Dictionary::new();
+            let white = self.cfg.sdr_white_nits.clamp(1.0, 10_000.0).round();
+            tags.set(crate::hdr::SDR_WHITE_TAG, &white.to_string());
+            octx.set_metadata(tags);
         }
         octx.write_header_with(self.cfg.container.header_options())?;
         let stream_tb = octx.stream(0).map_or(self.enc_tb, |s| s.time_base());

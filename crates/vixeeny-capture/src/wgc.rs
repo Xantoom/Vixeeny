@@ -22,8 +22,8 @@ use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TY
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAP_READ,
     D3D11_MAPPED_SUBRESOURCE, D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION, D3D11_SDK_VERSION,
-    D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
-    D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
+    D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING, D3D11CreateDevice,
+    ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
 };
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC};
 use windows::Win32::Graphics::Dxgi::{IDXGIAdapter, IDXGIDevice};
@@ -121,8 +121,11 @@ impl WgcBackend {
         // SAFETY: `desc` describes a staging texture; `init` points at `black`, which outlives
         // the call; the out-pointer is valid.
         unsafe {
-            self.device
-                .CreateTexture2D(&desc, init.as_ref().map(|i| &raw const *i), Some(&raw mut staging))
+            self.device.CreateTexture2D(
+                &desc,
+                init.as_ref().map(|i| &raw const *i),
+                Some(&raw mut staging),
+            )
         }
         .map_err(os("CreateTexture2D"))?;
         drop(black);
@@ -134,7 +137,14 @@ impl WgcBackend {
                 // picture lies inside the desktop's.
                 unsafe {
                     self.context.CopySubresourceRegion(
-                        &staging, 0, at.x as u32, at.y as u32, 0, texture, 0, None,
+                        &staging,
+                        0,
+                        at.x as u32,
+                        at.y as u32,
+                        0,
+                        texture,
+                        0,
+                        None,
                     );
                 }
                 Ok(())
@@ -727,7 +737,10 @@ mod tests {
         let (mut same, mut n) = (0u64, 0u64);
         for y in (0..h as usize).step_by(7) {
             for x in (0..w as usize * 4).step_by(13).filter(|x| x % 4 != 3) {
-                let (a, b) = (rows[y * stride + x], assembled.data[y * assembled.stride + x]);
+                let (a, b) = (
+                    rows[y * stride + x],
+                    assembled.data[y * assembled.stride + x],
+                );
                 same += u64::from(a.abs_diff(b) <= 2);
                 n += 1;
             }

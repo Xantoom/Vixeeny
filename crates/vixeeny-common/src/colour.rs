@@ -30,6 +30,48 @@ pub fn roll_off(v: f32, headroom: f32) -> f32 {
     KNEE + span * g.min(1.0)
 }
 
+/// The headroom (in units of SDR white) a picture is tone mapped with: its brightest luminance
+/// (see [`brightness`]), bounded by SDR white and by `display`, the screen's own. With nothing
+/// brighter than SDR white, [`roll_off`] is the identity up to it: SDR content (a page, a window)
+/// comes out exactly as an SDR capture shows it; highlights are rolled off only as far as needed.
+pub fn headroom(brightest: f32, display: f32) -> f32 {
+    let brightest = if brightest.is_finite() {
+        brightest
+    } else {
+        0.0
+    };
+    brightest.min(display).max(1.0)
+}
+
+/// How fast a video's tone mapping follows its brightest pixel, in seconds: quickly when it
+/// rises (a flash keeps its highlights), slowly when it falls (no visible pumping).
+pub const FOLLOW_RISE_SECONDS: f64 = 0.15;
+pub const FOLLOW_FALL_SECONDS: f64 = 1.0;
+
+/// The share of the way to its target a followed value makes at each frame of `fps`, rising and
+/// falling.
+pub fn follow_steps(fps: f64) -> (f32, f32) {
+    let step = |seconds: f64| (1.0 - (-1.0 / (fps.max(1.0) * seconds)).exp()) as f32;
+    (step(FOLLOW_RISE_SECONDS), step(FOLLOW_FALL_SECONDS))
+}
+
+/// The headroom followed one frame on, towards `target`; `current` below 1 (none yet: a first
+/// frame, a seek) takes the target as it is.
+pub fn follow(current: f32, target: f32, (rise, fall): (f32, f32)) -> f32 {
+    if current >= 1.0 {
+        current + (target - current) * if target > current { rise } else { fall }
+    } else {
+        target
+    }
+}
+
+/// The luminance [`roll_off`] maps for one scRGB pixel scaled by `scale` (SDR white becomes
+/// `1.0`): what [`headroom`] takes the brightest of. Not a number counts as black.
+pub fn brightness(rgb: [f32; 3], scale: f32) -> f32 {
+    let y = luminance(into_gamut(rgb.map(|c| c * scale)));
+    if y.is_finite() { y } else { 0.0 }
+}
+
 /// Brings a colour outside the BT.709 gamut (a negative channel: a wider-gamut green, a deep
 /// cyan…) inside it by desaturating it towards the grey of the same luminance, just enough.
 /// Hue and brightness stay; clipping the channel instead would shift the hue and add light.
@@ -66,10 +108,91 @@ pub fn srgb_decode(v: f32) -> f32 {
     }
 }
 
+/// The tone mapper and the PQ coding of this module in HLSL, line for line, for the shaders that
+/// run them on the graphics card (stills and recordings): the same steps and the same numbers.
+pub const HLSL: &str = r"
+static const float KNEE = 0.8;
+
+float luminance(float3 c) { return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b; }
+
+float3 into_gamut(float3 c) {
+    float y = luminance(c);
+    if (y <= 0.0) return 0.0;
+    float low = min(c.r, min(c.g, c.b));
+    if (low >= 0.0) return c;
+    float t = y / (y - low);
+    return max(y + (c - y) * t, 0.0);
+}
+
+float roll_off(float v, float h) {
+    if (v <= KNEE) return max(v, 0.0);
+    float span = 1.0 - KNEE;
+    float x = (v - KNEE) / span;
+    float w = max((max(h, 1.0) - KNEE) / span, 1.0);
+    float g = x * (1.0 + x / (w * w)) / (1.0 + x);
+    return KNEE + span * min(g, 1.0);
+}
+
+// Not a number, or infinite, counts as black.
+float brightness(float3 c, float scale) {
+    float y = luminance(into_gamut(c * scale));
+    return y > 0.0 && y < 3.0e38 ? y : 0.0;
+}
+
+float headroom(float brightest, float display) {
+    float b = brightest < 3.0e38 ? brightest : 0.0;
+    return max(min(b, display), 1.0);
+}
+
+float srgb(float v) {
+    v = saturate(v);
+    return v <= 0.0031308 ? 12.92 * v : 1.055 * pow(v, 1.0 / 2.4) - 0.055;
+}
+
+// One scRGB pixel scaled by `scale` to sRGB-coded 0..1, rolled off to `h`.
+float3 tonemap(float3 c, float scale, float h) {
+    c = into_gamut(c * scale);
+    float y = luminance(c);
+    if (!(y > 1.1920929e-7)) return 0.0;
+    float3 o = c * (roll_off(y, h) / y);
+    float m = max(o.r, max(o.g, o.b));
+    if (m > 1.0) o /= m;
+    return float3(srgb(o.r), srgb(o.g), srgb(o.b));
+}
+
+// Linear BT.709 to linear BT.2020 (ITU-R BT.2087).
+static const float3x3 BT709_TO_2020 = {
+    0.627404, 0.329283, 0.043313,
+    0.069097, 0.919540, 0.011362,
+    0.016391, 0.088013, 0.895595,
+};
+
+// PQ inverse EOTF of `light` (1.0 = 10 000 nits).
+float pq(float light) {
+    const float m1 = 2610.0 / 16384.0;
+    const float m2 = 2523.0 / 4096.0 * 128.0;
+    const float c1 = 3424.0 / 4096.0;
+    const float c2 = 2413.0 / 4096.0 * 32.0;
+    const float c3 = 2392.0 / 4096.0 * 32.0;
+    float y = pow(saturate(light), m1);
+    return pow((c1 + c2 * y) / (1.0 + c3 * y), m2);
+}
+
+// One scRGB pixel as BT.2020 / PQ signals (0..1). Not a number counts as black.
+float3 scrgb_to_pq(float3 c) {
+    float3 l = mul(BT709_TO_2020, c) * (80.0 / 10000.0);
+    l = l < 3.0e38 ? l : 0.0;
+    return float3(pq(l.r), pq(l.g), pq(l.b));
+}
+";
+
 // ---- HDR: scRGB to BT.2020 / PQ (SMPTE ST 2084), for the recordings and the HDR screenshots.
 
-/// 10 000 nits in scRGB units (1.0 = 80 nits).
-const PQ_PEAK: f32 = 10_000.0 / 80.0;
+/// The brightest light PQ codes, in nits.
+pub const PQ_PEAK_NITS: f32 = 10_000.0;
+
+/// The same in scRGB units (1.0 = 80 nits).
+const PQ_PEAK: f32 = PQ_PEAK_NITS / 80.0;
 
 /// Linear BT.709 → linear BT.2020 (ITU-R BT.2087).
 const BT709_TO_2020: [[f32; 3]; 3] = [
@@ -151,7 +274,12 @@ fn table() -> &'static Table {
 /// Colours wider than BT.709 (negative channels) land inside BT.2020; above 10 000 nits clips.
 pub fn scrgb_to_pq(rgb: [f32; 3]) -> [u16; 3] {
     let table = table();
-    BT709_TO_2020.map(|m| table.code(m[0] * rgb[0] + m[1] * rgb[1] + m[2] * rgb[2]))
+    scrgb_to_bt2020(rgb).map(|c| table.code(c))
+}
+
+/// One scRGB pixel on BT.2020 primaries, still linear and in the same units.
+pub fn scrgb_to_bt2020(rgb: [f32; 3]) -> [f32; 3] {
+    BT709_TO_2020.map(|m| m[0] * rgb[0] + m[1] * rgb[1] + m[2] * rgb[2])
 }
 
 /// The inverse of [`scrgb_to_pq`]: BT.2020 / PQ signals (0…1) → scRGB. Colours outside BT.709
@@ -178,6 +306,19 @@ mod tests {
         assert!(luminance([0.0, 1.12, 1.02]) > luminance(fitted) + 0.1);
         // Colours already inside are untouched.
         assert_eq!(into_gamut([0.2, 0.5, 0.1]), [0.2, 0.5, 0.1]);
+    }
+
+    #[test]
+    fn a_picture_without_highlights_keeps_sdr_white() {
+        // Nothing brighter than SDR white: white stays white, a light grey stays itself.
+        let h = headroom(1.0, 1000.0 / 240.0);
+        assert_eq!(roll_off(1.0, h), 1.0);
+        assert!((roll_off(0.9, h) - 0.9).abs() < 1e-6);
+        // Highlights: rolled off only up to the brightest one, never past the screen's peak.
+        assert_eq!(headroom(2.5, 1000.0 / 240.0), 2.5);
+        assert_eq!(headroom(40.0, 4.0), 4.0);
+        assert_eq!(headroom(f32::NAN, 4.0), 1.0);
+        assert_eq!(brightness([f32::INFINITY, 0.0, 0.0], 1.0), 0.0);
     }
 
     #[test]

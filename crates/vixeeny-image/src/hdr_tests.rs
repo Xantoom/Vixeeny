@@ -91,6 +91,23 @@ fn an_hdr_png_keeps_the_highlights_and_says_it_is_pq() {
         let at = bytes.windows(4).position(|c| c == b"cICP").unwrap();
         assert_eq!(&bytes[at + 4..at + 8], &[9, 16, 0, 1]);
         assert!(!bytes.windows(4).any(|c| c == b"sRGB"));
+        // Its light and the screen's, in 0.0001 nits: the sun, rounded up, and a 1000-nit peak.
+        let reader = png::Decoder::new(std::io::Cursor::new(&bytes))
+            .read_info()
+            .unwrap();
+        let info = reader.info();
+        let cll = info.content_light_level.unwrap();
+        assert!(
+            (10_000_000..=10_000_100).contains(&cll.max_content_light_level),
+            "{cll:?}"
+        );
+        assert!(cll.max_frame_average_light_level < cll.max_content_light_level);
+        let screen = info.mastering_display_color_volume.unwrap();
+        assert_eq!(
+            (screen.max_luminance, screen.min_luminance),
+            (10_000_000, 1)
+        );
+        assert_eq!(screen.chromaticities.green.1.into_scaled(), 79_700);
         let (width, px) = png_samples(&bytes);
         let at = |x: u32, y: u32| px[(y * width + x) as usize];
         // SDR white keeps its 240 nits, the sun its 1000: nothing is clipped at SDR white.
@@ -106,6 +123,22 @@ fn an_hdr_png_keeps_the_highlights_and_says_it_is_pq() {
             "{green:?}"
         );
     }
+}
+
+#[test]
+fn the_light_is_the_brightest_channel_and_its_mean() {
+    // Half a 1000-nit white, half black; a stray NaN counts as black.
+    let mut rgba: Vec<f32> = (0..8)
+        .flat_map(|i| {
+            let v = if i < 4 { 1000.0 / 80.0 } else { 0.0 };
+            [v, v, v, 1.0]
+        })
+        .collect();
+    rgba[4 * 7] = f32::NAN;
+    let light = hdr(&rgba, 4, 2).light();
+    assert!((light.max_cll - 1000.0).abs() < 0.1, "{light:?}");
+    assert!((light.max_fall - 500.0).abs() < 0.1, "{light:?}");
+    assert_eq!(light.peak, 1000.0);
 }
 
 #[test]
@@ -143,6 +176,16 @@ fn an_hdr_avif_is_tagged_bt2100_pq_and_reads_back_like_the_png() {
     assert_eq!(&avif[at + 4..at + 8], b"nclx");
     // Primaries 9 (BT.2020), transfer 16 (PQ), matrix 9 (BT.2020 NCL), full range.
     assert_eq!(&avif[at + 8..at + 15], &[0, 9, 0, 16, 0, 9, 0x80]);
+    // Its light in nits (the sun) and the screen's in 0.0001 nits...
+    let at = avif.windows(4).position(|c| c == b"clli").unwrap();
+    let cll = u16::from_be_bytes([avif[at + 4], avif[at + 5]]);
+    assert!((1000..=1001).contains(&cll), "{cll}");
+    let at = avif.windows(4).position(|c| c == b"mdcv").unwrap();
+    let nits = |i: usize| u32::from_be_bytes(avif[at + i..at + i + 4].try_into().unwrap());
+    assert_eq!((nits(20), nits(24)), (10_000_000, 1));
+    // ... given to the picture: after its size, depth, AV1 configuration and colours.
+    let at = avif.windows(4).position(|c| c == b"ipma").unwrap();
+    assert_eq!(&avif[at + 12..at + 21], &[0, 1, 6, 1, 2, 0x83, 4, 5, 6]);
     // The YCbCr conversion is Vixeeny's and the decoder's is FFmpeg's: the same thumbnail as
     // the PNG (lossless) says both use the same matrix.
     let from_avif = crate::decode(&avif).unwrap();
@@ -186,6 +229,9 @@ mod native {
         let image = JxlImage::builder()
             .read(std::io::Cursor::new(&bytes))
             .unwrap();
+        // Tone mapped from the sun rather than PQ's 10 000 nits.
+        let target = image.image_header().metadata.tone_mapping.intensity_target;
+        assert!((target - 1000.0).abs() < 1.0, "{target}");
         let encoding = format!("{:?}", image.image_header().metadata.colour_encoding);
         assert!(
             encoding.contains("Pq") && encoding.contains("Bt2100"),
@@ -226,6 +272,68 @@ mod native {
             for (p, q) in got.iter().zip(want) {
                 assert!(p.abs_diff(q) <= 6, "({x}, {y}): {got:?} vs {want:?}");
             }
+        }
+        // An HDR screen gets the sun back, and the green as the BT.2020 primary, not the
+        // sRGB green it is on the SDR picture.
+        let (cg, at) = ultra_hdr_rendition(&bytes);
+        assert_eq!(cg, crate::native::uhdr_color_gamut_UHDR_CG_BT_2100);
+        let sun = at(w - 6, 6);
+        assert!((sun[1] - 1000.0).abs() < 100.0, "{sun:?}");
+        let green = at(w - 6, h - 6);
+        assert!((green[1] - 160.0).abs() < 25.0, "{green:?}");
+        assert!(green[0] < 8.0 && green[2] < 8.0, "{green:?}");
+    }
+
+    /// The HDR picture libultrahdr rebuilds from an Ultra HDR JPEG for a 1000-nit screen: its
+    /// gamut, and its linear RGB in nits at a pixel.
+    fn ultra_hdr_rendition(
+        bytes: &[u8],
+    ) -> (
+        crate::native::uhdr_color_gamut_t,
+        impl Fn(u32, u32) -> [f32; 3],
+    ) {
+        use crate::native as ffi;
+        // SAFETY: the decoder is released below, after its picture is copied out; the input
+        // outlives the decode.
+        unsafe {
+            let dec = ffi::uhdr_create_decoder();
+            let mut input = ffi::uhdr_compressed_image_t {
+                data: bytes.as_ptr().cast_mut().cast(),
+                data_sz: bytes.len(),
+                capacity: bytes.len(),
+                cg: ffi::uhdr_color_gamut_UHDR_CG_UNSPECIFIED,
+                ct: ffi::uhdr_color_transfer_UHDR_CT_UNSPECIFIED,
+                range: ffi::uhdr_color_range_UHDR_CR_UNSPECIFIED,
+            };
+            let ok = |e: ffi::uhdr_error_info_t| {
+                assert_eq!(e.error_code, ffi::uhdr_codec_err_UHDR_CODEC_OK);
+            };
+            ok(ffi::uhdr_dec_set_image(dec, &raw mut input));
+            ok(ffi::uhdr_dec_set_out_img_format(
+                dec,
+                ffi::uhdr_img_fmt_UHDR_IMG_FMT_64bppRGBAHalfFloat,
+            ));
+            ok(ffi::uhdr_dec_set_out_color_transfer(
+                dec,
+                ffi::uhdr_color_transfer_UHDR_CT_LINEAR,
+            ));
+            ok(ffi::uhdr_dec_set_out_max_display_boost(dec, 1000.0 / 203.0));
+            ok(ffi::uhdr_decode(dec));
+            let out = &*ffi::uhdr_get_decoded_image(dec);
+            let stride = out.stride[0] as usize;
+            let halves = std::slice::from_raw_parts(
+                out.planes[0].cast::<u16>(),
+                stride * out.h as usize * 4,
+            )
+            .to_vec();
+            let cg = out.cg;
+            ffi::uhdr_release_decoder(dec);
+            // 1.0 is 203 nits.
+            let at = move |x: u32, y: u32| {
+                let i = (y as usize * stride + x as usize) * 4;
+                [0, 1, 2].map(|c| vixeeny_common::half::to_f32(halves[i + c]) * 203.0)
+            };
+            (cg, at)
         }
     }
 }

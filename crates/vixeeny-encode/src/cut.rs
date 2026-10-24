@@ -9,7 +9,7 @@
 //! the video encoded again with the encoder of the replay and the audio copied.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use ffmpeg_next::format::Pixel;
 use ffmpeg_next::software::resampling;
@@ -55,6 +55,8 @@ pub struct Clip {
     pub deep: bool,
     /// The HDR10 metadata a re-encode carries on, when `hdr`.
     hdr10: Option<Hdr10>,
+    /// SDR white of an HDR clip, in nits: the recorded monitor's when the file says it.
+    pub sdr_white_nits: f32,
     video: usize,
 }
 
@@ -97,6 +99,12 @@ impl Clip {
             .streams()
             .filter(|s| s.parameters().medium() == media::Type::Audio)
             .count();
+        let sdr_white_nits = input
+            .metadata()
+            .get(crate::hdr::SDR_WHITE_TAG)
+            .and_then(|v| v.parse::<f32>().ok())
+            .filter(|v| (1.0..=10_000.0).contains(v))
+            .unwrap_or(REFERENCE_WHITE);
         let mut frames = Vec::new();
         for (s, packet) in input.packets() {
             if s.index() != video {
@@ -130,6 +138,7 @@ impl Clip {
             hdr,
             deep,
             hdr10,
+            sdr_white_nits,
             video,
         })
     }
@@ -202,7 +211,8 @@ struct Scaler {
 unsafe impl Send for Scaler {}
 
 impl Scaler {
-    fn new(hdr: bool) -> Result<Self, RecordError> {
+    /// `tone`: for the frames of an HDR clip shown in SDR.
+    fn new(tone: Option<ToneMap>) -> Result<Self, RecordError> {
         // SAFETY: plain allocation, checked for NULL.
         let ctx = unsafe { ffi::sws_alloc_context() };
         if ctx.is_null() {
@@ -220,7 +230,7 @@ impl Scaler {
         }
         Ok(Self {
             ctx,
-            tone: hdr.then(ToneMap::new),
+            tone,
             deep: None,
         })
     }
@@ -324,21 +334,26 @@ impl Drop for Scaler {
     }
 }
 
-/// HDR (BT.2020 primaries, PQ) to SDR (BT.709, sRGB) for the preview: the reference white
-/// (203 nits, BT.2408) becomes SDR white, what is brighter rolls off up to the peak instead of
-/// being clipped, colours keep their hue (the curve scales the three channels alike) and those
-/// wider than BT.709 are desaturated just enough to fit, not clipped.
+/// HDR (BT.2020 primaries, PQ) to SDR (BT.709, sRGB) for the preview and the animated exports,
+/// as the screenshots and the recordings are tone mapped (`colour`): the clip's SDR white (the
+/// recorded monitor's, tagged by the recorder; else the BT.2408 reference, 203 nits) becomes
+/// SDR white, and what is brighter rolls off up to the brightest pixel of the frame, followed
+/// smoothly from frame to frame and never past the clip's peak. Colours keep their hue, and
+/// those wider than BT.709 are desaturated just enough to fit.
 pub struct ToneMap {
-    /// PQ code (12 bits) → linear light, 1.0 at the reference white.
+    /// PQ code (12 bits) → linear light, 1.0 at the clip's SDR white.
     linear: Vec<f32>,
-    /// Linear 0..1 (12 bits) → sRGB 8 bits.
+    /// Linear 0..1 (16 bits) → sRGB 8 bits.
     srgb: Vec<u8>,
+    /// The clip's peak, in units of its SDR white.
+    display: f32,
+    steps: (f32, f32),
+    /// The headroom followed (the bits of an `f32`; 0: none yet).
+    followed: AtomicU32,
 }
 
-/// The reference white, nits.
-const REFERENCE_WHITE: f64 = 203.0;
-/// The brightest a clip is taken to be (most HDR games and monitors), nits.
-const PEAK: f64 = 1000.0;
+/// The reference white of an HDR clip that does not say its own, nits (BT.2408).
+pub const REFERENCE_WHITE: f32 = 203.0;
 
 /// BT.2020 to BT.709, linear light (ITU-R BT.2087).
 const BT2020_TO_709: [[f32; 3]; 3] = [
@@ -347,51 +362,70 @@ const BT2020_TO_709: [[f32; 3]; 3] = [
     [-0.018_151, -0.100_579, 1.118_73],
 ];
 
-impl Default for ToneMap {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl ToneMap {
-    pub fn new() -> Self {
+    /// For a clip whose SDR white is `white_nits` and whose brightest pixel is `peak_nits`,
+    /// played at `fps`.
+    pub fn new(white_nits: f32, peak_nits: f32, fps: f64) -> Self {
         let (m1, m2) = (0.159_301_757_812_5, 78.843_75);
         let (c1, c2, c3) = (0.835_937_5, 18.851_562_5, 18.687_5);
+        let white = f64::from(white_nits.max(1.0));
         let linear = (0..4096)
             .map(|i| {
                 let e = (f64::from(i) / 4095.0).powf(1.0 / m2);
                 let nits = ((e - c1).max(0.0) / (c2 - c3 * e)).powf(1.0 / m1) * 10_000.0;
-                (nits / REFERENCE_WHITE) as f32
+                (nits / white) as f32
             })
             .collect();
-        let srgb = (0..4096)
-            .map(|i| {
-                let v = f64::from(i) / 4095.0;
-                let e = if v <= 0.003_130_8 {
-                    12.92 * v
-                } else {
-                    1.055 * v.powf(1.0 / 2.4) - 0.055
-                };
-                (e * 255.0).round().clamp(0.0, 255.0) as u8
-            })
+        let srgb = (0..=u16::MAX)
+            .map(|i| (colour::srgb_encode(f32::from(i) / 65535.0) * 255.0).round() as u8)
             .collect();
-        Self { linear, srgb }
+        Self {
+            linear,
+            srgb,
+            display: (f64::from(peak_nits) / white) as f32,
+            steps: colour::follow_steps(fps),
+            followed: AtomicU32::new(0),
+        }
     }
 
-    /// One pixel: PQ codes (16 bits, full range) to sRGB BGRA.
-    pub fn pixel(&self, rgb: [u16; 3]) -> [u8; 4] {
+    /// The tone mapping of `clip` when it is HDR: its SDR white, its peak, its frame rate.
+    fn of(clip: &Clip) -> Option<Self> {
+        clip.hdr.then(|| {
+            let peak = clip.hdr10.map_or(1000.0, |m| m.peak_nits());
+            let fps = f64::from(clip.rate.0) / f64::from(clip.rate.1.max(1));
+            Self::new(clip.sdr_white_nits, peak, fps)
+        })
+    }
+
+    /// Forgets the headroom followed: the next frame takes its own (after a seek).
+    pub fn reset(&self) {
+        self.followed.store(0, Ordering::Relaxed);
+    }
+
+    /// PQ codes (16 bits, full range) as linear BT.709, inside its gamut, 1.0 at SDR white.
+    fn light(&self, rgb: [u16; 3]) -> [f32; 3] {
         let lin = rgb.map(|c| self.linear[usize::from(c >> 4)]);
-        let [r, g, b] = colour::into_gamut(
+        colour::into_gamut(
             BT2020_TO_709.map(|row| row[0] * lin[0] + row[1] * lin[1] + row[2] * lin[2]),
-        );
-        let m = r.max(g).max(b);
-        let scale = if m > colour::KNEE {
-            colour::roll_off(m, (PEAK / REFERENCE_WHITE) as f32) / m
-        } else {
-            1.0
-        };
-        let code = |v: f32| self.srgb[((v * scale).min(1.0) * 4095.0) as usize];
-        [code(b), code(g), code(r), 255]
+        )
+    }
+
+    /// One pixel: PQ codes (16 bits, full range) to sRGB BGRA, rolled off up to `headroom`.
+    pub fn pixel(&self, rgb: [u16; 3], headroom: f32) -> [u8; 4] {
+        let c = self.light(rgb);
+        let y = colour::luminance(c);
+        // Black, or not a number.
+        if y.is_nan() || y <= f32::EPSILON {
+            return [0, 0, 0, 255];
+        }
+        let k = colour::roll_off(y, headroom) / y;
+        let mut o = c.map(|v| v * k);
+        let m = o[0].max(o[1]).max(o[2]);
+        if m > 1.0 {
+            o = o.map(|v| v / m);
+        }
+        let code = |v: f32| self.srgb[(v.clamp(0.0, 1.0) * 65535.0 + 0.5) as usize];
+        [code(o[2]), code(o[1]), code(o[0]), 255]
     }
 
     /// A picture of `w`×`h` RGB48 (rows `stride` bytes apart) to packed BGRA in `bgra`, on
@@ -404,6 +438,7 @@ impl ToneMap {
     }
 
     /// Like [`run`](Self::run), from pixels of `N` bytes whose PQ codes `codes` reads (16 bits).
+    /// The frame is rolled off up to its brightest pixel, followed from the frames before.
     pub(crate) fn run_with<const N: usize>(
         &self,
         data: &[u8],
@@ -415,18 +450,44 @@ impl ToneMap {
         let threads = std::thread::available_parallelism().map_or(4, std::num::NonZero::get);
         let rows = h.div_ceil(threads).max(1);
         let codes = &codes;
+        let pixels = |chunk: usize, r: usize| {
+            data[(chunk * rows + r) * stride..][..w * N]
+                .as_chunks::<N>()
+                .0
+                .iter()
+        };
+        let brightest = std::thread::scope(|s| {
+            let parts: Vec<_> = (0..h.div_ceil(rows))
+                .map(|chunk| {
+                    s.spawn(move || {
+                        let mut top = 0.0_f32;
+                        for r in 0..rows.min(h - chunk * rows) {
+                            for px in pixels(chunk, r) {
+                                let y = colour::luminance(self.light(codes(px)));
+                                if y.is_finite() {
+                                    top = top.max(y);
+                                }
+                            }
+                        }
+                        top
+                    })
+                })
+                .collect();
+            parts
+                .into_iter()
+                .filter_map(|p| p.join().ok())
+                .fold(0.0, f32::max)
+        });
+        let target = colour::headroom(brightest, self.display);
+        let before = f32::from_bits(self.followed.load(Ordering::Relaxed));
+        let headroom = colour::follow(before, target, self.steps);
+        self.followed.store(headroom.to_bits(), Ordering::Relaxed);
         std::thread::scope(|s| {
             for (chunk, out) in bgra.chunks_mut(rows * w * 4).enumerate() {
                 s.spawn(move || {
                     for (r, line) in out.chunks_exact_mut(w * 4).enumerate() {
-                        let row = &data[(chunk * rows + r) * stride..][..w * N];
-                        let pixels = row
-                            .as_chunks::<N>()
-                            .0
-                            .iter()
-                            .zip(line.as_chunks_mut::<4>().0);
-                        for (px, dst) in pixels {
-                            *dst = self.pixel(codes(px));
+                        for (px, dst) in pixels(chunk, r).zip(line.as_chunks_mut::<4>().0) {
+                            *dst = self.pixel(codes(px), headroom);
                         }
                     }
                 });
@@ -541,7 +602,7 @@ impl Pictures {
             decoder,
             hardware,
             input,
-            scaler: Scaler::new(clip.hdr)?,
+            scaler: Scaler::new(ToneMap::of(clip))?,
             #[cfg(windows)]
             card: Some(crate::card_scale::CardScaler::new()),
             from: 0,
@@ -593,6 +654,9 @@ impl Pictures {
         let key = self.clip.frames[self.clip.key_before(i)].pts;
         seek(&mut self.input, self.clip.video, key)?;
         self.decoder.flush();
+        if let Some(tone) = &self.scaler.tone {
+            tone.reset();
+        }
         self.from = i;
         self.eof = false;
         Ok(())
@@ -1010,7 +1074,7 @@ fn open_encoder(
     Ok((
         VideoOut {
             encoder,
-            scaler: Scaler::new(false)?,
+            scaler: Scaler::new(None)?,
             frame: None,
             pix,
             time_base: clip.time_base,
@@ -1114,7 +1178,7 @@ fn write_cut(
     octx.set_metadata(input.metadata().to_owned());
     let mut header = Dictionary::new();
     if muxer == "mp4" || muxer == "mov" {
-        header.set("movflags", "faststart");
+        header.set("movflags", "faststart+use_metadata_tags");
     }
     octx.write_header_with(header)?;
     let out_tb: Vec<Rational> = octx.streams().map(|s| s.time_base()).collect();
@@ -1277,29 +1341,47 @@ mod tests {
 
     #[test]
     fn hdr_is_tone_mapped_white_to_white_and_highlights_rolled_off() {
-        let tone = ToneMap::new();
-        let grey = |nits: f64| tone.pixel([pq(nits); 3]);
-        assert_eq!(grey(0.0), [0, 0, 0, 255]);
-        // The reference white is nearly SDR white; dim light keeps its level.
-        let white = grey(203.0)[0];
-        assert!(white >= 235, "{white}");
-        let dim = grey(20.3)[0];
-        let expected = (1.055 * 0.1_f64.powf(1.0 / 2.4) - 0.055) * 255.0;
-        assert!(
-            (f64::from(dim) - expected).abs() <= 2.0,
-            "{dim} vs {expected}"
-        );
+        // A clip made on a monitor whose SDR white is 240 nits, 1000 at its peak.
+        let tone = ToneMap::new(240.0, 1000.0, 60.0);
+        let h = 1000.0 / 240.0;
+        let grey = |nits: f64| tone.pixel([pq(nits); 3], h)[0];
+        assert_eq!(tone.pixel([0; 3], h), [0, 0, 0, 255]);
+        // Dim light keeps its level.
+        let expected = colour::srgb_encode(0.1) * 255.0;
+        assert!((f32::from(grey(24.0)) - expected).abs() <= 2.0);
         // Brighter keeps getting brighter up to the peak, never clipped before it.
-        let levels: Vec<u8> = [203.0, 300.0, 500.0, 800.0]
+        let levels: Vec<u8> = [240.0, 400.0, 600.0, 900.0]
             .iter()
-            .map(|&n| grey(n)[0])
+            .map(|&n| grey(n))
             .collect();
         assert!(levels.windows(2).all(|w| w[0] < w[1]), "{levels:?}");
-        assert_eq!(grey(1000.0)[0], 255);
-        assert_eq!(grey(10_000.0)[0], 255);
+        assert_eq!(grey(1000.0), 255);
+        assert_eq!(grey(10_000.0), 255);
         // Hue kept: a bright red stays red, not white.
-        let red = tone.pixel([pq(2000.0), pq(5.0), pq(5.0)]);
+        let red = tone.pixel([pq(2000.0), pq(5.0), pq(5.0)], h);
         assert!(red[2] == 255 && red[1] < 120 && red[0] < 120, "{red:?}");
+    }
+
+    #[test]
+    fn a_frame_without_highlights_keeps_the_clip_s_sdr_white() {
+        let tone = ToneMap::new(240.0, 1000.0, 60.0);
+        // Two pixels of 16-bit PQ: SDR white and 80 % of it.
+        let frame = |nits: [f64; 2]| -> Vec<u8> {
+            nits.iter()
+                .flat_map(|&n| [pq(n); 3])
+                .flat_map(u16::to_le_bytes)
+                .collect()
+        };
+        let mut out = vec![0; 8];
+        tone.run(&frame([240.0, 192.0]), 12, 2, 1, &mut out);
+        assert_eq!(&out[..3], &[255; 3]);
+        let light_grey = (colour::srgb_encode(0.8) * 255.0).round();
+        assert!((f32::from(out[4]) - light_grey).abs() <= 1.0, "{}", out[4]);
+        // A highlight comes: followed quickly, white is rolled off; after a seek, at once.
+        tone.reset();
+        tone.run(&frame([240.0, 1000.0]), 12, 2, 1, &mut out);
+        assert!(out[0] < 250, "{}", out[0]);
+        assert_eq!(&out[4..7], &[255; 3]);
     }
 
     fn clip(frames: &[(i64, bool, usize)]) -> Clip {
@@ -1317,6 +1399,7 @@ mod tests {
             hdr: false,
             deep: false,
             hdr10: None,
+            sdr_white_nits: REFERENCE_WHITE,
             video: 0,
         }
     }

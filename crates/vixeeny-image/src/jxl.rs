@@ -42,11 +42,13 @@ pub(crate) fn encode(image: &Bgra<'_>, settings: &JxlSettings) -> Result<Vec<u8>
         bits: 8,
         data_type: ffi::JxlDataType_JXL_TYPE_UINT8,
         bytes: &rgb,
+        intensity_target: 0.0,
     };
     write(&samples, &srgb, settings)
 }
 
-/// 16 bits per sample, BT.2020 / PQ.
+/// 16 bits per sample, BT.2020 / PQ, with the brightest light it holds as its intensity target:
+/// the peak viewers tone map from, rather than the 10 000 nits PQ can hold.
 pub(crate) fn encode_hdr(image: &Hdr<'_>, settings: &JxlSettings) -> Result<Vec<u8>, ImageError> {
     // Native endianness, as the pixel format of `write` says.
     let bytes = image.to_pq_bytes(u16::to_ne_bytes);
@@ -64,6 +66,7 @@ pub(crate) fn encode_hdr(image: &Hdr<'_>, settings: &JxlSettings) -> Result<Vec<
         bits: 16,
         data_type: ffi::JxlDataType_JXL_TYPE_UINT16,
         bytes: &bytes,
+        intensity_target: image.light().max_cll.max(image.sdr_white_nits),
     };
     write(&samples, &colour, settings)
 }
@@ -75,6 +78,8 @@ struct Samples<'a> {
     bits: u32,
     data_type: ffi::JxlDataType,
     bytes: &'a [u8],
+    /// The brightest light, in nits; 0 lets libjxl choose from the colour encoding.
+    intensity_target: f32,
 }
 
 fn write(
@@ -108,6 +113,9 @@ fn write(
         info.num_color_channels = 3;
         info.alpha_bits = 0;
         info.uses_original_profile = i32::from(settings.lossless);
+        if samples.intensity_target > 0.0 {
+            info.intensity_target = samples.intensity_target;
+        }
         check(
             ffi::JxlEncoderSetBasicInfo(enc.0, &raw const info),
             "basic info",

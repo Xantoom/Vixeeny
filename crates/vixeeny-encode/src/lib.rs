@@ -3,6 +3,8 @@
 //! later milestones, the video pipeline. See README.md.
 
 #[cfg(windows)]
+pub mod card_hdr;
+#[cfg(windows)]
 mod card_scale;
 pub mod clock;
 mod convert;

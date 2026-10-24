@@ -64,7 +64,9 @@ Slint windows are rendered in the tests by the software renderer.
 - **Video**: Windows.Graphics.Capture delivers frames with master-clock timestamps; the
   `Recorder` (`vixeeny-encode`) converts, encodes and muxes on its own threads, with constant or
   variable frame rate, pause, splitting on key frames and a crash-safe MP4. Frames can stay on
-  the GPU (D3D11 → NVENC/AMF).
+  the GPU (D3D11 → NVENC/AMF). From an HDR screen they stay scRGB half floats there, and shaders
+  write either BT.2020 / PQ for HDR10 or the SDR picture through the same tone curve as the
+  screenshots (`vixeeny-common::colour`), as the video editor's preview does.
 - **Audio**: every source delivers 48 kHz float chunks; one `Mixer` per track puts them on the
   master clock (gaps become silence, drift is corrected), then the recorder encodes the track.
 - **Replay buffer**: the same pipeline writes encoded packets into a ring cut by key frames;

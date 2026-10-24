@@ -105,6 +105,7 @@ fn recording_with(dir: &Path, seconds: usize, hdr: bool) -> PathBuf {
         chroma: Chroma::C420,
         hdr,
         peak_nits: 603.0,
+        sdr_white_nits: if hdr { 240.0 } else { 203.0 },
         split: Split::Off,
         keyframe_seconds: 1.0,
         queue: 1_000,
@@ -246,6 +247,8 @@ fn an_hdr_clip_is_previewed_in_sdr() {
     let dir = scratch("hdr");
     let clip = Clip::open(&recording_with(&dir, 1, true)).unwrap();
     assert!(clip.hdr && clip.deep);
+    // The monitor's SDR white the recording noted: 200 nits under it shows as a light grey.
+    assert_eq!(clip.sdr_white_nits, 240.0);
     for hardware in [true, false] {
         let mut pictures = Pictures::open_with(&clip, hardware).unwrap();
         pictures.seek(10).unwrap();
@@ -257,9 +260,10 @@ fn an_hdr_clip_is_previewed_in_sdr() {
             );
         }
         let centre = &picture.bgra[(45 * 160 + 80) * 4..][..4];
-        // Shown as PQ codes it would be a mid grey (≈ 150): tone mapped, a near white.
+        // Shown as PQ codes it would be a mid grey (≈ 150); tone mapped under a 240-nit white,
+        // 200 nits is about 235 (and 254 under the default 203).
         assert!(
-            centre[..3].iter().all(|&c| (225..=250).contains(&c)),
+            centre[..3].iter().all(|&c| (225..=245).contains(&c)),
             "{centre:?} (card: {})",
             pictures.hardware()
         );

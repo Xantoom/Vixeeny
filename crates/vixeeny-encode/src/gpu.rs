@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The GPU path of the recorder: frames are converted and scaled by the D3D11 video
-//! processor ([`crate::d3d_convert`]) into textures that FFmpeg's D3D11 frame pool owns. NVENC
+//! processor ([`crate::d3d_convert`]) into textures that FFmpeg's D3D11 frame pool owns; those
+//! of an HDR monitor go through shaders first ([`crate::card_hdr`]): tone mapped to SDR, or
+//! written as PQ by the shaders themselves. NVENC
 //! and AMF read those textures directly, QSV through a QSV view of the same pool, and software
 //! encoders get them downloaded (NV12 / P010: well under half the bytes of the captured BGRA,
 //! and no colour conversion left for the CPU). Windows only.
@@ -153,6 +155,7 @@ pub use windows_impl::Source;
 #[cfg(windows)]
 mod windows_impl {
     use super::{Feed, GpuPipeline, HwFrame};
+    use crate::card_hdr::{CardHdr, Levels};
     use crate::clock::Fps;
     use crate::d3d_convert::{Conversion, VideoConverter};
     use crate::recorder::RecordError;
@@ -171,16 +174,27 @@ mod windows_impl {
     use windows::core::Interface;
 
     pub struct Parts {
-        converter: VideoConverter,
+        stage: Stage,
         context: ID3D11DeviceContext,
+        out: (u32, u32),
+    }
+
+    /// How a frame becomes a pool frame.
+    enum Stage {
+        /// BGRA8: the video processor converts and scales it.
+        Processor(VideoConverter),
+        /// scRGB, recorded as SDR: tone mapped to BGRA8 by the shaders, then the processor.
+        ToneMapped(CardHdr, VideoConverter),
+        /// scRGB, recorded as HDR: PQ written into the P010 frame by the shaders.
+        Pq(CardHdr),
     }
 
     /// What the capture delivers.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[derive(Debug, Clone, Copy, PartialEq)]
     pub struct Source {
         pub size: (u32, u32),
-        /// scRGB half floats (HDR monitor) instead of BGRA8.
-        pub hdr: bool,
+        /// scRGB half floats (an HDR monitor of these levels) instead of BGRA8.
+        pub hdr: Option<Levels>,
     }
 
     fn cfg_err(what: &str, detail: impl std::fmt::Display) -> RecordError {
@@ -207,18 +221,32 @@ mod windows_impl {
             if chroma != Chroma::C420 && feed != Feed::Download {
                 return Err(cfg_err("frame pool", "4:2:2 and 4:4:4 are downloaded only"));
             }
-            let converter = VideoConverter::new(
-                device,
-                context,
-                source.size,
-                out,
-                (fps.num, fps.den),
-                Conversion {
-                    hdr_source: source.hdr,
-                    hdr_output,
-                },
-            )
-            .map_err(|e| cfg_err("video processor", e))?;
+            let processor = || {
+                VideoConverter::new(
+                    device,
+                    context,
+                    source.size,
+                    out,
+                    (fps.num, fps.den),
+                    Conversion {
+                        hdr_source: false,
+                        hdr_output: false,
+                    },
+                )
+                .map_err(|e| cfg_err("video processor", e))
+            };
+            let shaders = |levels| {
+                let rate = f64::from(fps.num) / f64::from(fps.den.max(1));
+                CardHdr::new(device, context, levels, rate).map_err(|e| cfg_err("HDR shaders", e))
+            };
+            let stage = match source.hdr {
+                None => Stage::Processor(processor()?),
+                Some(levels) if !hdr_output => Stage::ToneMapped(shaders(levels)?, processor()?),
+                Some(_) if chroma != Chroma::C420 || !ten_bit => {
+                    return Err(cfg_err("HDR shaders", "4:2:0 10-bit only"));
+                }
+                Some(levels) => Stage::Pq(shaders(levels)?),
+            };
             let (written, sw_format) = match (chroma, ten_bit) {
                 (Chroma::C420, false) => (DXGI_FORMAT_NV12, ffi::AVPixelFormat::AV_PIX_FMT_NV12),
                 (Chroma::C420, true) => (DXGI_FORMAT_P010, ffi::AVPixelFormat::AV_PIX_FMT_P010LE),
@@ -227,7 +255,9 @@ mod windows_impl {
                 (Chroma::C444, false) => (DXGI_FORMAT_AYUV, ffi::AVPixelFormat::AV_PIX_FMT_VUYX),
                 (Chroma::C444, true) => (DXGI_FORMAT_Y410, ffi::AVPixelFormat::AV_PIX_FMT_XV30LE),
             };
-            if !converter.writes(written) {
+            if let Stage::Processor(converter) | Stage::ToneMapped(_, converter) = &stage
+                && !converter.writes(written)
+            {
                 return Err(cfg_err(
                     "video processor",
                     format!("cannot write {}", chroma.name()),
@@ -322,8 +352,9 @@ mod windows_impl {
                 feed,
                 qsv,
                 imp: Parts {
-                    converter,
+                    stage,
                     context: context.clone(),
+                    out,
                 },
             };
 
@@ -333,7 +364,7 @@ mod windows_impl {
                 Height: source.size.1,
                 MipLevels: 1,
                 ArraySize: 1,
-                Format: if source.hdr {
+                Format: if source.hdr.is_some() {
                     DXGI_FORMAT_R16G16B16A16_FLOAT
                 } else {
                     DXGI_FORMAT_B8G8R8A8_UNORM
@@ -390,10 +421,23 @@ mod windows_impl {
                 let slice = (*frame).data[1] as usize as u32;
                 let dst = ID3D11Texture2D::from_raw_borrowed(&dst_ptr)
                     .ok_or_else(|| cfg_err("frame texture", "missing"))?;
-                self.imp
-                    .converter
-                    .convert(texture, rect, dst, slice)
-                    .map_err(|e| cfg_err("conversion", e))?;
+                match &self.imp.stage {
+                    Stage::Processor(converter) => converter.convert(texture, rect, dst, slice),
+                    Stage::ToneMapped(shaders, converter) => {
+                        shaders.to_sdr(texture, rect).and_then(|sdr| {
+                            let (w, h) = (rect.right - rect.left, rect.bottom - rect.top);
+                            let whole = RECT {
+                                left: 0,
+                                top: 0,
+                                right: w,
+                                bottom: h,
+                            };
+                            converter.convert(&sdr, whole, dst, slice)
+                        })
+                    }
+                    Stage::Pq(shaders) => shaders.to_pq(texture, rect, dst, slice, self.imp.out),
+                }
+                .map_err(|e| cfg_err("conversion", e))?;
                 // The encoder reads the texture on its own thread: make the GPU work visible.
                 self.imp.context.Flush();
                 Ok(hw)
