@@ -7,7 +7,7 @@
 use crate::toast::{Failed, Saved, Toast, failure_text};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -482,7 +482,12 @@ fn plan(
             channels: t.channels,
         })
         .collect();
-    let storage = replay_storage(config, &encoder, output_size);
+    // A recording keeps no replay ring.
+    let storage = if replay {
+        replay_storage(config, &encoder, output_size)
+    } else {
+        replay::Storage::Ram
+    };
     let mut record = RecordConfig {
         options,
         container,
@@ -779,6 +784,9 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
     let origin = vixeeny_platform::monotonic_ns();
     // Frames the GPU path could not hand over: lost, like those the encoder refuses.
     let gpu_lost = Arc::new(AtomicU64::new(0));
+    // Set once the recording thread reads the frames: the capture starts before the encoder is
+    // open, and what comes in the meantime is not lost from the recording.
+    let reading = Arc::new(AtomicBool::new(false));
     // The frames the recording's clock would drop are neither read nor converted.
     let pacer = (!plan.config.vfr).then(|| Pacer::new(plan.config.fps));
     let pacing = || {
@@ -810,6 +818,7 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
                 let (tx, rx) = std::sync::mpsc::sync_channel::<(i64, HwFrame)>(GPU_BACKLOG);
                 let pipeline = Arc::clone(&gpu.pipeline);
                 let lost = Arc::clone(&gpu_lost);
+                let reading = Arc::clone(&reading);
                 let crop = plan.config.crop;
                 let sink: vixeeny_capture::TextureSink =
                     Box::new(move |texture, content, time_ns| {
@@ -824,7 +833,7 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
                         let sent = pipeline
                             .convert(texture, rect)
                             .is_ok_and(|frame| tx.try_send((time_ns, frame)).is_ok());
-                        if !sent {
+                        if !sent && reading.load(Ordering::Acquire) {
                             lost.fetch_add(1, Ordering::Relaxed);
                         }
                         sent
@@ -871,6 +880,7 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
     let thread_state = Arc::clone(&state);
     // The GPU parts must outlive the recording (the device the textures live on).
     let save_as = plan.save_as;
+    let lost_on_gpu = Arc::clone(&gpu_lost);
     // The widget's warning sign, or a notification for a replay (it has no widget).
     let watch = (plan.widget.is_some() || save_as.is_some()).then(|| Watch {
         folder: plan.folder.clone(),
@@ -883,6 +893,7 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
     let thread = std::thread::Builder::new()
         .name("recording".into())
         .spawn(move || {
+            reading.store(true, Ordering::Release);
             let result = record_loop(
                 &stream,
                 gpu_frames.as_ref(),
@@ -906,12 +917,13 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
                     // The file names stay out of the log at this level: they are the user's.
                     tracing::info!(
                         "recording finished: {} frame(s) in {} file(s), {} repeated, {} dropped \
-                         (clock), {} dropped (encoder behind)",
+                         (clock), {} dropped (encoder behind), {} lost (GPU path)",
                         summary.frames,
                         summary.files.len(),
                         summary.repeated,
                         summary.dropped_by_clock,
-                        summary.dropped_by_queue
+                        summary.dropped_by_queue,
+                        lost_on_gpu.load(Ordering::Relaxed)
                     );
                     if let Some(file) = summary.files.first() {
                         let saved = Toast::Saved(Saved::Recording, file.clone());
