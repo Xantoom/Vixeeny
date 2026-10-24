@@ -11,7 +11,7 @@ use ffmpeg_next::ffi;
 
 use vixeeny_encode::audio::{AudioCodec, AudioTrackConfig};
 use vixeeny_encode::clock::Fps;
-use vixeeny_encode::cut::{Clip, Pictures, Reencode, Sound, export};
+use vixeeny_encode::cut::{Clip, Next, Pictures, Reencode, Sound, export};
 use vixeeny_encode::recorder::{
     FrameFormat, OutputContainer, RecordConfig, Recorder, Split, VideoFrame,
 };
@@ -74,8 +74,13 @@ fn recording(dir: &Path, seconds: usize) -> PathBuf {
 
 /// The same, in HDR (x265, 10 bits, BT.2020 PQ) when `hdr`: every frame the reference white.
 fn recording_with(dir: &Path, seconds: usize, hdr: bool) -> PathBuf {
+    recording_of(dir, seconds, hdr, &[])
+}
+
+/// The same with these encoder options too.
+fn recording_of(dir: &Path, seconds: usize, hdr: bool, extra: &[(&str, &str)]) -> PathBuf {
     let registry = Registry::builtin().unwrap();
-    let (encoder, options) = if hdr {
+    let (encoder, mut options) = if hdr {
         let encoder = registry.get("libx265").unwrap().clone();
         let options = encoder
             .presets
@@ -87,6 +92,7 @@ fn recording_with(dir: &Path, seconds: usize, hdr: bool) -> PathBuf {
     } else {
         x264(&registry)
     };
+    options.extend(extra.iter().map(|&(k, v)| (k.to_owned(), v.to_owned())));
     let track = |title: &str| AudioTrackConfig {
         title: title.into(),
         codec: AudioCodec::Aac,
@@ -187,6 +193,67 @@ fn the_clip_lists_its_frames_and_key_frames() {
         .collect();
     assert_eq!(keys, [0, 30, 60]);
     assert!((clip.duration() - 3.0).abs() < 0.05, "{}", clip.duration());
+    // x264 reorders its frames (B-frames): they are listed from the packets.
+    assert!(!Clip::listed_by_index(&clip.path).unwrap());
+}
+
+#[test]
+fn frames_shown_as_decoded_are_listed_from_the_index() {
+    let dir = scratch("index");
+    // Without B-frames, as the hardware encoders record.
+    let path = recording_of(&dir, 3, false, &[("bf", "0")]);
+    assert!(Clip::listed_by_index(&path).unwrap());
+    let clip = Clip::open(&path).unwrap();
+    assert_eq!(clip.frames.len(), 3 * FPS);
+    let keys: Vec<usize> = (0..clip.frames.len())
+        .filter(|&i| clip.frames[i].key)
+        .collect();
+    assert_eq!(keys, [0, 30, 60]);
+    assert!(clip.frames.iter().enumerate().all(|(i, f)| f.decode == i));
+    // The preview finds the frames by these times.
+    let mut pictures = Pictures::open_with(&clip, false).unwrap();
+    pictures.seek(45).unwrap();
+    let (i, picture) = pictures.read((320, 180)).unwrap().unwrap();
+    assert_eq!((i, number(&picture.bgra)), (45, 45));
+}
+
+#[test]
+fn a_seek_goes_on_from_the_decoder_and_a_read_can_be_given_up() {
+    let dir = scratch("seek-on");
+    let clip = Clip::open(&recording(&dir, 3)).unwrap();
+    let mut pictures = Pictures::open_with(&clip, false).unwrap();
+    let mut shown = |pictures: &mut Pictures, frame: usize| {
+        pictures.seek(frame).unwrap();
+        let (i, picture) = pictures.read((320, 180)).unwrap().unwrap();
+        assert_eq!((i, number(&picture.bgra)), (frame, frame));
+    };
+    shown(&mut pictures, 35);
+    // Further on, before the next key frame (60): decoded on from 36.
+    shown(&mut pictures, 50);
+    // A newer request comes while the frames before 70 are decoded: given up...
+    pictures.seek(70).unwrap();
+    assert!(matches!(
+        pictures.read_unless((320, 180), &|| true).unwrap(),
+        Next::Stopped
+    ));
+    // ... and the next seek goes on from there, or back.
+    shown(&mut pictures, 80);
+    shown(&mut pictures, 10);
+}
+
+#[test]
+fn frames_shown_out_of_decoding_order_are_listed_from_the_packets() {
+    let dir = scratch("reordered");
+    // x265 reorders its frames too.
+    let path = recording_with(&dir, 2, true);
+    assert!(!Clip::listed_by_index(&path).unwrap());
+    let clip = Clip::open(&path).unwrap();
+    assert_eq!(clip.frames.len(), 2 * FPS);
+    assert!(clip.frames.windows(2).all(|w| w[0].pts < w[1].pts));
+    let keys: Vec<usize> = (0..clip.frames.len())
+        .filter(|&i| clip.frames[i].key)
+        .collect();
+    assert_eq!(keys, [0, 30]);
 }
 
 #[test]

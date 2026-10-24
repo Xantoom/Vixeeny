@@ -270,7 +270,7 @@ pub fn run<B: StillBackend>(
             };
         }
         let path = save_hdr(action, snap, dest, output, metadata, &capture)?;
-        tracing::debug!(
+        tracing::info!(
             "grabbed (HDR) in {grabbed:?}, encoded and written in {:?}",
             started.elapsed() - grabbed
         );
@@ -311,7 +311,7 @@ pub fn run<B: StillBackend>(
             None => Bgra::new(frame.width, frame.height, frame.stride, &frame.data),
         };
         let path = save_image(action, snap, dest, output, metadata, &image)?;
-        tracing::debug!(
+        tracing::info!(
             "grabbed in {grabbed:?}, encoded and written in {:?}",
             started.elapsed() - grabbed
         );

@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use anyhow::Context;
 use vixeeny_common::config::Config;
 use vixeeny_common::i18n::{Key, Lang, tr};
-use vixeeny_encode::cut::{Clip, Picture, Pictures, Reencode, Sound};
+use vixeeny_encode::cut::{Clip, Next, Picture, Pictures, Reencode, Sound};
 use vixeeny_image::anim::AnimFormat;
 use vixeeny_overlay::cutter::{Cutter, CutterEvent, CutterHost, CutterTexts, Frames, Waker};
 
@@ -25,6 +25,14 @@ use crate::toast::{Failed, Saved, Toast};
 /// Pictures decoded ahead of the one shown while playing (each one the size of the video on
 /// screen).
 const AHEAD: usize = 4;
+
+/// Requests this close together are a drag (or the wheel): a frame far from its key frame
+/// shows the key frame first, then itself unless the next request comes before.
+const DRAGGING: Duration = Duration::from_millis(250);
+
+/// From this many frames after its key frame, a frame asked for while dragging shows the key
+/// frame first (about a tenth of a second of 4K decoding on the graphics card).
+const FAR_FROM_KEY: usize = 24;
 
 /// Opens the editor on `path` (a replay just written), in its own process.
 pub fn open(path: &Path) {
@@ -155,16 +163,20 @@ struct Video {
     asks: Sender<ToVideo>,
     /// The generation of the last request: what an older one still sends is dropped.
     generation: u64,
+    /// The same, for the picture thread: it gives up a frame no longer asked for.
+    newest: Arc<AtomicU64>,
 }
 
 impl Video {
     fn start(clip: &Clip, mail: Sender<Mail>, waker: Waker) -> Self {
         let (asks, rx) = channel();
         let clip = clip.clone();
+        let newest = Arc::new(AtomicU64::new(0));
+        let asked = Arc::clone(&newest);
         let spawned = std::thread::Builder::new()
             .name("cut-video".into())
             .spawn(move || {
-                if let Err(e) = video_thread(&clip, &rx, &mail, &waker) {
+                if let Err(e) = video_thread(&clip, &rx, &asked, &mail, &waker) {
                     tracing::error!("video editor: pictures: {e}");
                 }
             });
@@ -174,23 +186,30 @@ impl Video {
         Self {
             asks,
             generation: 0,
+            newest,
         }
     }
 
-    fn still(&mut self, frame: usize, size: (u32, u32)) {
+    fn next_generation(&mut self) -> u64 {
         self.generation += 1;
-        let _ = self.asks.send(ToVideo::Still(self.generation, frame, size));
+        self.newest.store(self.generation, Ordering::Release);
+        self.generation
+    }
+
+    fn still(&mut self, frame: usize, size: (u32, u32)) {
+        let g = self.next_generation();
+        let _ = self.asks.send(ToVideo::Still(g, frame, size));
     }
 
     fn play(&mut self, from: usize, last: usize, size: (u32, u32)) {
-        self.generation += 1;
+        self.next_generation();
         let _ = self
             .asks
             .send(ToVideo::Play(self.generation, from, last, size));
     }
 
     fn pause(&mut self) {
-        self.generation += 1;
+        self.next_generation();
         let _ = self.asks.send(ToVideo::Pause);
     }
 
@@ -203,10 +222,13 @@ impl Video {
 fn video_thread(
     clip: &Clip,
     rx: &Receiver<ToVideo>,
+    newest: &AtomicU64,
     mail: &Sender<Mail>,
     waker: &Waker,
 ) -> Result<(), vixeeny_encode::recorder::RecordError> {
     let mut pictures = Pictures::open(clip)?;
+    // When the last still frame was asked for: a drag asks for one after another.
+    let mut last_still: Option<Instant> = None;
     // Where the decoder is: the next read gives this frame (no seek needed to go on).
     let mut next: Option<usize> = None;
     // While playing: its generation, its last frame, the size.
@@ -243,17 +265,31 @@ fn video_thread(
         match ask {
             Some(ToVideo::Still(g, frame, size)) => {
                 playing = None;
+                let dragging = last_still.is_some_and(|t| t.elapsed() < DRAGGING);
+                last_still = Some(Instant::now());
+                let stop = || newest.load(Ordering::Acquire) != g;
                 if next != Some(frame) {
+                    let key = clip.key_before(frame);
+                    // Something to show at once while the frame is being reached.
+                    if dragging && frame - key >= FAR_FROM_KEY && next != Some(key) {
+                        pictures.seek(key)?;
+                        if let Next::Frame((_, picture)) = pictures.read_unless(size, &stop)? {
+                            out += 1;
+                            let _ = mail.send(Mail::Still(g, picture));
+                            waker.wake();
+                        }
+                    }
                     pictures.seek(frame)?;
                 }
-                match pictures.read(size)? {
-                    Some((i, picture)) => {
+                match pictures.read_unless(size, &stop)? {
+                    Next::Frame((i, picture)) => {
                         next = Some(i + 1);
                         out += 1;
                         let _ = mail.send(Mail::Still(g, picture));
                         waker.wake();
                     }
-                    None => next = None,
+                    // Given up for a newer request: the decoder is somewhere before `frame`.
+                    Next::Stopped | Next::End => next = None,
                 }
                 continue;
             }

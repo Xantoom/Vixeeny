@@ -60,6 +60,78 @@ pub struct Clip {
     video: usize,
 }
 
+/// How many packets of the video tell whether its frames are shown in the order they are
+/// decoded (an encoder that reorders, with B-frames, does it from the first ones).
+const ORDER_CHECKED: usize = 64;
+
+/// The video's frames as the file's index lists them (an MP4's sample tables, read with the
+/// file: instant, where reading every packet takes about 4 ms per second of 4K video), when it
+/// lists them all and the frames are shown in the order they are decoded; `None` otherwise (a Matroska
+/// file, a recording cut short, B-frames), and the packets are read.
+fn indexed_frames(input: &mut format::context::Input, video: usize) -> Option<Vec<Frame>> {
+    // SAFETY: the stream belongs to the live input; the entries are read while it is.
+    let indexed = unsafe {
+        let stream = *(*input.as_ptr()).streams.add(video);
+        let count = ffi::avformat_index_get_entries_count(stream);
+        if count <= 0 || i64::from(count) != (*stream).nb_frames {
+            return None;
+        }
+        let mut frames = Vec::with_capacity(count as usize);
+        for i in 0..count {
+            let entry = ffi::avformat_index_get_entry(stream, i).as_ref()?;
+            // An edit list hides frames: what is shown is then not what is listed.
+            if entry.flags() & ffi::AVINDEX_DISCARD_FRAME != 0 {
+                return None;
+            }
+            frames.push(Frame {
+                pts: entry.timestamp,
+                key: entry.flags() & ffi::AVINDEX_KEYFRAME != 0,
+                decode: i as usize,
+            });
+        }
+        frames
+    };
+    // The index holds decoding times. Frames shown in the order they are decoded are shown a
+    // fixed time after it (zero, or the delay an encoder keeps); the first packets tell.
+    let mut offset = None;
+    let shown_as_decoded = input
+        .packets()
+        .filter(|(s, _)| s.index() == video)
+        .take(ORDER_CHECKED)
+        .zip(&indexed)
+        .all(|((_, packet), frame)| match (packet.pts(), packet.dts()) {
+            (Some(pts), Some(dts)) if dts == frame.pts => {
+                *offset.get_or_insert(pts - dts) == pts - dts
+            }
+            _ => false,
+        });
+    let offset = offset.filter(|_| shown_as_decoded)?;
+    let mut frames = indexed;
+    for frame in &mut frames {
+        frame.pts += offset;
+    }
+    Some(frames)
+}
+
+/// The video's frames, from every packet of the file.
+fn scanned_frames(input: &mut format::context::Input, video: usize) -> Vec<Frame> {
+    let mut frames = Vec::new();
+    for (s, packet) in input.packets() {
+        if s.index() != video {
+            continue;
+        }
+        let Some(pts) = packet.pts().or(packet.dts()) else {
+            continue;
+        };
+        frames.push(Frame {
+            pts,
+            key: packet.is_key(),
+            decode: frames.len(),
+        });
+    }
+    frames
+}
+
 /// `pts` in seconds.
 fn seconds(pts: i64, tb: Rational) -> f64 {
     pts as f64 * f64::from(tb.0) / f64::from(tb.1.max(1))
@@ -105,20 +177,11 @@ impl Clip {
             .and_then(|v| v.parse::<f32>().ok())
             .filter(|v| (1.0..=10_000.0).contains(v))
             .unwrap_or(REFERENCE_WHITE);
-        let mut frames = Vec::new();
-        for (s, packet) in input.packets() {
-            if s.index() != video {
-                continue;
-            }
-            let Some(pts) = packet.pts().or(packet.dts()) else {
-                continue;
-            };
-            frames.push(Frame {
-                pts,
-                key: packet.is_key(),
-                decode: frames.len(),
-            });
-        }
+        let mut frames = match indexed_frames(&mut input, video) {
+            Some(frames) => frames,
+            // Read again from the start: the index's check may have read some packets.
+            None => scanned_frames(&mut format::input(path)?, video),
+        };
         frames.sort_by_key(|f| f.pts);
         if frames.is_empty() {
             return Err(RecordError::Config("the file has no frames".into()));
@@ -141,6 +204,18 @@ impl Clip {
             sdr_white_nits,
             video,
         })
+    }
+
+    /// Whether the frames of `path` are read from its index rather than its packets (tests).
+    #[doc(hidden)]
+    pub fn listed_by_index(path: &Path) -> Result<bool, RecordError> {
+        let mut input = format::input(path)?;
+        let video = input
+            .streams()
+            .best(media::Type::Video)
+            .ok_or_else(|| RecordError::Config("the file has no video".into()))?
+            .index();
+        Ok(indexed_frames(&mut input, video).is_some())
     }
 
     /// When frame `i` is shown, in seconds from the first frame.
@@ -580,6 +655,16 @@ pub struct Pictures {
     spare: Vec<Vec<u8>>,
 }
 
+/// What a read gives.
+#[derive(Debug)]
+pub enum Next<T> {
+    Frame(T),
+    /// The end of the clip.
+    End,
+    /// Given up for a newer request.
+    Stopped,
+}
+
 /// Pictures handed back are kept up to this many.
 const SPARE: usize = 8;
 
@@ -645,12 +730,23 @@ impl Pictures {
             .parameters();
         (self.decoder, self.hardware) = video_decoder(params, false)?;
         let from = self.from;
-        self.seek(from)
+        self.seek_from_key(from)
     }
 
-    /// The next [`Pictures::read`] gives frame `i`.
+    /// The next [`Pictures::read`] gives frame `i`. A frame a little further on is reached by
+    /// decoding on from where the decoder is, rather than from its key frame again.
     pub fn seek(&mut self, i: usize) -> Result<(), RecordError> {
         let i = i.min(self.clip.frames.len().saturating_sub(1));
+        // No key frame between here and there: going on decodes no more than a seek would.
+        if !self.eof && i >= self.from && self.clip.key_before(i) <= self.from {
+            self.from = i;
+            return Ok(());
+        }
+        self.seek_from_key(i)
+    }
+
+    /// Starts decoding again from the key frame before frame `i`, which the next read gives.
+    fn seek_from_key(&mut self, i: usize) -> Result<(), RecordError> {
         let key = self.clip.frames[self.clip.key_before(i)].pts;
         seek(&mut self.input, self.clip.video, key)?;
         self.decoder.flush();
@@ -662,9 +758,9 @@ impl Pictures {
         Ok(())
     }
 
-    /// The next frame (its index) without scaling it, `None` at the end. Frames before the
-    /// last seek target are skipped.
-    fn next_decoded(&mut self) -> Result<Option<usize>, RecordError> {
+    /// The next frame without scaling it. Frames before the last seek target are skipped, and
+    /// `stop` is asked after each of them.
+    fn next_decoded(&mut self, stop: &dyn Fn() -> bool) -> Result<Next<usize>, RecordError> {
         loop {
             if self.decoder.receive_frame(&mut self.decoded).is_ok() {
                 let pts = self.decoded.timestamp().or(self.decoded.pts());
@@ -672,13 +768,16 @@ impl Pictures {
                     continue;
                 };
                 if i < self.from {
+                    if stop() {
+                        return Ok(Next::Stopped);
+                    }
                     continue;
                 }
                 self.from = i + 1;
-                return Ok(Some(i));
+                return Ok(Next::Frame(i));
             }
             if self.eof {
-                return Ok(None);
+                return Ok(Next::End);
             }
             let mut sent = false;
             let mut failed = false;
@@ -704,22 +803,40 @@ impl Pictures {
 
     /// The next frame and its index, scaled to `size`; `None` at the end.
     pub fn read(&mut self, size: (u32, u32)) -> Result<Option<(usize, Picture)>, RecordError> {
-        let Some(i) = self.next_decoded()? else {
-            return Ok(None);
+        Ok(match self.read_unless(size, &|| false)? {
+            Next::Frame(frame) => Some(frame),
+            Next::End | Next::Stopped => None,
+        })
+    }
+
+    /// [`read`](Self::read), given up as soon as `stop` says so while it decodes the frames
+    /// before a seek's target (a newer request came): the next seek goes on from there.
+    pub fn read_unless(
+        &mut self,
+        size: (u32, u32),
+        stop: &dyn Fn() -> bool,
+    ) -> Result<Next<(usize, Picture)>, RecordError> {
+        let i = match self.next_decoded(stop)? {
+            Next::Frame(i) => i,
+            Next::End => return Ok(Next::End),
+            Next::Stopped => return Ok(Next::Stopped),
         };
         let bgra = self.spare.pop().unwrap_or_default();
         // SAFETY: a live frame; a plain field.
         let on_card = unsafe { !(*self.decoded.as_ptr()).hw_frames_ctx.is_null() };
         if !on_card {
-            return Ok(Some((i, self.scaler.run(&self.decoded, size, bgra)?)));
+            return Ok(Next::Frame((
+                i,
+                self.scaler.run(&self.decoded, size, bgra)?,
+            )));
         }
         #[cfg(windows)]
         let bgra = match self.on_card(size, bgra) {
-            Ok(picture) => return Ok(Some((i, picture))),
+            Ok(picture) => return Ok(Next::Frame((i, picture))),
             Err(bgra) => bgra,
         };
         self.copy_from_card()?;
-        Ok(Some((i, self.scaler.run(&self.copied, size, bgra)?)))
+        Ok(Next::Frame((i, self.scaler.run(&self.copied, size, bgra)?)))
     }
 
     /// The frame of the card scaled on the card; `bgra` back when the card cannot.
