@@ -7,6 +7,7 @@
 //! [`StillBackend`].
 
 mod card_tonemap;
+mod dda;
 mod fake;
 mod frame;
 pub mod freeze;

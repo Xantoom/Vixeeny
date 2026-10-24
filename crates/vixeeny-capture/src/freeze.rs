@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The frozen screen of a zone capture, done on the GPU by the daemon the moment the
-//! shortcut is pressed: every monitor is captured at once (Windows Graphics Capture), the frame
-//! is copied into a texture shared with the app and shown 1:1 by a borderless top-most window
-//! with its own flip-model swap chain (HDR monitors keep their HDR content: half floats in
-//! scRGB). Nothing goes through the CPU. The app reads the textures, builds its editor windows
-//! hidden, and asks the frozen screens to go once its own windows cover them
-//! ([`THAW_MESSAGE`]), so the screen never flickers.
+//! shortcut is pressed: every monitor is captured at once (Desktop Duplication, or Windows
+//! Graphics Capture where it cannot), the frame is copied into a texture shared with the app
+//! and shown 1:1 by a borderless top-most window with its own flip-model swap chain (HDR
+//! monitors keep their HDR content: half floats in scRGB). Nothing goes through the CPU. The
+//! app reads the textures, builds its editor windows hidden, and asks the frozen screens to go
+//! once its own windows cover them ([`THAW_MESSAGE`]), so the screen never flickers.
 
 use std::cell::RefCell;
 use std::sync::Mutex;
@@ -269,6 +269,13 @@ fn finish(
     let access: IDirect3DDxgiInterfaceAccess = surface.cast().map_err(os("surface access"))?;
     // SAFETY: the surface is backed by a D3D11 texture on our device.
     let source: ID3D11Texture2D = unsafe { access.GetInterface() }.map_err(os("GetInterface"))?;
+    let texture = shared_copy(gpu, &source)?;
+    let _ = frame.Close();
+    Ok(texture)
+}
+
+/// A copy of `source` in a new texture that can be shared.
+fn shared_copy(gpu: &Gpu, source: &ID3D11Texture2D) -> Result<ID3D11Texture2D, CaptureError> {
     let mut desc = D3D11_TEXTURE2D_DESC::default();
     // SAFETY: `desc` is a valid out-pointer.
     unsafe { source.GetDesc(&mut desc) };
@@ -291,9 +298,14 @@ fn finish(
     .map_err(os("CreateTexture2D"))?;
     let texture = texture.ok_or_else(|| CaptureError::Os("no shared texture".into()))?;
     // SAFETY: same device, size and format.
-    unsafe { gpu.context.CopyResource(&texture, &source) };
-    let _ = frame.Close();
+    unsafe { gpu.context.CopyResource(&texture, source) };
     Ok(texture)
+}
+
+/// A monitor's picture on its way: duplicated already, or captured once its frame comes.
+enum Source {
+    Duplicated(crate::dda::Frame),
+    Captured(Pending),
 }
 
 /// A hidden (cloaked) top-most window over `monitor`, showing `texture` when `show` (otherwise
@@ -466,15 +478,27 @@ fn take(
 ) -> Result<Frozen, CaptureError> {
     thaw();
     register_class()?;
-    // Every capture starts before any is waited for: they run side by side.
+    // Duplicated when they can be (without the pointer); every capture starts before any is
+    // waited for: they run side by side.
     let pending = monitors
         .iter()
-        .map(|m| start(gpu, m, cursor))
+        .map(|m| {
+            let frame = (!cursor)
+                .then(|| crate::dda::frame(&gpu.device, m, m.hdr.is_some()))
+                .flatten();
+            match frame {
+                Some(frame) => Ok(Source::Duplicated(frame)),
+                None => start(gpu, m, cursor).map(Source::Captured),
+            }
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let deadline = Instant::now() + FRAME_TIMEOUT;
     let textures = pending
         .iter()
-        .map(|p| finish(gpu, p, deadline))
+        .map(|p| match p {
+            Source::Duplicated(frame) => shared_copy(gpu, &frame.texture),
+            Source::Captured(p) => finish(gpu, p, deadline),
+        })
         .collect::<Result<Vec<_>, _>>()?;
     drop(pending);
 
@@ -887,10 +911,15 @@ mod tests {
     use super::*;
     use windows::Win32::Graphics::Direct3D11::D3D11_SUBRESOURCE_DATA;
 
+    /// Taken by the tests reading through the process's reader: its immediate context is used
+    /// by one thread at a time, as in the app.
+    static READING: Mutex<()> = Mutex::new(());
+
     /// The screens held at a press (nothing shown) are read back whole, as the app saves them.
     #[test]
     fn held_screens_are_read_back() {
         use crate::StillBackend;
+        let _reading = READING.lock();
         // Physical pixels, as the daemon and the app see the monitors.
         vixeeny_platform::ensure_dpi_aware();
         let (Ok(gpu), Ok(monitors)) = (Gpu::new(), vixeeny_platform::monitors()) else {
@@ -919,6 +948,7 @@ mod tests {
     /// A texture shared by one device is read by another, as the app reads the daemon's.
     #[test]
     fn shared_textures_are_read_back() {
+        let _reading = READING.lock();
         let Ok(gpu) = Gpu::new() else {
             vixeeny_common::skip_test("no Direct3D device");
             return;

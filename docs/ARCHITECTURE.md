@@ -35,7 +35,7 @@ runtime (`runtime.rs`); the platform layer (`platform/`) is a message-only windo
 |---|---|---|
 | `vixeeny-common` | config (`config.toml`), IPC, hotkey parsing, i18n table, paths, naming | no |
 | `vixeeny-platform` | monitors/DPI, windows, clipboard, notifications | yes |
-| `vixeeny-capture` | still and video capture through Windows.Graphics.Capture | yes |
+| `vixeeny-capture` | still and video capture through Windows.Graphics.Capture and Desktop Duplication | yes |
 | `vixeeny-audio` | WASAPI sources (loopback, microphones, per process), the time-driven `Mixer` | yes |
 | `vixeeny-encode` | codec registry (`codecs/registry.toml`), validation, hardware probe, recorder, replay ring, denoiser | FFmpeg |
 | `vixeeny-image` | PNG/JPEG (jpegli)/WebP/AVIF/JPEG XL encode and decode, HDR → SDR tone mapping | no |
@@ -59,6 +59,8 @@ Slint windows are rendered in the tests by the software renderer.
   every screen at once: one overlay window per monitor shows the screen as it was and dims it,
   then the editor works on that image. A full-screen capture uses the screens the daemon took
   at the press, shown nowhere, so it holds that moment however long the app takes to start.
+  Screens without the pointer come from Desktop Duplication (a few milliseconds); with the
+  pointer, or when duplication is refused, from Windows.Graphics.Capture.
 - **Video**: Windows.Graphics.Capture delivers frames with master-clock timestamps; the
   `Recorder` (`vixeeny-encode`) converts, encodes and muxes on its own threads, with constant or
   variable frame rate, pause, splitting on key frames and a crash-safe MP4. Frames can stay on

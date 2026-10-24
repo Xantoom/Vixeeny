@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Windows Graphics Capture, single-frame mode: create a capture session on a monitor or a
-//! window, wait for the first frame, copy it to CPU memory and tear the session down.
+//! window, wait for the first frame, copy it to CPU memory and tear the session down. A monitor
+//! is taken through Desktop Duplication first, which gives it without the wait (see
+//! [`crate::dda`]).
 //!
 //! Own windows are kept out of monitor captures by `WDA_EXCLUDEFROMCAPTURE`, set by the
 //! windows' owner (see `vixeeny_overlay::popup`), not here.
@@ -100,6 +102,22 @@ impl WgcBackend {
         self.start(item, cursor, pixel_format)?.finish(read)
     }
 
+    /// `monitor`'s picture in `pixel_format`: duplicated when it can be (not with the pointer),
+    /// captured otherwise.
+    fn start_monitor(
+        &self,
+        monitor: &MonitorInfo,
+        cursor: bool,
+        pixel_format: DirectXPixelFormat,
+    ) -> Result<Grab, CaptureError> {
+        let hdr = pixel_format == DirectXPixelFormat::R16G16B16A16Float;
+        if !cursor && let Some(frame) = crate::dda::frame(&self.device, monitor, hdr) {
+            return Ok(Grab::Duplicated(frame));
+        }
+        let item = monitor_item(monitor)?;
+        Ok(Grab::Captured(self.start(&item, cursor, pixel_format)?))
+    }
+
     /// A capture of `item` under way: its first frame is waited for by [`Started::finish`].
     fn start(
         &self,
@@ -191,6 +209,25 @@ impl WgcBackend {
                 let raw = read_back(&self.device, &self.context, texture)?;
                 tonemapped(&raw_hdr(&raw, area)?, info, tonemap)
             }
+        }
+    }
+}
+
+/// A monitor's picture on its way: duplicated already, or captured once its frame comes.
+enum Grab {
+    Duplicated(crate::dda::Frame),
+    Captured(Started),
+}
+
+impl Grab {
+    /// The picture, handed to `read` while it is held.
+    fn finish<T>(
+        self,
+        read: impl FnOnce(&ID3D11Texture2D) -> Result<T, CaptureError>,
+    ) -> Result<T, CaptureError> {
+        match self {
+            Self::Duplicated(frame) => read(&frame.texture),
+            Self::Captured(started) => started.finish(read),
         }
     }
 }
@@ -393,7 +430,8 @@ impl StillBackend for WgcBackend {
         monitor: &MonitorInfo,
         cursor: bool,
     ) -> Result<CpuFrame, CaptureError> {
-        self.grab_sdr_item(&monitor_item(monitor)?, cursor)
+        self.start_monitor(monitor, cursor, DirectXPixelFormat::B8G8R8A8UIntNormalized)?
+            .finish(|t| self.read_sdr(t))
     }
 
     fn grab_monitor_hdr(
@@ -402,7 +440,11 @@ impl StillBackend for WgcBackend {
         area: Option<&PhysicalRect>,
         cursor: bool,
     ) -> Result<HdrFrame, CaptureError> {
-        self.grab_hdr(&monitor_item(monitor)?, area, cursor)
+        self.start_monitor(monitor, cursor, DirectXPixelFormat::R16G16B16A16Float)?
+            .finish(|t| {
+                let raw = read_back(&self.device, &self.context, t)?;
+                raw_hdr(&raw, area)
+            })
     }
 
     fn grab_monitor_sdr(
@@ -413,7 +455,8 @@ impl StillBackend for WgcBackend {
         info: &HdrInfo,
         tonemap: ToneMapFn,
     ) -> Result<CpuFrame, CaptureError> {
-        self.grab_sdr(&monitor_item(monitor)?, area, cursor, info, tonemap)
+        self.start_monitor(monitor, cursor, DirectXPixelFormat::R16G16B16A16Float)?
+            .finish(|t| self.read_tonemapped(t, area, info, tonemap))
     }
 
     fn grab_window(&mut self, window: WindowId, cursor: bool) -> Result<CpuFrame, CaptureError> {
@@ -452,7 +495,7 @@ impl StillBackend for WgcBackend {
                     (Some(_), Some(_)) => DirectXPixelFormat::R16G16B16A16Float,
                     _ => DirectXPixelFormat::B8G8R8A8UIntNormalized,
                 };
-                self.start(&monitor_item(m)?, cursor, format)
+                self.start_monitor(m, cursor, format)
             })
             .collect::<Result<Vec<_>, _>>()?;
         monitors
@@ -480,7 +523,7 @@ impl StillBackend for WgcBackend {
                     Some(_) => DirectXPixelFormat::R16G16B16A16Float,
                     None => DirectXPixelFormat::B8G8R8A8UIntNormalized,
                 };
-                self.start(&monitor_item(m)?, cursor, format)
+                self.start_monitor(m, cursor, format)
             })
             .collect::<Result<Vec<_>, _>>()?;
         monitors
@@ -510,7 +553,7 @@ impl StillBackend for WgcBackend {
                     Some(_) => DirectXPixelFormat::R16G16B16A16Float,
                     None => DirectXPixelFormat::B8G8R8A8UIntNormalized,
                 };
-                self.start(&monitor_item(m)?, cursor, format)
+                self.start_monitor(m, cursor, format)
             })
             .collect::<Result<Vec<_>, _>>()?;
         monitors
