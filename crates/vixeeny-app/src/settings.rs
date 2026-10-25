@@ -130,7 +130,7 @@ fn update_view(lang: Lang) -> UpdateView {
     // What changed in the version offered, else in this one.
     let offered = state.newer_than(current).map_or(current, |r| r.version.as_str());
     let (notes_title, notes) = state.notes_of(offered).map_or_else(Default::default, |notes| {
-        (tr(Key::UpdateNotes, lang).replace("{version}", offered), vixeeny_updater::release::plain_notes(notes))
+        (tr(Key::UpdateNotes, lang).to_owned(), crate::whats_new::ui_notes(notes))
     });
     let view = update_card(&state, current, lang);
     UpdateView { notes_title, notes, ..view }

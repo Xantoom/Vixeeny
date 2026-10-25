@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { Theme, Button, Card, Toggle, ScrollArea } from "controls.slint";
+import { Theme, Button, Card, Toggle, ScrollArea, Notes, NoteLine } from "controls.slint";
 
 // Shown at the first start after an update: the new version and what changed in it.
 export component WhatsNewWindow inherits Window {
     in property <string> heading;
-    // The list of changes (or why it is not there yet).
-    in property <string> notes;
+    // The list of changes, or why it is not there yet.
+    in property <[NoteLine]> notes;
+    in property <string> message;
     in property <string> show-label;
     in property <string> ok-label;
     in-out property <bool> show-again: true;
@@ -58,12 +59,16 @@ export component WhatsNewWindow inherits Window {
                     width: parent.width;
                     height: parent.height;
                     VerticalLayout {
-                        padding: 16px;
-                        Text {
-                            text: root.notes;
-                            color: Theme.text;
+                        padding: 20px;
+                        alignment: start;
+                        if root.message != "" : Text {
+                            text: root.message;
+                            color: Theme.text-2;
                             font-size: 13px;
                             wrap: word-wrap;
+                        }
+                        Notes {
+                            lines: root.notes;
                         }
                     }
                 }

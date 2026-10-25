@@ -64,9 +64,7 @@ pub fn profile_kbps(
     let custom = profile.preset == "custom";
     let rated = custom && encoder.rate_mode(&profile.params).has_bitrate();
     let bitrate = rated.then(|| profile.params.get(rate_keys::BITRATE)?.parse().ok()).flatten();
-    // Constant quality held to a ceiling reaches it at most.
-    let ceiling = profile.max_rate.kbps().filter(|_| !rated);
-    let kbps = expected_kbps(
+    expected_kbps(
         encoder.family,
         size,
         profile.fps,
@@ -77,8 +75,7 @@ pub fn profile_kbps(
             _ => 1.0,
         },
         bitrate,
-    );
-    ceiling.map_or(kbps, |ceiling| kbps.min(ceiling + 512))
+    )
 }
 
 /// The size of a replay of `seconds` at `kbps`, as the settings and the recorder estimate it.

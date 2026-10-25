@@ -115,7 +115,7 @@ keys! {
     UiKeysHelp => "Hold the keys, then release. Esc cancels.", "Maintenez les touches, puis relâchez. Échap annule.";
     SetReplayStart => "Replay", "Replay";
     SetReplayDuration => "Duration", "Durée";
-    SetTemplate => "File name template", "Modèle de nom de fichier";
+    SetTemplate => "File name", "Nom de fichier";
     SetCheckNow => "Check now", "Vérifier maintenant";
     SetProblems => "Problems with these settings", "Problèmes avec ces réglages";
     UiGithub => "GitHub page", "Page GitHub";
@@ -384,7 +384,7 @@ keys! {
     SetNotifyReplay => "Replay saved", "Replay enregistré";
     SetNotifyFailures => "Errors", "Erreurs";
     SetNotifyUpdates => "New version available", "Nouvelle version disponible";
-    SetDiskAlertPercent => "Free space below", "Espace libre sous";
+    SetDiskAlertPercent => "Alert when free space is below", "Alerte espace libre sous";
     GrpReplay => "Recording", "Enregistrement";
     SetReplayUnit => "Unit", "Unité";
     OptSeconds => "Seconds", "Secondes";
@@ -395,14 +395,12 @@ keys! {
     SetSameAsVideo => "Same settings as Recording", "Mêmes paramètres que l'enregistrement";
     GameNoneOpen => "No game is open right now", "Aucun jeu n'est ouvert actuellement";
     SetWhatsNew => "Show what's new after an update", "Afficher les nouveautés après une mise à jour";
-    UpdateNotes => "What's new in {version}", "Nouveautés de la version {version}";
+    UpdateNotes => "Release notes", "Notes de version";
     WhatsNewTitle => "Vixeeny has been updated to {version}", "Vixeeny a été mis à jour en version {version}";
     WhatsNewLoading => "Loading the list of changes…", "Chargement de la liste des changements…";
     WhatsNewFailed => "The list of changes could not be loaded.", "La liste des changements n'a pas pu être chargée.";
     UiOk => "OK", "OK";
     SetPresetPerformance => "Performance", "Performance";
-    SetMaxRate => "Limit the bitrate", "Limiter le débit";
-    SetMaxRateKbps => "Maximum bitrate", "Débit maximum";
     SecRecording => "Recording", "Enregistrement";
     SetReplayNoHardware => "The replay needs a hardware encoder (graphics card or processor graphics): none was found.",
         "Le replay a besoin d'un encodeur matériel (carte graphique ou graphique du processeur) : aucun n'a été trouvé.";

@@ -19,8 +19,8 @@ use vixeeny_settings::{
 
 use crate::theme::{self, Look};
 use crate::{
-    LineItem, PcTile, SearchHit, SettingGroup, SettingRow, SettingsWindow, ShortcutKey, ShortcutRow, ShortcutSpan,
-    UiTexts,
+    LineItem, NoteLine, PcTile, SearchHit, SettingGroup, SettingRow, SettingsWindow, ShortcutKey, ShortcutRow,
+    ShortcutSpan, UiTexts,
 };
 
 /// One line of the about page.
@@ -57,7 +57,7 @@ pub struct UpdateView {
     pub action: String,
     /// The heading of the list of changes, and the list (empty: none to show).
     pub notes_title: String,
-    pub notes: String,
+    pub notes: Vec<NoteLine>,
 }
 
 fn show_update(w: &SettingsWindow, view: &UpdateView) {
@@ -67,7 +67,7 @@ fn show_update(w: &SettingsWindow, view: &UpdateView) {
     w.set_update_progress(view.progress);
     w.set_update_action(view.action.as_str().into());
     w.set_update_notes_title(view.notes_title.as_str().into());
-    w.set_update_notes(view.notes.as_str().into());
+    w.set_update_notes(ModelRc::from(Rc::new(VecModel::from(view.notes.clone()))));
 }
 
 /// A key press while a shortcut is being recorded.
@@ -573,6 +573,9 @@ fn row_model(row: &Row, config: &Config, lang: Lang) -> SettingRow {
             out.kind = if matches!(row.kind, Kind::Slider { .. }) { 8 } else { 2 };
             out.num = n as i32;
             out.shown = row.number_text(n, lang).into();
+            if out.kind == 2 {
+                out.text = row.unit.as_str().into();
+            }
             out.min = *min as i32;
             out.max = *max as i32;
             out.step = *step as i32;

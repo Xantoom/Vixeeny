@@ -20,8 +20,8 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
     let key = id;
     if id.starts_with("template:") {
         return pick(
-            "The name given to each file.\n{app}: the game being played (or Desktop).\n{date}: the day of the capture.\n{time}: the time of the capture.",
-            "Le nom donné à chaque fichier.\n{app} : le jeu en cours (ou Desktop).\n{date} : le jour de la capture.\n{time} : l'heure de la capture.",
+            "The name given to each file.\n{app}: the app's name.\n{date}: the day of the capture.\n{time}: the time of the capture.",
+            "Le nom donné à chaque fichier.\n{app} : nom de l'app.\n{date} : le jour de la capture.\n{time} : l'heure de la capture.",
         );
     }
     match key {
@@ -40,10 +40,7 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
             "10 bits avoids bands in gradients.\nNeeded for HDR.",
             "10 bits évite les bandes dans les dégradés.\nNécessaire pour le HDR.",
         ),
-        "window_backdrop" => pick(
-            "Window captures only: a margin, rounded corners and a shadow, on this background.",
-            "Captures de fenêtre seulement : une marge, des coins arrondis et une ombre, sur ce fond.",
-        ),
+        "window_backdrop" => pick("In window captures only.", "Dans capture de fenêtre seulement."),
         "image_hdr" if config.image.format == "webp" => pick(
             "WebP cannot keep HDR: its pictures are always converted.\nPNG, JPEG, AVIF and JPEG XL can keep it.",
             "Le WebP ne peut pas garder le HDR : ses images sont toujours converties.\nPNG, JPEG, AVIF et JPEG XL peuvent le garder.",
@@ -209,10 +206,6 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
         "replay_same_video" => pick(
             "Records the replay with the settings of the Recording page (on the graphics card all the same).\nOff: the replay has its own, set below.",
             "Enregistre le replay avec les réglages de la page Enregistrement (toujours sur la carte graphique).\nDésactivé : le replay a les siens, réglés ci-dessous.",
-        ),
-        "max_rate" => pick(
-            "Keeps the bitrate under a ceiling: the quality stays the profile's, except in the busiest scenes.\n4500 kbit/s keeps 30 seconds under 20 MB, Discord's limit without Nitro.",
-            "Garde le débit sous un plafond : la qualité reste celle du profil, sauf dans les scènes les plus chargées.\n4500 kbit/s garde 30 secondes sous 20 Mo, la limite de Discord sans Nitro.",
         ),
         "disk_alert:videos" => pick(
             "A warning sign on the recording widget when the disk of the videos is almost full.",

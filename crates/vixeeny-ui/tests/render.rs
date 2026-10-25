@@ -521,8 +521,18 @@ fn the_updates_and_about_pages_show_what_the_host_gives_them() {
         detail: "It installs at the next start of Vixeeny.".into(),
         progress: 1.0,
         action: "Restart".into(),
-        notes_title: "What's new in 1.3.0".into(),
-        notes: "Fixes\n• A window capture keeps its bottom rows.\n• Settings are saved whole.".into(),
+        notes_title: "Release notes".into(),
+        notes: [
+            (1, 0, "What's new"),
+            (2, 0, "Video and Sound are now one Recording page, with three profiles on every page."),
+            (2, 1, "Quality, Balanced and Performance."),
+            (1, 0, "Fixes"),
+            (2, 0, "A window capture keeps its bottom rows."),
+            (2, 0, "Settings are saved whole."),
+        ]
+        .into_iter()
+        .map(|(kind, level, text)| vixeeny_ui::NoteLine { kind, level, text: text.into() })
+        .collect(),
     });
     // The list of changes, unfolded.
     panel.window().invoke_toggle_notes();
@@ -560,7 +570,7 @@ fn info_tooltip_stays_while_the_pointer_moves_on_its_dot() {
         window.dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(x, y) });
     };
     // The glyph, the ring, inside the dot off the glyph, and the margin around it.
-    for (x, y) in [(396.0, 285.0), (390.5, 285.0), (396.0, 280.0), (392.0, 281.0), (401.5, 289.5)] {
+    for (x, y) in [(334.0, 285.0), (328.5, 285.0), (334.0, 280.0), (330.0, 281.0), (339.5, 289.5)] {
         for dx in [0.0, 0.5, 1.0, 1.5] {
             move_to(x + dx, y);
             assert!(changed("tip-on") > 20_000, "no tooltip at ({}, {y})", x + dx);
@@ -647,4 +657,37 @@ fn a_tooltip_goes_after_a_scroll() {
     let left = settings_render_at(&panel, "tip-scroll-4", size);
     let differ = left.as_slice().iter().zip(clean.as_slice()).filter(|(a, b)| a != b).count();
     assert!(differ < 500, "the tooltip stayed ({differ} pixels)");
+}
+
+#[test]
+fn the_whats_new_window_lists_the_changes_by_section() {
+    let window = WINDOW.with(Rc::clone);
+    let whats_new = WhatsNewWindow::new().unwrap();
+    whats_new.set_heading("Vixeeny has been updated to 1.3.0".into());
+    whats_new.set_show_label("Show what's new after an update".into());
+    whats_new.set_ok_label("OK".into());
+    let lines: Vec<NoteLine> = [
+        (1, 0, "What's new"),
+        (2, 0, "Video and Sound are now one Recording page, with three profiles on every page."),
+        (2, 1, "Quality, Balanced and Performance."),
+        (2, 0, "A Notifications page: one switch for all notifications, and one per kind."),
+        (1, 0, "Fixes"),
+        (2, 0, "The replay follows the game a launcher starts."),
+    ]
+    .into_iter()
+    .map(|(kind, level, text)| NoteLine { kind, level, text: text.into() })
+    .collect();
+    whats_new.set_notes(slint::ModelRc::from(Rc::new(slint::VecModel::from(lines))));
+    let (w, h) = (560, 520);
+    window.set_size(PhysicalSize::new(w, h));
+    whats_new.show().unwrap();
+    let mut buffer = SharedPixelBuffer::<Rgb8Pixel>::new(w, h);
+    for _ in 0..2 {
+        window.request_redraw();
+        window.draw_if_needed(|r| {
+            r.render(buffer.make_mut_slice(), w as usize);
+        });
+    }
+    save("9-whats-new", &buffer);
+    whats_new.hide().unwrap();
 }

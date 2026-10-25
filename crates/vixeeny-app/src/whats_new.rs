@@ -31,6 +31,26 @@ pub fn on_start(config: &Config) {
     }
 }
 
+/// Markdown release notes as the windows show them.
+pub fn ui_notes(notes: &str) -> Vec<vixeeny_ui::NoteLine> {
+    use vixeeny_updater::release::{NoteKind, note_lines};
+    note_lines(notes)
+        .into_iter()
+        .map(|line| {
+            let (kind, level) = match line.kind {
+                NoteKind::Text => (0, 0),
+                NoteKind::Heading => (1, 0),
+                NoteKind::Item { level } => (2, i32::from(level)),
+            };
+            vixeeny_ui::NoteLine { kind, level, text: line.text.into() }
+        })
+        .collect()
+}
+
+fn lines_model(lines: Vec<vixeeny_ui::NoteLine>) -> vixeeny_ui::slint::ModelRc<vixeeny_ui::NoteLine> {
+    vixeeny_ui::slint::ModelRc::from(std::rc::Rc::new(vixeeny_ui::slint::VecModel::from(lines)))
+}
+
 pub fn run_child() -> anyhow::Result<()> {
     let config = vixeeny_common::paths::config_file().and_then(|p| Config::load(&p).ok()).unwrap_or_default();
     let lang = crate::lang(&config.general.language);
@@ -42,21 +62,23 @@ pub fn run_child() -> anyhow::Result<()> {
     window.set_show_again(config.general.whats_new);
     let known = state::file().map(|p| State::load(&p)).and_then(|s| s.notes_of(CURRENT).map(str::to_owned));
     match known {
-        Some(notes) => window.set_notes(vixeeny_updater::release::plain_notes(&notes).into()),
+        Some(notes) => window.set_notes(lines_model(ui_notes(&notes))),
         // Not known yet (the version before this one kept none): asked for while the window shows.
         None => {
-            window.set_notes(tr(Key::WhatsNewLoading, lang).into());
+            window.set_message(tr(Key::WhatsNewLoading, lang).into());
             let weak = window.as_weak();
             std::thread::spawn(move || {
-                let text = match vixeeny_updater::client::notes(CURRENT) {
-                    Ok(notes) if !notes.is_empty() => vixeeny_updater::release::plain_notes(&notes),
-                    Ok(_) => String::new(),
+                let (lines, message) = match vixeeny_updater::client::notes(CURRENT) {
+                    Ok(notes) => (ui_notes(&notes), String::new()),
                     Err(e) => {
                         tracing::warn!("what's new: {e:#}");
-                        tr(Key::WhatsNewFailed, lang).to_owned()
+                        (Vec::new(), tr(Key::WhatsNewFailed, lang).to_owned())
                     }
                 };
-                let _ = weak.upgrade_in_event_loop(move |w| w.set_notes(text.into()));
+                let _ = weak.upgrade_in_event_loop(move |w| {
+                    w.set_notes(lines_model(lines));
+                    w.set_message(message.into());
+                });
             });
         }
     }

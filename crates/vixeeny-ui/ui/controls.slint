@@ -454,46 +454,83 @@ export component ComboBox inherits Rectangle {
 }
 
 // "−  42  +"
+// A whole number typed in, from `lo` to `hi`, its unit after it. Digits only; out of range it is outlined in red, and
+// held to the range once left.
 export component NumberBox inherits Rectangle {
     in property <int> value;
     in property <int> lo: 0;
     in property <int> hi: 100;
-    in property <int> step: 1;
     in property <bool> enabled: true;
-    // The value as it reads (grouped, with its unit); empty: the bare number.
-    in property <string> shown;
+    in property <string> unit;
     callback changed(int);
+
+    property <bool> wrong: input.text != "" && (input.text.to-float() < root.lo || input.text.to-float() > root.hi);
+    // The value typed: held to the range, or the value as it was when nothing is typed.
+    function commit() {
+        if input.text == "" {
+            input.text = root.value;
+            return;
+        }
+        let n = max(root.lo, min(root.hi, round(input.text.to-float())));
+        input.text = n;
+        if n != root.value { root.changed(n); }
+    }
+    changed value => { input.text = root.value; }
 
     width: 136px;
     height: 32px;
     border-radius: Theme.radius;
     border-width: 1px;
-    border-color: Theme.control-stroke;
-    background: Theme.control;
+    border-color: root.wrong ? Theme.danger : Theme.control-stroke;
     opacity: root.enabled ? 1.0 : 0.45;
-    HorizontalLayout {
-        IconButton {
-            icon: Icons.subtract;
-            size: 30px;
-            enabled: root.enabled && root.value > root.lo;
-            clicked => { root.changed(max(root.lo, root.value - root.step)); }
-        }
-        Text {
-            horizontal-stretch: 1;
-            text: root.shown != "" ? root.shown : root.value;
+    background: input.has-focus ? (Theme.dark ? #1f1f1f : #ffffff) : (touch.has-hover ? Theme.control-hover : Theme.control);
+    animate background, border-color { duration: Theme.t-fast; }
+
+    // The focus underline, drawn from the middle outwards.
+    Rectangle {
+        y: parent.height - 2px;
+        height: 2px;
+        width: input.has-focus ? parent.width - 2px : 0px;
+        x: (parent.width - self.width) / 2;
+        border-radius: 1px;
+        background: root.wrong ? Theme.danger : Theme.accent;
+        animate width { duration: Theme.t-normal; easing: cubic-bezier(0.2, 0, 0, 1); }
+    }
+    // A press anywhere else in the window takes the focus away (`Fields`).
+    property <bool> kept: input.has-focus && touch.has-hover;
+    changed kept => { Fields.kept = self.kept; }
+    property <int> blur: Fields.blur;
+    changed blur => { input.clear-focus(); }
+    touch := TouchArea {
+        mouse-cursor: MouseCursor.text;
+        clicked => { input.focus(); }
+        input := TextInput {
+            x: 10px;
+            width: parent.width - 20px - (root.unit != "" ? unit.preferred-width + 8px : 0px);
+            height: parent.height;
+            text: root.value;
+            enabled: root.enabled;
+            input-type: number;
             color: Theme.text;
+            selection-background-color: Theme.accent;
+            selection-foreground-color: Theme.on-accent;
             font-size: 14px;
-            overflow: elide;
-            horizontal-alignment: center;
+            vertical-alignment: center;
+            single-line: true;
+            accepted => { root.commit(); }
+            changed has-focus => { if (!self.has-focus) { root.commit(); } }
+        }
+        unit := Text {
+            x: parent.width - 10px - self.width;
+            width: self.preferred-width;
+            visible: root.unit != "";
+            text: root.unit;
+            color: Theme.text-3;
+            font-size: 14px;
             vertical-alignment: center;
         }
-        IconButton {
-            icon: Icons.add;
-            size: 30px;
-            enabled: root.enabled && root.value < root.hi;
-            clicked => { root.changed(min(root.hi, root.value + root.step)); }
-        }
     }
+    accessible-role: text-input;
 }
 
 export component Slider inherits Rectangle {
@@ -1024,8 +1061,10 @@ export component GroupRow inherits Rectangle {
     // A card of its own; else a row of a card shared with its group (no frame), under a line when `divider`.
     in property <bool> framed: true;
     in property <bool> divider: false;
-    // Belongs to the row above it: set in.
+    // Belongs to the row above it: set in, joined to it by a line that turns at a right angle.
     in property <bool> nested: false;
+    // The row under it belongs to the same row: the line goes on down to it.
+    in property <bool> nested-next: false;
     callback clicked();
 
     property <bool> stacked: root.width < root.stack-under;
@@ -1076,6 +1115,20 @@ export component GroupRow inherits Rectangle {
         background: Theme.stroke;
     }
 
+    if root.nested : Rectangle {
+        x: root.pad + 6px;
+        y: -12px;
+        width: 1px;
+        height: root.nested-next ? root.natural + 12px : txt.y + 10px + 12px;
+        background: Theme.stroke-strong;
+    }
+    if root.nested : Rectangle {
+        x: root.pad + 6px;
+        y: txt.y + 10px;
+        width: root.indent - 12px;
+        height: 1px;
+        background: Theme.stroke-strong;
+    }
     touch := TouchArea {
         enabled: root.clickable && !root.fold;
         mouse-cursor: root.clickable ? pointer : default;
@@ -1139,6 +1192,58 @@ export component GroupRow inherits Rectangle {
         opacity: root.dimmed ? 0.6 : 1.0;
         animate opacity { duration: Theme.t-normal; }
         @children
+    }
+}
+
+// A line of release notes. kind: 0 a paragraph, 1 a section's title, 2 a list item `level` deep.
+export struct NoteLine {
+    kind: int,
+    level: int,
+    text: string,
+}
+
+// Release notes: the sections' titles apart, the items behind a dot, each nested one set in further.
+export component Notes inherits VerticalLayout {
+    in property <[NoteLine]> lines;
+
+    alignment: start;
+    spacing: 6px;
+    for l[i] in root.lines : VerticalLayout {
+        padding-top: l.kind == 1 && i > 0 ? 12px : 0px;
+        if l.kind == 1 : Text {
+            text: l.text;
+            color: Theme.text;
+            font-size: 14px;
+            font-weight: 600;
+            wrap: word-wrap;
+        }
+        if l.kind == 0 : Text {
+            text: l.text;
+            color: Theme.text;
+            font-size: 13px;
+            wrap: word-wrap;
+        }
+        if l.kind == 2 : HorizontalLayout {
+            padding-left: l.level * 18px;
+            spacing: 10px;
+            Rectangle {
+                width: 5px;
+                Rectangle {
+                    y: 7px;
+                    width: 5px;
+                    height: 5px;
+                    border-radius: 2.5px;
+                    background: l.level == 0 ? Theme.accent : Theme.text-3;
+                }
+            }
+            Text {
+                horizontal-stretch: 1;
+                text: l.text;
+                color: Theme.text;
+                font-size: 13px;
+                wrap: word-wrap;
+            }
+        }
     }
 }
 

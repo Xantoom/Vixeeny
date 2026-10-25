@@ -1575,7 +1575,6 @@ mod tests {
         let mut c = Config::default();
         c.replay.enabled = true;
         c.replay.duration_seconds = 1200;
-        c.replay.video.max_rate.enabled = false;
         // Under the storage's name.
         let hint = |env: &Env, c: &Config| row(&rows(Section::Replay, env, c), "replay_storage").detail.clone();
         assert!(hint(&with_ram(64), &c).ends_with("in RAM"), "{}", hint(&with_ram(64), &c));
@@ -1583,9 +1582,6 @@ mod tests {
         c.replay.storage = "disk".into();
         assert!(!hint(&with_ram(64), &c).contains(" in RAM"));
         assert!(hint(&with_ram(64), &c).contains("GB"));
-        // Held to its ceiling: twenty minutes at 4.5 Mbit/s, under 1 GB.
-        c.replay.video.max_rate.enabled = true;
-        assert!(hint(&with_ram(64), &c).contains("MB"), "{}", hint(&with_ram(64), &c));
     }
 
     #[test]
@@ -1607,14 +1603,6 @@ mod tests {
         assert_eq!(marked(&video, "preset"), ["balanced"]);
         // Always on the graphics card: no choice of the kind.
         assert!(!has_in(&replay, "replay:encoder_kind") && has_in(&video, "encoder_kind"));
-        // The ceiling: off for both until turned on, its amount nested under it.
-        assert!(!has_in(&replay, "replay:max_rate_kbps") && !has_in(&video, "max_rate_kbps"));
-        row(&video, "max_rate").apply(&mut c, Value::Bool(true)).unwrap();
-        assert_eq!(c.video.max_rate.kbps(), Some(4_500));
-        // A bitrate of the user's own leaves no room for it.
-        c.video.preset = "custom".into();
-        c.video.params.insert("rc.mode".into(), "vbr".into());
-        assert!(!has(Section::Recording, &c, "max_rate"));
         // The encoder `auto` stands for is the videos' one.
         let both = with_nvenc_av1();
         let replay = rows(Section::Replay, &both, &c);

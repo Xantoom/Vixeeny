@@ -496,9 +496,6 @@ fn plan(
     } else {
         encoder.preset_options(preset, output_size, profile.fps, tools)
     };
-    if let Some(kbps) = profile.max_rate.kbps() {
-        encoder.cap_rate(&mut options, kbps);
-    }
     encoder.fit_tools(
         &mut options,
         tools,

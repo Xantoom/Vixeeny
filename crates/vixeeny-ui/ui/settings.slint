@@ -4,7 +4,7 @@
 // cards, one card per group under the group's title. Rows are generic (a toggle, a choice, a folder…); the shortcuts,
 // the updates and the about page have their own layouts. Plain Slint elements only (std-widgets would pull the SVG
 // decoder in for its icons).
-import { Theme, Icons, Icon, Card, Button, IconButton, Toggle, TextBox, ComboBox, NumberBox, Slider, NavItem, Group, GroupRow, InfoBar, ScrollArea, ProgressBar, SearchBox, ScreenPicker, LevelMeter, ColourField, Tip, TipLayer } from "controls.slint";
+import { Theme, Icons, Icon, Card, Button, IconButton, Toggle, TextBox, ComboBox, NumberBox, Slider, NavItem, Group, GroupRow, InfoBar, ScrollArea, ProgressBar, SearchBox, ScreenPicker, LevelMeter, ColourField, Tip, TipLayer, Notes, NoteLine } from "controls.slint";
 
 // A choice of a list with pictures (a program to record).
 export struct SettingRow {
@@ -27,7 +27,7 @@ export struct SettingRow {
     on: bool,
     text: string,
     num: int,
-    // The number as it reads: grouped, with its unit (`10 000 kbit/s`).
+    // The number as it reads: grouped, with its unit (`10 000 kbit/s`). A number typed in has its unit in `text`.
     shown: string,
     // The microphone's level, live under the slider.
     meter: bool,
@@ -386,9 +386,8 @@ component SettingLine inherits GroupRow {
         value: root.entry.num;
         lo: root.entry.min;
         hi: root.entry.max;
-        step: root.entry.step;
         enabled: root.entry.enabled;
-        shown: root.entry.shown;
+        unit: root.entry.text;
         changed(v) => { root.number(v); }
     }
     if root.entry.kind == 8 : VerticalLayout {
@@ -668,7 +667,7 @@ export component SettingsWindow inherits Window {
     in property <string> update-action;
     // What changed in the version offered (or this one), under a heading that folds it.
     in property <string> update-notes-title;
-    in property <string> update-notes;
+    in property <[NoteLine]> update-notes;
     property <bool> notes-open: false;
     public function toggle-notes() { root.notes-open = !root.notes-open; }
     // The page holds a setting changed from how it comes (its reset button works), and the question its reset asks.
@@ -925,7 +924,7 @@ export component SettingsWindow inherits Window {
                         }
                     }
                     // The list of changes, folded under its heading.
-                    if root.update-notes != "" : GroupRow {
+                    if root.update-notes.length > 0 : GroupRow {
                         title: root.update-notes-title;
                         glyph: Icons.document;
                         clickable: true;
@@ -936,16 +935,14 @@ export component SettingsWindow inherits Window {
                             size: 14px;
                         }
                     }
-                    if root.update-notes != "" && root.notes-open : Card {
-                        height: notes.preferred-height + 32px;
-                        notes := Text {
+                    if root.update-notes.length > 0 && root.notes-open : Card {
+                        height: notes.preferred-height + 36px;
+                        notes := Notes {
                             x: 52px;
-                            y: 16px;
+                            y: 18px;
                             width: parent.width - 52px - 20px;
-                            text: root.update-notes;
-                            color: Theme.text;
-                            font-size: 13px;
-                            wrap: word-wrap;
+                            height: self.preferred-height;
+                            lines: root.update-notes;
                         }
                     }
                 }
@@ -964,6 +961,7 @@ export component SettingsWindow inherits Window {
                         VerticalLayout {
                     for r[i] in g.rows : SettingLine {
                         divider: i > 0;
+                        nested-next: r.nested && g.rows[i + 1].nested;
                         entry: r;
                         t: root.t;
                         view-h: root.height;

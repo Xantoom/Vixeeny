@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The rows of each page of the settings window.
 
-use vixeeny_common::config::{Config, DiskAlert, MaxRate, Naming, TARGET_SOURCE};
+use vixeeny_common::config::{Config, DiskAlert, Naming, TARGET_SOURCE};
 use vixeeny_common::i18n::Key;
 use vixeeny_encode::registry::{
     BITRATE_RANGE, DEFAULT_BITRATE, DEFAULT_MAXRATE, Family, ParamType, PresetName, RateMode, rate_keys,
@@ -846,30 +846,6 @@ fn video_settings(env: &Env, config: &Config, replay: bool) -> Vec<Row> {
                 |c| c.video.chroma.clone(),
                 |c, v| c.video.chroma = v,
             ));
-        }
-    }
-
-    // A ceiling on constant quality (the bitrate modes have rates of their own).
-    let spec = current.as_deref().and_then(encoders::spec);
-    if !custom || spec.is_none_or(|spec| spec.rate_mode(&profile.params) == RateMode::Quality) {
-        rows.push(toggle(
-            "max_rate",
-            t(Key::SetMaxRate),
-            |c| c.video.max_rate.enabled,
-            |c, v| c.video.max_rate.enabled = v,
-        ));
-        if profile.max_rate.enabled {
-            let (lo, hi) = MaxRate::RANGE;
-            rows.push(nested(counted(
-                number(
-                    "max_rate_kbps",
-                    t(Key::SetMaxRateKbps),
-                    (i64::from(lo), i64::from(hi), 100),
-                    move |c| i64::from(c.video.max_rate.kbps.clamp(lo, hi)),
-                    |c, v| c.video.max_rate.kbps = v as u32,
-                ),
-                "kbit/s",
-            )));
         }
     }
 

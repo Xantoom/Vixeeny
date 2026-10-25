@@ -684,8 +684,6 @@ pub struct Video {
     pub params: BTreeMap<String, String>,
     /// Those of the other encoders, by encoder id: back when that encoder is chosen again.
     pub params_by_encoder: BTreeMap<String, BTreeMap<String, String>>,
-    /// A ceiling on the bitrate of the constant-quality profiles.
-    pub max_rate: MaxRate,
     pub show_cursor: bool,
     /// Variable frame rate (Matroska and WebM only).
     pub vfr: bool,
@@ -710,39 +708,11 @@ impl Default for Video {
             preset: "balanced".into(),
             params: BTreeMap::new(),
             params_by_encoder: BTreeMap::new(),
-            max_rate: MaxRate::default(),
             show_cursor: false,
             vfr: false,
             split: Split::default(),
             audio: Audio::default(),
         }
-    }
-}
-
-/// The ceiling offered when it is turned on, in kbit/s: 30 seconds, and the second back to their first key frame, stay
-/// under Discord's 20 MB with the sound (160 kbit/s), even when the encoder's two-second buffer is spent at once: (4
-/// 500 × 31 + 9 000 + 160 × 31) kbit ≈ 19.2 MB.
-pub const REPLAY_MAX_KBPS: u32 = 4_500;
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct MaxRate {
-    pub enabled: bool,
-    pub kbps: u32,
-}
-
-impl Default for MaxRate {
-    fn default() -> Self {
-        Self { enabled: false, kbps: REPLAY_MAX_KBPS }
-    }
-}
-
-impl MaxRate {
-    pub const RANGE: (u32, u32) = (500, 200_000);
-
-    /// The ceiling in kbit/s, when on.
-    pub fn kbps(&self) -> Option<u32> {
-        self.enabled.then(|| self.kbps.clamp(Self::RANGE.0, Self::RANGE.1))
     }
 }
 
@@ -1455,11 +1425,11 @@ mod tests {
         assert_eq!((replay.encoder.as_str(), replay.auto_codec.as_str()), ("auto", ""));
         assert_eq!((replay.resolution.as_str(), replay.fps, replay.preset.as_str()), ("1080p", 60, "performance"));
         assert_eq!((cfg.replay.duration_seconds, cfg.replay.duration_unit.as_str()), (180, "minutes"));
-        assert_eq!((replay.max_rate.kbps(), cfg.video.preset.as_str()), (None, "balanced"));
+        assert_eq!(cfg.video.preset, "balanced");
         assert_eq!((replay.audio.codec.as_str(), replay.audio.bitrate_kbps), ("aac", 160));
         assert_eq!((replay.audio.capture.as_str(), replay.audio.routing.as_str()), ("target", "mix_all"));
         // The videos keep theirs, and the replay takes them all, sound included, when it follows them.
-        assert_eq!((cfg.video.auto_codec.as_str(), cfg.video.max_rate.kbps()), ("", None));
+        assert_eq!(cfg.video.auto_codec, "");
         let mut cfg = cfg;
         cfg.video.audio.bitrate_kbps = 320;
         cfg.replay.same_as_video = true;
@@ -1478,9 +1448,6 @@ mod tests {
         let read =
             Config::from_toml(&format!("schema_version = {SCHEMA_VERSION}\n[replay]\nenabled = true\n")).unwrap();
         assert_eq!(read.replay.video, Video::replay());
-        // A ceiling out of range is held to it.
-        let cap = |kbps| MaxRate { enabled: true, kbps }.kbps();
-        assert_eq!((cap(10), cap(1_000_000)), (Some(500), Some(200_000)));
     }
 
     #[test]
@@ -1506,7 +1473,7 @@ mod tests {
         assert_eq!(cfg.replay.video.fps, 120);
         assert_eq!((cfg.video.preset.as_str(), cfg.replay.video.preset.as_str()), ("balanced", "balanced"));
         assert_eq!(cfg.replay_video().audio.bitrate_kbps, 320);
-        assert_eq!((cfg.replay.video.auto_codec.as_str(), cfg.replay.video.max_rate.kbps()), ("", None));
+        assert_eq!(cfg.replay.video.auto_codec, "");
         // The alert was off: off, its share ready for when it is on again.
         assert_eq!(cfg.disk_alert.recordings, DiskAlert { enabled: false, percent: 5 });
         assert_eq!(cfg.disk_alert.replays.threshold(), 0);

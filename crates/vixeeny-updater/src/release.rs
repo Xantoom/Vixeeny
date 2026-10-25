@@ -99,49 +99,65 @@ pub fn shown_notes(body: &str) -> String {
     out.trim().to_owned()
 }
 
-/// Markdown notes as plain text to read: headings without their marks, list items behind a bullet, the emphasis and the
-/// links' targets dropped.
-pub fn plain_notes(notes: &str) -> String {
-    let lines: Vec<String> = notes
+/// What a line of the notes is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoteKind {
+    /// A paragraph.
+    Text,
+    /// A section's title (`## Fixes`).
+    Heading,
+    /// A list item, `level` deep (0 at the margin).
+    Item { level: u8 },
+}
+
+/// A line of the notes as it is read: without its marks, the emphasis and the links' targets.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoteLine {
+    pub kind: NoteKind,
+    pub text: String,
+}
+
+/// Markdown notes as lines to read: headings, list items (their depth from their indent), paragraphs. Empty lines go.
+pub fn note_lines(notes: &str) -> Vec<NoteLine> {
+    notes
         .lines()
-        .map(|line| {
+        .filter_map(|line| {
             let line = line.trim_end();
             let indent = line.len() - line.trim_start().len();
             let text = line.trim_start();
-            let text = if let Some(item) = text.strip_prefix("- ").or_else(|| text.strip_prefix("* ")) {
-                format!("{}• {item}", " ".repeat(indent))
+            let (kind, text) = if let Some(item) = text.strip_prefix("- ").or_else(|| text.strip_prefix("* ")) {
+                (NoteKind::Item { level: u8::try_from(indent / 2).unwrap_or(u8::MAX) }, item)
+            } else if text.starts_with('#') {
+                (NoteKind::Heading, text.trim_start_matches('#').trim_start())
             } else {
-                text.trim_start_matches('#').trim_start().to_owned()
+                (NoteKind::Text, text)
             };
-            let mut plain = String::with_capacity(text.len());
-            let mut chars = text.chars().peekable();
-            while let Some(c) = chars.next() {
-                match c {
-                    '*' | '`' => {}
-                    // `[text](url)`: the text.
-                    ']' if chars.peek() == Some(&'(') => {
-                        for c in chars.by_ref() {
-                            if c == ')' {
-                                break;
-                            }
-                        }
+            let text = inline_plain(text);
+            (!text.is_empty()).then_some(NoteLine { kind, text })
+        })
+        .collect()
+}
+
+/// `text` without its emphasis, code marks and links' targets.
+fn inline_plain(text: &str) -> String {
+    let mut plain = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '*' | '`' => {}
+            // `[text](url)`: the text.
+            ']' if chars.peek() == Some(&'(') => {
+                for c in chars.by_ref() {
+                    if c == ')' {
+                        break;
                     }
-                    '[' => {}
-                    c => plain.push(c),
                 }
             }
-            plain
-        })
-        .collect();
-    // No more than one empty line in a row.
-    let mut out: Vec<String> = Vec::new();
-    for line in lines {
-        if line.is_empty() && out.last().is_none_or(String::is_empty) {
-            continue;
+            '[' => {}
+            c => plain.push(c),
         }
-        out.push(line);
     }
-    out.join("\n").trim().to_owned()
+    plain.trim().to_owned()
 }
 
 /// Where the release of `version` is asked for.
@@ -274,7 +290,15 @@ mod tests {
         let release = Release::parse(&json("0.6.0", "0.6.0")).ok().flatten().expect("none");
         assert_eq!(release.notes, "## What's new\n- Things");
         let notes = "## Fixes\n\n\n- A **window** capture, see [the page](https://x).\n  - `Nested`\n";
-        assert_eq!(plain_notes(notes), "Fixes\n\n• A window capture, see the page.\n  • Nested");
+        let line = |kind, text: &str| NoteLine { kind, text: text.into() };
+        assert_eq!(
+            note_lines(notes),
+            [
+                line(NoteKind::Heading, "Fixes"),
+                line(NoteKind::Item { level: 0 }, "A window capture, see the page."),
+                line(NoteKind::Item { level: 1 }, "Nested"),
+            ]
+        );
         assert_eq!(shown_notes("a<!-- x -->b<!-- open"), "ab");
         assert!(tag_url("https://github.com/Xantoom/Vixeeny", "1.2.0").ends_with("/releases/tags/v1.2.0"));
     }
