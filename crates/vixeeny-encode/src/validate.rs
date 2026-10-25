@@ -5,7 +5,7 @@
 use vixeeny_common::config::Video;
 
 use crate::probe::ProbeResult;
-use crate::registry::{Chroma, Container, Encoder, Family, Kind, PresetName, Registry, Vendor};
+use crate::registry::{Chroma, Container, Encoder, Family, Kind, PresetName, Registry};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Severity {
@@ -290,30 +290,18 @@ pub fn validate(profile: &Video, ctx: &Context<'_>) -> Vec<Issue> {
 
 /// The encoder `auto` stands for: the best hardware encoder the probe validated for 8-bit 4:2:0
 /// that takes pictures of `size` (when known), else libx264. Order: AV1 first (the smallest
-/// files for the quality), then HEVC, then H.264; NVIDIA, AMD, Intel…
+/// files for the quality), then HEVC, then H.264; NVIDIA, AMD, Intel… (the `preference` of each).
 pub fn pick_auto<'a>(
     registry: &'a Registry,
     probe: Option<&ProbeResult>,
     size: Option<(u32, u32)>,
 ) -> Option<&'a Encoder> {
-    let vendor_rank = |v: Vendor| match v {
-        Vendor::Nvidia => 0,
-        Vendor::Amd => 1,
-        Vendor::Intel => 2,
-        Vendor::None => 3,
-    };
-    let family_rank = |f: Family| match f {
-        Family::Av1 => 0,
-        Family::Hevc => 1,
-        Family::H264 => 2,
-        Family::Vp9 => 3,
-    };
     let best = probe.and_then(|probe| {
         registry
             .encoders()
             .filter(|e| e.kind == Kind::Hardware && probe.supports(&e.id, 8, Chroma::C420, false))
             .filter(|e| size.is_none_or(|size| probe.fits(&e.id, size)))
-            .min_by_key(|e| (family_rank(e.family), vendor_rank(e.vendor)))
+            .min_by_key(|e| (e.family.preference(), e.vendor.preference()))
     });
     best.or_else(|| registry.get("libx264"))
 }

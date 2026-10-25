@@ -615,24 +615,22 @@ pub fn look_of(config: &Config) -> vixeeny_ui::theme::Look {
 
 /// The programs, microphones and outputs the audio page offers.
 fn audio_devices() -> vixeeny_settings::AudioDevices {
-    {
-        use vixeeny_settings::{AudioDevices, AudioEntry};
-        let devices = |list: Vec<vixeeny_audio::DeviceInfo>| {
-            list.into_iter()
-                .map(|d| AudioEntry {
-                    id: d.id,
-                    name: d.name,
-                    icon: None,
-                })
-                .collect()
-        };
-        let (programs, games) = programs(vixeeny_audio::list_applications());
-        AudioDevices {
-            outputs: devices(vixeeny_audio::list_outputs()),
-            inputs: devices(vixeeny_audio::list_microphones()),
-            programs,
-            games,
-        }
+    use vixeeny_settings::{AudioDevices, AudioEntry};
+    let devices = |list: Vec<vixeeny_audio::DeviceInfo>| {
+        list.into_iter()
+            .map(|d| AudioEntry {
+                id: d.id,
+                name: d.name,
+                icon: None,
+            })
+            .collect()
+    };
+    let (programs, games) = programs(vixeeny_audio::list_applications());
+    AudioDevices {
+        outputs: devices(vixeeny_audio::list_outputs()),
+        inputs: devices(vixeeny_audio::list_microphones()),
+        programs,
+        games,
     }
 }
 

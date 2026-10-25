@@ -7,9 +7,9 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use vixeeny_editor::RgbaImage;
-use windows::Win32::Foundation::{HMODULE, POINT, RECT};
+use windows::Win32::Foundation::{E_INVALIDARG, HMODULE, POINT, RECT};
 use windows::Win32::Graphics::Direct2D::Common::{
-    D2D_RECT_F, D2D_SIZE_U, D2D1_ALPHA_MODE_IGNORE, D2D1_ALPHA_MODE_PREMULTIPLIED,
+    D2D_RECT_F, D2D_SIZE_U, D2D1_ALPHA_MODE, D2D1_ALPHA_MODE_IGNORE, D2D1_ALPHA_MODE_PREMULTIPLIED,
     D2D1_BEZIER_SEGMENT, D2D1_COLOR_F, D2D1_COMPOSITE_MODE_SOURCE_OVER, D2D1_FIGURE_BEGIN_FILLED,
     D2D1_FIGURE_END_CLOSED, D2D1_FIGURE_END_OPEN, D2D1_FILL_MODE_WINDING, D2D1_GRADIENT_STOP,
     D2D1_PIXEL_FORMAT,
@@ -47,7 +47,7 @@ use windows::Win32::Graphics::DirectWrite::{
     IDWriteFactory5, IDWriteFontCollection, IDWriteTextLayout,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
-    DXGI_ALPHA_MODE_IGNORE, DXGI_ALPHA_MODE_PREMULTIPLIED, DXGI_FORMAT_B8G8R8A8_UNORM,
+    DXGI_ALPHA_MODE_IGNORE, DXGI_ALPHA_MODE_PREMULTIPLIED, DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM,
     DXGI_FORMAT_R8G8B8A8_UNORM,
 };
 use windows::Win32::Graphics::Dxgi::{IDXGIDevice, IDXGIDevice3};
@@ -354,39 +354,52 @@ impl Gfx {
         Ok(surface)
     }
 
-    /// `img`'s `(x, y, w, h)` part as a Direct2D bitmap (opaque).
-    pub fn bitmap(&self, img: &RgbaImage, part: (u32, u32, u32, u32)) -> Result<ID2D1Bitmap1> {
-        let (x, y, w, h) = part;
-        let stride = img.width as usize * 4;
-        let start = y as usize * stride + x as usize * 4;
-        let end = start + (h.max(1) as usize - 1) * stride + w as usize * 4;
-        let Some(pixels) = img.data.get(start..end) else {
-            return Err(windows::core::Error::from_hresult(
-                windows::Win32::Foundation::E_INVALIDARG,
-            ));
-        };
+    /// `h` rows of `w` pixels, `stride` bytes apart, as a Direct2D bitmap.
+    fn new_bitmap(
+        &self,
+        (w, h): (u32, u32),
+        stride: u32,
+        pixels: &[u8],
+        format: DXGI_FORMAT,
+        alpha: D2D1_ALPHA_MODE,
+    ) -> Result<ID2D1Bitmap1> {
+        if w == 0 || h == 0 || pixels.len() < (h as usize - 1) * stride as usize + w as usize * 4 {
+            return Err(E_INVALIDARG.into());
+        }
         let props = D2D1_BITMAP_PROPERTIES1 {
             pixelFormat: D2D1_PIXEL_FORMAT {
-                format: DXGI_FORMAT_R8G8B8A8_UNORM,
-                alphaMode: D2D1_ALPHA_MODE_IGNORE,
+                format,
+                alphaMode: alpha,
             },
             dpiX: 96.0,
             dpiY: 96.0,
             bitmapOptions: D2D1_BITMAP_OPTIONS_NONE,
             colorContext: std::mem::ManuallyDrop::new(None),
         };
-        // SAFETY: `pixels` holds `h` rows `stride` bytes apart, each with `w` RGBA pixels.
+        let size = D2D_SIZE_U {
+            width: w,
+            height: h,
+        };
+        // SAFETY: `pixels` holds `h` rows `stride` bytes apart, each with `w` pixels (checked).
         unsafe {
-            self.dc.CreateBitmap(
-                D2D_SIZE_U {
-                    width: w.max(1),
-                    height: h.max(1),
-                },
-                Some(pixels.as_ptr().cast()),
-                u32::try_from(stride).unwrap_or(u32::MAX),
-                &props,
-            )
+            self.dc
+                .CreateBitmap(size, Some(pixels.as_ptr().cast()), stride, &props)
         }
+    }
+
+    /// `img`'s `(x, y, w, h)` part as a Direct2D bitmap (opaque).
+    pub fn bitmap(&self, img: &RgbaImage, part: (u32, u32, u32, u32)) -> Result<ID2D1Bitmap1> {
+        let (x, y, w, h) = (part.0, part.1, part.2.max(1), part.3.max(1));
+        let stride = img.width * 4;
+        let start = y as usize * stride as usize + x as usize * 4;
+        let pixels = img.data.get(start..).unwrap_or_default();
+        self.new_bitmap(
+            (w, h),
+            stride,
+            pixels,
+            DXGI_FORMAT_R8G8B8A8_UNORM,
+            D2D1_ALPHA_MODE_IGNORE,
+        )
     }
 
     fn format(
@@ -504,11 +517,6 @@ impl Gfx {
 
     /// An RGBA picture (straight alpha, `w`×`h`) as a Direct2D bitmap.
     pub fn rgba_bitmap(&self, w: u32, h: u32, rgba: &[u8]) -> Result<ID2D1Bitmap1> {
-        if rgba.len() != w as usize * h as usize * 4 || w == 0 || h == 0 {
-            return Err(windows::core::Error::from_hresult(
-                windows::Win32::Foundation::E_INVALIDARG,
-            ));
-        }
         let mut premultiplied = rgba.to_vec();
         for px in premultiplied.as_chunks_mut::<4>().0 {
             let a = u16::from(px[3]);
@@ -516,67 +524,31 @@ impl Gfx {
                 *c = ((u16::from(*c) * a + 127) / 255) as u8;
             }
         }
-        let props = D2D1_BITMAP_PROPERTIES1 {
-            pixelFormat: D2D1_PIXEL_FORMAT {
-                format: DXGI_FORMAT_R8G8B8A8_UNORM,
-                alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
-            },
-            dpiX: 96.0,
-            dpiY: 96.0,
-            bitmapOptions: D2D1_BITMAP_OPTIONS_NONE,
-            colorContext: std::mem::ManuallyDrop::new(None),
-        };
-        // SAFETY: `premultiplied` holds `h` rows of `w` RGBA pixels, `w * 4` bytes apart.
-        unsafe {
-            self.dc.CreateBitmap(
-                D2D_SIZE_U {
-                    width: w,
-                    height: h,
-                },
-                Some(premultiplied.as_ptr().cast()),
-                w * 4,
-                &props,
-            )
-        }
+        let alpha = D2D1_ALPHA_MODE_PREMULTIPLIED;
+        self.new_bitmap(
+            (w, h),
+            w * 4,
+            &premultiplied,
+            DXGI_FORMAT_R8G8B8A8_UNORM,
+            alpha,
+        )
     }
 
     /// A BGRA picture (opaque, `w`×`h`, rows packed) as a Direct2D bitmap.
     pub fn bgra_bitmap(&self, w: u32, h: u32, bgra: &[u8]) -> Result<ID2D1Bitmap1> {
-        if bgra.len() != w as usize * h as usize * 4 || w == 0 || h == 0 {
-            return Err(windows::core::Error::from_hresult(
-                windows::Win32::Foundation::E_INVALIDARG,
-            ));
-        }
-        let props = D2D1_BITMAP_PROPERTIES1 {
-            pixelFormat: D2D1_PIXEL_FORMAT {
-                format: DXGI_FORMAT_B8G8R8A8_UNORM,
-                alphaMode: D2D1_ALPHA_MODE_IGNORE,
-            },
-            dpiX: 96.0,
-            dpiY: 96.0,
-            bitmapOptions: D2D1_BITMAP_OPTIONS_NONE,
-            colorContext: std::mem::ManuallyDrop::new(None),
-        };
-        // SAFETY: `bgra` holds `h` rows of `w` BGRA pixels, `w * 4` bytes apart.
-        unsafe {
-            self.dc.CreateBitmap(
-                D2D_SIZE_U {
-                    width: w,
-                    height: h,
-                },
-                Some(bgra.as_ptr().cast()),
-                w * 4,
-                &props,
-            )
-        }
+        self.new_bitmap(
+            (w, h),
+            w * 4,
+            bgra,
+            DXGI_FORMAT_B8G8R8A8_UNORM,
+            D2D1_ALPHA_MODE_IGNORE,
+        )
     }
 
     /// Replaces the pixels of a bitmap made by [`Gfx::bgra_bitmap`] (same size).
     pub fn update_bgra(bitmap: &ID2D1Bitmap1, w: u32, h: u32, bgra: &[u8]) -> Result<()> {
         if bgra.len() != w as usize * h as usize * 4 {
-            return Err(windows::core::Error::from_hresult(
-                windows::Win32::Foundation::E_INVALIDARG,
-            ));
+            return Err(E_INVALIDARG.into());
         }
         // SAFETY: `bgra` holds the whole bitmap, `w * 4` bytes per row.
         unsafe { bitmap.CopyFromMemory(None, bgra.as_ptr().cast(), w * 4) }

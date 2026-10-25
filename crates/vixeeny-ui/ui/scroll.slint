@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { Theme, Icons, Button } from "controls.slint";
+import { Theme, Icons, Button, Card } from "controls.slint";
 
 // Control window of a scrolling capture: the live vertical preview of what has been
 // assembled, and the Finish / Cancel buttons. The capture runs from the start.
@@ -38,12 +38,8 @@ export component ScrollWindow inherits Window {
             padding: 16px;
             spacing: 12px;
 
-            Rectangle {
+            Card {
                 vertical-stretch: 1;
-                background: Theme.card;
-                border-radius: Theme.radius-card;
-                border-width: 1px;
-                border-color: Theme.stroke;
                 clip: true;
                 Image {
                     source: root.preview;

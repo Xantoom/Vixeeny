@@ -28,6 +28,17 @@ impl Family {
             Self::Vp9 => "vp9",
         }
     }
+
+    /// Hardware encoders are preferred in this order: AV1 (the smallest files for the quality),
+    /// HEVC, H.264, VP9.
+    pub const fn preference(self) -> u8 {
+        match self {
+            Self::Av1 => 0,
+            Self::Hevc => 1,
+            Self::H264 => 2,
+            Self::Vp9 => 3,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -44,6 +55,18 @@ pub enum Vendor {
     Nvidia,
     Amd,
     Intel,
+}
+
+impl Vendor {
+    /// NVIDIA, AMD, Intel, then none.
+    pub const fn preference(self) -> u8 {
+        match self {
+            Self::Nvidia => 0,
+            Self::Amd => 1,
+            Self::Intel => 2,
+            Self::None => 3,
+        }
+    }
 }
 
 /// Registry container names: `mp4` covers the hybrid and the classic MP4.

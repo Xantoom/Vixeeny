@@ -18,7 +18,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     HWND_TOPMOST, IDC_ARROW, IDC_CROSS, IDC_HAND, IDC_SIZEALL, IDC_SIZENESW, IDC_SIZENS,
     IDC_SIZENWSE, IDC_SIZEWE, LoadCursorW, RegisterClassExW, SWP_NOACTIVATE, SWP_NOMOVE,
     SWP_NOSIZE, SetWindowDisplayAffinity, SetWindowPos, WDA_EXCLUDEFROMCAPTURE,
-    WINDOW_DISPLAY_AFFINITY, WINDOW_EX_STYLE, WNDCLASSEXW, WS_EX_NOACTIVATE,
+    WINDOW_DISPLAY_AFFINITY, WINDOW_EX_STYLE, WINDOW_STYLE, WNDCLASSEXW, WS_EX_NOACTIVATE,
     WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{BOOL, PCWSTR, Result, w};
@@ -53,15 +53,21 @@ fn register(class: PCWSTR, proc: WndProc, done: &'static OnceLock<bool>) -> bool
     })
 }
 
-fn popup_window(class: PCWSTR, ex: WINDOW_EX_STYLE, rect: PhysicalRect) -> Result<HWND> {
-    // SAFETY: the class is registered; the strings are static. Attributes are set on the window
-    // just created.
-    unsafe {
-        let hwnd = CreateWindowExW(
-            WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOREDIRECTIONBITMAP | ex,
+/// A cloaked window of `class` over `rect`.
+fn new_window(
+    class: PCWSTR,
+    ex: WINDOW_EX_STYLE,
+    style: WINDOW_STYLE,
+    title: PCWSTR,
+    rect: PhysicalRect,
+) -> Result<HWND> {
+    // SAFETY: the class is registered; the title outlives the call.
+    let hwnd = unsafe {
+        CreateWindowExW(
+            ex,
             class,
-            w!("Vixeeny"),
-            WS_POPUP,
+            title,
+            style,
             rect.x,
             rect.y,
             i32::try_from(rect.width).unwrap_or(i32::MAX),
@@ -70,17 +76,26 @@ fn popup_window(class: PCWSTR, ex: WINDOW_EX_STYLE, rect: PhysicalRect) -> Resul
             None,
             Some(instance()),
             None,
-        )?;
-        set_cloak(hwnd, true);
-        let off = BOOL::from(true);
-        let _ = DwmSetWindowAttribute(
+        )
+    }?;
+    set_cloak(hwnd, true);
+    Ok(hwnd)
+}
+
+fn popup_window(class: PCWSTR, ex: WINDOW_EX_STYLE, rect: PhysicalRect) -> Result<HWND> {
+    let ex = WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOREDIRECTIONBITMAP | ex;
+    let hwnd = new_window(class, ex, WS_POPUP, w!("Vixeeny"), rect)?;
+    let off = BOOL::from(true);
+    // SAFETY: `off` outlives the call, which sets an attribute of the window just created.
+    let _ = unsafe {
+        DwmSetWindowAttribute(
             hwnd,
             DWMWA_TRANSITIONS_FORCEDISABLED,
             (&raw const off).cast(),
             size_of::<BOOL>() as u32,
-        );
-        Ok(hwnd)
-    }
+        )
+    };
+    Ok(hwnd)
 }
 
 /// A cloaked, hidden editor window over `(x, y, w, h)` (physical pixels).
@@ -152,24 +167,15 @@ pub fn create_app_window(proc: WndProc, rect: PhysicalRect, title: &str) -> Resu
         return Err(windows::core::Error::from_thread());
     }
     let title = windows::core::HSTRING::from(title);
-    // SAFETY: the class is registered; the title outlives the call. Attributes are set on the
-    // window just created.
+    let hwnd = new_window(
+        POPUP_CLASS,
+        WS_EX_APPWINDOW | WS_EX_NOREDIRECTIONBITMAP,
+        WS_POPUP | WS_SYSMENU | WS_MINIMIZEBOX,
+        PCWSTR(title.as_ptr()),
+        rect,
+    )?;
+    // SAFETY: attributes are set on the window just created.
     unsafe {
-        let hwnd = CreateWindowExW(
-            WS_EX_APPWINDOW | WS_EX_NOREDIRECTIONBITMAP,
-            POPUP_CLASS,
-            &title,
-            WS_POPUP | WS_SYSMENU | WS_MINIMIZEBOX,
-            rect.x,
-            rect.y,
-            i32::try_from(rect.width).unwrap_or(i32::MAX),
-            i32::try_from(rect.height).unwrap_or(i32::MAX),
-            None,
-            None,
-            Some(instance()),
-            None,
-        )?;
-        set_cloak(hwnd, true);
         // The executable's icon, for the taskbar and Alt+Tab (the class has none).
         for (kind, metric) in [(ICON_BIG, SM_CXICON), (ICON_SMALL, SM_CXSMICON)] {
             let size = GetSystemMetrics(metric);

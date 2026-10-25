@@ -31,7 +31,7 @@ pub struct Line {
     pub detail: String,
 }
 
-/// Where the update stands, for the card of the updates page.
+/// Where the update stands, for the card of the updates page (its number in `update-state`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum UpdateStage {
     /// Up to date, or not checked yet.
@@ -58,20 +58,8 @@ pub struct UpdateView {
     pub action: String,
 }
 
-fn stage_index(stage: UpdateStage) -> i32 {
-    match stage {
-        UpdateStage::Idle => 0,
-        UpdateStage::Checking => 1,
-        UpdateStage::Available => 2,
-        UpdateStage::Downloading => 3,
-        UpdateStage::Ready => 4,
-        UpdateStage::Failed => 5,
-        UpdateStage::Restarting => 6,
-    }
-}
-
 fn show_update(w: &SettingsWindow, view: &UpdateView) {
-    w.set_update_state(stage_index(view.stage));
+    w.set_update_state(view.stage as i32);
     w.set_update_title(view.title.as_str().into());
     w.set_update_detail(view.detail.as_str().into());
     w.set_update_progress(view.progress);
@@ -255,18 +243,11 @@ pub struct SettingsPanel {
 
 /// Cards of this computer, for the general page.
 fn pc_tiles(tiles: &[vixeeny_settings::machine::Tile]) -> ModelRc<PcTile> {
-    use vixeeny_settings::machine::TileKind;
     ModelRc::from(Rc::new(VecModel::from(
         tiles
             .iter()
             .map(|t| PcTile {
-                kind: match t.kind {
-                    TileKind::Cpu => 0,
-                    TileKind::Gpu => 1,
-                    TileKind::Ram => 2,
-                    TileKind::Screen => 3,
-                    TileKind::Disk => 4,
-                },
+                kind: t.kind as i32,
                 title: t.title.as_str().into(),
                 detail: t.detail.as_str().into(),
                 tip: t.tip.as_str().into(),

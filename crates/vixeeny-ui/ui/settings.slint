@@ -4,7 +4,7 @@
 // on the right, its settings in cards, one card per group under the group's title. Rows are generic (a
 // toggle, a choice, a folder…); the shortcuts, the updates and the about page have their own
 // layouts. Plain Slint elements only (std-widgets would pull the SVG decoder in for its icons).
-import { Theme, Icons, Icon, Button, IconButton, Toggle, TextBox, ComboBox, NumberBox, Slider, NavItem, Group, GroupRow, InfoBar, ScrollArea, ProgressBar, SearchBox, ScreenPicker, LevelMeter, ColourField, Tip, TipLayer } from "controls.slint";
+import { Theme, Icons, Icon, Card, Button, IconButton, Toggle, TextBox, ComboBox, NumberBox, Slider, NavItem, Group, GroupRow, InfoBar, ScrollArea, ProgressBar, SearchBox, ScreenPicker, LevelMeter, ColourField, Tip, TipLayer } from "controls.slint";
 
 // A choice of a list with pictures (a program to record).
 export struct SettingRow {
@@ -92,14 +92,25 @@ global Glyphs {
     out property <string> chevron-up: "M15.35 12.85A0.5 0.5 0 0 1 14.65 12.85L10 8.21L5.35 12.85A0.5 0.5 0 0 1 4.65 12.15L9.65 7.15A0.5 0.5 0 0 1 10.35 7.15L15.35 12.15A0.5 0.5 0 0 1 15.35 12.85Z";
 }
 
+// A scrolling page: its content in a column 24px from the left.
+component Page inherits ScrollArea {
+    in property <length> column;
+    in property <length> gap: 28px;
+    x: 0px;
+    VerticalLayout {
+        x: 24px;
+        width: root.column;
+        alignment: start;
+        spacing: root.gap;
+        padding-bottom: 32px;
+        @children
+    }
+}
+
 // One part of this computer: its icon (a screen: its outline, to scale), a figure or a name,
 // a short line; a disk, how full it is.
-component PcCard inherits Rectangle {
+component PcCard inherits Card {
     in property <PcTile> tile;
-    border-radius: Theme.radius-card;
-    border-width: 1px;
-    border-color: Theme.stroke;
-    background: Theme.card;
     HorizontalLayout {
         padding-left: 16px;
         padding-right: 16px;
@@ -883,101 +894,90 @@ export component SettingsWindow inherits Window {
             height: parent.height - self.y;
 
             // ---- pages made of rows (and the updates page)
-            if root.is-rows : rows-area := ScrollArea {
-                x: 0px;
+            if root.is-rows : rows-area := Page {
                 width: parent.width - 8px;
                 height: parent.height;
-                VerticalLayout {
-                    x: 24px;
-                    width: page.column;
-                    alignment: start;
-                    spacing: 28px;
-                    padding-bottom: 32px;
-                    if root.notice != "" : InfoBar {
-                        kind: 1;
-                        text: root.notice;
+                column: page.column;
+                if root.notice != "" : InfoBar {
+                    kind: 1;
+                    text: root.notice;
+                }
+                // Where the update stands, and what to do about it.
+                if root.section == 7 : Group {
+                    GroupRow {
+                        title: root.update-title;
+                        description: root.update-detail;
+                        glyph: root.update-state == 5 ? Icons.error
+                            : (root.update-state == 0 ? Icons.checkmark-circle : Icons.download);
+                        // Up to date: green.
+                        tint: root.update-state == 0 ? Theme.success : Theme.text;
+                        if root.update-state == 3 || root.update-state == 6 : ProgressBar {
+                            width: 160px;
+                            value: root.update-state == 6 ? 1 : root.update-progress;
+                        }
+                        if root.update-action != "" && root.update-state != 1 && root.update-state != 3 && root.update-state != 6 : Button {
+                            accent: root.update-state == 2 || root.update-state == 4;
+                            text: root.update-action;
+                            clicked => {
+                                root.page-action(root.update-state == 2 ? "update-download"
+                                    : root.update-state == 4 ? "update-restart" : "update-check", "");
+                            }
+                        }
                     }
-                    // Where the update stands, and what to do about it.
-                    if root.section == 7 : Group {
+                }
+                // A group: its title, then its rows in one card.
+                for g in root.groups : VerticalLayout {
+                    spacing: 8px;
+                    if g.title != "" : Text {
+                        text: g.title;
+                        color: Theme.text;
+                        font-size: 14px;
+                        font-weight: 600;
+                        wrap: word-wrap;
+                    }
+                    Card {
+                        clip: true;
+                        VerticalLayout {
+                    for r[i] in g.rows : SettingLine {
+                        divider: i > 0;
+                        entry: r;
+                        t: root.t;
+                        view-h: root.height;
+                        animated: root.animated;
+                        level: root.mic-level;
+                        highlighted: r.id != "" && r.id == root.highlight-id;
+                        reveal(y) => { rows-area.reveal(y); }
+                        toggled(v) => { root.row-toggled(r.id, v); }
+                        chosen(k) => { root.row-chosen(r.id, k); }
+                        number(v) => { root.row-number(r.id, v); }
+                        sliding(on) => { root.row-sliding(on); }
+                        text-edited(s) => { root.row-text(r.id, s); }
+                        colour(i, c) => { root.row-colour(r.id, i, c); }
+                        code(i, s) => { root.row-code(r.id, i, s); }
+                        browse => { root.row-browse(r.id); }
+                        action(a) => { root.row-action(r.id, a); }
+                    }
+                        }
+                    }
+                }
+                // All the pages back to how they come.
+                if root.section == 0 : VerticalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: root.t.reset-group;
+                        color: Theme.text;
+                        font-size: 14px;
+                        font-weight: 600;
+                    }
+                    Group {
                         GroupRow {
-                            title: root.update-title;
-                            description: root.update-detail;
-                            glyph: root.update-state == 5 ? Icons.error
-                                : (root.update-state == 0 ? Icons.checkmark-circle : Icons.download);
-                            // Up to date: green.
-                            tint: root.update-state == 0 ? Theme.success : Theme.text;
-                            if root.update-state == 3 || root.update-state == 6 : ProgressBar {
-                                width: 160px;
-                                value: root.update-state == 6 ? 1 : root.update-progress;
-                            }
-                            if root.update-action != "" && root.update-state != 1 && root.update-state != 3 && root.update-state != 6 : Button {
-                                accent: root.update-state == 2 || root.update-state == 4;
-                                text: root.update-action;
-                                clicked => {
-                                    root.page-action(root.update-state == 2 ? "update-download"
-                                        : root.update-state == 4 ? "update-restart" : "update-check", "");
-                                }
-                            }
-                        }
-                    }
-                    // A group: its title, then its rows in one card.
-                    for g in root.groups : VerticalLayout {
-                        spacing: 8px;
-                        if g.title != "" : Text {
-                            text: g.title;
-                            color: Theme.text;
-                            font-size: 14px;
-                            font-weight: 600;
-                            wrap: word-wrap;
-                        }
-                        Rectangle {
-                            border-radius: Theme.radius-card;
-                            border-width: 1px;
-                            border-color: Theme.stroke;
-                            background: Theme.card;
-                            clip: true;
-                            VerticalLayout {
-                        for r[i] in g.rows : SettingLine {
-                            divider: i > 0;
-                            entry: r;
-                            t: root.t;
-                            view-h: root.height;
-                            animated: root.animated;
-                            level: root.mic-level;
-                            highlighted: r.id != "" && r.id == root.highlight-id;
-                            reveal(y) => { rows-area.reveal(y); }
-                            toggled(v) => { root.row-toggled(r.id, v); }
-                            chosen(k) => { root.row-chosen(r.id, k); }
-                            number(v) => { root.row-number(r.id, v); }
-                            sliding(on) => { root.row-sliding(on); }
-                            text-edited(s) => { root.row-text(r.id, s); }
-                            colour(i, c) => { root.row-colour(r.id, i, c); }
-                            code(i, s) => { root.row-code(r.id, i, s); }
-                            browse => { root.row-browse(r.id); }
-                            action(a) => { root.row-action(r.id, a); }
-                        }
-                            }
-                        }
-                    }
-                    // All the pages back to how they come.
-                    if root.section == 0 : VerticalLayout {
-                        spacing: 8px;
-                        Text {
-                            text: root.t.reset-group;
-                            color: Theme.text;
-                            font-size: 14px;
-                            font-weight: 600;
-                        }
-                        Group {
-                            GroupRow {
-                                title: root.t.reset-all;
-                                description: root.t.reset-all-hint;
-                                glyph: Icons.arrow-reset;
-                                Button {
-                                    text: root.t.reset;
-                                    danger: true;
-                                    clicked => { root.confirming = 2; }
-                                }
+                            title: root.t.reset-all;
+                            description: root.t.reset-all-hint;
+                            glyph: Icons.arrow-reset;
+                            Button {
+                                text: root.t.reset;
+                                danger: true;
+                                clicked => { root.confirming = 2; }
                             }
                         }
                     }
@@ -985,33 +985,27 @@ export component SettingsWindow inherits Window {
             }
 
             // ---- the answers of a search: each leads to its setting
-            if root.searching : ScrollArea {
-                x: 0px;
+            if root.searching : Page {
                 width: parent.width - 8px;
                 height: parent.height;
-                VerticalLayout {
-                    x: 24px;
-                    width: page.column;
-                    alignment: start;
-                    spacing: 4px;
-                    padding-bottom: 32px;
-                    if root.search-hits.length == 0 : Text {
-                        text: root.search-none;
-                        color: Theme.text-2;
-                        font-size: 14px;
-                        wrap: word-wrap;
-                    }
-                    for hit[i] in root.search-hits : GroupRow {
-                        title: hit.label;
-                        description: hit.page;
-                        glyph: root.nav-icon(hit.section);
-                        clickable: true;
-                        clicked => { root.search-picked(i); }
-                        Icon {
-                            data: Glyphs.chevron-right;
-                            tint: Theme.text-2;
-                            size: 14px;
-                        }
+                column: page.column;
+                gap: 4px;
+                if root.search-hits.length == 0 : Text {
+                    text: root.search-none;
+                    color: Theme.text-2;
+                    font-size: 14px;
+                    wrap: word-wrap;
+                }
+                for hit[i] in root.search-hits : GroupRow {
+                    title: hit.label;
+                    description: hit.page;
+                    glyph: root.nav-icon(hit.section);
+                    clickable: true;
+                    clicked => { root.search-picked(i); }
+                    Icon {
+                        data: Glyphs.chevron-right;
+                        tint: Theme.text-2;
+                        size: 14px;
                     }
                 }
             }
@@ -1024,36 +1018,25 @@ export component SettingsWindow inherits Window {
                 property <length> key-w: max(180px, min(240px, (page.column - 220px) / 2));
                 // A "+" until a second shortcut is set (or being recorded).
                 property <length> second-w: root.two-columns || (root.recording-row >= 0 && root.recording-slot == 1) ? self.key-w : 40px;
-                ScrollArea {
-                    x: 0px;
+                Page {
                     width: parent.width - 8px;
                     height: parent.height;
-                    VerticalLayout {
-                        x: 24px;
-                        width: page.column;
-                        alignment: start;
-                        spacing: 28px;
-                        padding-bottom: 32px;
-                        for span in root.shortcut-spans : Rectangle {
-                            border-radius: Theme.radius-card;
-                            border-width: 1px;
-                            border-color: Theme.stroke;
-                            background: Theme.card;
-                            clip: true;
-                            VerticalLayout {
-                                for k in span.count : ShortcutLine {
-                                    property <int> i: span.start + k;
-                                    entry: root.shortcuts[self.i];
-                                    divider: k > 0;
-                                    recording-here: root.recording-row == self.i;
-                                    recording-slot: root.recording-slot;
-                                    held: root.recording-keys;
-                                    key-w: key-w;
-                                    second-w: second-w;
-                                    t: root.t;
-                                    record(slot) => { root.shortcut-record(self.i, slot); }
-                                    clear(slot) => { root.shortcut-clear(self.i, slot); }
-                                }
+                    column: page.column;
+                    for span in root.shortcut-spans : Card {
+                        clip: true;
+                        VerticalLayout {
+                            for k in span.count : ShortcutLine {
+                                property <int> i: span.start + k;
+                                entry: root.shortcuts[self.i];
+                                divider: k > 0;
+                                recording-here: root.recording-row == self.i;
+                                recording-slot: root.recording-slot;
+                                held: root.recording-keys;
+                                key-w: key-w;
+                                second-w: second-w;
+                                t: root.t;
+                                record(slot) => { root.shortcut-record(self.i, slot); }
+                                clear(slot) => { root.shortcut-clear(self.i, slot); }
                             }
                         }
                     }
@@ -1061,77 +1044,66 @@ export component SettingsWindow inherits Window {
             }
 
             // ---- about: who we are, this machine, the links
-            if root.section == 8 && !root.searching : ScrollArea {
-                x: 0px;
+            if root.section == 8 && !root.searching : Page {
                 width: parent.width - 8px;
                 height: parent.height;
+                column: page.column;
+                Card {
+                    height: who.preferred-height;
+                    who := HorizontalLayout {
+                        padding: 20px;
+                        spacing: 16px;
+                        Image {
+                            source: Theme.app-icon;
+                            width: 48px;
+                            height: 48px;
+                            y: (parent.height - self.height) / 2;
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 2px;
+                            Text { text: "Vixeeny"; color: Theme.text; font-size: 18px; font-weight: 700; }
+                            Text { text: root.version + " · " + root.tagline; color: Theme.text-2; font-size: 13px; wrap: word-wrap; }
+                        }
+                    }
+                }
+                if root.lines.length > 0 : Group {
+                    for line in root.lines : GroupRow {
+                        title: line.text;
+                        description: line.detail;
+                    }
+                }
                 VerticalLayout {
-                    x: 24px;
-                    width: page.column;
-                    alignment: start;
-                    spacing: 28px;
-                    padding-bottom: 32px;
-                    Rectangle {
-                        height: who.preferred-height;
-                        border-radius: Theme.radius-card;
-                        border-width: 1px;
-                        border-color: Theme.stroke;
-                        background: Theme.card;
-                        who := HorizontalLayout {
-                            padding: 20px;
-                            spacing: 16px;
-                            Image {
-                                source: Theme.app-icon;
-                                width: 48px;
-                                height: 48px;
-                                y: (parent.height - self.height) / 2;
-                            }
-                            VerticalLayout {
-                                alignment: center;
-                                spacing: 2px;
-                                Text { text: "Vixeeny"; color: Theme.text; font-size: 18px; font-weight: 700; }
-                                Text { text: root.version + " · " + root.tagline; color: Theme.text-2; font-size: 13px; wrap: word-wrap; }
-                            }
-                        }
-                    }
-                    if root.lines.length > 0 : Group {
-                        for line in root.lines : GroupRow {
-                            title: line.text;
-                            description: line.detail;
-                        }
-                    }
-                    VerticalLayout {
+                    spacing: 8px;
+                    HorizontalLayout {
                         spacing: 8px;
-                        HorizontalLayout {
-                            spacing: 8px;
-                            alignment: start;
-                            Button { icon: Icons.github; text: root.t.github; clicked => { root.page-action("github", ""); } }
-                            Button { icon: Icons.folder-open; text: root.t.logs; clicked => { root.page-action("logs", ""); } }
-                            Button { icon: Icons.document; text: root.t.licenses; clicked => { root.page-action("licenses", ""); } }
-                            Button { icon: Icons.bug; text: root.t.report; clicked => { root.page-action("report", ""); } }
-                        }
-                        if root.extra != "" : Text {
-                            text: root.extra;
-                            color: Theme.text-2;
-                            font-size: 12px;
-                            wrap: word-wrap;
-                        }
+                        alignment: start;
+                        Button { icon: Icons.github; text: root.t.github; clicked => { root.page-action("github", ""); } }
+                        Button { icon: Icons.folder-open; text: root.t.logs; clicked => { root.page-action("logs", ""); } }
+                        Button { icon: Icons.document; text: root.t.licenses; clicked => { root.page-action("licenses", ""); } }
+                        Button { icon: Icons.bug; text: root.t.report; clicked => { root.page-action("report", ""); } }
                     }
-                    // This computer.
-                    if root.pc-system.length + root.pc-gpus.length + root.pc-screens.length + root.pc-disks.length > 0 : VerticalLayout {
-                        spacing: 8px;
-                        Text {
-                            text: root.t.this-pc;
-                            color: Theme.text;
-                            font-size: 14px;
-                            font-weight: 600;
-                        }
-                        PcSheet {
-                            system: root.pc-system;
-                            gpus: root.pc-gpus;
-                            screens: root.pc-screens;
-                            disks: root.pc-disks;
-                        }
+                    if root.extra != "" : Text {
+                        text: root.extra;
+                        color: Theme.text-2;
+                        font-size: 12px;
+                        wrap: word-wrap;
+                    }
+                }
+                // This computer.
+                if root.pc-system.length + root.pc-gpus.length + root.pc-screens.length + root.pc-disks.length > 0 : VerticalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: root.t.this-pc;
+                        color: Theme.text;
+                        font-size: 14px;
+                        font-weight: 600;
+                    }
+                    PcSheet {
+                        system: root.pc-system;
+                        gpus: root.pc-gpus;
+                        screens: root.pc-screens;
+                        disks: root.pc-disks;
                     }
                 }
             }

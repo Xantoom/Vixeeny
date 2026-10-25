@@ -35,18 +35,6 @@ pub fn all() -> Vec<EncoderInfo> {
     let Some(registry) = registry() else {
         return Vec::new();
     };
-    let family = |f: Family| match f {
-        Family::Av1 => 0,
-        Family::Hevc => 1,
-        Family::H264 => 2,
-        Family::Vp9 => 3,
-    };
-    let vendor = |v: Vendor| match v {
-        Vendor::Nvidia => 0,
-        Vendor::Amd => 1,
-        Vendor::Intel => 2,
-        Vendor::None => 3,
-    };
     let shown = |f: Family| match f {
         Family::H264 => 0,
         Family::Hevc => 1,
@@ -59,7 +47,7 @@ pub fn all() -> Vec<EncoderInfo> {
         .map(|(i, e)| {
             let hardware = e.kind == Kind::Hardware;
             let rank = if hardware {
-                (family(e.family), vendor(e.vendor))
+                (e.family.preference(), e.vendor.preference())
             } else {
                 (0, i as u8)
             };
@@ -75,7 +63,7 @@ pub fn all() -> Vec<EncoderInfo> {
                 },
                 rank,
             };
-            (info, (shown(e.family), vendor(e.vendor)))
+            (info, (shown(e.family), e.vendor.preference()))
         })
         .collect();
     // By maker, then codec: the encoders of one chip together.

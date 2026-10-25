@@ -909,6 +909,14 @@ export component NavItem inherits Rectangle {
 }
 
 // Rows that belong together: each is a card of its own, a few pixels apart.
+// A card: rounded and outlined, on the card colour.
+export component Card inherits Rectangle {
+    border-radius: Theme.radius-card;
+    border-width: 1px;
+    border-color: Theme.stroke;
+    background: Theme.card;
+}
+
 export component Group inherits VerticalLayout {
     spacing: 8px;
 }
@@ -1140,13 +1148,10 @@ export component GroupRow inherits Rectangle {
 }
 
 // A message in a coloured band. kind: 0 information, 1 warning, 2 error.
-export component InfoBar inherits Rectangle {
+export component InfoBar inherits Card {
     in property <string> text;
     in property <int> kind: 0;
     preferred-height: row.preferred-height;
-    border-radius: Theme.radius-card;
-    border-width: 1px;
-    border-color: Theme.stroke;
     background: root.kind == 2 ? Theme.danger-fill : (root.kind == 1 ? Theme.warning-fill : Theme.card);
     row := HorizontalLayout {
         padding: 12px;

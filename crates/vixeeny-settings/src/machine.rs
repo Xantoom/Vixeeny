@@ -8,7 +8,8 @@ pub use vixeeny_common::machine::{Cpu, Disk, Gpu, Machine, Module, Screen};
 
 use crate::Env;
 
-/// What a tile shows: its icon (or, for a screen, its outline).
+/// What a tile shows: its icon (or, for a screen, its outline). Its number is the `kind` of a
+/// `PcTile`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TileKind {
     Cpu,
