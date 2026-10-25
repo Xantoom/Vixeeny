@@ -44,9 +44,7 @@ impl ScrollHandle {
     }
 
     pub fn show_status(&self, status: String) {
-        let _ = self
-            .window
-            .upgrade_in_event_loop(move |w| w.set_status(status.into()));
+        let _ = self.window.upgrade_in_event_loop(move |w| w.set_status(status.into()));
     }
 }
 
@@ -74,9 +72,7 @@ impl ScrollPanel {
     }
 
     pub fn handle(&self) -> ScrollHandle {
-        ScrollHandle {
-            window: self.window.as_weak(),
-        }
+        ScrollHandle { window: self.window.as_weak() }
     }
 
     pub fn set_position(&self, x: i32, y: i32, width: u32, height: u32) {
@@ -85,8 +81,8 @@ impl ScrollPanel {
         w.set_position(slint::PhysicalPosition::new(x, y));
     }
 
-    /// Runs until the window closes. `on_event` is called for each button; the window closes
-    /// itself on `Finish` and `Cancel`.
+    /// Runs until the window closes. `on_event` is called for each button; the window closes itself on `Finish` and
+    /// `Cancel`.
     pub fn run(self, on_event: impl Fn(ScrollEvent) + 'static) -> Result<(), slint::PlatformError> {
         let on_event = std::rc::Rc::new(on_event);
         let (weak, f) = (self.window.as_weak(), on_event.clone());

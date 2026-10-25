@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! HDR frames for recording: the scRGB half-float frame WGC delivers on an HDR monitor
-//! (linear BT.709 primaries, 1.0 = 80 nits) becomes BT.2020 / PQ (SMPTE ST 2084) 16-bit RGB,
-//! which swscale then turns into 10-bit YUV. This is the CPU path; the GPU path does the same
-//! with a shader.
+//! HDR frames for recording: the scRGB half-float frame WGC delivers on an HDR monitor (linear BT.709 primaries, 1.0 =
+//! 80 nits) becomes BT.2020 / PQ (SMPTE ST 2084) 16-bit RGB, which swscale then turns into 10-bit YUV. This is the CPU
+//! path; the GPU path does the same with a shader.
 
 use std::ffi::{c_int, c_uint};
 use std::sync::OnceLock;
@@ -12,16 +11,9 @@ use ffmpeg_next::ffi;
 use rayon::prelude::*;
 use vixeeny_common::colour;
 
-/// `src`: `width × height` pixels of RGBA half floats (little endian, rows `stride` bytes
-/// apart). Writes into `out` tightly packed 16-bit RGB (`RGB48LE`), PQ-coded, BT.2020 primaries,
-/// full range; `None` when `src` is too short.
-pub fn scrgb_half_to_pq(
-    src: &[u8],
-    width: u32,
-    height: u32,
-    stride: usize,
-    out: &mut Vec<u8>,
-) -> Option<()> {
+/// `src`: `width × height` pixels of RGBA half floats (little endian, rows `stride` bytes apart). Writes into `out`
+/// tightly packed 16-bit RGB (`RGB48LE`), PQ-coded, BT.2020 primaries, full range; `None` when `src` is too short.
+pub fn scrgb_half_to_pq(src: &[u8], width: u32, height: u32, stride: usize, out: &mut Vec<u8>) -> Option<()> {
     let (w, h) = (width as usize, height as usize);
     if stride < w * 8 || src.len() < stride * h.saturating_sub(1) + w * 8 {
         return None;
@@ -31,18 +23,16 @@ pub fn scrgb_half_to_pq(
     let half = HALF.get_or_init(|| (0..=u16::MAX).map(vixeeny_common::half::to_f32).collect());
     // One row per task, over every core: a 4K frame is 25 million samples.
     out.resize(w * h * 6, 0);
-    out.par_chunks_mut(w * 6)
-        .zip(src.par_chunks(stride))
-        .for_each(|(out, row)| {
-            let pixels = row[..w * 8].as_chunks::<8>().0;
-            for (o, px) in out.as_chunks_mut::<6>().0.iter_mut().zip(pixels) {
-                let channel = |i: usize| half[usize::from(u16::from_le_bytes([px[i], px[i + 1]]))];
-                let codes = colour::scrgb_to_pq([channel(0), channel(2), channel(4)]);
-                for (o, code) in o.as_chunks_mut::<2>().0.iter_mut().zip(codes) {
-                    *o = code.to_le_bytes();
-                }
+    out.par_chunks_mut(w * 6).zip(src.par_chunks(stride)).for_each(|(out, row)| {
+        let pixels = row[..w * 8].as_chunks::<8>().0;
+        for (o, px) in out.as_chunks_mut::<6>().0.iter_mut().zip(pixels) {
+            let channel = |i: usize| half[usize::from(u16::from_le_bytes([px[i], px[i + 1]]))];
+            let codes = colour::scrgb_to_pq([channel(0), channel(2), channel(4)]);
+            for (o, code) in o.as_chunks_mut::<2>().0.iter_mut().zip(codes) {
+                *o = code.to_le_bytes();
             }
-        });
+        }
+    });
     Some(())
 }
 
@@ -66,11 +56,10 @@ struct ContentLight {
     max_fall: c_uint,
 }
 
-/// HDR10 static metadata, so players map the picture to their own screen: the mastering display
-/// is the recorded monitor (BT.2020 primaries, as the PQ pixels are, a D65 white and its peak
-/// brightness), and that peak bounds both the brightest pixel and the brightest frame average
-/// (not measured; readers drop a light level whose average is 0). A file already encoded keeps
-/// its own.
+/// HDR10 static metadata, so players map the picture to their own screen: the mastering display is the recorded monitor
+/// (BT.2020 primaries, as the PQ pixels are, a D65 white and its peak brightness), and that peak bounds both the
+/// brightest pixel and the brightest frame average (not measured; readers drop a light level whose average is 0). A
+/// file already encoded keeps its own.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Hdr10 {
     mastering: MasteringDisplay,
@@ -80,38 +69,23 @@ pub(crate) struct Hdr10 {
 impl Hdr10 {
     pub(crate) fn new(peak_nits: f32) -> Self {
         let peak = peak_nits.clamp(80.0, 10_000.0).round() as u32;
-        let xy = |x: f64, y: f64| {
-            [x, y].map(|v| ffi::AVRational {
-                num: (v * 50_000.0).round() as c_int,
-                den: 50_000,
-            })
-        };
+        let xy = |x: f64, y: f64| [x, y].map(|v| ffi::AVRational { num: (v * 50_000.0).round() as c_int, den: 50_000 });
         Self {
             mastering: MasteringDisplay {
                 // Red, green, blue.
                 display_primaries: [xy(0.708, 0.292), xy(0.170, 0.797), xy(0.131, 0.046)],
                 white_point: xy(0.3127, 0.3290),
                 // The monitor's black is not read: the usual 0.0001 nits.
-                min_luminance: ffi::AVRational {
-                    num: 1,
-                    den: 10_000,
-                },
-                max_luminance: ffi::AVRational {
-                    num: peak as c_int,
-                    den: 1,
-                },
+                min_luminance: ffi::AVRational { num: 1, den: 10_000 },
+                max_luminance: ffi::AVRational { num: peak as c_int, den: 1 },
                 has_primaries: 1,
                 has_luminance: 1,
             },
-            light: ContentLight {
-                max_cll: peak,
-                max_fall: peak,
-            },
+            light: ContentLight { max_cll: peak, max_fall: peak },
         }
     }
 
-    /// The metadata of a stream, as it is; what it lacks is that of a 1000-nit display, the
-    /// usual mastering peak.
+    /// The metadata of a stream, as it is; what it lacks is that of a 1000-nit display, the usual mastering peak.
     ///
     /// # Safety
     /// `par` is the live parameters of a stream.
@@ -120,15 +94,10 @@ impl Hdr10 {
         // SAFETY: per the caller; an entry is read only when it is at least the struct's size.
         unsafe {
             let find = |kind| {
-                let sd = ffi::av_packet_side_data_get(
-                    (*par).coded_side_data,
-                    (*par).nb_coded_side_data,
-                    kind,
-                );
+                let sd = ffi::av_packet_side_data_get((*par).coded_side_data, (*par).nb_coded_side_data, kind);
                 (!sd.is_null()).then(|| &*sd)
             };
-            if let Some(sd) =
-                find(ffi::AVPacketSideDataType::AV_PKT_DATA_MASTERING_DISPLAY_METADATA)
+            if let Some(sd) = find(ffi::AVPacketSideDataType::AV_PKT_DATA_MASTERING_DISPLAY_METADATA)
                 && sd.size >= size_of::<MasteringDisplay>()
             {
                 let m = sd.data.cast::<MasteringDisplay>().read_unaligned();
@@ -150,8 +119,8 @@ impl Hdr10 {
         meta
     }
 
-    /// Writes the metadata on an encoder before it opens: x265, SVT-AV1 and NVENC read it there,
-    /// and FFmpeg passes it on to the container.
+    /// Writes the metadata on an encoder before it opens: x265, SVT-AV1 and NVENC read it there, and FFmpeg passes it
+    /// on to the container.
     ///
     /// # Safety
     /// `ctx` is a live encoder context that is not open yet.
@@ -161,10 +130,7 @@ impl Hdr10 {
             let sd = &raw mut (*ctx).decoded_side_data;
             let nb = &raw mut (*ctx).nb_decoded_side_data;
             let add = |kind, size| ffi::av_frame_side_data_new(sd, nb, kind, size, 0);
-            write(
-                add(MASTERING, size_of::<MasteringDisplay>()),
-                self.mastering,
-            );
+            write(add(MASTERING, size_of::<MasteringDisplay>()), self.mastering);
             write(add(LIGHT, size_of::<ContentLight>()), self.light);
         }
     }
@@ -177,47 +143,35 @@ impl Hdr10 {
         // SAFETY: per the caller; each entry is allocated at the size of the struct written.
         unsafe {
             if ffi::av_frame_get_side_data(frame, MASTERING).is_null() {
-                write(
-                    ffi::av_frame_new_side_data(frame, MASTERING, size_of::<MasteringDisplay>()),
-                    self.mastering,
-                );
+                write(ffi::av_frame_new_side_data(frame, MASTERING, size_of::<MasteringDisplay>()), self.mastering);
             }
             if ffi::av_frame_get_side_data(frame, LIGHT).is_null() {
-                write(
-                    ffi::av_frame_new_side_data(frame, LIGHT, size_of::<ContentLight>()),
-                    self.light,
-                );
+                write(ffi::av_frame_new_side_data(frame, LIGHT, size_of::<ContentLight>()), self.light);
             }
         }
     }
 }
 
 impl Hdr10 {
-    /// The brightest the picture is said to be, in nits: its brightest pixel when known, else
-    /// the mastering display's peak.
+    /// The brightest the picture is said to be, in nits: its brightest pixel when known, else the mastering display's
+    /// peak.
     pub(crate) fn peak_nits(&self) -> f32 {
         if self.light.max_cll > 0 {
             return self.light.max_cll as f32;
         }
         let max = self.mastering.max_luminance;
-        if max.num > 0 && max.den > 0 {
-            max.num as f32 / max.den as f32
-        } else {
-            1000.0
-        }
+        if max.num > 0 && max.den > 0 { max.num as f32 / max.den as f32 } else { 1000.0 }
     }
 }
 
-/// The file tag of an HDR recording holding the SDR white of the monitor it was made on, in
-/// nits: its SDR rendering (the video editor's) shows the desktop as it was.
+/// The file tag of an HDR recording holding the SDR white of the monitor it was made on, in nits: its SDR rendering
+/// (the video editor's) shows the desktop as it was.
 pub const SDR_WHITE_TAG: &str = "sdr_white_nits";
 
-const MASTERING: ffi::AVFrameSideDataType =
-    ffi::AVFrameSideDataType::AV_FRAME_DATA_MASTERING_DISPLAY_METADATA;
+const MASTERING: ffi::AVFrameSideDataType = ffi::AVFrameSideDataType::AV_FRAME_DATA_MASTERING_DISPLAY_METADATA;
 const LIGHT: ffi::AVFrameSideDataType = ffi::AVFrameSideDataType::AV_FRAME_DATA_CONTENT_LIGHT_LEVEL;
 
-/// Copies `value` into the side data `sd` (allocated at its size); a failed allocation is left
-/// out.
+/// Copies `value` into the side data `sd` (allocated at its size); a failed allocation is left out.
 ///
 /// # Safety
 /// `sd` is null or a side data entry of `size_of::<T>()` bytes.
@@ -245,18 +199,11 @@ mod tests {
     const TWO: u16 = 0x4000;
 
     fn pixel(r: u16, g: u16, b: u16) -> Vec<u8> {
-        [r, g, b, ONE]
-            .iter()
-            .flat_map(|v| v.to_le_bytes())
-            .collect()
+        [r, g, b, ONE].iter().flat_map(|v| v.to_le_bytes()).collect()
     }
 
     fn codes(px: &[u8]) -> Vec<f64> {
-        px.as_chunks::<2>()
-            .0
-            .iter()
-            .map(|c| f64::from(u16::from_le_bytes(*c)) / 65535.0)
-            .collect()
+        px.as_chunks::<2>().0.iter().map(|c| f64::from(u16::from_le_bytes(*c)) / 65535.0).collect()
     }
 
     #[test]
@@ -272,11 +219,7 @@ mod tests {
 
     #[test]
     fn white_and_black_keep_their_levels_through_the_matrix() {
-        let src = [
-            pixel(ZERO, ZERO, ZERO),
-            pixel(ONE_QUARTER_UP, ONE_QUARTER_UP, ONE_QUARTER_UP),
-        ]
-        .concat();
+        let src = [pixel(ZERO, ZERO, ZERO), pixel(ONE_QUARTER_UP, ONE_QUARTER_UP, ONE_QUARTER_UP)].concat();
         let out = to_pq(&src, 2, 1, 16).unwrap();
         let c = codes(&out);
         assert_eq!(&c[..3], &[0.0, 0.0, 0.0]);

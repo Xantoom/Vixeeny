@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! A captured window set on a background: a margin around it, its corners rounded as Windows 11
-//! draws them, a soft shadow under it, over a blurred picture (the wallpaper, else the window
-//! itself), a plain colour or a gradient.
-//! Worked out in linear light, so that the same code serves SDR pictures (linear 0…1) and HDR
-//! ones (scRGB); the blur and the shadow blend as light does.
+//! A captured window set on a background: a margin around it, its corners rounded as Windows 11 draws them, a soft
+//! shadow under it, over a blurred picture (the wallpaper, else the window itself), a plain colour or a gradient.
+//! Worked out in linear light, so that the same code serves SDR pictures (linear 0…1) and HDR ones (scRGB); the blur
+//! and the shadow blend as light does.
 
 use rayon::prelude::*;
 use vixeeny_common::colour::srgb_decode;
@@ -21,8 +20,7 @@ pub enum Backdrop {
     Gradient([u8; 3], [u8; 3]),
 }
 
-/// A small sRGB picture, 3 bytes per pixel: blurred anyway, it needs no more than a few
-/// hundred pixels.
+/// A small sRGB picture, 3 bytes per pixel: blurred anyway, it needs no more than a few hundred pixels.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Picture {
     pub width: u32,
@@ -57,8 +55,7 @@ pub struct Linear {
 /// Margin and corner radius at 100 %, in pixels; they grow with the screen's scale.
 const MARGIN: f32 = 56.0;
 const RADIUS: f32 = 8.0;
-/// How much the blur backdrop is darkened (so the window stands out), and how much the shadow
-/// darkens at its heart.
+/// How much the blur backdrop is darkened (so the window stands out), and how much the shadow darkens at its heart.
 pub const DARKEN: f32 = 0.8;
 pub const SHADOW: f32 = 0.85;
 
@@ -69,13 +66,12 @@ pub struct Layout {
     pub size: (u32, u32),
     pub margin: u32,
     pub radius: f32,
-    /// How far down the shadow is, how far it reaches past the window on every side (so that
-    /// it shows dark around it, not only below), and the radius of its three box blurs.
+    /// How far down the shadow is, how far it reaches past the window on every side (so that it shows dark around it,
+    /// not only below), and the radius of its three box blurs.
     pub offset: u32,
     pub spread: u32,
     pub softness: u32,
-    /// The blur backdrop is worked out at this size, then blurred by three box blurs of
-    /// `small_radius`.
+    /// The blur backdrop is worked out at this size, then blurred by three box blurs of `small_radius`.
     pub small: (u32, u32),
     pub small_radius: u32,
 }
@@ -103,25 +99,15 @@ pub fn linear_colour(c: [u8; 3], white: f32) -> [f32; 3] {
     c.map(|v| srgb_decode(f32::from(v) / 255.0) * white)
 }
 
-/// `window` on `backdrop`, at the interface `scale` of its screen. `white`: SDR white in the
-/// picture's units (1.0 for SDR, the screen's SDR white / 80 for scRGB), the brightness of the
-/// colour backdrop.
+/// `window` on `backdrop`, at the interface `scale` of its screen. `white`: SDR white in the picture's units (1.0 for
+/// SDR, the screen's SDR white / 80 for scRGB), the brightness of the colour backdrop.
 pub fn set_on(window: &Linear, backdrop: &Backdrop, scale: f32, white: f32) -> Linear {
     let layout = layout(window.width, window.height, scale);
-    let Layout {
-        size: (w, h),
-        margin,
-        radius,
-        ..
-    } = layout;
+    let Layout { size: (w, h), margin, radius, .. } = layout;
     let mut out = match backdrop {
         Backdrop::Colour(c) => {
             let px = linear_colour(*c, white);
-            Linear {
-                width: w,
-                height: h,
-                rgba: [px[0], px[1], px[2], 1.0].repeat(w as usize * h as usize),
-            }
+            Linear { width: w, height: h, rgba: [px[0], px[1], px[2], 1.0].repeat(w as usize * h as usize) }
         }
         Backdrop::Gradient(from, to) => gradient(*from, *to, (w, h), white),
         Backdrop::Blur => blurred(window, &layout),
@@ -132,10 +118,7 @@ pub fn set_on(window: &Linear, backdrop: &Backdrop, scale: f32, white: f32) -> L
     let spread = layout.spread.min(margin);
     let (sw, sh) = (window.width + 2 * spread, window.height + 2 * spread);
     let caster = rounded(sw, sh, radius + spread as f32);
-    let (left, top) = (
-        (margin - spread) as usize,
-        (margin - spread + layout.offset) as usize,
-    );
+    let (left, top) = ((margin - spread) as usize, (margin - spread + layout.offset) as usize);
     let softness = layout.softness as usize;
     let mut shadow = vec![0.0_f32; w as usize * h as usize];
     for y in 0..(sh as usize).min((h as usize).saturating_sub(top)) {
@@ -144,25 +127,17 @@ pub fn set_on(window: &Linear, backdrop: &Backdrop, scale: f32, white: f32) -> L
         shadow[dst..dst + sw as usize].copy_from_slice(&caster[src..src + sw as usize]);
     }
     blur_plane(&mut shadow, w as usize, h as usize, softness);
-    out.rgba
-        .par_chunks_mut(4)
-        .zip(shadow.par_iter())
-        .for_each(|(px, &s)| {
-            let keep = 1.0 - SHADOW * s;
-            px[0] *= keep;
-            px[1] *= keep;
-            px[2] *= keep;
-        });
+    out.rgba.par_chunks_mut(4).zip(shadow.par_iter()).for_each(|(px, &s)| {
+        let keep = 1.0 - SHADOW * s;
+        px[0] *= keep;
+        px[1] *= keep;
+        px[2] *= keep;
+    });
     // The window, its corners cut with anti-aliasing.
     let row = w as usize * 4;
-    out.rgba
-        .par_chunks_mut(row)
-        .skip(margin as usize)
-        .take(window.height as usize)
-        .enumerate()
-        .for_each(|(y, out_row)| {
-            let src_row =
-                &window.rgba[y * window.width as usize * 4..][..window.width as usize * 4];
+    out.rgba.par_chunks_mut(row).skip(margin as usize).take(window.height as usize).enumerate().for_each(
+        |(y, out_row)| {
+            let src_row = &window.rgba[y * window.width as usize * 4..][..window.width as usize * 4];
             for x in 0..window.width as usize {
                 let a = shape[y * window.width as usize + x];
                 if a <= 0.0 {
@@ -174,12 +149,12 @@ pub fn set_on(window: &Linear, backdrop: &Backdrop, scale: f32, white: f32) -> L
                 }
                 o[3] = 1.0;
             }
-        });
+        },
+    );
     out
 }
 
-/// Coverage of a `w`×`h` rectangle with corners of `radius`: 1 inside, 0 outside, a pixel's
-/// share along the curve.
+/// Coverage of a `w`×`h` rectangle with corners of `radius`: 1 inside, 0 outside, a pixel's share along the curve.
 fn rounded(w: u32, h: u32, radius: f32) -> Vec<f32> {
     let r = radius.min(w as f32 / 2.0).min(h as f32 / 2.0);
     let mut out = vec![1.0_f32; w as usize * h as usize];
@@ -192,12 +167,7 @@ fn rounded(w: u32, h: u32, radius: f32) -> Vec<f32> {
             // Distance from the corner circle's centre, at the pixel's centre.
             let (dx, dy) = (r - (x as f32 + 0.5), r - (y as f32 + 0.5));
             let a = (r + 0.5 - (dx.max(0.0).powi(2) + dy.max(0.0).powi(2)).sqrt()).clamp(0.0, 1.0);
-            for (cx, cy) in [
-                (x, y),
-                (w - 1 - x, y),
-                (x, h - 1 - y),
-                (w - 1 - x, h - 1 - y),
-            ] {
+            for (cx, cy) in [(x, y), (w - 1 - x, y), (x, h - 1 - y), (w - 1 - x, h - 1 - y)] {
                 out[(cy * w + cx) as usize] = a;
             }
         }
@@ -205,33 +175,25 @@ fn rounded(w: u32, h: u32, radius: f32) -> Vec<f32> {
     out
 }
 
-/// From `from` at the top left to `to` at the bottom right, mixed as the eye sees it (in sRGB),
-/// at `white`.
+/// From `from` at the top left to `to` at the bottom right, mixed as the eye sees it (in sRGB), at `white`.
 fn gradient(from: [u8; 3], to: [u8; 3], (w, h): (u32, u32), white: f32) -> Linear {
     let (from, to) = (from.map(f32::from), to.map(f32::from));
     let mut rgba = vec![0.0_f32; w as usize * h as usize * 4];
     let span = (w + h).saturating_sub(2).max(1) as f32;
-    rgba.par_chunks_mut(w as usize * 4)
-        .enumerate()
-        .for_each(|(y, row)| {
-            for x in 0..w as usize {
-                let t = (x + y) as f32 / span;
-                for c in 0..3 {
-                    let v = from[c] + (to[c] - from[c]) * t;
-                    row[x * 4 + c] = srgb_decode(v / 255.0) * white;
-                }
-                row[x * 4 + 3] = 1.0;
+    rgba.par_chunks_mut(w as usize * 4).enumerate().for_each(|(y, row)| {
+        for x in 0..w as usize {
+            let t = (x + y) as f32 / span;
+            for c in 0..3 {
+                let v = from[c] + (to[c] - from[c]) * t;
+                row[x * 4 + c] = srgb_decode(v / 255.0) * white;
             }
-        });
-    Linear {
-        width: w,
-        height: h,
-        rgba,
-    }
+            row[x * 4 + 3] = 1.0;
+        }
+    });
+    Linear { width: w, height: h, rgba }
 }
 
-/// The window stretched over `w`×`h` and blurred well past recognition, a little darker so the
-/// window stands out.
+/// The window stretched over `w`×`h` and blurred well past recognition, a little darker so the window stands out.
 fn blurred(window: &Linear, layout: &Layout) -> Linear {
     let (sw, sh) = (layout.small.0 as usize, layout.small.1 as usize);
     let (ww, wh) = (window.width as usize, window.height as usize);
@@ -256,8 +218,7 @@ fn blurred(window: &Linear, layout: &Layout) -> Linear {
     enlarged(small, layout)
 }
 
-/// `picture` covering `w`×`h` (cut on the sides that overflow), blurred and a little darker,
-/// at `white`.
+/// `picture` covering `w`×`h` (cut on the sides that overflow), blurred and a little darker, at `white`.
 fn blurred_picture(picture: &Picture, layout: &Layout, white: f32) -> Linear {
     let (w, h) = layout.size;
     let (sw, sh) = (layout.small.0 as usize, layout.small.1 as usize);
@@ -266,20 +227,12 @@ fn blurred_picture(picture: &Picture, layout: &Layout, white: f32) -> Linear {
     let fit = (pw / w as f32).min(ph / h as f32);
     let (cw, ch) = (w as f32 * fit, h as f32 * fit);
     let (left, top) = ((pw - cw) / 2.0, (ph - ch) / 2.0);
-    let lut: Vec<f32> = (0..=255)
-        .map(|v| srgb_decode(v as f32 / 255.0) * white * DARKEN)
-        .collect();
+    let lut: Vec<f32> = (0..=255).map(|v| srgb_decode(v as f32 / 255.0) * white * DARKEN).collect();
     let mut small = vec![[0.0_f32; 3]; sw * sh];
     for (i, px) in small.iter_mut().enumerate() {
         let (x, y) = (i % sw, i / sw);
-        let (fx0, fx1) = (
-            left + x as f32 * cw / sw as f32,
-            left + (x + 1) as f32 * cw / sw as f32,
-        );
-        let (fy0, fy1) = (
-            top + y as f32 * ch / sh as f32,
-            top + (y + 1) as f32 * ch / sh as f32,
-        );
+        let (fx0, fx1) = (left + x as f32 * cw / sw as f32, left + (x + 1) as f32 * cw / sw as f32);
+        let (fy0, fy1) = (top + y as f32 * ch / sh as f32, top + (y + 1) as f32 * ch / sh as f32);
         let (x0, y0) = (fx0 as usize, fy0 as usize);
         let x1 = (fx1.ceil() as usize).clamp(x0 + 1, picture.width as usize);
         let y1 = (fy1.ceil() as usize).clamp(y0 + 1, picture.height as usize);
@@ -312,30 +265,23 @@ fn enlarged(mut small: Vec<[f32; 3]>, layout: &Layout) -> Linear {
     }
     // Bilinear enlargement to the full size.
     let mut rgba = vec![0.0_f32; w as usize * h as usize * 4];
-    rgba.par_chunks_mut(w as usize * 4)
-        .enumerate()
-        .for_each(|(y, row)| {
-            let fy = ((y as f32 + 0.5) * sh as f32 / h as f32 - 0.5).clamp(0.0, (sh - 1) as f32);
-            let (y0, ty) = (fy.floor() as usize, fy.fract());
-            let y1 = (y0 + 1).min(sh - 1);
-            for x in 0..w as usize {
-                let fx =
-                    ((x as f32 + 0.5) * sw as f32 / w as f32 - 0.5).clamp(0.0, (sw - 1) as f32);
-                let (x0, tx) = (fx.floor() as usize, fx.fract());
-                let x1 = (x0 + 1).min(sw - 1);
-                for c in 0..3 {
-                    let top = small[y0 * sw + x0][c] * (1.0 - tx) + small[y0 * sw + x1][c] * tx;
-                    let bottom = small[y1 * sw + x0][c] * (1.0 - tx) + small[y1 * sw + x1][c] * tx;
-                    row[x * 4 + c] = top * (1.0 - ty) + bottom * ty;
-                }
-                row[x * 4 + 3] = 1.0;
+    rgba.par_chunks_mut(w as usize * 4).enumerate().for_each(|(y, row)| {
+        let fy = ((y as f32 + 0.5) * sh as f32 / h as f32 - 0.5).clamp(0.0, (sh - 1) as f32);
+        let (y0, ty) = (fy.floor() as usize, fy.fract());
+        let y1 = (y0 + 1).min(sh - 1);
+        for x in 0..w as usize {
+            let fx = ((x as f32 + 0.5) * sw as f32 / w as f32 - 0.5).clamp(0.0, (sw - 1) as f32);
+            let (x0, tx) = (fx.floor() as usize, fx.fract());
+            let x1 = (x0 + 1).min(sw - 1);
+            for c in 0..3 {
+                let top = small[y0 * sw + x0][c] * (1.0 - tx) + small[y0 * sw + x1][c] * tx;
+                let bottom = small[y1 * sw + x0][c] * (1.0 - tx) + small[y1 * sw + x1][c] * tx;
+                row[x * 4 + c] = top * (1.0 - ty) + bottom * ty;
             }
-        });
-    Linear {
-        width: w,
-        height: h,
-        rgba,
-    }
+            row[x * 4 + 3] = 1.0;
+        }
+    });
+    Linear { width: w, height: h, rgba }
 }
 
 /// Three box blurs of `radius` in each direction: close to a Gaussian. Edges repeat.
@@ -383,19 +329,10 @@ pub fn linear_from_bgra(width: u32, height: u32, stride: usize, bgra: &[u8]) -> 
     let mut rgba = Vec::with_capacity(width as usize * height as usize * 4);
     for y in 0..height as usize {
         for px in bgra[y * stride..][..width as usize * 4].as_chunks::<4>().0 {
-            rgba.extend_from_slice(&[
-                lut[usize::from(px[2])],
-                lut[usize::from(px[1])],
-                lut[usize::from(px[0])],
-                1.0,
-            ]);
+            rgba.extend_from_slice(&[lut[usize::from(px[2])], lut[usize::from(px[1])], lut[usize::from(px[0])], 1.0]);
         }
     }
-    Linear {
-        width,
-        height,
-        rgba,
-    }
+    Linear { width, height, rgba }
 }
 
 /// Linear light → SDR BGRA, opaque.
@@ -404,22 +341,12 @@ pub fn linear_to_bgra(picture: &Linear) -> Vec<u8> {
     let lut: Vec<u8> = (0..4096)
         .map(|i| {
             let v = i as f32 / 4095.0;
-            let s = if v <= 0.003_130_8 {
-                v * 12.92
-            } else {
-                1.055 * v.powf(1.0 / 2.4) - 0.055
-            };
+            let s = if v <= 0.003_130_8 { v * 12.92 } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 };
             (s * 255.0).round() as u8
         })
         .collect();
     let code = |v: f32| lut[(v.clamp(0.0, 1.0) * 4095.0).round() as usize];
-    picture
-        .rgba
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .flat_map(|p| [code(p[2]), code(p[1]), code(p[0]), 255])
-        .collect()
+    picture.rgba.as_chunks::<4>().0.iter().flat_map(|p| [code(p[2]), code(p[1]), code(p[0]), 255]).collect()
 }
 
 #[cfg(test)]
@@ -427,21 +354,12 @@ mod tests {
     use super::*;
 
     fn window(w: u32, h: u32, v: f32) -> Linear {
-        Linear {
-            width: w,
-            height: h,
-            rgba: [v, v, v, 1.0].repeat((w * h) as usize),
-        }
+        Linear { width: w, height: h, rgba: [v, v, v, 1.0].repeat((w * h) as usize) }
     }
 
     #[test]
     fn the_window_sits_in_a_margin_with_rounded_corners() {
-        let out = set_on(
-            &window(200, 100, 0.5),
-            &Backdrop::Colour([255, 255, 255]),
-            1.0,
-            1.0,
-        );
+        let out = set_on(&window(200, 100, 0.5), &Backdrop::Colour([255, 255, 255]), 1.0, 1.0);
         assert_eq!((out.width, out.height), (312, 212));
         let px = |x: u32, y: u32| out.rgba[((y * out.width + x) * 4) as usize];
         // The middle of the window is the window.
@@ -458,12 +376,7 @@ mod tests {
     #[test]
     fn hdr_backdrops_are_at_sdr_white() {
         // scRGB on a screen whose SDR white is 240 nits: 3.0.
-        let out = set_on(
-            &window(64, 64, 10.0),
-            &Backdrop::Colour([255, 255, 255]),
-            1.0,
-            3.0,
-        );
+        let out = set_on(&window(64, 64, 10.0), &Backdrop::Colour([255, 255, 255]), 1.0, 3.0);
         assert!((out.rgba[0] - 3.0).abs() < 1e-3);
         let centre = ((out.height / 2 * out.width + out.width / 2) * 4) as usize;
         assert!((out.rgba[centre] - 10.0).abs() < 1e-4);
@@ -478,10 +391,7 @@ mod tests {
         let out = set_on(&w, &Backdrop::Blur, 1.5, 1.0);
         assert_eq!((out.width, out.height), (160 + 168, 90 + 168));
         let corner = &out.rgba[..4];
-        assert!(
-            corner[0] > 0.4 && corner[1] < 0.05 && corner[2] < 0.05,
-            "{corner:?}"
-        );
+        assert!(corner[0] > 0.4 && corner[1] < 0.05 && corner[2] < 0.05, "{corner:?}");
     }
 
     #[test]
@@ -493,27 +403,13 @@ mod tests {
                 rgb.extend_from_slice(if x < 200 { &[255, 0, 0] } else { &[0, 0, 255] });
             }
         }
-        let picture = Picture {
-            width: 400,
-            height: 100,
-            rgb,
-        };
-        let out = set_on(
-            &window(100, 100, 0.0),
-            &Backdrop::Picture(std::sync::Arc::new(picture)),
-            1.0,
-            1.0,
-        );
+        let picture = Picture { width: 400, height: 100, rgb };
+        let out = set_on(&window(100, 100, 0.0), &Backdrop::Picture(std::sync::Arc::new(picture)), 1.0, 1.0);
         let px = |x: u32, y: u32| &out.rgba[((y * out.width + x) * 4) as usize..][..3];
         let (left, right) = (px(2, 2), px(out.width - 3, 2));
         assert!(left[0] > 0.4 && left[2] < 0.05, "{left:?}");
         assert!(right[2] > 0.4 && right[0] < 0.05, "{right:?}");
-        let out = set_on(
-            &window(100, 100, 0.0),
-            &Backdrop::Gradient([0, 0, 0], [255, 255, 255]),
-            1.0,
-            1.0,
-        );
+        let out = set_on(&window(100, 100, 0.0), &Backdrop::Gradient([0, 0, 0], [255, 255, 255]), 1.0, 1.0);
         let last = out.rgba.len() - 4;
         assert!(out.rgba[0] < 1e-3 && (out.rgba[last] - 1.0).abs() < 1e-3);
     }
@@ -540,9 +436,7 @@ mod tests {
 
     #[test]
     fn box_blur_keeps_the_mean() {
-        let mut plane: Vec<f32> = (0..100)
-            .map(|i| if i == 50 { 100.0 } else { 0.0 })
-            .collect();
+        let mut plane: Vec<f32> = (0..100).map(|i| if i == 50 { 100.0 } else { 0.0 }).collect();
         blur_plane(&mut plane, 100, 1, 3);
         assert!((plane.iter().sum::<f32>() - 100.0).abs() < 1e-3);
         assert!(plane[50] < 30.0 && plane[47] > 0.0);

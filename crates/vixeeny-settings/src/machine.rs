@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! What this computer is made of, as the top of the general page shows it (the host reads it
-//! from the OS): a tile per part, grouped as the parts, the screens and the disks.
+//! What this computer is made of, as the top of the general page shows it (the host reads it from the OS): a tile per
+//! part, grouped as the parts, the screens and the disks.
 
 use vixeeny_common::i18n::{Key, Lang, tr};
 
@@ -8,8 +8,7 @@ pub use vixeeny_common::machine::{Cpu, Disk, Gpu, Machine, Module, Screen};
 
 use crate::Env;
 
-/// What a tile shows: its icon (or, for a screen, its outline). Its number is the `kind` of a
-/// `PcTile`.
+/// What a tile shows: its icon (or, for a screen, its outline). Its number is the `kind` of a `PcTile`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TileKind {
     Cpu,
@@ -38,21 +37,12 @@ pub struct Tile {
 
 impl Tile {
     fn new(kind: TileKind, title: String, detail: String, tip: String) -> Self {
-        Self {
-            kind,
-            title,
-            detail,
-            tip,
-            used: None,
-            aspect: 0.0,
-            badge: String::new(),
-            primary: false,
-        }
+        Self { kind, title, detail, tip, used: None, aspect: 0.0, badge: String::new(), primary: false }
     }
 }
 
-/// The cards of the general page, a row each: processor and memory, graphics, screens, disks
-/// (each empty until the host has read the machine).
+/// The cards of the general page, a row each: processor and memory, graphics, screens, disks (each empty until the host
+/// has read the machine).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Overview {
     pub system: Vec<Tile>,
@@ -77,39 +67,24 @@ fn capacity(bytes: u64, lang: Lang) -> String {
     };
     let text = format!("{value:.2}");
     let text = text.trim_end_matches('0').trim_end_matches('.');
-    let text = if fr {
-        text.replace('.', ",")
-    } else {
-        text.to_owned()
-    };
+    let text = if fr { text.replace('.', ",") } else { text.to_owned() };
     format!("{text} {unit}")
 }
 
 /// A part's name without what the box already says ("8-Core Processor", "(TM)").
 fn short_name(name: &str) -> String {
-    let mut words: Vec<&str> = name
-        .split_whitespace()
-        .filter(|w| !w.eq_ignore_ascii_case("processor") && !w.ends_with("-Core"))
-        .collect();
+    let mut words: Vec<&str> =
+        name.split_whitespace().filter(|w| !w.eq_ignore_ascii_case("processor") && !w.ends_with("-Core")).collect();
     if words.last().is_some_and(|w| w.eq_ignore_ascii_case("cpu")) {
         words.pop();
     }
-    words
-        .join(" ")
-        .replace("(TM)", "")
-        .replace("(R)", "")
-        .replace("(tm)", "")
-        .replace("(r)", "")
+    words.join(" ").replace("(TM)", "").replace("(R)", "").replace("(tm)", "").replace("(r)", "")
 }
 
 /// `4.7 GHz` (`4,7 GHz` in French).
 fn ghz(mhz: u32, lang: Lang) -> String {
     let text = format!("{:.1}", f64::from(mhz) / 1000.0);
-    let text = if lang == Lang::Fr {
-        text.replace('.', ",")
-    } else {
-        text
-    };
+    let text = if lang == Lang::Fr { text.replace('.', ",") } else { text };
     format!("{text} GHz")
 }
 
@@ -122,11 +97,7 @@ fn sticks(modules: &[Module], lang: Lang) -> String {
     let sizes = if same(|m| m.bytes) {
         format!("{} × {}", modules.len(), memory(first.bytes, lang))
     } else {
-        modules
-            .iter()
-            .map(|m| memory(m.bytes, lang))
-            .collect::<Vec<_>>()
-            .join(" + ")
+        modules.iter().map(|m| memory(m.bytes, lang)).collect::<Vec<_>>().join(" + ")
     };
     let mut kind = Vec::new();
     if modules.iter().all(|m| m.kind == first.kind) && !first.kind.is_empty() {
@@ -161,19 +132,16 @@ fn aspect(width: u32, height: u32) -> Option<String> {
         (3.2, "32:10"),
         (32.0 / 9.0, "32:9"),
     ];
-    let name = known
-        .iter()
-        .find(|(k, _)| (r - k).abs() / k < 0.03)
-        .map_or_else(
-            || {
-                let (mut a, mut b) = (long, short);
-                while b != 0 {
-                    (a, b) = (b, a % b);
-                }
-                format!("{}:{}", long / a, short / a)
-            },
-            |(_, n)| (*n).to_owned(),
-        );
+    let name = known.iter().find(|(k, _)| (r - k).abs() / k < 0.03).map_or_else(
+        || {
+            let (mut a, mut b) = (long, short);
+            while b != 0 {
+                (a, b) = (b, a % b);
+            }
+            format!("{}:{}", long / a, short / a)
+        },
+        |(_, n)| (*n).to_owned(),
+    );
     if name == "16:9" && width > height {
         return None;
     }
@@ -186,12 +154,7 @@ fn aspect(width: u32, height: u32) -> Option<String> {
 }
 
 fn joined(parts: &[&str]) -> String {
-    parts
-        .iter()
-        .filter(|p| !p.is_empty())
-        .copied()
-        .collect::<Vec<_>>()
-        .join(" · ")
+    parts.iter().filter(|p| !p.is_empty()).copied().collect::<Vec<_>>().join(" · ")
 }
 
 /// The cards of the general page.
@@ -201,9 +164,8 @@ pub fn overview(env: &Env) -> Overview {
     let t = |k| tr(k, lang).to_owned();
     let mut o = Overview::default();
     if let Some(cpu) = &m.cpu {
-        let cores = t(Key::PcCores)
-            .replace("{cores}", &cpu.cores.to_string())
-            .replace("{threads}", &cpu.threads.to_string());
+        let cores =
+            t(Key::PcCores).replace("{cores}", &cpu.cores.to_string()).replace("{threads}", &cpu.threads.to_string());
         let clock = match (cpu.base_mhz, cpu.boost_mhz) {
             (0, _) => String::new(),
             (base, boost) if boost > base => {
@@ -211,20 +173,10 @@ pub fn overview(env: &Env) -> Overview {
             }
             (base, _) => ghz(base, lang),
         };
-        o.system.push(Tile::new(
-            TileKind::Cpu,
-            short_name(&cpu.name),
-            joined(&[&cores, &clock]),
-            t(Key::PcCpu),
-        ));
+        o.system.push(Tile::new(TileKind::Cpu, short_name(&cpu.name), joined(&[&cores, &clock]), t(Key::PcCpu)));
     }
     if m.ram_bytes > 0 {
-        o.system.push(Tile::new(
-            TileKind::Ram,
-            memory(m.ram_bytes, lang),
-            sticks(&m.modules, lang),
-            t(Key::PcRam),
-        ));
+        o.system.push(Tile::new(TileKind::Ram, memory(m.ram_bytes, lang), sticks(&m.modules, lang), t(Key::PcRam)));
     }
     for gpu in &m.gpus {
         let (tip, memory) = if gpu.integrated {
@@ -234,8 +186,7 @@ pub fn overview(env: &Env) -> Overview {
         } else {
             (t(Key::PcGpu), String::new())
         };
-        o.gpus
-            .push(Tile::new(TileKind::Gpu, short_name(&gpu.name), memory, tip));
+        o.gpus.push(Tile::new(TileKind::Gpu, short_name(&gpu.name), memory, tip));
     }
     for s in &m.screens {
         let mut title = format!("{} × {}", s.width, s.height);
@@ -250,38 +201,21 @@ pub fn overview(env: &Env) -> Overview {
             TileKind::Screen,
             title,
             detail,
-            joined(&[
-                &t(Key::PcScreenN).replace("{n}", &s.number.to_string()),
-                &s.name,
-            ]),
+            joined(&[&t(Key::PcScreenN).replace("{n}", &s.number.to_string()), &s.name]),
         );
-        tile.aspect = if s.height > 0 {
-            s.width as f32 / s.height as f32
-        } else {
-            16.0 / 9.0
-        };
+        tile.aspect = if s.height > 0 { s.width as f32 / s.height as f32 } else { 16.0 / 9.0 };
         tile.badge = s.number.to_string();
         tile.primary = s.primary;
         o.screens.push(tile);
     }
     for d in &m.disks {
         // As the Explorer names it: `Games (D:)`, `Local Disk (C:)`.
-        let name = if d.label.is_empty() {
-            t(Key::PcLocalDisk)
-        } else {
-            d.label.clone()
-        };
+        let name = if d.label.is_empty() { t(Key::PcLocalDisk) } else { d.label.clone() };
         let free = t(Key::PcFree)
             .replace("{free}", &capacity(d.free_bytes, lang))
             .replace("{total}", &capacity(d.bytes, lang));
-        let mut tile = Tile::new(
-            TileKind::Disk,
-            format!("{name} ({})", d.letter),
-            free,
-            d.model.clone(),
-        );
-        tile.used =
-            (d.bytes > 0).then(|| 1.0 - (d.free_bytes.min(d.bytes) as f64 / d.bytes as f64) as f32);
+        let mut tile = Tile::new(TileKind::Disk, format!("{name} ({})", d.letter), free, d.model.clone());
+        tile.used = (d.bytes > 0).then(|| 1.0 - (d.free_bytes.min(d.bytes) as f64 / d.bytes as f64) as f32);
         o.disks.push(tile);
     }
     o
@@ -314,19 +248,11 @@ mod tests {
 
     #[test]
     fn the_general_page_shows_each_part() {
-        let stick = |cl| Module {
-            bytes: 32 << 30,
-            kind: "DDR5".into(),
-            mts: 6000,
-            cl,
-        };
+        let stick = |cl| Module { bytes: 32 << 30, kind: "DDR5".into(), mts: 6000, cl };
         let env = Env::new(Lang::En, "1.0.0").with_machine(Machine::sample());
         let o = overview(&env);
         let shown = |tiles: &[Tile]| {
-            tiles
-                .iter()
-                .map(|t| format!("{} | {} | {}", t.title, t.detail, t.tip))
-                .collect::<Vec<_>>()
+            tiles.iter().map(|t| format!("{} | {} | {}", t.title, t.detail, t.tip)).collect::<Vec<_>>()
         };
         assert_eq!(
             shown(&o.system),
@@ -335,10 +261,7 @@ mod tests {
                 "64 GB | 2 × 32 GB · DDR5 6000 MT/s CL30 | Memory (RAM)",
             ]
         );
-        assert_eq!(
-            shown(&o.gpus),
-            ["NVIDIA GeForce RTX 5080 | 16 GB | Graphics card"]
-        );
+        assert_eq!(shown(&o.gpus), ["NVIDIA GeForce RTX 5080 | 16 GB | Graphics card"]);
         assert_eq!(
             shown(&o.screens),
             [
@@ -350,10 +273,7 @@ mod tests {
         assert!((o.screens[1].aspect - 2.389).abs() < 0.01);
         assert_eq!(
             shown(&o.disks),
-            [
-                "Local Disk (C:) | 1 TB free of 2 TB | CT2000T500SSD8",
-                "Games (D:) | 100 GB free of 4 TB | ",
-            ]
+            ["Local Disk (C:) | 1 TB free of 2 TB | CT2000T500SSD8", "Games (D:) | 100 GB free of 4 TB | ",]
         );
         assert!((o.disks[0].used.unwrap() - 0.5).abs() < 0.01);
         // An Intel processor tells its boost; sticks of mixed sizes are listed one by one.
@@ -361,13 +281,7 @@ mod tests {
         if let Some(c) = m.cpu.as_mut() {
             (c.base_mhz, c.boost_mhz) = (3600, 5800);
         }
-        m.modules = vec![
-            stick(0),
-            Module {
-                bytes: 16 << 30,
-                ..stick(0)
-            },
-        ];
+        m.modules = vec![stick(0), Module { bytes: 16 << 30, ..stick(0) }];
         let o = overview(&Env::new(Lang::Fr, "1.0.0").with_machine(m));
         assert!(o.system[0].detail.ends_with("3,6 GHz (boost 5,8 GHz)"));
         assert_eq!(o.system[1].detail, "32 Go + 16 Go · DDR5 6000 MT/s");

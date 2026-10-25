@@ -1,29 +1,26 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Administrator rights without a prompt at each start. A program started as administrator (a
-//! game, often) does not let programs without these rights take the focus or the input from
-//! it: Vixeeny then needs them too. A scheduled task of the user, made once with Windows'
-//! consent, starts Vixeeny with them. Only for a Vixeeny in Program Files, which the user's
-//! programs cannot change: one in the user's own folders could be swapped for another
-//! program, which the task would then start as administrator.
+//! Administrator rights without a prompt at each start. A program started as administrator (a game, often) does not let
+//! programs without these rights take the focus or the input from it: Vixeeny then needs them too. A scheduled task of
+//! the user, made once with Windows' consent, starts Vixeeny with them. Only for a Vixeeny in Program Files, which the
+//! user's programs cannot change: one in the user's own folders could be swapped for another program, which the task
+//! would then start as administrator.
 
 use std::mem::ManuallyDrop;
 use std::path::{Path, PathBuf};
 
-use windows::Win32::Foundation::{
-    CloseHandle, ERROR_CANCELLED, HANDLE, HLOCAL, LocalFree, VARIANT_FALSE,
-};
+use windows::Win32::Foundation::{CloseHandle, ERROR_CANCELLED, HANDLE, HLOCAL, LocalFree, VARIANT_FALSE};
 use windows::Win32::Security::Authorization::ConvertSidToStringSidW;
 use windows::Win32::Security::{
-    GetTokenInformation, TOKEN_ELEVATION, TOKEN_ELEVATION_TYPE, TOKEN_QUERY, TOKEN_USER,
-    TokenElevation, TokenElevationType, TokenElevationTypeLimited, TokenUser,
+    GetTokenInformation, TOKEN_ELEVATION, TOKEN_ELEVATION_TYPE, TOKEN_QUERY, TOKEN_USER, TokenElevation,
+    TokenElevationType, TokenElevationTypeLimited, TokenUser,
 };
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
 };
 use windows::Win32::System::TaskScheduler::{
-    IExecAction, ITaskFolder, ITaskService, TASK_ACTION_EXEC, TASK_CREATE_OR_UPDATE,
-    TASK_ENUM_HIDDEN, TASK_INSTANCES_PARALLEL, TASK_LOGON_INTERACTIVE_TOKEN,
-    TASK_RUN_USE_SESSION_ID, TASK_RUNLEVEL_HIGHEST, TaskScheduler,
+    IExecAction, ITaskFolder, ITaskService, TASK_ACTION_EXEC, TASK_CREATE_OR_UPDATE, TASK_ENUM_HIDDEN,
+    TASK_INSTANCES_PARALLEL, TASK_LOGON_INTERACTIVE_TOKEN, TASK_RUN_USE_SESSION_ID, TASK_RUNLEVEL_HIGHEST,
+    TaskScheduler,
 };
 use windows::Win32::System::Threading::{GetCurrentProcess, GetCurrentProcessId, OpenProcessToken};
 use windows::Win32::System::Variant::{VARIANT, VT_BSTR, VT_I4, VariantClear};
@@ -34,8 +31,7 @@ use crate::{PlatformError, Result};
 /// The folder of the tasks in the Task Scheduler; each user's task is named after their SID.
 const FOLDER: &str = r"\Vixeeny";
 
-/// Administrators and the system manage the folder; every account may read it (to find its
-/// own task in it).
+/// Administrators and the system manage the folder; every account may read it (to find its own task in it).
 const FOLDER_SDDL: &str = "D:P(A;;FA;;;BA)(A;;FA;;;SY)(A;;FR;;;AU)";
 
 /// What this process's account can have.
@@ -66,10 +62,7 @@ impl Token {
     }
 
     /// A fixed-size piece of information about the token.
-    fn fixed<T: Default>(
-        &self,
-        class: windows::Win32::Security::TOKEN_INFORMATION_CLASS,
-    ) -> Option<T> {
+    fn fixed<T: Default>(&self, class: windows::Win32::Security::TOKEN_INFORMATION_CLASS) -> Option<T> {
         let mut value = T::default();
         let mut size = 0_u32;
         // SAFETY: `value` holds `size_of::<T>()` bytes, the size the class asks for.
@@ -94,16 +87,8 @@ impl Token {
         let _ = unsafe { GetTokenInformation(self.0, TokenUser, None, 0, &raw mut size) };
         let mut buffer = vec![0_u64; (size as usize).div_ceil(8)];
         // SAFETY: `buffer` holds `size` bytes, aligned for a `TOKEN_USER`.
-        unsafe {
-            GetTokenInformation(
-                self.0,
-                TokenUser,
-                Some(buffer.as_mut_ptr().cast()),
-                size,
-                &raw mut size,
-            )
-        }
-        .map_err(|_| failed())?;
+        unsafe { GetTokenInformation(self.0, TokenUser, Some(buffer.as_mut_ptr().cast()), size, &raw mut size) }
+            .map_err(|_| failed())?;
         // SAFETY: filled by the call above.
         let sid = unsafe { (*buffer.as_ptr().cast::<TOKEN_USER>()).User.Sid };
         let mut text = PWSTR::null();
@@ -129,10 +114,7 @@ pub fn rights() -> Rights {
     let Ok(token) = Token::open() else {
         return Rights::Standard;
     };
-    if token
-        .fixed::<TOKEN_ELEVATION>(TokenElevation)
-        .is_some_and(|e| e.TokenIsElevated != 0)
-    {
+    if token.fixed::<TOKEN_ELEVATION>(TokenElevation).is_some_and(|e| e.TokenIsElevated != 0) {
         return Rights::Elevated;
     }
     match token.fixed::<TOKEN_ELEVATION_TYPE>(TokenElevationType) {
@@ -145,8 +127,7 @@ pub fn rights() -> Rights {
 pub fn protected_install(dir: &Path) -> bool {
     use windows::Win32::UI::Shell::{FOLDERID_ProgramFiles, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
     // SAFETY: a known folder id; the returned string is freed below.
-    let Ok(text) = (unsafe { SHGetKnownFolderPath(&FOLDERID_ProgramFiles, KF_FLAG_DEFAULT, None) })
-    else {
+    let Ok(text) = (unsafe { SHGetKnownFolderPath(&FOLDERID_ProgramFiles, KF_FLAG_DEFAULT, None) }) else {
         return false;
     };
     // SAFETY: a terminated string from the call above.
@@ -158,18 +139,14 @@ pub fn protected_install(dir: &Path) -> bool {
 
 /// Whether `dir` is `root` or under it, whatever the case of the letters (Windows' paths).
 fn inside(dir: &Path, root: &Path) -> bool {
-    let parts = |p: &Path| -> Vec<String> {
-        p.components()
-            .map(|c| c.as_os_str().to_string_lossy().to_lowercase())
-            .collect()
-    };
+    let parts =
+        |p: &Path| -> Vec<String> { p.components().map(|c| c.as_os_str().to_string_lossy().to_lowercase()).collect() };
     let (dir, root) = (parts(dir), parts(root));
     // `..` could lead out of it.
     !root.is_empty() && dir.starts_with(&root) && !dir.iter().any(|c| c == "..")
 }
 
-/// COM for this thread while it lives (nothing to undo when the thread already had it in
-/// another mode).
+/// COM for this thread while it lives (nothing to undo when the thread already had it in another mode).
 struct Com(bool);
 
 impl Com {
@@ -229,9 +206,8 @@ impl Drop for Variant {
 /// The Task Scheduler of this computer.
 fn scheduler() -> Result<ITaskService> {
     // SAFETY: the class and interface go together; COM is set up by the caller (`Com`).
-    let service: ITaskService =
-        unsafe { CoCreateInstance(&TaskScheduler, None, CLSCTX_INPROC_SERVER) }
-            .map_err(|e| os("cannot reach the Task Scheduler", &e))?;
+    let service: ITaskService = unsafe { CoCreateInstance(&TaskScheduler, None, CLSCTX_INPROC_SERVER) }
+        .map_err(|e| os("cannot reach the Task Scheduler", &e))?;
     let none = Variant::empty();
     // SAFETY: empty values: this computer, this account.
     unsafe { service.Connect(&none.0, &none.0, &none.0, &none.0) }
@@ -249,15 +225,7 @@ fn task_program(service: &ITaskService, sid: &str) -> Option<PathBuf> {
     // SAFETY: plain COM calls on live interfaces; the collection counts from 1.
     unsafe {
         let task = folder(service)?.GetTask(&BSTR::from(sid)).ok()?;
-        let action: IExecAction = task
-            .Definition()
-            .ok()?
-            .Actions()
-            .ok()?
-            .get_Item(1)
-            .ok()?
-            .cast()
-            .ok()?;
+        let action: IExecAction = task.Definition().ok()?.Actions().ok()?.get_Item(1).ok()?.cast().ok()?;
         let mut path = BSTR::new();
         action.Path(&raw mut path).ok()?;
         Some(PathBuf::from(path.to_string().trim_matches('"')))
@@ -270,18 +238,15 @@ pub fn task_starts(exe: &Path) -> bool {
         return false;
     };
     let _com = Com::new();
-    scheduler()
-        .ok()
-        .and_then(|service| task_program(&service, &sid))
-        .is_some_and(|program| same_file(&program, exe))
+    scheduler().ok().and_then(|service| task_program(&service, &sid)).is_some_and(|program| same_file(&program, exe))
 }
 
 fn same_file(a: &Path, b: &Path) -> bool {
     a.as_os_str().to_string_lossy().to_lowercase() == b.as_os_str().to_string_lossy().to_lowercase()
 }
 
-/// Makes (or makes again) this account's task that starts `exe` with the administrator's
-/// rights, at once and without asking. Needs these rights; `exe` must be in Program Files.
+/// Makes (or makes again) this account's task that starts `exe` with the administrator's rights, at once and without
+/// asking. Needs these rights; `exe` must be in Program Files.
 pub fn register_task(exe: &Path) -> Result<()> {
     let dir = exe
         .parent()
@@ -297,9 +262,7 @@ pub fn register_task(exe: &Path) -> Result<()> {
             Some(folder) => folder,
             None => service
                 .GetFolder(&BSTR::from(r"\"))
-                .and_then(|root| {
-                    root.CreateFolder(&BSTR::from(&FOLDER[1..]), &Variant::text(FOLDER_SDDL).0)
-                })
+                .and_then(|root| root.CreateFolder(&BSTR::from(&FOLDER[1..]), &Variant::text(FOLDER_SDDL).0))
                 .map_err(failed)?,
         };
         let task = service.NewTask(0).map_err(failed)?;
@@ -311,29 +274,15 @@ pub fn register_task(exe: &Path) -> Result<()> {
             })
             .map_err(failed)?;
         let principal = task.Principal().map_err(failed)?;
-        principal
-            .SetUserId(&BSTR::from(sid.as_str()))
-            .map_err(failed)?;
-        principal
-            .SetLogonType(TASK_LOGON_INTERACTIVE_TOKEN)
-            .map_err(failed)?;
-        principal
-            .SetRunLevel(TASK_RUNLEVEL_HIGHEST)
-            .map_err(failed)?;
+        principal.SetUserId(&BSTR::from(sid.as_str())).map_err(failed)?;
+        principal.SetLogonType(TASK_LOGON_INTERACTIVE_TOKEN).map_err(failed)?;
+        principal.SetRunLevel(TASK_RUNLEVEL_HIGHEST).map_err(failed)?;
         let settings = task.Settings().map_err(failed)?;
-        settings
-            .SetDisallowStartIfOnBatteries(VARIANT_FALSE)
-            .map_err(failed)?;
-        settings
-            .SetStopIfGoingOnBatteries(VARIANT_FALSE)
-            .map_err(failed)?;
+        settings.SetDisallowStartIfOnBatteries(VARIANT_FALSE).map_err(failed)?;
+        settings.SetStopIfGoingOnBatteries(VARIANT_FALSE).map_err(failed)?;
         // No time limit; a start while Vixeeny runs reaches it (it opens the settings).
-        settings
-            .SetExecutionTimeLimit(&BSTR::from("PT0S"))
-            .map_err(failed)?;
-        settings
-            .SetMultipleInstances(TASK_INSTANCES_PARALLEL)
-            .map_err(failed)?;
+        settings.SetExecutionTimeLimit(&BSTR::from("PT0S")).map_err(failed)?;
+        settings.SetMultipleInstances(TASK_INSTANCES_PARALLEL).map_err(failed)?;
         // A task's program gets a lower priority by default (7): Vixeeny keeps the usual one.
         settings.SetPriority(4).map_err(failed)?;
         let action: IExecAction = task
@@ -341,14 +290,9 @@ pub fn register_task(exe: &Path) -> Result<()> {
             .and_then(|actions| actions.Create(TASK_ACTION_EXEC))
             .and_then(|action| action.cast())
             .map_err(failed)?;
-        action
-            .SetPath(&BSTR::from(exe.as_os_str().to_string_lossy().as_ref()))
-            .map_err(failed)?;
-        action
-            .SetWorkingDirectory(&BSTR::from(dir.as_os_str().to_string_lossy().as_ref()))
-            .map_err(failed)?;
-        // The account may read and start its task, not change it: what it starts stays the
-        // program in Program Files.
+        action.SetPath(&BSTR::from(exe.as_os_str().to_string_lossy().as_ref())).map_err(failed)?;
+        action.SetWorkingDirectory(&BSTR::from(dir.as_os_str().to_string_lossy().as_ref())).map_err(failed)?;
+        // The account may read and start its task, not change it: what it starts stays the program in Program Files.
         let sddl = format!("D:P(A;;FA;;;BA)(A;;FA;;;SY)(A;;FRFX;;;{sid})");
         folder
             .RegisterTaskDefinition(
@@ -365,19 +309,13 @@ pub fn register_task(exe: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Starts this account's task, in this session: Vixeeny starts with the administrator's
-/// rights, without asking.
+/// Starts this account's task, in this session: Vixeeny starts with the administrator's rights, without asking.
 pub fn run_task() -> Result<()> {
     let sid = Token::open()?.user_sid()?;
     let mut session = 0_u32;
     // SAFETY: this process's id; `session` is written.
-    unsafe {
-        windows::Win32::System::RemoteDesktop::ProcessIdToSessionId(
-            GetCurrentProcessId(),
-            &raw mut session,
-        )
-    }
-    .map_err(|e| os("cannot read the session", &e))?;
+    unsafe { windows::Win32::System::RemoteDesktop::ProcessIdToSessionId(GetCurrentProcessId(), &raw mut session) }
+        .map_err(|e| os("cannot read the session", &e))?;
     let _com = Com::new();
     let service = scheduler()?;
     let task = folder(&service)
@@ -385,20 +323,12 @@ pub fn run_task() -> Result<()> {
         .and_then(|folder| unsafe { folder.GetTask(&BSTR::from(sid.as_str())) }.ok())
         .ok_or_else(|| PlatformError::Os("this account has no Vixeeny task".into()))?;
     // SAFETY: no parameters; this session and the task's own account.
-    unsafe {
-        task.RunEx(
-            &Variant::empty().0,
-            TASK_RUN_USE_SESSION_ID.0,
-            session as i32,
-            &BSTR::new(),
-        )
-    }
-    .map_err(|e| os("cannot start the task", &e))?;
+    unsafe { task.RunEx(&Variant::empty().0, TASK_RUN_USE_SESSION_ID.0, session as i32, &BSTR::new()) }
+        .map_err(|e| os("cannot start the task", &e))?;
     Ok(())
 }
 
-/// Removes the tasks of every account, and their folder (uninstall). Needs the administrator's
-/// rights.
+/// Removes the tasks of every account, and their folder (uninstall). Needs the administrator's rights.
 pub fn remove_tasks() -> Result<()> {
     let _com = Com::new();
     let service = scheduler()?;
@@ -433,19 +363,12 @@ pub enum ElevateError {
     Os(#[from] PlatformError),
 }
 
-/// Starts `program` with `args` with the administrator's rights: Windows asks the user first.
-/// Returns once it is started (or refused); it is not waited for.
+/// Starts `program` with `args` with the administrator's rights: Windows asks the user first. Returns once it is
+/// started (or refused); it is not waited for.
 pub fn run_as_admin(program: &Path, args: &str) -> std::result::Result<(), ElevateError> {
-    use windows::Win32::UI::Shell::{
-        SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SHELLEXECUTEINFOW, ShellExecuteExW,
-    };
+    use windows::Win32::UI::Shell::{SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SHELLEXECUTEINFOW, ShellExecuteExW};
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-    let file: Vec<u16> = program
-        .as_os_str()
-        .to_string_lossy()
-        .encode_utf16()
-        .chain([0])
-        .collect();
+    let file: Vec<u16> = program.as_os_str().to_string_lossy().encode_utf16().chain([0]).collect();
     let params: Vec<u16> = args.encode_utf16().chain([0]).collect();
     let mut info = SHELLEXECUTEINFOW {
         cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
@@ -474,14 +397,8 @@ mod tests {
         assert!(inside(Path::new(r"C:\Program Files\Vixeeny"), root));
         assert!(inside(Path::new(r"c:\program files\vixeeny"), root));
         assert!(!inside(Path::new(r"C:\Program Files (x86)\Vixeeny"), root));
-        assert!(!inside(
-            Path::new(r"C:\Users\Jean\AppData\Local\Programs\Vixeeny"),
-            root
-        ));
-        assert!(!inside(
-            Path::new(r"C:\Program Files\..\Users\Vixeeny"),
-            root
-        ));
+        assert!(!inside(Path::new(r"C:\Users\Jean\AppData\Local\Programs\Vixeeny"), root));
+        assert!(!inside(Path::new(r"C:\Program Files\..\Users\Vixeeny"), root));
     }
 
     #[test]
@@ -490,12 +407,6 @@ mod tests {
         let exe = std::env::current_exe().unwrap();
         assert!(!protected_install(exe.parent().unwrap()));
         let _ = rights();
-        assert!(
-            Token::open()
-                .unwrap()
-                .user_sid()
-                .unwrap()
-                .starts_with("S-1-")
-        );
+        assert!(Token::open().unwrap().user_sid().unwrap().starts_with("S-1-"));
     }
 }

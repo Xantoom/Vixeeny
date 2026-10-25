@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The encoder settings of the registry against the real encoders: the custom preset of each
-//! encoder in every rate mode, every declared pixel format and every option value (the hardware
-//! encoders when this machine has them). The recordings themselves are tested in `recorder.rs`.
-//! Needs the native build: `cargo xtask build-native ffmpeg`.
+//! The encoder settings of the registry against the real encoders: the custom preset of each encoder in every rate
+//! mode, every declared pixel format and every option value (the hardware encoders when this machine has them). The
+//! recordings themselves are tested in `recorder.rs`. Needs the native build: `cargo xtask build-native ffmpeg`.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::path::PathBuf;
@@ -37,11 +36,7 @@ fn synth_frame(i: usize) -> frame::Video {
     let mut f = frame::Video::new(Pixel::YUV420P, W, H);
     for plane in 0..3 {
         let stride = f.stride(plane);
-        let (w, h) = if plane == 0 {
-            (W as usize, H as usize)
-        } else {
-            (W as usize / 2, H as usize / 2)
-        };
+        let (w, h) = if plane == 0 { (W as usize, H as usize) } else { (W as usize / 2, H as usize / 2) };
         let data = f.data_mut(plane);
         for y in 0..h {
             for x in 0..w {
@@ -53,11 +48,7 @@ fn synth_frame(i: usize) -> frame::Video {
     f
 }
 
-fn write_packets(
-    octx: &mut format::context::Output,
-    tb: Rational,
-    receive: &mut dyn FnMut(&mut Packet) -> bool,
-) {
+fn write_packets(octx: &mut format::context::Output, tb: Rational, receive: &mut dyn FnMut(&mut Packet) -> bool) {
     let stream_tb = octx.stream(0).unwrap().time_base();
     let mut pkt = Packet::empty();
     while receive(&mut pkt) {
@@ -67,21 +58,11 @@ fn write_packets(
     }
 }
 
-fn encode_video(
-    enc: &str,
-    enc_opts: &str,
-    label: &str,
-    mux: &str,
-    ext: &str,
-    mopts: &str,
-) -> PathBuf {
+fn encode_video(enc: &str, enc_opts: &str, label: &str, mux: &str, ext: &str, mopts: &str) -> PathBuf {
     let path = std::env::temp_dir().join(format!("vx-m1-{enc}-{label}.{ext}"));
     let mut octx = format::output_as(&path, mux).unwrap();
     let codec = encoder::find_by_name(enc).unwrap_or_else(|| panic!("{enc} is not built in"));
-    let mut ctx = codec::context::Context::new_with_codec(codec)
-        .encoder()
-        .video()
-        .unwrap();
+    let mut ctx = codec::context::Context::new_with_codec(codec).encoder().video().unwrap();
     ctx.set_width(W);
     ctx.set_height(H);
     ctx.set_format(Pixel::YUV420P);
@@ -106,11 +87,7 @@ fn encode_video(
 
 fn count_packets(path: &PathBuf, kind: media::Type) -> usize {
     let mut ictx = format::input(path).unwrap();
-    let idx = ictx
-        .streams()
-        .best(kind)
-        .expect("stream missing in output")
-        .index();
+    let idx = ictx.streams().best(kind).expect("stream missing in output").index();
     ictx.packets().filter(|(s, _)| s.index() == idx).count()
 }
 
@@ -119,50 +96,26 @@ fn count_packets(path: &PathBuf, kind: media::Type) -> usize {
 fn custom_rate_modes_encode() {
     ffmpeg::init().unwrap();
     let registry = vixeeny_encode::registry::Registry::builtin().unwrap();
-    let software = registry
-        .encoders()
-        .filter(|e| e.kind == vixeeny_encode::registry::Kind::Software);
+    let software = registry.encoders().filter(|e| e.kind == vixeeny_encode::registry::Kind::Software);
     for e in software {
         for mode in e.rate_modes() {
             let params = [("rc.mode".to_owned(), mode.name().to_owned())].into();
-            let options: Vec<String> = e
-                .custom_options(&params)
-                .into_iter()
-                .map(|(k, v)| format!("{k}={v}"))
-                .collect();
+            let options: Vec<String> = e.custom_options(&params).into_iter().map(|(k, v)| format!("{k}={v}")).collect();
             let label = format!("custom-{}", mode.name());
-            let path = encode_video(
-                &e.ffmpeg_encoder,
-                &options.join(","),
-                &label,
-                "matroska",
-                "mkv",
-                "",
-            );
-            assert_eq!(
-                count_packets(&path, media::Type::Video),
-                FRAMES,
-                "{} {mode:?}: {options:?}",
-                e.id
-            );
+            let path = encode_video(&e.ffmpeg_encoder, &options.join(","), &label, "matroska", "mkv", "");
+            assert_eq!(count_packets(&path, media::Type::Video), FRAMES, "{} {mode:?}: {options:?}", e.id);
             std::fs::remove_file(path).ok();
         }
     }
 }
 
-/// Opens `enc` with `options` on NV12 frames (or 4:2:0 planes, for an encoder without NV12)
-/// and encodes a few: `Err` when it refuses.
+/// Opens `enc` with `options` on NV12 frames (or 4:2:0 planes, for an encoder without NV12) and encodes a few: `Err`
+/// when it refuses.
 fn try_encode(enc: &str, options: &str) -> Result<usize, ffmpeg::Error> {
     let codec = encoder::find_by_name(enc).ok_or(ffmpeg::Error::EncoderNotFound)?;
-    let nv12 = codec
-        .video()
-        .ok()
-        .and_then(|v| v.formats())
-        .is_none_or(|mut f| f.any(|p| p == Pixel::NV12));
+    let nv12 = codec.video().ok().and_then(|v| v.formats()).is_none_or(|mut f| f.any(|p| p == Pixel::NV12));
     let format = if nv12 { Pixel::NV12 } else { Pixel::YUV420P };
-    let mut ctx = codec::context::Context::new_with_codec(codec)
-        .encoder()
-        .video()?;
+    let mut ctx = codec::context::Context::new_with_codec(codec).encoder().video()?;
     ctx.set_width(W);
     ctx.set_height(H);
     ctx.set_format(format);
@@ -195,21 +148,11 @@ fn custom_rate_modes_on_this_gpu() {
     ffmpeg::init().unwrap();
     let registry = vixeeny_encode::registry::Registry::builtin().unwrap();
     let join = |o: std::collections::BTreeMap<String, String>| {
-        o.into_iter()
-            .map(|(k, v)| format!("{k}={v}"))
-            .collect::<Vec<_>>()
-            .join(",")
+        o.into_iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(",")
     };
-    let hardware = registry
-        .encoders()
-        .filter(|e| e.kind == vixeeny_encode::registry::Kind::Hardware);
+    let hardware = registry.encoders().filter(|e| e.kind == vixeeny_encode::registry::Kind::Hardware);
     for e in hardware {
-        let balanced = e
-            .presets
-            .balanced
-            .iter()
-            .map(|(k, v)| (k.clone(), v.to_ffmpeg()))
-            .collect();
+        let balanced = e.presets.balanced.iter().map(|(k, v)| (k.clone(), v.to_ffmpeg())).collect();
         if let Err(err) = try_encode(&e.ffmpeg_encoder, &join(balanced)) {
             eprintln!("{}: skipped ({err})", e.id);
             continue;
@@ -225,36 +168,26 @@ fn custom_rate_modes_on_this_gpu() {
     }
 }
 
-/// The probe does not try software encoders: each one offers every pixel format the registry
-/// declares, so each of them must encode.
+/// The probe does not try software encoders: each one offers every pixel format the registry declares, so each of them
+/// must encode.
 #[test]
 fn software_encoders_encode_every_declared_pixel_format() {
     let _ = ffmpeg::init();
     let registry = vixeeny_encode::registry::Registry::builtin().unwrap();
-    let software = registry
-        .encoders()
-        .filter(|e| e.kind == vixeeny_encode::registry::Kind::Software);
+    let software = registry.encoders().filter(|e| e.kind == vixeeny_encode::registry::Kind::Software);
     for e in software {
-        let options = VIDEO
-            .iter()
-            .find(|(name, ..)| *name == e.ffmpeg_encoder)
-            .map_or("", |v| v.1);
+        let options = VIDEO.iter().find(|(name, ..)| *name == e.ffmpeg_encoder).map_or("", |v| v.1);
         for spec in &e.pixel_formats {
             let pix: Pixel = spec.ffmpeg.parse().unwrap();
             let codec = encoder::find_by_name(&e.ffmpeg_encoder).unwrap();
-            let mut ctx = codec::context::Context::new_with_codec(codec)
-                .encoder()
-                .video()
-                .unwrap();
+            let mut ctx = codec::context::Context::new_with_codec(codec).encoder().video().unwrap();
             ctx.set_width(W);
             ctx.set_height(H);
             ctx.set_format(pix);
             ctx.set_time_base(Rational(1, FPS));
             ctx.set_frame_rate(Some(Rational(FPS, 1)));
             let label = format!("{} {}", e.id, spec.ffmpeg);
-            let mut venc = ctx
-                .open_with(opts(options))
-                .unwrap_or_else(|err| panic!("{label}: {err}"));
+            let mut venc = ctx.open_with(opts(options)).unwrap_or_else(|err| panic!("{label}: {err}"));
             let mut packets = 0;
             let mut pkt = Packet::empty();
             for i in 0..10 {
@@ -264,8 +197,7 @@ fn software_encoders_encode_every_declared_pixel_format() {
                     f.data_mut(plane).fill(0);
                 }
                 f.set_pts(Some(i));
-                venc.send_frame(&f)
-                    .unwrap_or_else(|err| panic!("{label}: {err}"));
+                venc.send_frame(&f).unwrap_or_else(|err| panic!("{label}: {err}"));
                 while venc.receive_packet(&mut pkt).is_ok() {
                     packets += 1;
                 }
@@ -279,27 +211,20 @@ fn software_encoders_encode_every_declared_pixel_format() {
     }
 }
 
-/// Every value of every expert option (each choice, both ends of a range) opens and encodes,
-/// on the software encoders and the hardware ones this machine has.
+/// Every value of every expert option (each choice, both ends of a range) opens and encodes, on the software encoders
+/// and the hardware ones this machine has.
 #[test]
 fn every_option_value_encodes() {
     use vixeeny_encode::registry::ParamType;
     ffmpeg::init().unwrap();
     let registry = vixeeny_encode::registry::Registry::builtin().unwrap();
     let join = |o: std::collections::BTreeMap<String, String>| {
-        o.into_iter()
-            .map(|(k, v)| format!("{k}={v}"))
-            .collect::<Vec<_>>()
-            .join(",")
+        o.into_iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(",")
     };
     let mut failed = Vec::new();
     for e in registry.encoders() {
         if let Err(err) = try_encode(&e.ffmpeg_encoder, &join(e.custom_options(&[].into()))) {
-            assert!(
-                e.kind == vixeeny_encode::registry::Kind::Hardware,
-                "{}: {err}",
-                e.id
-            );
+            assert!(e.kind == vixeeny_encode::registry::Kind::Hardware, "{}: {err}", e.id);
             eprintln!("{}: skipped ({err})", e.id);
             continue;
         }
@@ -307,11 +232,9 @@ fn every_option_value_encodes() {
             let values: Vec<String> = match p.kind {
                 ParamType::Enum => p.values.clone(),
                 ParamType::Bool => vec!["0".into(), "1".into()],
-                ParamType::Int | ParamType::Float => [p.min, p.max]
-                    .into_iter()
-                    .flatten()
-                    .map(|v| v.to_string())
-                    .collect(),
+                ParamType::Int | ParamType::Float => {
+                    [p.min, p.max].into_iter().flatten().map(|v| v.to_string()).collect()
+                }
                 ParamType::String => Vec::new(),
             };
             for v in values {

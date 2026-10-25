@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Round trips: encode, decode, compare dimensions and, for lossless formats,
-//! pixels.
+//! Round trips: encode, decode, compare dimensions and, for lossless formats, pixels.
 
 use super::*;
 
@@ -30,9 +29,7 @@ fn rgb_of(data: &[u8], stride: usize, width: u32, height: u32) -> Vec<u8> {
 }
 
 fn decode(bytes: &[u8], format: image::ImageFormat) -> image::RgbImage {
-    image::load_from_memory_with_format(bytes, format)
-        .unwrap()
-        .to_rgb8()
+    image::load_from_memory_with_format(bytes, format).unwrap().to_rgb8()
 }
 
 #[test]
@@ -44,24 +41,10 @@ fn png_is_lossless_and_oxipng_keeps_it_so() {
         let want = rgb_of(&data, stride, w, h);
         for settings in [
             PngSettings::default(),
-            PngSettings {
-                compression: PngCompression::Default,
-                oxipng_level: None,
-            },
-            PngSettings {
-                compression: PngCompression::High,
-                oxipng_level: Some(1),
-            },
+            PngSettings { compression: PngCompression::Default, oxipng_level: None },
+            PngSettings { compression: PngCompression::High, oxipng_level: Some(1) },
         ] {
-            let bytes = encode(
-                ImageFormat::Png,
-                &img,
-                &Settings {
-                    png: settings,
-                    ..Settings::default()
-                },
-            )
-            .unwrap();
+            let bytes = encode(ImageFormat::Png, &img, &Settings { png: settings, ..Settings::default() }).unwrap();
             assert!(bytes.windows(4).any(|w| w == b"sRGB"));
             let got = decode(&bytes, image::ImageFormat::Png);
             assert_eq!((got.width(), got.height()), (w, h));
@@ -79,10 +62,7 @@ fn oxipng_never_grows_the_file() {
         ImageFormat::Png,
         &img,
         &Settings {
-            png: PngSettings {
-                compression: PngCompression::Fast,
-                oxipng_level: Some(2),
-            },
+            png: PngSettings { compression: PngCompression::Fast, oxipng_level: Some(2) },
             ..Settings::default()
         },
     )
@@ -109,14 +89,7 @@ fn webp_lossless_is_bit_exact_and_tagged() {
 fn webp_lossy_decodes_to_the_same_size() {
     let (data, stride) = sample(40, 30);
     let img = Bgra::new(40, 30, stride, &data);
-    let settings = Settings {
-        webp: WebpSettings {
-            lossless: false,
-            quality: 80.0,
-            effort: 2,
-        },
-        ..Settings::default()
-    };
+    let settings = Settings { webp: WebpSettings { lossless: false, quality: 80.0, effort: 2 }, ..Settings::default() };
     let bytes = encode(ImageFormat::WebP, &img, &settings).unwrap();
     let got = decode(&bytes, image::ImageFormat::WebP);
     assert_eq!((got.width(), got.height()), (40, 30));
@@ -141,29 +114,13 @@ fn avif_round_trip_in_both_depths_and_chromas() {
     let (data, stride) = smooth(96, 64);
     let img = Bgra::new(96, 64, stride, &data);
     let want = rgb_of(&data, stride, 96, 64);
-    for (depth, chroma) in [
-        (10, Chroma::Yuv444),
-        (8, Chroma::Yuv444),
-        (10, Chroma::Yuv420),
-    ] {
-        let settings = Settings {
-            avif: AvifSettings {
-                quality: 90,
-                speed: 10,
-                depth,
-                chroma,
-            },
-            ..Settings::default()
-        };
+    for (depth, chroma) in [(10, Chroma::Yuv444), (8, Chroma::Yuv444), (10, Chroma::Yuv420)] {
+        let settings = Settings { avif: AvifSettings { quality: 90, speed: 10, depth, chroma }, ..Settings::default() };
         let bytes = encode(ImageFormat::Avif, &img, &settings).unwrap();
         assert_eq!(&bytes[4..12], b"ftypavif");
         let (w, h, got) = crate::avif::decode_rgb(&bytes).unwrap();
         assert_eq!((w, h), (96, 64));
-        let err: u64 = got
-            .iter()
-            .zip(&want)
-            .map(|(a, b)| u64::from(a.abs_diff(*b)))
-            .sum();
+        let err: u64 = got.iter().zip(&want).map(|(a, b)| u64::from(a.abs_diff(*b))).sum();
         let mean = err as f64 / want.len() as f64;
         assert!(mean < 4.0, "{depth}-bit {chroma:?}: mean error {mean}");
     }
@@ -180,11 +137,7 @@ mod native {
         let want = rgb_of(&data, stride, 64, 48);
         for chroma in [Chroma::Yuv444, Chroma::Yuv420] {
             let settings = Settings {
-                jpeg: JpegSettings {
-                    quality: 95,
-                    chroma,
-                    progressive: chroma == Chroma::Yuv420,
-                },
+                jpeg: JpegSettings { quality: 95, chroma, progressive: chroma == Chroma::Yuv420 },
                 ..Settings::default()
             };
             let bytes = encode(ImageFormat::Jpeg, &img, &settings).unwrap();
@@ -192,12 +145,7 @@ mod native {
             assert!(bytes.windows(11).any(|w| w == b"ICC_PROFILE"));
             let got = decode(&bytes, image::ImageFormat::Jpeg);
             assert_eq!((got.width(), got.height()), (64, 48));
-            let err: u64 = got
-                .as_raw()
-                .iter()
-                .zip(&want)
-                .map(|(a, b)| u64::from(a.abs_diff(*b)))
-                .sum();
+            let err: u64 = got.as_raw().iter().zip(&want).map(|(a, b)| u64::from(a.abs_diff(*b))).sum();
             let mean = err as f64 / want.len() as f64;
             let limit = if chroma == Chroma::Yuv444 { 6.0 } else { 14.0 }; // noisy test image
             assert!(mean < limit, "{chroma:?}: mean error {mean}");
@@ -210,9 +158,7 @@ mod native {
         let img = Bgra::new(57, 43, stride, &data);
         let bytes = encode(ImageFormat::Jxl, &img, &Settings::default()).unwrap();
         assert!(bytes.starts_with(&[0xff, 0x0a]) || bytes.starts_with(b"\0\0\0\x0cJXL "));
-        let image = jxl_oxide::JxlImage::builder()
-            .read(std::io::Cursor::new(&bytes))
-            .unwrap();
+        let image = jxl_oxide::JxlImage::builder().read(std::io::Cursor::new(&bytes)).unwrap();
         let render = image.render_frame(0).unwrap();
         let fb = render.image_all_channels();
         assert_eq!((fb.width(), fb.height()), (57, 43));
@@ -228,14 +174,7 @@ mod native {
         let lossy = encode(
             ImageFormat::Jxl,
             &img,
-            &Settings {
-                jxl: JxlSettings {
-                    lossless: false,
-                    distance: 2.0,
-                    effort: 3,
-                },
-                ..Settings::default()
-            },
+            &Settings { jxl: JxlSettings { lossless: false, distance: 2.0, effort: 3 }, ..Settings::default() },
         )
         .unwrap();
         assert!(lossy.len() < lossless.len());

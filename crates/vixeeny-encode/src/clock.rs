@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The master clock side of the pipeline: captured frames carry the OS monotonic time;
-//! the output is a constant frame rate. Late frames are repeated, early ones dropped, and a pause
-//! removes its duration from the media time so the file has no hole. Pure, so it is tested with
-//! made-up timelines.
+//! The master clock side of the pipeline: captured frames carry the OS monotonic time; the output is a constant frame
+//! rate. Late frames are repeated, early ones dropped, and a pause removes its duration from the media time so the file
+//! has no hole. Pure, so it is tested with made-up timelines.
 
 /// A frame rate as a fraction (`60/1`, `30000/1001`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -172,10 +171,9 @@ impl Cfr {
     }
 }
 
-/// The recording's clock, told the same frames and pauses, where frames arrive: a frame it
-/// says no to would be dropped by the recording, so it is not converted at all. It never says
-/// no to one the recording keeps: it does not see the repeats of a static screen, so its slots
-/// are never ahead of the recording's.
+/// The recording's clock, told the same frames and pauses, where frames arrive: a frame it says no to would be dropped
+/// by the recording, so it is not converted at all. It never says no to one the recording keeps: it does not see the
+/// repeats of a static screen, so its slots are never ahead of the recording's.
 #[derive(Debug, Clone)]
 pub struct Pacer(std::sync::Arc<std::sync::Mutex<Cfr>>);
 
@@ -185,10 +183,7 @@ impl Pacer {
     }
 
     fn with<T>(&self, f: impl FnOnce(&mut Cfr) -> T) -> T {
-        f(&mut self
-            .0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner))
+        f(&mut self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
     }
 
     /// Whether the recording keeps a frame captured at `t`.
@@ -233,8 +228,7 @@ mod tests {
                 pacer.resume(t);
             }
             let wanted = pacer.wanted(t);
-            let kept =
-                !cfr.is_paused() && cfr.on_frame(t).iter().any(|e| matches!(e, Emit::New(_)));
+            let kept = !cfr.is_paused() && cfr.on_frame(t).iter().any(|e| matches!(e, Emit::New(_)));
             assert!(wanted || !kept, "frame {i} was kept but not wanted");
             if wanted {
                 pacer.taken(t);
@@ -276,17 +270,7 @@ mod tests {
     fn a_gap_repeats_the_previous_frame() {
         let mut c = Cfr::new(Fps::whole(50));
         let e = feed(&mut c, &[0, 100 * MS]);
-        assert_eq!(
-            e,
-            [
-                Emit::New(0),
-                Emit::Repeat(1),
-                Emit::Repeat(2),
-                Emit::Repeat(3),
-                Emit::Repeat(4),
-                Emit::New(5)
-            ]
-        );
+        assert_eq!(e, [Emit::New(0), Emit::Repeat(1), Emit::Repeat(2), Emit::Repeat(3), Emit::Repeat(4), Emit::New(5)]);
         assert_eq!(c.repeated, 4);
     }
 
@@ -294,10 +278,7 @@ mod tests {
     fn early_frames_are_dropped() {
         let mut c = Cfr::new(Fps::whole(50));
         // Two frames in the same slot: the second is dropped; a burst of three too.
-        let e = feed(
-            &mut c,
-            &[0, 5 * MS, 20 * MS, 22 * MS, 25 * MS, 40 * MS].map(|x| x),
-        );
+        let e = feed(&mut c, &[0, 5 * MS, 20 * MS, 22 * MS, 25 * MS, 40 * MS].map(|x| x));
         assert_eq!(indices(&e), [0, 1, 2]);
         assert_eq!(c.dropped, 3);
     }
@@ -325,12 +306,7 @@ mod tests {
         assert!(c.on_frame(1_500 * MS).is_empty());
         assert!(c.on_tick(2_000 * MS).is_empty());
         c.resume(3_000 * MS); // paused for 2 s
-        all.extend(feed(
-            &mut c,
-            &(0..50)
-                .map(|i| 3_000 * MS + i * 20 * MS)
-                .collect::<Vec<_>>(),
-        ));
+        all.extend(feed(&mut c, &(0..50).map(|i| 3_000 * MS + i * 20 * MS).collect::<Vec<_>>()));
         all.extend(c.finish(4_000 * MS));
         // 2 s of recording = 100 frames, contiguous indices.
         assert_eq!(indices(&all), (0..100).collect::<Vec<_>>());

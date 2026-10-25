@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Start with the Windows session: the `Vixeeny` value of `HKCU\…\Run`, the one the installer
-//! writes. Only this user's entry, and only the entry: the choice made in Task Manager
-//! (its "Startup apps") stays Windows' own.
+//! Start with the Windows session: the `Vixeeny` value of `HKCU\…\Run`, the one the installer writes. Only this user's
+//! entry, and only the entry: the choice made in Task Manager (its "Startup apps") stays Windows' own.
 
 use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, WIN32_ERROR};
 use windows::Win32::System::Registry::{
@@ -16,11 +15,7 @@ const RUN: windows::core::PCWSTR = w!(r"Software\Microsoft\Windows\CurrentVersio
 const NAME: windows::core::PCWSTR = w!("Vixeeny");
 
 fn check(error: WIN32_ERROR, what: &str) -> anyhow::Result<()> {
-    anyhow::ensure!(
-        error == ERROR_SUCCESS,
-        "{what}: {}",
-        error.to_hresult().message()
-    );
+    anyhow::ensure!(error == ERROR_SUCCESS, "{what}: {}", error.to_hresult().message());
     Ok(())
 }
 
@@ -28,17 +23,7 @@ fn check(error: WIN32_ERROR, what: &str) -> anyhow::Result<()> {
 fn entry() -> anyhow::Result<Option<String>> {
     let mut size = 0_u32;
     // SAFETY: constant names; asks for the size only.
-    let error = unsafe {
-        RegGetValueW(
-            HKEY_CURRENT_USER,
-            RUN,
-            NAME,
-            RRF_RT_REG_SZ,
-            None,
-            None,
-            Some(&raw mut size),
-        )
-    };
+    let error = unsafe { RegGetValueW(HKEY_CURRENT_USER, RUN, NAME, RRF_RT_REG_SZ, None, None, Some(&raw mut size)) };
     if error == ERROR_FILE_NOT_FOUND {
         return Ok(None);
     }
@@ -73,8 +58,7 @@ fn command(exe: &std::path::Path) -> String {
 
 /// Makes the OS autostart entry match `enabled`, pointing at the running daemon executable.
 pub fn apply(enabled: bool) -> anyhow::Result<()> {
-    // The tests run the daemon's logic: they must never point the user's entry at a test
-    // program.
+    // The tests run the daemon's logic: they must never point the user's entry at a test program.
     if cfg!(test) || std::env::var_os(DISABLE_ENV).is_some() {
         tracing::debug!("autostart left untouched ({DISABLE_ENV} is set)");
         return Ok(());
@@ -89,14 +73,7 @@ pub fn apply(enabled: bool) -> anyhow::Result<()> {
         let data: Vec<u16> = wanted.encode_utf16().chain([0]).collect();
         // SAFETY: `data` is a terminated wide string of the size given.
         let error = unsafe {
-            RegSetKeyValueW(
-                HKEY_CURRENT_USER,
-                RUN,
-                NAME,
-                REG_SZ.0,
-                Some(data.as_ptr().cast()),
-                (data.len() * 2) as u32,
-            )
+            RegSetKeyValueW(HKEY_CURRENT_USER, RUN, NAME, REG_SZ.0, Some(data.as_ptr().cast()), (data.len() * 2) as u32)
         };
         check(error, "write the autostart entry")?;
         if current.is_none() {
@@ -115,12 +92,7 @@ pub fn apply(enabled: bool) -> anyhow::Result<()> {
 mod tests {
     #[test]
     fn the_entry_is_quoted_for_paths_with_spaces() {
-        let exe = std::path::Path::new(
-            r"C:\Users\Jean Dupont\AppData\Local\Programs\Vixeeny\Vixeeny.exe",
-        );
-        assert_eq!(
-            super::command(exe),
-            r#""C:\Users\Jean Dupont\AppData\Local\Programs\Vixeeny\Vixeeny.exe""#
-        );
+        let exe = std::path::Path::new(r"C:\Users\Jean Dupont\AppData\Local\Programs\Vixeeny\Vixeeny.exe");
+        assert_eq!(super::command(exe), r#""C:\Users\Jean Dupont\AppData\Local\Programs\Vixeeny\Vixeeny.exe""#);
     }
 }

@@ -4,15 +4,14 @@
 use vixeeny_common::config::{Config, Naming, TARGET_SOURCE};
 use vixeeny_common::i18n::Key;
 use vixeeny_encode::registry::{
-    BITRATE_RANGE, DEFAULT_BITRATE, DEFAULT_MAXRATE, Family, ParamType, PresetName, RateMode,
-    rate_keys,
+    BITRATE_RANGE, DEFAULT_BITRATE, DEFAULT_MAXRATE, Family, ParamType, PresetName, RateMode, rate_keys,
 };
 use vixeeny_encode::{replay, validate};
 
 use crate::encoders::{self, param_label, param_range};
 use crate::{
-    Admin, Env, Invalid, Kind, Opt, Row, Value, advised, button, choice, counted, discouraged,
-    folder, header, hinted, info, nested, number, opt, row, slider, toggle,
+    Admin, Env, Invalid, Kind, Opt, Row, Value, advised, button, choice, counted, discouraged, folder, header, hinted,
+    info, nested, number, opt, row, slider, toggle,
 };
 
 /// `off`, `size:<MB>` or `duration:<minutes>` → (kind, amount).
@@ -35,11 +34,7 @@ const FRAME_RATES: [u32; 3] = [30, 60, 120];
 
 /// The offered frame rate closest to `fps` (a setting from another machine or an older list).
 fn fps_option(fps: u32, offered: &[u32]) -> u32 {
-    offered
-        .iter()
-        .copied()
-        .min_by_key(|f| f.abs_diff(fps))
-        .unwrap_or(60)
+    offered.iter().copied().min_by_key(|f| f.abs_diff(fps)).unwrap_or(60)
 }
 
 fn hdr_on(setting: &str) -> bool {
@@ -76,12 +71,7 @@ pub fn general(env: &Env) -> Vec<Row> {
             |c| c.general.theme.clone(),
             |c, v| c.general.theme = v,
         ),
-        toggle(
-            "autostart",
-            t(Key::SetAutostart),
-            |c| c.general.autostart,
-            |c, v| c.general.autostart = v,
-        ),
+        toggle("autostart", t(Key::SetAutostart), |c| c.general.autostart, |c, v| c.general.autostart = v),
         toggle(
             "notifications",
             t(Key::SetNotifications),
@@ -102,29 +92,17 @@ fn admin(env: &Env) -> Option<Row> {
     let t = |k| env.t(k);
     let (row, hint) = match env.admin {
         Admin::Hidden => return None,
-        Admin::Granted => (
-            info("admin", t(Key::SetAdmin), t(Key::SetAdminGranted)),
-            Key::SetAdminHint,
-        ),
+        Admin::Granted => (info("admin", t(Key::SetAdmin), t(Key::SetAdminGranted)), Key::SetAdminHint),
         Admin::Missing { moves } => (
             button("admin", t(Key::SetAdmin), t(Key::SetAdminGrant)),
-            if moves {
-                Key::SetAdminHintMove
-            } else {
-                Key::SetAdminHint
-            },
+            if moves { Key::SetAdminHintMove } else { Key::SetAdminHint },
         ),
     };
     Some(hinted(row, t(hint)))
 }
 
 /// How the files of one kind are named. `get` and `naming` reach the settings of that kind.
-fn naming_rows(
-    env: &Env,
-    kind: &str,
-    get: fn(&Config) -> &Naming,
-    naming: fn(&mut Config) -> &mut Naming,
-) -> [Row; 1] {
+fn naming_rows(env: &Env, kind: &str, get: fn(&Config) -> &Naming, naming: fn(&mut Config) -> &mut Naming) -> [Row; 1] {
     let template = row(
         format!("template:{kind}"),
         env.t(Key::SetTemplate),
@@ -149,12 +127,7 @@ pub fn overlay(env: &Env, config: &Config) -> Vec<Row> {
     let t = |k| env.t(k);
     let mut rows = vec![
         header("h_side", t(Key::GrpSideBar)),
-        toggle(
-            "overlay_enabled",
-            t(Key::SetOverlayOn),
-            |c| c.overlay.enabled,
-            |c, v| c.overlay.enabled = v,
-        ),
+        toggle("overlay_enabled", t(Key::SetOverlayOn), |c| c.overlay.enabled, |c, v| c.overlay.enabled = v),
     ];
     if config.overlay.enabled {
         rows.push(crate::picked(
@@ -217,16 +190,11 @@ pub fn overlay(env: &Env, config: &Config) -> Vec<Row> {
     rows
 }
 
-/// The widget's place as the picker reads it: a preset, or `custom:<x>:<y>` in thousandths of
-/// the room across and down.
+/// The widget's place as the picker reads it: a preset, or `custom:<x>:<y>` in thousandths of the room across and down.
 fn widget_place(widget: &vixeeny_common::config::RecordingWidget) -> String {
     if widget.corner == "custom" {
         let thousandths = |f: f32| (f.clamp(0.0, 1.0) * 1000.0).round() as u32;
-        format!(
-            "custom:{}:{}",
-            thousandths(widget.custom.0),
-            thousandths(widget.custom.1)
-        )
+        format!("custom:{}:{}", thousandths(widget.custom.0), thousandths(widget.custom.1))
     } else {
         widget.corner.clone()
     }
@@ -238,12 +206,7 @@ fn set_widget_place(c: &mut Config, value: String) {
     let mut parts = value.split(':');
     let corner = parts.next().unwrap_or_default().to_owned();
     if corner == "custom" {
-        let mut part = || {
-            parts
-                .next()
-                .and_then(|p| p.parse::<u32>().ok())
-                .map(|n| n.min(1000) as f32 / 1000.0)
-        };
+        let mut part = || parts.next().and_then(|p| p.parse::<u32>().ok()).map(|n| n.min(1000) as f32 / 1000.0);
         if let (Some(x), Some(y)) = (part(), part()) {
             widget.custom = (x, y);
         }
@@ -268,19 +231,15 @@ fn disk_alert(env: &Env) -> Row {
             if pct == 0 {
                 "0".into()
             } else {
-                DISK_ALERTS
-                    .into_iter()
-                    .min_by_key(|p| p.abs_diff(pct))
-                    .unwrap_or(5)
-                    .to_string()
+                DISK_ALERTS.into_iter().min_by_key(|p| p.abs_diff(pct)).unwrap_or(5).to_string()
             }
         },
         |c, v| c.recording_widget.disk_alert_percent = v.parse().unwrap_or(0),
     )
 }
 
-/// A folder row, with a warning sign when the folder cannot be reached (a drive unplugged, a
-/// file in its place): the files then go to the default folder.
+/// A folder row, with a warning sign when the folder cannot be reached (a drive unplugged, a file in its place): the
+/// files then go to the default folder.
 fn folder_row(env: &Env, row: Row, setting: &str) -> Row {
     if vixeeny_common::paths::reachable_dir(setting) {
         row
@@ -299,12 +258,7 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
         header("h_location", t(Key::GrpLocation)),
         folder_row(
             env,
-            folder(
-                "dir_images",
-                t(Key::SetFolder),
-                |c| c.paths.images.clone(),
-                |c, v| c.paths.images = v,
-            ),
+            folder("dir_images", t(Key::SetFolder), |c| c.paths.images.clone(), |c, v| c.paths.images = v),
             &config.paths.images,
         ),
         toggle(
@@ -314,12 +268,7 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
             |c, v| c.paths.per_app_subfolder.images = v,
         ),
     ];
-    rows.extend(naming_rows(
-        env,
-        "images",
-        |c| &c.paths.naming.images,
-        |c| &mut c.paths.naming.images,
-    ));
+    rows.extend(naming_rows(env, "images", |c| &c.paths.naming.images, |c| &mut c.paths.naming.images));
     rows.extend([
         header("h_format", t(Key::GrpEncoding)),
         choice(
@@ -424,14 +373,7 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
                 "avif_speed",
                 t(Key::SetAvifSpeed),
                 (0, i64::from(vixeeny_common::config::AVIF_MAX_SPEED), 1),
-                |c| {
-                    i64::from(
-                        c.image
-                            .avif
-                            .speed
-                            .min(vixeeny_common::config::AVIF_MAX_SPEED),
-                    )
-                },
+                |c| i64::from(c.image.avif.speed.min(vixeeny_common::config::AVIF_MAX_SPEED)),
                 |c, v| c.image.avif.speed = v as u8,
             ));
         }
@@ -469,12 +411,7 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
             |c| c.image.copy_to_clipboard,
             |c, v| c.image.copy_to_clipboard = v,
         ),
-        toggle(
-            "image_cursor",
-            t(Key::SetShowCursor),
-            |c| c.image.show_cursor,
-            |c, v| c.image.show_cursor = v,
-        ),
+        toggle("image_cursor", t(Key::SetShowCursor), |c| c.image.show_cursor, |c, v| c.image.show_cursor = v),
     ]);
     // Only when Windows shows HDR: there is nothing to keep otherwise.
     if env.display.hdr {
@@ -485,18 +422,14 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
             |c, v| c.image.hdr = if v { "keep_hdr" } else { "tonemap_sdr" }.into(),
         );
         // WebP has no HDR: its pictures are always converted.
-        rows.push(if config.image.format == "webp" {
-            crate::greyed(hdr)
-        } else {
-            hdr
-        });
+        rows.push(if config.image.format == "webp" { crate::greyed(hdr) } else { hdr });
     }
     rows.extend(backdrop_rows(env, config));
     rows
 }
 
-/// The registry parameters of the encoder in use, as editable rows (the `custom` preset).
-/// A custom option, stored as text under `key` in the profile's `params`.
+/// The registry parameters of the encoder in use, as editable rows (the `custom` preset). A custom option, stored as
+/// text under `key` in the profile's `params`.
 fn param_row(id: String, label: String, kind: Kind, key: String, default: String) -> Row {
     let read = key.clone();
     let numeric = matches!(kind, Kind::Number { .. } | Kind::Slider { .. });
@@ -527,9 +460,8 @@ fn param_row(id: String, label: String, kind: Kind, key: String, default: String
     )
 }
 
-/// The options of the encoder set by hand: the rate control (only the fields of the chosen
-/// mode) and the speed / quality preset, then the encoder's other parameters (the expert
-/// ones).
+/// The options of the encoder set by hand: the rate control (only the fields of the chosen mode) and the speed /
+/// quality preset, then the encoder's other parameters (the expert ones).
 fn custom_rows(env: &Env, config: &Config, encoder: &str) -> (Vec<Row>, Vec<Row>) {
     let Some(spec) = encoders::spec(encoder) else {
         return (Vec::new(), Vec::new());
@@ -538,14 +470,11 @@ fn custom_rows(env: &Env, config: &Config, encoder: &str) -> (Vec<Row>, Vec<Row>
     let rc = &spec.rate_control;
     let mode = spec.rate_mode(&config.video.params);
     let mut rows = Vec::new();
-    // The speed that keeps up with these settings (resolution × frame rate).
-    // What the GPU's encoder has, when its driver says: only that is offered.
+    // The speed that keeps up with these settings (resolution × frame rate). What the GPU's encoder has, when its
+    // driver says: only that is offered.
     let tools = env.probe.as_ref().and_then(|p| p.tools(&spec.id));
     let speed = spec.speed_for(pixel_rate(env, config), tools);
-    let modes: Vec<Opt> = spec
-        .rate_modes()
-        .map(|m| opt(m.name(), encoders::rate_mode_label(m, spec)))
-        .collect();
+    let modes: Vec<Opt> = spec.rate_modes().map(|m| opt(m.name(), encoders::rate_mode_label(m, spec))).collect();
     if modes.len() > 1 {
         rows.push(param_row(
             format!("p:{}", rate_keys::MODE),
@@ -560,19 +489,11 @@ fn custom_rows(env: &Env, config: &Config, encoder: &str) -> (Vec<Row>, Vec<Row>
         RateMode::Vbr | RateMode::Cbr => None,
     };
     if let Some((key, q)) = scale {
-        let label = if lang == vixeeny_common::i18n::Lang::Fr {
-            "Qualité"
-        } else {
-            "Quality"
-        };
+        let label = if lang == vixeeny_common::i18n::Lang::Fr { "Qualité" } else { "Quality" };
         rows.push(param_row(
             format!("p:{key}"),
             label.into(),
-            Kind::Slider {
-                min: q.min,
-                max: q.max,
-                step: 1,
-            },
+            Kind::Slider { min: q.min, max: q.max, step: 1 },
             key.into(),
             q.default.to_string(),
         ));
@@ -583,11 +504,7 @@ fn custom_rows(env: &Env, config: &Config, encoder: &str) -> (Vec<Row>, Vec<Row>
                 param_row(
                     format!("p:{key}"),
                     param_label(key, lang),
-                    Kind::Number {
-                        min,
-                        max,
-                        step: 500,
-                    },
+                    Kind::Number { min, max, step: 500 },
                     key.into(),
                     default.to_string(),
                 ),
@@ -621,17 +538,11 @@ fn custom_rows(env: &Env, config: &Config, encoder: &str) -> (Vec<Row>, Vec<Row>
                         // No more B-frames than the encoder takes.
                         .filter(|v| {
                             param.key != "bframes"
-                                || v.parse::<u32>()
-                                    .ok()
-                                    .zip(tools)
-                                    .is_none_or(|(n, t)| n <= t.max_bframes)
+                                || v.parse::<u32>().ok().zip(tools).is_none_or(|(n, t)| n <= t.max_bframes)
                         })
                         .map(|v| {
                             let label = encoders::value_label(&param.key, v, lang);
-                            if speed
-                                .as_ref()
-                                .is_some_and(|(k, r)| *k == param.key && r == v)
-                            {
+                            if speed.as_ref().is_some_and(|(k, r)| *k == param.key && r == v) {
                                 advised(v, label)
                             } else if param.key == "tune" && matches!(v.as_str(), "psnr" | "ssim") {
                                 // Tunes for measurements: they turn the psychovisual tools off.
@@ -645,27 +556,12 @@ fn custom_rows(env: &Env, config: &Config, encoder: &str) -> (Vec<Row>, Vec<Row>
             ),
             ParamType::Bool => (param_label(&param.key, lang), Kind::Toggle),
             // A numbered preset reads better on a slider (its "i" says what its ends mean).
-            ParamType::Int if param.key == "preset" => (
-                param_label(&param.key, lang),
-                Kind::Slider { min, max, step },
-            ),
-            ParamType::Int => (
-                param_label(&param.key, lang),
-                Kind::Number { min, max, step },
-            ),
-            ParamType::Float => (
-                param_label(&param.key, lang),
-                Kind::Slider { min, max, step },
-            ),
+            ParamType::Int if param.key == "preset" => (param_label(&param.key, lang), Kind::Slider { min, max, step }),
+            ParamType::Int => (param_label(&param.key, lang), Kind::Number { min, max, step }),
+            ParamType::Float => (param_label(&param.key, lang), Kind::Slider { min, max, step }),
             ParamType::String => (param_label(&param.key, lang), Kind::Text),
         };
-        let mut row = param_row(
-            format!("p:{}", param.key),
-            label,
-            kind,
-            param.key.clone(),
-            param.default.to_ffmpeg(),
-        );
+        let mut row = param_row(format!("p:{}", param.key), label, kind, param.key.clone(), param.default.to_ffmpeg());
         match (param.key.as_str(), param.kind) {
             ("preset", ParamType::Int) => {
                 row = hinted(row, encoders::numbered_preset_ends(min, max, lang));
@@ -687,8 +583,8 @@ fn custom_rows(env: &Env, config: &Config, encoder: &str) -> (Vec<Row>, Vec<Row>
     (rows, expert)
 }
 
-/// The recording, in the order of OBS: the folder, the picture, the encoder, the file, then
-/// the encoder's own options when they are set by hand.
+/// The recording, in the order of OBS: the folder, the picture, the encoder, the file, then the encoder's own options
+/// when they are set by hand.
 pub fn video(env: &Env, config: &Config) -> Vec<Row> {
     let t = |k| env.t(k);
     let profile = &config.video;
@@ -702,12 +598,7 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
         header("h_location", t(Key::GrpLocation)),
         folder_row(
             env,
-            folder(
-                "dir_videos",
-                t(Key::SetFolder),
-                |c| c.paths.videos.clone(),
-                |c, v| c.paths.videos = v,
-            ),
+            folder("dir_videos", t(Key::SetFolder), |c| c.paths.videos.clone(), |c, v| c.paths.videos = v),
             &config.paths.videos,
         ),
         toggle(
@@ -717,12 +608,7 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
             |c, v| c.paths.per_app_subfolder.videos = v,
         ),
     ];
-    rows.extend(naming_rows(
-        env,
-        "videos",
-        |c| &c.paths.naming.videos,
-        |c| &mut c.paths.naming.videos,
-    ));
+    rows.extend(naming_rows(env, "videos", |c| &c.paths.naming.videos, |c| &mut c.paths.naming.videos));
 
     // ---- the picture
     rows.push(header("h_video", t(Key::GrpPicture)));
@@ -746,8 +632,8 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
         rows.push(aspect);
     }
     let (_, _, cw, ch) = validate::center_crop(screen, validate::aspect(&profile.aspect));
-    // The screen's size first, then only smaller ones: a height the screen does not reach (a
-    // setting from a larger screen) records at the screen's size, and shows as it.
+    // The screen's size first, then only smaller ones: a height the screen does not reach (a setting from a larger
+    // screen) records at the screen's size, and shows as it.
     let mut sizes = vec![opt("source", size_name((cw, ch)))];
     for height in [2160u32, 1440, 1080, 720, 480] {
         if height < ch {
@@ -772,28 +658,16 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
     // Above 60 fps only what a monitor shows.
     let max = env.display.max_refresh.max(60);
     // (A 239.76 Hz monitor reads 239: one more lets 240 through.)
-    let rates: Vec<u32> = FRAME_RATES
-        .iter()
-        .copied()
-        .filter(|f| *f <= max + 1)
-        .collect();
+    let rates: Vec<u32> = FRAME_RATES.iter().copied().filter(|f| *f <= max + 1).collect();
     let offered = rates.clone();
     rows.push(choice(
         "fps",
         t(Key::SetFps),
-        rates
-            .iter()
-            .map(|f| opt(&f.to_string(), format!("{f} fps")))
-            .collect(),
+        rates.iter().map(|f| opt(&f.to_string(), format!("{f} fps"))).collect(),
         move |c| fps_option(c.video.fps, &offered).to_string(),
         |c, v| c.video.fps = v.parse().unwrap_or(60),
     ));
-    rows.push(toggle(
-        "video_cursor",
-        t(Key::SetShowCursor),
-        |c| c.video.show_cursor,
-        |c, v| c.video.show_cursor = v,
-    ));
+    rows.push(toggle("video_cursor", t(Key::SetShowCursor), |c| c.video.show_cursor, |c, v| c.video.show_cursor = v));
 
     // ---- the encoder
     rows.push(header("h_encoder", t(Key::GrpEncoding)));
@@ -806,11 +680,7 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
         t(Key::SetEncoderKind),
         kinds,
         move |c| {
-            if no_hardware {
-                "software".to_owned()
-            } else {
-                c.video.encoder_kind.clone()
-            }
+            if no_hardware { "software".to_owned() } else { c.video.encoder_kind.clone() }
         },
         |c, v| {
             let profile = &mut c.video;
@@ -819,17 +689,10 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
             profile.encoder = "auto".into();
         },
     );
-    rows.push(if no_hardware {
-        crate::greyed(crate::warned(kind, t(Key::SetNoHardware)))
-    } else {
-        kind
-    });
+    rows.push(if no_hardware { crate::greyed(crate::warned(kind, t(Key::SetNoHardware))) } else { kind });
     let recommended = encoders::best(env, hardware).map(|e| e.id.clone());
     // One section per maker when there are several chips (a graphics card and the processor's).
-    let makers = list
-        .iter()
-        .map(|e| e.vendor)
-        .collect::<std::collections::BTreeSet<_>>();
+    let makers = list.iter().map(|e| e.vendor).collect::<std::collections::BTreeSet<_>>();
     let mut options: Vec<Opt> = Vec::new();
     for e in &list {
         if makers.len() > 1 && !options.iter().any(|o| o.heading && o.label == e.vendor) {
@@ -854,11 +717,7 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
             Box::new(move |c| {
                 // `auto` (older files) shows the encoder it resolves to.
                 let own = c.video.encoder.clone();
-                Value::Text(if own == "auto" {
-                    shown.clone().unwrap_or_default()
-                } else {
-                    own
-                })
+                Value::Text(if own == "auto" { shown.clone().unwrap_or_default() } else { own })
             }),
             Box::new(move |c, v| match v {
                 Value::Text(id) => {
@@ -918,10 +777,7 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
 
     // ---- the encoder's options, set by hand: right under the profile that shows them
     if !matches!(profile.preset.as_str(), "quality" | "balanced" | "small") {
-        let (basic, expert) = current
-            .as_deref()
-            .map(|id| custom_rows(env, config, id))
-            .unwrap_or_default();
+        let (basic, expert) = current.as_deref().map(|id| custom_rows(env, config, id)).unwrap_or_default();
         rows.extend(basic);
         let (row, open) = crate::expander(env, "expert_video", t(Key::SetExpert));
         rows.push(row);
@@ -930,11 +786,7 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
             rows.push(choice(
                 "chroma",
                 t(Key::SetChroma),
-                vec![
-                    opt("420", "4:2:0"),
-                    opt("422", "4:2:2"),
-                    opt("444", "4:4:4"),
-                ],
+                vec![opt("420", "4:2:0"), opt("422", "4:2:2"), opt("444", "4:4:4")],
                 |c| c.video.chroma.clone(),
                 |c, v| c.video.chroma = v,
             ));
@@ -946,13 +798,9 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
     rows.push(choice(
         "container",
         t(Key::SetContainer),
-        // Hybrid MP4 only: fragmented while it is written (a recording cut short by a crash or
-        // a full disk still plays), a classic MP4 once done (what every editor reads).
-        vec![
-            opt("mp4_hybrid", "MP4"),
-            opt("mkv", "MKV"),
-            opt("webm", "WebM"),
-        ],
+        // Hybrid MP4 only: fragmented while it is written (a recording cut short by a crash or a full disk still
+        // plays), a classic MP4 once done (what every editor reads).
+        vec![opt("mp4_hybrid", "MP4"), opt("mkv", "MKV"), opt("webm", "WebM")],
         |c| match c.video.container.as_str() {
             "mp4" | "mp4_fragmented" | "fmp4" => "mp4_hybrid".to_owned(),
             other => other.to_owned(),
@@ -1005,22 +853,17 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
     rows
 }
 
-/// The screen recordings are measured on: the main one (1920 × 1080 until it is known).
-/// The pixels a second a recording encodes, with these settings on the main screen.
+/// The screen recordings are measured on: the main one (1920 × 1080 until it is known). The pixels a second a recording
+/// encodes, with these settings on the main screen.
 pub(crate) fn pixel_rate(env: &Env, config: &Config) -> u64 {
-    let (_, _, cw, ch) =
-        validate::center_crop(main_screen(env), validate::aspect(&config.video.aspect));
+    let (_, _, cw, ch) = validate::center_crop(main_screen(env), validate::aspect(&config.video.aspect));
     let (w, h) = validate::output_size(&config.video.resolution, (cw, ch)).unwrap_or((cw, ch));
     u64::from(w) * u64::from(h) * u64::from(config.video.fps.max(1))
 }
 
 pub(crate) fn main_screen(env: &Env) -> (u32, u32) {
     let screens = &env.machine.screens;
-    screens
-        .iter()
-        .find(|s| s.primary)
-        .or_else(|| screens.first())
-        .map_or((1920, 1080), |s| (s.width, s.height))
+    screens.iter().find(|s| s.primary).or_else(|| screens.first()).map_or((1920, 1080), |s| (s.width, s.height))
 }
 
 /// The usual name of a picture ratio (`21:9` for 3440 × 1440), else the reduced fraction.
@@ -1055,11 +898,7 @@ fn size_name((w, h): (u32, u32)) -> String {
         (_, 480) => "SD",
         _ => "",
     };
-    if !name.is_empty() {
-        format!("{w} × {h} ({name})")
-    } else {
-        format!("{w} × {h}")
-    }
+    if !name.is_empty() { format!("{w} × {h} ({name})") } else { format!("{w} × {h}") }
 }
 
 /// The audio bitrates offered, in kbit/s (160 is recommended).
@@ -1067,23 +906,13 @@ const AUDIO_BITRATES: [u32; 6] = [96, 128, 160, 192, 256, 320];
 
 /// The offered audio bitrate closest to `kbps` (a setting from an older version).
 fn audio_bitrate_option(kbps: u32) -> u32 {
-    AUDIO_BITRATES
-        .iter()
-        .copied()
-        .min_by_key(|k| k.abs_diff(kbps))
-        .unwrap_or(160)
+    AUDIO_BITRATES.iter().copied().min_by_key(|k| k.abs_diff(kbps)).unwrap_or(160)
 }
 
 /// The audio codec `auto` stands for: Opus beside AV1 (and VP9, and in WebM), else AAC.
 fn auto_audio_codec(env: &Env, config: &Config) -> &'static str {
-    let family = encoders::resolved(env, &config.video)
-        .and_then(|e| encoders::spec(&e.id))
-        .map(|spec| spec.family);
-    if matches!(family, Some(Family::Av1 | Family::Vp9)) || config.video.container == "webm" {
-        "opus"
-    } else {
-        "aac"
-    }
+    let family = encoders::resolved(env, &config.video).and_then(|e| encoders::spec(&e.id)).map(|spec| spec.family);
+    if matches!(family, Some(Family::Av1 | Family::Vp9)) || config.video.container == "webm" { "opus" } else { "aac" }
 }
 
 /// One audio device recorded on its own: an output (`out:<id>`) or an input (`in:<id>`).
@@ -1098,14 +927,12 @@ fn is_mic(spec: &str) -> bool {
 
 /// The label of a source the machine does not offer right now.
 fn absent_label(spec: &str) -> String {
-    spec.split_once(':')
-        .map_or(spec, |(_, name)| name)
-        .to_owned()
+    spec.split_once(':').map_or(spec, |(_, name)| name).to_owned()
 }
 
-/// What the profile records besides the microphone: `system` (all the PC sound), `target` (the
-/// recorded program), `output` (one output device), `programs` (the ones ticked) or `none`.
-/// Settings from before 0.9.15 have no such field: it is read from their sources.
+/// What the profile records besides the microphone: `system` (all the PC sound), `target` (the recorded program),
+/// `output` (one output device), `programs` (the ones ticked) or `none`. Settings from before 0.9.15 have no such
+/// field: it is read from their sources.
 fn capture_mode(config: &Config) -> &str {
     let audio = &config.video.audio;
     if matches!(audio.capture.as_str(), "programs" | "none") {
@@ -1125,18 +952,13 @@ fn capture_mode(config: &Config) -> &str {
     }
 }
 
-/// Switches what is recorded besides the microphone (the microphone is kept as it is).
-/// The device or the programs left are set aside, and come back with their mode.
+/// Switches what is recorded besides the microphone (the microphone is kept as it is). The device or the programs left
+/// are set aside, and come back with their mode.
 fn set_capture(config: &mut Config, mode: &str, first_output: Option<&str>) {
     let audio = &mut config.video.audio;
     let program = |s: &String| s.starts_with("app:") && s != TARGET_SOURCE;
     // What the mode left had chosen replaces what was set aside of the same kind.
-    let leaving: Vec<String> = audio
-        .sources
-        .iter()
-        .filter(|s| is_device(s) || program(s))
-        .cloned()
-        .collect();
+    let leaving: Vec<String> = audio.sources.iter().filter(|s| is_device(s) || program(s)).cloned().collect();
     if leaving.iter().any(|s| is_device(s)) {
         audio.set_aside.retain(|s| !is_device(s));
     }
@@ -1155,12 +977,7 @@ fn set_capture(config: &mut Config, mode: &str, first_output: Option<&str>) {
             }
         }
         "programs" => {
-            let kept: Vec<String> = audio
-                .set_aside
-                .iter()
-                .filter(|s| program(s))
-                .cloned()
-                .collect();
+            let kept: Vec<String> = audio.set_aside.iter().filter(|s| program(s)).cloned().collect();
             audio.sources.extend(kept);
         }
         _ => {}
@@ -1193,8 +1010,8 @@ fn program_row(spec: String, label: String, icon: Option<crate::Icon>) -> Row {
     r
 }
 
-/// The volume keys of the microphone and of what is recorded besides it (a source of its own
-/// in the settings file is more precise and wins).
+/// The volume keys of the microphone and of what is recorded besides it (a source of its own in the settings file is
+/// more precise and wins).
 const MIC_VOLUME: &str = "mic";
 const CAPTURE_VOLUME: &str = "capture";
 
@@ -1203,11 +1020,7 @@ fn volume_row(id: &str, label: String, key: &'static str) -> Row {
     let mut volume = row(
         id,
         label,
-        Kind::Slider {
-            min: 0,
-            max: 200,
-            step: 5,
-        },
+        Kind::Slider { min: 0, max: 200, step: 5 },
         Box::new(move |c| {
             let v = c.video.audio.volumes.get(key).copied().unwrap_or(1.0);
             Value::Int((f64::from(v) * 100.0).round() as i64)
@@ -1259,24 +1072,16 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
         // Which device: the outputs, then the inputs, each in alphabetical order.
         "output" => {
             let mut devices = Vec::new();
-            for (prefix, list, title) in [
-                ("out", &env.audio.outputs, Key::SrcOutputs),
-                ("in", &env.audio.inputs, Key::SrcInputs),
-            ] {
-                let mut group: Vec<Opt> = list
-                    .iter()
-                    .map(|d| opt(&format!("{prefix}:{}", d.id), d.name.as_str()))
-                    .collect();
+            for (prefix, list, title) in
+                [("out", &env.audio.outputs, Key::SrcOutputs), ("in", &env.audio.inputs, Key::SrcInputs)]
+            {
+                let mut group: Vec<Opt> =
+                    list.iter().map(|d| opt(&format!("{prefix}:{}", d.id), d.name.as_str())).collect();
                 // An unplugged device that the profile records.
-                let recorded = chosen
-                    .iter()
-                    .filter(|s| s.starts_with(&format!("{prefix}:")));
+                let recorded = chosen.iter().filter(|s| s.starts_with(&format!("{prefix}:")));
                 for spec in recorded {
                     if !group.iter().any(|o| o.value == *spec) {
-                        group.push(opt(
-                            spec,
-                            format!("{} ({})", absent_label(spec), t(Key::SrcAbsent)),
-                        ));
+                        group.push(opt(spec, format!("{} ({})", absent_label(spec), t(Key::SrcAbsent))));
                     }
                 }
                 group.sort_by_key(|o| o.label.to_lowercase());
@@ -1289,15 +1094,7 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
                 "audio_output",
                 t(Key::SetAudioOutput),
                 devices,
-                |c| {
-                    c.video
-                        .audio
-                        .sources
-                        .iter()
-                        .find(|s| is_device(s))
-                        .cloned()
-                        .unwrap_or_default()
-                },
+                |c| c.video.audio.sources.iter().find(|s| is_device(s)).cloned().unwrap_or_default(),
                 |c, v| {
                     let sources = &mut c.video.audio.sources;
                     sources.retain(|s| !is_device(s));
@@ -1308,39 +1105,23 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
         // The programs that play sound now, and those ticked before that are closed.
         "programs" => {
             for p in &env.audio.programs {
-                rows.push(nested(program_row(
-                    format!("app:{}", p.id),
-                    p.name.clone(),
-                    p.icon.clone(),
-                )));
+                rows.push(nested(program_row(format!("app:{}", p.id), p.name.clone(), p.icon.clone())));
             }
             for spec in chosen.iter().filter(|s| s.starts_with("app:")) {
-                if !env
-                    .audio
-                    .programs
-                    .iter()
-                    .any(|p| format!("app:{}", p.id) == *spec)
-                {
+                if !env.audio.programs.iter().any(|p| format!("app:{}", p.id) == *spec) {
                     let label = format!("{} ({})", absent_label(spec), t(Key::SrcClosed));
                     rows.push(nested(program_row(spec.clone(), label, None)));
                 }
             }
             if !rows.iter().any(|r| r.id.starts_with("src:app:")) {
-                rows.push(nested(info(
-                    "no_programs",
-                    t(Key::SrcNoPrograms),
-                    String::new(),
-                )));
+                rows.push(nested(info("no_programs", t(Key::SrcNoPrograms), String::new())));
             }
         }
         _ => {}
     }
 
     if mode != "none" {
-        rows.push(counted(
-            volume_row("capture_volume", t(Key::SetCaptureVolume), CAPTURE_VOLUME),
-            "%",
-        ));
+        rows.push(counted(volume_row("capture_volume", t(Key::SetCaptureVolume), CAPTURE_VOLUME), "%"));
     }
 
     // ---- the microphone: a switch, then which one
@@ -1365,34 +1146,18 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
     ));
     if chosen.iter().any(|s| is_mic(s)) {
         let mut mics = vec![opt("mic", t(Key::SrcMic))];
-        mics.extend(
-            env.audio
-                .inputs
-                .iter()
-                .map(|d| opt(&format!("mic:{}", d.id), d.name.as_str())),
-        );
+        mics.extend(env.audio.inputs.iter().map(|d| opt(&format!("mic:{}", d.id), d.name.as_str())));
         // An unplugged microphone that the profile records.
         for spec in chosen.iter().filter(|s| s.starts_with("mic:")) {
             if !mics.iter().any(|o| o.value == *spec) {
-                mics.push(opt(
-                    spec,
-                    format!("{} ({})", absent_label(spec), t(Key::SrcAbsent)),
-                ));
+                mics.push(opt(spec, format!("{} ({})", absent_label(spec), t(Key::SrcAbsent))));
             }
         }
         rows.push(choice(
             "mic_device",
             t(Key::SetMicDevice),
             mics,
-            |c| {
-                c.video
-                    .audio
-                    .sources
-                    .iter()
-                    .find(|s| is_mic(s))
-                    .cloned()
-                    .unwrap_or_else(|| "mic".into())
-            },
+            |c| c.video.audio.sources.iter().find(|s| is_mic(s)).cloned().unwrap_or_else(|| "mic".into()),
             |c, v| {
                 let sources = &mut c.video.audio.sources;
                 sources.retain(|s| !is_mic(s));
@@ -1400,10 +1165,7 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
             },
         ));
         // Its level, live under the volume.
-        let mut volume = counted(
-            volume_row("mic_volume", t(Key::SetMicVolume), MIC_VOLUME),
-            "%",
-        );
+        let mut volume = counted(volume_row("mic_volume", t(Key::SetMicVolume), MIC_VOLUME), "%");
         volume.meter = true;
         rows.push(volume);
         rows.push(toggle(
@@ -1418,10 +1180,7 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
     rows.push(header("h_tracks", t(Key::GrpTracks)));
     // Only with more than one source: one source makes one track either way.
     if config.video.audio.sources.len() > 1 {
-        let mut routes = vec![
-            opt("one_track_per_source", t(Key::SetRouteEach)),
-            opt("mix_all", t(Key::SetRouteMix)),
-        ];
+        let mut routes = vec![opt("one_track_per_source", t(Key::SetRouteEach)), opt("mix_all", t(Key::SetRouteMix))];
         // Written by hand in the settings file: listed only while it is the setting.
         if config.video.audio.routing == "advanced" {
             routes.push(opt("advanced", t(Key::SetRouteAdvanced)));
@@ -1440,14 +1199,7 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
         t(Key::SetAudioCodec),
         vec![
             // Opus with AV1 and VP9, AAC with the rest.
-            opt(
-                "auto",
-                format!(
-                    "{} ({})",
-                    t(Key::OptAuto),
-                    if auto == "opus" { "Opus" } else { "AAC" }
-                ),
-            ),
+            opt("auto", format!("{} ({})", t(Key::OptAuto), if auto == "opus" { "Opus" } else { "AAC" })),
             crate::heading(t(Key::OptGroupCompressed)),
             advised("aac", "AAC"),
             opt("opus", "Opus"),
@@ -1472,11 +1224,7 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
                 .iter()
                 .map(|k| {
                     let label = format!("{k} kbit/s");
-                    if *k == 160 {
-                        advised(&k.to_string(), label)
-                    } else {
-                        opt(&k.to_string(), label)
-                    }
+                    if *k == 160 { advised(&k.to_string(), label) } else { opt(&k.to_string(), label) }
                 })
                 .collect(),
             |c| audio_bitrate_option(c.video.audio.bitrate_kbps).to_string(),
@@ -1496,11 +1244,7 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
     let channels = choice(
         "audio_channels",
         t(Key::SetAudioChannels),
-        vec![
-            opt("mono", "Mono"),
-            advised("stereo", t(Key::OptStereo)),
-            opt("surround", "5.1 / 7.1"),
-        ],
+        vec![opt("mono", "Mono"), advised("stereo", t(Key::OptStereo)), opt("surround", "5.1 / 7.1")],
         |c| match c.video.audio.channels.as_str() {
             "5.1" | "7.1" => "surround".to_owned(),
             other => other.to_owned(),
@@ -1508,16 +1252,9 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
         |c, v| c.video.audio.channels = v,
     );
     // Surround needs Matroska and a codec that carries it: say so when it falls back to stereo.
-    let surround = matches!(
-        config.video.audio.channels.as_str(),
-        "surround" | "5.1" | "7.1"
-    );
+    let surround = matches!(config.video.audio.channels.as_str(), "surround" | "5.1" | "7.1");
     let carried = config.video.container == "mkv" && codec != "aac";
-    rows.push(if surround && !carried {
-        crate::warned(channels, t(Key::SetSurroundHint))
-    } else {
-        channels
-    });
+    rows.push(if surround && !carried { crate::warned(channels, t(Key::SetSurroundHint)) } else { channels });
 
     rows
 }
@@ -1528,11 +1265,7 @@ pub fn replay(env: &Env, config: &Config) -> Vec<Row> {
     let storage = choice(
         "replay_storage",
         t(Key::SetReplayStorage),
-        vec![
-            advised("auto", t(Key::OptAuto)),
-            opt("ram", t(Key::SetStorageRam)),
-            opt("disk", t(Key::SetStorageDisk)),
-        ],
+        vec![advised("auto", t(Key::OptAuto)), opt("ram", t(Key::SetStorageRam)), opt("disk", t(Key::SetStorageDisk))],
         |c| c.replay.storage.clone(),
         |c, v| c.replay.storage = v,
     );
@@ -1544,21 +1277,13 @@ pub fn replay(env: &Env, config: &Config) -> Vec<Row> {
         REPLAY_DURATIONS
             .iter()
             .map(|s| {
-                let label = if *s < 60 {
-                    format!("{s} s")
-                } else {
-                    format!("{} min", s / 60)
-                };
+                let label = if *s < 60 { format!("{s} s") } else { format!("{} min", s / 60) };
                 opt(&s.to_string(), label)
             })
             .collect(),
         |c| {
             let s = c.replay.duration_seconds;
-            REPLAY_DURATIONS
-                .iter()
-                .min_by_key(|d| d.abs_diff(s))
-                .unwrap_or(&30)
-                .to_string()
+            REPLAY_DURATIONS.iter().min_by_key(|d| d.abs_diff(s)).unwrap_or(&30).to_string()
         },
         |c, v| c.replay.duration_seconds = v.parse().unwrap_or(30),
     );
@@ -1578,20 +1303,11 @@ pub fn replay(env: &Env, config: &Config) -> Vec<Row> {
             .collect(),
         |c| {
             let s = c.replay.after_seconds;
-            REPLAY_AFTER
-                .iter()
-                .min_by_key(|d| d.abs_diff(s))
-                .unwrap_or(&0)
-                .to_string()
+            REPLAY_AFTER.iter().min_by_key(|d| d.abs_diff(s)).unwrap_or(&0).to_string()
         },
         |c, v| c.replay.after_seconds = v.parse().unwrap_or(0),
     );
-    let enabled = toggle(
-        "replay_enabled",
-        t(Key::SetReplayStart),
-        |c| c.replay.enabled,
-        |c, v| c.replay.enabled = v,
-    );
+    let enabled = toggle("replay_enabled", t(Key::SetReplayStart), |c| c.replay.enabled, |c, v| c.replay.enabled = v);
     // The rest only matters while the replay runs.
     if !config.replay.enabled {
         return vec![enabled];
@@ -1618,12 +1334,7 @@ pub fn replay(env: &Env, config: &Config) -> Vec<Row> {
         header("h_folder", t(Key::GrpLocation)),
         folder_row(
             env,
-            folder(
-                "dir_replays",
-                t(Key::SetFolder),
-                |c| c.paths.replays.clone(),
-                |c, v| c.paths.replays = v,
-            ),
+            folder("dir_replays", t(Key::SetFolder), |c| c.paths.replays.clone(), |c, v| c.paths.replays = v),
             &config.paths.replays,
         ),
         toggle(
@@ -1633,12 +1344,7 @@ pub fn replay(env: &Env, config: &Config) -> Vec<Row> {
             |c, v| c.paths.per_app_subfolder.replays = v,
         ),
     ]);
-    rows.extend(naming_rows(
-        env,
-        "replays",
-        |c| &c.paths.naming.replays,
-        |c| &mut c.paths.naming.replays,
-    ));
+    rows.extend(naming_rows(env, "replays", |c| &c.paths.naming.replays, |c| &mut c.paths.naming.replays));
     rows
 }
 
@@ -1661,19 +1367,14 @@ fn backdrop_rows(env: &Env, config: &Config) -> Vec<Row> {
             |c, v| c.image.window_backdrop = v,
         ),
     ];
-    let swatches: Vec<[u8; 3]> = std::iter::once(env.accent)
-        .chain(BACKDROP_COLOURS.iter().map(|(_, c)| *c))
-        .collect();
+    let swatches: Vec<[u8; 3]> = std::iter::once(env.accent).chain(BACKDROP_COLOURS.iter().map(|(_, c)| *c)).collect();
     match backdrop_kind(&config.image.window_backdrop) {
         "colour" => {
             let accent = env.accent;
             rows.push(row(
                 "backdrop_colour",
                 t(Key::SetBackdropColour),
-                Kind::Colour {
-                    swatches,
-                    pairs: Vec::new(),
-                },
+                Kind::Colour { swatches, pairs: Vec::new() },
                 Box::new(move |c| Value::Text(hex(c.image.backdrop_colour().unwrap_or(accent)))),
                 Box::new(|c, v| match v {
                     Value::Text(t) => {
@@ -1688,13 +1389,7 @@ fn backdrop_rows(env: &Env, config: &Config) -> Vec<Row> {
             rows.push(row(
                 "backdrop_gradient",
                 t(Key::SetBackdropGradient),
-                Kind::Colour {
-                    swatches,
-                    pairs: BACKDROP_GRADIENTS
-                        .iter()
-                        .map(|(_, from, to)| (*from, *to))
-                        .collect(),
-                },
+                Kind::Colour { swatches, pairs: BACKDROP_GRADIENTS.iter().map(|(_, from, to)| (*from, *to)).collect() },
                 Box::new(|c| {
                     let (from, to) = c.image.backdrop_gradient();
                     Value::Text(format!("{},{}", hex(from), hex(to)))
@@ -1722,8 +1417,8 @@ fn backdrop_kind(setting: &str) -> &str {
     }
 }
 
-/// The games open now, and the programs of the user's lists: each one automatic (the replay
-/// looks for signs of a game), always recorded, or never.
+/// The games open now, and the programs of the user's lists: each one automatic (the replay looks for signs of a game),
+/// always recorded, or never.
 fn game_rows(env: &Env, config: &Config) -> Vec<Row> {
     let t = |k| env.t(k);
     let (games, open) = crate::expander(env, "games", t(Key::HdrGames));
@@ -1792,8 +1487,8 @@ const REPLAY_AFTER: [u32; 5] = [0, 5, 10, 15, 30];
 /// The durations a replay can keep, in seconds.
 const REPLAY_DURATIONS: [u32; 9] = [15, 30, 60, 120, 300, 600, 900, 1200, 1800];
 
-/// How big the replay will be with the video settings, and where `auto` keeps it. `None` while
-/// the encoder is not known.
+/// How big the replay will be with the video settings, and where `auto` keeps it. `None` while the encoder is not
+/// known.
 fn replay_estimate(env: &Env, config: &Config) -> Option<String> {
     let encoder = encoders::resolved(env, &config.video).and_then(|e| encoders::spec(&e.id))?;
     // The largest screen (a recording is of one screen).
@@ -1815,15 +1510,11 @@ fn replay_estimate(env: &Env, config: &Config) -> Option<String> {
         _ if replay::fits_in_ram(bytes, env.machine.ram_bytes) => Key::ReplayEstimateRam,
         _ => Key::ReplayEstimateDisk,
     };
-    Some(
-        env.t(key)
-            .replace("{size}", &vixeeny_common::i18n::size_label(bytes, env.lang)),
-    )
+    Some(env.t(key).replace("{size}", &vixeeny_common::i18n::size_label(bytes, env.lang)))
 }
 
-/// The settings of the updates page (the state of the update is drawn by the page).
-/// One switch: checking and installing go together (a check every 12 hours, the download in
-/// the background, the installation at the next start).
+/// The settings of the updates page (the state of the update is drawn by the page). One switch: checking and installing
+/// go together (a check every 12 hours, the download in the background, the installation at the next start).
 pub fn updates(env: &Env, _config: &Config) -> Vec<Row> {
     vec![toggle(
         "auto_update",

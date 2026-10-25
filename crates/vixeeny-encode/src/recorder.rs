@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The recording pipeline: frames with a monotonic timestamp go through the
-//! constant-frame-rate clock ([`crate::clock`]), colour conversion and scaling, an encoder opened
-//! from the registry, and a muxer (MKV, hybrid or fragmented MP4, WebM) that can split the output
-//! on key frames. Everything runs on a dedicated worker thread behind a bounded queue, so a slow
-//! encoder drops input frames (counted) instead of stalling the capture.
+//! The recording pipeline: frames with a monotonic timestamp go through the constant-frame-rate clock
+//! ([`crate::clock`]), colour conversion and scaling, an encoder opened from the registry, and a muxer (MKV, hybrid or
+//! fragmented MP4, WebM) that can split the output on key frames. Everything runs on a dedicated worker thread behind a
+//! bounded queue, so a slow encoder drops input frames (counted) instead of stalling the capture.
 //!
-//! Frames come either as BGRA in RAM (the CPU path: converted here) or already converted on the
-//! GPU ([`crate::gpu`]): handed to NVENC / AMF / QSV as they are, downloaded for a software
-//! encoder.
+//! Frames come either as BGRA in RAM (the CPU path: converted here) or already converted on the GPU ([`crate::gpu`]):
+//! handed to NVENC / AMF / QSV as they are, downloaded for a software encoder.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -50,8 +48,8 @@ impl From<ffmpeg_next::Error> for RecordError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputContainer {
     Mkv,
-    /// Fragmented while recording (readable after a crash), classic once done: the fragments
-    /// become one `mdat` and a full `moov` follows, in place (FFmpeg's `hybrid_fragmented`).
+    /// Fragmented while recording (readable after a crash), classic once done: the fragments become one `mdat` and a
+    /// full `moov` follows, in place (FFmpeg's `hybrid_fragmented`).
     Mp4Hybrid,
     Mp4Fragmented,
     WebM,
@@ -90,14 +88,10 @@ impl OutputContainer {
         d.set("flush_packets", "1");
         match self {
             // Tags of its own (the SDR white of an HDR recording) are written too.
-            Self::Mp4Fragmented => d.set(
-                "movflags",
-                "frag_keyframe+empty_moov+default_base_moof+use_metadata_tags",
-            ),
-            Self::Mp4Hybrid => d.set(
-                "movflags",
-                "frag_keyframe+empty_moov+default_base_moof+hybrid_fragmented+use_metadata_tags",
-            ),
+            Self::Mp4Fragmented => d.set("movflags", "frag_keyframe+empty_moov+default_base_moof+use_metadata_tags"),
+            Self::Mp4Hybrid => {
+                d.set("movflags", "frag_keyframe+empty_moov+default_base_moof+hybrid_fragmented+use_metadata_tags")
+            }
             Self::Mkv | Self::WebM => {}
         }
         d
@@ -119,8 +113,7 @@ pub struct RecordConfig {
     pub options: Vec<(String, String)>,
     pub container: OutputContainer,
     pub output_size: (u32, u32),
-    /// Keep only the middle of the picture with this ratio (`None`: all of it). GPU frames
-    /// come cropped already.
+    /// Keep only the middle of the picture with this ratio (`None`: all of it). GPU frames come cropped already.
     pub crop: Option<(u32, u32)>,
     pub fps: Fps,
     pub depth: u8,
@@ -137,8 +130,8 @@ pub struct RecordConfig {
     pub keyframe_seconds: f64,
     /// Frames the queue holds before input frames are dropped.
     pub queue: usize,
-    /// Variable frame rate: every captured frame is kept at its own time, nothing is repeated
-    /// or dropped (the file is smaller when the screen is mostly still). Matroska and WebM only.
+    /// Variable frame rate: every captured frame is kept at its own time, nothing is repeated or dropped (the file is
+    /// smaller when the screen is mostly still). Matroska and WebM only.
     pub vfr: bool,
     /// Audio tracks, in file order; fed with `push_audio` (empty = no audio).
     pub audio: Vec<AudioTrackConfig>,
@@ -245,8 +238,8 @@ pub struct Recorder {
 type Namer = Box<dyn FnMut(u32) -> PathBuf + Send>;
 
 impl Recorder {
-    /// Opens the encoder and the first file, then records until [`Recorder::stop`]. `namer`
-    /// gives the path of each part (0, 1, …).
+    /// Opens the encoder and the first file, then records until [`Recorder::stop`]. `namer` gives the path of each part
+    /// (0, 1, …).
     pub fn start(config: RecordConfig, namer: Namer) -> Result<Self, RecordError> {
         let stats = Arc::new(Stats::default());
         let (tx, rx) = sync_channel(config.queue.max(1));
@@ -272,12 +265,7 @@ impl Recorder {
             })
             .map_err(|e| RecordError::Io(e.to_string()))?;
         match ready_rx.recv() {
-            Ok(Ok(())) => Ok(Self {
-                tx,
-                join,
-                stats,
-                buffers,
-            }),
+            Ok(Ok(())) => Ok(Self { tx, join, stats, buffers }),
             Ok(Err(message)) => {
                 let _ = join.join();
                 Err(RecordError::Config(message))
@@ -290,8 +278,7 @@ impl Recorder {
         &self.stats
     }
 
-    /// Queues a frame captured at `t` (nanoseconds, monotonic). `false` = dropped, the encoder
-    /// is behind.
+    /// Queues a frame captured at `t` (nanoseconds, monotonic). `false` = dropped, the encoder is behind.
     pub fn push_frame(&self, t: i64, frame: VideoFrame) -> bool {
         self.stats.pushed.fetch_add(1, Ordering::Relaxed);
         self.queue(t, Input::Cpu(frame))
@@ -308,8 +295,8 @@ impl Recorder {
             Ok(()) => true,
             Err(TrySendError::Full(cmd) | TrySendError::Disconnected(cmd)) => {
                 self.stats.queue_dropped.fetch_add(1, Ordering::Relaxed);
-                // The pixels go back to the capture: the next frame does not allocate them
-                // again while the encoder is already behind.
+                // The pixels go back to the capture: the next frame does not allocate them again while the encoder is
+                // already behind.
                 if let Cmd::Frame(_, input) = cmd
                     && let Input::Cpu(frame) = *input
                 {
@@ -320,10 +307,10 @@ impl Recorder {
         }
     }
 
-    /// Appends samples (48 kHz, interleaved f32, in the track's channel count) to audio track
-    /// `track`. The track is one gapless stream starting at the recording's time zero (the origin
-    /// of the video timestamps): `vixeeny_audio::Mixer` produces exactly that. Blocks when the encoder is behind, so no
-    /// audio is ever dropped (a dropped block would shift the track).
+    /// Appends samples (48 kHz, interleaved f32, in the track's channel count) to audio track `track`. The track is one
+    /// gapless stream starting at the recording's time zero (the origin of the video timestamps):
+    /// `vixeeny_audio::Mixer` produces exactly that. Blocks when the encoder is behind, so no audio is ever dropped (a
+    /// dropped block would shift the track).
     pub fn push_audio(&self, track: usize, samples: Vec<f32>) {
         let _ = self.tx.send(Cmd::Audio(track, samples));
     }
@@ -341,14 +328,11 @@ impl Recorder {
         let _ = self.tx.send(Cmd::Resume(t));
     }
 
-    /// Writes the replay buffer's last seconds to `path` without re-encoding. Returns once the
-    /// packets are picked (the buffer keeps running); the file is complete after
-    /// [`ReplaySave::wait`].
+    /// Writes the replay buffer's last seconds to `path` without re-encoding. Returns once the packets are picked (the
+    /// buffer keeps running); the file is complete after [`ReplaySave::wait`].
     pub fn save_replay(&self, path: PathBuf) -> Result<ReplaySave, RecordError> {
         let (reply, answer) = sync_channel(1);
-        self.tx
-            .send(Cmd::Save(path, reply))
-            .map_err(|_| RecordError::Worker)?;
+        self.tx.send(Cmd::Save(path, reply)).map_err(|_| RecordError::Worker)?;
         answer.recv().map_err(|_| RecordError::Worker)?
     }
 
@@ -360,8 +344,7 @@ impl Recorder {
     }
 }
 
-/// Time stamping of a variable-rate recording: microseconds from the first frame, pauses cut
-/// out, strictly increasing.
+/// Time stamping of a variable-rate recording: microseconds from the first frame, pauses cut out, strictly increasing.
 #[derive(Debug, Default)]
 struct Vfr {
     origin: Option<i64>,
@@ -397,22 +380,10 @@ impl Vfr {
 }
 
 /// The encoder's pixel format for a depth and a chroma, from the registry entry.
-pub(crate) fn pixel_format(
-    encoder: &Encoder,
-    depth: u8,
-    chroma: Chroma,
-) -> Result<Pixel, RecordError> {
-    let spec = encoder
-        .pixel_formats
-        .iter()
-        .find(|p| p.depth == depth && p.chroma == chroma)
-        .ok_or_else(|| {
-            RecordError::Config(format!(
-                "{} does not take {depth}-bit {} video",
-                encoder.display_name,
-                chroma.name()
-            ))
-        })?;
+pub(crate) fn pixel_format(encoder: &Encoder, depth: u8, chroma: Chroma) -> Result<Pixel, RecordError> {
+    let spec = encoder.pixel_formats.iter().find(|p| p.depth == depth && p.chroma == chroma).ok_or_else(|| {
+        RecordError::Config(format!("{} does not take {depth}-bit {} video", encoder.display_name, chroma.name()))
+    })?;
     <Pixel as std::str::FromStr>::from_str(&spec.ffmpeg)
         .map_err(|_| RecordError::Config(format!("unknown pixel format {}", spec.ffmpeg)))
 }
@@ -425,28 +396,21 @@ fn dictionary(options: &[(String, String)]) -> Dictionary<'static> {
     d
 }
 
-/// Options some GPUs or drivers refuse (NVENC's B-frames as references before Turing and its
-/// temporal AQ in AV1 where the card lacks it, the newer controls of AMF and Quick Sync): an
-/// encoder that does not open with them opens without.
-const OPTIONAL: [&str; 6] = [
-    "b_ref_mode",
-    "temporal-aq",
-    "preencode",
-    "high_motion_quality_boost_enable",
-    "extbrc",
-    "look_ahead_depth",
-];
+/// Options some GPUs or drivers refuse (NVENC's B-frames as references before Turing and its temporal AQ in AV1 where
+/// the card lacks it, the newer controls of AMF and Quick Sync): an encoder that does not open with them opens without.
+const OPTIONAL: [&str; 6] =
+    ["b_ref_mode", "temporal-aq", "preencode", "high_motion_quality_boost_enable", "extbrc", "look_ahead_depth"];
 
-/// Opens a video encoder with `options` through `open` (which sets the context up anew each
-/// time), and once more without the [`OPTIONAL`] ones when it refuses.
+/// Opens a video encoder with `options` through `open` (which sets the context up anew each time), and once more
+/// without the [`OPTIONAL`] ones when it refuses.
 pub(crate) fn open_video(
     options: &[(String, String)],
     mut open: impl FnMut(Dictionary<'static>) -> Result<encoder::Video, RecordError>,
 ) -> Result<encoder::Video, RecordError> {
     let with_threads = |options: &[(String, String)]| {
         let mut d = dictionary(options);
-        // FFmpeg's default is one thread: libvpx then encodes on a single core and x265 one
-        // frame at a time. Zero lets each encoder use the whole CPU (x264 does by itself).
+        // FFmpeg's default is one thread: libvpx then encodes on a single core and x265 one frame at a time. Zero lets
+        // each encoder use the whole CPU (x264 does by itself).
         if d.get("threads").is_none() {
             d.set("threads", "0");
         }
@@ -455,9 +419,7 @@ pub(crate) fn open_video(
     let optional = |(k, _): &&(String, String)| OPTIONAL.contains(&k.as_str());
     match open(with_threads(options)) {
         Err(e) if options.iter().any(|o| optional(&o)) => {
-            tracing::warn!(
-                "the encoder refused its options ({e}): trying without the optional ones"
-            );
+            tracing::warn!("the encoder refused its options ({e}): trying without the optional ones");
             let kept: Vec<_> = options.iter().filter(|o| !optional(o)).cloned().collect();
             open(with_threads(&kept))
         }
@@ -468,8 +430,8 @@ pub(crate) fn open_video(
 struct Output {
     octx: format::context::Output,
     stream_tb: Rational,
-    /// pts of the first (key) packet of the part, in encoder time base: subtracted so each file
-    /// starts at zero (the dts stay negative by the encoder delay, as in the first file).
+    /// pts of the first (key) packet of the part, in encoder time base: subtracted so each file starts at zero (the dts
+    /// stay negative by the encoder delay, as in the first file).
     offset: Option<i64>,
     first_pts: i64,
     packets: u64,
@@ -514,8 +476,7 @@ struct Worker {
     converter: Option<convert::Converter>,
     /// HDR frames as 16-bit PQ RGB, kept from one frame to the next.
     hdr16: Vec<u8>,
-    /// Downloaded GPU frames (NV12 / P010) to the encoder's planar format: a reshuffle, no
-    /// colour conversion.
+    /// Downloaded GPU frames (NV12 / P010) to the encoder's planar format: a reshuffle, no colour conversion.
     unpack: Option<(scaling::Context, Pixel)>,
     last: Option<Last>,
     out: Option<Output>,
@@ -532,14 +493,11 @@ struct Worker {
 impl Worker {
     fn open(cfg: RecordConfig, mut namer: Namer, stats: Arc<Stats>) -> Result<Self, RecordError> {
         let pix = pixel_format(&cfg.encoder, cfg.depth, cfg.chroma)?;
-        let codec = encoder::find_by_name(&cfg.encoder.ffmpeg_encoder).ok_or_else(|| {
-            RecordError::Config(format!("{} is not built in", cfg.encoder.ffmpeg_encoder))
-        })?;
+        let codec = encoder::find_by_name(&cfg.encoder.ffmpeg_encoder)
+            .ok_or_else(|| RecordError::Config(format!("{} is not built in", cfg.encoder.ffmpeg_encoder)))?;
         let (w, h) = cfg.output_size;
         if w == 0 || h == 0 || w % 2 != 0 || h % 2 != 0 {
-            return Err(RecordError::Config(format!(
-                "bad output size {w}×{h} (must be even)"
-            )));
+            return Err(RecordError::Config(format!("bad output size {w}×{h} (must be even)")));
         }
         let first = if cfg.files {
             let path0 = namer(0);
@@ -551,27 +509,18 @@ impl Worker {
             None
         };
         // Every container we write (Matroska, MP4, WebM) wants the codec headers out of band.
-        let global = first
-            .as_ref()
-            .is_none_or(|(octx, _)| octx.format().flags().contains(format::Flags::GLOBAL_HEADER));
+        let global =
+            first.as_ref().is_none_or(|(octx, _)| octx.format().flags().contains(format::Flags::GLOBAL_HEADER));
 
         if cfg.vfr && !matches!(cfg.container, OutputContainer::Mkv | OutputContainer::WebM) {
-            return Err(RecordError::Config(
-                "variable frame rate needs Matroska or WebM".into(),
-            ));
+            return Err(RecordError::Config("variable frame rate needs Matroska or WebM".into()));
         }
         // VFR stamps frames in microseconds; CFR counts frames.
-        let enc_tb = if cfg.vfr {
-            Rational(1, 1_000_000)
-        } else {
-            Rational(cfg.fps.den as i32, cfg.fps.num as i32)
-        };
+        let enc_tb = if cfg.vfr { Rational(1, 1_000_000) } else { Rational(cfg.fps.den as i32, cfg.fps.num as i32) };
         let gop = (f64::from(cfg.fps.num) / f64::from(cfg.fps.den) * cfg.keyframe_seconds).round();
         let hdr10 = cfg.hdr.then(|| Hdr10::new(cfg.peak_nits));
         let encoder = open_video(&cfg.options, |options| {
-            let mut ctx = codec::context::Context::new_with_codec(codec)
-                .encoder()
-                .video()?;
+            let mut ctx = codec::context::Context::new_with_codec(codec).encoder().video()?;
             ctx.set_width(w);
             ctx.set_height(h);
             ctx.set_format(pix);
@@ -627,9 +576,10 @@ impl Worker {
             files: Vec::new(),
             ring: None,
         };
-        worker.ring = worker.cfg.replay_seconds.map(|seconds| {
-            Ring::with_storage(seconds, worker.cfg.audio.len(), &worker.cfg.replay_storage)
-        });
+        worker.ring = worker
+            .cfg
+            .replay_seconds
+            .map(|seconds| Ring::with_storage(seconds, worker.cfg.audio.len(), &worker.cfg.replay_storage));
         for track in &worker.cfg.audio {
             let enc = AudioEncoder::open(track, global)?;
             let codec = enc.codec;
@@ -648,8 +598,8 @@ impl Worker {
         Ok(worker)
     }
 
-    /// The first video frame fixes the media's time zero. Audio starts at the clock origin, so
-    /// the audio that came before the frame is cut: both streams then agree on what "0" is.
+    /// The first video frame fixes the media's time zero. Audio starts at the clock origin, so the audio that came
+    /// before the frame is cut: both streams then agree on what "0" is.
     fn anchor(&mut self, t: i64) -> Result<(), RecordError> {
         if self.anchored {
             return Ok(());
@@ -697,11 +647,7 @@ impl Worker {
     /// Writes the held audio packets that start at or before `limit` samples (media time).
     fn write_audio_before(&mut self, limit: i64) -> Result<(), RecordError> {
         for i in 0..self.audio.len() {
-            while self.audio[i]
-                .held
-                .front()
-                .is_some_and(|p| p.pts().unwrap_or(0) <= limit)
-            {
+            while self.audio[i].held.front().is_some_and(|p| p.pts().unwrap_or(0) <= limit) {
                 if let Some(mut packet) = self.audio[i].held.pop_front() {
                     self.write_audio(i, &mut packet)?;
                 }
@@ -744,11 +690,7 @@ impl Worker {
         self.write_audio_before(i64::MAX)
     }
 
-    fn begin_part(
-        &mut self,
-        octx: format::context::Output,
-        path: PathBuf,
-    ) -> Result<(), RecordError> {
+    fn begin_part(&mut self, octx: format::context::Output, path: PathBuf) -> Result<(), RecordError> {
         self.files.push(path);
         self.out = Some(self.new_output(octx)?);
         Ok(())
@@ -776,29 +718,15 @@ impl Worker {
         octx.write_header_with(self.cfg.container.header_options())?;
         let stream_tb = octx.stream(0).map_or(self.enc_tb, |s| s.time_base());
         let audio_tb = (0..self.audio.len())
-            .map(|i| {
-                octx.stream(1 + i)
-                    .map_or(Rational(1, SAMPLE_RATE as i32), |s| s.time_base())
-            })
+            .map(|i| octx.stream(1 + i).map_or(Rational(1, SAMPLE_RATE as i32), |s| s.time_base()))
             .collect();
-        Ok(Output {
-            octx,
-            stream_tb,
-            offset: None,
-            first_pts: 0,
-            packets: 0,
-            bytes: 0,
-            audio_tb,
-            audio_cut: 0,
-        })
+        Ok(Output { octx, stream_tb, offset: None, first_pts: 0, packets: 0, bytes: 0, audio_tb, audio_cut: 0 })
     }
 
     /// Picks the packets of a save and hands them to a thread that writes the file.
     fn save_replay(&mut self, path: PathBuf) -> Result<ReplaySave, RecordError> {
-        let seconds = self
-            .cfg
-            .replay_seconds
-            .ok_or_else(|| RecordError::Config("this recording has no replay buffer".into()))?;
+        let seconds =
+            self.cfg.replay_seconds.ok_or_else(|| RecordError::Config("this recording has no replay buffer".into()))?;
         let snapshot = self
             .ring
             .as_ref()
@@ -820,11 +748,7 @@ impl Worker {
                 Ok(())
             })
             .map_err(|e| RecordError::Io(e.to_string()))?;
-        Ok(ReplaySave {
-            path,
-            seconds: span,
-            join,
-        })
+        Ok(ReplaySave { path, seconds: span, join })
     }
 
     fn run(mut self, rx: &Receiver<Cmd>) -> Result<Summary, RecordError> {
@@ -911,9 +835,7 @@ impl Worker {
                 let gpu = self.cfg.gpu.as_ref().ok_or(RecordError::Worker)?;
                 Last::Hw(gpu.to_qsv(&frame)?)
             }
-            (Input::Hw(frame), Some(crate::gpu::Feed::Download)) => {
-                Last::Sw(self.download(&frame)?)
-            }
+            (Input::Hw(frame), Some(crate::gpu::Feed::Download)) => Last::Sw(self.download(&frame)?),
             (Input::Hw(frame), _) => Last::Hw(frame),
         })
     }
@@ -925,11 +847,7 @@ impl Worker {
         if got.format() == self.pix {
             return Ok(got);
         }
-        if self
-            .unpack
-            .as_ref()
-            .is_none_or(|(_, from)| *from != got.format())
-        {
+        if self.unpack.as_ref().is_none_or(|(_, from)| *from != got.format()) {
             let ctx = scaling::Context::get(
                 got.format(),
                 got.width(),
@@ -950,29 +868,20 @@ impl Worker {
 
     fn convert(&mut self, src: &VideoFrame) -> Result<frame::Video, RecordError> {
         let (ow, oh) = self.cfg.output_size;
-        let (left, top, width, height) =
-            crate::validate::center_crop((src.width, src.height), self.cfg.crop);
+        let (left, top, width, height) = crate::validate::center_crop((src.width, src.height), self.cfg.crop);
         // Half-float HDR frames become 16-bit PQ RGB first; swscale does the rest.
         let (format, bytes, stride, bpp) = match src.format {
             FrameFormat::Bgra8 => (Pixel::BGRA, &src.data[..], src.stride, 4),
             FrameFormat::ScRgbHalf => {
-                crate::hdr::scrgb_half_to_pq(
-                    &src.data,
-                    src.width,
-                    src.height,
-                    src.stride,
-                    &mut self.hdr16,
-                )
-                .ok_or_else(|| RecordError::Config("frame buffer too small".into()))?;
+                crate::hdr::scrgb_half_to_pq(&src.data, src.width, src.height, src.stride, &mut self.hdr16)
+                    .ok_or_else(|| RecordError::Config("frame buffer too small".into()))?;
                 (Pixel::RGB48LE, &self.hdr16[..], src.width as usize * 6, 6)
             }
         };
         // The crop starts that many bytes in.
         let start = top as usize * stride + left as usize * bpp;
         let rows = convert::Rows {
-            bytes: bytes
-                .get(start..)
-                .ok_or_else(|| RecordError::Config("frame buffer too small".into()))?,
+            bytes: bytes.get(start..).ok_or_else(|| RecordError::Config("frame buffer too small".into()))?,
             stride,
             width,
             height,
@@ -984,8 +893,7 @@ impl Worker {
         // The previous frame is reused once the encoder holds no reference to it any more.
         let mut output = match self.last.take() {
             Some(Last::Sw(frame))
-                if (frame.format(), frame.width(), frame.height()) == (self.pix, ow, oh)
-                    && writable(&frame) =>
+                if (frame.format(), frame.width(), frame.height()) == (self.pix, ow, oh) && writable(&frame) =>
             {
                 frame
             }
@@ -1012,8 +920,8 @@ impl Worker {
                 self.encoder.send_frame(frame)?;
             }
             Some(Last::Hw(frame)) => {
-                // SAFETY: the frame is a live D3D11 `AVFrame`; the encoder takes its own
-                // reference to the pixels, so the same frame can be sent again for a repeat.
+                // SAFETY: the frame is a live D3D11 `AVFrame`; the encoder takes its own reference to the pixels, so
+                // the same frame can be sent again for a repeat.
                 let code = unsafe {
                     if let Some(meta) = self.hdr10 {
                         meta.attach_to_frame(frame.as_ptr());
@@ -1054,9 +962,7 @@ impl Worker {
     }
 
     fn write(&mut self, packet: &mut Packet) -> Result<(), RecordError> {
-        self.stats
-            .written
-            .fetch_add(packet.size() as u64, Ordering::Relaxed);
+        self.stats.written.fetch_add(packet.size() as u64, Ordering::Relaxed);
         let video_pts = packet.pts().unwrap_or(0);
         let reached = self.pts_to_samples(video_pts);
         if let Some(ring) = &mut self.ring {
@@ -1112,11 +1018,7 @@ impl Worker {
         self.close_part()?;
         Ok(Summary {
             files: self.files,
-            frames: if self.cfg.vfr {
-                self.stats.encoded.load(Ordering::Relaxed)
-            } else {
-                self.cfr.emitted()
-            },
+            frames: if self.cfg.vfr { self.stats.encoded.load(Ordering::Relaxed) } else { self.cfr.emitted() },
             repeated: self.cfr.repeated,
             dropped_by_clock: self.cfr.dropped,
             dropped_by_queue: self.stats.queue_dropped.load(Ordering::Relaxed),
@@ -1124,41 +1026,25 @@ impl Worker {
     }
 }
 
-/// Writes a replay: the packets of `snapshot`, video and audio merged by time, each stream
-/// starting at zero.
-fn write_snapshot(
-    out: &mut Output,
-    snapshot: &Snapshot,
-    enc_tb: Rational,
-) -> Result<(), RecordError> {
-    // The first packet is a key frame; its dts may be before its pts (encoder delay), as in a
-    // normal recording.
-    let offset = snapshot
-        .video
-        .first()
-        .and_then(|(_, p)| p.pts())
-        .unwrap_or(0);
+/// Writes a replay: the packets of `snapshot`, video and audio merged by time, each stream starting at zero.
+fn write_snapshot(out: &mut Output, snapshot: &Snapshot, enc_tb: Rational) -> Result<(), RecordError> {
+    // The first packet is a key frame; its dts may be before its pts (encoder delay), as in a normal recording.
+    let offset = snapshot.video.first().and_then(|(_, p)| p.pts()).unwrap_or(0);
     let cut = samples_of(enc_tb, offset);
     let mut next = vec![0_usize; snapshot.audio.len()];
     let mut video = snapshot.video.iter().peekable();
     loop {
         // The earliest of the next video packet and the next packet of every audio track.
         let video_t = video.peek().map(|(t, _)| *t);
-        let audio_pick = snapshot
-            .audio
-            .iter()
-            .enumerate()
-            .filter_map(|(i, q)| q.get(next[i]).map(|(t, _)| (*t, i)))
-            .min();
+        let audio_pick =
+            snapshot.audio.iter().enumerate().filter_map(|(i, q)| q.get(next[i]).map(|(t, _)| (*t, i))).min();
         match (video_t, audio_pick) {
             (None, None) => break,
             (Some(vt), audio) if audio.is_none_or(|(at, _)| vt <= at) => {
                 let Some((_, original)) = video.next() else {
                     break;
                 };
-                let mut packet = original
-                    .load()
-                    .map_err(|e| RecordError::Io(e.to_string()))?;
+                let mut packet = original.load().map_err(|e| RecordError::Io(e.to_string()))?;
                 packet.set_pts(packet.pts().map(|p| p - offset));
                 packet.set_dts(packet.dts().map(|d| d - offset));
                 packet.rescale_ts(enc_tb, out.stream_tb);
@@ -1168,9 +1054,7 @@ fn write_snapshot(
             (_, Some((_, track))) => {
                 let (_, original) = &snapshot.audio[track][next[track]];
                 next[track] += 1;
-                let mut packet = original
-                    .load()
-                    .map_err(|e| RecordError::Io(e.to_string()))?;
+                let mut packet = original.load().map_err(|e| RecordError::Io(e.to_string()))?;
                 let Some(pts) = packet.pts().map(|p| p - cut) else {
                     continue;
                 };

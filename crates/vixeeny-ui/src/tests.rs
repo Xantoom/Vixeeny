@@ -1,5 +1,5 @@
-//! Headless rendering with Slint's software renderer: checks layouts without a display.
-//! Set `VIXEENY_SCREENSHOTS=<dir>` to also write the rendered frames as PNG files.
+//! Headless rendering with Slint's software renderer: checks layouts without a display. Set `VIXEENY_SCREENSHOTS=<dir>`
+//! to also write the rendered frames as PNG files.
 
 use std::rc::Rc;
 
@@ -30,8 +30,7 @@ fn save(name: &str, buf: &SharedPixelBuffer<Rgb8Pixel>) {
         return;
     };
     let _ = std::fs::create_dir_all(&dir);
-    let Ok(file) = std::fs::File::create(std::path::Path::new(&dir).join(format!("{name}.png")))
-    else {
+    let Ok(file) = std::fs::File::create(std::path::Path::new(&dir).join(format!("{name}.png"))) else {
         return;
     };
     let mut enc = png::Encoder::new(std::io::BufWriter::new(file), buf.width(), buf.height());
@@ -40,18 +39,11 @@ fn save(name: &str, buf: &SharedPixelBuffer<Rgb8Pixel>) {
     let Ok(mut writer) = enc.write_header() else {
         return;
     };
-    let bytes: Vec<u8> = buf
-        .as_slice()
-        .iter()
-        .flat_map(|p| [p.r, p.g, p.b])
-        .collect();
+    let bytes: Vec<u8> = buf.as_slice().iter().flat_map(|p| [p.r, p.g, p.b]).collect();
     let _ = writer.write_image_data(&bytes);
 }
 
-fn settings_panel() -> (
-    settings_panel::SettingsPanel,
-    Rc<std::cell::RefCell<Vec<vixeeny_common::config::Config>>>,
-) {
+fn settings_panel() -> (settings_panel::SettingsPanel, Rc<std::cell::RefCell<Vec<vixeeny_common::config::Config>>>) {
     use std::cell::RefCell;
     WINDOW.with(|_| ());
     let panel = settings_panel::SettingsPanel::new(
@@ -67,10 +59,7 @@ fn settings_panel() -> (
     (panel, seen)
 }
 
-fn settings_render(
-    panel: &settings_panel::SettingsPanel,
-    name: &str,
-) -> SharedPixelBuffer<Rgb8Pixel> {
+fn settings_render(panel: &settings_panel::SettingsPanel, name: &str) -> SharedPixelBuffer<Rgb8Pixel> {
     settings_render_at(panel, name, (1040, 720))
 }
 
@@ -166,11 +155,7 @@ fn changing_the_language_relabels_the_window_at_once() {
     panel.select_section(Section::General);
     use slint::Model;
     let titles = |p: &settings_panel::SettingsPanel| {
-        p.window()
-            .get_section_titles()
-            .iter()
-            .map(|s| s.to_string())
-            .collect::<Vec<_>>()
+        p.window().get_section_titles().iter().map(|s| s.to_string()).collect::<Vec<_>>()
     };
     assert_eq!(titles(&panel)[0], "General");
     assert_eq!(titles(&panel)[4], "Sound");
@@ -216,55 +201,33 @@ fn a_backdrop_colour_is_picked_or_typed() {
     use vixeeny_settings::Section;
     let (panel, seen) = settings_panel();
     panel.select_section(Section::Image);
-    panel
-        .window()
-        .invoke_row_chosen("window_backdrop".into(), 3); // gradient
+    panel.window().invoke_row_chosen("window_backdrop".into(), 3); // gradient
     let w = panel.window();
-    w.invoke_row_colour(
-        "backdrop_gradient".into(),
-        1,
-        slint::Color::from_rgb_u8(1, 2, 3),
-    );
+    w.invoke_row_colour("backdrop_gradient".into(), 1, slint::Color::from_rgb_u8(1, 2, 3));
     settings_render_at(&panel, "backdrop_gradient", (1040, 1500));
     // Its start opens the picker.
     let at = slint::LogicalPosition::new(726.0, 784.0);
     let button = slint::platform::PointerEventButton::Left;
     for event in [
         slint::platform::WindowEvent::PointerMoved { position: at },
-        slint::platform::WindowEvent::PointerPressed {
-            position: at,
-            button,
-        },
-        slint::platform::WindowEvent::PointerReleased {
-            position: at,
-            button,
-        },
+        slint::platform::WindowEvent::PointerPressed { position: at, button },
+        slint::platform::WindowEvent::PointerReleased { position: at, button },
     ] {
         w.window().dispatch_event(event);
     }
     slint::platform::update_timers_and_animations();
     settings_render_at(&panel, "backdrop_picker", (1040, 1500));
-    let last = |seen: &std::cell::RefCell<Vec<vixeeny_common::config::Config>>| {
-        seen.borrow().last().map(|c| c.image.clone())
-    };
-    assert_eq!(
-        last(&seen).map(|i| i.backdrop_gradient),
-        Some("#654ea3,#010203".into())
-    );
+    let last =
+        |seen: &std::cell::RefCell<Vec<vixeeny_common::config::Config>>| seen.borrow().last().map(|c| c.image.clone());
+    assert_eq!(last(&seen).map(|i| i.backdrop_gradient), Some("#654ea3,#010203".into()));
     w.invoke_row_chosen("window_backdrop".into(), 2); // colour
     w.invoke_row_code("backdrop_colour".into(), 0, "#ABCDEF".into());
     slint::platform::update_timers_and_animations();
-    assert_eq!(
-        last(&seen).map(|i| i.backdrop_colour),
-        Some("#abcdef".into())
-    );
+    assert_eq!(last(&seen).map(|i| i.backdrop_colour), Some("#abcdef".into()));
     // Not a colour: nothing changes.
     w.invoke_row_code("backdrop_colour".into(), 0, "#zz".into());
     slint::platform::update_timers_and_animations();
-    assert_eq!(
-        last(&seen).map(|i| i.backdrop_colour),
-        Some("#abcdef".into())
-    );
+    assert_eq!(last(&seen).map(|i| i.backdrop_colour), Some("#abcdef".into()));
     settings_render_at(&panel, "backdrop_colour", (1040, 1500));
 }
 
@@ -287,10 +250,7 @@ fn rows_that_appear_on_the_same_page_unfold() {
     // PNG brings its own options in: they unfold, the rows already there do not.
     panel.window().invoke_row_chosen("image_format".into(), 0); // PNG, JPEG
     let unfolded = fresh(&panel);
-    assert!(
-        unfolded.contains(&"png_compression".to_owned()),
-        "{unfolded:?}"
-    );
+    assert!(unfolded.contains(&"png_compression".to_owned()), "{unfolded:?}");
     assert!(!unfolded.contains(&"image_format".to_owned()));
     panel.select_section(Section::Video);
     assert!(fresh(&panel).is_empty());
@@ -315,14 +275,8 @@ fn rows_that_stop_applying_fold_away_then_go() {
     let now = rows(&panel);
     let corner = now.iter().position(|(id, _)| id == "widget_corner");
     let widget = now.iter().position(|(id, _)| id == "widget");
-    assert!(
-        corner.is_some_and(|c| widget.is_some_and(|w| c == w + 1)),
-        "{now:?}"
-    );
-    assert!(
-        now.iter()
-            .any(|(id, leaving)| id == "widget_corner" && *leaving)
-    );
+    assert!(corner.is_some_and(|c| widget.is_some_and(|w| c == w + 1)), "{now:?}");
+    assert!(now.iter().any(|(id, leaving)| id == "widget_corner" && *leaving));
     // The next change takes them away for good.
     panel.window().invoke_row_chosen("overlay_edge".into(), 0);
     assert!(!rows(&panel).iter().any(|(id, _)| id == "widget_corner"));
@@ -346,21 +300,13 @@ fn the_search_leads_to_the_setting() {
     // English: nothing; the words are those of the window's language.
     assert_eq!(w.get_search_hits().row_count(), 0);
     w.invoke_search_edited("folder".into());
-    let pages: Vec<String> = w
-        .get_search_hits()
-        .iter()
-        .map(|h| h.page.to_string())
-        .collect();
+    let pages: Vec<String> = w.get_search_hits().iter().map(|h| h.page.to_string()).collect();
     assert!(pages.contains(&"Image".to_owned()), "{pages:?}");
     w.set_search_text("save repl".into());
     w.invoke_search_edited("save repl".into());
     settings_render(&panel, "9-settings-search");
     // Both shortcuts that save the replay, the plain one first.
-    let labels: Vec<String> = w
-        .get_search_hits()
-        .iter()
-        .map(|h| h.label.to_string())
-        .collect();
+    let labels: Vec<String> = w.get_search_hits().iter().map(|h| h.label.to_string()).collect();
     assert_eq!(labels, ["Save the replay", "Save and edit the replay"]);
     // A folded expert setting: its section opens, the row is outlined.
     w.set_search_text(Default::default());
@@ -388,13 +334,7 @@ fn shortcuts_that_cannot_work_are_marked() {
     panel.set_taken_shortcuts(vec!["PrintScreen".into()]);
     let row = w.get_shortcuts().row_data(0).unwrap();
     // Red, the reason on hover only: no text under the action.
-    assert!(
-        row.keys
-            .row_data(0)
-            .unwrap()
-            .tip
-            .contains("another program")
-    );
+    assert!(row.keys.row_data(0).unwrap().tip.contains("another program"));
     assert!(row.error.is_empty());
     // One that Windows keeps.
     w.invoke_shortcut_record(5, 1);
@@ -450,10 +390,7 @@ fn shortcuts_are_edited_in_place_and_conflicts_are_explained() {
     // Leaving the window stops the recording without touching anything.
     w.invoke_shortcut_record(7, 1);
     assert!(panel.captured(settings_panel::Captured::Cancel));
-    assert!(
-        !panel.captured(settings_panel::Captured::Cancel),
-        "nothing is recording any more"
-    );
+    assert!(!panel.captured(settings_panel::Captured::Cancel), "nothing is recording any more");
     assert_eq!(seen.borrow().len(), 1);
     // The keys show while held, in the order pressed; letting go saves them.
     w.invoke_shortcut_record(7, 1);
@@ -462,21 +399,12 @@ fn shortcuts_are_edited_in_place_and_conflicts_are_explained() {
     }
     assert_eq!(w.get_recording_keys(), "SHIFT + CTRL + F6");
     assert!(panel.key("F6", false));
-    assert_eq!(
-        panel.config().hotkeys.replay_toggle,
-        ["Ctrl+Shift+F7", "Shift+Ctrl+F6"]
-    );
-    assert!(
-        !panel.key("ShiftLeft", false),
-        "recorded: the keys are free again"
-    );
+    assert_eq!(panel.config().hotkeys.replay_toggle, ["Ctrl+Shift+F7", "Shift+Ctrl+F6"]);
+    assert!(!panel.key("ShiftLeft", false), "recorded: the keys are free again");
     // Escape cancels: the slot keeps its shortcut.
     w.invoke_shortcut_record(7, 0);
     assert!(panel.key("Escape", true));
-    assert_eq!(
-        panel.config().hotkeys.replay_toggle,
-        ["Ctrl+Shift+F7", "Shift+Ctrl+F6"]
-    );
+    assert_eq!(panel.config().hotkeys.replay_toggle, ["Ctrl+Shift+F7", "Shift+Ctrl+F6"]);
 }
 
 #[test]
@@ -488,16 +416,10 @@ fn a_chord_ends_at_the_first_key_let_go() {
     assert_eq!(chord.release("ControlLeft"), ChordStep::Held(String::new()));
     chord.press("AltLeft");
     // Print Screen only reports going up.
-    assert_eq!(
-        chord.release("PrintScreen"),
-        ChordStep::Done(Captured::Combination("Alt+PrintScreen".into()))
-    );
+    assert_eq!(chord.release("PrintScreen"), ChordStep::Done(Captured::Combination("Alt+PrintScreen".into())));
     chord.press("ShiftLeft");
     chord.press("KeyR");
-    assert_eq!(
-        chord.release("ShiftLeft"),
-        ChordStep::Done(Captured::Combination("Shift+KeyR".into()))
-    );
+    assert_eq!(chord.release("ShiftLeft"), ChordStep::Done(Captured::Combination("Shift+KeyR".into())));
 }
 
 #[test]
@@ -505,35 +427,20 @@ fn every_page_of_the_settings_renders() {
     use vixeeny_settings::{AudioDevices, AudioEntry, Section};
     let (panel, _) = settings_panel();
     panel.window().set_animated(false);
-    let entry = |id: &str, name: &str| AudioEntry {
-        id: id.into(),
-        name: name.into(),
-        icon: None,
-    };
+    let entry = |id: &str, name: &str| AudioEntry { id: id.into(), name: name.into(), icon: None };
     // A program's icon: a blue disc on a transparent ground.
     let disc: Vec<u8> = (0..32 * 32)
         .flat_map(|i| {
             let (x, y) = ((i % 32) as f32 - 15.5, (i / 32) as f32 - 15.5);
-            if x * x + y * y < 15.0 * 15.0 {
-                [30, 120, 230, 255]
-            } else {
-                [0, 0, 0, 0]
-            }
+            if x * x + y * y < 15.0 * 15.0 { [30, 120, 230, 255] } else { [0, 0, 0, 0] }
         })
         .collect();
     panel.set_audio(AudioDevices {
-        outputs: vec![
-            entry("o1", "Speakers (Realtek Audio)"),
-            entry("o2", "Headset (Arctis 7)"),
-        ],
+        outputs: vec![entry("o1", "Speakers (Realtek Audio)"), entry("o2", "Headset (Arctis 7)")],
         inputs: vec![entry("i1", "Microphone (Blue Yeti)")],
         programs: vec![
             AudioEntry {
-                icon: Some(vixeeny_settings::Icon {
-                    width: 32,
-                    height: 32,
-                    rgba: disc.into(),
-                }),
+                icon: Some(vixeeny_settings::Icon { width: 32, height: 32, rgba: disc.into() }),
                 ..entry("Spotify.exe", "Spotify")
             },
             entry("chrome.exe", "Google Chrome"),
@@ -549,9 +456,7 @@ fn every_page_of_the_settings_renders() {
     // The programs to record, ticked one by one.
     panel.select_section(Section::Audio);
     panel.window().invoke_row_chosen("audio_capture".into(), 3);
-    panel
-        .window()
-        .invoke_row_toggled("src:app:Spotify.exe".into(), true);
+    panel.window().invoke_row_toggled("src:app:Spotify.exe".into(), true);
     settings_render(&panel, "9-page-audio-programs");
     // The microphone: its level, its volume.
     panel.window().invoke_row_toggled("mic_on".into(), true);
@@ -560,8 +465,7 @@ fn every_page_of_the_settings_renders() {
     // The smallest window: nothing overlaps.
     panel.select_section(Section::General);
     settings_render_at(&panel, "9-page-smallest", (960, 640));
-    // In French (longer words): every page at the narrowest width, on a wide screen, and
-    // zoomed to 150 %.
+    // In French (longer words): every page at the narrowest width, on a wide screen, and zoomed to 150 %.
     panel.window().invoke_row_chosen("language".into(), 1);
     for section in Section::ALL {
         panel.select_section(section);
@@ -587,14 +491,8 @@ fn the_updates_and_about_pages_show_what_the_host_gives_them() {
     panel.window().set_animated(false);
     panel.select_section(Section::About);
     panel.set_lines(vec![
-        Line {
-            text: "Licence GPL-3.0-or-later".into(),
-            detail: "https://github.com/Xantoom/Vixeeny".into(),
-        },
-        Line {
-            text: "Logs".into(),
-            detail: "C:\\Users\\me\\AppData\\Local\\Vixeeny\\logs".into(),
-        },
+        Line { text: "Licence GPL-3.0-or-later".into(), detail: "https://github.com/Xantoom/Vixeeny".into() },
+        Line { text: "Logs".into(), detail: "C:\\Users\\me\\AppData\\Local\\Vixeeny\\logs".into() },
     ]);
     panel.set_update(&settings_panel::UpdateView {
         stage: settings_panel::UpdateStage::Downloading,
@@ -625,8 +523,8 @@ fn the_updates_and_about_pages_show_what_the_host_gives_them() {
     settings_render(&panel, "9-settings-updates-current");
 }
 
-// The tooltip of an "i" shows anywhere on its dot, and stays while the pointer moves on it: a
-// popup took the pointer from the dot and closed again at the next move.
+// The tooltip of an "i" shows anywhere on its dot, and stays while the pointer moves on it: a popup took the pointer
+// from the dot and closed again at the next move.
 #[test]
 fn info_tooltip_stays_while_the_pointer_moves_on_its_dot() {
     use slint::LogicalPosition;
@@ -640,44 +538,24 @@ fn info_tooltip_stays_while_the_pointer_moves_on_its_dot() {
     let base = settings_render_at(&panel, "tip-base", size);
     let changed = |name: &str| {
         let shot = settings_render_at(&panel, name, size);
-        shot.as_slice()
-            .iter()
-            .zip(base.as_slice())
-            .filter(|(a, b)| a != b)
-            .count()
+        shot.as_slice().iter().zip(base.as_slice()).filter(|(a, b)| a != b).count()
     };
     let move_to = |x: f32, y: f32| {
-        window.dispatch_event(WindowEvent::PointerMoved {
-            position: LogicalPosition::new(x, y),
-        });
+        window.dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(x, y) });
     };
     // The glyph, the ring, inside the dot off the glyph, and the margin around it.
-    for (x, y) in [
-        (396.0, 285.0),
-        (390.5, 285.0),
-        (396.0, 280.0),
-        (392.0, 281.0),
-        (401.5, 289.5),
-    ] {
+    for (x, y) in [(396.0, 285.0), (390.5, 285.0), (396.0, 280.0), (392.0, 281.0), (401.5, 289.5)] {
         for dx in [0.0, 0.5, 1.0, 1.5] {
             move_to(x + dx, y);
-            assert!(
-                changed("tip-on") > 20_000,
-                "no tooltip at ({}, {y})",
-                x + dx
-            );
+            assert!(changed("tip-on") > 20_000, "no tooltip at ({}, {y})", x + dx);
         }
         move_to(600.0, 600.0);
-        assert!(
-            changed("tip-off") < 2_000,
-            "the tooltip stays away from the dot"
-        );
+        assert!(changed("tip-off") < 2_000, "the tooltip stays away from the dot");
     }
     window.dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: 1.0 });
 }
 
-// Behind Mica the window's background lets it through a little (black here, so darker) and the
-// cards only veil it.
+// Behind Mica the window's background lets it through a little (black here, so darker) and the cards only veil it.
 #[test]
 fn with_mica_the_window_lets_it_through() {
     use vixeeny_settings::Section;
@@ -687,17 +565,14 @@ fn with_mica_the_window_lets_it_through() {
     let shot = settings_render(&panel, "9-settings-mica");
     let at = |x: usize, y: usize| shot.as_slice()[y * 1040 + x];
     let nav = at(100, 600);
-    assert!(
-        nav.r > 0 && nav.r < 0x14,
-        "the background, see-through: {nav:?}"
-    );
+    assert!(nav.r > 0 && nav.r < 0x14, "the background, see-through: {nav:?}");
     let card = at(600, 140);
     assert!(card.r > nav.r, "a veil over it: {card:?}");
     panel.window().global::<Theme>().set_mica(false);
 }
 
-// An "i" hovered, then the page scrolled under the pointer: the tooltip goes once the pointer
-// leaves, although the dot is no longer where it was shown.
+// An "i" hovered, then the page scrolled under the pointer: the tooltip goes once the pointer leaves, although the dot
+// is no longer where it was shown.
 #[test]
 fn a_tooltip_goes_after_a_scroll() {
     use slint::LogicalPosition;
@@ -712,12 +587,7 @@ fn a_tooltip_goes_after_a_scroll() {
             encoders: vec![EncoderProbe {
                 id: "nvenc_h264".into(),
                 adapter: Some(0),
-                formats: vec![FormatProbe {
-                    depth: 8,
-                    chroma: Chroma::C420,
-                    uhd: true,
-                    hdr: false,
-                }],
+                formats: vec![FormatProbe { depth: 8, chroma: Chroma::C420, uhd: true, hdr: false }],
                 tools: None,
                 max: None,
             }],
@@ -731,27 +601,15 @@ fn a_tooltip_goes_after_a_scroll() {
     let size = (1040, 720);
     let at = |x: f32, y: f32| LogicalPosition::new(x, y);
     let scroll = |y: f32, dy: f32| {
-        window.dispatch_event(WindowEvent::PointerScrolled {
-            position: at(600.0, y),
-            delta_x: 0.0,
-            delta_y: dy,
-        });
+        window.dispatch_event(WindowEvent::PointerScrolled { position: at(600.0, y), delta_x: 0.0, delta_y: dy });
     };
     settings_render_at(&panel, "tip-scroll-0", size);
-    window.dispatch_event(WindowEvent::PointerMoved {
-        position: at(600.0, 500.0),
-    });
+    window.dispatch_event(WindowEvent::PointerMoved { position: at(600.0, 500.0) });
     scroll(500.0, -2000.0);
     settings_render_at(&panel, "tip-scroll-1", size);
     for event in [
-        WindowEvent::PointerPressed {
-            position: at(600.0, 493.0),
-            button: PointerEventButton::Left,
-        },
-        WindowEvent::PointerReleased {
-            position: at(600.0, 493.0),
-            button: PointerEventButton::Left,
-        },
+        WindowEvent::PointerPressed { position: at(600.0, 493.0), button: PointerEventButton::Left },
+        WindowEvent::PointerReleased { position: at(600.0, 493.0), button: PointerEventButton::Left },
     ] {
         window.dispatch_event(event);
     }
@@ -764,22 +622,13 @@ fn a_tooltip_goes_after_a_scroll() {
     let clean = settings_render_at(&panel, "tip-scroll-3", size);
     scroll(end.y, -100.0);
     // The container's "i", near the bottom; a little scroll; the pointer moves up and away.
-    window.dispatch_event(WindowEvent::PointerMoved {
-        position: at(335.0, 604.0),
-    });
+    window.dispatch_event(WindowEvent::PointerMoved { position: at(335.0, 604.0) });
     scroll(604.0, 100.0);
     for k in 0..50 {
         let k = k as f32;
-        window.dispatch_event(WindowEvent::PointerMoved {
-            position: at(335.0 + k * 5.5, 604.0 - k * 10.0),
-        });
+        window.dispatch_event(WindowEvent::PointerMoved { position: at(335.0 + k * 5.5, 604.0 - k * 10.0) });
     }
     let left = settings_render_at(&panel, "tip-scroll-4", size);
-    let differ = left
-        .as_slice()
-        .iter()
-        .zip(clean.as_slice())
-        .filter(|(a, b)| a != b)
-        .count();
+    let differ = left.as_slice().iter().zip(clean.as_slice()).filter(|(a, b)| a != b).count();
     assert!(differ < 500, "the tooltip stayed ({differ} pixels)");
 }

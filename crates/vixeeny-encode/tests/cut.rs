@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Cutting a recording to the frame: the list of frames, the preview's pictures and sound, and
-//! the two ways of writing a part (packets copied from a key frame, or the video encoded again).
-//! Needs the native build: `cargo xtask build-native ffmpeg`.
+//! Cutting a recording to the frame: the list of frames, the preview's pictures and sound, and the two ways of writing
+//! a part (packets copied from a key frame, or the video encoded again). Needs the native build:
+//! `cargo xtask build-native ffmpeg`.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod common;
@@ -22,8 +22,7 @@ use common::scratch;
 const MS: i64 = 1_000_000;
 const FPS: usize = 30;
 
-/// Frame `i`: its number drawn as the brightness of the whole picture, so that a decoded frame
-/// tells which one it is.
+/// Frame `i`: its number drawn as the brightness of the whole picture, so that a decoded frame tells which one it is.
 fn frame(i: usize) -> VideoFrame {
     let v = (i * 2 % 256) as u8;
     VideoFrame {
@@ -50,8 +49,7 @@ fn recording_of(dir: &Path, seconds: usize, hdr: bool, extra: &[(&str, &str)]) -
     let registry = Registry::builtin().unwrap();
     let id = if hdr { "libx265" } else { "libx264" };
     let mut cfg = common::config(&registry, id, PresetName::Performance);
-    cfg.options
-        .extend(extra.iter().map(|&(k, v)| (k.to_owned(), v.to_owned())));
+    cfg.options.extend(extra.iter().map(|&(k, v)| (k.to_owned(), v.to_owned())));
     let track = |title: &str| AudioTrackConfig {
         title: title.into(),
         codec: AudioCodec::Aac,
@@ -96,17 +94,8 @@ fn recording_of(dir: &Path, seconds: usize, hdr: bool, extra: &[(&str, &str)]) -
 
 /// An scRGB frame at 2.5 (200 nits, about the reference white of HDR).
 fn white_hdr() -> VideoFrame {
-    let px: Vec<u8> = [0x4100_u16, 0x4100, 0x4100, 0x3c00]
-        .iter()
-        .flat_map(|v| v.to_le_bytes())
-        .collect();
-    VideoFrame {
-        width: 320,
-        height: 180,
-        stride: 320 * 8,
-        format: FrameFormat::ScRgbHalf,
-        data: px.repeat(320 * 180),
-    }
+    let px: Vec<u8> = [0x4100_u16, 0x4100, 0x4100, 0x3c00].iter().flat_map(|v| v.to_le_bytes()).collect();
+    VideoFrame { width: 320, height: 180, stride: 320 * 8, format: FrameFormat::ScRgbHalf, data: px.repeat(320 * 180) }
 }
 
 /// The frame number a picture shows (its brightness).
@@ -119,14 +108,8 @@ fn number(bgra: &[u8]) -> usize {
 
 fn reencode() -> Reencode {
     let registry = Registry::builtin().unwrap();
-    let RecordConfig {
-        encoder, options, ..
-    } = common::config(&registry, "libx264", PresetName::Performance);
-    Reencode {
-        encoder,
-        options,
-        depth: 8,
-    }
+    let RecordConfig { encoder, options, .. } = common::config(&registry, "libx264", PresetName::Performance);
+    Reencode { encoder, options, depth: 8 }
 }
 
 #[test]
@@ -136,9 +119,7 @@ fn the_clip_lists_its_frames_and_key_frames() {
     assert_eq!(clip.frames.len(), 3 * FPS);
     assert_eq!((clip.width, clip.height), (320, 180));
     assert_eq!(clip.audio_tracks, 2);
-    let keys: Vec<usize> = (0..clip.frames.len())
-        .filter(|&i| clip.frames[i].key)
-        .collect();
+    let keys: Vec<usize> = (0..clip.frames.len()).filter(|&i| clip.frames[i].key).collect();
     assert_eq!(keys, [0, 30, 60]);
     assert!((clip.duration() - 3.0).abs() < 0.05, "{}", clip.duration());
     // x264 reorders its frames (B-frames): they are listed from the packets.
@@ -153,9 +134,7 @@ fn frames_shown_as_decoded_are_listed_from_the_index() {
     assert!(Clip::listed_by_index(&path).unwrap());
     let clip = Clip::open(&path).unwrap();
     assert_eq!(clip.frames.len(), 3 * FPS);
-    let keys: Vec<usize> = (0..clip.frames.len())
-        .filter(|&i| clip.frames[i].key)
-        .collect();
+    let keys: Vec<usize> = (0..clip.frames.len()).filter(|&i| clip.frames[i].key).collect();
     assert_eq!(keys, [0, 30, 60]);
     assert!(clip.frames.iter().enumerate().all(|(i, f)| f.decode == i));
     // The preview finds the frames by these times.
@@ -180,10 +159,7 @@ fn a_seek_goes_on_from_the_decoder_and_a_read_can_be_given_up() {
     shown(&mut pictures, 50);
     // A newer request comes while the frames before 70 are decoded: given up...
     pictures.seek(70).unwrap();
-    assert!(matches!(
-        pictures.read_unless((320, 180), &|| true).unwrap(),
-        Next::Stopped
-    ));
+    assert!(matches!(pictures.read_unless((320, 180), &|| true).unwrap(), Next::Stopped));
     // ... and the next seek goes on from there, or back.
     shown(&mut pictures, 80);
     shown(&mut pictures, 10);
@@ -198,9 +174,7 @@ fn frames_shown_out_of_decoding_order_are_listed_from_the_packets() {
     let clip = Clip::open(&path).unwrap();
     assert_eq!(clip.frames.len(), 2 * FPS);
     assert!(clip.frames.windows(2).all(|w| w[0].pts < w[1].pts));
-    let keys: Vec<usize> = (0..clip.frames.len())
-        .filter(|&i| clip.frames[i].key)
-        .collect();
+    let keys: Vec<usize> = (0..clip.frames.len()).filter(|&i| clip.frames[i].key).collect();
     assert_eq!(keys, [0, 30]);
 }
 
@@ -242,17 +216,8 @@ fn the_graphics_card_and_the_processor_show_the_same_frames() {
         assert_eq!((a, b), (target, target));
         assert!(number(&pa.bgra).abs_diff(number(&pb.bgra)) <= 1);
         // The same picture, but for the filters of the two scalers.
-        let diff: u64 = pa
-            .bgra
-            .iter()
-            .zip(&pb.bgra)
-            .map(|(x, y)| u64::from(x.abs_diff(*y)))
-            .sum();
-        assert!(
-            diff / pa.bgra.len() as u64 <= 8,
-            "mean difference {}",
-            diff / pa.bgra.len() as u64
-        );
+        let diff: u64 = pa.bgra.iter().zip(&pb.bgra).map(|(x, y)| u64::from(x.abs_diff(*y))).sum();
+        assert!(diff / pa.bgra.len() as u64 <= 8, "mean difference {}", diff / pa.bgra.len() as u64);
     }
     assert!(card.scaled_on_card(), "the card scales what it decodes");
 }
@@ -269,19 +234,12 @@ fn an_hdr_clip_is_previewed_in_sdr() {
         pictures.seek(10).unwrap();
         let (_, picture) = pictures.read((160, 90)).unwrap().unwrap();
         if hardware && pictures.hardware() {
-            assert!(
-                pictures.scaled_on_card(),
-                "the card scales the HDR frames too"
-            );
+            assert!(pictures.scaled_on_card(), "the card scales the HDR frames too");
         }
         let centre = &picture.bgra[(45 * 160 + 80) * 4..][..4];
-        // Shown as PQ codes it would be a mid grey (≈ 150); tone mapped under a 240-nit white,
-        // 200 nits is about 235 (and 254 under the default 203).
-        assert!(
-            centre[..3].iter().all(|&c| (225..=245).contains(&c)),
-            "{centre:?} (card: {})",
-            pictures.hardware()
-        );
+        // Shown as PQ codes it would be a mid grey (≈ 150); tone mapped under a 240-nit white, 200 nits is about 235
+        // (and 254 under the default 203).
+        assert!(centre[..3].iter().all(|&c| (225..=245).contains(&c)), "{centre:?} (card: {})", pictures.hardware());
     }
 }
 
@@ -304,33 +262,22 @@ fn the_preview_sound_mixes_the_tracks_from_where_it_is_asked() {
     assert!(peak > 0.7, "peak {peak}");
 }
 
-/// The peak brightness the HDR10 metadata of `path` names: the mastering display's and the
-/// brightest pixel's.
+/// The peak brightness the HDR10 metadata of `path` names: the mastering display's and the brightest pixel's.
 fn hdr10_peaks(path: &Path) -> Option<(i32, u32)> {
     let input = ffmpeg_next::format::input(path).unwrap();
-    let stream = input
-        .streams()
-        .best(ffmpeg_next::media::Type::Video)
-        .unwrap();
-    // SAFETY: the parameters of a live stream; the side data is read at FFmpeg's layouts
-    // (AVMasteringDisplayMetadata: 8 rationals, then the maximum; AVContentLightMetadata).
+    let stream = input.streams().best(ffmpeg_next::media::Type::Video).unwrap();
+    // SAFETY: the parameters of a live stream; the side data is read at FFmpeg's layouts (AVMasteringDisplayMetadata: 8
+    // rationals, then the maximum; AVContentLightMetadata).
     unsafe {
         let par = stream.parameters().as_ptr();
         let find = |kind| {
-            let sd = ffi::av_packet_side_data_get(
-                (*par).coded_side_data,
-                (*par).nb_coded_side_data,
-                kind,
-            );
+            let sd = ffi::av_packet_side_data_get((*par).coded_side_data, (*par).nb_coded_side_data, kind);
             (!sd.is_null()).then(|| (*sd).data)
         };
         let mastering = find(ffi::AVPacketSideDataType::AV_PKT_DATA_MASTERING_DISPLAY_METADATA)?;
         let light = find(ffi::AVPacketSideDataType::AV_PKT_DATA_CONTENT_LIGHT_LEVEL)?;
         let max = mastering.cast::<ffi::AVRational>().add(9).read_unaligned();
-        Some((
-            max.num / max.den.max(1),
-            light.cast::<u32>().read_unaligned(),
-        ))
+        Some((max.num / max.den.max(1), light.cast::<u32>().read_unaligned()))
     }
 }
 
@@ -341,17 +288,9 @@ fn an_hdr_part_keeps_the_hdr10_metadata_of_the_recording() {
     assert_eq!(hdr10_peaks(&clip.path), Some((603, 603)));
     let registry = Registry::builtin().unwrap();
     let encoder = registry.get("libx265").unwrap().clone();
-    let options = encoder
-        .presets
-        .get(PresetName::Performance)
-        .iter()
-        .map(|(k, v)| (k.clone(), v.to_ffmpeg()))
-        .collect();
-    let reencode = Reencode {
-        encoder,
-        options,
-        depth: 10,
-    };
+    let options =
+        encoder.presets.get(PresetName::Performance).iter().map(|(k, v)| (k.clone(), v.to_ffmpeg())).collect();
+    let reencode = Reencode { encoder, options, depth: 10 };
     let never = AtomicBool::new(false);
     let encoded = dir.join("encoded.mp4");
     export(&clip, (10, 40), &encoded, Some(&reencode), &|_| {}, &never).unwrap();
@@ -382,15 +321,7 @@ fn a_part_from_a_key_frame_is_copied_and_another_one_encoded_again() {
     let encoded = dir.join("encoded.mp4");
     assert!(export(&clip, (10, 40), &encoded, None, &|_| {}, &never).is_err());
     let last = std::cell::Cell::new(0.0);
-    export(
-        &clip,
-        (10, 40),
-        &encoded,
-        Some(&reencode()),
-        &|p| last.set(p),
-        &never,
-    )
-    .unwrap();
+    export(&clip, (10, 40), &encoded, Some(&reencode()), &|p| last.set(p), &never).unwrap();
     assert!((last.get() - 1.0).abs() < f32::EPSILON);
     let part = Clip::open(&encoded).unwrap();
     assert_eq!(part.frames.len(), 31);
@@ -399,11 +330,7 @@ fn a_part_from_a_key_frame_is_copied_and_another_one_encoded_again() {
     let mut pictures = Pictures::open(&part).unwrap();
     pictures.seek(0).unwrap();
     let (_, first) = pictures.read((32, 18)).unwrap().unwrap();
-    assert!(
-        number(&first.bgra).abs_diff(10) <= 1,
-        "first frame shows {}",
-        number(&first.bgra)
-    );
+    assert!(number(&first.bgra).abs_diff(10) <= 1, "first frame shows {}", number(&first.bgra));
     pictures.seek(30).unwrap();
     let (_, end) = pictures.read((32, 18)).unwrap().unwrap();
     assert!(number(&end.bgra).abs_diff(40) <= 1);
@@ -419,17 +346,7 @@ fn a_part_from_a_key_frame_is_copied_and_another_one_encoded_again() {
     // A cancelled export leaves nothing behind.
     let cancelled = dir.join("cancelled.mp4");
     let stop = AtomicBool::new(true);
-    assert!(
-        export(
-            &clip,
-            (10, 40),
-            &cancelled,
-            Some(&reencode()),
-            &|_| {},
-            &stop
-        )
-        .is_err()
-    );
+    assert!(export(&clip, (10, 40), &cancelled, Some(&reencode()), &|_| {}, &stop).is_err());
     assert!(!cancelled.exists());
     assert!(!cancelled.with_extension("part.tmp").exists());
 }

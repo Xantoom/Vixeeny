@@ -1,20 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! `vixeeny-app --update background`: the check the daemon starts after its own start and each
-//! wake from sleep. With automatic
-//! updates on, a new version is downloaded and verified without a word, and installed at the next
-//! start of Vixeeny (or by the Restart button of the settings); otherwise the user is told once.
+//! `vixeeny-app --update background`: the check the daemon starts after its own start and each wake from sleep. With
+//! automatic updates on, a new version is downloaded and verified without a word, and installed at the next start of
+//! Vixeeny (or by the Restart button of the settings); otherwise the user is told once.
 //!
-//! `vixeeny-app --update pending`: run by the daemon as it starts; undoes an install cut short,
-//! or installs a downloaded version (the daemon stops, the new one starts).
+//! `vixeeny-app --update pending`: run by the daemon as it starts; undoes an install cut short, or installs a
+//! downloaded version (the daemon stops, the new one starts).
 //!
-//! `vixeeny-app --update install [--settings]`: installs the downloaded version (the Restart
-//! button of the settings), then shows the settings again.
+//! `vixeeny-app --update install [--settings]`: installs the downloaded version (the Restart button of the settings),
+//! then shows the settings again.
 //!
-//! `vixeeny-app --update off`: run by the installer when its updates box is left unchecked;
-//! turns the update check off in the user's settings.
+//! `vixeeny-app --update off`: run by the installer when its updates box is left unchecked; turns the update check off
+//! in the user's settings.
 //!
-//! `vixeeny-app --update quit`: run by the installer; stops Vixeeny the way an update does (a
-//! recording ends first), waiting at most half a minute.
+//! `vixeeny-app --update quit`: run by the installer; stops Vixeeny the way an update does (a recording ends first),
+//! waiting at most half a minute.
 
 use vixeeny_common::config::Config;
 use vixeeny_common::i18n::{Key, tr};
@@ -35,16 +34,12 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
             false => pending(),
         },
         Some("install") => {
-            let reopen = args
-                .iter()
-                .any(|a| a == "--settings")
-                .then_some(ControlRequest::OpenSettings);
+            let reopen = args.iter().any(|a| a == "--settings").then_some(ControlRequest::OpenSettings);
             client::install(reopen)
         }
         Some("quit") => client::stop_daemon(Some(std::time::Duration::from_secs(30))),
         Some("off") => {
-            let path = vixeeny_common::paths::config_file()
-                .ok_or_else(|| anyhow::anyhow!("no settings folder"))?;
+            let path = vixeeny_common::paths::config_file().ok_or_else(|| anyhow::anyhow!("no settings folder"))?;
             let mut config = Config::load(&path)?;
             config.general.check_updates = false;
             config.general.auto_update = false;
@@ -67,9 +62,7 @@ fn pending() -> anyhow::Result<()> {
 
 fn background() -> anyhow::Result<()> {
     client::clean_up();
-    let config = vixeeny_common::paths::config_file()
-        .and_then(|p| Config::load(&p).ok())
-        .unwrap_or_default();
+    let config = vixeeny_common::paths::config_file().and_then(|p| Config::load(&p).ok()).unwrap_or_default();
     if !config.general.check_updates {
         return Ok(());
     }
@@ -81,12 +74,11 @@ fn background() -> anyhow::Result<()> {
         return Ok(());
     };
     let mut state = State::load(&path);
-    // In Program Files, only a Vixeeny with the administrator's rights can change the files: one
-    // without them (a standard account) tells the user instead.
+    // In Program Files, only a Vixeeny with the administrator's rights can change the files: one without them (a
+    // standard account) tells the user instead.
     let writable = std::env::current_exe().is_ok_and(|exe| {
         use vixeeny_platform::elevation::{self, Rights};
-        !exe.parent().is_some_and(elevation::protected_install)
-            || elevation::rights() == Rights::Elevated
+        !exe.parent().is_some_and(elevation::protected_install) || elevation::rights() == Rights::Elevated
     });
     if config.general.auto_update && writable {
         // A version whose install failed is downloaded again only by hand.
@@ -107,11 +99,9 @@ fn background() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Starts the installation in a process of its own (the settings window closes meanwhile and
-/// comes back with the new version).
+/// Starts the installation in a process of its own (the settings window closes meanwhile and comes back with the new
+/// version).
 pub fn spawn_install() -> anyhow::Result<()> {
-    std::process::Command::new(std::env::current_exe()?)
-        .args(["--update", "install", "--settings"])
-        .spawn()?;
+    std::process::Command::new(std::env::current_exe()?).args(["--update", "install", "--settings"]).spawn()?;
     Ok(())
 }

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Image encoding and HDR → SDR tone mapping.
 //!
-//! Input is always opaque 8-bit BGRA ([`Bgra`], what the capture layer hands over). Every
-//! encoder embeds an sRGB colour description and no other metadata.
+//! Input is always opaque 8-bit BGRA ([`Bgra`], what the capture layer hands over). Every encoder embeds an sRGB colour
+//! description and no other metadata.
 
 pub mod anim;
 mod avif;
@@ -88,10 +88,7 @@ pub struct PngSettings {
 impl Default for PngSettings {
     /// Defaults: fast compression, oxipng off.
     fn default() -> Self {
-        Self {
-            compression: PngCompression::Fast,
-            oxipng_level: None,
-        }
+        Self { compression: PngCompression::Fast, oxipng_level: None }
     }
 }
 
@@ -126,8 +123,8 @@ impl Default for JpegSettings {
             quality: 90,
             // Full colour: screenshots are text and interfaces, which 4:2:0 fringes.
             chroma: Chroma::Yuv444,
-            // Progressive is 1 % smaller but takes three times as long (4K game frame: 110 ms
-            // against 38), and decodes slower.
+            // Progressive is 1 % smaller but takes three times as long (4K game frame: 110 ms against 38), and decodes
+            // slower.
             progressive: false,
         }
     }
@@ -145,11 +142,7 @@ pub struct WebpSettings {
 impl Default for WebpSettings {
     /// Defaults: lossless.
     fn default() -> Self {
-        Self {
-            lossless: true,
-            quality: 90.0,
-            effort: 4,
-        }
+        Self { lossless: true, quality: 90.0, effort: 4 }
     }
 }
 
@@ -157,8 +150,8 @@ impl Default for WebpSettings {
 pub struct AvifSettings {
     /// 0 to 100.
     pub quality: u8,
-    /// The encoder's speed, 0 (slowest) to [`vixeeny_common::config::AVIF_MAX_SPEED`] (fastest): libaom's `cpu-used` two
-    /// steps up, else SVT-AV1's preset four steps up.
+    /// The encoder's speed, 0 (slowest) to [`vixeeny_common::config::AVIF_MAX_SPEED`] (fastest): libaom's `cpu-used`
+    /// two steps up, else SVT-AV1's preset four steps up.
     pub speed: u8,
     /// 8 or 10 bits per channel.
     pub depth: u8,
@@ -168,12 +161,7 @@ pub struct AvifSettings {
 impl Default for AvifSettings {
     /// Defaults: quality 80, 10 bits, 4:4:4.
     fn default() -> Self {
-        Self {
-            quality: 80,
-            speed: 6,
-            depth: 10,
-            chroma: Chroma::Yuv444,
-        }
+        Self { quality: 80, speed: 6, depth: 10, chroma: Chroma::Yuv444 }
     }
 }
 
@@ -189,11 +177,7 @@ pub struct JxlSettings {
 impl Default for JxlSettings {
     /// Defaults: lossless, effort 7.
     fn default() -> Self {
-        Self {
-            lossless: true,
-            distance: 1.0,
-            effort: 7,
-        }
+        Self { lossless: true, distance: 1.0, effort: 7 }
     }
 }
 
@@ -233,11 +217,7 @@ pub enum ImageError {
 }
 
 /// Encodes `image` in `format`.
-pub fn encode(
-    format: ImageFormat,
-    image: &Bgra<'_>,
-    settings: &Settings,
-) -> Result<Vec<u8>, ImageError> {
+pub fn encode(format: ImageFormat, image: &Bgra<'_>, settings: &Settings) -> Result<Vec<u8>, ImageError> {
     image.validate()?;
     match format {
         ImageFormat::Png => png_enc::encode(image, &settings.png),
@@ -252,13 +232,9 @@ pub fn encode(
     }
 }
 
-/// Encodes an HDR picture as HDR (BT.2020 / PQ; JPEG as Ultra HDR: an SDR picture with a gain
-/// map). [`ImageFormat::holds_hdr`] says which formats can.
-pub fn encode_hdr(
-    format: ImageFormat,
-    image: &Hdr<'_>,
-    settings: &Settings,
-) -> Result<Vec<u8>, ImageError> {
+/// Encodes an HDR picture as HDR (BT.2020 / PQ; JPEG as Ultra HDR: an SDR picture with a gain map).
+/// [`ImageFormat::holds_hdr`] says which formats can.
+pub fn encode_hdr(format: ImageFormat, image: &Hdr<'_>, settings: &Settings) -> Result<Vec<u8>, ImageError> {
     image.validate()?;
     match format {
         ImageFormat::Png => png_enc::encode_hdr(image, &settings.png),

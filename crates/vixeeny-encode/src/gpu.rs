@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The GPU path of the recorder: frames are converted and scaled by the D3D11 video
-//! processor ([`crate::d3d_convert`]) into textures that FFmpeg's D3D11 frame pool owns; those
-//! of an HDR monitor go through shaders first ([`crate::card_hdr`]): tone mapped to SDR, or
-//! written as PQ by the shaders themselves. NVENC
-//! and AMF read those textures directly, QSV through a QSV view of the same pool, and software
-//! encoders get them downloaded (NV12 / P010: well under half the bytes of the captured BGRA,
-//! and no colour conversion left for the CPU). Windows only.
+//! The GPU path of the recorder: frames are converted and scaled by the D3D11 video processor ([`crate::d3d_convert`])
+//! into textures that FFmpeg's D3D11 frame pool owns; those of an HDR monitor go through shaders first
+//! ([`crate::card_hdr`]): tone mapped to SDR, or written as PQ by the shaders themselves. NVENC and AMF read those
+//! textures directly, QSV through a QSV view of the same pool, and software encoders get them downloaded (NV12 / P010:
+//! well under half the bytes of the captured BGRA, and no colour conversion left for the CPU). Windows only.
 //!
-//! Anything that fails while building the pipeline is an error the caller answers by using the
-//! CPU path instead (there is a self-test conversion before the pipeline is handed out).
+//! Anything that fails while building the pipeline is an error the caller answers by using the CPU path instead (there
+//! is a self-test conversion before the pipeline is handed out).
 
 use ffmpeg_next::ffi;
 
@@ -43,8 +41,8 @@ pub fn feed(encoder: &Encoder) -> Option<Feed> {
 /// A frame whose pixels are in GPU memory (an FFmpeg `AVFrame` of format D3D11).
 pub struct HwFrame(*mut ffi::AVFrame);
 
-// SAFETY: an `AVFrame` is a reference-counted handle; the frame is only touched by one thread at
-// a time (it travels through the recorder's queue).
+// SAFETY: an `AVFrame` is a reference-counted handle; the frame is only touched by one thread at a time (it travels
+// through the recorder's queue).
 unsafe impl Send for HwFrame {}
 
 impl HwFrame {
@@ -76,8 +74,8 @@ pub struct GpuPipeline {
     imp: windows_impl::Parts,
 }
 
-// SAFETY: the buffer references are immutable after creation (FFmpeg's pool is thread safe) and
-// the D3D11 device is multithread protected.
+// SAFETY: the buffer references are immutable after creation (FFmpeg's pool is thread safe) and the D3D11 device is
+// multithread protected.
 unsafe impl Send for GpuPipeline {}
 // SAFETY: see above.
 unsafe impl Sync for GpuPipeline {}
@@ -100,14 +98,12 @@ impl GpuPipeline {
 
     /// [`Feed::Qsv`]: `frame` seen as a QSV surface (the same texture, no copy).
     pub(crate) fn to_qsv(&self, frame: &HwFrame) -> Result<HwFrame, RecordError> {
-        // SAFETY: `self.qsv` was derived from the pool `frame` comes from; the mapped frame
-        // keeps a reference to the source frame until it is freed.
+        // SAFETY: `self.qsv` was derived from the pool `frame` comes from; the mapped frame keeps a reference to the
+        // source frame until it is freed.
         unsafe {
             let mut out = ffi::av_frame_alloc();
             if out.is_null() {
-                return Err(RecordError::Config(
-                    "GPU path: frame allocation failed".into(),
-                ));
+                return Err(RecordError::Config("GPU path: frame allocation failed".into()));
             }
             (*out).format = ffi::AVPixelFormat::AV_PIX_FMT_QSV as i32;
             (*out).hw_frames_ctx = ffi::av_buffer_ref(self.qsv);
@@ -122,10 +118,7 @@ impl GpuPipeline {
 
     /// [`Feed::Download`]: the pixels of `frame` in system memory (NV12 / P010, or packed
     /// 4:2:2 / 4:4:4).
-    pub(crate) fn download(
-        &self,
-        frame: &HwFrame,
-    ) -> Result<ffmpeg_next::frame::Video, RecordError> {
+    pub(crate) fn download(&self, frame: &HwFrame) -> Result<ffmpeg_next::frame::Video, RecordError> {
         let mut out = ffmpeg_next::frame::Video::empty();
         // SAFETY: `out` is an empty frame: FFmpeg allocates it in the pool's software format.
         let code = unsafe { ffi::av_hwframe_transfer_data(out.as_mut_ptr(), frame.as_ptr(), 0) };
@@ -138,8 +131,8 @@ impl GpuPipeline {
 
 impl Drop for GpuPipeline {
     fn drop(&mut self) {
-        // SAFETY: the references were created by this pipeline and are released once (unref of
-        // a null reference is a no-op).
+        // SAFETY: the references were created by this pipeline and are released once (unref of a null reference is a
+        // no-op).
         unsafe {
             ffi::av_buffer_unref(&raw mut self.qsv);
             ffi::av_buffer_unref(&raw mut self.frames);
@@ -160,8 +153,7 @@ mod windows_impl {
     use ffmpeg_next::ffi;
     use windows::Win32::Foundation::RECT;
     use windows::Win32::Graphics::Direct3D11::{
-        D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, ID3D11Device, ID3D11DeviceContext,
-        ID3D11Texture2D,
+        D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
     };
     use windows::Win32::Graphics::Dxgi::Common::{
         DXGI_FORMAT_AYUV, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_NV12, DXGI_FORMAT_P010,
@@ -198,10 +190,10 @@ mod windows_impl {
     }
 
     impl GpuPipeline {
-        /// Builds the video processor, the FFmpeg D3D11 device and frame pool on `device` (and
-        /// their QSV view for [`Feed::Qsv`]), and converts one blank frame as a self-test.
-        /// `ten_bit`: P010 instead of NV12 (always for an HDR output). `chroma` other than 4:2:0
-        /// gives packed frames (YUY2 / Y210, AYUV / Y410), for [`Feed::Download`] only.
+        /// Builds the video processor, the FFmpeg D3D11 device and frame pool on `device` (and their QSV view for
+        /// [`Feed::Qsv`]), and converts one blank frame as a self-test. `ten_bit`: P010 instead of NV12 (always for an
+        /// HDR output). `chroma` other than 4:2:0 gives packed frames (YUY2 / Y210, AYUV / Y410), for
+        /// [`Feed::Download`] only.
         #[allow(clippy::too_many_arguments)]
         pub fn new(
             device: &ID3D11Device,
@@ -224,10 +216,7 @@ mod windows_impl {
                     source.size,
                     out,
                     (fps.num, fps.den),
-                    Conversion {
-                        hdr_source: false,
-                        hdr_output: false,
-                    },
+                    Conversion { hdr_source: false, hdr_output: false },
                 )
                 .map_err(|e| cfg_err("video processor", e))
             };
@@ -254,17 +243,13 @@ mod windows_impl {
             if let Stage::Processor(converter) | Stage::ToneMapped(_, converter) = &stage
                 && !converter.writes(written)
             {
-                return Err(cfg_err(
-                    "video processor",
-                    format!("cannot write {}", chroma.name()),
-                ));
+                return Err(cfg_err("video processor", format!("cannot write {}", chroma.name())));
             }
 
-            // SAFETY: plain FFmpeg allocation and initialisation calls; every return value is
-            // checked and partial state is released on failure.
+            // SAFETY: plain FFmpeg allocation and initialisation calls; every return value is checked and partial state
+            // is released on failure.
             let (hw_device, frames) = unsafe {
-                let mut hw_device =
-                    ffi::av_hwdevice_ctx_alloc(ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_D3D11VA);
+                let mut hw_device = ffi::av_hwdevice_ctx_alloc(ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_D3D11VA);
                 if hw_device.is_null() {
                     return Err(cfg_err("D3D11VA device", "allocation failed"));
                 }
@@ -286,20 +271,14 @@ mod windows_impl {
                 (*fctx).sw_format = sw_format;
                 (*fctx).width = out.0 as i32;
                 (*fctx).height = out.1 as i32;
-                // NVIDIA refuses NV12 / P010 texture arrays that can be render targets (what the
-                // video processor writes to): a pool of single textures, which FFmpeg grows on
-                // demand and reuses. QSV needs a fixed array to derive its surfaces from:
-                // enough for the encoder's own queue, within about 300 MB of video memory.
-                let bytes =
-                    u64::from(out.0) * u64::from(out.1) * 3 / 2 * if ten_bit { 2 } else { 1 };
-                (*fctx).initial_pool_size = if feed == Feed::Qsv {
-                    (300_000_000 / bytes.max(1)).clamp(8, 20) as i32
-                } else {
-                    0
-                };
+                // NVIDIA refuses NV12 / P010 texture arrays that can be render targets (what the video processor writes
+                // to): a pool of single textures, which FFmpeg grows on demand and reuses. QSV needs a fixed array to
+                // derive its surfaces from: enough for the encoder's own queue, within about 300 MB of video memory.
+                let bytes = u64::from(out.0) * u64::from(out.1) * 3 / 2 * if ten_bit { 2 } else { 1 };
+                (*fctx).initial_pool_size =
+                    if feed == Feed::Qsv { (300_000_000 / bytes.max(1)).clamp(8, 20) as i32 } else { 0 };
                 let hwctx = (*fctx).hwctx.cast::<ffi::AVD3D11VAFramesContext>();
-                (*hwctx).BindFlags =
-                    (D3D11_BIND_RENDER_TARGET.0 | D3D11_BIND_SHADER_RESOURCE.0) as u32;
+                (*hwctx).BindFlags = (D3D11_BIND_RENDER_TARGET.0 | D3D11_BIND_SHADER_RESOURCE.0) as u32;
                 if ffi::av_hwframe_ctx_init(frames) < 0 {
                     ffi::av_buffer_unref(&raw mut frames);
                     ffi::av_buffer_unref(&raw mut hw_device);
@@ -308,8 +287,8 @@ mod windows_impl {
                 (hw_device, frames)
             };
             let qsv = if feed == Feed::Qsv {
-                // SAFETY: derivation from the live device and pool; the QSV device is only
-                // held by the derived frame context.
+                // SAFETY: derivation from the live device and pool; the QSV device is only held by the derived frame
+                // context.
                 unsafe {
                     let mut qsv_device = std::ptr::null_mut();
                     let mut qsv = std::ptr::null_mut();
@@ -342,33 +321,15 @@ mod windows_impl {
             } else {
                 std::ptr::null_mut()
             };
-            let pipeline = Self {
-                frames,
-                device: hw_device,
-                feed,
-                qsv,
-                imp: Parts {
-                    stage,
-                    context: context.clone(),
-                    out,
-                },
-            };
+            let pipeline =
+                Self { frames, device: hw_device, feed, qsv, imp: Parts { stage, context: context.clone(), out } };
 
             // Self-test: one blank source texture through the whole conversion.
-            let format = if source.hdr.is_some() {
-                DXGI_FORMAT_R16G16B16A16_FLOAT
-            } else {
-                DXGI_FORMAT_B8G8R8A8_UNORM
-            };
+            let format = if source.hdr.is_some() { DXGI_FORMAT_R16G16B16A16_FLOAT } else { DXGI_FORMAT_B8G8R8A8_UNORM };
             let bind = (D3D11_BIND_SHADER_RESOURCE.0 | D3D11_BIND_RENDER_TARGET.0) as u32;
             let blank = vixeeny_platform::d3d::texture(device, source.size, format, bind, 0, None)
                 .map_err(|e| cfg_err("test texture", e))?;
-            let rect = RECT {
-                left: 0,
-                top: 0,
-                right: source.size.0 as i32,
-                bottom: source.size.1 as i32,
-            };
+            let rect = RECT { left: 0, top: 0, right: source.size.0 as i32, bottom: source.size.1 as i32 };
             let test = pipeline.convert(&blank, rect)?;
             match feed {
                 Feed::Direct => {}
@@ -378,16 +339,11 @@ mod windows_impl {
             Ok(pipeline)
         }
 
-        /// Converts the `rect` part of `texture` into a pool frame. `Err` when the pool is
-        /// exhausted (QSV's fixed pool: the encoder is behind, the caller drops the frame) or
-        /// the GPU refuses.
-        pub fn convert(
-            &self,
-            texture: &ID3D11Texture2D,
-            rect: RECT,
-        ) -> Result<HwFrame, RecordError> {
-            // SAFETY: the frame is allocated from our own pool; its `data[0]` is the pool
-            // texture and `data[1]` the array slice, as FFmpeg documents for D3D11 frames.
+        /// Converts the `rect` part of `texture` into a pool frame. `Err` when the pool is exhausted (QSV's fixed pool:
+        /// the encoder is behind, the caller drops the frame) or the GPU refuses.
+        pub fn convert(&self, texture: &ID3D11Texture2D, rect: RECT) -> Result<HwFrame, RecordError> {
+            // SAFETY: the frame is allocated from our own pool; its `data[0]` is the pool texture and `data[1]` the
+            // array slice, as FFmpeg documents for D3D11 frames.
             unsafe {
                 let mut frame = ffi::av_frame_alloc();
                 if frame.is_null() {
@@ -400,22 +356,15 @@ mod windows_impl {
                 let hw = HwFrame(frame);
                 let dst_ptr = (*frame).data[0].cast::<std::ffi::c_void>();
                 let slice = (*frame).data[1] as usize as u32;
-                let dst = ID3D11Texture2D::from_raw_borrowed(&dst_ptr)
-                    .ok_or_else(|| cfg_err("frame texture", "missing"))?;
+                let dst =
+                    ID3D11Texture2D::from_raw_borrowed(&dst_ptr).ok_or_else(|| cfg_err("frame texture", "missing"))?;
                 match &self.imp.stage {
                     Stage::Processor(converter) => converter.convert(texture, rect, dst, slice),
-                    Stage::ToneMapped(shaders, converter) => {
-                        shaders.to_sdr(texture, rect).and_then(|sdr| {
-                            let (w, h) = (rect.right - rect.left, rect.bottom - rect.top);
-                            let whole = RECT {
-                                left: 0,
-                                top: 0,
-                                right: w,
-                                bottom: h,
-                            };
-                            converter.convert(&sdr, whole, dst, slice)
-                        })
-                    }
+                    Stage::ToneMapped(shaders, converter) => shaders.to_sdr(texture, rect).and_then(|sdr| {
+                        let (w, h) = (rect.right - rect.left, rect.bottom - rect.top);
+                        let whole = RECT { left: 0, top: 0, right: w, bottom: h };
+                        converter.convert(&sdr, whole, dst, slice)
+                    }),
                     Stage::Pq(shaders) => shaders.to_pq(texture, rect, dst, slice, self.imp.out),
                 }
                 .map_err(|e| cfg_err("conversion", e))?;
@@ -427,27 +376,22 @@ mod windows_impl {
     }
 }
 
-/// Opens `ctx` for the frames of this pipeline: D3D11 or QSV surfaces. A software encoder keeps
-/// its own pixel format (the frames are downloaded).
-pub(crate) fn attach(
-    ctx: &mut ffmpeg_next::encoder::video::Video,
-    pipeline: &GpuPipeline,
-) -> Result<(), RecordError> {
+/// Opens `ctx` for the frames of this pipeline: D3D11 or QSV surfaces. A software encoder keeps its own pixel format
+/// (the frames are downloaded).
+pub(crate) fn attach(ctx: &mut ffmpeg_next::encoder::video::Video, pipeline: &GpuPipeline) -> Result<(), RecordError> {
     let (format, pool) = match pipeline.feed {
         Feed::Direct => (ffi::AVPixelFormat::AV_PIX_FMT_D3D11, pipeline.frames),
         Feed::Qsv => (ffi::AVPixelFormat::AV_PIX_FMT_QSV, pipeline.qsv),
         Feed::Download => return Ok(()),
     };
-    // SAFETY: `ctx` is a live, not yet opened codec context; `av_buffer_ref` gives it its own
-    // reference to the pool, which it releases when closed.
+    // SAFETY: `ctx` is a live, not yet opened codec context; `av_buffer_ref` gives it its own reference to the pool,
+    // which it releases when closed.
     unsafe {
         let raw = ctx.as_mut_ptr();
         (*raw).pix_fmt = format;
         (*raw).hw_frames_ctx = ffi::av_buffer_ref(pool);
         if (*raw).hw_frames_ctx.is_null() {
-            return Err(RecordError::Config(
-                "GPU path: cannot reference the pool".into(),
-            ));
+            return Err(RecordError::Config("GPU path: cannot reference the pool".into()));
         }
     }
     Ok(())

@@ -8,9 +8,9 @@ use vixeeny_image::{Bgra, ImageFormat};
 use vixeeny_platform::PlatformError;
 use vixeeny_platform::clipboard::ImageClip;
 
-/// Copies `image`: as PNG (lossless) or, in another chosen format, as a file of that format
-/// (see `vixeeny_platform::clipboard`). A bitmap goes along in every case. `encoded`: the image
-/// already encoded with the image settings (the file just saved), not encoded again then.
+/// Copies `image`: as PNG (lossless) or, in another chosen format, as a file of that format (see
+/// `vixeeny_platform::clipboard`). A bitmap goes along in every case. `encoded`: the image already encoded with the
+/// image settings (the file just saved), not encoded again then.
 pub fn copy_bgra(config: &Config, image: &Bgra<'_>, encoded: Option<&[u8]>) -> anyhow::Result<()> {
     let (format, settings) = crate::image_output(config);
     let made;
@@ -28,19 +28,11 @@ pub fn copy_bgra(config: &Config, image: &Bgra<'_>, encoded: Option<&[u8]>) -> a
         image.data
     } else {
         packed = (0..image.height as usize)
-            .flat_map(|y| {
-                image.data[y * image.stride..y * image.stride + row]
-                    .iter()
-                    .copied()
-            })
+            .flat_map(|y| image.data[y * image.stride..y * image.stride + row].iter().copied())
             .collect();
         &packed
     };
-    let file = if format == ImageFormat::Png {
-        None
-    } else {
-        Some(clip_file(format, bytes)?)
-    };
+    let file = if format == ImageFormat::Png { None } else { Some(clip_file(format, bytes)?) };
     let clip = ImageClip {
         png: (format == ImageFormat::Png).then_some(bytes),
         jpeg: (format == ImageFormat::Jpeg).then_some(bytes),
@@ -50,21 +42,14 @@ pub fn copy_bgra(config: &Config, image: &Bgra<'_>, encoded: Option<&[u8]>) -> a
         .map_err(|e: PlatformError| anyhow::anyhow!("{e}"))
 }
 
-/// Writes the copied image where the clipboard can point to it. Only the latest copy is kept:
-/// the clipboard holds a single image.
+/// Writes the copied image where the clipboard can point to it. Only the latest copy is kept: the clipboard holds a
+/// single image.
 fn clip_file(format: ImageFormat, bytes: &[u8]) -> anyhow::Result<PathBuf> {
-    let dir = vixeeny_common::paths::cache_dir()
-        .ok_or_else(|| anyhow::anyhow!("no cache folder"))?
-        .join("clipboard");
+    let dir = vixeeny_common::paths::cache_dir().ok_or_else(|| anyhow::anyhow!("no cache folder"))?.join("clipboard");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir)?;
     let now = vixeeny_platform::local_time();
-    let path = dir.join(format!(
-        "Vixeeny_{}_{}.{}",
-        now.date(),
-        now.time(),
-        format.extension()
-    ));
+    let path = dir.join(format!("Vixeeny_{}_{}.{}", now.date(), now.time(), format.extension()));
     std::fs::write(&path, bytes)?;
     Ok(path)
 }

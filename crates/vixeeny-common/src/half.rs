@@ -61,9 +61,7 @@ mod tests {
         assert!(to_f32(0x7e00).is_nan());
         assert_eq!(to_f32(0x0001), 2f32.powi(-24)); // smallest subnormal
         assert_eq!(to_f32(0x8001), -(2f32.powi(-24)));
-        for h in [
-            0x0000, 0x0001, 0x03ff, 0x0400, 0x3555, 0x3c00, 0x7bff, 0x8001, 0xc000,
-        ] {
+        for h in [0x0000, 0x0001, 0x03ff, 0x0400, 0x3555, 0x3c00, 0x7bff, 0x8001, 0xc000] {
             assert_eq!(from_f32(to_f32(h)), h, "{h:#06x}");
         }
         assert_eq!(from_f32(0.333_333), 0x3555);

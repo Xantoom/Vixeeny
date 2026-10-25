@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The recording widget, drawn natively: a small bar with a blinking red dot, the
-//! elapsed time, and the pause / stop buttons. It stays where it was put. In pause the dot is
-//! amber and still and the time frozen. With `auto_hide` it fades after 3 s and comes back under
-//! the pointer. It never takes the keyboard and is left out of every screen capture.
+//! The recording widget, drawn natively: a small bar with a blinking red dot, the elapsed time, and the pause / stop
+//! buttons. It stays where it was put. In pause the dot is amber and still and the time frozen. With `auto_hide` it
+//! fades after 3 s and comes back under the pointer. It never takes the keyboard and is left out of every screen
+//! capture.
 //!
 //! While recording it draws once a second (the time and the dot), nothing in between.
 
@@ -14,8 +14,8 @@ use vixeeny_platform::PhysicalRect;
 use windows::Win32::Foundation::{LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetWindowRect, KillTimer, SetTimer, WM_CAPTURECHANGED, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN,
-    WM_LBUTTONUP, WM_MOUSEMOVE, WM_SETCURSOR, WM_TIMER,
+    GetWindowRect, KillTimer, SetTimer, WM_CAPTURECHANGED, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP,
+    WM_MOUSEMOVE, WM_SETCURSOR, WM_TIMER,
 };
 use windows::core::Result;
 
@@ -71,11 +71,7 @@ pub struct Clock {
 
 impl Clock {
     pub fn new(now: Instant) -> Self {
-        Self {
-            base: Duration::ZERO,
-            since: now,
-            paused: false,
-        }
+        Self { base: Duration::ZERO, since: now, paused: false }
     }
 
     pub fn set(&mut self, paused: bool, elapsed: Duration, now: Instant) {
@@ -85,11 +81,7 @@ impl Clock {
     }
 
     pub fn elapsed(&self, now: Instant) -> Duration {
-        if self.paused {
-            self.base
-        } else {
-            self.base + now.saturating_duration_since(self.since)
-        }
+        if self.paused { self.base } else { self.base + now.saturating_duration_since(self.since) }
     }
 }
 
@@ -148,8 +140,8 @@ fn part(target: WidgetTarget) -> Box2 {
     }
 }
 
-/// What is at `(x, y)`, window pixels at `u` physical pixels per logical one; the warning sign
-/// is there only while `alert` is on.
+/// What is at `(x, y)`, window pixels at `u` physical pixels per logical one; the warning sign is there only while
+/// `alert` is on.
 pub fn widget_at(u: f32, x: f32, y: f32, alert: bool) -> WidgetTarget {
     let (lx, ly) = (x / u - MARGIN, y / u - MARGIN);
     let inside = |(bx, by, bw, bh): Box2| lx >= bx && lx < bx + bw && ly >= by && ly < by + bh;
@@ -177,10 +169,7 @@ pub struct WidgetLook {
 
 /// Size of the bar's surface: the whole window.
 pub fn widget_surface(u: f32) -> (u32, u32) {
-    (
-        (WIDTH as f32 * u).ceil() as u32,
-        (HEIGHT as f32 * u).ceil() as u32,
-    )
+    ((WIDTH as f32 * u).ceil() as u32, (HEIGHT as f32 * u).ceil() as u32)
 }
 
 pub fn paint_widget(c: &Canvas<'_>, t: &Theme, u: f32, look: &WidgetLook) -> Result<()> {
@@ -211,13 +200,7 @@ pub fn paint_widget(c: &Canvas<'_>, t: &Theme, u: f32, look: &WidgetLook) -> Res
     let (cx, cy) = (sx + sw / 2.0, sy + sh / 2.0);
     if look.paused {
         let icon = 16.0 * u;
-        c.icon(
-            icons::PAUSE_FILLED,
-            cx - icon / 2.0,
-            cy - icon / 2.0,
-            icon,
-            t.warning,
-        )?;
+        c.icon(icons::PAUSE_FILLED, cx - icon / 2.0, cy - icon / 2.0, icon, t.warning)?;
     } else {
         if look.pulse {
             c.fill_circle(cx, cy, 9.0 * u, t.record.with_alpha(0.25))?;
@@ -228,46 +211,22 @@ pub fn paint_widget(c: &Canvas<'_>, t: &Theme, u: f32, look: &WidgetLook) -> Res
     // The time, frozen and dimmed while paused.
     let colour = if look.paused { t.text_2 } else { t.text };
     let time = c.gfx.paragraph(&look.time, 14.0 * u, true, 1.0e5)?;
-    c.text_layout(
-        &time.layout,
-        sx + sw + 6.0 * u,
-        oy + (BAR_H * u - time.height) / 2.0,
-        colour,
-    )?;
+    c.text_layout(&time.layout, sx + sw + 6.0 * u, oy + (BAR_H * u - time.height) / 2.0, colour)?;
 
     // The warning sign, then a divider and stop.
     if look.alert != Alert::None {
         back(WidgetTarget::Alert)?;
         let (x, y, w, h) = at(WidgetTarget::Alert);
-        let tint = if look.alert == Alert::Critical {
-            t.danger
-        } else {
-            t.warning
-        };
+        let tint = if look.alert == Alert::Critical { t.danger } else { t.warning };
         let icon = 18.0 * u;
-        c.icon(
-            icons::WARNING,
-            x + (w - icon) / 2.0,
-            y + (h - icon) / 2.0,
-            icon,
-            tint,
-        )?;
+        c.icon(icons::WARNING, x + (w - icon) / 2.0, y + (h - icon) / 2.0, icon, tint)?;
     }
     let (px, _, _, _) = at(WidgetTarget::Stop);
-    c.fill_rect(
-        rect(px - 4.0 * u, oy + (BAR_H - 18.0) / 2.0 * u, 1.0, 18.0 * u),
-        t.divider,
-    )?;
+    c.fill_rect(rect(px - 4.0 * u, oy + (BAR_H - 18.0) / 2.0 * u, 1.0, 18.0 * u), t.divider)?;
     back(WidgetTarget::Stop)?;
     let (x, y, w, h) = at(WidgetTarget::Stop);
     let icon = 16.0 * u;
-    c.icon(
-        icons::STOP_FILLED,
-        x + (w - icon) / 2.0,
-        y + (h - icon) / 2.0,
-        icon,
-        t.record,
-    )?;
+    c.icon(icons::STOP_FILLED, x + (w - icon) / 2.0, y + (h - icon) / 2.0, icon, t.record)?;
     Ok(())
 }
 
@@ -281,30 +240,22 @@ impl AlertTip {
     pub fn new(gfx: &Gfx, u: f32, text: &str) -> Result<Self> {
         let text = gfx.paragraph(text, 13.0 * u, false, TIP_WIDTH * u)?;
         let side = 2.0 * (TIP_PAD + TIP_SHADOW) * u;
-        let size = (
-            (text.width + side).ceil() as u32,
-            (text.height + side).ceil() as u32,
-        );
+        let size = ((text.width + side).ceil() as u32, (text.height + side).ceil() as u32);
         Ok(Self { text, size })
     }
 }
 
 pub fn paint_alert_tip(c: &Canvas<'_>, t: &Theme, u: f32, tip: &AlertTip) -> Result<()> {
     let m = TIP_SHADOW * u;
-    let r = rect(
-        m,
-        m,
-        tip.size.0 as f32 - 2.0 * m,
-        tip.size.1 as f32 - 2.0 * m,
-    );
+    let r = rect(m, m, tip.size.0 as f32 - 2.0 * m, tip.size.1 as f32 - 2.0 * m);
     c.shadow(r, 6.0 * u, 8.0 * u, 2.0 * u, Rgba::hex(0x000000, 0x35))?;
     c.fill_round(r, 6.0 * u, t.flyout)?;
     c.stroke_round(r, 6.0 * u, 1.0, t.stroke_strong)?;
     c.text_layout(&tip.text.layout, m + TIP_PAD * u, m + TIP_PAD * u, t.text)
 }
 
-/// Where the tooltip goes: under the widget, or above it when the widget is in the lower half
-/// of `work`; its middle under the warning sign at `anchor_x`, whole inside `work`.
+/// Where the tooltip goes: under the widget, or above it when the widget is in the lower half of `work`; its middle
+/// under the warning sign at `anchor_x`, whole inside `work`.
 pub fn tip_origin(widget: RECT, anchor_x: i32, size: (u32, u32), work: RECT) -> (i32, i32) {
     let (w, h) = (size.0 as i32, size.1 as i32);
     let below = widget.top + widget.bottom < work.top + work.bottom;
@@ -357,12 +308,7 @@ impl Inner {
         let u = self.u;
         let drawn = self
             .piece
-            .show(
-                &self.gfx,
-                &look,
-                || Ok(widget_surface(u)),
-                |c| paint_widget(c, &self.theme, u, &look),
-            )
+            .show(&self.gfx, &look, || Ok(widget_surface(u)), |c| paint_widget(c, &self.theme, u, &look))
             // SAFETY: plain call.
             .and_then(|()| unsafe { self.gfx.dcomp.Commit() });
         if let Err(e) = drawn {
@@ -396,11 +342,7 @@ impl Inner {
         }
         let gfx = &self.gfx;
         let rise = 6.0 * self.u;
-        scene::set_offset(
-            &self.piece.visual,
-            0.0,
-            if self.animate { rise } else { 0.0 },
-        )?;
+        scene::set_offset(&self.piece.visual, 0.0, if self.animate { rise } else { 0.0 })?;
         self.opacity.set(1.0);
         self.faded.set(false);
         if let Some(effect) = &self.piece.effect {
@@ -414,9 +356,7 @@ impl Inner {
         {
             // SAFETY: plain property calls with animations of the same device.
             unsafe {
-                self.piece
-                    .visual
-                    .SetOffsetY(&scene::ease_out(gfx, rise, 0.0, RISE)?)?;
+                self.piece.visual.SetOffsetY(&scene::ease_out(gfx, rise, 0.0, RISE)?)?;
                 effect.SetOpacity(&scene::ease_out(gfx, 0.0, 1.0, RISE)?)?;
                 gfx.dcomp.Commit()?;
             }
@@ -482,11 +422,7 @@ impl Inner {
         if text.is_empty() {
             return self.hide_tip();
         }
-        let shown = self
-            .tip
-            .borrow()
-            .as_ref()
-            .and_then(|t| t.piece.look.borrow().clone());
+        let shown = self.tip.borrow().as_ref().and_then(|t| t.piece.look.borrow().clone());
         if shown.as_deref() == Some(text.as_str()) {
             return;
         }
@@ -504,28 +440,16 @@ impl Inner {
         unsafe { GetWindowRect(self.popup.hwnd, &mut bar)? };
         let (ax, _, aw, _) = part(WidgetTarget::Alert);
         let anchor = bar.left + ((MARGIN + ax + aw / 2.0) * u) as i32;
-        let centre = POINT {
-            x: (bar.left + bar.right) / 2,
-            y: (bar.top + bar.bottom) / 2,
-        };
+        let centre = POINT { x: (bar.left + bar.right) / 2, y: (bar.top + bar.bottom) / 2 };
         let work = popup::work_area_at(centre).unwrap_or(bar);
         let (x, y) = tip_origin(bar, anchor, tip.size, work);
         // Never in the video either.
-        let popup = Popup::new(
-            &self.gfx,
-            PhysicalRect::new(x, y, tip.size.0, tip.size.1),
-            Focus::Never,
-            Capture::Hidden,
-        )?;
+        let popup =
+            Popup::new(&self.gfx, PhysicalRect::new(x, y, tip.size.0, tip.size.1), Focus::Never, Capture::Hidden)?;
         let piece = Piece::new(&self.gfx, false)?;
         scene::add(&popup.root, &piece.visual)?;
         piece.move_to(0.0, 0.0)?;
-        piece.show(
-            &self.gfx,
-            &text.to_owned(),
-            || Ok(tip.size),
-            |c| paint_alert_tip(c, &self.theme, u, &tip),
-        )?;
+        piece.show(&self.gfx, &text.to_owned(), || Ok(tip.size), |c| paint_alert_tip(c, &self.theme, u, &tip))?;
         // SAFETY: plain call.
         unsafe { self.gfx.dcomp.Commit()? };
         popup.on_message(|msg, _, _| popup::passive(msg));
@@ -690,9 +614,7 @@ impl Widget {
             closed: Cell::new(false),
         });
         let weak: Weak<Inner> = Rc::downgrade(&inner);
-        inner
-            .popup
-            .on_message(move |msg, wparam, lparam| weak.upgrade()?.message(msg, wparam, lparam));
+        inner.popup.on_message(move |msg, wparam, lparam| weak.upgrade()?.message(msg, wparam, lparam));
         Ok(Self { inner })
     }
 
@@ -710,8 +632,8 @@ impl Widget {
         inner.refresh();
     }
 
-    /// What goes wrong (`Alert::None`: nothing) and the tooltip of the warning sign. A new or
-    /// worse problem brings a faded widget back.
+    /// What goes wrong (`Alert::None`: nothing) and the tooltip of the warning sign. A new or worse problem brings a
+    /// faded widget back.
     pub fn set_alert(&self, alert: Alert, text: &str) {
         let inner = &self.inner;
         let before = std::mem::replace(&mut inner.look.borrow_mut().alert, alert);
@@ -734,8 +656,8 @@ impl Widget {
         inner.refresh();
     }
 
-    /// Shows the bar, rising into place (with [`Display::Alerts`], once something goes wrong),
-    /// and runs until [`Widget::close`].
+    /// Shows the bar, rising into place (with [`Display::Alerts`], once something goes wrong), and runs until
+    /// [`Widget::close`].
     pub fn run(&self) -> Result<()> {
         let inner = &self.inner;
         inner.tick();
@@ -787,8 +709,8 @@ mod tests {
 
     #[test]
     fn the_buttons_are_where_they_are_drawn() {
-        // The bar is 10 px inside the window: the state at its left end, stop at its right end,
-        // the warning sign just before stop; the rest moves the widget.
+        // The bar is 10 px inside the window: the state at its left end, stop at its right end, the warning sign just
+        // before stop; the rest moves the widget.
         for u in [1.0, 1.5] {
             assert_eq!(widget_at(u, 30.0 * u, 30.0 * u, false), WidgetTarget::State);
             assert_eq!(widget_at(u, 186.0 * u, 30.0 * u, false), WidgetTarget::Stop);
@@ -801,18 +723,8 @@ mod tests {
 
     #[test]
     fn the_tooltip_goes_beside_the_bar_on_the_free_side() {
-        let work = RECT {
-            left: 0,
-            top: 0,
-            right: 1920,
-            bottom: 1032,
-        };
-        let bar = |top| RECT {
-            left: 10,
-            top,
-            right: 226,
-            bottom: top + 60,
-        };
+        let work = RECT { left: 0, top: 0, right: 1920, bottom: 1032 };
+        let bar = |top| RECT { left: 10, top, right: 226, bottom: top + 60 };
         // Top-left corner: under the bar, kept on screen on the left.
         assert_eq!(tip_origin(bar(6), 160, (200, 50), work), (60, 66));
         assert_eq!(tip_origin(bar(6), 40, (200, 50), work), (0, 66));

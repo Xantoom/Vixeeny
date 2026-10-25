@@ -14,22 +14,19 @@ use crate::core::{Core, Effect, Event, SpawnId};
 use crate::server::{AppLink, EventTx};
 use crate::supervisor::Spawner;
 
-/// The daemon watches for games: to have the app run the replay with them, or tell that it is
-/// off.
+/// The daemon watches for games: to have the app run the replay with them, or tell that it is off.
 fn watches_games(config: &Config) -> bool {
     config.replay.enabled || config.replay.notify == "both"
 }
 
 /// Finds games in the foreground.
 pub trait Games {
-    /// Has Windows send [`Event::Foreground`] through `tx` at each change in the foreground;
-    /// `false` when it refused.
+    /// Has Windows send [`Event::Foreground`] through `tx` at each change in the foreground; `false` when it refused.
     fn hook(&mut self, tx: EventTx) -> bool;
-    /// The process of the full-screen game in `window` (`None`: the foreground now), if it is
-    /// one.
+    /// The process of the full-screen game in `window` (`None`: the foreground now), if it is one.
     fn game(&mut self, window: Option<u64>, config: &Config) -> Option<u32>;
-    /// Whether process `pid` is part of the game running as process `game` (its in-game web
-    /// pages, in a window of another process).
+    /// Whether process `pid` is part of the game running as process `game` (its in-game web pages, in a window of
+    /// another process).
     fn same_game(&self, pid: u32, game: u32) -> bool {
         pid == game
     }
@@ -55,21 +52,21 @@ pub trait Tray {
     fn notify(&mut self, message: &str);
 }
 
-/// Registers the global shortcuts with the OS. A shortcut press becomes an
-/// [`Event::Action`] sent by the backend itself.
+/// Registers the global shortcuts with the OS. A shortcut press becomes an [`Event::Action`] sent by the backend
+/// itself.
 pub trait HotkeyBackend {
-    /// Replaces the registered shortcuts by `bindings`. Returns the shortcuts the OS refused
-    /// (typically because another application owns them), each with the reason.
+    /// Replaces the registered shortcuts by `bindings`. Returns the shortcuts the OS refused (typically because another
+    /// application owns them), each with the reason.
     fn apply(&mut self, bindings: &[(ActionId, Hotkey)]) -> Vec<(Hotkey, String)>;
 }
 
-/// Freezes the screens the moment a zone capture is asked for (see
-/// `vixeeny_capture::freeze`); the app takes over from the frozen screens.
+/// Freezes the screens the moment a zone capture is asked for (see `vixeeny_capture::freeze`); the app takes over from
+/// the frozen screens.
 pub trait Freezer {
     /// `None` when the screens cannot be frozen, or already are.
     fn freeze(&mut self) -> Option<Frozen>;
-    /// The screens captured for the app without being shown (with the pointer when `cursor`),
-    /// as [`freeze`](Self::freeze) otherwise.
+    /// The screens captured for the app without being shown (with the pointer when `cursor`), as
+    /// [`freeze`](Self::freeze) otherwise.
     fn hold(&mut self, _cursor: bool) -> Option<Frozen> {
         None
     }
@@ -187,14 +184,13 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
         }
     }
 
-    /// Starts watching for full-screen games if the replay is on, or to say it is off: the app
-    /// is started with a game (the replay runs, or it says it is off), not before.
+    /// Starts watching for full-screen games if the replay is on, or to say it is off: the app is started with a game
+    /// (the replay runs, or it says it is off), not before.
     pub fn start_replay_if_configured(&mut self) {
         self.look_for_game(None);
     }
 
-    /// With games watched: tells the app (starting it) about a game newly in the foreground.
-    /// `true` when it did.
+    /// With games watched: tells the app (starting it) about a game newly in the foreground. `true` when it did.
     fn look_for_game(&mut self, window: Option<u64>) -> bool {
         if !watches_games(&self.config) {
             return false;
@@ -203,11 +199,7 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
             self.hooked = self.games.hook(self.tx.clone());
         }
         match self.games.game(window, &self.config) {
-            Some(pid)
-                if self
-                    .last_game
-                    .is_none_or(|game| !self.games.same_game(pid, game)) =>
-            {
+            Some(pid) if self.last_game.is_none_or(|game| !self.games.same_game(pid, game)) => {
                 self.last_game = Some(pid);
                 self.dispatch(Event::Action(ActionId::ReplayWatch));
                 true
@@ -224,9 +216,7 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
             match &problem.kind {
                 ProblemKind::Invalid(e) => tracing::warn!("shortcut `{text}` for {action:?}: {e}"),
                 ProblemKind::TooMany => {
-                    tracing::warn!(
-                        "shortcut `{text}` for {action:?} ignored: at most 2 per action"
-                    );
+                    tracing::warn!("shortcut `{text}` for {action:?} ignored: at most 2 per action");
                 }
                 ProblemKind::Duplicate => {
                     tracing::warn!("shortcut `{text}` listed twice for {action:?}");
@@ -279,14 +269,11 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
         flow
     }
 
-    /// The screens freeze before anything else happens for a zone capture, and are held for a
-    /// full-screen one; they go when the app that should take over from them is gone (the app
-    /// itself removes them otherwise).
+    /// The screens freeze before anything else happens for a zone capture, and are held for a full-screen one; they go
+    /// when the app that should take over from them is gone (the app itself removes them otherwise).
     fn freeze_or_thaw(&mut self, event: &Event) {
         match *event {
-            Event::Action(action) | Event::Control(ControlRequest::Action(action))
-                if action.holds_screen() =>
-            {
+            Event::Action(action) | Event::Control(ControlRequest::Action(action)) if action.holds_screen() => {
                 // Screens of an earlier press no action took: not this one's.
                 if self.frozen.is_some() && self.frozen_for.is_none() {
                     self.thaw();
@@ -296,9 +283,7 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
                     self.frozen_for = None;
                 }
             }
-            Event::Action(action) | Event::Control(ControlRequest::Action(action))
-                if action.freezes_screen() =>
-            {
+            Event::Action(action) | Event::Control(ControlRequest::Action(action)) if action.freezes_screen() => {
                 // `None` while earlier frozen screens are still up: they serve this press.
                 if let Some(frozen) = self.freezer.freeze() {
                     self.frozen = Some(frozen);
@@ -321,10 +306,7 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
 
     /// The frozen screens, for the app that runs `action`.
     fn take_frozen(&mut self, action: ActionId, receiver: FrozenFor) -> Option<Frozen> {
-        let frozen = self
-            .frozen
-            .take()
-            .filter(|_| action.freezes_screen() || action.holds_screen());
+        let frozen = self.frozen.take().filter(|_| action.freezes_screen() || action.holds_screen());
         if frozen.is_some() {
             self.frozen_for = Some(receiver);
         }
@@ -336,10 +318,7 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
             Effect::SpawnApp { id, action } => {
                 vixeeny_platform::allow_foreground_handoff();
                 let frozen = self.take_frozen(action, FrozenFor::Spawn(id));
-                if let Err(e) = self
-                    .spawner
-                    .spawn(id, action, frozen.as_ref(), self.tx.clone())
-                {
+                if let Err(e) = self.spawner.spawn(id, action, frozen.as_ref(), self.tx.clone()) {
                     tracing::error!("cannot start the app: {e}");
                     // Feed the failure back so the state machine can recover.
                     self.tx.send(Event::AppExited { id, success: false });
@@ -398,8 +377,8 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
             Ok(config) if config == self.config => {}
             Ok(config) => {
                 let old = std::mem::replace(&mut self.config, config);
-                // The replay turned on or off, or other games: the game in front counts again,
-                // and a running app follows (its buffer goes when the replay is off).
+                // The replay turned on or off, or other games: the game in front counts again, and a running app
+                // follows (its buffer goes when the replay is off).
                 if old.replay != self.config.replay {
                     self.last_game = None;
                     if !self.look_for_game(None) && self.core.app_running() {
@@ -407,19 +386,15 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
                     }
                 }
                 if old.general.language != self.config.general.language {
-                    self.lang =
-                        Lang::resolve(&self.config.general.language, self.os_locale.as_deref());
+                    self.lang = Lang::resolve(&self.config.general.language, self.os_locale.as_deref());
                     self.tray.set_language(self.lang);
-                    self.tray
-                        .set_recording(self.core.recording_state(), self.lang);
+                    self.tray.set_recording(self.core.recording_state(), self.lang);
                 }
                 if old.general.autostart != self.config.general.autostart {
                     self.apply_autostart();
                 }
                 // Registering them again would also repeat the warning about a taken shortcut.
-                if old.hotkeys != self.config.hotkeys
-                    || old.overlay.enabled != self.config.overlay.enabled
-                {
+                if old.hotkeys != self.config.hotkeys || old.overlay.enabled != self.config.overlay.enabled {
                     self.apply_hotkeys();
                 }
                 tracing::debug!("config reloaded");
@@ -430,8 +405,8 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
     }
 }
 
-/// Tells the settings window which shortcuts did not register (the file is emptied when all
-/// did), when that changed. Not in tests: they would write to the user's folder.
+/// Tells the settings window which shortcuts did not register (the file is emptied when all did), when that changed.
+/// Not in tests: they would write to the user's folder.
 fn write_taken(failures: &[(Hotkey, String)]) {
     if cfg!(test) {
         return;
@@ -490,16 +465,8 @@ mod tests {
     }
     impl HotkeyBackend for FakeHotkeys {
         fn apply(&mut self, bindings: &[(ActionId, Hotkey)]) -> Vec<(Hotkey, String)> {
-            *self.applied.lock().unwrap() =
-                bindings.iter().map(|(a, h)| (*a, h.to_string())).collect();
-            if self.refuse {
-                bindings
-                    .iter()
-                    .map(|(_, h)| (h.clone(), "taken".into()))
-                    .collect()
-            } else {
-                Vec::new()
-            }
+            *self.applied.lock().unwrap() = bindings.iter().map(|(a, h)| (*a, h.to_string())).collect();
+            if self.refuse { bindings.iter().map(|(_, h)| (h.clone(), "taken".into())).collect() } else { Vec::new() }
         }
     }
 
@@ -508,13 +475,7 @@ mod tests {
         spawned: Arc<Mutex<Vec<(SpawnId, ActionId)>>>,
     }
     impl Spawner for FakeSpawner {
-        fn spawn(
-            &mut self,
-            id: SpawnId,
-            action: ActionId,
-            _: Option<&Frozen>,
-            _: EventTx,
-        ) -> io::Result<()> {
+        fn spawn(&mut self, id: SpawnId, action: ActionId, _: Option<&Frozen>, _: EventTx) -> io::Result<()> {
             if self.fail {
                 return Err(io::Error::other("boom"));
             }
@@ -526,10 +487,7 @@ mod tests {
     type Log = Arc<Mutex<Vec<String>>>;
     type Spawned = Arc<Mutex<Vec<(SpawnId, ActionId)>>>;
 
-    fn runtime(
-        fail: bool,
-        config: Config,
-    ) -> (Runtime<FakeTray, FakeSpawner>, EventTx, Log, Spawned) {
+    fn runtime(fail: bool, config: Config) -> (Runtime<FakeTray, FakeSpawner>, EventTx, Log, Spawned) {
         let (tx, rx) = channel();
         let events = EventTx::new(tx, Arc::new(NoWake));
         let tray = FakeTray::default();
@@ -541,10 +499,7 @@ mod tests {
             Some("fr-FR".into()),
             tray,
             Box::new(FakeHotkeys::default()),
-            FakeSpawner {
-                fail,
-                spawned: spawned.clone(),
-            },
+            FakeSpawner { fail, spawned: spawned.clone() },
             AppLink::default(),
             events.clone(),
             rx,
@@ -566,12 +521,9 @@ mod tests {
 
     #[test]
     fn the_app_starts_with_a_game_when_the_replay_is_on_or_says_it_is_off() {
-        for (enabled, notify, watched) in [
-            (false, "on", false),
-            (true, "on", true),
-            (false, "both", true),
-            (true, "none", true),
-        ] {
+        for (enabled, notify, watched) in
+            [(false, "on", false), (true, "on", true), (false, "both", true), (true, "none", true)]
+        {
             let mut config = Config::default();
             config.replay.enabled = enabled;
             config.replay.notify = notify.into();
@@ -588,11 +540,7 @@ mod tests {
                 events.send(Event::Foreground(1));
                 rt.pump();
             }
-            let expected = if watched {
-                vec![(1, ActionId::ReplayWatch)]
-            } else {
-                Vec::new()
-            };
+            let expected = if watched { vec![(1, ActionId::ReplayWatch)] } else { Vec::new() };
             assert_eq!(*spawned.lock().unwrap(), expected, "{enabled} {notify}");
         }
     }
@@ -642,10 +590,7 @@ mod tests {
         let (mut rt, tx, log, _) = runtime(true, Config::default());
         tx.send(Event::Action(ActionId::OpenSettings));
         rt.pump();
-        assert_eq!(
-            *log.lock().unwrap(),
-            vec!["notify Vixeeny s'est arrêté de façon inattendue".to_owned()]
-        );
+        assert_eq!(*log.lock().unwrap(), vec!["notify Vixeeny s'est arrêté de façon inattendue".to_owned()]);
     }
 
     #[derive(Default, Clone)]
@@ -655,20 +600,11 @@ mod tests {
     impl Freezer for FakeFreezer {
         fn freeze(&mut self) -> Option<Frozen> {
             self.log.lock().unwrap().push("freeze");
-            Some(Frozen {
-                adapter: 1,
-                screens: Vec::new(),
-            })
+            Some(Frozen { adapter: 1, screens: Vec::new() })
         }
         fn hold(&mut self, cursor: bool) -> Option<Frozen> {
-            self.log
-                .lock()
-                .unwrap()
-                .push(if cursor { "hold with cursor" } else { "hold" });
-            Some(Frozen {
-                adapter: 1,
-                screens: Vec::new(),
-            })
+            self.log.lock().unwrap().push(if cursor { "hold with cursor" } else { "hold" });
+            Some(Frozen { adapter: 1, screens: Vec::new() })
         }
         fn thaw(&mut self) {
             self.log.lock().unwrap().push("thaw");
@@ -685,22 +621,13 @@ mod tests {
         tx.send(Event::Action(ActionId::CaptureFullscreen));
         rt.pump();
         assert_eq!(*freezer.log.lock().unwrap(), vec!["hold with cursor"]);
-        assert_eq!(
-            spawned.lock().unwrap().last(),
-            Some(&(1, ActionId::CaptureFullscreen))
-        );
+        assert_eq!(spawned.lock().unwrap().last(), Some(&(1, ActionId::CaptureFullscreen)));
         assert!(rt.frozen.is_none());
         // Screens no action took go before new ones are held.
-        rt.frozen = Some(Frozen {
-            adapter: 1,
-            screens: Vec::new(),
-        });
+        rt.frozen = Some(Frozen { adapter: 1, screens: Vec::new() });
         rt.frozen_for = None;
         rt.freeze_or_thaw(&Event::Action(ActionId::CaptureAllMonitors));
-        assert_eq!(
-            *freezer.log.lock().unwrap(),
-            vec!["hold with cursor", "thaw", "hold with cursor"]
-        );
+        assert_eq!(*freezer.log.lock().unwrap(), vec!["hold with cursor", "thaw", "hold with cursor"]);
         assert!(rt.frozen.is_some());
     }
 
@@ -713,29 +640,17 @@ mod tests {
         rt.pump();
         assert!(freezer.log.lock().unwrap().is_empty());
         // The settings app exits; a zone capture starts a new app with the frozen screens.
-        tx.send(Event::AppExited {
-            id: 1,
-            success: true,
-        });
+        tx.send(Event::AppExited { id: 1, success: true });
         tx.send(Event::Action(ActionId::CaptureRegion));
         rt.pump();
         assert_eq!(*freezer.log.lock().unwrap(), vec!["freeze"]);
-        assert_eq!(
-            spawned.lock().unwrap().last(),
-            Some(&(2, ActionId::CaptureRegion))
-        );
+        assert_eq!(spawned.lock().unwrap().last(), Some(&(2, ActionId::CaptureRegion)));
         assert!(rt.frozen.is_none());
         // Another app's exit leaves them; the exit of the one that has them removes them.
-        tx.send(Event::AppExited {
-            id: 1,
-            success: true,
-        });
+        tx.send(Event::AppExited { id: 1, success: true });
         rt.pump();
         assert_eq!(*freezer.log.lock().unwrap(), vec!["freeze"]);
-        tx.send(Event::AppExited {
-            id: 2,
-            success: false,
-        });
+        tx.send(Event::AppExited { id: 2, success: false });
         rt.pump();
         assert_eq!(*freezer.log.lock().unwrap(), vec!["freeze", "thaw"]);
     }
@@ -760,21 +675,8 @@ mod tests {
         let applied = hk.applied.clone();
         let mut config = Config::default();
         config.hotkeys.open_settings = vec!["Ctrl+F9".into()]; // conflicts with record
-        let spawner = FakeSpawner {
-            fail: false,
-            spawned: Arc::default(),
-        };
-        let mut rt = Runtime::new(
-            config,
-            None,
-            None,
-            tray,
-            Box::new(hk),
-            spawner,
-            AppLink::default(),
-            events,
-            rx,
-        );
+        let spawner = FakeSpawner { fail: false, spawned: Arc::default() };
+        let mut rt = Runtime::new(config, None, None, tray, Box::new(hk), spawner, AppLink::default(), events, rx);
         rt.apply_config();
         let applied = applied.lock().unwrap();
         assert!(applied.contains(&(ActionId::RecordToggle, "Ctrl+F9".into())));
@@ -788,10 +690,7 @@ mod tests {
         let events = EventTx::new(tx, Arc::new(NoWake));
         let tray = FakeTray::default();
         let log = tray.log.clone();
-        let hk = FakeHotkeys {
-            refuse: true,
-            ..Default::default()
-        };
+        let hk = FakeHotkeys { refuse: true, ..Default::default() };
         let applied = hk.applied.clone();
         let dir = std::env::temp_dir().join(format!("vixeeny-reload-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -804,21 +703,12 @@ mod tests {
             None,
             tray,
             Box::new(hk),
-            FakeSpawner {
-                fail: false,
-                spawned: Arc::default(),
-            },
+            FakeSpawner { fail: false, spawned: Arc::default() },
             AppLink::default(),
             events,
             rx,
         );
-        let notified = || {
-            log.lock()
-                .unwrap()
-                .iter()
-                .filter(|l| l.starts_with("notify"))
-                .count()
-        };
+        let notified = || log.lock().unwrap().iter().filter(|l| l.starts_with("notify")).count();
 
         // A slider moved: the shortcuts stay registered, the taken one is not reported again.
         config.image.jpeg.quality = 42;
@@ -843,25 +733,10 @@ mod tests {
         let events = EventTx::new(tx, Arc::new(NoWake));
         let tray = FakeTray::default();
         let log = tray.log.clone();
-        let hk = FakeHotkeys {
-            refuse: true,
-            ..Default::default()
-        };
-        let spawner = FakeSpawner {
-            fail: false,
-            spawned: Arc::default(),
-        };
-        let mut rt = Runtime::new(
-            Config::default(),
-            None,
-            None,
-            tray,
-            Box::new(hk),
-            spawner,
-            AppLink::default(),
-            events,
-            rx,
-        );
+        let hk = FakeHotkeys { refuse: true, ..Default::default() };
+        let spawner = FakeSpawner { fail: false, spawned: Arc::default() };
+        let mut rt =
+            Runtime::new(Config::default(), None, None, tray, Box::new(hk), spawner, AppLink::default(), events, rx);
         rt.apply_config();
         assert!(log.lock().unwrap().iter().any(|l| l.starts_with("notify")));
     }

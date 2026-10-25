@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! What the drawn pieces of the editor look like: the toolbar, its tips, the style panel, the
-//! size label, a handle of the zone and the text field. Each piece is drawn whole
-//! into its own surface, only when it changes.
+//! What the drawn pieces of the editor look like: the toolbar, its tips, the style panel, the size label, a handle of
+//! the zone and the text field. Each piece is drawn whole into its own surface, only when it changes.
 
 use vixeeny_editor::{Color, Tool};
 use windows::Win32::Graphics::Direct2D::Common::D2D_RECT_F;
@@ -13,12 +12,7 @@ use crate::layout::{self, BUTTON, Button, Kit, PanelForm, PanelHit, Picks, SHADO
 use crate::theme::{Rgba, Theme, hsv_to_rgb};
 
 pub fn rgba(c: Color) -> Rgba {
-    Rgba([
-        f32::from(c.r) / 255.0,
-        f32::from(c.g) / 255.0,
-        f32::from(c.b) / 255.0,
-        f32::from(c.a) / 255.0,
-    ])
+    Rgba([f32::from(c.r) / 255.0, f32::from(c.g) / 255.0, f32::from(c.b) / 255.0, f32::from(c.a) / 255.0])
 }
 
 /// What the toolbar shows; it is drawn again only when this changes.
@@ -46,10 +40,7 @@ pub struct BarLook {
 /// Size in pixels of the toolbar's surface (the bar and room for its shadow).
 pub fn bar_surface(u: f32, upright: bool) -> (u32, u32) {
     let (w, h) = layout::bar_size(upright);
-    (
-        (w * u + 2.0 * SHADOW * u).ceil() as u32,
-        (h * u + 2.0 * SHADOW * u).ceil() as u32,
-    )
+    ((w * u + 2.0 * SHADOW * u).ceil() as u32, (h * u + 2.0 * SHADOW * u).ceil() as u32)
 }
 
 struct ButtonLook {
@@ -88,16 +79,7 @@ fn icon_button(
     button_back(c, t, u, x, y, b)?;
     if b.active {
         // The mark of the selected item, as Windows 11 has.
-        c.fill_round(
-            rect(
-                x + 8.0 * u,
-                y + BUTTON * u - 3.0 * u,
-                BUTTON * u - 16.0 * u,
-                2.0 * u,
-            ),
-            1.0 * u,
-            t.accent,
-        )?;
+        c.fill_round(rect(x + 8.0 * u, y + BUTTON * u - 3.0 * u, BUTTON * u - 16.0 * u, 2.0 * u), 1.0 * u, t.accent)?;
     }
     let tint = if !b.enabled {
         t.text_off
@@ -112,14 +94,7 @@ fn icon_button(
 }
 
 /// The box of a floating piece (toolbar, panel): shadow, translucent fill, hairline border.
-fn floating_box(
-    c: &Canvas<'_>,
-    t: &Theme,
-    r: D2D_RECT_F,
-    radius: f32,
-    alpha: f32,
-    shadow: Rgba,
-) -> Result<()> {
+fn floating_box(c: &Canvas<'_>, t: &Theme, r: D2D_RECT_F, radius: f32, alpha: f32, shadow: Rgba) -> Result<()> {
     c.shadow(r, radius, 18.0, 6.0, shadow)?;
     c.fill_round(r, radius, t.flyout.with_alpha(alpha))?;
     c.stroke_round(r, radius, 1.0, t.stroke_strong)
@@ -192,13 +167,7 @@ pub fn tip_size(gfx: &Gfx, u: f32, text: &str) -> Result<((u32, u32), (f32, f32)
     let (w, _) = gfx.measure(text, 12.0 * u, Font::Ui)?;
     let bubble = ((w + 16.0 * u).ceil(), (26.0 * u).ceil());
     let m = TIP_MARGIN * u;
-    Ok((
-        (
-            (bubble.0 + 2.0 * m).ceil() as u32,
-            (bubble.1 + 2.0 * m).ceil() as u32,
-        ),
-        bubble,
-    ))
+    Ok((((bubble.0 + 2.0 * m).ceil() as u32, (bubble.1 + 2.0 * m).ceil() as u32), bubble))
 }
 
 pub fn tip(c: &Canvas<'_>, t: &Theme, u: f32, text: &str, bubble: (f32, f32)) -> Result<()> {
@@ -215,8 +184,7 @@ pub fn tip(c: &Canvas<'_>, t: &Theme, u: f32, text: &str, bubble: (f32, f32)) ->
 pub struct PanelLook {
     pub color: Color,
     pub recent: Vec<Color>,
-    /// The thickness setting (the slider, up to `max_width`) and the size of what the tool
-    /// draws (shown).
+    /// The thickness setting (the slider, up to `max_width`) and the size of what the tool draws (shown).
     pub width: f32,
     pub max_width: f32,
     pub size: f32,
@@ -229,21 +197,10 @@ pub struct PanelLook {
 }
 
 pub fn panel_surface(u: f32) -> (u32, u32) {
-    (
-        (layout::PANEL_W * u + 2.0 * SHADOW * u).ceil() as u32,
-        (layout::PANEL_MAX_H * u + 2.0 * SHADOW * u).ceil() as u32,
-    )
+    ((layout::PANEL_W * u + 2.0 * SHADOW * u).ceil() as u32, (layout::PANEL_MAX_H * u + 2.0 * SHADOW * u).ceil() as u32)
 }
 
-fn swatch(
-    c: &Canvas<'_>,
-    t: &Theme,
-    u: f32,
-    x: f32,
-    y: f32,
-    fill: Option<Rgba>,
-    chosen: bool,
-) -> Result<()> {
+fn swatch(c: &Canvas<'_>, t: &Theme, u: f32, x: f32, y: f32, fill: Option<Rgba>, chosen: bool) -> Result<()> {
     let r = layout::SWATCH * u / 2.0;
     let (cx, cy) = (x + r, y + r);
     if let Some(fill) = fill {
@@ -262,12 +219,7 @@ pub fn panel(c: &Canvas<'_>, t: &Theme, u: f32, look: &PanelLook) -> Result<()> 
     let back = rect(ox, oy, layout::PANEL_W * u, form.height() * u);
     floating_box(c, t, back, 12.0 * u, 0.97, Rgba::hex(0x000000, 0x50))?;
     let at = |x: f32, y: f32| (ox + x * u, oy + y * u);
-    let divider = |y: f32| {
-        c.fill_rect(
-            rect(ox + 10.0 * u, oy + y * u, (layout::PANEL_W - 20.0) * u, 1.0),
-            t.divider,
-        )
-    };
+    let divider = |y: f32| c.fill_rect(rect(ox + 10.0 * u, oy + y * u, (layout::PANEL_W - 20.0) * u, 1.0), t.divider);
     for (i, colour) in Color::PALETTE.iter().enumerate() {
         let (x, y) = at(layout::swatch_x(i), 10.0);
         swatch(c, t, u, x, y, Some(rgba(*colour)), *colour == look.color)?;
@@ -303,23 +255,13 @@ pub fn panel(c: &Canvas<'_>, t: &Theme, u: f32, look: &PanelLook) -> Result<()> 
     let track = rect(x, y - 2.0 * u, length * u, 4.0 * u);
     c.fill_round(track, 2.0 * u, t.divider)?;
     c.fill_round(rect(x, y - 2.0 * u, knob - x, 4.0 * u), 2.0 * u, t.accent)?;
-    let grow = if look.hover == Some(PanelHit::Size) {
-        1.0
-    } else {
-        0.0
-    };
+    let grow = if look.hover == Some(PanelHit::Size) { 1.0 } else { 0.0 };
     c.fill_circle(knob, y, (7.0 + grow) * u, t.flyout)?;
     c.fill_circle(knob, y, (4.0 + grow) * u, t.accent)?;
     c.stroke_circle(knob, y, (7.0 + grow) * u, 1.0, t.stroke_strong)?;
     let (lx, lw) = layout::SIZE_LABEL;
     let (x, y) = at(lx, ty - 15.0);
-    c.text(
-        &format!("{} px", look.size.round()),
-        rect(x, y, lw * u, 30.0 * u),
-        13.0 * u,
-        t.text,
-        Align::Centre,
-    )?;
+    c.text(&format!("{} px", look.size.round()), rect(x, y, lw * u, 30.0 * u), 13.0 * u, t.text, Align::Centre)?;
 
     // The fill of the shapes.
     if form.fill {
@@ -367,20 +309,12 @@ pub fn panel(c: &Canvas<'_>, t: &Theme, u: f32, look: &PanelLook) -> Result<()> 
         let (hx, hy, hw, hh) = form.hue();
         let (x, y) = at(hx, hy);
         let bar = rect(x, y, hw * u, hh * u);
-        let stops: Vec<(f32, Rgba)> = [
-            0xff0000, 0xffff00, 0x00ff00, 0x00ffff, 0x0000ff, 0xff00ff, 0xff0000,
-        ]
-        .iter()
-        .enumerate()
-        .map(|(i, c)| (i as f32 / 6.0, Rgba::hex(*c, 255)))
-        .collect();
-        c.gradient(
-            bar,
-            4.0 * u,
-            (bar.left, bar.top),
-            (bar.left, bar.bottom),
-            &stops,
-        )?;
+        let stops: Vec<(f32, Rgba)> = [0xff0000, 0xffff00, 0x00ff00, 0x00ffff, 0x0000ff, 0xff00ff, 0xff0000]
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (i as f32 / 6.0, Rgba::hex(*c, 255)))
+            .collect();
+        c.gradient(bar, 4.0 * u, (bar.left, bar.top), (bar.left, bar.bottom), &stops)?;
         let my = y + h / 360.0 * hh * u - 2.0 * u;
         let marker = rect(x, my, hw * u, 4.0 * u);
         c.fill_rect(marker, white)?;
@@ -394,8 +328,8 @@ pub fn brush_side(diameter: u32) -> u32 {
     diameter + 6
 }
 
-/// The size of what the tool draws, around the pointer: a ring of that diameter, white over a
-/// dark edge so it shows on any picture.
+/// The size of what the tool draws, around the pointer: a ring of that diameter, white over a dark edge so it shows on
+/// any picture.
 pub fn brush(c: &Canvas<'_>, diameter: u32) -> Result<()> {
     let side = brush_side(diameter) as f32;
     let (centre, r) = (side / 2.0, (diameter as f32 / 2.0).max(1.0));
@@ -452,10 +386,7 @@ pub fn field(c: &Canvas<'_>, f: &FieldLook) -> Result<()> {
     c.text_layout(&layout, 0.0, 0.0, color)?;
     if f.caret_on {
         let x = Gfx::caret_x(&layout, u32::try_from(f.caret).unwrap_or(0));
-        c.fill_rect(
-            rect(x.max(0.0), 0.0, (f.size / 16.0).max(1.5), f.size * 1.25),
-            color,
-        )?;
+        c.fill_rect(rect(x.max(0.0), 0.0, (f.size / 16.0).max(1.5), f.size * 1.25), color)?;
     }
     Ok(())
 }

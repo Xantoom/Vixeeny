@@ -47,8 +47,8 @@ pub(crate) fn encode(image: &Bgra<'_>, settings: &JxlSettings) -> Result<Vec<u8>
     write(&samples, &srgb, settings)
 }
 
-/// 16 bits per sample, BT.2020 / PQ, with the brightest light it holds as its intensity target:
-/// the peak viewers tone map from, rather than the 10 000 nits PQ can hold.
+/// 16 bits per sample, BT.2020 / PQ, with the brightest light it holds as its intensity target: the peak viewers tone
+/// map from, rather than the 10 000 nits PQ can hold.
 pub(crate) fn encode_hdr(image: &Hdr<'_>, settings: &JxlSettings) -> Result<Vec<u8>, ImageError> {
     // Native endianness, as the pixel format of `write` says.
     let bytes = image.to_pq_bytes(u16::to_ne_bytes);
@@ -82,14 +82,9 @@ struct Samples<'a> {
     intensity_target: f32,
 }
 
-fn write(
-    samples: &Samples<'_>,
-    colour: &ffi::JxlColorEncoding,
-    settings: &JxlSettings,
-) -> Result<Vec<u8>, ImageError> {
-    // SAFETY: libjxl objects are created and destroyed through the RAII wrappers; the samples
-    // and the structs passed by pointer outlive the calls that read them (libjxl copies the
-    // pixel data in `JxlEncoderAddImageFrame`).
+fn write(samples: &Samples<'_>, colour: &ffi::JxlColorEncoding, settings: &JxlSettings) -> Result<Vec<u8>, ImageError> {
+    // SAFETY: libjxl objects are created and destroyed through the RAII wrappers; the samples and the structs passed by
+    // pointer outlive the calls that read them (libjxl copies the pixel data in `JxlEncoderAddImageFrame`).
     unsafe {
         // The runner must outlive the encoder: declared first, dropped last.
         let runner = Runner(ffi::JxlThreadParallelRunnerCreate(
@@ -116,15 +111,9 @@ fn write(
         if samples.intensity_target > 0.0 {
             info.intensity_target = samples.intensity_target;
         }
-        check(
-            ffi::JxlEncoderSetBasicInfo(enc.0, &raw const info),
-            "basic info",
-        )?;
+        check(ffi::JxlEncoderSetBasicInfo(enc.0, &raw const info), "basic info")?;
 
-        check(
-            ffi::JxlEncoderSetColorEncoding(enc.0, colour),
-            "colour encoding",
-        )?;
+        check(ffi::JxlEncoderSetColorEncoding(enc.0, colour), "colour encoding")?;
 
         let frame = ffi::JxlEncoderFrameSettingsCreate(enc.0, ptr::null());
         check(
@@ -138,10 +127,7 @@ fn write(
         if settings.lossless {
             check(ffi::JxlEncoderSetFrameLossless(frame, 1), "lossless")?;
         } else {
-            check(
-                ffi::JxlEncoderSetFrameDistance(frame, settings.distance.clamp(0.0, 25.0)),
-                "distance",
-            )?;
+            check(ffi::JxlEncoderSetFrameDistance(frame, settings.distance.clamp(0.0, 25.0)), "distance")?;
         }
         let format = ffi::JxlPixelFormat {
             num_channels: 3,

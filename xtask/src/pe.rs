@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The DLLs a Windows program names (PE32+ import tables): those loaded with the program, and
-//! those loaded on first use (`/DELAYLOAD`).
+//! The DLLs a Windows program names (PE32+ import tables): those loaded with the program, and those loaded on first use
+//! (`/DELAYLOAD`).
 
 use anyhow::{Context, Result, bail};
 
@@ -57,15 +57,12 @@ fn offset(sections: &[Section], rva: u32) -> Result<usize> {
 fn name_at(bytes: &[u8], sections: &[Section], rva: u32) -> Result<String> {
     let start = offset(sections, rva)?;
     let tail = bytes.get(start..).context("truncated PE file")?;
-    let end = tail
-        .iter()
-        .position(|b| *b == 0)
-        .context("unterminated name")?;
+    let end = tail.iter().position(|b| *b == 0).context("unterminated name")?;
     Ok(String::from_utf8_lossy(&tail[..end]).into_owned())
 }
 
-/// The names in the descriptor table of data directory `index` (`stride` bytes per entry, the
-/// name's address `name` bytes in); an all-zero entry ends it.
+/// The names in the descriptor table of data directory `index` (`stride` bytes per entry, the name's address `name`
+/// bytes in); an all-zero entry ends it.
 fn table(
     bytes: &[u8],
     optional: usize,
@@ -83,9 +80,7 @@ fn table(
     let mut at = offset(sections, rva)?;
     let mut names = Vec::new();
     loop {
-        let entry = bytes
-            .get(at..at + stride)
-            .context("truncated import table")?;
+        let entry = bytes.get(at..at + stride).context("truncated import table")?;
         if entry.iter().all(|b| *b == 0) {
             return Ok(names);
         }
@@ -133,14 +128,13 @@ mod tests {
         // The tables at 0x1000 (imports) and 0x1100 (delay-load), the names from 0x1800 on.
         let raw = |rva: usize| rva - 0x1000 + 0x200;
         let mut text = 0x1800;
-        let mut write =
-            |b: &mut Vec<u8>, table: usize, stride: usize, name: usize, dlls: &[&str]| {
-                for (i, dll) in dlls.iter().enumerate() {
-                    b[raw(text)..raw(text) + dll.len()].copy_from_slice(dll.as_bytes());
-                    put32(b, raw(table + i * stride + name), text as u32);
-                    text += dll.len() + 1;
-                }
-            };
+        let mut write = |b: &mut Vec<u8>, table: usize, stride: usize, name: usize, dlls: &[&str]| {
+            for (i, dll) in dlls.iter().enumerate() {
+                b[raw(text)..raw(text) + dll.len()].copy_from_slice(dll.as_bytes());
+                put32(b, raw(table + i * stride + name), text as u32);
+                text += dll.len() + 1;
+            }
+        };
         write(&mut b, 0x1000, 20, 12, at_start);
         write(&mut b, 0x1100, 32, 4, delayed);
         let directories = optional + 112;
@@ -151,10 +145,7 @@ mod tests {
 
     #[test]
     fn both_import_tables_are_read() -> Result<()> {
-        let got = imports(&program(
-            &["KERNEL32.dll", "d3d11.dll"],
-            &["avcodec-63.dll"],
-        ))?;
+        let got = imports(&program(&["KERNEL32.dll", "d3d11.dll"], &["avcodec-63.dll"]))?;
         assert_eq!(got.at_start, ["KERNEL32.dll", "d3d11.dll"]);
         assert_eq!(got.delayed, ["avcodec-63.dll"]);
         Ok(())

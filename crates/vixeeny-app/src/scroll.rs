@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Scrolling capture: the user picked a zone and scrolls the content; this module follows the
-//! zone frame by frame (each time the screen changes), assembles the frames and saves the long
-//! image. The capture starts with the zone as it is: there is nothing to click before scrolling.
+//! Scrolling capture: the user picked a zone and scrolls the content; this module follows the zone frame by frame (each
+//! time the screen changes), assembles the frames and saves the long image. The capture starts with the zone as it is:
+//! there is nothing to click before scrolling.
 //!
-//! The result opens in the editor (scrolling view, whole image selected) unless
-//! `[scrolling] annotate` is off, in which case it is saved right away.
+//! The result opens in the editor (scrolling view, whole image selected) unless `[scrolling] annotate` is off, in which
+//! case it is saved right away.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -47,8 +47,8 @@ fn tight(frame: &CpuFrame) -> Option<Frame> {
     Frame::new(frame.width, frame.height, data)
 }
 
-/// An HDR screen: its levels, and a quick SDR rendering of its half floats for matching and
-/// for the preview (the picture itself is tone-mapped once, at the end).
+/// An HDR screen: its levels, and a quick SDR rendering of its half floats for matching and for the preview (the
+/// picture itself is tone-mapped once, at the end).
 struct HdrScreen {
     info: HdrInfo,
     /// Every half float (by its bits) as an sRGB byte.
@@ -120,14 +120,7 @@ fn hdr_picture(width: u32, height: u32, layer: &[u8], info: HdrInfo) -> HdrCaptu
     for px in rgba.as_chunks_mut::<4>().0 {
         px[3] = 1.0;
     }
-    HdrCapture {
-        frame: HdrFrame {
-            width,
-            height,
-            rgba,
-        },
-        info,
-    }
+    HdrCapture { frame: HdrFrame { width, height, rgba }, info }
 }
 
 /// BGRA → RGBA for the preview.
@@ -139,17 +132,13 @@ fn to_rgba(frame: &Frame) -> Vec<u8> {
     out
 }
 
-/// Where to put the control window: beside the zone when there is room. It is left out of the
-/// capture anyway, but should not hide what the user scrolls.
+/// Where to put the control window: beside the zone when there is room. It is left out of the capture anyway, but
+/// should not hide what the user scrolls.
 fn panel_rect(monitor: &PhysicalRect, zone: &PhysicalRect, scale: f32) -> PhysicalRect {
     let width = (PANEL_WIDTH * scale) as u32;
-    let height = ((PANEL_HEIGHT * scale) as u32)
-        .max(zone.height.min(monitor.height))
-        .min(monitor.height);
+    let height = ((PANEL_HEIGHT * scale) as u32).max(zone.height.min(monitor.height)).min(monitor.height);
     let gap = (12.0 * scale) as i64;
-    let y = i64::from(zone.y)
-        .min(monitor.bottom() - i64::from(height))
-        .max(i64::from(monitor.y)) as i32;
+    let y = i64::from(zone.y).min(monitor.bottom() - i64::from(height)).max(i64::from(monitor.y)) as i32;
     let right = zone.right() + gap;
     let left = i64::from(zone.x) - gap - i64::from(width);
     let x = if right + i64::from(width) <= monitor.right() {
@@ -181,14 +170,9 @@ impl Shared {
         self.told.1.notify_all();
     }
 
-    /// Sleeps until `flag`, the finish or the cancel is set (or `timeout` passed); clears
-    /// `arrived`.
+    /// Sleeps until `flag`, the finish or the cancel is set (or `timeout` passed); clears `arrived`.
     fn wait_for(&self, flag: &AtomicBool, timeout: Option<Duration>) {
-        let idle = |(): &mut ()| {
-            ![flag, &self.finish, &self.cancel]
-                .iter()
-                .any(|f| f.load(Ordering::Relaxed))
-        };
+        let idle = |(): &mut ()| ![flag, &self.finish, &self.cancel].iter().any(|f| f.load(Ordering::Relaxed));
         if let Ok(held) = self.told.0.lock() {
             match timeout {
                 Some(t) => drop(self.told.1.wait_timeout_while(held, t, idle)),
@@ -199,8 +183,8 @@ impl Shared {
     }
 }
 
-/// Follows the zone until told to finish. Returns the assembled image, and on an HDR screen
-/// its levels (the image's layer then holds the rows as captured, RGBA half floats).
+/// Follows the zone until told to finish. Returns the assembled image, and on an HDR screen its levels (the image's
+/// layer then holds the rows as captured, RGBA half floats).
 fn capture_loop(
     shared: &Arc<Shared>,
     monitor: MonitorInfo,
@@ -216,17 +200,9 @@ fn capture_loop(
     let hdr = vixeeny_platform::hdr_info(monitor.id).map(HdrScreen::new);
     let target = StreamTarget::Region { monitor, rect };
     let told = shared.clone();
-    let stream = VideoStream::start_notify(
-        &target,
-        false,
-        hdr.is_some(),
-        Box::new(move || told.tell(&told.arrived)),
-    )?;
+    let stream = VideoStream::start_notify(&target, false, hdr.is_some(), Box::new(move || told.tell(&told.arrived)))?;
     let buffers = stream.buffers();
-    let mut stitcher = Stitcher::new(vixeeny_stitch::Config {
-        max_height,
-        ..Default::default()
-    });
+    let mut stitcher = Stitcher::new(vixeeny_stitch::Config { max_height, ..Default::default() });
     let mut warned_full = false;
     // The preview is shown at most this often; the last change always shows.
     let mut shown: Option<Instant> = None;
@@ -247,8 +223,7 @@ fn capture_loop(
             match stitcher.push_layered(&frame, layer.as_deref())? {
                 Push::Full if !warned_full => {
                     warned_full = true;
-                    let msg = tr(Key::ScrollTruncated, lang)
-                        .replace("{height}", &stitcher.height().to_string());
+                    let msg = tr(Key::ScrollTruncated, lang).replace("{height}", &stitcher.height().to_string());
                     preview.show_status(msg);
                 }
                 // A frame that cannot be placed is found again as soon as it can.
@@ -260,15 +235,12 @@ fn capture_loop(
             return Ok(stitcher.finish().map(|s| (s, hdr.map(|h| h.info))));
         }
         unshown |= changed && !warned_full;
-        let due = shown.map_or(Duration::ZERO, |t| {
-            PREVIEW_EVERY.saturating_sub(t.elapsed())
-        });
+        let due = shown.map_or(Duration::ZERO, |t| PREVIEW_EVERY.saturating_sub(t.elapsed()));
         if unshown && due.is_zero() {
             unshown = false;
             shown = Some(Instant::now());
             if let Some(p) = stitcher.preview(preview_box.0, preview_box.1) {
-                let status = tr(Key::ScrollCapturing, lang)
-                    .replace("{height}", &stitcher.height().to_string());
+                let status = tr(Key::ScrollCapturing, lang).replace("{height}", &stitcher.height().to_string());
                 preview.show_preview(p.width, p.height, to_rgba(&p), status);
             }
         }
@@ -277,16 +249,10 @@ fn capture_loop(
     }
 }
 
-pub fn run(
-    config: &Config,
-    snapshot: Snapshot,
-    zone: PhysicalRect,
-    scale: f32,
-) -> anyhow::Result<()> {
+pub fn run(config: &Config, snapshot: Snapshot, zone: PhysicalRect, scale: f32) -> anyhow::Result<()> {
     let lang = crate::lang(&config.general.language);
-    let monitor = vixeeny_platform::monitor_for_rect(&snapshot.monitors, &zone)
-        .context("no monitor for the zone")?
-        .clone();
+    let monitor =
+        vixeeny_platform::monitor_for_rect(&snapshot.monitors, &zone).context("no monitor for the zone")?.clone();
     // The zone, relative to its monitor and clipped to it.
     let x0 = i64::from(zone.x).max(i64::from(monitor.rect.x));
     let y0 = i64::from(zone.y).max(i64::from(monitor.rect.y));
@@ -320,17 +286,7 @@ pub fn run(
         let max_height = config.scrolling.max_height.max(100);
         std::thread::Builder::new()
             .name("scroll-capture".into())
-            .spawn(move || {
-                capture_loop(
-                    &shared,
-                    monitor,
-                    relative,
-                    max_height,
-                    lang,
-                    &handle,
-                    preview_box,
-                )
-            })?
+            .spawn(move || capture_loop(&shared, monitor, relative, max_height, lang, &handle, preview_box))?
     };
 
     let events = shared.clone();
@@ -342,9 +298,7 @@ pub fn run(
     if !shared.finish.load(Ordering::Relaxed) {
         shared.tell(&shared.cancel);
     }
-    let result = worker
-        .join()
-        .map_err(|_| anyhow::anyhow!("the capture thread panicked"))?;
+    let result = worker.join().map_err(|_| anyhow::anyhow!("the capture thread panicked"))?;
     ran.map_err(|e| anyhow::anyhow!("window: {e}"))?;
     let Some((stitched, hdr_info)) = result? else {
         tracing::debug!("scrolling capture cancelled");
@@ -355,8 +309,8 @@ pub fn run(
     }
     let mut frame = stitched.frame;
     let mut hdr = None;
-    // On an HDR screen, the rows as captured: tone-mapped as every other capture is, and kept
-    // as HDR when the picture holds it.
+    // On an HDR screen, the rows as captured: tone-mapped as every other capture is, and kept as HDR when the picture
+    // holds it.
     if let (Some(layer), Some(info)) = (stitched.layer, hdr_info) {
         let (w, h) = (frame.width, frame.height);
         frame = tonemapped(&layer, w, h, &info).context("unexpected stitched image")?;
@@ -364,33 +318,14 @@ pub fn run(
         hdr = keep.then(|| hdr_picture(w, h, &layer, info));
     }
     if config.scrolling.annotate {
-        match annotate(
-            config,
-            snapshot.clone(),
-            &monitor,
-            scale,
-            &frame,
-            hdr.as_ref(),
-        ) {
+        match annotate(config, snapshot.clone(), &monitor, scale, &frame, hdr.as_ref()) {
             Ok(()) => return Ok(()),
             // Saving what was captured beats losing it.
             Err(e) => tracing::error!("editor: {e:#}, saving directly"),
         }
     }
-    let bitmap = Bgra::new(
-        frame.width,
-        frame.height,
-        frame.width as usize * 4,
-        &frame.data,
-    );
-    let path = crate::region::save_bgra(
-        config,
-        &snapshot,
-        ActionId::CaptureScrolling,
-        &bitmap,
-        hdr.as_ref(),
-        None,
-    )?;
+    let bitmap = Bgra::new(frame.width, frame.height, frame.width as usize * 4, &frame.data);
+    let path = crate::region::save_bgra(config, &snapshot, ActionId::CaptureScrolling, &bitmap, hdr.as_ref(), None)?;
     tracing::info!("scrolling capture saved ({}x{})", frame.width, frame.height);
     tracing::debug!("saved {}", path.display());
     Ok(())
@@ -406,13 +341,8 @@ fn annotate(
     hdr: Option<&HdrCapture>,
 ) -> anyhow::Result<()> {
     let hdr = hdr.cloned();
-    let base = RgbaImage::from_bgra(
-        frame.width,
-        frame.height,
-        frame.width as usize * 4,
-        &frame.data,
-    )
-    .context("unexpected stitched image")?;
+    let base = RgbaImage::from_bgra(frame.width, frame.height, frame.width as usize * 4, &frame.data)
+        .context("unexpected stitched image")?;
     let mut session = Session::new(base, Vec::new());
     session.select_all();
     session.dim = 0.0;
@@ -444,27 +374,20 @@ fn annotate(
     .map_err(|e| anyhow::anyhow!("cannot create the editor window: {e}"))?;
     overlay.set_tips(&tips);
     overlay.set_scrolling(true);
-    overlay
-        .run((monitor.rect.x, monitor.rect.y))
-        .map_err(|e| anyhow::anyhow!("editor window: {e}"))
+    overlay.run((monitor.rect.x, monitor.rect.y)).map_err(|e| anyhow::anyhow!("editor window: {e}"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// An HDR frame keeps its light as captured, beside a quick SDR rendering of the same size
-    /// whose white is the screen's SDR white.
+    /// An HDR frame keeps its light as captured, beside a quick SDR rendering of the same size whose white is the
+    /// screen's SDR white.
     #[test]
     fn hdr_rows_round_trip() {
-        let info = HdrInfo {
-            sdr_white_nits: 240.0,
-            peak_nits: 1000.0,
-        };
+        let info = HdrInfo { sdr_white_nits: 240.0, peak_nits: 1000.0 };
         let white = 240.0 / 80.0;
-        let rgba: Vec<f32> = (0..8 * 4)
-            .flat_map(|i| [i as f32 * 0.25, white, 6.5, 1.0])
-            .collect();
+        let rgba: Vec<f32> = (0..8 * 4).flat_map(|i| [i as f32 * 0.25, white, 6.5, 1.0]).collect();
         // Rows of 8 pixels, 16 bytes of padding after each.
         let stride = 8 * 8 + 16;
         let mut data = vec![0u8; stride * 4];

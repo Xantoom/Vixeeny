@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! A short visible run of the overlay in a small window: draws a zone, captures the screen,
-//! closes itself after a few seconds. `cargo run --example smoke -- <out.png>`.
+//! A short visible run of the overlay in a small window: draws a zone, captures the screen, closes itself after a few
+//! seconds. `cargo run --example smoke -- <out.png>`.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use vixeeny_capture::{CaptureOptions, CaptureTarget, Capturer, WgcBackend};
@@ -17,12 +17,8 @@ fn at(x: i32, y: i32) -> isize {
 }
 
 fn main() {
-    let out = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "smoke.png".into());
-    tracing_subscriber::fmt()
-        .with_writer(std::io::stderr)
-        .init();
+    let out = std::env::args().nth(1).unwrap_or_else(|| "smoke.png".into());
+    tracing_subscriber::fmt().with_writer(std::io::stderr).init();
     vixeeny_platform::ensure_dpi_aware();
     let (x0, y0, w, h) = (200, 200, 900u32, 560u32);
     let data = (0..w * h)
@@ -44,11 +40,7 @@ fn main() {
     };
     let mut session = Session::new(image, Vec::new());
     session.dim = 0.5;
-    let screen = Screen {
-        position: (x0, y0),
-        size: (w, h),
-        area: Rect::new(0.0, 0.0, w as f32, h as f32),
-    };
+    let screen = Screen { position: (x0, y0), size: (w, h), area: Rect::new(0.0, 0.0, w as f32, h as f32) };
     let t = std::time::Instant::now();
     let mut overlay = Overlay::on_screens(session, 1.0, &[screen], Look::default(), |c, _| {
         eprintln!("command {c:?}");
@@ -71,23 +63,13 @@ fn main() {
         }
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(1200));
-            let front = vixeeny_platform::foreground_window()
-                .ok()
-                .flatten()
-                .map(|w| w.id.0);
+            let front = vixeeny_platform::foreground_window().ok().flatten().map(|w| w.id.0);
             eprintln!("keyboard on the overlay: {}", front == Some(hwnd));
             let monitors = vixeeny_platform::monitors().expect("monitors");
             let mut capturer = Capturer::new(WgcBackend::new().expect("wgc"), monitors.clone());
-            let bounds =
-                vixeeny_platform::virtual_bounds(monitors.iter().map(|m| &m.rect)).unwrap();
+            let bounds = vixeeny_platform::virtual_bounds(monitors.iter().map(|m| &m.rect)).unwrap();
             let frame = capturer
-                .grab(
-                    &CaptureTarget::AllMonitors,
-                    CaptureOptions {
-                        show_cursor: false,
-                        tonemap: None,
-                    },
-                )
+                .grab(&CaptureTarget::AllMonitors, CaptureOptions { show_cursor: false, tonemap: None })
                 .expect("grab");
             // The window's part, as BGRA → RGBA.
             let (ox, oy) = ((x0 - bounds.x) as usize, (y0 - bounds.y) as usize);

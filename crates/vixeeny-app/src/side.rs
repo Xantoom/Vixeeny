@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The side overlay, `overlay_toggle`: opens the strip on the edge of the monitor
-//! under the mouse, waits for a pick, and gives it back as an action to run.
+//! The side overlay, `overlay_toggle`: opens the strip on the edge of the monitor under the mouse, waits for a pick,
+//! and gives it back as an action to run.
 
 use std::sync::Mutex;
 
@@ -8,9 +8,7 @@ use anyhow::Context;
 use vixeeny_common::config::Config;
 use vixeeny_common::i18n::{Key, Lang, tr};
 use vixeeny_common::ipc::ActionId;
-use vixeeny_overlay::side::{
-    Choice, Edge, SidePanel, SideState, SideTexts, entries, panel_geometry,
-};
+use vixeeny_overlay::side::{Choice, Edge, SidePanel, SideState, SideTexts, entries, panel_geometry};
 
 /// What the user did in the overlay.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -60,29 +58,20 @@ type Dismiss = Box<dyn Fn() + Send>;
 /// Set while the strip is on screen.
 static OPEN: Mutex<Option<Dismiss>> = Mutex::new(None);
 
-/// The overlay's shortcut pressed again while the strip is on screen: it goes away as a click
-/// elsewhere would, rather than waiting to open once more. False when no strip is open.
+/// The overlay's shortcut pressed again while the strip is on screen: it goes away as a click elsewhere would, rather
+/// than waiting to open once more. False when no strip is open.
 pub fn dismiss_open() -> bool {
-    let open = OPEN
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let open = OPEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     open.as_ref().map(|dismiss| dismiss()).is_some()
 }
 
 /// Shows the overlay until the user picks, dismisses it, or clicks elsewhere.
-pub fn run(
-    config: &Config,
-    recording: bool,
-    replay: bool,
-    pinned: bool,
-) -> anyhow::Result<Outcome> {
+pub fn run(config: &Config, recording: bool, replay: bool, pinned: bool) -> anyhow::Result<Outcome> {
     vixeeny_platform::ensure_dpi_aware();
     let monitors = vixeeny_platform::monitors()?;
     let (x, y) = vixeeny_platform::cursor_position()?;
-    let monitor = vixeeny_platform::monitor_at(&monitors, x, y)
-        .or_else(|| monitors.first())
-        .context("no monitor")?
-        .clone();
+    let monitor =
+        vixeeny_platform::monitor_at(&monitors, x, y).or_else(|| monitors.first()).context("no monitor")?.clone();
 
     let lang = crate::lang(&config.general.language);
     let state = SideState {
@@ -94,35 +83,20 @@ pub fn run(
         pinned,
     };
     let texts = texts(lang);
-    let geometry = panel_geometry(
-        state.edge,
-        monitor.rect,
-        monitor.dpi,
-        &entries(&texts, &state),
-    );
+    let geometry = panel_geometry(state.edge, monitor.rect, monitor.dpi, &entries(&texts, &state));
     let panel = SidePanel::new(&texts, &state, geometry, monitor.dpi)?;
 
-    // A click elsewhere closes it. Losing the focus says so only when Windows let the strip
-    // take it, which it does not always do for a window opened by a shortcut: the clicks are
-    // watched directly. The strip closes on the next turn of its loop, not inside the hook.
+    // A click elsewhere closes it. Losing the focus says so only when Windows let the strip take it, which it does not
+    // always do for a window opened by a shortcut: the clicks are watched directly. The strip closes on the next turn
+    // of its loop, not inside the hook.
     let dismiss = panel.dismisser();
-    *OPEN
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Box::new(panel.dismisser()));
+    *OPEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Box::new(panel.dismisser()));
     let mut outside = None;
     let choice = panel.run_with(|handle| {
-        outside = vixeeny_platform::on_click_outside(
-            vixeeny_platform::WindowId(handle),
-            Box::new(dismiss),
-        );
+        outside = vixeeny_platform::on_click_outside(vixeeny_platform::WindowId(handle), Box::new(dismiss));
     });
-    *OPEN
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    *OPEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     drop(outside);
     let choice = choice?;
-    Ok(Outcome {
-        action: choice.map(action_of),
-        pinned: panel.pinned(),
-    })
+    Ok(Outcome { action: choice.map(action_of), pinned: panel.pinned() })
 }

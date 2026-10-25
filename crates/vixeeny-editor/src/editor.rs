@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Tool interaction: turns pointer events into edits of the document. The UI feeds
-//! pointer positions in image pixels and draws [`Editor::preview`] while a gesture is running.
+//! Tool interaction: turns pointer events into edits of the document. The UI feeds pointer positions in image pixels
+//! and draws [`Editor::preview`] while a gesture is running.
 
 use crate::geometry::{Point, Rect, snap_angle, square_corner};
 use crate::history::{Edit, History};
@@ -69,18 +69,8 @@ pub enum Outcome {
 
 #[derive(Debug, Clone)]
 enum Drag {
-    Draw {
-        start: Point,
-        points: Vec<Point>,
-        current: Point,
-        shift: bool,
-    },
-    Move {
-        id: AnnotationId,
-        start: Point,
-        original: Annotation,
-        delta: (f32, f32),
-    },
+    Draw { start: Point, points: Vec<Point>, current: Point, shift: bool },
+    Move { id: AnnotationId, start: Point, original: Annotation, delta: (f32, f32) },
 }
 
 /// The width of the highlighter's stroke for a thickness setting: a broad marker pen.
@@ -147,21 +137,12 @@ impl Editor {
     fn add(&mut self, annotation: Annotation) -> AnnotationId {
         let id = self.doc.fresh_id();
         let index = self.doc.items.len();
-        self.history.commit(
-            &mut self.doc,
-            Edit::Add {
-                index,
-                item: Item { id, annotation },
-            },
-        );
+        self.history.commit(&mut self.doc, Edit::Add { index, item: Item { id, annotation } });
         id
     }
 
     fn clamp_to_image(&self, p: Point) -> Point {
-        Point::new(
-            p.x.clamp(0.0, self.doc.size.0 as f32),
-            p.y.clamp(0.0, self.doc.size.1 as f32),
-        )
+        Point::new(p.x.clamp(0.0, self.doc.size.0 as f32), p.y.clamp(0.0, self.doc.size.1 as f32))
     }
 
     pub fn pointer_down(&mut self, p: Point, mods: Modifiers, base: Option<&RgbaImage>) -> Outcome {
@@ -169,16 +150,8 @@ impl Editor {
         match self.tool {
             Tool::Select => {
                 self.selection = self.doc.hit_test(p);
-                if let Some((id, original)) = self
-                    .selection
-                    .and_then(|id| self.doc.get(id).map(|a| (id, a.clone())))
-                {
-                    self.drag = Some(Drag::Move {
-                        id,
-                        start: p,
-                        original,
-                        delta: (0.0, 0.0),
-                    });
+                if let Some((id, original)) = self.selection.and_then(|id| self.doc.get(id).map(|a| (id, a.clone()))) {
+                    self.drag = Some(Drag::Move { id, start: p, original, delta: (0.0, 0.0) });
                 }
                 Outcome::Nothing
             }
@@ -186,26 +159,14 @@ impl Editor {
             Tool::Marker => {
                 let number = self.doc.next_marker_number();
                 let (color, radius) = (self.settings.style.color, self.settings.marker_radius);
-                let id = self.add(Annotation::Marker {
-                    center: p,
-                    number,
-                    color,
-                    radius,
-                });
+                let id = self.add(Annotation::Marker { center: p, number, color, radius });
                 self.selection = Some(id);
                 Outcome::Nothing
             }
-            Tool::Eyedropper => base
-                .and_then(|img| self.pick_color(img, p))
-                .map_or(Outcome::Nothing, Outcome::Picked),
+            Tool::Eyedropper => base.and_then(|img| self.pick_color(img, p)).map_or(Outcome::Nothing, Outcome::Picked),
             _ => {
                 let p = self.clamp_to_image(p);
-                self.drag = Some(Drag::Draw {
-                    start: p,
-                    points: vec![p],
-                    current: p,
-                    shift: mods.shift,
-                });
+                self.drag = Some(Drag::Draw { start: p, points: vec![p], current: p, shift: mods.shift });
                 Outcome::Nothing
             }
         }
@@ -214,12 +175,7 @@ impl Editor {
     pub fn pointer_move(&mut self, p: Point, mods: Modifiers) {
         let clamp = self.clamp_to_image(p);
         match &mut self.drag {
-            Some(Drag::Draw {
-                points,
-                current,
-                shift,
-                ..
-            }) => {
+            Some(Drag::Draw { points, current, shift, .. }) => {
                 *current = clamp;
                 *shift = mods.shift;
                 if points.last().is_none_or(|last| last.distance(clamp) >= 1.0) {
@@ -235,16 +191,10 @@ impl Editor {
         self.pointer_move(p, mods);
         match self.drag.take() {
             Some(drag @ Drag::Draw { .. }) => self.finish_draw(drag),
-            Some(Drag::Move {
-                id,
-                original,
-                delta,
-                ..
-            }) if delta != (0.0, 0.0) => {
+            Some(Drag::Move { id, original, delta, .. }) if delta != (0.0, 0.0) => {
                 let new = original.translated(delta.0, delta.1);
                 let old = original;
-                self.history
-                    .commit(&mut self.doc, Edit::Replace { id, old, new });
+                self.history.commit(&mut self.doc, Edit::Replace { id, old, new });
             }
             Some(Drag::Move { .. }) => {}
             None => {}
@@ -254,15 +204,8 @@ impl Editor {
     /// The annotation being drawn or moved, to draw over the image while the button is down.
     pub fn preview(&self) -> Option<Annotation> {
         match self.drag.as_ref()? {
-            Drag::Draw {
-                start,
-                points,
-                current,
-                shift,
-            } => self.build(*start, points, *current, *shift),
-            Drag::Move {
-                original, delta, ..
-            } => Some(original.translated(delta.0, delta.1)),
+            Drag::Draw { start, points, current, shift } => self.build(*start, points, *current, *shift),
+            Drag::Move { original, delta, .. } => Some(original.translated(delta.0, delta.1)),
         }
     }
 
@@ -275,75 +218,36 @@ impl Editor {
     }
 
     fn drag_rect(&self, start: Point, current: Point, shift: bool) -> Rect {
-        let end = if shift {
-            square_corner(start, current)
-        } else {
-            current
-        };
+        let end = if shift { square_corner(start, current) } else { current };
         Rect::from_corners(start, self.clamp_to_image(end))
     }
 
-    fn build(
-        &self,
-        start: Point,
-        points: &[Point],
-        current: Point,
-        shift: bool,
-    ) -> Option<Annotation> {
+    fn build(&self, start: Point, points: &[Point], current: Point, shift: bool) -> Option<Annotation> {
         let s = &self.settings;
         let big_enough = start.distance(current) >= MIN_DRAG;
         match self.tool {
-            Tool::Pen => Some(Annotation::Pen {
-                points: points.to_vec(),
-                style: s.style,
-            }),
+            Tool::Pen => Some(Annotation::Pen { points: points.to_vec(), style: s.style }),
             Tool::Highlighter => Some(Annotation::Highlight {
                 points: points.to_vec(),
                 color: s.style.color.with_alpha(s.highlight_alpha),
                 width: highlight_width(s.style.width),
             }),
             Tool::Line | Tool::Arrow if big_enough => {
-                let to = if shift {
-                    snap_angle(start, current, 15.0)
-                } else {
-                    current
-                };
+                let to = if shift { snap_angle(start, current, 15.0) } else { current };
                 let to = self.clamp_to_image(to);
                 Some(if self.tool == Tool::Line {
-                    Annotation::Line {
-                        from: start,
-                        to,
-                        style: s.style,
-                    }
+                    Annotation::Line { from: start, to, style: s.style }
                 } else {
-                    Annotation::Arrow {
-                        from: start,
-                        to,
-                        style: s.style,
-                    }
+                    Annotation::Arrow { from: start, to, style: s.style }
                 })
             }
             Tool::Rect | Tool::Ellipse | Tool::Blur | Tool::Pixelate if big_enough => {
                 let rect = self.drag_rect(start, current, shift);
                 Some(match self.tool {
-                    Tool::Rect => Annotation::Rect {
-                        rect,
-                        style: s.style,
-                        filled: s.filled,
-                    },
-                    Tool::Ellipse => Annotation::Ellipse {
-                        rect,
-                        style: s.style,
-                        filled: s.filled,
-                    },
-                    Tool::Blur => Annotation::Blur {
-                        rect,
-                        radius: s.blur_radius,
-                    },
-                    _ => Annotation::Pixelate {
-                        rect,
-                        block: s.pixelate_block,
-                    },
+                    Tool::Rect => Annotation::Rect { rect, style: s.style, filled: s.filled },
+                    Tool::Ellipse => Annotation::Ellipse { rect, style: s.style, filled: s.filled },
+                    Tool::Blur => Annotation::Blur { rect, radius: s.blur_radius },
+                    _ => Annotation::Pixelate { rect, block: s.pixelate_block },
                 })
             }
             _ => None,
@@ -352,13 +256,7 @@ impl Editor {
 
     /// Commits the gesture (called by `pointer_up`).
     fn finish_draw(&mut self, drag: Drag) {
-        let Drag::Draw {
-            start,
-            points,
-            current,
-            shift,
-        } = drag
-        else {
+        let Drag::Draw { start, points, current, shift } = drag else {
             return;
         };
         if let Some(a) = self.build(start, &points, current, shift) {
@@ -407,8 +305,7 @@ impl Editor {
         };
         if let Some(index) = self.doc.items.iter().position(|i| i.id == id) {
             let item = self.doc.items[index].clone();
-            self.history
-                .commit(&mut self.doc, Edit::Remove { index, item });
+            self.history.commit(&mut self.doc, Edit::Remove { index, item });
         }
     }
 
@@ -417,8 +314,7 @@ impl Editor {
         let Some(id) = self.selection else { return };
         if let Some(old) = self.doc.get(id).cloned() {
             let new = old.translated(dx, dy);
-            self.history
-                .commit(&mut self.doc, Edit::Replace { id, old, new });
+            self.history.commit(&mut self.doc, Edit::Replace { id, old, new });
         }
     }
 
@@ -482,9 +378,7 @@ mod tests {
             (Tool::Arrow, |a| matches!(a, Annotation::Arrow { .. })),
             (Tool::Rect, |a| matches!(a, Annotation::Rect { .. })),
             (Tool::Ellipse, |a| matches!(a, Annotation::Ellipse { .. })),
-            (Tool::Highlighter, |a| {
-                matches!(a, Annotation::Highlight { .. })
-            }),
+            (Tool::Highlighter, |a| matches!(a, Annotation::Highlight { .. })),
             (Tool::Blur, |a| matches!(a, Annotation::Blur { .. })),
             (Tool::Pixelate, |a| matches!(a, Annotation::Pixelate { .. })),
         ];
@@ -500,14 +394,7 @@ mod tests {
     #[test]
     fn a_tiny_drag_creates_no_shape_but_a_click_makes_a_pen_dot() {
         let mut ed = Editor::new(100, 100);
-        for tool in [
-            Tool::Line,
-            Tool::Arrow,
-            Tool::Rect,
-            Tool::Ellipse,
-            Tool::Blur,
-            Tool::Pixelate,
-        ] {
+        for tool in [Tool::Line, Tool::Arrow, Tool::Rect, Tool::Ellipse, Tool::Blur, Tool::Pixelate] {
             ed.tool = tool;
             drag(&mut ed, p(10.0, 10.0), p(11.0, 11.0), NO);
         }
@@ -522,20 +409,13 @@ mod tests {
         let mut ed = Editor::new(300, 300);
         ed.tool = Tool::Line;
         drag(&mut ed, p(10.0, 10.0), p(110.0, 15.0), SHIFT);
-        let Annotation::Line { to, .. } = only(&ed) else {
-            panic!()
-        };
-        assert!(
-            (to.y - 10.0).abs() < 1e-3 && (to.x - 110.0).abs() < 1.0,
-            "{to:?}"
-        );
+        let Annotation::Line { to, .. } = only(&ed) else { panic!() };
+        assert!((to.y - 10.0).abs() < 1e-3 && (to.x - 110.0).abs() < 1.0, "{to:?}");
 
         let mut ed = Editor::new(300, 300);
         ed.tool = Tool::Ellipse;
         drag(&mut ed, p(10.0, 10.0), p(110.0, 60.0), SHIFT);
-        let Annotation::Ellipse { rect, .. } = only(&ed) else {
-            panic!()
-        };
+        let Annotation::Ellipse { rect, .. } = only(&ed) else { panic!() };
         assert_eq!((rect.w, rect.h), (100.0, 100.0));
     }
 
@@ -544,9 +424,7 @@ mod tests {
         let mut ed = Editor::new(100, 50);
         ed.tool = Tool::Rect;
         drag(&mut ed, p(-20.0, -20.0), p(500.0, 500.0), NO);
-        let Annotation::Rect { rect, .. } = only(&ed) else {
-            panic!()
-        };
+        let Annotation::Rect { rect, .. } = only(&ed) else { panic!() };
         assert_eq!(*rect, Rect::new(0.0, 0.0, 100.0, 50.0));
     }
 
@@ -556,9 +434,7 @@ mod tests {
         ed.tool = Tool::Rect;
         ed.pointer_down(p(10.0, 10.0), NO, None);
         ed.pointer_move(p(50.0, 40.0), NO);
-        let Some(Annotation::Rect { rect, .. }) = ed.preview() else {
-            panic!()
-        };
+        let Some(Annotation::Rect { rect, .. }) = ed.preview() else { panic!() };
         assert_eq!(rect, Rect::new(10.0, 10.0, 40.0, 30.0));
         assert!(ed.doc.items.is_empty());
         ed.pointer_up(p(50.0, 40.0), NO);
@@ -577,13 +453,7 @@ mod tests {
             .doc
             .items
             .iter()
-            .filter_map(|i| {
-                if let Annotation::Marker { number, .. } = i.annotation {
-                    Some(number)
-                } else {
-                    None
-                }
-            })
+            .filter_map(|i| if let Annotation::Marker { number, .. } = i.annotation { Some(number) } else { None })
             .collect();
         assert_eq!(numbers, [1, 2, 3]);
         // delete the last one: the next click reuses its number
@@ -596,15 +466,10 @@ mod tests {
     fn text_flow() {
         let mut ed = Editor::new(200, 100);
         ed.tool = Tool::Text;
-        assert_eq!(
-            ed.pointer_down(p(20.0, 20.0), NO, None),
-            Outcome::TextRequested(p(20.0, 20.0))
-        );
+        assert_eq!(ed.pointer_down(p(20.0, 20.0), NO, None), Outcome::TextRequested(p(20.0, 20.0)));
         assert!(ed.add_text(p(20.0, 20.0), "   ").is_none());
         ed.add_text(p(20.0, 20.0), "Hello").unwrap();
-        let Annotation::Text { text, .. } = only(&ed) else {
-            panic!()
-        };
+        let Annotation::Text { text, .. } = only(&ed) else { panic!() };
         assert_eq!(text, "Hello");
     }
 
@@ -618,22 +483,16 @@ mod tests {
         ed.pointer_down(p(30.0, 30.0), NO, None);
         assert_eq!(ed.hidden(), Some(ed.doc.items[0].id));
         ed.pointer_move(p(50.0, 40.0), NO);
-        let Some(Annotation::Rect { rect, .. }) = ed.preview() else {
-            panic!()
-        };
+        let Some(Annotation::Rect { rect, .. }) = ed.preview() else { panic!() };
         assert_eq!((rect.x, rect.y), (30.0, 20.0));
         ed.pointer_up(p(50.0, 40.0), NO);
-        let Annotation::Rect { rect, .. } = only(&ed) else {
-            panic!()
-        };
+        let Annotation::Rect { rect, .. } = only(&ed) else { panic!() };
         assert_eq!((rect.x, rect.y), (30.0, 20.0));
 
         ed.nudge(1.0, 1.0);
         ed.undo();
         ed.undo(); // the move
-        let Annotation::Rect { rect, .. } = only(&ed) else {
-            panic!()
-        };
+        let Annotation::Rect { rect, .. } = only(&ed) else { panic!() };
         assert_eq!((rect.x, rect.y), (10.0, 10.0));
         ed.redo();
 
@@ -674,15 +533,9 @@ mod tests {
         let mut ed = Editor::new(4, 4);
         let base = RgbaImage::filled(4, 4, Color::rgb(10, 20, 30));
         ed.tool = Tool::Eyedropper;
-        assert_eq!(
-            ed.pointer_down(p(1.0, 1.0), NO, Some(&base)),
-            Outcome::Picked(Color::rgb(10, 20, 30))
-        );
+        assert_eq!(ed.pointer_down(p(1.0, 1.0), NO, Some(&base)), Outcome::Picked(Color::rgb(10, 20, 30)));
         assert_eq!(ed.settings.style.color, Color::rgb(10, 20, 30));
-        assert_eq!(
-            ed.pointer_down(p(9.0, 1.0), NO, Some(&base)),
-            Outcome::Nothing
-        );
+        assert_eq!(ed.pointer_down(p(9.0, 1.0), NO, Some(&base)), Outcome::Nothing);
         assert_eq!(ed.recent_colors(), [Color::rgb(10, 20, 30)]);
         assert!(ed.doc.items.is_empty());
     }
@@ -696,13 +549,7 @@ mod tests {
         ed.set_color(Color::rgb(5, 0, 0));
         assert_eq!(ed.recent_colors().len(), 8);
         assert_eq!(ed.recent_colors()[0], Color::rgb(5, 0, 0));
-        assert_eq!(
-            ed.recent_colors()
-                .iter()
-                .filter(|c| **c == Color::rgb(5, 0, 0))
-                .count(),
-            1
-        );
+        assert_eq!(ed.recent_colors().iter().filter(|c| **c == Color::rgb(5, 0, 0)).count(), 1);
     }
 
     #[test]

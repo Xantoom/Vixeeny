@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Validation of a recording profile against the registry and the choice of the
-//! `auto` encoder. Pure functions: no FFmpeg, no OS.
+//! Validation of a recording profile against the registry and the choice of the `auto` encoder. Pure functions: no
+//! FFmpeg, no OS.
 
 use vixeeny_common::config::Video;
 
@@ -61,17 +61,11 @@ pub struct Issue {
 }
 
 fn error(kind: IssueKind) -> Issue {
-    Issue {
-        severity: Severity::Error,
-        kind,
-    }
+    Issue { severity: Severity::Error, kind }
 }
 
 fn warning(kind: IssueKind) -> Issue {
-    Issue {
-        severity: Severity::Warning,
-        kind,
-    }
+    Issue { severity: Severity::Warning, kind }
 }
 
 /// Everything besides the profile itself that the verdict depends on.
@@ -92,8 +86,8 @@ const fn max_sample_rate(family: Family) -> u64 {
     }
 }
 
-/// Output size of a `resolution` setting: `source`, `2160p`…`720p` (the ratio is kept, never
-/// larger than the source: 2160p of a 1440p screen is 1440p), or `WxH`.
+/// Output size of a `resolution` setting: `source`, `2160p`…`720p` (the ratio is kept, never larger than the source:
+/// 2160p of a 1440p screen is 1440p), or `WxH`.
 pub fn output_size(setting: &str, source: (u32, u32)) -> Option<(u32, u32)> {
     if setting == "source" {
         return Some(source);
@@ -104,9 +98,8 @@ pub fn output_size(setting: &str, source: (u32, u32)) -> Option<(u32, u32)> {
             return Some(source);
         }
         // To the nearest even width (854 × 480 for 16:9).
-        let w = (u64::from(source.0) * u64::from(h) + u64::from(source.1.max(1)))
-            / (2 * u64::from(source.1.max(1)))
-            * 2;
+        let w =
+            (u64::from(source.0) * u64::from(h) + u64::from(source.1.max(1))) / (2 * u64::from(source.1.max(1))) * 2;
         return Some(((w as u32).max(2), h & !1));
     }
     let (w, h) = setting.split_once('x')?;
@@ -114,18 +107,16 @@ pub fn output_size(setting: &str, source: (u32, u32)) -> Option<(u32, u32)> {
     (w > 0 && h > 0).then_some((w, h))
 }
 
-/// The bit depth a recording gets: 10 bits for HDR, and for HEVC and AV1 whenever the encoder
-/// (and, for a hardware one, the GPU) can (finer gradients, no banding, and a few percent
-/// smaller at the same quality; every HEVC and AV1 decoder of the last years plays it). H.264
-/// and VP9 stay 8-bit: their 10-bit profiles play almost nowhere in hardware.
+/// The bit depth a recording gets: 10 bits for HDR, and for HEVC and AV1 whenever the encoder (and, for a hardware one,
+/// the GPU) can (finer gradients, no banding, and a few percent smaller at the same quality; every HEVC and AV1 decoder
+/// of the last years plays it). H.264 and VP9 stay 8-bit: their 10-bit profiles play almost nowhere in hardware.
 pub fn depth(encoder: &Encoder, chroma: Chroma, hdr: bool, probe: Option<&ProbeResult>) -> u8 {
     if hdr {
         return 10;
     }
     let can = matches!(encoder.family, Family::Hevc | Family::Av1)
         && encoder.supports_format(10, chroma)
-        && (encoder.kind == Kind::Software
-            || probe.is_none_or(|p| p.supports(&encoder.id, 10, chroma, false)));
+        && (encoder.kind == Kind::Software || probe.is_none_or(|p| p.supports(&encoder.id, 10, chroma, false)));
     if can { 10 } else { 8 }
 }
 
@@ -136,8 +127,8 @@ pub fn aspect(setting: &str) -> Option<(u32, u32)> {
     (w > 0 && h > 0).then_some((w, h))
 }
 
-/// The middle part of a `size` picture with the `aspect` ratio (the whole picture without
-/// one): `(left, top, width, height)`, even sizes.
+/// The middle part of a `size` picture with the `aspect` ratio (the whole picture without one):
+/// `(left, top, width, height)`, even sizes.
 pub fn center_crop(size: (u32, u32), aspect: Option<(u32, u32)>) -> (u32, u32, u32, u32) {
     let (w, h) = size;
     let Some((aw, ah)) = aspect else {
@@ -151,12 +142,7 @@ pub fn center_crop(size: (u32, u32), aspect: Option<(u32, u32)>) -> (u32, u32, u
         (w, ((u64::from(w) * ah / aw) as u32).min(h))
     };
     let (cw, ch) = (cw.max(2) & !1, ch.max(2) & !1);
-    (
-        (w - cw.min(w)) / 2,
-        (h - ch.min(h)) / 2,
-        cw.min(w),
-        ch.min(h),
-    )
+    ((w - cw.min(w)) / 2, (h - ch.min(h)) / 2, cw.min(w), ch.min(h))
 }
 
 /// Whether an audio codec fits a container; `None` for an unknown codec.
@@ -174,9 +160,7 @@ pub fn validate(profile: &Video, ctx: &Context<'_>) -> Vec<Issue> {
 
     let container = Container::from_setting(&profile.container);
     if container.is_none() {
-        issues.push(error(IssueKind::UnknownContainer(
-            profile.container.clone(),
-        )));
+        issues.push(error(IssueKind::UnknownContainer(profile.container.clone())));
     }
     let chroma = Chroma::from_setting(&profile.chroma);
     if chroma.is_none() {
@@ -203,17 +187,11 @@ pub fn validate(profile: &Video, ctx: &Context<'_>) -> Vec<Issue> {
 
     // Audio ↔ container.
     if profile.audio.codec != "auto" {
-        match (
-            audio_ok(&profile.audio.codec, container.unwrap_or(Container::Mkv)),
-            container,
-        ) {
-            (None, _) => issues.push(error(IssueKind::UnknownAudioCodec(
-                profile.audio.codec.clone(),
-            ))),
-            (Some(false), Some(c)) => issues.push(error(IssueKind::AudioCodec {
-                codec: profile.audio.codec.clone(),
-                container: c,
-            })),
+        match (audio_ok(&profile.audio.codec, container.unwrap_or(Container::Mkv)), container) {
+            (None, _) => issues.push(error(IssueKind::UnknownAudioCodec(profile.audio.codec.clone()))),
+            (Some(false), Some(c)) => {
+                issues.push(error(IssueKind::AudioCodec { codec: profile.audio.codec.clone(), container: c }))
+            }
             _ => {}
         }
     }
@@ -242,10 +220,7 @@ pub fn validate(profile: &Video, ctx: &Context<'_>) -> Vec<Issue> {
     if let Some(c) = container
         && !encoder.containers.contains(&c)
     {
-        issues.push(error(IssueKind::ContainerNotSupported {
-            family: encoder.family,
-            container: c,
-        }));
+        issues.push(error(IssueKind::ContainerNotSupported { family: encoder.family, container: c }));
     }
     if let Some(chroma) = chroma {
         let depth = depth(encoder, chroma, wants_hdr, ctx.probe);
@@ -260,11 +235,7 @@ pub fn validate(profile: &Video, ctx: &Context<'_>) -> Vec<Issue> {
     if let Some(probe) = ctx.probe
         && let Some(size) = size
         && !probe.fits(&encoder.id, size)
-        && let Some(max) = probe
-            .encoders
-            .iter()
-            .filter(|e| e.id == encoder.id)
-            .find_map(|e| e.max)
+        && let Some(max) = probe.encoders.iter().filter(|e| e.id == encoder.id).find_map(|e| e.max)
     {
         issues.push(error(IssueKind::TooLarge { max }));
     }
@@ -288,9 +259,9 @@ pub fn validate(profile: &Video, ctx: &Context<'_>) -> Vec<Issue> {
     issues
 }
 
-/// The encoder `auto` stands for: the best hardware encoder the probe validated for 8-bit 4:2:0
-/// that takes pictures of `size` (when known), else libx264. Order: AV1 first (the smallest
-/// files for the quality), then HEVC, then H.264; NVIDIA, AMD, Intel… (the `preference` of each).
+/// The encoder `auto` stands for: the best hardware encoder the probe validated for 8-bit 4:2:0 that takes pictures of
+/// `size` (when known), else libx264. Order: AV1 first (the smallest files for the quality), then HEVC, then H.264;
+/// NVIDIA, AMD, Intel… (the `preference` of each).
 pub fn pick_auto<'a>(
     registry: &'a Registry,
     probe: Option<&ProbeResult>,

@@ -31,16 +31,11 @@ pub fn scratch(name: &str) -> Scratch {
     Scratch(dir)
 }
 
-/// A recording of 320×180 at 30 fps, 8-bit 4:2:0 SDR in Matroska, with encoder `id` and its
-/// options of `preset`, no audio.
+/// A recording of 320×180 at 30 fps, 8-bit 4:2:0 SDR in Matroska, with encoder `id` and its options of `preset`, no
+/// audio.
 pub fn config(registry: &Registry, id: &str, preset: PresetName) -> RecordConfig {
     let encoder = registry.get(id).unwrap().clone();
-    let options = encoder
-        .presets
-        .get(preset)
-        .iter()
-        .map(|(k, v)| (k.clone(), v.to_ffmpeg()))
-        .collect();
+    let options = encoder.presets.get(preset).iter().map(|(k, v)| (k.clone(), v.to_ffmpeg())).collect();
     RecordConfig {
         crop: None,
         encoder,

@@ -21,8 +21,7 @@ impl Tray {
         let settings = MenuItem::new(tr(Key::MenuSettings, lang), true, None);
         let quit = MenuItem::new(tr(Key::MenuQuit, lang), true, None);
         let menu = Menu::new();
-        menu.append_items(&[&settings, &quit])
-            .context("building the tray menu")?;
+        menu.append_items(&[&settings, &quit]).context("building the tray menu")?;
 
         let settings_id: MenuId = settings.id().clone();
         let quit_id: MenuId = quit.id().clone();
@@ -36,12 +35,7 @@ impl Tray {
         }));
         let click_tx = tx.clone();
         TrayIconEvent::set_event_handler(Some(move |event: TrayIconEvent| {
-            if let TrayIconEvent::Click {
-                button: MouseButton::Left,
-                button_state: MouseButtonState::Up,
-                ..
-            } = event
-            {
+            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
                 click_tx.send(Event::Action(ActionId::OpenSettings));
             }
         }));
@@ -53,16 +47,12 @@ impl Tray {
             .with_tooltip(tr(Key::TrayTooltip, lang))
             .build()
             .context("creating the tray icon")?;
-        Ok(Self {
-            tray,
-            settings,
-            quit,
-        })
+        Ok(Self { tray, settings, quit })
     }
 }
 
-/// The icons of the executable's resource (see `build.rs`): 1 is the application's, 2 the
-/// one with the recording dot. Windows picks the size that suits the display scale.
+/// The icons of the executable's resource (see `build.rs`): 1 is the application's, 2 the one with the recording dot.
+/// Windows picks the size that suits the display scale.
 fn tray_image(recording: bool) -> anyhow::Result<Icon> {
     Icon::from_resource(if recording { 2 } else { 1 }, None).context("loading the tray icon")
 }
@@ -70,11 +60,7 @@ fn tray_image(recording: bool) -> anyhow::Result<Icon> {
 impl crate::runtime::Tray for Tray {
     fn set_recording(&mut self, state: RecState, lang: Lang) {
         let recording = state == RecState::Recording;
-        let key = if state == RecState::Idle {
-            Key::TrayTooltip
-        } else {
-            Key::TrayTooltipRecording
-        };
+        let key = if state == RecState::Idle { Key::TrayTooltip } else { Key::TrayTooltipRecording };
         match tray_image(recording) {
             Ok(image) => {
                 if let Err(e) = self.tray.set_icon(Some(image)) {

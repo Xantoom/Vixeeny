@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Reading the images Vixeeny writes (for the notification thumbnails): PNG, JPEG, WebP, AVIF and
-//! JPEG XL. The result is opaque sRGB BGRA, upright: the embedded colour profile and
-//! the orientation (EXIF, or `irot`/`imir` for AVIF) are applied, transparency is flattened on
-//! white (the encoders ignore alpha).
+//! Reading the images Vixeeny writes (for the notification thumbnails): PNG, JPEG, WebP, AVIF and JPEG XL. The result
+//! is opaque sRGB BGRA, upright: the embedded colour profile and the orientation (EXIF, or `irot`/`imir` for AVIF) are
+//! applied, transparency is flattened on white (the encoders ignore alpha).
 
 use std::io::Cursor;
 
@@ -31,10 +30,7 @@ impl SourceFormat {
             Some(Self::Jpeg)
         } else if bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
             Some(Self::WebP)
-        } else if bytes.len() >= 12
-            && &bytes[4..8] == b"ftyp"
-            && matches!(&bytes[8..12], b"avif" | b"avis")
-        {
+        } else if bytes.len() >= 12 && &bytes[4..8] == b"ftyp" && matches!(&bytes[8..12], b"avif" | b"avis") {
             Some(Self::Avif)
         } else if starts(&[0xff, 0x0a]) || starts(b"\0\0\0\x0cJXL \r\n\x87\n") {
             Some(Self::Jxl)
@@ -70,25 +66,18 @@ pub fn decode(bytes: &[u8]) -> Result<Decoded, ImageError> {
 }
 
 fn decode_with_image(bytes: &[u8]) -> Result<Decoded, ImageError> {
-    let reader = ImageReader::new(Cursor::new(bytes))
-        .with_guessed_format()
-        .map_err(bad)?;
+    let reader = ImageReader::new(Cursor::new(bytes)).with_guessed_format().map_err(bad)?;
     let mut decoder = reader.into_decoder().map_err(bad)?;
     let profile = decoder.icc_profile().map_err(bad)?;
     let orientation = decoder.orientation().unwrap_or(Orientation::NoTransforms);
     let mut picture = DynamicImage::from_decoder(decoder).map_err(bad)?;
     picture.apply_orientation(orientation);
     let rgba = picture.into_rgba8();
-    Ok(finish(
-        rgba.width(),
-        rgba.height(),
-        rgba.into_raw(),
-        profile.as_deref(),
-    ))
+    Ok(finish(rgba.width(), rgba.height(), rgba.into_raw(), profile.as_deref()))
 }
 
-/// A PNG whose `cICP` chunk says BT.2020 / PQ (what Vixeeny writes for HDR), tone-mapped to SDR;
-/// `None` for every other PNG.
+/// A PNG whose `cICP` chunk says BT.2020 / PQ (what Vixeeny writes for HDR), tone-mapped to SDR; `None` for every other
+/// PNG.
 fn decode_png_pq(bytes: &[u8]) -> Result<Option<Decoded>, ImageError> {
     let mut decoder = png::Decoder::new(Cursor::new(bytes));
     decoder.set_transformations(png::Transformations::EXPAND);
@@ -100,12 +89,7 @@ fn decode_png_pq(bytes: &[u8]) -> Result<Option<Decoded>, ImageError> {
     if !pq {
         return Ok(None);
     }
-    let mut buf = vec![
-        0;
-        reader
-            .output_buffer_size()
-            .ok_or_else(|| bad("image too large"))?
-    ];
+    let mut buf = vec![0; reader.output_buffer_size().ok_or_else(|| bad("image too large"))?];
     let info = reader.next_frame(&mut buf).map_err(bad)?;
     let (width, height) = (info.width, info.height);
     let samples = &buf[..info.buffer_size()];
@@ -119,28 +103,18 @@ fn decode_png_pq(bytes: &[u8]) -> Result<Option<Decoded>, ImageError> {
                 [c(0), c(2), c(4)]
             })
             .collect(),
-        (png::ColorType::Rgb, png::BitDepth::Eight) => samples
-            .as_chunks::<3>()
-            .0
-            .iter()
-            .map(|p| p.map(|c| f32::from(c) / 255.0))
-            .collect(),
-        (png::ColorType::Grayscale, png::BitDepth::Sixteen) => samples
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .map(|p| [f32::from(u16::from_be_bytes(*p)) / 65535.0; 3])
-            .collect(),
+        (png::ColorType::Rgb, png::BitDepth::Eight) => {
+            samples.as_chunks::<3>().0.iter().map(|p| p.map(|c| f32::from(c) / 255.0)).collect()
+        }
+        (png::ColorType::Grayscale, png::BitDepth::Sixteen) => {
+            samples.as_chunks::<2>().0.iter().map(|p| [f32::from(u16::from_be_bytes(*p)) / 65535.0; 3]).collect()
+        }
         (png::ColorType::Grayscale, png::BitDepth::Eight) => {
             samples.iter().map(|&c| [f32::from(c) / 255.0; 3]).collect()
         }
         _ => return Ok(None),
     };
-    Ok(Some(Decoded {
-        width,
-        height,
-        bgra: crate::hdr::pq_to_sdr(width, height, &signal),
-    }))
+    Ok(Some(Decoded { width, height, bgra: crate::hdr::pq_to_sdr(width, height, &signal) }))
 }
 
 fn decode_jxl(bytes: &[u8]) -> Result<Decoded, ImageError> {
@@ -156,19 +130,9 @@ fn decode_jxl(bytes: &[u8]) -> Result<Decoded, ImageError> {
     for px in fb.buf().chunks_exact(channels) {
         match channels {
             1 => rgba.extend_from_slice(&[quantise(px[0]); 3]),
-            2 => rgba.extend_from_slice(&[
-                quantise(px[0]),
-                quantise(px[0]),
-                quantise(px[0]),
-                quantise(px[1]),
-            ]),
+            2 => rgba.extend_from_slice(&[quantise(px[0]), quantise(px[0]), quantise(px[0]), quantise(px[1])]),
             3 => rgba.extend_from_slice(&[quantise(px[0]), quantise(px[1]), quantise(px[2]), 255]),
-            4 => rgba.extend_from_slice(&[
-                quantise(px[0]),
-                quantise(px[1]),
-                quantise(px[2]),
-                quantise(px[3]),
-            ]),
+            4 => rgba.extend_from_slice(&[quantise(px[0]), quantise(px[1]), quantise(px[2]), quantise(px[3])]),
             _ => return Err(bad("unsupported JPEG XL colour model")),
         }
     }
@@ -196,11 +160,7 @@ fn finish(width: u32, height: u32, mut rgba: Vec<u8>, profile: Option<&[u8]>) ->
         px.swap(0, 2);
         px[3] = 255;
     }
-    Decoded {
-        width,
-        height,
-        bgra: rgba,
-    }
+    Decoded { width, height, bgra: rgba }
 }
 
 /// Leaves the pixels alone when the profile is unusable (a wrong profile must not lose the file).
@@ -222,11 +182,7 @@ fn convert_to_srgb(rgba: &mut [u8], profile: &[u8]) {
     let mut out = vec![0u8; rgba.len()];
     if transform.transform(rgba, &mut out).is_ok() {
         // The transform does not carry alpha reliably across versions: keep the source's.
-        let pixels = out
-            .as_chunks_mut::<4>()
-            .0
-            .iter_mut()
-            .zip(rgba.as_chunks::<4>().0);
+        let pixels = out.as_chunks_mut::<4>().0.iter_mut().zip(rgba.as_chunks::<4>().0);
         for (dst, src) in pixels {
             dst[3] = src[3];
         }

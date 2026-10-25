@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! What a setting does and what to choose, shown behind the "i" beside its label. Only where
-//! there is something useful to say: obvious settings have none.
+//! What a setting does and what to choose, shown behind the "i" beside its label. Only where there is something useful
+//! to say: obvious settings have none.
 
 use vixeeny_common::config::Config;
 use vixeeny_common::i18n::Lang;
@@ -25,10 +25,9 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
             "Keeps the exact picture, pixel for pixel.\nLarger files.",
             "Garde l'image exacte, pixel par pixel.\nFichiers plus gros.",
         ),
-        "avif_speed" => pick(
-            "Higher: faster saving, larger file.",
-            "Plus haut : enregistrement plus rapide, fichier plus gros.",
-        ),
+        "avif_speed" => {
+            pick("Higher: faster saving, larger file.", "Plus haut : enregistrement plus rapide, fichier plus gros.")
+        }
         "webp_effort" | "jxl_effort" => pick(
             "Higher: smaller file at the same quality, longer saving.",
             "Plus haut : fichier plus petit à qualité égale, enregistrement plus long.",
@@ -85,13 +84,10 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
             })
         }
         "p:rc.quality" => {
-            let encoder =
-                encoders::resolved(env, &config.video).and_then(|e| encoders::spec(&e.id));
+            let encoder = encoders::resolved(env, &config.video).and_then(|e| encoders::spec(&e.id));
             let default = encoder.map(|e| e.rate_control.quality.default);
-            let base = pick(
-                "Lower: better quality, larger files.",
-                "Plus bas : meilleure qualité, fichiers plus gros.",
-            )?;
+            let base =
+                pick("Lower: better quality, larger files.", "Plus bas : meilleure qualité, fichiers plus gros.")?;
             Some(match default {
                 Some(d) if fr => format!("{base}\n\nRecommandé : {d}."),
                 Some(d) => format!("{base}\n\nRecommended: {d}."),
@@ -107,8 +103,7 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
             "Le plafond pour les scènes très animées.\n\nRecommandé : 1,5 × le débit.",
         ),
         "p:preset" | "p:quality" | "p:deadline" | "p:cpu-used" => {
-            let encoder =
-                encoders::resolved(env, &config.video).and_then(|e| encoders::spec(&e.id));
+            let encoder = encoders::resolved(env, &config.video).and_then(|e| encoders::spec(&e.id));
             let nvenc = encoder.is_some_and(|e| e.id.starts_with("nvenc"));
             let lang = env.lang;
             // What keeps up with these settings (resolution × frame rate) on this screen.

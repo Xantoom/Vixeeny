@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! PNG written on every core: the image is cut in bands, each filtered and deflated on its own
-//! and ended on a byte boundary (a sync flush), so that the bands join into one zlib stream, as
-//! pigz does. A 4K game frame takes 80 ms rather than 0.45 to 1.2 s with one core, for the same
-//! size (a band does not see the 32 KB before it: a few hundred bytes).
+//! PNG written on every core: the image is cut in bands, each filtered and deflated on its own and ended on a byte
+//! boundary (a sync flush), so that the bands join into one zlib stream, as pigz does. A 4K game frame takes 80 ms
+//! rather than 0.45 to 1.2 s with one core, for the same size (a band does not see the 32 KB before it: a few hundred
+//! bytes).
 
 use flate2::{Compress, Compression, FlushCompress, Status};
 use png::{BitDepth, ColorType, Encoder, SrgbRenderingIntent};
@@ -15,20 +15,15 @@ use crate::{Bgra, Hdr, ImageError, PngCompression, PngSettings};
 pub(crate) fn encode(image: &Bgra<'_>, settings: &PngSettings) -> Result<Vec<u8>, ImageError> {
     let rows = image.rows().collect::<Vec<_>>();
     let row = |y: usize, out: &mut [u8]| {
-        for (o, px) in out
-            .as_chunks_mut::<3>()
-            .0
-            .iter_mut()
-            .zip(rows[y].as_chunks::<4>().0)
-        {
+        for (o, px) in out.as_chunks_mut::<3>().0.iter_mut().zip(rows[y].as_chunks::<4>().0) {
             *o = [px[2], px[1], px[0]];
         }
     };
     write(image.width, image.height, 3, &row, settings, None)
 }
 
-/// 16-bit RGB PNG, BT.2020 / PQ, described by a `cICP` chunk, its light by `cLLI` and the
-/// screen it was seen on by `mDCV` (PNG third edition).
+/// 16-bit RGB PNG, BT.2020 / PQ, described by a `cICP` chunk, its light by `cLLI` and the screen it was seen on by
+/// `mDCV` (PNG third edition).
 pub(crate) fn encode_hdr(image: &Hdr<'_>, settings: &PngSettings) -> Result<Vec<u8>, ImageError> {
     let samples = image.to_pq_bytes(u16::to_be_bytes);
     let n = image.width as usize * 6;
@@ -49,8 +44,7 @@ fn clli(light: &Light) -> [u8; 8] {
     out
 }
 
-/// `mDCV`: red, green, blue and white as x, y in 0.00002, then the brightest and darkest light
-/// in 0.0001 nits.
+/// `mDCV`: red, green, blue and white as x, y in 0.00002, then the brightest and darkest light in 0.0001 nits.
 fn mdcv(light: &Light) -> [u8; 24] {
     let mut out = [0; 24];
     let xy = Light::PRIMARIES.iter().chain([&Light::WHITE]).flatten();
@@ -74,17 +68,15 @@ fn write(
     settings: &PngSettings,
     hdr: Option<Light>,
 ) -> Result<Vec<u8>, ImageError> {
-    // zlib-rs levels; at 4K, 2 is a fifth smaller than the png crate's fastest for a quarter
-    // more time, and 6 and 9 are as small as its own.
+    // zlib-rs levels; at 4K, 2 is a fifth smaller than the png crate's fastest for a quarter more time, and 6 and 9 are
+    // as small as its own.
     let (level, adaptive) = match settings.compression {
         PngCompression::Fast => (2, false),
         PngCompression::Default => (6, true),
         PngCompression::High => (9, true),
     };
     let (w, h) = (width as usize, height as usize);
-    let bands = h
-        .div_ceil(BAND_ROWS)
-        .clamp(1, rayon::current_num_threads() * 2);
+    let bands = h.div_ceil(BAND_ROWS).clamp(1, rayon::current_num_threads() * 2);
     let per_band = h.div_ceil(bands);
     let parts = (0..h.div_ceil(per_band))
         .into_par_iter()
@@ -128,8 +120,7 @@ fn write(
         None => Ok(out),
         Some(level) => {
             let options = oxipng::Options::from_preset(level.min(6));
-            oxipng::optimize_from_memory(&out, &options)
-                .map_err(|e| ImageError::Oxipng(e.to_string()))
+            oxipng::optimize_from_memory(&out, &options).map_err(|e| ImageError::Oxipng(e.to_string()))
         }
     }
 }
@@ -141,8 +132,7 @@ struct Part {
     len: u64,
 }
 
-/// Filters and deflates `rows` (`stride` bytes each): byte-aligned at its end, or the end of
-/// the stream when `last`.
+/// Filters and deflates `rows` (`stride` bytes each): byte-aligned at its end, or the end of the stream when `last`.
 fn band(
     rows: std::ops::Range<usize>,
     stride: usize,
@@ -164,16 +154,12 @@ fn band(
         row(y, &mut cur);
         let up = (y > 0).then_some(&prev[..]);
         if adaptive {
-            // The filter leaving the smallest sum of absolute values, as libpng and the png
-            // crate pick it.
+            // The filter leaving the smallest sum of absolute values, as libpng and the png crate pick it.
             let mut best_cost = u64::MAX;
             let mut best_kind = 0;
             for kind in 0..5 {
                 apply(kind, &cur, up, bpp, &mut trial);
-                let cost = trial
-                    .iter()
-                    .map(|&v| u64::from(v.cast_signed().unsigned_abs()))
-                    .sum();
+                let cost = trial.iter().map(|&v| u64::from(v.cast_signed().unsigned_abs())).sum();
                 if cost < best_cost {
                     best_cost = cost;
                     best_kind = kind;
@@ -194,11 +180,7 @@ fn band(
         a.write(&filtered);
         a.finish()
     };
-    let flush = if last {
-        FlushCompress::Finish
-    } else {
-        FlushCompress::Sync
-    };
+    let flush = if last { FlushCompress::Finish } else { FlushCompress::Sync };
     let mut compress = Compress::new(Compression::new(level), false);
     let mut deflated = Vec::with_capacity(filtered.len() / 2 + 4096);
     loop {
@@ -208,25 +190,17 @@ fn band(
             .map_err(|e| png::EncodingError::from(std::io::Error::other(e)))?;
         let all_in = compress.total_in() as usize == filtered.len();
         // The output may have filled up before the flush was written whole.
-        let done = if last {
-            status == Status::StreamEnd
-        } else {
-            all_in && deflated.len() < deflated.capacity()
-        };
+        let done = if last { status == Status::StreamEnd } else { all_in && deflated.len() < deflated.capacity() };
         if done {
             break;
         }
         deflated.reserve(deflated.capacity().max(4096));
     }
-    Ok(Part {
-        deflated,
-        adler,
-        len: filtered.len() as u64,
-    })
+    Ok(Part { deflated, adler, len: filtered.len() as u64 })
 }
 
-/// PNG filter `kind` (0 none, 1 sub, 2 up, 3 average, 4 Paeth) of `cur` over `up` (`None`: the
-/// first row, all zeros above).
+/// PNG filter `kind` (0 none, 1 sub, 2 up, 3 average, 4 Paeth) of `cur` over `up` (`None`: the first row, all zeros
+/// above).
 fn apply(kind: u8, cur: &[u8], up: Option<&[u8]>, bpp: usize, out: &mut [u8]) {
     let up_at = |i: usize| up.map_or(0, |u| u[i]);
     match kind {
@@ -253,11 +227,7 @@ fn apply(kind: u8, cur: &[u8], up: Option<&[u8]>, bpp: usize, out: &mut [u8]) {
         }
         _ => {
             for i in 0..cur.len() {
-                let (a, c) = if i >= bpp {
-                    (cur[i - bpp], up_at(i - bpp))
-                } else {
-                    (0, 0)
-                };
+                let (a, c) = if i >= bpp { (cur[i - bpp], up_at(i - bpp)) } else { (0, 0) };
                 out[i] = cur[i].wrapping_sub(paeth(a, up_at(i), c));
             }
         }
@@ -277,16 +247,14 @@ fn paeth(a: u8, b: u8, c: u8) -> u8 {
     }
 }
 
-/// The Adler-32 of two pieces put end to end, from theirs and the second's length (zlib's
-/// `adler32_combine`).
+/// The Adler-32 of two pieces put end to end, from theirs and the second's length (zlib's `adler32_combine`).
 fn adler32_combine(first: u32, second: u32, second_len: u64) -> u32 {
     const BASE: u64 = 65_521;
     let rem = second_len % BASE;
     let a1 = u64::from(first & 0xffff);
     let a2 = u64::from(second & 0xffff);
     let sum1 = (a1 + a2 + BASE - 1) % BASE;
-    let sum2 =
-        (rem * a1 % BASE + u64::from(first >> 16) + u64::from(second >> 16) + BASE - rem) % BASE;
+    let sum2 = (rem * a1 % BASE + u64::from(first >> 16) + u64::from(second >> 16) + BASE - rem) % BASE;
     (sum1 | (sum2 << 16)) as u32
 }
 
@@ -303,13 +271,7 @@ mod tests {
             a.finish()
         };
         let (x, y) = data.split_at(123_457);
-        assert_eq!(
-            adler32_combine(adler(x), adler(y), y.len() as u64),
-            adler(&data)
-        );
-        assert_eq!(
-            adler32_combine(1, adler(&data), data.len() as u64),
-            adler(&data)
-        );
+        assert_eq!(adler32_combine(adler(x), adler(y), y.len() as u64), adler(&data));
+        assert_eq!(adler32_combine(1, adler(&data), data.len() as u64), adler(&data));
     }
 }

@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Screen capture: still images of monitors, windows and regions, and the frame streams of
-//! recordings (`wgc_stream`).
+//! Screen capture: still images of monitors, windows and regions, and the frame streams of recordings (`wgc_stream`).
 //!
-//! [`Capturer`] holds the target logic (regions, all monitors, DPI) and is tested with
-//! [`FakeBackend`]; the OS only supplies whole-monitor and whole-window frames through
-//! [`StillBackend`].
+//! [`Capturer`] holds the target logic (regions, all monitors, DPI) and is tested with [`FakeBackend`]; the OS only
+//! supplies whole-monitor and whole-window frames through [`StillBackend`].
 
 mod card_tonemap;
 mod dda;
@@ -20,8 +18,7 @@ pub use hdr::{HdrCapture, HdrFrame, reference};
 use vixeeny_platform::{HdrInfo, MonitorId, MonitorInfo, PhysicalRect, WindowId, virtual_bounds};
 pub use wgc::WgcBackend;
 pub use wgc_stream::{
-    CapturedFrame, Gate, GpuCapture, HeldFrame, Notify, Pacing, StreamTarget, TextureSink,
-    VideoStream,
+    CapturedFrame, Gate, GpuCapture, HeldFrame, Notify, Pacing, StreamTarget, TextureSink, VideoStream,
 };
 use windows::Win32::Graphics::Direct3D11::ID3D11Device;
 
@@ -38,8 +35,7 @@ pub enum CaptureTarget {
     AllMonitors,
 }
 
-/// Converts scRGB floats (4 per pixel, `1.0` = 80 nits) to 8-bit BGRA; see
-/// `vixeeny_image::tonemap`.
+/// Converts scRGB floats (4 per pixel, `1.0` = 80 nits) to 8-bit BGRA; see `vixeeny_image::tonemap`.
 pub type ToneMapFn = fn(&[f32], &HdrInfo) -> Vec<u8>;
 
 /// No cursor in still images by default.
@@ -75,14 +71,9 @@ pub enum Shown {
 /// What the capture of still images needs from the system.
 pub trait StillBackend {
     /// The whole monitor, physical pixels.
-    fn grab_monitor(
-        &mut self,
-        monitor: &MonitorInfo,
-        cursor: bool,
-    ) -> Result<CpuFrame, CaptureError>;
-    /// The whole monitor as scRGB floats. Only called for monitors with `hdr` set.
-    /// `area` (relative to the monitor) limits it to a part, read alone: a zone captured 15
-    /// times a second converts only its own pixels.
+    fn grab_monitor(&mut self, monitor: &MonitorInfo, cursor: bool) -> Result<CpuFrame, CaptureError>;
+    /// The whole monitor as scRGB floats. Only called for monitors with `hdr` set. `area` (relative to the monitor)
+    /// limits it to a part, read alone: a zone captured 15 times a second converts only its own pixels.
     fn grab_monitor_hdr(
         &mut self,
         _monitor: &MonitorInfo,
@@ -91,9 +82,8 @@ pub trait StillBackend {
     ) -> Result<HdrFrame, CaptureError> {
         Err(CaptureError::Unsupported)
     }
-    /// The monitor (or `area` of it) tone-mapped to SDR; only called for monitors with `hdr`
-    /// set. A backend may do it on the graphics card, with the same tone mapper as `tonemap`
-    /// and `tonemap` as its fallback.
+    /// The monitor (or `area` of it) tone-mapped to SDR; only called for monitors with `hdr` set. A backend may do it
+    /// on the graphics card, with the same tone mapper as `tonemap` and `tonemap` as its fallback.
     fn grab_monitor_sdr(
         &mut self,
         monitor: &MonitorInfo,
@@ -108,11 +98,7 @@ pub trait StillBackend {
     /// The whole window content.
     fn grab_window(&mut self, window: WindowId, cursor: bool) -> Result<CpuFrame, CaptureError>;
     /// The whole window content as scRGB floats. Only called for windows on an HDR monitor.
-    fn grab_window_hdr(
-        &mut self,
-        _window: WindowId,
-        _cursor: bool,
-    ) -> Result<HdrFrame, CaptureError> {
+    fn grab_window_hdr(&mut self, _window: WindowId, _cursor: bool) -> Result<HdrFrame, CaptureError> {
         Err(CaptureError::Unsupported)
     }
     /// The whole window content tone-mapped to SDR, as [`grab_monitor_sdr`](Self::grab_monitor_sdr).
@@ -131,8 +117,8 @@ pub trait StillBackend {
         None
     }
     /// Every monitor of `monitors`, each as [`grab_monitor`](Self::grab_monitor) gives it, or
-    /// [`grab_monitor_sdr`](Self::grab_monitor_sdr) for an HDR one when `tonemap` is set. A
-    /// backend may capture them side by side.
+    /// [`grab_monitor_sdr`](Self::grab_monitor_sdr) for an HDR one when `tonemap` is set. A backend may capture them
+    /// side by side.
     fn grab_monitors(
         &mut self,
         monitors: &[MonitorInfo],
@@ -142,21 +128,14 @@ pub trait StillBackend {
         monitors
             .iter()
             .map(|m| match (m.hdr, tonemap) {
-                (Some(info), Some(tonemap)) => {
-                    self.grab_monitor_sdr(m, None, cursor, &info, tonemap)
-                }
+                (Some(info), Some(tonemap)) => self.grab_monitor_sdr(m, None, cursor, &info, tonemap),
                 _ => self.grab_monitor(m, cursor),
             })
             .collect()
     }
-    /// Every monitor of `monitors` as it shows: [`grab_monitor_hdr`](Self::grab_monitor_hdr)
-    /// for an HDR one, [`grab_monitor`](Self::grab_monitor) for the others. A backend may
-    /// capture them side by side.
-    fn grab_monitors_shown(
-        &mut self,
-        monitors: &[MonitorInfo],
-        cursor: bool,
-    ) -> Result<Vec<Shown>, CaptureError> {
+    /// Every monitor of `monitors` as it shows: [`grab_monitor_hdr`](Self::grab_monitor_hdr) for an HDR one,
+    /// [`grab_monitor`](Self::grab_monitor) for the others. A backend may capture them side by side.
+    fn grab_monitors_shown(&mut self, monitors: &[MonitorInfo], cursor: bool) -> Result<Vec<Shown>, CaptureError> {
         monitors
             .iter()
             .map(|m| match m.hdr {
@@ -165,9 +144,8 @@ pub trait StillBackend {
             })
             .collect()
     }
-    /// Every monitor of `monitors` both tone-mapped to SDR (as
-    /// [`grab_monitors`](Self::grab_monitors) gives it) and, for an HDR one, as scRGB too, both
-    /// from the same frame. A backend may capture them side by side.
+    /// Every monitor of `monitors` both tone-mapped to SDR (as [`grab_monitors`](Self::grab_monitors) gives it) and,
+    /// for an HDR one, as scRGB too, both from the same frame. A backend may capture them side by side.
     fn grab_monitors_both(
         &mut self,
         monitors: &[MonitorInfo],
@@ -193,11 +171,7 @@ pub trait StillBackend {
 
 /// A backend lent for a while (kept by its owner for the next captures).
 impl<B: StillBackend + ?Sized> StillBackend for &mut B {
-    fn grab_monitor(
-        &mut self,
-        monitor: &MonitorInfo,
-        cursor: bool,
-    ) -> Result<CpuFrame, CaptureError> {
+    fn grab_monitor(&mut self, monitor: &MonitorInfo, cursor: bool) -> Result<CpuFrame, CaptureError> {
         (**self).grab_monitor(monitor, cursor)
     }
     fn grab_monitor_hdr(
@@ -221,11 +195,7 @@ impl<B: StillBackend + ?Sized> StillBackend for &mut B {
     fn grab_window(&mut self, window: WindowId, cursor: bool) -> Result<CpuFrame, CaptureError> {
         (**self).grab_window(window, cursor)
     }
-    fn grab_window_hdr(
-        &mut self,
-        window: WindowId,
-        cursor: bool,
-    ) -> Result<HdrFrame, CaptureError> {
+    fn grab_window_hdr(&mut self, window: WindowId, cursor: bool) -> Result<HdrFrame, CaptureError> {
         (**self).grab_window_hdr(window, cursor)
     }
     fn grab_window_sdr(
@@ -248,11 +218,7 @@ impl<B: StillBackend + ?Sized> StillBackend for &mut B {
     ) -> Result<Vec<CpuFrame>, CaptureError> {
         (**self).grab_monitors(monitors, cursor, tonemap)
     }
-    fn grab_monitors_shown(
-        &mut self,
-        monitors: &[MonitorInfo],
-        cursor: bool,
-    ) -> Result<Vec<Shown>, CaptureError> {
+    fn grab_monitors_shown(&mut self, monitors: &[MonitorInfo], cursor: bool) -> Result<Vec<Shown>, CaptureError> {
         (**self).grab_monitors_shown(monitors, cursor)
     }
     fn grab_monitors_both(
@@ -268,9 +234,9 @@ impl<B: StillBackend + ?Sized> StillBackend for &mut B {
     }
 }
 
-/// Gives back the memory the driver keeps for the textures `device` freed (over 100 MB after a
-/// few 4K captures): the next ones cost about a millisecond more to make. Call it once the
-/// device's work is done (its immediate context is reset).
+/// Gives back the memory the driver keeps for the textures `device` freed (over 100 MB after a few 4K captures): the
+/// next ones cost about a millisecond more to make. Call it once the device's work is done (its immediate context is
+/// reset).
 pub fn trim(device: &ID3D11Device) {
     use windows::Win32::Graphics::Dxgi::IDXGIDevice3;
     use windows::core::Interface;
@@ -304,26 +270,13 @@ impl<B: StillBackend> Capturer<B> {
     }
 
     fn monitor(&self, id: MonitorId) -> Result<&MonitorInfo, CaptureError> {
-        self.monitors
-            .iter()
-            .find(|m| m.id == id)
-            .ok_or(CaptureError::UnknownMonitor)
+        self.monitors.iter().find(|m| m.id == id).ok_or(CaptureError::UnknownMonitor)
     }
 
     /// One monitor, tone-mapped to SDR when it shows HDR and `options.tonemap` is set.
-    fn monitor_frame(
-        &mut self,
-        monitor: &MonitorInfo,
-        options: CaptureOptions,
-    ) -> Result<CpuFrame, CaptureError> {
+    fn monitor_frame(&mut self, monitor: &MonitorInfo, options: CaptureOptions) -> Result<CpuFrame, CaptureError> {
         if let (Some(info), Some(tonemap)) = (monitor.hdr, options.tonemap) {
-            return self.backend.grab_monitor_sdr(
-                monitor,
-                None,
-                options.show_cursor,
-                &info,
-                tonemap,
-            );
+            return self.backend.grab_monitor_sdr(monitor, None, options.show_cursor, &info, tonemap);
         }
         self.backend.grab_monitor(monitor, options.show_cursor)
     }
@@ -334,11 +287,7 @@ impl<B: StillBackend> Capturer<B> {
         self.monitor(id).ok()?.hdr
     }
 
-    pub fn grab(
-        &mut self,
-        target: &CaptureTarget,
-        options: CaptureOptions,
-    ) -> Result<CpuFrame, CaptureError> {
+    pub fn grab(&mut self, target: &CaptureTarget, options: CaptureOptions) -> Result<CpuFrame, CaptureError> {
         match target {
             CaptureTarget::Monitor(id) => {
                 let monitor = self.monitor(*id)?.clone();
@@ -347,23 +296,12 @@ impl<B: StillBackend> Capturer<B> {
             CaptureTarget::Region { monitor, rect } => {
                 let monitor = self.monitor(*monitor)?.clone();
                 if let (Some(info), Some(tonemap)) = (monitor.hdr, options.tonemap) {
-                    return self.backend.grab_monitor_sdr(
-                        &monitor,
-                        Some(rect),
-                        options.show_cursor,
-                        &info,
-                        tonemap,
-                    );
+                    return self.backend.grab_monitor_sdr(&monitor, Some(rect), options.show_cursor, &info, tonemap);
                 }
-                self.backend
-                    .grab_monitor(&monitor, options.show_cursor)?
-                    .crop(rect)
+                self.backend.grab_monitor(&monitor, options.show_cursor)?.crop(rect)
             }
             CaptureTarget::Window(id) => match (self.window_hdr(*id), options.tonemap) {
-                (Some(info), Some(tonemap)) => {
-                    self.backend
-                        .grab_window_sdr(*id, options.show_cursor, &info, tonemap)
-                }
+                (Some(info), Some(tonemap)) => self.backend.grab_window_sdr(*id, options.show_cursor, &info, tonemap),
                 _ => self.backend.grab_window(*id, options.show_cursor),
             },
             CaptureTarget::AllMonitors => self.grab_all(options),
@@ -371,12 +309,9 @@ impl<B: StillBackend> Capturer<B> {
     }
 
     fn grab_all(&mut self, options: CaptureOptions) -> Result<CpuFrame, CaptureError> {
-        let bounds =
-            virtual_bounds(self.monitors.iter().map(|m| &m.rect)).ok_or(CaptureError::NoMonitor)?;
+        let bounds = virtual_bounds(self.monitors.iter().map(|m| &m.rect)).ok_or(CaptureError::NoMonitor)?;
         let mut canvas = CpuFrame::new(bounds.width, bounds.height);
-        let frames =
-            self.backend
-                .grab_monitors(&self.monitors, options.show_cursor, options.tonemap)?;
+        let frames = self.backend.grab_monitors(&self.monitors, options.show_cursor, options.tonemap)?;
         for (monitor, frame) in self.monitors.iter().zip(frames) {
             let at = monitor.rect.relative_to(&bounds);
             canvas.blit(&frame, at.x, at.y);
@@ -384,14 +319,10 @@ impl<B: StillBackend> Capturer<B> {
         Ok(canvas)
     }
 
-    /// The target as HDR, when it shows an HDR monitor; `None` when it is SDR only (take
-    /// [`grab`](Self::grab) then). With several monitors, the SDR ones are placed at the SDR
-    /// white of the HDR ones, and every monitor's SDR white is brought to the brightest.
-    pub fn grab_hdr(
-        &mut self,
-        target: &CaptureTarget,
-        cursor: bool,
-    ) -> Result<Option<HdrCapture>, CaptureError> {
+    /// The target as HDR, when it shows an HDR monitor; `None` when it is SDR only (take [`grab`](Self::grab) then).
+    /// With several monitors, the SDR ones are placed at the SDR white of the HDR ones, and every monitor's SDR white
+    /// is brought to the brightest.
+    pub fn grab_hdr(&mut self, target: &CaptureTarget, cursor: bool) -> Result<Option<HdrCapture>, CaptureError> {
         match target {
             CaptureTarget::Monitor(id) | CaptureTarget::Region { monitor: id, .. } => {
                 let monitor = self.monitor(*id)?.clone();
@@ -416,37 +347,28 @@ impl<B: StillBackend> Capturer<B> {
         }
     }
 
-    /// Every monitor as [`grab`](Self::grab) (tone-mapped with `tonemap`) and
-    /// [`grab_hdr`](Self::grab_hdr) give them for [`CaptureTarget::AllMonitors`], from one
-    /// capture: both show the same moment.
+    /// Every monitor as [`grab`](Self::grab) (tone-mapped with `tonemap`) and [`grab_hdr`](Self::grab_hdr) give them
+    /// for [`CaptureTarget::AllMonitors`], from one capture: both show the same moment.
     pub fn grab_all_both(
         &mut self,
         cursor: bool,
         tonemap: ToneMapFn,
     ) -> Result<(CpuFrame, Option<HdrCapture>), CaptureError> {
-        let options = CaptureOptions {
-            show_cursor: cursor,
-            tonemap: Some(tonemap),
-        };
+        let options = CaptureOptions { show_cursor: cursor, tonemap: Some(tonemap) };
         let Some(info) = reference(&self.monitors) else {
             return Ok((self.grab_all(options)?, None));
         };
-        let bounds =
-            virtual_bounds(self.monitors.iter().map(|m| &m.rect)).ok_or(CaptureError::NoMonitor)?;
+        let bounds = virtual_bounds(self.monitors.iter().map(|m| &m.rect)).ok_or(CaptureError::NoMonitor)?;
         let mut sdr = CpuFrame::new(bounds.width, bounds.height);
         let mut hdr = HdrFrame::new(bounds.width, bounds.height);
-        let frames = self
-            .backend
-            .grab_monitors_both(&self.monitors, cursor, tonemap)?;
+        let frames = self.backend.grab_monitors_both(&self.monitors, cursor, tonemap)?;
         for (monitor, (toned, scrgb)) in self.monitors.iter().zip(frames) {
             let at = monitor.rect.relative_to(&bounds);
             sdr.blit(&toned, at.x, at.y);
             let (x, y) = (at.x as u32, at.y as u32);
             match scrgb {
                 Some(mut frame) => {
-                    let own = monitor
-                        .hdr
-                        .map_or(info.sdr_white_nits, |o| o.sdr_white_nits);
+                    let own = monitor.hdr.map_or(info.sdr_white_nits, |o| o.sdr_white_nits);
                     frame.scale(info.sdr_white_nits / own.max(1.0));
                     hdr.blit(&frame, at.x, at.y);
                 }
@@ -463,8 +385,7 @@ impl<B: StillBackend> Capturer<B> {
         let Some(info) = reference(&self.monitors) else {
             return Ok(None);
         };
-        let bounds =
-            virtual_bounds(self.monitors.iter().map(|m| &m.rect)).ok_or(CaptureError::NoMonitor)?;
+        let bounds = virtual_bounds(self.monitors.iter().map(|m| &m.rect)).ok_or(CaptureError::NoMonitor)?;
         let mut canvas = HdrFrame::new(bounds.width, bounds.height);
         let shown = self.backend.grab_monitors_shown(&self.monitors, cursor)?;
         for (monitor, shown) in self.monitors.iter().zip(shown) {
@@ -481,18 +402,11 @@ impl<B: StillBackend> Capturer<B> {
                 }
             }
         }
-        Ok(Some(HdrCapture {
-            frame: canvas,
-            info,
-        }))
+        Ok(Some(HdrCapture { frame: canvas, info }))
     }
 }
 
-pub(crate) fn tonemapped(
-    hdr: &HdrFrame,
-    info: &HdrInfo,
-    tonemap: ToneMapFn,
-) -> Result<CpuFrame, CaptureError> {
+pub(crate) fn tonemapped(hdr: &HdrFrame, info: &HdrInfo, tonemap: ToneMapFn) -> Result<CpuFrame, CaptureError> {
     let bgra = tonemap(&hdr.rgba, info);
     let stride = hdr.width as usize * BYTES_PER_PIXEL;
     CpuFrame::from_raw(hdr.width, hdr.height, stride, bgra)

@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! One track: the sources assigned to it, placed on a continuous timeline.
 //!
-//! WASAPI delivers nothing while an application is silent, and device clocks drift from the
-//! master clock, so the mixer is driven by *time*: [`Mixer::drain`] emits fixed blocks up to
-//! `now − latency`, taking what each source delivered by then and silence for the rest. A chunk
-//! continues the previous one when its timestamp agrees to within [`RESYNC_FRAMES`]; otherwise it
-//! is placed by its timestamp (a gap becomes silence, an overlap overwrites), which bounds the
-//! error against the master clock whatever the drift.
+//! WASAPI delivers nothing while an application is silent, and device clocks drift from the master clock, so the mixer
+//! is driven by *time*: [`Mixer::drain`] emits fixed blocks up to `now − latency`, taking what each source delivered by
+//! then and silence for the rest. A chunk continues the previous one when its timestamp agrees to within
+//! [`RESYNC_FRAMES`]; otherwise it is placed by its timestamp (a gap becomes silence, an overlap overwrites), which
+//! bounds the error against the master clock whatever the drift.
 
 use crate::layout::convert;
 use crate::{AudioChunk, CHANNELS, SAMPLE_RATE};
@@ -72,14 +71,7 @@ impl Mixer {
     pub fn with_channels(volumes: &[f32], origin_ns: i64, channels: usize) -> Self {
         Self {
             channels,
-            sources: volumes
-                .iter()
-                .map(|&volume| Source {
-                    volume,
-                    buf: Vec::new(),
-                    expected: None,
-                })
-                .collect(),
+            sources: volumes.iter().map(|&volume| Source { volume, buf: Vec::new(), expected: None }).collect(),
             epoch_ns: origin_ns,
             epoch_idx: 0,
             next: 0,
@@ -114,10 +106,7 @@ impl Mixer {
         }
         let mut at = self.raw_idx(chunk.time_ns);
         let next = self.next;
-        let first_of_stretch = self
-            .sources
-            .get(source)
-            .is_some_and(|s| s.expected.is_none());
+        let first_of_stretch = self.sources.get(source).is_some_and(|s| s.expected.is_none());
         if first_of_stretch {
             // A stream that starts a few ms before the stretch keeps its first samples.
             at = at.max(self.epoch_idx as i64);
@@ -130,11 +119,8 @@ impl Mixer {
             _ => at,
         };
         s.expected = Some((start + frames as i64).max(0) as u64);
-        let converted = convert(
-            &chunk.samples[..frames as usize * chunk.channels.max(1)],
-            chunk.channels,
-            self.channels,
-        );
+        let converted =
+            convert(&chunk.samples[..frames as usize * chunk.channels.max(1)], chunk.channels, self.channels);
         let channels = self.channels;
         let mut data: &[f32] = &converted;
         if start < next as i64 {
@@ -168,10 +154,7 @@ impl Mixer {
                 *v = v.clamp(-1.0, 1.0);
             }
             self.next += len as u64;
-            out.push(Block {
-                channels: self.channels,
-                samples,
-            });
+            out.push(Block { channels: self.channels, samples });
         }
     }
 
@@ -200,8 +183,8 @@ impl Mixer {
         out
     }
 
-    /// Stops the track at `t_ns`: what was captured up to then is still emitted by
-    /// [`drain`](Self::drain), nothing after.
+    /// Stops the track at `t_ns`: what was captured up to then is still emitted by [`drain`](Self::drain), nothing
+    /// after.
     pub fn pause(&mut self, t_ns: i64) {
         if matches!(self.state, State::Running) {
             let end = self.idx_of(t_ns);
@@ -262,10 +245,7 @@ mod tests {
     }
 
     fn collect(blocks: &[Block]) -> Vec<f32> {
-        blocks
-            .iter()
-            .flat_map(|b| b.samples.iter().copied())
-            .collect()
+        blocks.iter().flat_map(|b| b.samples.iter().copied()).collect()
     }
 
     #[test]
@@ -275,9 +255,7 @@ mod tests {
         // 10 ms chunks of a ramp; the timestamps wobble by ±4 ms (below the resync threshold).
         for k in 0..300usize {
             let jitter = ((k * 7) % 9) as i64 - 4;
-            let c = chunk(k as i64 * 10 * MS + jitter * MS, 480, |i| {
-                ((k * 480 + i) as f32) / 1e6
-            });
+            let c = chunk(k as i64 * 10 * MS + jitter * MS, 480, |i| ((k * 480 + i) as f32) / 1e6);
             m.push(0, &c);
             out.extend(m.drain(k as i64 * 10 * MS + 10 * MS));
         }
@@ -389,11 +367,7 @@ mod tests {
     fn a_surround_track_takes_surround_and_stereo_sources() {
         let mut m = Mixer::with_channels(&[1.0, 1.0], 0, 6);
         // 100 ms of 5.1 with only the centre on, and of stereo with only the left on.
-        let surround = AudioChunk {
-            time_ns: 0,
-            channels: 6,
-            samples: [0.0, 0.0, 0.5, 0.0, 0.0, 0.0].repeat(4_800),
-        };
+        let surround = AudioChunk { time_ns: 0, channels: 6, samples: [0.0, 0.0, 0.5, 0.0, 0.0, 0.0].repeat(4_800) };
         let stereo = AudioChunk::stereo(0, [0.25, 0.0].repeat(4_800));
         m.push(0, &surround);
         m.push(1, &stereo);

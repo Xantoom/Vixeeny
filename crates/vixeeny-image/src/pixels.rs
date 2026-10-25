@@ -12,12 +12,7 @@ pub struct Bgra<'a> {
 
 impl<'a> Bgra<'a> {
     pub fn new(width: u32, height: u32, stride: usize, data: &'a [u8]) -> Self {
-        Self {
-            width,
-            height,
-            stride,
-            data,
-        }
+        Self { width, height, stride, data }
     }
 
     pub(crate) fn validate(&self) -> Result<(), ImageError> {

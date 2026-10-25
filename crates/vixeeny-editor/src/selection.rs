@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The capture area: drawing a zone, resizing and moving it with handles,
-//! window detection, and where the toolbar goes. Pure geometry; all
-//! coordinates are pixels of the frozen image.
+//! The capture area: drawing a zone, resizing and moving it with handles, window detection, and where the toolbar goes.
+//! Pure geometry; all coordinates are pixels of the frozen image.
 
 use crate::geometry::{Point, Rect};
 
@@ -25,16 +24,7 @@ pub enum Handle {
 }
 
 impl Handle {
-    pub const ALL: [Self; 8] = [
-        Self::NW,
-        Self::N,
-        Self::NE,
-        Self::E,
-        Self::SE,
-        Self::S,
-        Self::SW,
-        Self::W,
-    ];
+    pub const ALL: [Self; 8] = [Self::NW, Self::N, Self::NE, Self::E, Self::SE, Self::S, Self::SW, Self::W];
 
     pub fn position(self, r: &Rect) -> Point {
         let (cx, cy) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
@@ -89,22 +79,14 @@ pub struct Selection {
     windows: Vec<Rect>,
     press: Option<Point>,
     pub hover_window: Option<Rect>,
-    /// Where the zone was just drawn (the pointer still rests on its corner): there the zone
-    /// moves rather than resizes, until the pointer goes away.
+    /// Where the zone was just drawn (the pointer still rests on its corner): there the zone moves rather than resizes,
+    /// until the pointer goes away.
     fresh: Option<Point>,
 }
 
 impl Selection {
     pub fn new(bounds: Rect, windows: Vec<Rect>) -> Self {
-        Self {
-            bounds,
-            rect: None,
-            mode: Mode::Idle,
-            windows,
-            press: None,
-            hover_window: None,
-            fresh: None,
-        }
+        Self { bounds, rect: None, mode: Mode::Idle, windows, press: None, hover_window: None, fresh: None }
     }
 
     /// The zone, once one exists (also while it is being drawn).
@@ -118,8 +100,7 @@ impl Selection {
 
     /// The pointer still rests where the zone was just drawn.
     fn rests_on_fresh_zone(&self, p: Point) -> bool {
-        self.fresh
-            .is_some_and(|at| at.distance(p) <= HANDLE_RADIUS * 2.0)
+        self.fresh.is_some_and(|at| at.distance(p) <= HANDLE_RADIUS * 2.0)
     }
 
     /// A zone exists and no gesture is running: the toolbar can show.
@@ -128,47 +109,38 @@ impl Selection {
     }
 
     fn clamp(&self, p: Point) -> Point {
-        Point::new(
-            p.x.clamp(self.bounds.x, self.bounds.right()),
-            p.y.clamp(self.bounds.y, self.bounds.bottom()),
-        )
+        Point::new(p.x.clamp(self.bounds.x, self.bounds.right()), p.y.clamp(self.bounds.y, self.bounds.bottom()))
     }
 
     fn window_at(&self, p: Point) -> Option<Rect> {
-        self.windows
-            .iter()
-            .find(|w| w.contains(p))
-            .and_then(|w| w.intersect(&self.bounds))
+        self.windows.iter().find(|w| w.contains(p)).and_then(|w| w.intersect(&self.bounds))
     }
 
     /// Which handle (if any) is under `p`.
     pub fn handle_at(&self, p: Point) -> Option<Handle> {
         let r = self.rect?;
-        Handle::ALL
-            .into_iter()
-            .find(|h| h.position(&r).distance(p) <= HANDLE_RADIUS * 1.5)
-            .or_else(|| {
-                // Edges between the handles: grabbing the border resizes too.
-                let e = HANDLE_RADIUS;
-                let inner = r.inflate(-e).contains(p);
-                let outer = r.inflate(e).contains(p);
-                if inner || !outer {
-                    return None;
-                }
-                let (near_l, near_r) = ((p.x - r.x).abs() <= e, (p.x - r.right()).abs() <= e);
-                let (near_t, near_b) = ((p.y - r.y).abs() <= e, (p.y - r.bottom()).abs() <= e);
-                match (near_l, near_r, near_t, near_b) {
-                    (true, _, true, _) => Some(Handle::NW),
-                    (_, true, true, _) => Some(Handle::NE),
-                    (true, _, _, true) => Some(Handle::SW),
-                    (_, true, _, true) => Some(Handle::SE),
-                    (true, ..) => Some(Handle::W),
-                    (_, true, ..) => Some(Handle::E),
-                    (_, _, true, _) => Some(Handle::N),
-                    (.., true) => Some(Handle::S),
-                    _ => None,
-                }
-            })
+        Handle::ALL.into_iter().find(|h| h.position(&r).distance(p) <= HANDLE_RADIUS * 1.5).or_else(|| {
+            // Edges between the handles: grabbing the border resizes too.
+            let e = HANDLE_RADIUS;
+            let inner = r.inflate(-e).contains(p);
+            let outer = r.inflate(e).contains(p);
+            if inner || !outer {
+                return None;
+            }
+            let (near_l, near_r) = ((p.x - r.x).abs() <= e, (p.x - r.right()).abs() <= e);
+            let (near_t, near_b) = ((p.y - r.y).abs() <= e, (p.y - r.bottom()).abs() <= e);
+            match (near_l, near_r, near_t, near_b) {
+                (true, _, true, _) => Some(Handle::NW),
+                (_, true, true, _) => Some(Handle::NE),
+                (true, _, _, true) => Some(Handle::SW),
+                (_, true, _, true) => Some(Handle::SE),
+                (true, ..) => Some(Handle::W),
+                (_, true, ..) => Some(Handle::E),
+                (_, _, true, _) => Some(Handle::N),
+                (.., true) => Some(Handle::S),
+                _ => None,
+            }
+        })
     }
 
     pub fn cursor_at(&self, p: Point) -> CursorHint {
@@ -190,8 +162,8 @@ impl Selection {
     }
 
     pub fn pointer_down(&mut self, p: Point) {
-        // Off the image (around a picture shown smaller than the screen): always a new zone,
-        // never the edge or the handle the point would be clamped onto.
+        // Off the image (around a picture shown smaller than the screen): always a new zone, never the edge or the
+        // handle the point would be clamped onto.
         let outside = self.clamp(p) != p;
         let p = self.clamp(p);
         self.press = Some(p);
@@ -219,11 +191,7 @@ impl Selection {
                 if !self.rests_on_fresh_zone(p) {
                     self.fresh = None;
                 }
-                self.hover_window = if self.rect.is_none() {
-                    self.window_at(p)
-                } else {
-                    None
-                }
+                self.hover_window = if self.rect.is_none() { self.window_at(p) } else { None }
             }
             Mode::Drawing { start } => self.rect = Some(Rect::from_corners(start, p)),
             Mode::Moving { grab, original } => {
@@ -239,9 +207,7 @@ impl Selection {
     pub fn pointer_up(&mut self, p: Point) {
         self.pointer_move(p);
         let p = self.clamp(p);
-        let was_click = self
-            .press
-            .is_some_and(|press| press.distance(p) < CLICK_SLOP);
+        let was_click = self.press.is_some_and(|press| press.distance(p) < CLICK_SLOP);
         if matches!(self.mode, Mode::Drawing { .. }) {
             self.rect = if was_click {
                 // A plain click takes the whole window under the cursor.
@@ -281,8 +247,7 @@ impl Selection {
 }
 
 fn resize(original: &Rect, handle: Handle, p: Point) -> Rect {
-    let (mut l, mut t, mut r, mut b) =
-        (original.x, original.y, original.right(), original.bottom());
+    let (mut l, mut t, mut r, mut b) = (original.x, original.y, original.right(), original.bottom());
     match handle {
         Handle::N => t = p.y,
         Handle::S => b = p.y,
@@ -324,26 +289,15 @@ pub struct BarPlace {
     pub side: BarSide,
 }
 
-/// Places a toolbar of `size` (lying; upright it is turned) by the zone: centred above it, else
-/// centred below, else upright on its right, else on its left (each only when the whole bar is
-/// on the monitor `screen` gives for the middle of that side), else inside at its top. Along its
-/// length the bar slides to stay on the monitor.
-pub fn place_toolbar(
-    zone: &Rect,
-    size: (f32, f32),
-    screen: impl Fn(Point) -> Rect,
-    gap: f32,
-) -> BarPlace {
+/// Places a toolbar of `size` (lying; upright it is turned) by the zone: centred above it, else centred below, else
+/// upright on its right, else on its left (each only when the whole bar is on the monitor `screen` gives for the middle
+/// of that side), else inside at its top. Along its length the bar slides to stay on the monitor.
+pub fn place_toolbar(zone: &Rect, size: (f32, f32), screen: impl Fn(Point) -> Rect, gap: f32) -> BarPlace {
     let (w, h) = size;
-    let centre = |from: f32, length: f32, lo: f32, hi: f32| {
-        (from - length / 2.0).clamp(lo, (hi - length).max(lo))
-    };
+    let centre = |from: f32, length: f32, lo: f32, hi: f32| (from - length / 2.0).clamp(lo, (hi - length).max(lo));
     let (cx, cy) = (zone.x + zone.w / 2.0, zone.y + zone.h / 2.0);
     let lying = |s: &Rect| centre(cx, w, s.x, s.right());
-    let place = |x: f32, y: f32, side: BarSide| BarPlace {
-        at: Point::new(x, y),
-        side,
-    };
+    let place = |x: f32, y: f32, side: BarSide| BarPlace { at: Point::new(x, y), side };
     let s = screen(Point::new(cx, zone.y));
     let y = zone.y - gap - h;
     if y >= s.y && w <= s.w {
@@ -381,10 +335,7 @@ mod tests {
     fn sel() -> Selection {
         Selection::new(
             Rect::new(0.0, 0.0, 1000.0, 600.0),
-            vec![
-                Rect::new(100.0, 100.0, 300.0, 200.0),
-                Rect::new(0.0, 0.0, 1000.0, 600.0),
-            ],
+            vec![Rect::new(100.0, 100.0, 300.0, 200.0), Rect::new(0.0, 0.0, 1000.0, 600.0)],
         )
     }
 
@@ -432,10 +383,7 @@ mod tests {
 
     #[test]
     fn windows_are_clipped_to_the_image() {
-        let mut s = Selection::new(
-            Rect::new(0.0, 0.0, 100.0, 100.0),
-            vec![Rect::new(50.0, 50.0, 200.0, 200.0)],
-        );
+        let mut s = Selection::new(Rect::new(0.0, 0.0, 100.0, 100.0), vec![Rect::new(50.0, 50.0, 200.0, 200.0)]);
         s.pointer_down(p(60.0, 60.0));
         s.pointer_up(p(60.0, 60.0));
         assert_eq!(s.rect(), Some(Rect::new(50.0, 50.0, 50.0, 50.0)));
@@ -464,46 +412,14 @@ mod tests {
     fn every_handle_resizes_its_side() {
         let base = Rect::new(100.0, 100.0, 200.0, 100.0);
         let cases = [
-            (
-                Handle::N,
-                p(200.0, 80.0),
-                Rect::new(100.0, 80.0, 200.0, 120.0),
-            ),
-            (
-                Handle::S,
-                p(200.0, 260.0),
-                Rect::new(100.0, 100.0, 200.0, 160.0),
-            ),
-            (
-                Handle::E,
-                p(350.0, 150.0),
-                Rect::new(100.0, 100.0, 250.0, 100.0),
-            ),
-            (
-                Handle::W,
-                p(50.0, 150.0),
-                Rect::new(50.0, 100.0, 250.0, 100.0),
-            ),
-            (
-                Handle::NE,
-                p(320.0, 90.0),
-                Rect::new(100.0, 90.0, 220.0, 110.0),
-            ),
-            (
-                Handle::NW,
-                p(90.0, 90.0),
-                Rect::new(90.0, 90.0, 210.0, 110.0),
-            ),
-            (
-                Handle::SE,
-                p(320.0, 210.0),
-                Rect::new(100.0, 100.0, 220.0, 110.0),
-            ),
-            (
-                Handle::SW,
-                p(90.0, 210.0),
-                Rect::new(90.0, 100.0, 210.0, 110.0),
-            ),
+            (Handle::N, p(200.0, 80.0), Rect::new(100.0, 80.0, 200.0, 120.0)),
+            (Handle::S, p(200.0, 260.0), Rect::new(100.0, 100.0, 200.0, 160.0)),
+            (Handle::E, p(350.0, 150.0), Rect::new(100.0, 100.0, 250.0, 100.0)),
+            (Handle::W, p(50.0, 150.0), Rect::new(50.0, 100.0, 250.0, 100.0)),
+            (Handle::NE, p(320.0, 90.0), Rect::new(100.0, 90.0, 220.0, 110.0)),
+            (Handle::NW, p(90.0, 90.0), Rect::new(90.0, 90.0, 210.0, 110.0)),
+            (Handle::SE, p(320.0, 210.0), Rect::new(100.0, 100.0, 220.0, 110.0)),
+            (Handle::SW, p(90.0, 210.0), Rect::new(90.0, 100.0, 210.0, 110.0)),
         ];
         for (handle, to, expected) in cases {
             let mut s = sel();
@@ -604,10 +520,7 @@ mod tests {
         // One pixel short above: below.
         let b = at(Rect::new(100.0, 47.0, 400.0, 200.0));
         assert_eq!((b.at, b.side), (p(150.0, 255.0), BarSide::Below));
-        assert_eq!(
-            at(Rect::new(100.0, 48.0, 400.0, 200.0)).side,
-            BarSide::Above
-        );
+        assert_eq!(at(Rect::new(100.0, 48.0, 400.0, 200.0)).side, BarSide::Above);
         // Neither above nor below: upright on the right, centred on the zone's middle.
         let b = at(Rect::new(100.0, 20.0, 400.0, 560.0));
         assert_eq!((b.at, b.side), (p(508.0, 150.0), BarSide::Right));
@@ -622,31 +535,13 @@ mod tests {
     #[test]
     fn the_toolbar_slides_along_to_stay_on_its_screen() {
         let screen = Rect::new(0.0, 0.0, 1000.0, 600.0);
-        let b = place_toolbar(
-            &Rect::new(0.0, 300.0, 100.0, 50.0),
-            (300.0, 40.0),
-            |_| screen,
-            8.0,
-        );
+        let b = place_toolbar(&Rect::new(0.0, 300.0, 100.0, 50.0), (300.0, 40.0), |_| screen, 8.0);
         assert_eq!((b.at.x, b.side), (0.0, BarSide::Above));
-        let b = place_toolbar(
-            &Rect::new(950.0, 300.0, 50.0, 50.0),
-            (300.0, 40.0),
-            |_| screen,
-            8.0,
-        );
+        let b = place_toolbar(&Rect::new(950.0, 300.0, 50.0, 50.0), (300.0, 40.0), |_| screen, 8.0);
         assert_eq!(b.at.x, 700.0);
         // Upright near the top of the screen.
-        let b = place_toolbar(
-            &Rect::new(100.0, 10.0, 400.0, 580.0),
-            (300.0, 40.0),
-            |_| screen,
-            8.0,
-        );
-        assert!(
-            b.side.upright() && b.at.y >= 0.0 && b.at.y + 300.0 <= 600.0,
-            "{b:?}"
-        );
+        let b = place_toolbar(&Rect::new(100.0, 10.0, 400.0, 580.0), (300.0, 40.0), |_| screen, 8.0);
+        assert!(b.side.upright() && b.at.y >= 0.0 && b.at.y + 300.0 <= 600.0, "{b:?}");
     }
 
     #[test]
@@ -655,12 +550,7 @@ mod tests {
         let upper = Rect::new(0.0, 0.0, 1000.0, 600.0);
         let lower = Rect::new(0.0, 600.0, 1000.0, 600.0);
         let screen = |q: Point| if q.y < 600.0 { upper } else { lower };
-        let b = place_toolbar(
-            &Rect::new(100.0, 20.0, 400.0, 1000.0),
-            (300.0, 40.0),
-            screen,
-            8.0,
-        );
+        let b = place_toolbar(&Rect::new(100.0, 20.0, 400.0, 1000.0), (300.0, 40.0), screen, 8.0);
         assert_eq!((b.at.y, b.side), (1028.0, BarSide::Below));
     }
 }

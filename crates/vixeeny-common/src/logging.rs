@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Log files: `<log dir>/<name>.<local date>.log`, one line per event in local time
-//! with its UTC offset, so that a user's "around 11 pm" matches. Light even after years of daily
-//! use: a week of files per program, at most [`DAY_LIMIT`] bytes a day, and a line repeated in a
-//! row is written once with a count. `RUST_LOG` overrides the `info` default. The writer is
-//! synchronous: no helper thread, no wake-ups while idle.
+//! Log files: `<log dir>/<name>.<local date>.log`, one line per event in local time with its UTC offset, so that a
+//! user's "around 11 pm" matches. Light even after years of daily use: a week of files per program, at most
+//! [`DAY_LIMIT`] bytes a day, and a line repeated in a row is written once with a count. `RUST_LOG` overrides the
+//! `info` default. The writer is synchronous: no helper thread, no wake-ups while idle.
 
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -35,8 +34,7 @@ impl FormatTime for LocalTimer {
     }
 }
 
-/// The day's file of one program. Each `write` is one event (the formatter writes a whole line
-/// at once).
+/// The day's file of one program. Each `write` is one event (the formatter writes a whole line at once).
 pub struct DailyFile {
     dir: PathBuf,
     name: String,
@@ -70,11 +68,7 @@ impl DailyFile {
     fn open(&mut self, date: String) {
         let path = self.dir.join(format!("{}.{date}.log", self.name));
         self.file = OpenOptions::new().create(true).append(true).open(path).ok();
-        self.written = self
-            .file
-            .as_ref()
-            .and_then(|f| f.metadata().ok())
-            .map_or(0, |m| m.len());
+        self.written = self.file.as_ref().and_then(|f| f.metadata().ok()).map_or(0, |m| m.len());
         self.full = self.written >= DAY_LIMIT;
         self.date = date;
         self.prune();
@@ -106,10 +100,8 @@ impl DailyFile {
         }
         if self.written + line.len() as u64 > DAY_LIMIT {
             self.full = true;
-            let note = format!(
-                "{}  WARN the log is full for today: nothing more is written until tomorrow\n",
-                (self.clock)()
-            );
+            let note =
+                format!("{}  WARN the log is full for today: nothing more is written until tomorrow\n", (self.clock)());
             let _ = file.write_all(note.as_bytes());
             return;
         }
@@ -122,17 +114,10 @@ impl DailyFile {
         if self.repeats == 0 {
             return;
         }
-        let until = self.last_repeat.map_or_else(String::new, |s| {
-            format!(
-                ", the last at {:02}:{:02}:{:02}",
-                s.hour, s.minute, s.second
-            )
-        });
-        let note = format!(
-            "{}  INFO (the line above came {} more time(s){until})\n",
-            (self.clock)(),
-            self.repeats
-        );
+        let until = self
+            .last_repeat
+            .map_or_else(String::new, |s| format!(", the last at {:02}:{:02}:{:02}", s.hour, s.minute, s.second));
+        let note = format!("{}  INFO (the line above came {} more time(s){until})\n", (self.clock)(), self.repeats);
         self.repeats = 0;
         self.emit(note.as_bytes());
     }
@@ -164,9 +149,9 @@ impl Write for DailyFile {
     }
 }
 
-/// Logs to `<log dir>/<name>.<date>.log`, then writes the line that opens every run: version,
-/// `program` (what this process does), process id and `system` (the Windows version). Failing to
-/// open the log directory is not fatal: the program then runs without logs.
+/// Logs to `<log dir>/<name>.<date>.log`, then writes the line that opens every run: version, `program` (what this
+/// process does), process id and `system` (the Windows version). Failing to open the log directory is not fatal: the
+/// program then runs without logs.
 pub fn init(name: &str, program: &str, clock: Clock, system: &str) {
     let Some(dir) = crate::paths::log_dir() else {
         return;
@@ -187,14 +172,11 @@ pub fn init(name: &str, program: &str, clock: Clock, system: &str) {
         env!("CARGO_PKG_VERSION"),
         std::process::id()
     );
-    // The programs have no console (Windows subsystem): a panic would vanish without a trace.
-    // Its message gives the file and line (the release builds carry no symbols for a trace).
+    // The programs have no console (Windows subsystem): a panic would vanish without a trace. Its message gives the
+    // file and line (the release builds carry no symbols for a trace).
     std::panic::set_hook(Box::new(|info| {
         let thread = std::thread::current();
-        tracing::error!(
-            "crash in thread `{}`: {info}",
-            thread.name().unwrap_or("unnamed")
-        );
+        tracing::error!("crash in thread `{}`: {info}", thread.name().unwrap_or("unnamed"));
     }));
 }
 
@@ -256,21 +238,15 @@ mod tests {
         log.write_all(line("other").as_bytes()).unwrap();
         let text = read("2026-10-10");
         assert_eq!(text.matches("same").count(), 1, "{text}");
-        assert!(
-            text.contains("came 49 more time(s), the last at 01:00:49"),
-            "{text}"
-        );
+        assert!(text.contains("came 49 more time(s), the last at 01:00:49"), "{text}");
         assert!(text.ends_with("other\n"));
 
         // Past the daily limit, one note and nothing more.
         let big = "x".repeat(4000);
         for i in 0..400 {
-            log.write_all(line(&format!("{i} {big}")).as_bytes())
-                .unwrap();
+            log.write_all(line(&format!("{i} {big}")).as_bytes()).unwrap();
         }
-        let len = std::fs::metadata(dir.join("p.2026-10-10.log"))
-            .unwrap()
-            .len();
+        let len = std::fs::metadata(dir.join("p.2026-10-10.log")).unwrap().len();
         assert!(len <= DAY_LIMIT + 200, "{len}");
         assert_eq!(read("2026-10-10").matches("the log is full").count(), 1);
 
@@ -279,10 +255,8 @@ mod tests {
             NOW.store(day * 86_400, Ordering::Relaxed);
             log.write_all(line("a day").as_bytes()).unwrap();
         }
-        let mut names: Vec<_> = std::fs::read_dir(&dir)
-            .unwrap()
-            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-            .collect();
+        let mut names: Vec<_> =
+            std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
         names.sort();
         assert_eq!(names.len(), KEEP_DAYS);
         assert_eq!(names.last().unwrap(), "p.2026-10-19.log");

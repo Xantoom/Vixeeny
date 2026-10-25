@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! OS directories. `VIXEENY_CONFIG_DIR` / `VIXEENY_LOG_DIR` override them (tests, benchmarks,
-//! portable installs).
+//! OS directories. `VIXEENY_CONFIG_DIR` / `VIXEENY_LOG_DIR` override them (tests, benchmarks, portable installs).
 
 use std::path::PathBuf;
 
@@ -10,18 +9,15 @@ fn dirs() -> Option<ProjectDirs> {
     ProjectDirs::from("", "", "Vixeeny")
 }
 
-/// `<folder of the executable>/data` when a `portable.flag` file sits next to the executable
-/// (the portable zip): settings and logs then travel with the folder.
+/// `<folder of the executable>/data` when a `portable.flag` file sits next to the executable (the portable zip):
+/// settings and logs then travel with the folder.
 pub fn portable_dir() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     portable_dir_of(exe.parent()?)
 }
 
 fn portable_dir_of(exe_dir: &std::path::Path) -> Option<PathBuf> {
-    exe_dir
-        .join("portable.flag")
-        .exists()
-        .then(|| exe_dir.join("data"))
+    exe_dir.join("portable.flag").exists().then(|| exe_dir.join("data"))
 }
 
 /// Directory holding `config.toml`.
@@ -45,8 +41,8 @@ pub fn hw_cache_file() -> Option<PathBuf> {
     config_dir().map(|d| d.join("hw_cache.toml"))
 }
 
-/// The shortcuts the daemon could not register (taken by another program or by Windows), one
-/// per line in their canonical spelling: the settings window marks them.
+/// The shortcuts the daemon could not register (taken by another program or by Windows), one per line in their
+/// canonical spelling: the settings window marks them.
 pub fn hotkeys_taken_file() -> Option<PathBuf> {
     cache_dir().map(|d| d.join("hotkeys-taken.txt"))
 }
@@ -69,11 +65,7 @@ pub fn log_dir() -> Option<PathBuf> {
         return Some(dir.join("logs"));
     }
     // %LOCALAPPDATA%\Vixeeny\data\logs
-    dirs().map(|d| {
-        d.state_dir()
-            .unwrap_or_else(|| d.data_local_dir())
-            .join("logs")
-    })
+    dirs().map(|d| d.state_dir().unwrap_or_else(|| d.data_local_dir()).join("logs"))
 }
 
 /// Directory for what crashes leave (notes and minidumps), beside the logs.
@@ -81,19 +73,14 @@ pub fn crash_dir() -> Option<PathBuf> {
     log_dir().and_then(|d| d.parent().map(|p| p.join("crashes")))
 }
 
-/// Expands the `{pictures}` and `{videos}` placeholders of the `[paths]` settings. Unknown
-/// placeholders are left alone; a leading `~` is not special.
+/// Expands the `{pictures}` and `{videos}` placeholders of the `[paths]` settings. Unknown placeholders are left alone;
+/// a leading `~` is not special.
 pub fn expand_user_dir(template: &str) -> Option<PathBuf> {
     let user = UserDirs::new()?;
-    let pictures = user
-        .picture_dir()
-        .map_or_else(|| user.home_dir().join("Pictures"), PathBuf::from);
-    let videos = user
-        .video_dir()
-        .map_or_else(|| user.home_dir().join("Videos"), PathBuf::from);
-    let expanded = template
-        .replace("{pictures}", &pictures.to_string_lossy())
-        .replace("{videos}", &videos.to_string_lossy());
+    let pictures = user.picture_dir().map_or_else(|| user.home_dir().join("Pictures"), PathBuf::from);
+    let videos = user.video_dir().map_or_else(|| user.home_dir().join("Videos"), PathBuf::from);
+    let expanded =
+        template.replace("{pictures}", &pictures.to_string_lossy()).replace("{videos}", &videos.to_string_lossy());
     Some(PathBuf::from(expanded))
 }
 
@@ -102,23 +89,17 @@ pub const DEFAULT_IMAGES: &str = "{pictures}";
 pub const DEFAULT_VIDEOS: &str = "{videos}";
 pub const DEFAULT_REPLAYS: &str = "{videos}/Replay";
 
-/// Whether a `[paths]` setting can hold files: it is a folder, or it can be made one (the
-/// nearest part of it that exists is a folder: a drive that is not plugged in has none).
-/// Nothing is created.
+/// Whether a `[paths]` setting can hold files: it is a folder, or it can be made one (the nearest part of it that
+/// exists is a folder: a drive that is not plugged in has none). Nothing is created.
 pub fn reachable_dir(template: &str) -> bool {
     expand_user_dir(template).is_some_and(|dir| {
-        dir.is_absolute()
-            && dir
-                .ancestors()
-                .find(|a| a.exists())
-                .is_some_and(std::path::Path::is_dir)
+        dir.is_absolute() && dir.ancestors().find(|a| a.exists()).is_some_and(std::path::Path::is_dir)
     })
 }
 
-/// The folder a file is written to, made ready when it is needed (never before): `setting`'s,
-/// created when missing. When it cannot be (a drive unplugged, a name Windows refuses, a file
-/// in its place), `fallback`'s, the default one of that kind: a capture is not lost to a folder
-/// gone. `None`: neither can be made.
+/// The folder a file is written to, made ready when it is needed (never before): `setting`'s, created when missing.
+/// When it cannot be (a drive unplugged, a name Windows refuses, a file in its place), `fallback`'s, the default one of
+/// that kind: a capture is not lost to a folder gone. `None`: neither can be made.
 pub fn ready_dir(setting: &str, fallback: &str) -> Option<PathBuf> {
     let make = |dir: &PathBuf| std::fs::create_dir_all(dir).is_ok() && dir.is_dir();
     let wanted = expand_user_dir(setting)?;
@@ -126,11 +107,7 @@ pub fn ready_dir(setting: &str, fallback: &str) -> Option<PathBuf> {
         return Some(wanted);
     }
     let other = expand_user_dir(fallback)?;
-    tracing::warn!(
-        "{} cannot be used, the files go to {}",
-        wanted.display(),
-        other.display()
-    );
+    tracing::warn!("{} cannot be used, the files go to {}", wanted.display(), other.display());
     make(&other).then_some(other)
 }
 
@@ -165,10 +142,7 @@ mod tests {
         let file = base.join("file");
         std::fs::write(&file, "").unwrap();
         assert!(!reachable_dir(&text(&file.join("sub"))));
-        assert_eq!(
-            ready_dir(&text(&file.join("sub")), &text(&fallback)),
-            Some(fallback.clone())
-        );
+        assert_eq!(ready_dir(&text(&file.join("sub")), &text(&fallback)), Some(fallback.clone()));
         assert!(fallback.is_dir());
         assert!(!reachable_dir("relative/folder"));
         std::fs::remove_dir_all(&base).unwrap();
@@ -180,10 +154,7 @@ mod tests {
             assert!(dir.ends_with("Vixeeny"));
             assert!(!dir.to_string_lossy().contains('{'));
         }
-        assert_eq!(
-            expand_user_dir("/abs/{other}").unwrap_or_default(),
-            PathBuf::from("/abs/{other}")
-        );
+        assert_eq!(expand_user_dir("/abs/{other}").unwrap_or_default(), PathBuf::from("/abs/{other}"));
     }
 }
 

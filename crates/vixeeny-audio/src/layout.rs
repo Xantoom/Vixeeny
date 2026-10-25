@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Channel layouts. Tracks are mono-free: 2 (stereo), 6 (5.1) or 8 (7.1) interleaved channels,
-//! in the order Windows and FFmpeg both use: FL FR FC LFE BL BR (SL SR).
+//! Channel layouts. Tracks are mono-free: 2 (stereo), 6 (5.1) or 8 (7.1) interleaved channels, in the order Windows and
+//! FFmpeg both use: FL FR FC LFE BL BR (SL SR).
 
 use std::borrow::Cow;
 
 /// Gain of the centre and surround channels when folded into the front pair (-3 dB).
 const MIX: f32 = std::f32::consts::FRAC_1_SQRT_2;
 
-/// The channel count a track uses for a source of `native` channels, at most `max`: stereo,
-/// 5.1 or 7.1 (anything else is not worth a track of its own).
+/// The channel count a track uses for a source of `native` channels, at most `max`: stereo, 5.1 or 7.1 (anything else
+/// is not worth a track of its own).
 pub fn track_channels(native: usize, max: usize) -> usize {
     let n = native.min(max);
     if n >= 8 {

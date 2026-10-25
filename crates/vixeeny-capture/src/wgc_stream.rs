@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Windows Graphics Capture, streaming mode: a capture session that stays open and
-//! delivers every frame with the OS monotonic timestamp (`SystemRelativeTime`, the master clock
-//! of the recording pipeline) as BGRA in RAM. WGC only produces a frame when the content
-//! changes: the consumer repeats the last one to keep a constant frame rate.
+//! Windows Graphics Capture, streaming mode: a capture session that stays open and delivers every frame with the OS
+//! monotonic timestamp (`SystemRelativeTime`, the master clock of the recording pipeline) as BGRA in RAM. WGC only
+//! produces a frame when the content changes: the consumer repeats the last one to keep a constant frame rate.
 //!
-//! This is the CPU path (GPU → staging texture → RAM). The zero-copy GPU paths build on the
-//! same session: the hardware encoders take each frame as a texture ([`GpuCapture`]), and a
-//! viewer on the graphics card takes the newest one when it can ([`VideoStream::start_held`]).
+//! This is the CPU path (GPU → staging texture → RAM). The zero-copy GPU paths build on the same session: the hardware
+//! encoders take each frame as a texture ([`GpuCapture`]), and a viewer on the graphics card takes the newest one when
+//! it can ([`VideoStream::start_held`]).
 
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, sync_channel};
 use std::sync::{Arc, Mutex};
@@ -24,15 +23,13 @@ use windows::Graphics::SizeInt32;
 use windows::Win32::Foundation::{HMODULE, HWND};
 use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11_BOX, D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAP_READ,
-    D3D11_MAPPED_SUBRESOURCE, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
-    D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
+    D3D11_BOX, D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE,
+    D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING, D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext,
+    ID3D11Texture2D,
 };
 use windows::Win32::Graphics::Dxgi::IDXGIDevice;
 use windows::Win32::Graphics::Gdi::HMONITOR;
-use windows::Win32::System::WinRT::Direct3D11::{
-    CreateDirect3D11DeviceFromDXGIDevice, IDirect3DDxgiInterfaceAccess,
-};
+use windows::Win32::System::WinRT::Direct3D11::{CreateDirect3D11DeviceFromDXGIDevice, IDirect3DDxgiInterfaceAccess};
 use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop;
 use windows::core::{IInspectable, Interface, factory};
 
@@ -43,11 +40,7 @@ use crate::{CaptureError, CpuFrame};
 const BACKLOG: usize = 3;
 
 fn pixel_format(hdr: bool) -> DirectXPixelFormat {
-    if hdr {
-        DirectXPixelFormat::R16G16B16A16Float
-    } else {
-        DirectXPixelFormat::B8G8R8A8UIntNormalized
-    }
+    if hdr { DirectXPixelFormat::R16G16B16A16Float } else { DirectXPixelFormat::B8G8R8A8UIntNormalized }
 }
 
 /// What to follow.
@@ -68,19 +61,17 @@ pub enum StreamTarget {
 pub struct CapturedFrame {
     /// `true`: `frame.data` holds RGBA half floats (scRGB, 8 bytes per pixel) instead of BGRA8.
     pub hdr: bool,
-    /// Nanoseconds on the OS monotonic clock (the same clock as
-    /// `vixeeny_platform::monotonic_ns`).
+    /// Nanoseconds on the OS monotonic clock (the same clock as `vixeeny_platform::monotonic_ns`).
     pub time_ns: i64,
     pub frame: CpuFrame,
 }
 
-/// Receives each frame as a GPU texture: `(texture, content size, time in ns)`. The texture is
-/// only valid during the call (it goes back to the capture pool afterwards): convert or copy it
-/// there. Returns whether the frame was taken.
+/// Receives each frame as a GPU texture: `(texture, content size, time in ns)`. The texture is only valid during the
+/// call (it goes back to the capture pool afterwards): convert or copy it there. Returns whether the frame was taken.
 pub type TextureSink = Box<dyn FnMut(&ID3D11Texture2D, (u32, u32), i64) -> bool + Send>;
 
-/// Which frames a recording keeps, asked before a frame is read or converted: a frame the
-/// recording would drop costs nothing. Called on a capture thread.
+/// Which frames a recording keeps, asked before a frame is read or converted: a frame the recording would drop costs
+/// nothing. Called on a capture thread.
 pub trait Gate: Send + Sync {
     /// Whether a frame captured at `time_ns` would be kept.
     fn wanted(&self, time_ns: i64) -> bool;
@@ -98,8 +89,8 @@ pub struct Pacing {
 /// Told (on a capture thread) that a frame is waiting in [`VideoStream::recv`].
 pub type Notify = Box<dyn Fn() + Send + Sync>;
 
-/// The newest frame of a stream, kept on the graphics card (see [`VideoStream::start_held`]).
-/// It goes back to the capture pool when dropped: the pool has two, so hold at most one.
+/// The newest frame of a stream, kept on the graphics card (see [`VideoStream::start_held`]). It goes back to the
+/// capture pool when dropped: the pool has two, so hold at most one.
 pub struct HeldFrame {
     /// The whole picture of the monitor or window, BGRA, on the stream's device.
     pub texture: ID3D11Texture2D,
@@ -155,44 +146,29 @@ struct Shared {
     buffers: BufferPool,
 }
 
-// SAFETY: a D3D11 device is free-threaded; the immediate context and the staging texture are
-// only used under their mutexes; the other fields are WinRT objects (agile) or plain data.
+// SAFETY: a D3D11 device is free-threaded; the immediate context and the staging texture are only used under their
+// mutexes; the other fields are WinRT objects (agile) or plain data.
 unsafe impl Send for Shared {}
 // SAFETY: see above.
 unsafe impl Sync for Shared {}
 
 impl Shared {
     /// Copies `texture` (its `content` part, cropped to the region) into a CPU frame.
-    fn read(
-        &self,
-        texture: &ID3D11Texture2D,
-        content: SizeInt32,
-    ) -> Result<CpuFrame, CaptureError> {
+    fn read(&self, texture: &ID3D11Texture2D, content: SizeInt32) -> Result<CpuFrame, CaptureError> {
         let (cw, ch) = (content.Width.max(1) as u32, content.Height.max(1) as u32);
         let (x, y, w, h) = match self.region {
             Some(r) => {
                 let x = r.x.max(0) as u32;
                 let y = r.y.max(0) as u32;
-                (
-                    x,
-                    y,
-                    r.width.min(cw.saturating_sub(x)),
-                    r.height.min(ch.saturating_sub(y)),
-                )
+                (x, y, r.width.min(cw.saturating_sub(x)), r.height.min(ch.saturating_sub(y)))
             }
             None => (0, 0, cw, ch),
         };
         if w == 0 || h == 0 {
             return Err(CaptureError::InvalidRegion);
         }
-        let context = self
-            .context
-            .lock()
-            .map_err(|_| CaptureError::Os("capture lock poisoned".into()))?;
-        let mut cache = self
-            .staging
-            .lock()
-            .map_err(|_| CaptureError::Os("capture lock poisoned".into()))?;
+        let context = self.context.lock().map_err(|_| CaptureError::Os("capture lock poisoned".into()))?;
+        let mut cache = self.staging.lock().map_err(|_| CaptureError::Os("capture lock poisoned".into()))?;
         if cache.as_ref().is_none_or(|(_, size)| *size != (w, h)) {
             let mut desc = D3D11_TEXTURE2D_DESC::default();
             // SAFETY: `desc` is a valid out-pointer.
@@ -205,38 +181,24 @@ impl Shared {
             desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
             let mut staging = None;
             // SAFETY: `desc` describes a staging texture; the out-pointer is valid.
-            unsafe {
-                self.device
-                    .CreateTexture2D(&desc, None, Some(&raw mut staging))
-            }
-            .map_err(os("CreateTexture2D"))?;
+            unsafe { self.device.CreateTexture2D(&desc, None, Some(&raw mut staging)) }
+                .map_err(os("CreateTexture2D"))?;
             let staging = staging.ok_or_else(|| CaptureError::Os("no staging texture".into()))?;
             *cache = Some((staging, (w, h)));
         }
         let Some((staging, _)) = cache.as_ref() else {
             return Err(CaptureError::Os("no staging texture".into()));
         };
-        let source = D3D11_BOX {
-            left: x,
-            top: y,
-            front: 0,
-            right: x + w,
-            bottom: y + h,
-            back: 1,
-        };
-        // SAFETY: both textures belong to this device; the box lies inside the source (it was
-        // clamped to the content size) and the destination has exactly its size.
-        unsafe {
-            context.CopySubresourceRegion(staging, 0, 0, 0, 0, texture, 0, Some(&raw const source))
-        };
+        let source = D3D11_BOX { left: x, top: y, front: 0, right: x + w, bottom: y + h, back: 1 };
+        // SAFETY: both textures belong to this device; the box lies inside the source (it was clamped to the content
+        // size) and the destination has exactly its size.
+        unsafe { context.CopySubresourceRegion(staging, 0, 0, 0, 0, texture, 0, Some(&raw const source)) };
         let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
         // SAFETY: the staging texture has CPU read access; `mapped` is a valid out-pointer.
-        unsafe { context.Map(staging, 0, D3D11_MAP_READ, 0, Some(&raw mut mapped)) }
-            .map_err(os("Map"))?;
+        unsafe { context.Map(staging, 0, D3D11_MAP_READ, 0, Some(&raw mut mapped)) }.map_err(os("Map"))?;
         let stride = mapped.RowPitch as usize;
         // SAFETY: a mapped texture exposes `RowPitch * Height` readable bytes until `Unmap`.
-        let pixels =
-            unsafe { std::slice::from_raw_parts(mapped.pData.cast::<u8>(), stride * h as usize) };
+        let pixels = unsafe { std::slice::from_raw_parts(mapped.pData.cast::<u8>(), stride * h as usize) };
         let mut data = self.buffers.take(pixels.len());
         data.extend_from_slice(pixels);
         // SAFETY: matches the successful Map above.
@@ -270,9 +232,8 @@ impl VideoStream {
         Self::start_with(target, cursor, hdr, None, None)
     }
 
-    /// Like [`start`](Self::start); with `gpu`, frames go to its sink as textures and `recv`
-    /// only reports errors (the stream ending). With `pacing`, only the frames its gate wants
-    /// are read or converted.
+    /// Like [`start`](Self::start); with `gpu`, frames go to its sink as textures and `recv` only reports errors (the
+    /// stream ending). With `pacing`, only the frames its gate wants are read or converted.
     pub fn start_with(
         target: &StreamTarget,
         cursor: bool,
@@ -283,11 +244,10 @@ impl VideoStream {
         Self::open(target, cursor, hdr, gpu, None, pacing)
     }
 
-    /// Captures on `device` and keeps only the newest frame, on the graphics card, until
-    /// [`take_held`](Self::take_held) takes it; `notify` is called each time one waits. No
-    /// more than one frame per `min_interval` is made (Windows 11 24H2 and later; older
-    /// versions make one per change). For a viewer: it shows the newest picture when it can,
-    /// and a frame left waiting is replaced, never queued.
+    /// Captures on `device` and keeps only the newest frame, on the graphics card, until [`take_held`](Self::take_held)
+    /// takes it; `notify` is called each time one waits. No more than one frame per `min_interval` is made (Windows 11
+    /// 24H2 and later; older versions make one per change). For a viewer: it shows the newest picture when it can, and
+    /// a frame left waiting is replaced, never queued.
     pub fn start_held(
         target: &StreamTarget,
         device: ID3D11Device,
@@ -295,19 +255,10 @@ impl VideoStream {
         notify: Notify,
     ) -> Result<Self, CaptureError> {
         let held = Held::default();
-        let stream = Self::open_with(
-            target,
-            false,
-            false,
-            Source::Held(device, held.clone()),
-            Some(notify),
-            None,
-        )?;
+        let stream = Self::open_with(target, false, false, Source::Held(device, held.clone()), Some(notify), None)?;
         if let Some(interval) = min_interval {
             let ticks = i64::try_from(interval.as_nanos() / 100).unwrap_or(i64::MAX);
-            let _ = stream
-                .session
-                .SetMinUpdateInterval(windows::Foundation::TimeSpan { Duration: ticks });
+            let _ = stream.session.SetMinUpdateInterval(windows::Foundation::TimeSpan { Duration: ticks });
         }
         Ok(stream)
     }
@@ -317,14 +268,9 @@ impl VideoStream {
         self.held.as_ref()?.lock().ok()?.take()
     }
 
-    /// Like [`start`](Self::start), calling `notify` each time a frame waits in `recv`: the
-    /// consumer reads them when told rather than waiting on `recv`.
-    pub fn start_notify(
-        target: &StreamTarget,
-        cursor: bool,
-        hdr: bool,
-        notify: Notify,
-    ) -> Result<Self, CaptureError> {
+    /// Like [`start`](Self::start), calling `notify` each time a frame waits in `recv`: the consumer reads them when
+    /// told rather than waiting on `recv`.
+    pub fn start_notify(target: &StreamTarget, cursor: bool, hdr: bool, notify: Notify) -> Result<Self, CaptureError> {
         Self::open(target, cursor, hdr, None, Some(notify), None)
     }
 
@@ -349,12 +295,9 @@ impl VideoStream {
         pacing: Option<Pacing>,
     ) -> Result<Self, CaptureError> {
         if !GraphicsCaptureSession::IsSupported().map_err(os("IsSupported"))? {
-            return Err(CaptureError::Os(
-                "Windows Graphics Capture is not available".into(),
-            ));
+            return Err(CaptureError::Os("Windows Graphics Capture is not available".into()));
         }
-        let interop =
-            factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>().map_err(os("interop"))?;
+        let interop = factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>().map_err(os("interop"))?;
         let (item, region): (GraphicsCaptureItem, Option<PhysicalRect>) = match target {
             // SAFETY: the handles come from the OS enumeration; a stale one makes the call fail.
             StreamTarget::Monitor(m) => (
@@ -370,8 +313,7 @@ impl VideoStream {
             ),
             StreamTarget::Window(w) => (
                 // SAFETY: as above.
-                unsafe { interop.CreateForWindow(HWND(w.0 as usize as *mut _)) }
-                    .map_err(os("CreateForWindow"))?,
+                unsafe { interop.CreateForWindow(HWND(w.0 as usize as *mut _)) }.map_err(os("CreateForWindow"))?,
                 None,
             ),
         };
@@ -383,8 +325,7 @@ impl VideoStream {
             Source::Held(device, slot) => {
                 held = Some(slot);
                 // SAFETY: plain call. The context is never used from here: frames are only held.
-                let context =
-                    unsafe { device.GetImmediateContext() }.map_err(os("GetImmediateContext"))?;
+                let context = unsafe { device.GetImmediateContext() }.map_err(os("GetImmediateContext"))?;
                 (device, context, None)
             }
             Source::Cpu => {
@@ -433,51 +374,28 @@ impl VideoStream {
             last_size: Mutex::new(size),
             buffers: buffers.clone(),
         });
-        let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
-            &winrt_device,
-            pixel_format(hdr),
-            2,
-            size,
-        )
-        .map_err(os("CreateFreeThreaded"))?;
+        let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(&winrt_device, pixel_format(hdr), 2, size)
+            .map_err(os("CreateFreeThreaded"))?;
         let (tx, rx) = sync_channel(BACKLOG);
-        let arrived = pool
-            .FrameArrived(&frame_handler(shared, tx.clone()))
-            .map_err(os("FrameArrived"))?;
+        let arrived = pool.FrameArrived(&frame_handler(shared, tx.clone())).map_err(os("FrameArrived"))?;
         let closed = item
             .Closed(&TypedEventHandler::new(move |_, _| {
-                let _ = tx.try_send(Err(CaptureError::Os(
-                    "the captured window was closed".into(),
-                )));
+                let _ = tx.try_send(Err(CaptureError::Os("the captured window was closed".into())));
                 Ok(())
             }))
             .map_err(os("Closed"))?;
-        let session = pool
-            .CreateCaptureSession(&item)
-            .map_err(os("CreateCaptureSession"))?;
+        let session = pool.CreateCaptureSession(&item).map_err(os("CreateCaptureSession"))?;
         let _ = session.SetIsCursorCaptureEnabled(cursor);
         let _ = session.SetIsBorderRequired(false);
-        if let Some(Pacing {
-            fps: (num, den), ..
-        }) = pacing
-        {
-            // Windows 11 24H2 and later: no more than two frames per period of the recording
-            // (a screen faster than that skips its other refreshes), so every period still gets
-            // a frame. Older versions refuse it and deliver every refresh: the gate sorts them.
+        if let Some(Pacing { fps: (num, den), .. }) = pacing {
+            // Windows 11 24H2 and later: no more than two frames per period of the recording (a screen faster than that
+            // skips its other refreshes), so every period still gets a frame. Older versions refuse it and deliver
+            // every refresh: the gate sorts them.
             let ticks = i64::from(den) * 10_000_000 / (2 * i64::from(num.max(1)));
             let _ = session.SetMinUpdateInterval(windows::Foundation::TimeSpan { Duration: ticks });
         }
         session.StartCapture().map_err(os("StartCapture"))?;
-        Ok(Self {
-            pool,
-            session,
-            item,
-            arrived,
-            closed,
-            rx,
-            buffers,
-            held,
-        })
+        Ok(Self { pool, session, item, arrived, closed, rx, buffers, held })
     }
 
     /// Where the pixels of the CPU frames come from: hand them back once used.
@@ -508,97 +426,84 @@ fn frame_handler(
     shared: Arc<Shared>,
     tx: SyncSender<Result<CapturedFrame, CaptureError>>,
 ) -> TypedEventHandler<Direct3D11CaptureFramePool, IInspectable> {
-    TypedEventHandler::new(
-        move |pool: windows::core::Ref<'_, Direct3D11CaptureFramePool>, _| {
-            let Some(pool) = pool.as_ref() else {
-                return Ok(());
-            };
-            // Only the newest frame matters: drain the pool.
-            let mut newest = None;
-            while let Ok(frame) = pool.TryGetNextFrame() {
-                newest = Some(frame);
-            }
-            let Some(frame) = newest else { return Ok(()) };
-            let content = frame.ContentSize()?;
-            // A window that was resized needs a pool of the new size.
-            if let Ok(mut last) = shared.last_size.lock()
-                && (last.Width, last.Height) != (content.Width, content.Height)
-            {
-                *last = content;
-                let _ = pool.Recreate(&shared.winrt_device, pixel_format(shared.hdr), 2, content);
-            }
-            let time_ns = frame.SystemRelativeTime()?.Duration.saturating_mul(100);
-            // A frame the recording would drop is neither read nor converted.
-            if let Some(gate) = &shared.gate
-                && !gate.wanted(time_ns)
-            {
-                return Ok(());
-            }
-            let surface = frame.Surface()?;
-            let access: IDirect3DDxgiInterfaceAccess = surface.cast()?;
-            // SAFETY: the surface is backed by a D3D11 texture on our device.
-            let texture: ID3D11Texture2D = unsafe { access.GetInterface() }?;
-            if let Some(held) = &shared.held {
-                let frame = HeldFrame {
-                    texture,
-                    content: (content.Width.max(1) as u32, content.Height.max(1) as u32),
-                    time_ns,
-                    frame,
-                };
-                // The frame waiting before goes back to the pool.
-                let old = held.lock().ok().and_then(|mut slot| slot.replace(frame));
-                drop(old);
-                if let Some(notify) = &shared.notify {
-                    notify();
-                }
-                return Ok(());
-            }
-            if let Some(sink) = &shared.sink {
-                if let Ok(mut sink) = sink.lock()
-                    && sink(
-                        &texture,
-                        (content.Width.max(1) as u32, content.Height.max(1) as u32),
-                        time_ns,
-                    )
-                    && let Some(gate) = &shared.gate
-                {
-                    gate.taken(time_ns);
-                }
-                return Ok(());
-            }
-            let result = shared.read(&texture, content).map(|frame| CapturedFrame {
-                hdr: shared.hdr,
+    TypedEventHandler::new(move |pool: windows::core::Ref<'_, Direct3D11CaptureFramePool>, _| {
+        let Some(pool) = pool.as_ref() else {
+            return Ok(());
+        };
+        // Only the newest frame matters: drain the pool.
+        let mut newest = None;
+        while let Ok(frame) = pool.TryGetNextFrame() {
+            newest = Some(frame);
+        }
+        let Some(frame) = newest else { return Ok(()) };
+        let content = frame.ContentSize()?;
+        // A window that was resized needs a pool of the new size.
+        if let Ok(mut last) = shared.last_size.lock()
+            && (last.Width, last.Height) != (content.Width, content.Height)
+        {
+            *last = content;
+            let _ = pool.Recreate(&shared.winrt_device, pixel_format(shared.hdr), 2, content);
+        }
+        let time_ns = frame.SystemRelativeTime()?.Duration.saturating_mul(100);
+        // A frame the recording would drop is neither read nor converted.
+        if let Some(gate) = &shared.gate
+            && !gate.wanted(time_ns)
+        {
+            return Ok(());
+        }
+        let surface = frame.Surface()?;
+        let access: IDirect3DDxgiInterfaceAccess = surface.cast()?;
+        // SAFETY: the surface is backed by a D3D11 texture on our device.
+        let texture: ID3D11Texture2D = unsafe { access.GetInterface() }?;
+        if let Some(held) = &shared.held {
+            let frame = HeldFrame {
+                texture,
+                content: (content.Width.max(1) as u32, content.Height.max(1) as u32),
                 time_ns,
                 frame,
-            });
-            // A full queue drops the frame: the consumer is behind.
-            let read = result.is_ok();
-            if tx.try_send(result).is_ok() {
-                if read && let Some(gate) = &shared.gate {
-                    gate.taken(time_ns);
-                }
-                if let Some(notify) = &shared.notify {
-                    notify();
-                }
+            };
+            // The frame waiting before goes back to the pool.
+            let old = held.lock().ok().and_then(|mut slot| slot.replace(frame));
+            drop(old);
+            if let Some(notify) = &shared.notify {
+                notify();
             }
-            Ok(())
-        },
-    )
+            return Ok(());
+        }
+        if let Some(sink) = &shared.sink {
+            if let Ok(mut sink) = sink.lock()
+                && sink(&texture, (content.Width.max(1) as u32, content.Height.max(1) as u32), time_ns)
+                && let Some(gate) = &shared.gate
+            {
+                gate.taken(time_ns);
+            }
+            return Ok(());
+        }
+        let result = shared.read(&texture, content).map(|frame| CapturedFrame { hdr: shared.hdr, time_ns, frame });
+        // A full queue drops the frame: the consumer is behind.
+        let read = result.is_ok();
+        if tx.try_send(result).is_ok() {
+            if read && let Some(gate) = &shared.gate {
+                gate.taken(time_ns);
+            }
+            if let Some(notify) = &shared.notify {
+                notify();
+            }
+        }
+        Ok(())
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// The editor's live view: the newest frame waits on the graphics card, on the device
-    /// given, the size of the monitor, and is replaced rather than queued.
+    /// The editor's live view: the newest frame waits on the graphics card, on the device given, the size of the
+    /// monitor, and is replaced rather than queued.
     #[test]
     fn a_held_stream_keeps_the_newest_frame_on_the_device_given() {
         vixeeny_platform::ensure_dpi_aware();
-        let Some(monitor) = vixeeny_platform::monitors()
-            .ok()
-            .and_then(|m| m.into_iter().next())
-        else {
+        let Some(monitor) = vixeeny_platform::monitors().ok().and_then(|m| m.into_iter().next()) else {
             vixeeny_common::skip_test("no monitor");
             return;
         };
@@ -647,10 +552,7 @@ mod tests {
         let mut desc = D3D11_TEXTURE2D_DESC::default();
         // SAFETY: `desc` is a valid out-pointer.
         unsafe { frame.texture.GetDesc(&mut desc) };
-        assert_eq!(
-            desc.Format,
-            windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM
-        );
+        assert_eq!(desc.Format, windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM);
         // SAFETY: plain call.
         let owner = unsafe { frame.texture.GetDevice() }.expect("device");
         assert_eq!(owner, device, "the frame is on the device given");

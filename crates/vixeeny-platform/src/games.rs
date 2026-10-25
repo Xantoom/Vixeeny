@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! What tells a game from another program that fills the screen: where the launchers install
-//! their games, the programs Windows knows as games (Game Bar), and exclusive full screen.
-//! Nothing decides alone: [`is_game`] weighs these signals with the user's own lists.
+//! What tells a game from another program that fills the screen: where the launchers install their games, the programs
+//! Windows knows as games (Game Bar), and exclusive full screen. Nothing decides alone: [`is_game`] weighs these
+//! signals with the user's own lists.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::ERROR_SUCCESS;
 use windows::Win32::System::Registry::{
-    HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, RRF_RT_REG_SZ, RegCloseKey,
-    RegEnumKeyExW, RegGetValueW, RegOpenKeyExW,
+    HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, RRF_RT_REG_SZ, RegCloseKey, RegEnumKeyExW, RegGetValueW,
+    RegOpenKeyExW,
 };
 use windows::core::{HSTRING, PWSTR};
 
@@ -54,16 +54,15 @@ pub struct Facts {
     pub protected: bool,
 }
 
-/// The user's word: programs that are games even without a sign of it, and programs that never
-/// are (executable names, lower case).
+/// The user's word: programs that are games even without a sign of it, and programs that never are (executable names,
+/// lower case).
 #[derive(Debug, Clone, Copy)]
 pub struct Lists<'a> {
     pub always: &'a [String],
     pub never: &'a [String],
 }
 
-/// Whether `exe` (the executable's file name, lower case) is a game, from the `facts` and the
-/// user's lists.
+/// Whether `exe` (the executable's file name, lower case) is a game, from the `facts` and the user's lists.
 pub fn is_game(exe: &str, facts: Facts, lists: Lists<'_>) -> bool {
     if !facts.full_screen || lists.never.iter().any(|e| e == exe) {
         return false;
@@ -81,14 +80,12 @@ pub fn is_launcher(exe: &str) -> bool {
 
 /// The executable's file name, lower case, as the lists hold it.
 pub fn exe_name(path: &str) -> Option<String> {
-    Path::new(path)
-        .file_name()
-        .map(|n| n.to_string_lossy().to_lowercase())
+    Path::new(path).file_name().map(|n| n.to_string_lossy().to_lowercase())
 }
 
-/// Whether process `pid` is part of the game running as process `game`: the game itself, a
-/// process it started, or a program installed with it. A game's in-game web pages (shop, news,
-/// events) may come in front in a full-screen window of another process: it is still the game.
+/// Whether process `pid` is part of the game running as process `game`: the game itself, a process it started, or a
+/// program installed with it. A game's in-game web pages (shop, news, events) may come in front in a full-screen window
+/// of another process: it is still the game.
 pub fn part_of_game(pid: u32, game: u32) -> bool {
     if pid == game {
         return true;
@@ -106,11 +103,10 @@ pub fn part_of_game(pid: u32, game: u32) -> bool {
     }
 }
 
-/// Whether `exe` lies in the folder of `game_exe` or below it. Not when that folder is too
-/// near the root of the disk to be the game's own (`C:\Program Files`).
+/// Whether `exe` lies in the folder of `game_exe` or below it. Not when that folder is too near the root of the disk to
+/// be the game's own (`C:\Program Files`).
 pub fn installed_with(exe: &str, game_exe: &str) -> bool {
-    let (Some(dir), Some(game_dir)) = (Path::new(exe).parent(), Path::new(game_exe).parent())
-    else {
+    let (Some(dir), Some(game_dir)) = (Path::new(exe).parent(), Path::new(game_exe).parent()) else {
         return false;
     };
     let words = |p: &Path| {
@@ -122,12 +118,7 @@ pub fn installed_with(exe: &str, game_exe: &str) -> bool {
             .collect::<Vec<_>>()
     };
     let (dir, game_dir) = (words(dir), words(game_dir));
-    let root = |p: &str| {
-        Path::new(p)
-            .components()
-            .next()
-            .map(|c| c.as_os_str().to_ascii_lowercase())
-    };
+    let root = |p: &str| Path::new(p).components().next().map(|c| c.as_os_str().to_ascii_lowercase());
     game_dir.len() >= 2 && root(exe) == root(game_exe) && dir.starts_with(&game_dir)
 }
 
@@ -175,8 +166,8 @@ impl Detector {
         self.game(window, lists)
     }
 
-    /// A game protected by an anti-cheat hides its executable's path: it is then known by its
-    /// file name alone (in `exe_path` too).
+    /// A game protected by an anti-cheat hides its executable's path: it is then known by its file name alone (in
+    /// `exe_path` too).
     fn game(&mut self, mut window: WindowInfo, lists: Lists<'_>) -> Option<WindowInfo> {
         let protected = window.exe_path.is_none();
         if protected {
@@ -203,33 +194,24 @@ impl Detector {
     }
 }
 
-/// The name a game is shown by: as its executable describes itself, else the title of its
-/// window, else its file name. An engine's own name, left in the description by the game,
-/// says nothing of it.
+/// The name a game is shown by: as its executable describes itself, else the title of its window, else its file name.
+/// An engine's own name, left in the description by the game, says nothing of it.
 pub fn display_name(path: &str, title: &str) -> String {
     const ENGINES: &[&str] = &["ue4", "ue5", "unrealgame", "unreal engine", "unity"];
     let meta = crate::exe_metadata(path);
-    [
-        meta.product_name,
-        meta.file_description,
-        Some(title.to_owned()),
-    ]
-    .into_iter()
-    .flatten()
-    .map(|n| n.trim().to_owned())
-    .find(|n| !n.is_empty() && !ENGINES.contains(&n.to_lowercase().as_str()))
-    .unwrap_or_else(|| {
-        Path::new(path)
-            .file_stem()
-            .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
-    })
+    [meta.product_name, meta.file_description, Some(title.to_owned())]
+        .into_iter()
+        .flatten()
+        .map(|n| n.trim().to_owned())
+        .find(|n| !n.is_empty() && !ENGINES.contains(&n.to_lowercase().as_str()))
+        .unwrap_or_else(|| Path::new(path).file_stem().map_or_else(String::new, |n| n.to_string_lossy().into_owned()))
 }
 
 /// Where games are installed on this computer, read from the launchers and from Windows.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GameSignals {
-    /// The launchers' game folders (Steam, Epic, GOG, EA, Ubisoft, Battle.net, Riot, Xbox),
-    /// normalised by [`normalise`].
+    /// The launchers' game folders (Steam, Epic, GOG, EA, Ubisoft, Battle.net, Riot, Xbox), normalised by
+    /// [`normalise`].
     pub folders: Vec<String>,
     /// The executables Windows recognised as games (Game Bar), normalised.
     pub known: Vec<String>,
@@ -243,43 +225,27 @@ impl GameSignals {
         folders.extend(epic_folders());
         folders.extend(xbox_folders());
         for (root, key, value) in [
-            (
-                HKEY_LOCAL_MACHINE,
-                r"SOFTWARE\WOW6432Node\GOG.com\Games",
-                "path",
-            ),
+            (HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\GOG.com\Games", "path"),
             (HKEY_LOCAL_MACHINE, r"SOFTWARE\GOG.com\Games", "path"),
-            (
-                HKEY_LOCAL_MACHINE,
-                r"SOFTWARE\WOW6432Node\Ubisoft\Launcher\Installs",
-                "InstallDir",
-            ),
+            (HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Ubisoft\Launcher\Installs", "InstallDir"),
         ] {
             folders.extend(subkey_strings(root, key, value));
         }
         folders.extend(publisher_folders());
-        let mut folders: Vec<String> = folders
-            .iter()
-            .filter(|f| specific_enough(f))
-            .map(|f| normalise(f))
-            .collect();
+        let mut folders: Vec<String> = folders.iter().filter(|f| specific_enough(f)).map(|f| normalise(f)).collect();
         folders.sort();
         folders.dedup();
-        let mut known: Vec<String> = subkey_strings(
-            HKEY_CURRENT_USER,
-            r"System\GameConfigStore\Children",
-            "MatchedExeFullPath",
-        )
-        .iter()
-        .map(|p| normalise_file(p))
-        .collect();
+        let mut known: Vec<String> =
+            subkey_strings(HKEY_CURRENT_USER, r"System\GameConfigStore\Children", "MatchedExeFullPath")
+                .iter()
+                .map(|p| normalise_file(p))
+                .collect();
         known.sort();
         known.dedup();
         Self { folders, known }
     }
 
-    /// Whether `exe` (a full path) is installed by a launcher, known to Windows as a game, or
-    /// made with a game engine.
+    /// Whether `exe` (a full path) is installed by a launcher, known to Windows as a game, or made with a game engine.
     pub fn installed_game(&self, exe: &str) -> bool {
         let file = normalise_file(exe);
         self.known.binary_search(&file).is_ok()
@@ -288,8 +254,8 @@ impl GameSignals {
     }
 }
 
-/// A full-screen Direct3D program has the screen to itself (exclusive mode). Borderless full
-/// screen, the most common today, does not show here.
+/// A full-screen Direct3D program has the screen to itself (exclusive mode). Borderless full screen, the most common
+/// today, does not show here.
 pub fn exclusive_full_screen() -> bool {
     use windows::Win32::UI::Shell::{QUNS_RUNNING_D3D_FULL_SCREEN, SHQueryUserNotificationState};
     // SAFETY: no arguments.
@@ -312,17 +278,12 @@ fn normalise_file(path: &str) -> String {
 
 /// A folder deep enough to hold games only: not a drive, not `Program Files` itself.
 fn specific_enough(folder: &str) -> bool {
-    let parts: Vec<String> = normalise(folder)
-        .split('\\')
-        .filter(|p| !p.is_empty())
-        .map(str::to_owned)
-        .collect();
+    let parts: Vec<String> = normalise(folder).split('\\').filter(|p| !p.is_empty()).map(str::to_owned).collect();
     match parts.as_slice() {
         [] | [_] => false,
-        [_, second] => !matches!(
-            second.as_str(),
-            "program files" | "program files (x86)" | "programdata" | "users" | "windows"
-        ),
+        [_, second] => {
+            !matches!(second.as_str(), "program files" | "program files (x86)" | "programdata" | "users" | "windows")
+        }
         _ => true,
     }
 }
@@ -337,15 +298,7 @@ fn steam_folders() -> Vec<String> {
     if let Ok(vdf) = std::fs::read_to_string(steam.join(r"steamapps\libraryfolders.vdf")) {
         libraries.extend(steam_libraries(&vdf));
     }
-    libraries
-        .into_iter()
-        .map(|l| {
-            Path::new(&l)
-                .join(r"steamapps\common")
-                .display()
-                .to_string()
-        })
-        .collect()
+    libraries.into_iter().map(|l| Path::new(&l).join(r"steamapps\common").display().to_string()).collect()
 }
 
 /// The `"path"` entries of `libraryfolders.vdf`.
@@ -360,8 +313,7 @@ fn steam_libraries(vdf: &str) -> Vec<String> {
 
 /// The install folders in the Epic launcher's manifests.
 fn epic_folders() -> Vec<String> {
-    let data = std::env::var_os("ProgramData")
-        .map_or_else(|| PathBuf::from(r"C:\ProgramData"), PathBuf::from);
+    let data = std::env::var_os("ProgramData").map_or_else(|| PathBuf::from(r"C:\ProgramData"), PathBuf::from);
     let Ok(entries) = std::fs::read_dir(data.join(r"Epic\EpicGamesLauncher\Data\Manifests")) else {
         return Vec::new();
     };
@@ -377,11 +329,7 @@ fn epic_folders() -> Vec<String> {
 fn json_string(json: &str, field: &str) -> Option<String> {
     let key = format!("\"{field}\"");
     let rest = &json[json.find(&key)? + key.len()..];
-    let rest = rest
-        .trim_start()
-        .strip_prefix(':')?
-        .trim_start()
-        .strip_prefix('"')?;
+    let rest = rest.trim_start().strip_prefix(':')?.trim_start().strip_prefix('"')?;
     let mut out = String::new();
     let mut chars = rest.chars();
     while let Some(c) = chars.next() {
@@ -400,10 +348,7 @@ fn json_string(json: &str, field: &str) -> Option<String> {
 
 /// `X:\XboxGames` on every drive (where the Xbox app installs PC Game Pass games).
 fn xbox_folders() -> Vec<String> {
-    ('C'..='Z')
-        .map(|d| format!(r"{d}:\XboxGames"))
-        .filter(|f| Path::new(f).is_dir())
-        .collect()
+    ('C'..='Z').map(|d| format!(r"{d}:\XboxGames")).filter(|f| Path::new(f).is_dir()).collect()
 }
 
 /// The publishers whose installed programs are games (their launchers are told apart by name).
@@ -420,39 +365,25 @@ const GAME_PUBLISHERS: &[&str] = &[
     "hoyoverse",
 ];
 
-/// Whether `exe` (a full path) was made with a game engine: an Unreal Engine game's
-/// executable is `<name>-Win64-Shipping.exe`, a Unity game has the engine's library beside it.
-/// Games that come with their own launcher are found this way.
+/// Whether `exe` (a full path) was made with a game engine: an Unreal Engine game's executable is
+/// `<name>-Win64-Shipping.exe`, a Unity game has the engine's library beside it. Games that come with their own
+/// launcher are found this way.
 fn made_with_an_engine(exe: &str) -> bool {
     let path = Path::new(exe);
-    let unreal = path
-        .file_stem()
-        .is_some_and(|s| s.to_string_lossy().to_lowercase().ends_with("-shipping"));
+    let unreal = path.file_stem().is_some_and(|s| s.to_string_lossy().to_lowercase().ends_with("-shipping"));
     unreal
-        || path.parent().is_some_and(|dir| {
-            ["UnityPlayer.dll", "GameAssembly.dll"]
-                .iter()
-                .any(|lib| dir.join(lib).is_file())
-        })
+        || path
+            .parent()
+            .is_some_and(|dir| ["UnityPlayer.dll", "GameAssembly.dll"].iter().any(|lib| dir.join(lib).is_file()))
 }
 
-/// The install folders of the programs published by [`GAME_PUBLISHERS`], from the list of
-/// installed programs.
+/// The install folders of the programs published by [`GAME_PUBLISHERS`], from the list of installed programs.
 fn publisher_folders() -> Vec<String> {
     let mut folders = Vec::new();
     for (root, key) in [
-        (
-            HKEY_LOCAL_MACHINE,
-            r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
-        ),
-        (
-            HKEY_LOCAL_MACHINE,
-            r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
-        ),
-        (
-            HKEY_CURRENT_USER,
-            r"Software\Microsoft\Windows\CurrentVersion\Uninstall",
-        ),
+        (HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Uninstall"),
     ] {
         for sub in subkeys(root, key) {
             let path = format!(r"{key}\{sub}");
@@ -482,32 +413,14 @@ fn string_value(root: HKEY, key: &str, value: &str) -> Option<String> {
     let (key, value) = (HSTRING::from(key), HSTRING::from(value));
     let mut bytes = 0u32;
     // SAFETY: a size query: no buffer, `bytes` receives the size.
-    let status = unsafe {
-        RegGetValueW(
-            root,
-            &key,
-            &value,
-            RRF_RT_REG_SZ,
-            None,
-            None,
-            Some(&raw mut bytes),
-        )
-    };
+    let status = unsafe { RegGetValueW(root, &key, &value, RRF_RT_REG_SZ, None, None, Some(&raw mut bytes)) };
     if status != ERROR_SUCCESS || bytes == 0 {
         return None;
     }
     let mut buffer = vec![0u16; (bytes as usize).div_ceil(2)];
     // SAFETY: `buffer` holds `bytes` bytes; RRF_RT_REG_SZ checks the type.
     let status = unsafe {
-        RegGetValueW(
-            root,
-            &key,
-            &value,
-            RRF_RT_REG_SZ,
-            None,
-            Some(buffer.as_mut_ptr().cast()),
-            Some(&raw mut bytes),
-        )
+        RegGetValueW(root, &key, &value, RRF_RT_REG_SZ, None, Some(buffer.as_mut_ptr().cast()), Some(&raw mut bytes))
     };
     if status != ERROR_SUCCESS {
         return None;
@@ -521,8 +434,7 @@ fn string_value(root: HKEY, key: &str, value: &str) -> Option<String> {
 fn subkeys(root: HKEY, key: &str) -> Vec<String> {
     let mut opened = HKEY::default();
     // SAFETY: `opened` receives the key, closed below.
-    let status =
-        unsafe { RegOpenKeyExW(root, &HSTRING::from(key), None, KEY_READ, &raw mut opened) };
+    let status = unsafe { RegOpenKeyExW(root, &HSTRING::from(key), None, KEY_READ, &raw mut opened) };
     if status != ERROR_SUCCESS {
         return Vec::new();
     }
@@ -532,16 +444,7 @@ fn subkeys(root: HKEY, key: &str) -> Vec<String> {
         let mut len = buffer.len() as u32;
         // SAFETY: `buffer` holds `len` characters; the optional out-pointers are not asked for.
         let status = unsafe {
-            RegEnumKeyExW(
-                opened,
-                index,
-                Some(PWSTR(buffer.as_mut_ptr())),
-                &raw mut len,
-                None,
-                None,
-                None,
-                None,
-            )
+            RegEnumKeyExW(opened, index, Some(PWSTR(buffer.as_mut_ptr())), &raw mut len, None, None, None, None)
         };
         if status != ERROR_SUCCESS {
             break;
@@ -555,10 +458,7 @@ fn subkeys(root: HKEY, key: &str) -> Vec<String> {
 
 /// `value` of every subkey of `key`.
 fn subkey_strings(root: HKEY, key: &str, value: &str) -> Vec<String> {
-    subkeys(root, key)
-        .iter()
-        .filter_map(|sub| string_value(root, &format!(r"{key}\{sub}"), value))
-        .collect()
+    subkeys(root, key).iter().filter_map(|sub| string_value(root, &format!(r"{key}\{sub}"), value)).collect()
 }
 
 #[cfg(test)]
@@ -572,41 +472,24 @@ mod tests {
         let web = r"d:\games\wuthering waves game\Client\Binaries\Win64\ThirdParty\KrPcSdk_Global\KRSDKExternal.exe";
         assert!(installed_with(web, game));
         assert!(installed_with(game, game));
-        assert!(!installed_with(
-            r"C:\Program Files\Browser\browser.exe",
-            game
-        ));
-        assert!(!installed_with(
-            r"E:\Games\Wuthering Waves Game\Client\Binaries\Win64\x.exe",
-            game
-        ));
+        assert!(!installed_with(r"C:\Program Files\Browser\browser.exe", game));
+        assert!(!installed_with(r"E:\Games\Wuthering Waves Game\Client\Binaries\Win64\x.exe", game));
         // A folder near the root of the disk holds many programs.
-        assert!(!installed_with(
-            r"C:\Program Files\Other\other.exe",
-            r"C:\Program Files\game.exe"
-        ));
-        assert!(!installed_with(
-            r"C:\Games\Other\other.exe",
-            r"C:\Games\Mine\game.exe"
-        ));
+        assert!(!installed_with(r"C:\Program Files\Other\other.exe", r"C:\Program Files\game.exe"));
+        assert!(!installed_with(r"C:\Games\Other\other.exe", r"C:\Games\Mine\game.exe"));
     }
 
     #[test]
     fn the_steam_libraries_are_read_from_their_file() {
         let vdf = "\"libraryfolders\"\n{\n\t\"0\"\n\t{\n\t\t\"path\"\t\t\"C:\\\\Program Files (x86)\\\\Steam\"\n\t\t\"label\"\t\t\"\"\n\t}\n\t\"1\"\n\t{\n\t\t\"path\"\t\t\"D:\\\\SteamLibrary\"\n\t}\n}\n";
-        assert_eq!(
-            steam_libraries(vdf),
-            [r"C:\Program Files (x86)\Steam", r"D:\SteamLibrary"]
-        );
+        assert_eq!(steam_libraries(vdf), [r"C:\Program Files (x86)\Steam", r"D:\SteamLibrary"]);
     }
 
     #[test]
     fn the_epic_install_folder_is_read_from_its_manifest() {
-        let json = "{\n\t\"FormatVersion\": 0,\n\t\"InstallLocation\": \"C:\\\\Program Files\\\\Epic Games\\\\Fortnite\",\n}";
-        assert_eq!(
-            json_string(json, "InstallLocation").as_deref(),
-            Some(r"C:\Program Files\Epic Games\Fortnite")
-        );
+        let json =
+            "{\n\t\"FormatVersion\": 0,\n\t\"InstallLocation\": \"C:\\\\Program Files\\\\Epic Games\\\\Fortnite\",\n}";
+        assert_eq!(json_string(json, "InstallLocation").as_deref(), Some(r"C:\Program Files\Epic Games\Fortnite"));
         assert_eq!(json_string(json, "Missing"), None);
     }
 
@@ -622,10 +505,7 @@ mod tests {
         assert!(!signals.installed_game(r"D:\SteamLibrary\steamapps\commonX\a.exe"));
         assert!(!signals.installed_game(r"C:\Program Files\VideoLAN\VLC\vlc.exe"));
         // The lists hold file names in lower case.
-        assert_eq!(
-            exe_name(r"C:\Games\Hades\Hades.EXE").as_deref(),
-            Some("hades.exe")
-        );
+        assert_eq!(exe_name(r"C:\Games\Hades\Hades.EXE").as_deref(), Some("hades.exe"));
     }
 
     #[test]
@@ -651,18 +531,10 @@ mod tests {
     }
 
     fn facts(full_screen: bool, exclusive: bool, installed_game: bool) -> Facts {
-        Facts {
-            full_screen,
-            exclusive,
-            installed_game,
-            protected: false,
-        }
+        Facts { full_screen, exclusive, installed_game, protected: false }
     }
 
-    const NONE: Lists<'static> = Lists {
-        always: &[],
-        never: &[],
-    };
+    const NONE: Lists<'static> = Lists { always: &[], never: &[] };
 
     #[test]
     fn a_full_screen_program_needs_a_sign_of_a_game() {
@@ -675,33 +547,20 @@ mod tests {
         // A game in a window is not recorded.
         assert!(!is_game("hades.exe", facts(false, true, true), NONE));
         // An anti-cheat hides where it is installed: that is a sign too.
-        let protected = Facts {
-            protected: true,
-            ..facts(true, false, false)
-        };
+        let protected = Facts { protected: true, ..facts(true, false, false) };
         assert!(is_game("client-win64-shipping.exe", protected, NONE));
     }
 
     #[test]
     fn the_launchers_are_not_games() {
         assert!(!is_game("steam.exe", facts(true, false, true), NONE));
-        assert!(!is_game(
-            "leagueclientux.exe",
-            facts(true, false, true),
-            NONE
-        ));
+        assert!(!is_game("leagueclientux.exe", facts(true, false, true), NONE));
     }
 
     #[test]
     fn the_user_has_the_last_word() {
-        let (always, never) = (
-            ["indie.exe".to_owned()],
-            ["hades.exe".to_owned(), "steam.exe".to_owned()],
-        );
-        let lists = Lists {
-            always: &always,
-            never: &never,
-        };
+        let (always, never) = (["indie.exe".to_owned()], ["hades.exe".to_owned(), "steam.exe".to_owned()]);
+        let lists = Lists { always: &always, never: &never };
         assert!(is_game("indie.exe", facts(true, false, false), lists));
         assert!(!is_game("hades.exe", facts(true, true, true), lists));
         // Still in full screen only.

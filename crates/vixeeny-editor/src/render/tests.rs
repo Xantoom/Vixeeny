@@ -15,13 +15,7 @@ fn doc_with(w: u32, h: u32, annotations: Vec<Annotation>) -> Document {
     for annotation in annotations {
         let id = doc.fresh_id();
         let index = doc.items.len();
-        hist.commit(
-            &mut doc,
-            Edit::Add {
-                index,
-                item: Item { id, annotation },
-            },
-        );
+        hist.commit(&mut doc, Edit::Add { index, item: Item { id, annotation } });
     }
     doc
 }
@@ -35,10 +29,7 @@ fn ascii(img: &RgbaImage, step: u32) -> String {
     let mut out = String::new();
     for y in (0..img.height).step_by(step as usize) {
         for x in (0..img.width).step_by(step as usize) {
-            let p = img.pixel(
-                (x + step / 2).min(img.width - 1),
-                (y + step / 2).min(img.height - 1),
-            );
+            let p = img.pixel((x + step / 2).min(img.width - 1), (y + step / 2).min(img.height - 1));
             let (r, g, b) = (i32::from(p.r), i32::from(p.g), i32::from(p.b));
             out.push(match () {
                 () if r > 230 && g > 230 && b > 230 => '.',
@@ -60,11 +51,7 @@ fn a_line_has_the_requested_colour_and_thickness() {
     let doc = doc_with(
         40,
         20,
-        vec![Annotation::Line {
-            from: Point::new(2.0, 10.0),
-            to: Point::new(38.0, 10.0),
-            style: style(RED, 4.0),
-        }],
+        vec![Annotation::Line { from: Point::new(2.0, 10.0), to: Point::new(38.0, 10.0), style: style(RED, 4.0) }],
     );
     let img = render(&white(40, 20), &doc);
     assert_eq!(img.pixel(20, 10), RED);
@@ -78,27 +65,11 @@ fn outline_and_filled_rectangles() {
     let rect = Rect::new(4.0, 4.0, 30.0, 20.0);
     let outline = render(
         &white(40, 30),
-        &doc_with(
-            40,
-            30,
-            vec![Annotation::Rect {
-                rect,
-                style: style(RED, 2.0),
-                filled: false,
-            }],
-        ),
+        &doc_with(40, 30, vec![Annotation::Rect { rect, style: style(RED, 2.0), filled: false }]),
     );
     let filled = render(
         &white(40, 30),
-        &doc_with(
-            40,
-            30,
-            vec![Annotation::Rect {
-                rect,
-                style: style(RED, 2.0),
-                filled: true,
-            }],
-        ),
+        &doc_with(40, 30, vec![Annotation::Rect { rect, style: style(RED, 2.0), filled: true }]),
     );
     assert_eq!(outline.pixel(19, 14), WHITE);
     assert_eq!(filled.pixel(19, 14), RED);
@@ -110,11 +81,7 @@ fn ellipse_is_round() {
     let doc = doc_with(
         40,
         40,
-        vec![Annotation::Ellipse {
-            rect: Rect::new(2.0, 2.0, 36.0, 36.0),
-            style: style(RED, 2.0),
-            filled: true,
-        }],
+        vec![Annotation::Ellipse { rect: Rect::new(2.0, 2.0, 36.0, 36.0), style: style(RED, 2.0), filled: true }],
     );
     let img = render(&white(40, 40), &doc);
     assert_eq!(img.pixel(20, 20), RED);
@@ -156,28 +123,8 @@ fn blur_and_pixelate_destroy_detail() {
         }
     }
     let area = Rect::new(8.0, 8.0, 16.0, 16.0);
-    let blurred = render(
-        &base,
-        &doc_with(
-            32,
-            32,
-            vec![Annotation::Blur {
-                rect: area,
-                radius: 3.0,
-            }],
-        ),
-    );
-    let mosaic = render(
-        &base,
-        &doc_with(
-            32,
-            32,
-            vec![Annotation::Pixelate {
-                rect: area,
-                block: 8,
-            }],
-        ),
-    );
+    let blurred = render(&base, &doc_with(32, 32, vec![Annotation::Blur { rect: area, radius: 3.0 }]));
+    let mosaic = render(&base, &doc_with(32, 32, vec![Annotation::Pixelate { rect: area, block: 8 }]));
     for img in [&blurred, &mosaic] {
         let v = i32::from(img.pixel(15, 15).r);
         assert!((v - 128).abs() < 20, "{v}");
@@ -192,15 +139,8 @@ fn a_blur_covers_what_was_drawn_before_it() {
         40,
         20,
         vec![
-            Annotation::Rect {
-                rect: Rect::new(10.0, 5.0, 20.0, 10.0),
-                style: style(RED, 1.0),
-                filled: true,
-            },
-            Annotation::Pixelate {
-                rect: Rect::new(0.0, 0.0, 40.0, 20.0),
-                block: 40,
-            },
+            Annotation::Rect { rect: Rect::new(10.0, 5.0, 20.0, 10.0), style: style(RED, 1.0), filled: true },
+            Annotation::Pixelate { rect: Rect::new(0.0, 0.0, 40.0, 20.0), block: 40 },
         ],
     );
     let img = render(&white(40, 20), &doc);
@@ -223,10 +163,7 @@ fn text_is_drawn_inside_its_bounds() {
         .filter(|&(x, y)| img.pixel(x, y).r < 100)
         .collect::<Vec<_>>();
     assert!(dark.len() > 20, "{}", dark.len());
-    assert!(
-        dark.iter()
-            .all(|&(x, y)| b.inflate(2.0).contains(Point::new(x as f32, y as f32)))
-    );
+    assert!(dark.iter().all(|&(x, y)| b.inflate(2.0).contains(Point::new(x as f32, y as f32))));
 }
 
 #[test]
@@ -244,19 +181,11 @@ fn text_background_fills_behind_the_glyphs() {
 
 #[test]
 fn marker_shows_its_number_in_a_contrasting_colour() {
-    let a = Annotation::Marker {
-        center: Point::new(20.0, 20.0),
-        number: 7,
-        color: RED,
-        radius: 14.0,
-    };
+    let a = Annotation::Marker { center: Point::new(20.0, 20.0), number: 7, color: RED, radius: 14.0 };
     let img = render(&white(40, 40), &doc_with(40, 40, vec![a]));
     assert_eq!(img.pixel(9, 20), RED);
     assert_eq!(img.pixel(1, 1), WHITE);
-    let whites = (12..28)
-        .flat_map(|y| (12..28).map(move |x| (x, y)))
-        .filter(|&(x, y)| img.pixel(x, y).g > 200)
-        .count();
+    let whites = (12..28).flat_map(|y| (12..28).map(move |x| (x, y))).filter(|&(x, y)| img.pixel(x, y).g > 200).count();
     assert!(whites > 8, "{whites}");
 }
 
@@ -266,11 +195,7 @@ fn annotations_outside_the_image_do_not_panic() {
         10,
         10,
         vec![
-            Annotation::Line {
-                from: Point::new(-50.0, -50.0),
-                to: Point::new(500.0, 500.0),
-                style: style(RED, 3.0),
-            },
+            Annotation::Line { from: Point::new(-50.0, -50.0), to: Point::new(500.0, 500.0), style: style(RED, 3.0) },
             Annotation::Text {
                 pos: Point::new(-30.0, 8.0),
                 text: "clipped".into(),
@@ -278,29 +203,11 @@ fn annotations_outside_the_image_do_not_panic() {
                 color: RED,
                 background: None,
             },
-            Annotation::Blur {
-                rect: Rect::new(-10.0, -10.0, 100.0, 100.0),
-                radius: 5.0,
-            },
-            Annotation::Pixelate {
-                rect: Rect::new(200.0, 200.0, 5.0, 5.0),
-                block: 3,
-            },
-            Annotation::Marker {
-                center: Point::new(-5.0, 50.0),
-                number: 1,
-                color: RED,
-                radius: 8.0,
-            },
-            Annotation::Arrow {
-                from: Point::new(1.0, 1.0),
-                to: Point::new(1.0, 1.0),
-                style: style(RED, 2.0),
-            },
-            Annotation::Pen {
-                points: vec![],
-                style: style(RED, 2.0),
-            },
+            Annotation::Blur { rect: Rect::new(-10.0, -10.0, 100.0, 100.0), radius: 5.0 },
+            Annotation::Pixelate { rect: Rect::new(200.0, 200.0, 5.0, 5.0), block: 3 },
+            Annotation::Marker { center: Point::new(-5.0, 50.0), number: 1, color: RED, radius: 8.0 },
+            Annotation::Arrow { from: Point::new(1.0, 1.0), to: Point::new(1.0, 1.0), style: style(RED, 2.0) },
+            Annotation::Pen { points: vec![], style: style(RED, 2.0) },
         ],
     );
     let img = render(&white(10, 10), &doc);
@@ -332,22 +239,13 @@ fn reference_scene() {
                 style: style(Color::rgb(0x43, 0xa0, 0x47), 4.0),
                 filled: true,
             },
-            Annotation::Arrow {
-                from: Point::new(6.0, 44.0),
-                to: Point::new(60.0, 36.0),
-                style: style(RED, 3.0),
-            },
+            Annotation::Arrow { from: Point::new(6.0, 44.0), to: Point::new(60.0, 36.0), style: style(RED, 3.0) },
             Annotation::Line {
                 from: Point::new(66.0, 44.0),
                 to: Point::new(92.0, 44.0),
                 style: style(Color::rgb(0, 0, 0), 3.0),
             },
-            Annotation::Marker {
-                center: Point::new(20.0, 16.0),
-                number: 1,
-                color: RED,
-                radius: 8.0,
-            },
+            Annotation::Marker { center: Point::new(20.0, 16.0), number: 1, color: RED, radius: 8.0 },
         ],
     );
     insta::assert_snapshot!(ascii(&render(&white(96, 48), &doc), 2));
@@ -364,30 +262,17 @@ fn a_bgra_screen_lands_at_its_place_in_the_desktop() {
     let row = 4 * 4;
     super::bgra_to_rgba(&src, 12, &mut dst[row + 4..], row, (2, 2));
     assert_eq!(&dst[row + 4..row + 12], &[3, 2, 1, 255, 6, 5, 4, 255]);
-    assert_eq!(
-        &dst[2 * row + 4..2 * row + 12],
-        &[9, 8, 7, 255, 12, 11, 10, 255]
-    );
+    assert_eq!(&dst[2 * row + 4..2 * row + 12], &[9, 8, 7, 255, 12, 11, 10, 255]);
     assert!(dst[..row + 4].iter().all(|&b| b == 0));
     assert!(dst[2 * row + 12..].iter().all(|&b| b == 0));
 }
 
 #[test]
 fn a_stroke_is_smoothed_through_the_midpoints() {
-    let pts = [
-        Point::new(0.0, 0.0),
-        Point::new(10.0, 0.0),
-        Point::new(10.0, 10.0),
-    ];
+    let pts = [Point::new(0.0, 0.0), Point::new(10.0, 0.0), Point::new(10.0, 10.0)];
     let (first, segments) = smooth(&pts).expect("a path");
     assert_eq!(first, pts[0]);
-    assert_eq!(
-        segments,
-        [
-            Segment::Quad(pts[1], Point::new(10.0, 5.0)),
-            Segment::Line(pts[2]),
-        ]
-    );
+    assert_eq!(segments, [Segment::Quad(pts[1], Point::new(10.0, 5.0)), Segment::Line(pts[2]),]);
     // A single point is a dot.
     assert_eq!(smooth(&pts[..1]).expect("a dot").1.len(), 1);
     assert!(smooth(&[]).is_none());
@@ -433,12 +318,5 @@ fn the_letters_of_a_text_are_drawn_alone_where_the_export_puts_them() {
         radius: 12.0,
     };
     let (image, ..) = letters(&marker).expect("a number");
-    assert!(
-        image
-            .data
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .any(|p| p[3] > 0 && p[0] == 0)
-    );
+    assert!(image.data.as_chunks::<4>().0.iter().any(|p| p[3] > 0 && p[0] == 0));
 }

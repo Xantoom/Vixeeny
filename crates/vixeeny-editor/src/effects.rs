@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Pixel effects on a straight 4-channel buffer: Gaussian-like blur and mosaic. They run on the
-//! flattened image at export, which is what makes them irreversible.
+//! Pixel effects on a straight 4-channel buffer: Gaussian-like blur and mosaic. They run on the flattened image at
+//! export, which is what makes them irreversible.
 
 /// Integer pixel region inside a `width`×`height` buffer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,24 +18,12 @@ impl Region {
         let y0 = rect.y.floor().max(0.0) as usize;
         let x1 = (rect.right().ceil().max(0.0) as usize).min(width);
         let y1 = (rect.bottom().ceil().max(0.0) as usize).min(height);
-        (x1 > x0 && y1 > y0).then(|| Self {
-            x: x0,
-            y: y0,
-            w: x1 - x0,
-            h: y1 - y0,
-        })
+        (x1 > x0 && y1 > y0).then(|| Self { x: x0, y: y0, w: x1 - x0, h: y1 - y0 })
     }
 }
 
 /// One box blur pass along a line of `n` pixels, `stride` bytes apart, with edge replication.
-fn box_line(
-    data: &mut [u8],
-    start: usize,
-    stride: usize,
-    n: usize,
-    radius: usize,
-    tmp: &mut Vec<[u8; 4]>,
-) {
+fn box_line(data: &mut [u8], start: usize, stride: usize, n: usize, radius: usize, tmp: &mut Vec<[u8; 4]>) {
     tmp.clear();
     tmp.extend((0..n).map(|i| {
         let o = start + i * stride;
@@ -55,19 +43,15 @@ fn box_line(
         for c in 0..4 {
             data[o + c] = ((sum[c] + window / 2) / window) as u8;
         }
-        let (add, sub) = (
-            at(i as isize + radius as isize + 1),
-            at(i as isize - radius as isize),
-        );
+        let (add, sub) = (at(i as isize + radius as isize + 1), at(i as isize - radius as isize));
         for c in 0..4 {
             sum[c] = sum[c] + u32::from(add[c]) - u32::from(sub[c]);
         }
     }
 }
 
-/// Three box blurs along each of `rows` rows of `n` pixels (`stride` bytes apart, from the
-/// start of `data`), the rows shared between threads: each row stays in the cache for its
-/// three passes.
+/// Three box blurs along each of `rows` rows of `n` pixels (`stride` bytes apart, from the start of `data`), the rows
+/// shared between threads: each row stays in the cache for its three passes.
 fn box_rows(data: &mut [u8], stride: usize, rows: usize, n: usize, radius: usize) {
     if rows == 0 || n == 0 {
         return;
@@ -79,10 +63,7 @@ fn box_rows(data: &mut [u8], stride: usize, rows: usize, n: usize, radius: usize
     let threads = if rows * n < 1 << 16 {
         1
     } else {
-        std::thread::available_parallelism()
-            .map_or(1, std::num::NonZero::get)
-            .min(8)
-            .min(rows)
+        std::thread::available_parallelism().map_or(1, std::num::NonZero::get).min(8).min(rows)
     };
     let per = rows.div_ceil(threads);
     std::thread::scope(|scope| {
@@ -102,15 +83,9 @@ fn box_rows(data: &mut [u8], stride: usize, rows: usize, n: usize, radius: usize
 /// Pixels per side of the tiles a transposition copies, so both sides stay in the cache.
 const TILE: usize = 32;
 
-/// Copies the `w`×`h` pixels of `src` (`src_stride` bytes per row) to `dst` with rows and
-/// columns swapped (`dst_stride` bytes per row of `h` pixels).
-fn transpose(
-    src: &[u8],
-    src_stride: usize,
-    dst: &mut [u8],
-    dst_stride: usize,
-    (w, h): (usize, usize),
-) {
+/// Copies the `w`×`h` pixels of `src` (`src_stride` bytes per row) to `dst` with rows and columns swapped (`dst_stride`
+/// bytes per row of `h` pixels).
+fn transpose(src: &[u8], src_stride: usize, dst: &mut [u8], dst_stride: usize, (w, h): (usize, usize)) {
     for ty in (0..h).step_by(TILE) {
         for tx in (0..w).step_by(TILE) {
             for y in ty..(ty + TILE).min(h) {
@@ -123,9 +98,8 @@ fn transpose(
     }
 }
 
-/// Approximates a Gaussian blur of standard deviation `sigma` by three box blurs. The columns
-/// are blurred as the rows of a transposed copy: walking down a column of a large image misses
-/// the cache at every pixel.
+/// Approximates a Gaussian blur of standard deviation `sigma` by three box blurs. The columns are blurred as the rows
+/// of a transposed copy: walking down a column of a large image misses the cache at every pixel.
 pub fn blur(data: &mut [u8], width: usize, region: Region, sigma: f32) {
     if sigma <= 0.0 {
         return;
@@ -144,8 +118,7 @@ pub fn blur(data: &mut [u8], width: usize, region: Region, sigma: f32) {
     transpose(&columns, h * 4, area, stride, (h, w));
 }
 
-/// Replaces every `block`×`block` cell of the region (aligned to the region's corner) by its
-/// average colour.
+/// Replaces every `block`×`block` cell of the region (aligned to the region's corner) by its average colour.
 pub fn pixelate(data: &mut [u8], width: usize, region: Region, block: usize) {
     let block = block.max(1);
     for by in (0..region.h).step_by(block) {
@@ -195,15 +168,8 @@ mod tests {
     fn the_blur_matches_the_line_by_line_one_and_stays_in_its_region() {
         // Large enough for several threads; the region off every edge.
         let (width, height) = (420, 380);
-        let image: Vec<u8> = (0..width * height * 4)
-            .map(|i| (i * 7919 % 251) as u8)
-            .collect();
-        let region = Region {
-            x: 13,
-            y: 7,
-            w: 397,
-            h: 361,
-        };
+        let image: Vec<u8> = (0..width * height * 4).map(|i| (i * 7919 % 251) as u8).collect();
+        let region = Region { x: 13, y: 7, w: 397, h: 361 };
         let sigma = 4.0_f32;
         let radius = ((((4.0 * sigma * sigma + 1.0).sqrt() - 1.0) / 2.0).round() as usize).max(1);
         let mut want = image.clone();
@@ -212,8 +178,7 @@ mod tests {
         blur(&mut got, width, region, sigma);
         for (i, ((g, w), o)) in got.iter().zip(&want).zip(&image).enumerate() {
             let (x, y) = (i / 4 % width, i / 4 / width);
-            let inside = (region.x..region.x + region.w).contains(&x)
-                && (region.y..region.y + region.h).contains(&y);
+            let inside = (region.x..region.x + region.w).contains(&x) && (region.y..region.y + region.h).contains(&y);
             if inside {
                 // Only the rounding between passes differs.
                 assert!(g.abs_diff(*w) <= 2, "pixel ({x}, {y}): {g} vs {w}");

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The colours of the native windows: the design tokens of `vixeeny-ui/ui/theme.slint`, for the
-//! look the host gives (light or dark, the system accent).
+//! The colours of the native windows: the design tokens of `vixeeny-ui/ui/theme.slint`, for the look the host gives
+//! (light or dark, the system accent).
 
 pub use vixeeny_common::look::{Look, dark_theme};
 
@@ -19,12 +19,7 @@ impl Rgba {
     }
 
     pub fn rgb8(c: [u8; 3]) -> Self {
-        Self([
-            f32::from(c[0]) / 255.0,
-            f32::from(c[1]) / 255.0,
-            f32::from(c[2]) / 255.0,
-            1.0,
-        ])
+        Self([f32::from(c[0]) / 255.0, f32::from(c[1]) / 255.0, f32::from(c[2]) / 255.0, 1.0])
     }
 
     pub fn with_alpha(self, a: f32) -> Self {
@@ -113,11 +108,7 @@ impl Theme {
     pub fn new(look: Look) -> Self {
         let dark = look.dark;
         let base = Rgba::rgb8(look.accent);
-        let accent = if dark {
-            base.brighter(0.45)
-        } else {
-            base.darker(0.05)
-        };
+        let accent = if dark { base.brighter(0.45) } else { base.darker(0.05) };
         let pick = |d: Rgba, l: Rgba| if dark { d } else { l };
         Self {
             flyout: pick(Rgba::hex(0x232327, 255), Rgba::hex(0xffffff, 255)),
@@ -151,12 +142,7 @@ mod tests {
 
     #[test]
     fn hsv_round_trips() {
-        for (r, g, b) in [
-            (1.0, 0.0, 0.0),
-            (0.2, 0.4, 0.6),
-            (0.9, 0.9, 0.1),
-            (0.0, 0.0, 0.0),
-        ] {
+        for (r, g, b) in [(1.0, 0.0, 0.0), (0.2, 0.4, 0.6), (0.9, 0.9, 0.1), (0.0, 0.0, 0.0)] {
             let (h, s, v) = rgb_to_hsv(r, g, b);
             let (r2, g2, b2) = hsv_to_rgb(h, s, v);
             assert!((r - r2).abs() < 1e-5 && (g - g2).abs() < 1e-5 && (b - b2).abs() < 1e-5);

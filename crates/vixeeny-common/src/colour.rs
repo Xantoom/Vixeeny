@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Colour for HDR, shared by the screenshots and the recordings.
 //!
-//! HDR → SDR (`vixeeny_image::tonemap` from scRGB, the preview of the video editor from PQ):
-//! linear light where `1.0` is SDR white, BT.709 primaries. HDR kept as HDR: scRGB to BT.2020 /
-//! PQ ([`scrgb_to_pq`]).
+//! HDR → SDR (`vixeeny_image::tonemap` from scRGB, the preview of the video editor from PQ): linear light where `1.0`
+//! is SDR white, BT.709 primaries. HDR kept as HDR: scRGB to BT.2020 / PQ ([`scrgb_to_pq`]).
 
 use std::sync::OnceLock;
 
@@ -15,9 +14,8 @@ pub fn luminance([r, g, b]: [f32; 3]) -> f32 {
     0.2126 * r + 0.7152 * g + 0.0722 * b
 }
 
-/// Highlights roll off instead of clipping: identity up to [`KNEE`], then an extended Reinhard
-/// on the excess so that `headroom` (the peak, in units of SDR white) lands exactly on `1.0`.
-/// Smooth and monotonic.
+/// Highlights roll off instead of clipping: identity up to [`KNEE`], then an extended Reinhard on the excess so that
+/// `headroom` (the peak, in units of SDR white) lands exactly on `1.0`. Smooth and monotonic.
 pub fn roll_off(v: f32, headroom: f32) -> f32 {
     if v <= KNEE {
         return v.max(0.0);
@@ -30,51 +28,42 @@ pub fn roll_off(v: f32, headroom: f32) -> f32 {
     KNEE + span * g.min(1.0)
 }
 
-/// The headroom (in units of SDR white) a picture is tone mapped with: its brightest luminance
-/// (see [`brightness`]), bounded by SDR white and by `display`, the screen's own. With nothing
-/// brighter than SDR white, [`roll_off`] is the identity up to it: SDR content (a page, a window)
-/// comes out exactly as an SDR capture shows it; highlights are rolled off only as far as needed.
+/// The headroom (in units of SDR white) a picture is tone mapped with: its brightest luminance (see [`brightness`]),
+/// bounded by SDR white and by `display`, the screen's own. With nothing brighter than SDR white, [`roll_off`] is the
+/// identity up to it: SDR content (a page, a window) comes out exactly as an SDR capture shows it; highlights are
+/// rolled off only as far as needed.
 pub fn headroom(brightest: f32, display: f32) -> f32 {
-    let brightest = if brightest.is_finite() {
-        brightest
-    } else {
-        0.0
-    };
+    let brightest = if brightest.is_finite() { brightest } else { 0.0 };
     brightest.min(display).max(1.0)
 }
 
-/// How fast a video's tone mapping follows its brightest pixel, in seconds: quickly when it
-/// rises (a flash keeps its highlights), slowly when it falls (no visible pumping).
+/// How fast a video's tone mapping follows its brightest pixel, in seconds: quickly when it rises (a flash keeps its
+/// highlights), slowly when it falls (no visible pumping).
 pub const FOLLOW_RISE_SECONDS: f64 = 0.15;
 pub const FOLLOW_FALL_SECONDS: f64 = 1.0;
 
-/// The share of the way to its target a followed value makes at each frame of `fps`, rising and
-/// falling.
+/// The share of the way to its target a followed value makes at each frame of `fps`, rising and falling.
 pub fn follow_steps(fps: f64) -> (f32, f32) {
     let step = |seconds: f64| (1.0 - (-1.0 / (fps.max(1.0) * seconds)).exp()) as f32;
     (step(FOLLOW_RISE_SECONDS), step(FOLLOW_FALL_SECONDS))
 }
 
-/// The headroom followed one frame on, towards `target`; `current` below 1 (none yet: a first
-/// frame, a seek) takes the target as it is.
+/// The headroom followed one frame on, towards `target`; `current` below 1 (none yet: a first frame, a seek) takes the
+/// target as it is.
 pub fn follow(current: f32, target: f32, (rise, fall): (f32, f32)) -> f32 {
-    if current >= 1.0 {
-        current + (target - current) * if target > current { rise } else { fall }
-    } else {
-        target
-    }
+    if current >= 1.0 { current + (target - current) * if target > current { rise } else { fall } } else { target }
 }
 
-/// The luminance [`roll_off`] maps for one scRGB pixel scaled by `scale` (SDR white becomes
-/// `1.0`): what [`headroom`] takes the brightest of. Not a number counts as black.
+/// The luminance [`roll_off`] maps for one scRGB pixel scaled by `scale` (SDR white becomes `1.0`): what [`headroom`]
+/// takes the brightest of. Not a number counts as black.
 pub fn brightness(rgb: [f32; 3], scale: f32) -> f32 {
     let y = luminance(into_gamut(rgb.map(|c| c * scale)));
     if y.is_finite() { y } else { 0.0 }
 }
 
-/// Brings a colour outside the BT.709 gamut (a negative channel: a wider-gamut green, a deep
-/// cyan…) inside it by desaturating it towards the grey of the same luminance, just enough.
-/// Hue and brightness stay; clipping the channel instead would shift the hue and add light.
+/// Brings a colour outside the BT.709 gamut (a negative channel: a wider-gamut green, a deep cyan…) inside it by
+/// desaturating it towards the grey of the same luminance, just enough. Hue and brightness stay; clipping the channel
+/// instead would shift the hue and add light.
 pub fn into_gamut(rgb: [f32; 3]) -> [f32; 3] {
     let y = luminance(rgb);
     if y <= 0.0 {
@@ -91,25 +80,17 @@ pub fn into_gamut(rgb: [f32; 3]) -> [f32; 3] {
 /// The sRGB transfer function, `0.0..=1.0` in and out.
 pub fn srgb_encode(v: f32) -> f32 {
     let v = v.clamp(0.0, 1.0);
-    if v <= 0.003_130_8 {
-        12.92 * v
-    } else {
-        1.055 * v.powf(1.0 / 2.4) - 0.055
-    }
+    if v <= 0.003_130_8 { 12.92 * v } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 }
 }
 
 /// The inverse of [`srgb_encode`].
 pub fn srgb_decode(v: f32) -> f32 {
     let v = v.clamp(0.0, 1.0);
-    if v <= 0.040_45 {
-        v / 12.92
-    } else {
-        ((v + 0.055) / 1.055).powf(2.4)
-    }
+    if v <= 0.040_45 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
 }
 
-/// The tone mapper and the PQ coding of this module in HLSL, line for line, for the shaders that
-/// run them on the graphics card (stills and recordings): the same steps and the same numbers.
+/// The tone mapper and the PQ coding of this module in HLSL, line for line, for the shaders that run them on the
+/// graphics card (stills and recordings): the same steps and the same numbers.
 pub const HLSL: &str = r"
 static const float KNEE = 0.8;
 
@@ -195,18 +176,12 @@ pub const PQ_PEAK_NITS: f32 = 10_000.0;
 const PQ_PEAK: f32 = PQ_PEAK_NITS / 80.0;
 
 /// Linear BT.709 → linear BT.2020 (ITU-R BT.2087).
-const BT709_TO_2020: [[f32; 3]; 3] = [
-    [0.627_404, 0.329_283, 0.043_313],
-    [0.069_097, 0.919_540, 0.011_362],
-    [0.016_391, 0.088_013, 0.895_595],
-];
+const BT709_TO_2020: [[f32; 3]; 3] =
+    [[0.627_404, 0.329_283, 0.043_313], [0.069_097, 0.919_540, 0.011_362], [0.016_391, 0.088_013, 0.895_595]];
 
 /// Linear BT.2020 → linear BT.709 (the inverse of [`BT709_TO_2020`]).
-const BT2020_TO_709: [[f32; 3]; 3] = [
-    [1.660_491, -0.587_641, -0.072_850],
-    [-0.124_550, 1.132_9, -0.008_349],
-    [-0.018_151, -0.100_579, 1.118_73],
-];
+const BT2020_TO_709: [[f32; 3]; 3] =
+    [[1.660_491, -0.587_641, -0.072_850], [-0.124_550, 1.132_9, -0.008_349], [-0.018_151, -0.100_579, 1.118_73]];
 
 /// PQ inverse EOTF: absolute luminance (0…10 000 nits, as 0…1) → signal (0…1).
 fn pq_encode(linear: f64) -> f64 {
@@ -233,8 +208,8 @@ fn pq_decode(signal: f32) -> f32 {
 /// Smallest value the table distinguishes from black (2⁻²⁰ ≈ 1e-6 of SDR white).
 const FLOOR_BITS: u32 = (127 - 20) << 23;
 
-/// Linear scRGB value → PQ code (0…65535), through a table indexed by the top bits of the float
-/// (10 mantissa bits: a relative step of 0.1 %, far below one 10-bit code).
+/// Linear scRGB value → PQ code (0…65535), through a table indexed by the top bits of the float (10 mantissa bits: a
+/// relative step of 0.1 %, far below one 10-bit code).
 struct Table {
     codes: Vec<u16>,
 }
@@ -270,8 +245,8 @@ fn table() -> &'static Table {
     TABLE.get_or_init(Table::build)
 }
 
-/// One scRGB pixel (linear BT.709, 1.0 = 80 nits) as BT.2020 / PQ codes, full range 16 bits.
-/// Colours wider than BT.709 (negative channels) land inside BT.2020; above 10 000 nits clips.
+/// One scRGB pixel (linear BT.709, 1.0 = 80 nits) as BT.2020 / PQ codes, full range 16 bits. Colours wider than BT.709
+/// (negative channels) land inside BT.2020; above 10 000 nits clips.
 pub fn scrgb_to_pq(rgb: [f32; 3]) -> [u16; 3] {
     let table = table();
     scrgb_to_bt2020(rgb).map(|c| table.code(c))
@@ -282,8 +257,8 @@ pub fn scrgb_to_bt2020(rgb: [f32; 3]) -> [f32; 3] {
     BT709_TO_2020.map(|m| m[0] * rgb[0] + m[1] * rgb[1] + m[2] * rgb[2])
 }
 
-/// The inverse of [`scrgb_to_pq`]: BT.2020 / PQ signals (0…1) → scRGB. Colours outside BT.709
-/// come out with negative channels, as scRGB writes them.
+/// The inverse of [`scrgb_to_pq`]: BT.2020 / PQ signals (0…1) → scRGB. Colours outside BT.709 come out with negative
+/// channels, as scRGB writes them.
 pub fn pq_to_scrgb(signal: [f32; 3]) -> [f32; 3] {
     let linear = signal.map(|s| pq_decode(s) * PQ_PEAK);
     BT2020_TO_709.map(|m| m[0] * linear[0] + m[1] * linear[1] + m[2] * linear[2])
@@ -346,12 +321,7 @@ mod tests {
 
     #[test]
     fn pq_round_trips_through_scrgb() {
-        for rgb in [
-            [1.0, 1.0, 1.0],
-            [12.5, 3.0, 0.2],
-            [0.01, 0.5, 40.0],
-            [-0.3, 1.1, 1.0],
-        ] {
+        for rgb in [[1.0, 1.0, 1.0], [12.5, 3.0, 0.2], [0.01, 0.5, 40.0], [-0.3, 1.1, 1.0]] {
             let codes = scrgb_to_pq(rgb).map(|c| f32::from(c) / 65535.0);
             let back = pq_to_scrgb(codes);
             // The matrices mix the channels: the error follows the brightest one.

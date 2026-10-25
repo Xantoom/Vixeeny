@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The video editor of the replays, drawn natively: a window of its own that plays a clip and
-//! cuts it to the frame.
+//! The video editor of the replays, drawn natively: a window of its own that plays a clip and cuts it to the frame.
 //!
 //! ```text
 //! ┌ title: name of the file ─────────────────────────── ✕ ┐
@@ -10,9 +9,9 @@
 //! │ ⚡ 0:08.250                [Save as…]  [   Save   ]    │
 //! └───────────────────────────────────────────────────────┘
 //! ```
-//! The window knows the frames (their times, the key frames), what is kept and where the
-//! playhead is; what it cannot do itself (decode a frame, play, write) it asks its host for
-//! through [`CutterEvent`]s, on its own thread, between two messages.
+//! The window knows the frames (their times, the key frames), what is kept and where the playhead is; what it cannot do
+//! itself (decode a frame, play, write) it asks its host for through [`CutterEvent`]s, on its own thread, between two
+//! messages.
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
@@ -22,15 +21,12 @@ use vixeeny_platform::PhysicalRect;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Direct2D::ID2D1Bitmap1;
 use windows::Win32::Graphics::DirectComposition::{IDCompositionSurface, IDCompositionVisual2};
-use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetKeyState, ReleaseCapture, SetCapture, VK_CONTROL, VK_SHIFT,
-};
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, ReleaseCapture, SetCapture, VK_CONTROL, VK_SHIFT};
 use windows::Win32::UI::WindowsAndMessaging::{
-    DispatchMessageW, GetWindowRect, HTCAPTION, HTCLIENT, MSG, MWMO_INPUTAVAILABLE,
-    MsgWaitForMultipleObjectsEx, PM_REMOVE, PeekMessageW, PostMessageW, QS_ALLINPUT, SW_MINIMIZE,
-    ShowWindow, TranslateMessage, WM_CAPTURECHANGED, WM_CLOSE, WM_KEYDOWN, WM_LBUTTONDBLCLK,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCHITTEST, WM_QUIT, WM_SETCURSOR,
-    WM_SYSKEYDOWN,
+    DispatchMessageW, GetWindowRect, HTCAPTION, HTCLIENT, MSG, MWMO_INPUTAVAILABLE, MsgWaitForMultipleObjectsEx,
+    PM_REMOVE, PeekMessageW, PostMessageW, QS_ALLINPUT, SW_MINIMIZE, ShowWindow, TranslateMessage, WM_CAPTURECHANGED,
+    WM_CLOSE, WM_KEYDOWN, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCHITTEST,
+    WM_QUIT, WM_SETCURSOR, WM_SYSKEYDOWN,
 };
 use windows::core::Result;
 
@@ -84,16 +80,12 @@ impl Frames {
     }
 
     pub fn duration(&self) -> f64 {
-        self.times
-            .last()
-            .map_or(0.0, |t| t + 1.0 / self.rate.max(1.0))
+        self.times.last().map_or(0.0, |t| t + 1.0 / self.rate.max(1.0))
     }
 
     /// The frame shown at `t`.
     pub fn at(&self, t: f64) -> usize {
-        self.times
-            .partition_point(|&x| x <= t + 1e-9)
-            .saturating_sub(1)
+        self.times.partition_point(|&x| x <= t + 1e-9).saturating_sub(1)
     }
 
     fn time(&self, i: usize) -> f64 {
@@ -182,18 +174,8 @@ impl Layout {
         let band_h = (h - TITLE_H - BOTTOM_H).max(1.0);
         let band = (0.0, TITLE_H, w, band_h);
         let aspect = if aspect > 0.0 { aspect } else { 16.0 / 9.0 };
-        let (vw, vh) = if w / band_h > aspect {
-            (band_h * aspect, band_h)
-        } else {
-            (w, w / aspect)
-        };
-        Self {
-            w,
-            h,
-            band,
-            video: ((w - vw) / 2.0, TITLE_H + (band_h - vh) / 2.0, vw, vh),
-            bottom: TITLE_H + band_h,
-        }
+        let (vw, vh) = if w / band_h > aspect { (band_h * aspect, band_h) } else { (w, w / aspect) };
+        Self { w, h, band, video: ((w - vw) / 2.0, TITLE_H + (band_h - vh) / 2.0, vw, vh), bottom: TITLE_H + band_h }
     }
 
     /// A part of the bottom bands, in window coordinates.
@@ -210,20 +192,12 @@ impl Layout {
             Target::Next => (PAD + 84.0, b + 8.0, 32.0, 32.0),
             Target::Mute => (self.w - PAD - VOLUME_W - 40.0, b + 8.0, 32.0, 32.0),
             Target::Volume => (self.w - PAD - VOLUME_W, b + 14.0, VOLUME_W, 20.0),
-            Target::Strip | Target::From | Target::To => (
-                PAD + HANDLE_W,
-                b + STRIP_Y,
-                self.w - 2.0 * (PAD + HANDLE_W),
-                STRIP_H,
-            ),
+            Target::Strip | Target::From | Target::To => {
+                (PAD + HANDLE_W, b + STRIP_Y, self.w - 2.0 * (PAD + HANDLE_W), STRIP_H)
+            }
             Target::Sign => (PAD, actions + 18.0, 24.0, 24.0),
             Target::Save => (self.w - PAD - SAVE_W, button_y, SAVE_W, BUTTON_H),
-            Target::SaveAs => (
-                self.w - PAD - SAVE_W - 8.0 - SAVE_AS_W,
-                button_y,
-                SAVE_AS_W,
-                BUTTON_H,
-            ),
+            Target::SaveAs => (self.w - PAD - SAVE_W - 8.0 - SAVE_AS_W, button_y, SAVE_AS_W, BUTTON_H),
             Target::None => (0.0, 0.0, 0.0, 0.0),
         }
     }
@@ -244,18 +218,8 @@ impl Layout {
     fn handle(&self, frames: &Frames, state: &CutState, target: Target) -> Box2 {
         let (_, y, _, h) = self.part(Target::Strip);
         match target {
-            Target::From => (
-                self.x_of(frames, frames.time(state.from)) - HANDLE_W,
-                y - 4.0,
-                HANDLE_W,
-                h + 8.0,
-            ),
-            _ => (
-                self.x_of(frames, frames.time(state.to) + 1.0 / frames.rate.max(1.0)),
-                y - 4.0,
-                HANDLE_W,
-                h + 8.0,
-            ),
+            Target::From => (self.x_of(frames, frames.time(state.from)) - HANDLE_W, y - 4.0, HANDLE_W, h + 8.0),
+            _ => (self.x_of(frames, frames.time(state.to) + 1.0 / frames.rate.max(1.0)), y - 4.0, HANDLE_W, h + 8.0),
         }
     }
 
@@ -291,8 +255,8 @@ impl Layout {
     }
 }
 
-/// The window's place: centred on `work` (the monitor's free area, physical pixels), as tall
-/// as it leaves with a margin above and below, as wide as the picture needs.
+/// The window's place: centred on `work` (the monitor's free area, physical pixels), as tall as it leaves with a margin
+/// above and below, as wide as the picture needs.
 pub fn placement(work: PhysicalRect, u: f32, aspect: f32) -> PhysicalRect {
     let (w, h) = (work.width as f32, work.height as f32);
     let margin_y = (h * 0.06).max(24.0 * u);
@@ -331,11 +295,7 @@ pub struct CutState {
 pub fn format_time(t: f64) -> String {
     let ms = (t.max(0.0) * 1000.0).round() as u64;
     let (h, m, s, ms) = (ms / 3_600_000, ms / 60_000 % 60, ms / 1000 % 60, ms % 1000);
-    if h > 0 {
-        format!("{h}:{m:02}:{s:02}.{ms:03}")
-    } else {
-        format!("{m}:{s:02}.{ms:03}")
-    }
+    if h > 0 { format!("{h}:{m:02}:{s:02}.{ms:03}") } else { format!("{m}:{s:02}.{ms:03}") }
 }
 
 /// What the bottom bands show; drawn again only when it changes.
@@ -365,8 +325,7 @@ enum Drag {
 /// What the host does for the window.
 pub trait CutterHost {
     fn event(&mut self, cutter: &Cutter, event: CutterEvent);
-    /// Called on every turn of the loop; returns how long the loop may sleep (`None`: until a
-    /// message comes).
+    /// Called on every turn of the loop; returns how long the loop may sleep (`None`: until a message comes).
     fn tick(&mut self, cutter: &Cutter) -> Option<Duration>;
 }
 
@@ -377,14 +336,7 @@ pub struct Waker(isize);
 impl Waker {
     pub fn wake(&self) {
         // SAFETY: plain call; a window that is gone makes it fail, nothing else.
-        let _ = unsafe {
-            PostMessageW(
-                Some(HWND(self.0 as *mut _)),
-                popup::WM_POPUP,
-                WPARAM(0),
-                LPARAM(0),
-            )
-        };
+        let _ = unsafe { PostMessageW(Some(HWND(self.0 as *mut _)), popup::WM_POPUP, WPARAM(0), LPARAM(0)) };
     }
 }
 
@@ -457,10 +409,7 @@ impl Inner {
     /// Moves the playhead by the user: playing stops.
     fn seek(&self, frame: usize) {
         if self.state.get().playing {
-            self.state.set(CutState {
-                playing: false,
-                ..self.state.get()
-            });
+            self.state.set(CutState { playing: false, ..self.state.get() });
             self.emit(CutterEvent::Pause);
         }
         self.set_state(|s| s.position = frame);
@@ -482,11 +431,7 @@ impl Inner {
         } else {
             self.state.set(s);
         }
-        self.emit(if s.playing {
-            CutterEvent::Play
-        } else {
-            CutterEvent::Pause
-        });
+        self.emit(if s.playing { CutterEvent::Play } else { CutterEvent::Pause });
     }
 
     fn busy(&self) -> bool {
@@ -567,17 +512,11 @@ impl Inner {
             // M: mute.
             0x4d => self.set_state(|s| s.muted = !s.muted),
             // Ctrl+S, Ctrl+Shift+S
-            0x53 if control() && !self.busy() => self.emit(if shift() {
-                CutterEvent::SaveAs
-            } else {
-                CutterEvent::Save
-            }),
+            0x53 if control() && !self.busy() => {
+                self.emit(if shift() { CutterEvent::SaveAs } else { CutterEvent::Save })
+            }
             // Escape: stops the writing, else closes.
-            0x1b => self.emit(if self.busy() {
-                CutterEvent::Cancel
-            } else {
-                CutterEvent::Close
-            }),
+            0x1b => self.emit(if self.busy() { CutterEvent::Cancel } else { CutterEvent::Close }),
             _ => return false,
         }
         true
@@ -610,11 +549,7 @@ impl Inner {
                 let (lx, ly) = ((px - r.left as f32) / u, (py - r.top as f32) / u);
                 let state = self.state.get();
                 let hit = self.layout.target_at(&self.frames, &state, lx, ly);
-                return Some(LRESULT(if hit == Target::Title {
-                    HTCAPTION as isize
-                } else {
-                    HTCLIENT as isize
-                }));
+                return Some(LRESULT(if hit == Target::Title { HTCAPTION as isize } else { HTCLIENT as isize }));
             }
             WM_CLOSE => {
                 self.emit(CutterEvent::Close);
@@ -622,9 +557,7 @@ impl Inner {
             }
             WM_SETCURSOR if (lparam.0 & 0xffff) == 1 => {
                 let pointer = match self.hover.get() {
-                    Target::From | Target::To => {
-                        Pointer::Zone(vixeeny_editor::CursorHint::ResizeEw)
-                    }
+                    Target::From | Target::To => Pointer::Zone(vixeeny_editor::CursorHint::ResizeEw),
                     Target::None | Target::Title | Target::Sign => Pointer::Arrow,
                     _ => Pointer::Hand,
                 };
@@ -642,8 +575,7 @@ impl Inner {
                     Some(drag) => self.drag_to(drag, x),
                     None => {
                         let state = self.state.get();
-                        self.hover
-                            .set(self.layout.target_at(&self.frames, &state, x, y));
+                        self.hover.set(self.layout.target_at(&self.frames, &state, x, y));
                     }
                 }
             }
@@ -719,13 +651,10 @@ impl Inner {
             |c| paint_title(c, &self.theme, u, &layout, &self.texts.title, &title),
         )?;
         let state = self.state.get();
-        // The playhead and the time are layers of their own: playing moves the one and draws
-        // the other again, not the whole bands.
+        // The playhead and the time are layers of their own: playing moves the one and draws the other again, not the
+        // whole bands.
         let look = BottomLook {
-            state: CutState {
-                position: 0,
-                ..state
-            },
+            state: CutState { position: 0, ..state },
             hover,
             held,
             thumbs: self.thumbs.borrow().iter().filter(|t| t.is_some()).count(),
@@ -735,18 +664,7 @@ impl Inner {
             &self.gfx,
             &look,
             || Ok((w, (BOTTOM_H * u).ceil() as u32)),
-            |c| {
-                paint_bottom(
-                    c,
-                    &self.theme,
-                    u,
-                    &layout,
-                    &self.frames,
-                    &self.texts,
-                    &look,
-                    &thumbs,
-                )
-            },
+            |c| paint_bottom(c, &self.theme, u, &layout, &self.frames, &self.texts, &look, &thumbs),
         )?;
         drop(thumbs);
         self.clock.show(
@@ -770,12 +688,7 @@ impl Inner {
             Some(text) => {
                 let text = text.to_owned();
                 // Measured once per text, not on every move of the pointer.
-                let cached = self
-                    .tip_size
-                    .borrow()
-                    .as_ref()
-                    .filter(|(t, _)| *t == text)
-                    .map(|(_, m)| *m);
+                let cached = self.tip_size.borrow().as_ref().filter(|(t, _)| *t == text).map(|(_, m)| *m);
                 let (size, bubble) = match cached {
                     Some(m) => m,
                     None => {
@@ -792,8 +705,8 @@ impl Inner {
                 )?;
                 let (bx, by, bw, _) = layout.part(hover);
                 let m = crate::paint::TIP_MARGIN * u;
-                let tx = ((bx + bw / 2.0) * u - size.0 as f32 / 2.0)
-                    .clamp(0.0, (layout.w * u - size.0 as f32).max(0.0));
+                let tx =
+                    ((bx + bw / 2.0) * u - size.0 as f32 / 2.0).clamp(0.0, (layout.w * u - size.0 as f32).max(0.0));
                 let ty = by * u - bubble.1 - m - 4.0 * u;
                 self.tip.move_to(tx.round(), ty.round())?;
             }
@@ -840,32 +753,12 @@ impl Inner {
     }
 }
 
-fn paint_title(
-    c: &Canvas<'_>,
-    t: &Theme,
-    u: f32,
-    l: &Layout,
-    name: &str,
-    look: &TitleLook,
-) -> Result<()> {
+fn paint_title(c: &Canvas<'_>, t: &Theme, u: f32, l: &Layout, name: &str, look: &TitleLook) -> Result<()> {
     c.fill_rect(rect(0.0, 0.0, l.w * u, TITLE_H * u), t.flyout)?;
     let icon = 18.0 * u;
-    c.icon(
-        icons::CUT,
-        14.0 * u,
-        (TITLE_H * u - icon) / 2.0,
-        icon,
-        t.accent,
-    )?;
-    let text = c
-        .gfx
-        .paragraph_lines(name, 13.0 * u, false, (l.w - 140.0) * u, 1)?;
-    c.text_layout(
-        &text.layout,
-        42.0 * u,
-        (TITLE_H * u - text.height) / 2.0,
-        t.text,
-    )?;
+    c.icon(icons::CUT, 14.0 * u, (TITLE_H * u - icon) / 2.0, icon, t.accent)?;
+    let text = c.gfx.paragraph_lines(name, 13.0 * u, false, (l.w - 140.0) * u, 1)?;
+    c.text_layout(&text.layout, 42.0 * u, (TITLE_H * u - text.height) / 2.0, t.text)?;
     let (x, y, w, h) = l.part(Target::Close);
     let (back, fore) = match (look.held, look.hover) {
         (Some(Target::Close), _) => (Some(Rgba::hex(0xc42b1c, 0xcc)), Rgba::hex(0xffffff, 255)),
@@ -876,13 +769,7 @@ fn paint_title(
         c.fill_rect(rect(x * u, y * u, w * u, h * u), back)?;
     }
     let icon = 16.0 * u;
-    c.icon(
-        icons::DISMISS,
-        (x + w / 2.0) * u - icon / 2.0,
-        (y + h / 2.0) * u - icon / 2.0,
-        icon,
-        fore,
-    )
+    c.icon(icons::DISMISS, (x + w / 2.0) * u - icon / 2.0, (y + h / 2.0) * u - icon / 2.0, icon, fore)
 }
 
 /// The size of the time's surface (physical pixels): room for `h:mm:ss.mmm / h:mm:ss.mmm`.
@@ -895,22 +782,13 @@ fn clock_at(l: &Layout) -> (f32, f32) {
     (PAD + 128.0, l.bottom)
 }
 
-/// The time of the playhead and the length of the clip, at `(x, y)` (pixels of the canvas):
-/// a layer of its own, drawn again on every frame played (the rest of the bands is not).
-fn paint_clock(
-    c: &Canvas<'_>,
-    t: &Theme,
-    u: f32,
-    frames: &Frames,
-    position: usize,
-    (x, y): (f32, f32),
-) -> Result<()> {
+/// The time of the playhead and the length of the clip, at `(x, y)` (pixels of the canvas): a layer of its own, drawn
+/// again on every frame played (the rest of the bands is not).
+fn paint_clock(c: &Canvas<'_>, t: &Theme, u: f32, frames: &Frames, position: usize, (x, y): (f32, f32)) -> Result<()> {
     let now = format_time(frames.time(position));
     let total = format_time(frames.duration());
     let time = c.gfx.paragraph(&now, 14.0 * u, true, 1.0e5)?;
-    let rest = c
-        .gfx
-        .paragraph(&format!(" / {total}"), 14.0 * u, false, 1.0e5)?;
+    let rest = c.gfx.paragraph(&format!(" / {total}"), 14.0 * u, false, 1.0e5)?;
     let ty = y + (CONTROLS_H * u - time.height) / 2.0;
     c.text_layout(&time.layout, x, ty, t.text)?;
     c.text_layout(&rest.layout, x + time.width, ty, t.text_2)
@@ -918,10 +796,7 @@ fn paint_clock(
 
 /// The playhead's surface (physical pixels): its line over the strip and its knob above.
 fn playhead_size(u: f32) -> (u32, u32) {
-    (
-        (PLAYHEAD_W * u).ceil() as u32,
-        ((STRIP_H + 17.0) * u).ceil() as u32,
-    )
+    ((PLAYHEAD_W * u).ceil() as u32, ((STRIP_H + 17.0) * u).ceil() as u32)
 }
 
 const PLAYHEAD_W: f32 = 12.0;
@@ -932,14 +807,10 @@ fn playhead_at(l: &Layout, frames: &Frames, position: usize) -> (f32, f32) {
     (x - PLAYHEAD_W / 2.0, l.bottom + STRIP_Y - 11.0)
 }
 
-/// The playhead, its surface's top left at `(x, y)` (pixels of the canvas): drawn once, then
-/// only moved.
+/// The playhead, its surface's top left at `(x, y)` (pixels of the canvas): drawn once, then only moved.
 fn paint_playhead(c: &Canvas<'_>, t: &Theme, u: f32, (x, y): (f32, f32)) -> Result<()> {
     let cx = x + PLAYHEAD_W / 2.0 * u;
-    c.fill_rect(
-        rect(cx - 1.0 * u, y + 5.0 * u, 2.0 * u, (STRIP_H + 12.0) * u),
-        t.text,
-    )?;
+    c.fill_rect(rect(cx - 1.0 * u, y + 5.0 * u, 2.0 * u, (STRIP_H + 12.0) * u), t.text)?;
     c.fill_circle(cx, y + 5.0 * u, 5.0 * u, t.text)
 }
 
@@ -973,13 +844,7 @@ fn paint_bottom(
     let icon_in = |data: &'static str, target: Target, size: f32, colour: Rgba| -> Result<()> {
         let (x, y, w, h) = l.part(target);
         let i = size * u;
-        c.icon(
-            data,
-            (x + w / 2.0) * u - i / 2.0,
-            (y + h / 2.0 - top) * u - i / 2.0,
-            i,
-            colour,
-        )
+        c.icon(data, (x + w / 2.0) * u - i / 2.0, (y + h / 2.0 - top) * u - i / 2.0, i, colour)
     };
 
     // ---- controls: frame by frame, play, the time; the volume on the right
@@ -988,11 +853,7 @@ fn paint_bottom(
     back(Target::Next, 6.0)?;
     icon_in(icons::NEXT, Target::Next, 18.0, t.text)?;
     let play = at(l.part(Target::Play));
-    let fill = if look.hover == Target::Play {
-        t.accent.brighter(0.08)
-    } else {
-        t.accent
-    };
+    let fill = if look.hover == Target::Play { t.accent.brighter(0.08) } else { t.accent };
     c.fill_circle(
         (play.left + play.right) / 2.0,
         (play.top + play.bottom) / 2.0,
@@ -1000,11 +861,7 @@ fn paint_bottom(
         fill,
     )?;
     icon_in(
-        if s.playing {
-            icons::PAUSE_FILLED
-        } else {
-            icons::PLAY_FILLED
-        },
+        if s.playing { icons::PAUSE_FILLED } else { icons::PLAY_FILLED },
         Target::Play,
         18.0,
         Rgba::hex(0xffffff, 255),
@@ -1013,11 +870,7 @@ fn paint_bottom(
     back(Target::Mute, 6.0)?;
     let silent = s.muted || s.volume == 0.0;
     icon_in(
-        if silent {
-            icons::SPEAKER_MUTE
-        } else {
-            icons::SPEAKER
-        },
+        if silent { icons::SPEAKER_MUTE } else { icons::SPEAKER },
         Target::Mute,
         18.0,
         if silent { t.text_2 } else { t.text },
@@ -1026,16 +879,8 @@ fn paint_bottom(
     let cy = (track.top + track.bottom) / 2.0;
     let level = if s.muted { 0.0 } else { s.volume };
     let kx = track.left + (track.right - track.left) * level;
-    c.fill_round(
-        rect(track.left, cy - 2.0 * u, track.right - track.left, 4.0 * u),
-        2.0 * u,
-        t.control_stroke,
-    )?;
-    c.fill_round(
-        rect(track.left, cy - 2.0 * u, kx - track.left, 4.0 * u),
-        2.0 * u,
-        t.accent,
-    )?;
+    c.fill_round(rect(track.left, cy - 2.0 * u, track.right - track.left, 4.0 * u), 2.0 * u, t.control_stroke)?;
+    c.fill_round(rect(track.left, cy - 2.0 * u, kx - track.left, 4.0 * u), 2.0 * u, t.accent)?;
     c.fill_circle(kx, cy, 7.0 * u, t.flyout)?;
     c.stroke_circle(kx, cy, 7.0 * u, 1.0, t.stroke_strong)?;
     c.fill_circle(kx, cy, 4.0 * u, t.accent)?;
@@ -1062,26 +907,16 @@ fn paint_bottom(
     c.pop_layer();
     // The part kept: framed in the accent colour, its handles outside it.
     let edge = 2.0 * u;
-    c.fill_rect(
-        rect(x_from, strip.top - edge, x_to - x_from, edge),
-        t.accent,
-    )?;
+    c.fill_rect(rect(x_from, strip.top - edge, x_to - x_from, edge), t.accent)?;
     c.fill_rect(rect(x_from, strip.bottom, x_to - x_from, edge), t.accent)?;
     for target in [Target::From, Target::To] {
         let (hx, hy, hw, hh) = l.handle(frames, &s, target);
         let r = rect(hx * u, (hy - top) * u, hw * u, hh * u);
-        let colour = if look.hover == target || look.held == Some(target) {
-            t.accent.brighter(0.1)
-        } else {
-            t.accent
-        };
+        let colour = if look.hover == target || look.held == Some(target) { t.accent.brighter(0.1) } else { t.accent };
         c.fill_round(r, 4.0 * u, colour)?;
         let gx = (r.left + r.right) / 2.0;
         let gy = (r.top + r.bottom) / 2.0;
-        c.fill_rect(
-            rect(gx - 0.75 * u, gy - 7.0 * u, 1.5 * u, 14.0 * u),
-            Rgba::hex(0xffffff, 0xcc),
-        )?;
+        c.fill_rect(rect(gx - 0.75 * u, gy - 7.0 * u, 1.5 * u, 14.0 * u), Rgba::hex(0xffffff, 0xcc))?;
     }
     // Key frames under the strip, where they can be told apart.
     let ticks_y = strip.bottom + 6.0 * u;
@@ -1097,40 +932,16 @@ fn paint_bottom(
     // ---- the actions: the length kept and how it is written; save as, save
     let sign = at(l.part(Target::Sign));
     let i = 20.0 * u;
-    let (data, colour) = if s.lossless {
-        (icons::FLASH, t.accent)
-    } else {
-        (icons::SYNC, t.text_2)
-    };
-    c.icon(
-        data,
-        (sign.left + sign.right) / 2.0 - i / 2.0,
-        (sign.top + sign.bottom) / 2.0 - i / 2.0,
-        i,
-        colour,
-    )?;
+    let (data, colour) = if s.lossless { (icons::FLASH, t.accent) } else { (icons::SYNC, t.text_2) };
+    c.icon(data, (sign.left + sign.right) / 2.0 - i / 2.0, (sign.top + sign.bottom) / 2.0 - i / 2.0, i, colour)?;
     let kept = format_time(frames.time(s.to) - frames.time(s.from) + 1.0 / frames.rate.max(1.0));
     match s.progress {
         Some(p) => {
             let (bx, _, _, _) = l.part(Target::SaveAs);
             let w = (bx - PAD - 48.0 - 16.0).max(0.0) * u;
-            let r = rect(
-                sign.right + 12.0 * u,
-                (sign.top + sign.bottom) / 2.0 - 3.0 * u,
-                w,
-                6.0 * u,
-            );
+            let r = rect(sign.right + 12.0 * u, (sign.top + sign.bottom) / 2.0 - 3.0 * u, w, 6.0 * u);
             c.fill_round(r, 3.0 * u, t.control_stroke)?;
-            c.fill_round(
-                rect(
-                    r.left,
-                    r.top,
-                    (r.right - r.left) * p.clamp(0.0, 1.0),
-                    6.0 * u,
-                ),
-                3.0 * u,
-                t.accent,
-            )?;
+            c.fill_round(rect(r.left, r.top, (r.right - r.left) * p.clamp(0.0, 1.0), 6.0 * u), 3.0 * u, t.accent)?;
         }
         None => {
             let text = c.gfx.paragraph(&kept, 14.0 * u, true, 1.0e5)?;
@@ -1166,11 +977,7 @@ fn paint_bottom(
         t.accent
     };
     c.fill_round(r, 6.0 * u, fill)?;
-    let colour = if busy {
-        t.text_off
-    } else {
-        Rgba::hex(0xffffff, 255)
-    };
+    let colour = if busy { t.text_off } else { Rgba::hex(0xffffff, 255) };
     c.text(&texts.save, r, 14.0 * u, colour, Align::Centre)
 }
 
@@ -1181,35 +988,18 @@ pub struct Cutter {
 
 impl Cutter {
     /// The window over `geometry` (physical pixels; see [`placement`]) on a monitor at `dpi`.
-    pub fn new(
-        geometry: PhysicalRect,
-        dpi: u32,
-        look: Look,
-        frames: Frames,
-        texts: CutterTexts,
-    ) -> Result<Self> {
+    pub fn new(geometry: PhysicalRect, dpi: u32, look: Look, frames: Frames, texts: CutterTexts) -> Result<Self> {
         let gfx = Gfx::shared()?;
         let u = dpi.max(48) as f32 / 96.0;
         let popup = Popup::new_window(&gfx, geometry, &texts.title)?;
-        let layout = Layout::new(
-            geometry.width as f32 / u,
-            geometry.height as f32 / u,
-            frames.aspect,
-        );
+        let layout = Layout::new(geometry.width as f32 / u, geometry.height as f32 / u, frames.aspect);
         let video = scene::visual(&gfx)?;
         let title = Piece::new(&gfx, false)?;
         let bottom = Piece::new(&gfx, false)?;
         let tip = Piece::new(&gfx, false)?;
         let clock = Piece::new(&gfx, false)?;
         let playhead = Piece::new(&gfx, false)?;
-        for v in [
-            &video,
-            &title.visual,
-            &bottom.visual,
-            &playhead.visual,
-            &clock.visual,
-            &tip.visual,
-        ] {
+        for v in [&video, &title.visual, &bottom.visual, &playhead.visual, &clock.visual, &tip.visual] {
             scene::add(&popup.root, v)?;
         }
         title.move_to(0.0, 0.0)?;
@@ -1250,9 +1040,7 @@ impl Cutter {
             closed: Cell::new(false),
         });
         let weak: Weak<Inner> = Rc::downgrade(&inner);
-        inner
-            .popup
-            .on_message(move |msg, wparam, lparam| weak.upgrade()?.message(msg, wparam, lparam));
+        inner.popup.on_message(move |msg, wparam, lparam| weak.upgrade()?.message(msg, wparam, lparam));
         Ok(Self { inner })
     }
 
@@ -1269,10 +1057,7 @@ impl Cutter {
         let u = self.inner.u;
         let tw = h * self.inner.frames.aspect.max(0.1);
         let n = (w / tw).ceil().max(1.0) as usize;
-        (
-            n,
-            (((w / n as f32) * u).ceil() as u32, (h * u).ceil() as u32),
-        )
+        (n, (((w / n as f32) * u).ceil() as u32, (h * u).ceil() as u32))
     }
 
     /// The frame thumbnail `slot` should show.
@@ -1358,8 +1143,8 @@ impl Cutter {
         self.inner.closed.set(true);
     }
 
-    /// Shows the window and runs until [`Cutter::close`], handing the events to `host` and
-    /// asking it what to do on every turn.
+    /// Shows the window and runs until [`Cutter::close`], handing the events to `host` and asking it what to do on
+    /// every turn.
     pub fn run(&self, host: &mut dyn CutterHost) -> Result<()> {
         let inner = &self.inner;
         inner.refresh();
@@ -1377,9 +1162,7 @@ impl Cutter {
             if !inner.events.borrow().is_empty() {
                 continue;
             }
-            let ms = wait.map_or(u32::MAX, |d| {
-                d.as_millis().min(u128::from(u32::MAX - 1)) as u32
-            });
+            let ms = wait.map_or(u32::MAX, |d| d.as_millis().min(u128::from(u32::MAX - 1)) as u32);
             // SAFETY: no handles; waits for input or the timeout.
             unsafe {
                 MsgWaitForMultipleObjectsEx(None, ms, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
@@ -1412,10 +1195,7 @@ impl Cutter {
         let mut r = RECT::default();
         // SAFETY: a valid out-pointer.
         let _ = unsafe { GetWindowRect(self.inner.popup.hwnd, &mut r) };
-        POINT {
-            x: r.left,
-            y: r.top,
-        }
+        POINT { x: r.left, y: r.top }
     }
 }
 
@@ -1479,17 +1259,9 @@ mod tests {
     #[test]
     fn the_window_leaves_a_margin_above_and_below_and_is_centred() {
         let work = PhysicalRect::new(0, 0, 2560, 1400);
-        let PhysicalRect {
-            x,
-            y,
-            width: w,
-            height: h,
-        } = placement(work, 1.0, 16.0 / 9.0);
+        let PhysicalRect { x, y, width: w, height: h } = placement(work, 1.0, 16.0 / 9.0);
         assert!(y > 0 && y + h as i32 <= 1400);
-        assert!(
-            (y - (1400 - (y + h as i32))).abs() <= 1,
-            "the same margin above and below"
-        );
+        assert!((y - (1400 - (y + h as i32))).abs() <= 1, "the same margin above and below");
         assert!((x - (2560 - (x + w as i32))).abs() <= 1, "centred");
         // As wide as the picture needs at that height.
         let video_h = h as f32 - TITLE_H - BOTTOM_H;
@@ -1526,10 +1298,7 @@ mod tests {
         }
         // The middle of the strip moves the playhead; the title drags the window.
         let (sx, sy, sw, sh) = l.part(Target::Strip);
-        assert_eq!(
-            l.target_at(&f, &s, sx + sw / 2.0, sy + sh / 2.0),
-            Target::Strip
-        );
+        assert_eq!(l.target_at(&f, &s, sx + sw / 2.0, sy + sh / 2.0), Target::Strip);
         assert_eq!(l.target_at(&f, &s, 300.0, 20.0), Target::Title);
     }
 
@@ -1550,18 +1319,10 @@ mod tests {
         // A picture: a gradient, as a game would show.
         let (pw, ph) = (320_u32, 180_u32);
         let picture: Vec<u8> = (0..ph)
-            .flat_map(|y| {
-                (0..pw).flat_map(move |x| [(x * 255 / pw) as u8, (y * 255 / ph) as u8, 120, 255])
-            })
+            .flat_map(|y| (0..pw).flat_map(move |x| [(x * 255 / pw) as u8, (y * 255 / ph) as u8, 120, 255]))
             .collect();
-        for (name, dark, progress, lossless) in [
-            ("dark", true, None, true),
-            ("light", false, Some(0.4), false),
-        ] {
-            let t = Theme::new(Look {
-                dark,
-                ..Look::default()
-            });
+        for (name, dark, progress, lossless) in [("dark", true, None, true), ("light", false, Some(0.4), false)] {
+            let t = Theme::new(Look { dark, ..Look::default() });
             let bitmap = gfx.bgra_bitmap(pw, ph, &picture).expect("bitmap");
             let thumbs: Vec<Option<ID2D1Bitmap1>> = (0..12).map(|_| Some(bitmap.clone())).collect();
             let mut state = state(frames.len());
@@ -1570,22 +1331,12 @@ mod tests {
             state.position = 700;
             state.progress = progress;
             state.lossless = lossless;
-            let look = BottomLook {
-                state,
-                hover: Target::Save,
-                held: None,
-                thumbs: 12,
-            };
-            let title = TitleLook {
-                hover: Target::None,
-                held: None,
-            };
+            let look = BottomLook { state, hover: Target::Save, held: None, thumbs: 12 };
+            let title = TitleLook { hover: Target::None, held: None };
             let th = (TITLE_H * u).ceil() as u32;
             let bh = (BOTTOM_H * u).ceil() as u32;
             let vh = h - th - bh;
-            let top = gfx
-                .render(w, th, |c| paint_title(c, &t, u, &l, &texts.title, &title))
-                .expect("title");
+            let top = gfx.render(w, th, |c| paint_title(c, &t, u, &l, &texts.title, &title)).expect("title");
             let (vx, vy, vw, vhh) = l.video;
             let video = gfx
                 .render(w, vh, |c| {
@@ -1597,14 +1348,7 @@ mod tests {
                 .render(w, bh, |c| {
                     paint_bottom(c, &t, u, &l, &frames, &texts, &look, &thumbs)?;
                     let (cx, cy) = clock_at(&l);
-                    paint_clock(
-                        c,
-                        &t,
-                        u,
-                        &frames,
-                        state.position,
-                        (cx * u, (cy - l.bottom) * u),
-                    )?;
+                    paint_clock(c, &t, u, &frames, state.position, (cx * u, (cy - l.bottom) * u))?;
                     let (px, py) = playhead_at(&l, &frames, state.position);
                     paint_playhead(c, &t, u, (px * u, (py - l.bottom) * u))
                 })

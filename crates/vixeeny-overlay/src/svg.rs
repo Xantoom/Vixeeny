@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The subset of SVG path data the icons use: move, line, horizontal, vertical, cubic Bézier and
-//! close, absolute or relative. Parsed into figures that Direct2D turns into a geometry.
+//! The subset of SVG path data the icons use: move, line, horizontal, vertical, cubic Bézier and close, absolute or
+//! relative. Parsed into figures that Direct2D turns into a geometry.
 
 /// One drawing step, in absolute coordinates.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -24,9 +24,7 @@ struct Tokens<'a> {
 
 impl Tokens<'_> {
     fn skip_separators(&mut self) {
-        self.rest = self
-            .rest
-            .trim_start_matches(|c: char| c.is_ascii_whitespace() || c == ',');
+        self.rest = self.rest.trim_start_matches(|c: char| c.is_ascii_whitespace() || c == ',');
     }
 
     fn command(&mut self) -> Option<char> {
@@ -70,10 +68,7 @@ impl Tokens<'_> {
 
     fn at_number(&mut self) -> bool {
         self.skip_separators();
-        self.rest
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_digit() || matches!(c, '-' | '+' | '.'))
+        self.rest.chars().next().is_some_and(|c| c.is_ascii_digit() || matches!(c, '-' | '+' | '.'))
     }
 }
 
@@ -90,11 +85,7 @@ pub fn parse(data: &str) -> Option<Vec<Figure>> {
             'M' => {
                 let (x, y) = (tokens.number()? + base.0, tokens.number()? + base.1);
                 at = (x, y);
-                figures.push(Figure {
-                    start: at,
-                    segments: Vec::new(),
-                    closed: false,
-                });
+                figures.push(Figure { start: at, segments: Vec::new(), closed: false });
                 // Further pairs after a move are lines.
                 command = if relative { 'l' } else { 'L' };
                 if !tokens.at_number() {
@@ -174,14 +165,7 @@ mod tests {
     #[test]
     fn relative_commands_add_to_the_current_point() {
         let figures = parse("m1 1l2 0v3h-1z").expect("valid path");
-        assert_eq!(
-            figures[0].segments,
-            [
-                Segment::Line(3.0, 1.0),
-                Segment::Line(3.0, 4.0),
-                Segment::Line(2.0, 4.0),
-            ]
-        );
+        assert_eq!(figures[0].segments, [Segment::Line(3.0, 1.0), Segment::Line(3.0, 4.0), Segment::Line(2.0, 4.0),]);
     }
 
     #[test]

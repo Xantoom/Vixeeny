@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The annotation editor's model: annotations, undo/redo, tool
-//! interaction and rendering to pixels. No UI, no OS: everything is testable.
+//! The annotation editor's model: annotations, undo/redo, tool interaction and rendering to pixels. No UI, no OS:
+//! everything is testable.
 
 pub mod geometry;
 pub mod history;

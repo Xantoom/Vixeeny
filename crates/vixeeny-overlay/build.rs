@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Turns the icon paths of `vixeeny-ui/ui/icons.slint` (Fluent UI System Icons, 20×20 outlines)
-//! into Rust constants, so both front-ends draw the very same icons.
+//! Turns the icon paths of `vixeeny-ui/ui/icons.slint` (Fluent UI System Icons, 20×20 outlines) into Rust constants, so
+//! both front-ends draw the very same icons.
 
 fn main() {
     use std::fmt::Write as _;
@@ -23,13 +23,7 @@ fn main() {
         names.push(name);
     }
     let all: Vec<String> = names.iter().map(|n| format!("({n:?}, {n})")).collect();
-    writeln!(
-        out,
-        "pub const ALL: [(&str, &str); {}] = [{}];",
-        names.len(),
-        all.join(", ")
-    )
-    .unwrap_or_default();
+    writeln!(out, "pub const ALL: [(&str, &str); {}] = [{}];", names.len(), all.join(", ")).unwrap_or_default();
     let dest = std::path::Path::new(&std::env::var("OUT_DIR").unwrap_or_default()).join("icons.rs");
     std::fs::write(&dest, out).unwrap_or_else(|e| panic!("{}: {e}", dest.display()));
 }

@@ -5,18 +5,11 @@ use crate::{Bgra, ImageFormat, Settings, SourceFormat, decode, encode};
 
 /// 4×2 image whose pixels are all different (BGRA).
 fn tagged() -> Vec<u8> {
-    (0..8u8)
-        .flat_map(|i| [i * 30, 255 - i * 20, i * 7 + 3, 255])
-        .collect()
+    (0..8u8).flat_map(|i| [i * 30, 255 - i * 20, i * 7 + 3, 255]).collect()
 }
 
 fn png_bytes(rgb_like: &[u8], w: u32, h: u32) -> Vec<u8> {
-    encode(
-        ImageFormat::Png,
-        &Bgra::new(w, h, w as usize * 4, rgb_like),
-        &Settings::default(),
-    )
-    .unwrap()
+    encode(ImageFormat::Png, &Bgra::new(w, h, w as usize * 4, rgb_like), &Settings::default()).unwrap()
 }
 
 fn crc32(data: &[u8]) -> u32 {
@@ -24,11 +17,7 @@ fn crc32(data: &[u8]) -> u32 {
     for &b in data {
         crc ^= u32::from(b);
         for _ in 0..8 {
-            crc = if crc & 1 != 0 {
-                (crc >> 1) ^ 0xedb8_8320
-            } else {
-                crc >> 1
-            };
+            crc = if crc & 1 != 0 { (crc >> 1) ^ 0xedb8_8320 } else { crc >> 1 };
         }
     }
     !crc
@@ -89,11 +78,7 @@ fn icc_profile_is_converted_to_srgb() {
     let p3 = ColorProfile::new_display_p3().encode().unwrap();
     let wide = decode(&with_chunk(&png, b"iCCP", &iccp(&p3))).unwrap();
     assert_ne!(wide.bgra, src);
-    assert!(
-        wide.bgra[2] >= 200,
-        "red gets more saturated: {:?}",
-        wide.bgra
-    );
+    assert!(wide.bgra[2] >= 200, "red gets more saturated: {:?}", wide.bgra);
 }
 
 /// iCCP body: name, NUL, method 0, zlib stream.
@@ -140,14 +125,7 @@ fn transparency_is_flattened_on_white() {
 fn gradient(w: u32, h: u32) -> Vec<u8> {
     (0..h)
         .flat_map(|y| (0..w).map(move |x| (x, y)))
-        .flat_map(|(x, y)| {
-            [
-                (x * 255 / w) as u8,
-                (y * 255 / h) as u8,
-                ((x + y) * 255 / (w + h)) as u8,
-                255,
-            ]
-        })
+        .flat_map(|(x, y)| [(x * 255 / w) as u8, (y * 255 / h) as u8, ((x + y) * 255 / (w + h)) as u8, 255])
         .collect()
 }
 
@@ -161,12 +139,7 @@ fn an_avif_capture_reads_back_for_its_thumbnail() {
     assert_eq!(SourceFormat::sniff(&avif), Some(SourceFormat::Avif));
     let d = decode(&avif).unwrap();
     assert_eq!((d.width, d.height), (w, h));
-    let err: u64 = d
-        .bgra
-        .iter()
-        .zip(&src)
-        .map(|(a, b)| u64::from(a.abs_diff(*b)))
-        .sum();
+    let err: u64 = d.bgra.iter().zip(&src).map(|(a, b)| u64::from(a.abs_diff(*b))).sum();
     let mean = err as f64 / src.len() as f64;
     assert!(mean < 6.0, "mean error {mean}");
 }
@@ -175,16 +148,8 @@ fn an_avif_capture_reads_back_for_its_thumbnail() {
 #[test]
 fn native_formats_read() {
     let (w, h) = (96u32, 64u32);
-    let src: Vec<u8> = (0..w * h)
-        .flat_map(|i| {
-            [
-                (i % 251) as u8,
-                ((i / w) * 3) as u8,
-                (i % 97) as u8 * 2,
-                255,
-            ]
-        })
-        .collect();
+    let src: Vec<u8> =
+        (0..w * h).flat_map(|i| [(i % 251) as u8, ((i / w) * 3) as u8, (i % 97) as u8 * 2, 255]).collect();
     let img = Bgra::new(w, h, w as usize * 4, &src);
     let jxl = encode(ImageFormat::Jxl, &img, &Settings::default()).unwrap();
     let d = decode(&jxl).unwrap();

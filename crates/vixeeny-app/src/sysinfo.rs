@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The system info: the block a bug report starts with ("Report a problem"). It holds what the
-//! maintainers need to reproduce a problem — version, system, display, GPUs, encoders — and
-//! nothing personal: no user name, no folder, no file name.
+//! The system info: the block a bug report starts with ("Report a problem"). It holds what the maintainers need to
+//! reproduce a problem — version, system, display, GPUs, encoders — and nothing personal: no user name, no folder, no
+//! file name.
 
 use vixeeny_common::config::Config;
 
@@ -22,12 +22,7 @@ pub fn format(info: &Info) -> String {
     use std::fmt::Write as _;
 
     let mut out = String::from("<details><summary>Vixeeny system info</summary>\n\n```text\n");
-    let _ = writeln!(
-        out,
-        "Vixeeny   {} ({})",
-        info.version,
-        info.build.join(", ")
-    );
+    let _ = writeln!(out, "Vixeeny   {} ({})", info.version, info.build.join(", "));
     let _ = writeln!(out, "System    {} {}", info.os, info.arch);
     let list = |out: &mut String, title: &str, items: &[String]| {
         if items.is_empty() {
@@ -53,14 +48,7 @@ fn os_name() -> String {
 
 /// Collects the report of this machine. `probe` is the hardware probe (cached or fresh).
 pub fn collect(config: &Config, probe: Option<&vixeeny_encode::probe::ProbeResult>) -> Info {
-    let mut build = vec![
-        if cfg!(debug_assertions) {
-            "debug"
-        } else {
-            "release"
-        }
-        .to_owned(),
-    ];
+    let mut build = vec![if cfg!(debug_assertions) { "debug" } else { "release" }.to_owned()];
     if cfg!(feature = "native-codecs") {
         build.push("native-codecs".to_owned());
     }

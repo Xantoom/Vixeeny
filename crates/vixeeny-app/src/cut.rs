@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The video editor of the replays (`--cut <file>`), a process of its own: the window
-//! ([`vixeeny_overlay::cutter`]) on the main thread; the pictures, the sound and the thumbnails
-//! decoded on threads of their own, which wake the window when they have something for it.
+//! The video editor of the replays (`--cut <file>`), a process of its own: the window ([`vixeeny_overlay::cutter`]) on
+//! the main thread; the pictures, the sound and the thumbnails decoded on threads of their own, which wake the window
+//! when they have something for it.
 //!
-//! What is kept is written beside the replay (`<name>-cut.<ext>`) or where the user chooses;
-//! the replay itself is left as it is.
+//! What is kept is written beside the replay (`<name>-cut.<ext>`) or where the user chooses; the replay itself is left
+//! as it is.
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -22,45 +22,36 @@ use vixeeny_overlay::cutter::{Cutter, CutterEvent, CutterHost, CutterTexts, Fram
 
 use crate::toast::{Failed, Saved, Toast};
 
-/// Pictures decoded ahead of the one shown while playing (each one the size of the video on
-/// screen).
+/// Pictures decoded ahead of the one shown while playing (each one the size of the video on screen).
 const AHEAD: usize = 4;
 
-/// Requests this close together are a drag (or the wheel): a frame far from its key frame
-/// shows the key frame first, then itself unless the next request comes before.
+/// Requests this close together are a drag (or the wheel): a frame far from its key frame shows the key frame first,
+/// then itself unless the next request comes before.
 const DRAGGING: Duration = Duration::from_millis(250);
 
-/// From this many frames after its key frame, a frame asked for while dragging shows the key
-/// frame first (about a tenth of a second of 4K decoding on the graphics card).
+/// From this many frames after its key frame, a frame asked for while dragging shows the key frame first (about a tenth
+/// of a second of 4K decoding on the graphics card).
 const FAR_FROM_KEY: usize = 24;
 
 /// Opens the editor on `path` (a replay just written), in its own process.
 pub fn open(path: &Path) {
     // The editor comes to the front: this process may hand it the foreground.
     vixeeny_platform::allow_foreground_handoff();
-    let spawned = std::env::current_exe().and_then(|exe| {
-        std::process::Command::new(exe)
-            .arg("--cut")
-            .arg(path)
-            .spawn()
-    });
+    let spawned =
+        std::env::current_exe().and_then(|exe| std::process::Command::new(exe).arg("--cut").arg(path).spawn());
     if let Err(e) = spawned {
         tracing::error!("cannot start the video editor: {e}");
     }
 }
 
 fn load_config() -> Config {
-    vixeeny_common::paths::config_file()
-        .and_then(|path| Config::load(&path).ok())
-        .unwrap_or_default()
+    vixeeny_common::paths::config_file().and_then(|path| Config::load(&path).ok()).unwrap_or_default()
 }
 
 fn texts(lang: Lang, path: &Path) -> CutterTexts {
     let t = |k| tr(k, lang).to_owned();
     CutterTexts {
-        title: path
-            .file_name()
-            .map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
+        title: path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
         save: t(Key::CutSave),
         save_as: t(Key::CutSaveAs),
         cancel: t(Key::CutCancel),
@@ -91,9 +82,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     let video = Video::start(&clip, tx.clone(), waker_given);
     let frames = Frames {
         times: (0..clip.frames.len()).map(|i| clip.time(i)).collect(),
-        keys: (0..clip.frames.len())
-            .filter(|&i| clip.frames[i].key)
-            .collect(),
+        keys: (0..clip.frames.len()).filter(|&i| clip.frames[i].key).collect(),
         rate: 1.0 / clip.frame_seconds().max(1e-6),
         aspect: clip.width as f32 / clip.height.max(1) as f32,
     };
@@ -106,14 +95,8 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
         .context("no monitor")?;
     let u = monitor.dpi.max(48) as f32 / 96.0;
     let geometry = vixeeny_overlay::cutter::placement(monitor.work, u, frames.aspect);
-    let cutter = Cutter::new(
-        geometry,
-        monitor.dpi,
-        vixeeny_ui::theme::default_look(),
-        frames,
-        texts(lang, &path),
-    )
-    .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let cutter = Cutter::new(geometry, monitor.dpi, vixeeny_ui::theme::default_look(), frames, texts(lang, &path))
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let waker = cutter.waker();
     let _ = give_waker.send(waker.clone());
@@ -177,21 +160,15 @@ impl Video {
         let clip = clip.clone();
         let newest = Arc::new(AtomicU64::new(0));
         let asked = Arc::clone(&newest);
-        let spawned = std::thread::Builder::new()
-            .name("cut-video".into())
-            .spawn(move || {
-                if let Err(e) = video_thread(&clip, &rx, &asked, &mail, &waker) {
-                    tracing::error!("video editor: pictures: {e}");
-                }
-            });
+        let spawned = std::thread::Builder::new().name("cut-video".into()).spawn(move || {
+            if let Err(e) = video_thread(&clip, &rx, &asked, &mail, &waker) {
+                tracing::error!("video editor: pictures: {e}");
+            }
+        });
         if let Err(e) = spawned {
             tracing::error!("video editor: {e}");
         }
-        Self {
-            asks,
-            generation: 0,
-            newest,
-        }
+        Self { asks, generation: 0, newest }
     }
 
     fn next_generation(&mut self) -> u64 {
@@ -207,9 +184,7 @@ impl Video {
 
     fn play(&mut self, from: usize, last: usize, size: (u32, u32)) {
         self.next_generation();
-        let _ = self
-            .asks
-            .send(ToVideo::Play(self.generation, from, last, size));
+        let _ = self.asks.send(ToVideo::Play(self.generation, from, last, size));
     }
 
     fn pause(&mut self) {
@@ -243,8 +218,8 @@ fn video_thread(
     // Pictures sent and not handed back yet: playing stays this far ahead of the window.
     let mut out = 0_usize;
     loop {
-        // Waits when there is nothing to decode (paused, or far enough ahead); a picture
-        // handed back or a request wakes it.
+        // Waits when there is nothing to decode (paused, or far enough ahead); a picture handed back or a request wakes
+        // it.
         let decoding = playing.is_some() && out < AHEAD;
         let first = if decoding {
             match rx.try_recv() {
@@ -373,34 +348,20 @@ impl Speaker {
         let heard_epoch = Arc::new(AtomicU64::new(0));
         let broken = Arc::new(AtomicBool::new(false));
         let clip = clip.clone();
-        let shared = (
-            clock.clone(),
-            heard_epoch.clone(),
-            broken.clone(),
-            wake.clone(),
-        );
-        let spawned = std::thread::Builder::new()
-            .name("cut-sound".into())
-            .spawn(move || {
-                let (clock, heard_epoch, broken, wake) = shared;
-                if let Err(e) = sound_thread(&clip, &rx, wake, &clock, &heard_epoch) {
-                    tracing::warn!("video editor: sound: {e}");
-                    broken.store(true, Ordering::SeqCst);
-                    waker.wake();
-                }
-            });
+        let shared = (clock.clone(), heard_epoch.clone(), broken.clone(), wake.clone());
+        let spawned = std::thread::Builder::new().name("cut-sound".into()).spawn(move || {
+            let (clock, heard_epoch, broken, wake) = shared;
+            if let Err(e) = sound_thread(&clip, &rx, wake, &clock, &heard_epoch) {
+                tracing::warn!("video editor: sound: {e}");
+                broken.store(true, Ordering::SeqCst);
+                waker.wake();
+            }
+        });
         if let Err(e) = spawned {
             tracing::error!("video editor: {e}");
             return None;
         }
-        Some(Self {
-            asks,
-            wake,
-            clock,
-            heard_epoch,
-            epoch: AtomicU64::new(0),
-            broken,
-        })
+        Some(Self { asks, wake, clock, heard_epoch, epoch: AtomicU64::new(0), broken })
     }
 
     fn play(&self, from: f64, until: f64) {
@@ -420,8 +381,7 @@ impl Speaker {
     /// Seconds of the clip heard now, once the sound of the last play has started.
     fn heard(&self) -> Option<f64> {
         let clock = f64::from_bits(self.clock.load(Ordering::SeqCst));
-        (self.heard_epoch.load(Ordering::SeqCst) == self.epoch.load(Ordering::SeqCst))
-            .then_some(clock)
+        (self.heard_epoch.load(Ordering::SeqCst) == self.epoch.load(Ordering::SeqCst)).then_some(clock)
     }
 
     fn works(&self) -> bool {
@@ -445,8 +405,7 @@ struct SoundPlay {
     pending: VecDeque<f32>,
     /// Frames still to write.
     left: usize,
-    /// Since when (and from what second) the speakers have played everything: the sound ended
-    /// before the pictures.
+    /// Since when (and from what second) the speakers have played everything: the sound ended before the pictures.
     drained: Option<(Instant, f64)>,
 }
 
@@ -457,8 +416,7 @@ fn sound_thread(
     clock: &AtomicU64,
     heard_epoch: &AtomicU64,
 ) -> anyhow::Result<()> {
-    let mut speakers =
-        vixeeny_audio::Speakers::open(wake.clone()).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let mut speakers = vixeeny_audio::Speakers::open(wake.clone()).map_err(|e| anyhow::anyhow!("{e}"))?;
     let mut sound = Sound::open(clip)?.context("no sound")?;
     let channels = vixeeny_encode::cut::SOUND_CHANNELS;
     let rate = f64::from(vixeeny_encode::cut::SOUND_RATE);
@@ -483,13 +441,7 @@ fn sound_thread(
                 speakers.clear();
                 sound.seek(from)?;
                 let frames = ((to - from).max(0.0) * rate) as usize;
-                play = Some(SoundPlay {
-                    epoch,
-                    from,
-                    pending: VecDeque::new(),
-                    left: frames,
-                    drained: None,
-                });
+                play = Some(SoundPlay { epoch, from, pending: VecDeque::new(), left: frames, drained: None });
             }
             Some(SoundAsk::Stop) => {
                 speakers.clear();
@@ -498,14 +450,7 @@ fn sound_thread(
             Some(SoundAsk::Volume(v)) => speakers.set_volume(v),
             None => {}
         }
-        let Some(SoundPlay {
-            epoch,
-            from,
-            pending,
-            left,
-            drained,
-        }) = play.as_mut()
-        else {
+        let Some(SoundPlay { epoch, from, pending, left, drained }) = play.as_mut() else {
             continue;
         };
         // Keeps the speakers' buffer full, up to the end of what is played.
@@ -521,9 +466,8 @@ fn sound_thread(
                 }
             }
             let n = (pending.len() / channels).min(room).min(*left);
-            let written = speakers
-                .write(&pending.make_contiguous()[..n * channels])
-                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            let written =
+                speakers.write(&pending.make_contiguous()[..n * channels]).map_err(|e| anyhow::anyhow!("{e}"))?;
             pending.drain(..written * channels);
             room -= written;
             *left -= written;
@@ -549,30 +493,26 @@ fn sound_thread(
 /// Decodes the thumbnails of the strip, one per slot, on a thread of its own.
 fn thumbnails(clip: &Clip, cutter: &Cutter, mail: Sender<Mail>, waker: Waker) {
     let (slots, size) = cutter.thumbnail_slots();
-    let wanted: Vec<(usize, usize)> = (0..slots)
-        .map(|slot| (slot, cutter.thumbnail_frame(slot)))
-        .collect();
+    let wanted: Vec<(usize, usize)> = (0..slots).map(|slot| (slot, cutter.thumbnail_frame(slot))).collect();
     let clip = clip.clone();
-    let _ = std::thread::Builder::new()
-        .name("cut-thumbnails".into())
-        .spawn(move || {
-            // Key frames only, one after the other: the processor does it without a second
-            // decoder (and its memory) on the graphics card.
-            let Ok(mut pictures) = Pictures::open_with(&clip, false) else {
-                return;
-            };
-            for (slot, frame) in wanted {
-                if pictures.seek(frame).is_err() {
-                    continue;
-                }
-                if let Ok(Some((_, picture))) = pictures.read(size) {
-                    if mail.send(Mail::Thumbnail(slot, picture)).is_err() {
-                        return;
-                    }
-                    waker.wake();
-                }
+    let _ = std::thread::Builder::new().name("cut-thumbnails".into()).spawn(move || {
+        // Key frames only, one after the other: the processor does it without a second decoder (and its memory) on the
+        // graphics card.
+        let Ok(mut pictures) = Pictures::open_with(&clip, false) else {
+            return;
+        };
+        for (slot, frame) in wanted {
+            if pictures.seek(frame).is_err() {
+                continue;
             }
-        });
+            if let Ok(Some((_, picture))) = pictures.read(size) {
+                if mail.send(Mail::Thumbnail(slot, picture)).is_err() {
+                    return;
+                }
+                waker.wake();
+            }
+        }
+    });
 }
 
 /// A writing under way.
@@ -612,11 +552,7 @@ impl Host {
     fn play(&mut self, cutter: &Cutter) {
         let s = cutter.state();
         // Up to the end of the part kept, or of the clip from beyond it.
-        let last = if s.position <= s.to {
-            s.to
-        } else {
-            self.clip.frames.len() - 1
-        };
+        let last = if s.position <= s.to { s.to } else { self.clip.frames.len() - 1 };
         let from = self.clip.time(s.position);
         let until = self.clip.time(last) + self.clip.frame_seconds();
         self.drop_ahead();
@@ -624,11 +560,7 @@ impl Host {
         if let Some(sound) = &self.sound {
             sound.play(from, until);
         }
-        self.playing = Some(Playing {
-            from,
-            started: Instant::now(),
-            last,
-        });
+        self.playing = Some(Playing { from, started: Instant::now(), last });
     }
 
     fn pause(&mut self, cutter: &Cutter) {
@@ -671,35 +603,32 @@ impl Host {
         let (mail, waker) = (self.tx.clone(), self.waker.clone());
         let (stop, share) = (cancel.clone(), progress.clone());
         let range = (s.from, s.to);
-        let spawned = std::thread::Builder::new()
-            .name("cut-export".into())
-            .spawn(move || {
-                // The encoders are looked up here, not on the window's thread.
-                let reencoders = if clip.lossless(range.0, range.1) || anim_format(&dest).is_some()
-                {
-                    Vec::new()
-                } else {
-                    crate::record::reencoders(&config, &clip)
-                };
-                // The bar moves by whole pixels: the window is woken every half percent.
-                let told = std::cell::Cell::new(0.0_f32);
-                let tell = |p: f32| {
-                    if p - told.get() >= 0.005 || p >= 1.0 {
-                        told.set(p);
-                        share.store(p.to_bits(), Ordering::SeqCst);
-                        waker.wake();
-                    }
-                };
-                let result = match anim_format(&dest) {
-                    Some(format) => {
-                        let settings = crate::image_output(&config).1;
-                        write_animation(&clip, range, &dest, format, &settings, &tell, &stop)
-                    }
-                    None => write(&clip, range, &dest, &reencoders, &tell, &stop),
-                };
-                let _ = mail.send(Mail::Written(result.map(|()| dest)));
-                waker.wake();
-            });
+        let spawned = std::thread::Builder::new().name("cut-export".into()).spawn(move || {
+            // The encoders are looked up here, not on the window's thread.
+            let reencoders = if clip.lossless(range.0, range.1) || anim_format(&dest).is_some() {
+                Vec::new()
+            } else {
+                crate::record::reencoders(&config, &clip)
+            };
+            // The bar moves by whole pixels: the window is woken every half percent.
+            let told = std::cell::Cell::new(0.0_f32);
+            let tell = |p: f32| {
+                if p - told.get() >= 0.005 || p >= 1.0 {
+                    told.set(p);
+                    share.store(p.to_bits(), Ordering::SeqCst);
+                    waker.wake();
+                }
+            };
+            let result = match anim_format(&dest) {
+                Some(format) => {
+                    let settings = crate::image_output(&config).1;
+                    write_animation(&clip, range, &dest, format, &settings, &tell, &stop)
+                }
+                None => write(&clip, range, &dest, &reencoders, &tell, &stop),
+            };
+            let _ = mail.send(Mail::Written(result.map(|()| dest)));
+            waker.wake();
+        });
         match spawned {
             Ok(_) => {
                 cutter.set_progress(Some(0.0));
@@ -710,11 +639,7 @@ impl Host {
     }
 
     fn save_as(&mut self, cutter: &Cutter) {
-        let ext = self
-            .clip
-            .path
-            .extension()
-            .map_or_else(|| "mp4".to_owned(), |e| e.to_string_lossy().into_owned());
+        let ext = self.clip.path.extension().map_or_else(|| "mp4".to_owned(), |e| e.to_string_lossy().into_owned());
         let mut dialog = rfd::FileDialog::new()
             .set_title(tr(Key::CutSaveAs, self.lang).trim_end_matches('…'))
             .add_filter(ext.to_uppercase(), &[ext.as_str()]);
@@ -722,11 +647,7 @@ impl Host {
         let animated = tr(Key::CutAnimated, self.lang);
         for format in AnimFormat::ALL {
             let name = format.extension().to_uppercase();
-            let label = if format == AnimFormat::Gif {
-                name
-            } else {
-                format!("{name} ({animated})")
-            };
+            let label = if format == AnimFormat::Gif { name } else { format!("{name} ({animated})") };
             dialog = dialog.add_filter(label, &[format.extension()]);
         }
         let suggested = cut_name(&self.clip.path);
@@ -763,10 +684,7 @@ impl Host {
             Mail::End(g) if g == generation => {
                 if let Some(p) = self.playing.as_mut() {
                     // Nothing after this: the end comes with the last frame decoded.
-                    p.last = self
-                        .ahead
-                        .back()
-                        .map_or(cutter.state().position, |(i, _)| *i);
+                    p.last = self.ahead.back().map_or(cutter.state().position, |(i, _)| *i);
                 }
             }
             Mail::Thumbnail(slot, picture) => {
@@ -779,11 +697,7 @@ impl Host {
                     Ok(path) => {
                         tracing::info!("cut saved: {}", path.display());
                         // An animation is shown as a picture.
-                        let kind = if anim_format(&path).is_some() {
-                            Saved::Image
-                        } else {
-                            Saved::Replay
-                        };
+                        let kind = if anim_format(&path).is_some() { Saved::Image } else { Saved::Replay };
                         crate::toast::notify(&self.config, &Toast::Saved(kind, path));
                         cutter.close();
                     }
@@ -840,8 +754,8 @@ fn anim_format(path: &Path) -> Option<AnimFormat> {
     AnimFormat::from_extension(path.extension()?.to_str()?)
 }
 
-/// Writes frames `from..=to` as an animated picture: at most the format's frame rate and size,
-/// in SDR (an HDR clip is tone mapped, as in the preview).
+/// Writes frames `from..=to` as an animated picture: at most the format's frame rate and size, in SDR (an HDR clip is
+/// tone mapped, as in the preview).
 fn write_animation(
     clip: &Clip,
     (from, to): (usize, usize),
@@ -867,8 +781,7 @@ fn write_animation(
     // Written aside, then renamed: a cancelled or failed export leaves nothing behind.
     let tmp = dest.with_extension(format!("{}.part", format.extension()));
     let result = (|| {
-        let mut animation =
-            Animation::new(format, size.0, size.1, settings, &tmp).map_err(|e| e.to_string())?;
+        let mut animation = Animation::new(format, size.0, size.1, settings, &tmp).map_err(|e| e.to_string())?;
         let mut pictures = Pictures::open(clip).map_err(|e| e.to_string())?;
         pictures.seek(from).map_err(|e| e.to_string())?;
         while let Some((i, picture)) = pictures.read(size).map_err(|e| e.to_string())? {
@@ -879,16 +792,12 @@ fn write_animation(
                 return Err(CANCELLED.to_owned());
             }
             if keep[i - from] {
-                animation
-                    .push(&picture.bgra, ms(clip.time(i)))
-                    .map_err(|e| e.to_string())?;
+                animation.push(&picture.bgra, ms(clip.time(i))).map_err(|e| e.to_string())?;
             }
             pictures.recycle(picture.bgra);
             progress((i - from + 1) as f32 / times.len() as f32);
         }
-        animation
-            .finish(ms(clip.time(to) + clip.frame_seconds()))
-            .map_err(|e| e.to_string())
+        animation.finish(ms(clip.time(to) + clip.frame_seconds())).map_err(|e| e.to_string())
     })();
     match result {
         Ok(()) => std::fs::rename(&tmp, dest).map_err(|e| e.to_string()),
@@ -901,20 +810,11 @@ fn write_animation(
 
 /// `<name>-cut.<ext>` beside `original`, numbered when it is taken.
 fn cut_name(original: &Path) -> PathBuf {
-    let stem = original
-        .file_stem()
-        .map_or_else(|| "replay".to_owned(), |s| s.to_string_lossy().into_owned());
-    let ext = original
-        .extension()
-        .map(|e| format!(".{}", e.to_string_lossy()))
-        .unwrap_or_default();
+    let stem = original.file_stem().map_or_else(|| "replay".to_owned(), |s| s.to_string_lossy().into_owned());
+    let ext = original.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
     (1..)
         .map(|n| {
-            let suffix = if n == 1 {
-                "-cut".to_owned()
-            } else {
-                format!("-cut-{n}")
-            };
+            let suffix = if n == 1 { "-cut".to_owned() } else { format!("-cut-{n}") };
             original.with_file_name(format!("{stem}{suffix}{ext}"))
         })
         .find(|p| !p.exists())
@@ -993,12 +893,7 @@ impl CutterHost for Host {
             return None;
         }
         // Wakes up for the next frame (the threads wake the loop when one is decoded).
-        let next = self
-            .ahead
-            .front()
-            .map_or(self.clip.frame_seconds(), |(i, _)| {
-                (self.clip.time(*i) - now).max(0.0)
-            });
+        let next = self.ahead.front().map_or(self.clip.frame_seconds(), |(i, _)| (self.clip.time(*i) - now).max(0.0));
         Some(Duration::from_secs_f64(next.min(0.05)))
     }
 }
@@ -1009,19 +904,13 @@ mod tests {
 
     /// Two seconds at 30 fps, 320×180, no sound: each frame a grey as bright as its number.
     fn recording(dir: &Path) -> PathBuf {
-        use vixeeny_encode::recorder::{
-            FrameFormat, OutputContainer, RecordConfig, Recorder, Split, VideoFrame,
-        };
+        use vixeeny_encode::recorder::{FrameFormat, OutputContainer, RecordConfig, Recorder, Split, VideoFrame};
         use vixeeny_encode::registry::{Chroma, PresetName, Registry};
         const MS: i64 = 1_000_000;
         let registry = Registry::builtin().unwrap();
         let encoder = registry.get("libx264").unwrap().clone();
-        let options = encoder
-            .presets
-            .get(PresetName::Performance)
-            .iter()
-            .map(|(k, v)| (k.clone(), v.to_ffmpeg()))
-            .collect();
+        let options =
+            encoder.presets.get(PresetName::Performance).iter().map(|(k, v)| (k.clone(), v.to_ffmpeg())).collect();
         let cfg = RecordConfig {
             crop: None,
             encoder,
@@ -1080,22 +969,11 @@ mod tests {
         let last = std::cell::Cell::new(0.0);
         // One second (frames 15 to 44) as a GIF: 15 frames at 15 fps.
         let gif = dir.join("part.gif");
-        write_animation(
-            &clip,
-            (15, 44),
-            &gif,
-            AnimFormat::Gif,
-            &settings,
-            &|p| last.set(p),
-            &cancel,
-        )
-        .unwrap();
+        write_animation(&clip, (15, 44), &gif, AnimFormat::Gif, &settings, &|p| last.set(p), &cancel).unwrap();
         assert!((last.get() - 1.0).abs() < 1e-6);
         let mut options = gif::DecodeOptions::new();
         options.set_color_output(gif::ColorOutput::Indexed);
-        let mut decoder = options
-            .read_info(std::fs::File::open(&gif).unwrap())
-            .unwrap();
+        let mut decoder = options.read_info(std::fs::File::open(&gif).unwrap()).unwrap();
         let (mut frames, mut hundredths) = (0, 0_u32);
         while let Some(frame) = decoder.read_next_frame().unwrap() {
             frames += 1;
@@ -1105,36 +983,15 @@ mod tests {
         assert_eq!((frames, hundredths), (15, 100));
         // WebP keeps the clip's 30 fps; nothing is left beside the file.
         let webp = dir.join("part.webp");
-        write_animation(
-            &clip,
-            (0, 59),
-            &webp,
-            AnimFormat::WebP,
-            &settings,
-            &|_| {},
-            &cancel,
-        )
-        .unwrap();
+        write_animation(&clip, (0, 59), &webp, AnimFormat::WebP, &settings, &|_| {}, &cancel).unwrap();
         assert!(std::fs::metadata(&webp).unwrap().len() > 0);
         assert_eq!(anim_format(&webp), Some(AnimFormat::WebP));
         // Cancelled: no file, no leftover.
         cancel.store(true, Ordering::SeqCst);
         let gone = dir.join("gone.avif");
-        let result = write_animation(
-            &clip,
-            (0, 59),
-            &gone,
-            AnimFormat::Avif,
-            &settings,
-            &|_| {},
-            &cancel,
-        );
+        let result = write_animation(&clip, (0, 59), &gone, AnimFormat::Avif, &settings, &|_| {}, &cancel);
         assert_eq!(result, Err(CANCELLED.to_owned()));
-        let left: Vec<_> = std::fs::read_dir(&dir)
-            .unwrap()
-            .flatten()
-            .map(|e| e.file_name())
-            .collect();
+        let left: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name()).collect();
         assert_eq!(left.len(), 3, "{left:?}");
         let _ = std::fs::remove_dir_all(dir);
     }

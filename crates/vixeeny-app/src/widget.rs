@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The recording widget as a process of its own: `vixeeny-app --widget …`. The
-//! recorder starts it and talks to it over its standard input and output (see `widget_math`), so
-//! the app's action loop stays free while the pill is on screen. The widget window is excluded
-//! from every screen capture and never takes the focus.
+//! The recording widget as a process of its own: `vixeeny-app --widget …`. The recorder starts it and talks to it over
+//! its standard input and output (see `widget_math`), so the app's action loop stays free while the pill is on screen.
+//! The widget window is excluded from every screen capture and never takes the focus.
 
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -21,19 +20,15 @@ pub struct Widget {
 }
 
 impl Widget {
-    /// Starts the widget in the configured corner of `monitor`. `on_press` is called from a
-    /// thread of its own for each button press.
+    /// Starts the widget in the configured corner of `monitor`. `on_press` is called from a thread of its own for each
+    /// button press.
     pub fn spawn(
         settings: &RecordingWidget,
         monitor: &MonitorInfo,
         on_press: impl Fn(FromWidget) + Send + 'static,
     ) -> anyhow::Result<Self> {
-        let PhysicalRect {
-            x,
-            y,
-            width: w,
-            height: h,
-        } = corner_geometry(&settings.corner, settings.custom, monitor.work, monitor.dpi);
+        let PhysicalRect { x, y, width: w, height: h } =
+            corner_geometry(&settings.corner, settings.custom, monitor.work, monitor.dpi);
         let mut command = Command::new(std::env::current_exe()?);
         command
             .arg("--widget")
@@ -47,28 +42,21 @@ impl Widget {
             use std::os::windows::process::CommandExt;
             command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
         }
-        let mut child = command
-            .spawn()
-            .context("cannot start the recording widget")?;
+        let mut child = command.spawn().context("cannot start the recording widget")?;
         let stdin = child.stdin.take().context("no widget stdin")?;
         let stdout = child.stdout.take().context("no widget stdout")?;
-        std::thread::Builder::new()
-            .name("widget-reader".into())
-            .spawn(move || {
-                for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-                    if let Some(press) = FromWidget::parse(&line) {
-                        on_press(press);
-                    }
+        std::thread::Builder::new().name("widget-reader".into()).spawn(move || {
+            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                if let Some(press) = FromWidget::parse(&line) {
+                    on_press(press);
                 }
-            })?;
+            }
+        })?;
         Ok(Self { child, stdin })
     }
 
     pub fn state(&mut self, paused: bool, elapsed: Duration) {
-        self.send(&ToWidget::State {
-            paused,
-            elapsed_ms: elapsed.as_millis() as u64,
-        });
+        self.send(&ToWidget::State { paused, elapsed_ms: elapsed.as_millis() as u64 });
     }
 
     /// What goes wrong, and the words of the warning sign's tooltip.
@@ -86,8 +74,7 @@ impl Drop for Widget {
     fn drop(&mut self) {
         let _ = self.stdin.write_all(ToWidget::Quit.to_line().as_bytes());
         let _ = self.stdin.flush();
-        // It exits by itself (Windows tells when); do not leave a pill on screen if it does not
-        // within a second.
+        // It exits by itself (Windows tells when); do not leave a pill on screen if it does not within a second.
         let (tx, rx) = std::sync::mpsc::channel();
         if vixeeny_platform::on_process_exit(self.child.id(), move || {
             let _ = tx.send(());
@@ -107,16 +94,9 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     use vixeeny_overlay::widget::{Display, Widget as Bar, WidgetEvent};
 
     let num = |i: usize| -> anyhow::Result<i64> {
-        args.get(i)
-            .and_then(|a| a.parse().ok())
-            .with_context(|| format!("bad widget argument {i}"))
+        args.get(i).and_then(|a| a.parse().ok()).with_context(|| format!("bad widget argument {i}"))
     };
-    let geometry = PhysicalRect::new(
-        num(0)? as i32,
-        num(1)? as i32,
-        num(2)? as u32,
-        num(3)? as u32,
-    );
+    let geometry = PhysicalRect::new(num(0)? as i32, num(1)? as i32, num(2)? as u32, num(3)? as u32);
     let display = Display::from_name(args.get(4).map_or("", String::as_str));
     let dpi = num(5)? as u32;
 
@@ -137,8 +117,8 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
         let _ = out.flush();
     });
 
-    // Messages from the recorder arrive on a thread and are applied on the widget's; when the
-    // recorder is gone (or says quit) the widget closes.
+    // Messages from the recorder arrive on a thread and are applied on the widget's; when the recorder is gone (or says
+    // quit) the widget closes.
     let (_mailbox, sender) = vixeeny_overlay::popup::mailbox({
         let bar = bar.clone();
         move |msg: ToWidget| match msg {
@@ -149,20 +129,18 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
             ToWidget::Quit => bar.close(),
         }
     })?;
-    std::thread::Builder::new()
-        .name("widget-stdin".into())
-        .spawn(move || {
-            for line in std::io::stdin().lock().lines().map_while(Result::ok) {
-                match ToWidget::parse(&line) {
-                    Some(ToWidget::Quit) => break,
-                    Some(msg) => {
-                        sender.send(msg);
-                    }
-                    None => {}
+    std::thread::Builder::new().name("widget-stdin".into()).spawn(move || {
+        for line in std::io::stdin().lock().lines().map_while(Result::ok) {
+            match ToWidget::parse(&line) {
+                Some(ToWidget::Quit) => break,
+                Some(msg) => {
+                    sender.send(msg);
                 }
+                None => {}
             }
-            sender.send(ToWidget::Quit);
-        })?;
+        }
+        sender.send(ToWidget::Quit);
+    })?;
     bar.run()?;
     Ok(())
 }

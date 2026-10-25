@@ -31,33 +31,17 @@ pub enum Edit {
 impl Edit {
     fn inverse(&self) -> Self {
         match self {
-            Self::Add { index, item } => Self::Remove {
-                index: *index,
-                item: item.clone(),
-            },
-            Self::Remove { index, item } => Self::Add {
-                index: *index,
-                item: item.clone(),
-            },
-            Self::Replace { id, old, new } => Self::Replace {
-                id: *id,
-                old: new.clone(),
-                new: old.clone(),
-            },
-            Self::Clear { items } => Self::Restore {
-                items: items.clone(),
-            },
-            Self::Restore { items } => Self::Clear {
-                items: items.clone(),
-            },
+            Self::Add { index, item } => Self::Remove { index: *index, item: item.clone() },
+            Self::Remove { index, item } => Self::Add { index: *index, item: item.clone() },
+            Self::Replace { id, old, new } => Self::Replace { id: *id, old: new.clone(), new: old.clone() },
+            Self::Clear { items } => Self::Restore { items: items.clone() },
+            Self::Restore { items } => Self::Clear { items: items.clone() },
         }
     }
 
     fn apply(&self, doc: &mut Document) {
         match self {
-            Self::Add { index, item } => doc
-                .items
-                .insert((*index).min(doc.items.len()), item.clone()),
+            Self::Add { index, item } => doc.items.insert((*index).min(doc.items.len()), item.clone()),
             Self::Remove { item, .. } => doc.items.retain(|i| i.id != item.id),
             Self::Replace { id, new, .. } => {
                 if let Some(i) = doc.items.iter_mut().find(|i| i.id == *id) {
@@ -127,23 +111,14 @@ mod tests {
         Annotation::Line {
             from: Point::new(0.0, 0.0),
             to: Point::new(x, 0.0),
-            style: Style {
-                color: Color::PALETTE[0],
-                width: 1.0,
-            },
+            style: Style { color: Color::PALETTE[0], width: 1.0 },
         }
     }
 
     fn add(doc: &mut Document, h: &mut History, a: Annotation) -> AnnotationId {
         let id = doc.fresh_id();
         let index = doc.items.len();
-        h.commit(
-            doc,
-            Edit::Add {
-                index,
-                item: Item { id, annotation: a },
-            },
-        );
+        h.commit(doc, Edit::Add { index, item: Item { id, annotation: a } });
         id
     }
 
@@ -154,22 +129,9 @@ mod tests {
         let before = doc.clone();
         let a = add(&mut doc, &mut h, line(1.0));
         let b = add(&mut doc, &mut h, line(2.0));
-        h.commit(
-            &mut doc,
-            Edit::Replace {
-                id: a,
-                old: line(1.0),
-                new: line(9.0),
-            },
-        );
+        h.commit(&mut doc, Edit::Replace { id: a, old: line(1.0), new: line(9.0) });
         let item_b = doc.items.iter().find(|i| i.id == b).cloned().unwrap();
-        h.commit(
-            &mut doc,
-            Edit::Remove {
-                index: 1,
-                item: item_b,
-            },
-        );
+        h.commit(&mut doc, Edit::Remove { index: 1, item: item_b });
         let after = doc.clone();
         assert_eq!(doc.items.len(), 1);
 

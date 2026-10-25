@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The Windows part: message loop, tray icon, global shortcuts, wake-up of the loop from other
-//! threads.
+//! The Windows part: message loop, tray icon, global shortcuts, wake-up of the loop from other threads.
 
 use std::path::PathBuf;
 

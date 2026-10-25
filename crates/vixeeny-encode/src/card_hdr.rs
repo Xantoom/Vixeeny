@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The frames of an HDR monitor (scRGB half floats) made ready for the encoder on the graphics
-//! card, by shaders rather than the video processor: drivers differ there (NVIDIA's takes no
-//! half floats in, and makes no PQ out of RGB).
+//! The frames of an HDR monitor (scRGB half floats) made ready for the encoder on the graphics card, by shaders rather
+//! than the video processor: drivers differ there (NVIDIA's takes no half floats in, and makes no PQ out of RGB).
 //!
-//! - SDR: tone mapped as the screenshots are (`colour::HLSL`: the same steps and numbers), up to
-//!   the brightest pixel of the picture, followed smoothly from frame to frame so that the
-//!   brightness never jumps; then 8-bit BGRA, which the video processor converts and scales.
-//! - HDR: BT.2020 / PQ, written straight into the luma and chroma planes of a P010 frame
-//!   (limited range, chroma sited left), scaled on the way.
+//! - SDR: tone mapped as the screenshots are (`colour::HLSL`: the same steps and numbers), up to the brightest pixel of
+//!   the picture, followed smoothly from frame to frame so that the brightness never jumps; then 8-bit BGRA, which the
+//!   video processor converts and scales.
+//! - HDR: BT.2020 / PQ, written straight into the luma and chroma planes of a P010 frame (limited range, chroma sited
+//!   left), scaled on the way.
 //!
 //! The brightest pixel and its smoothed value never leave the card.
 
@@ -16,15 +15,13 @@ use std::sync::{Mutex, OnceLock};
 use windows::Win32::Foundation::RECT;
 use windows::Win32::Graphics::Direct3D::D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11_BIND_CONSTANT_BUFFER, D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE,
-    D3D11_BIND_UNORDERED_ACCESS, D3D11_BOX, D3D11_BUFFER_DESC, D3D11_COMPARISON_NEVER,
-    D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_RENDER_TARGET_VIEW_DESC,
-    D3D11_RENDER_TARGET_VIEW_DESC_0, D3D11_RESOURCE_MISC_BUFFER_STRUCTURED,
-    D3D11_RTV_DIMENSION_TEXTURE2DARRAY, D3D11_SAMPLER_DESC, D3D11_TEX2D_ARRAY_RTV,
-    D3D11_TEXTURE_ADDRESS_CLAMP, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, D3D11_VIEWPORT,
-    ID3D11Buffer, ID3D11ComputeShader, ID3D11Device, ID3D11DeviceContext, ID3D11PixelShader,
-    ID3D11RenderTargetView, ID3D11SamplerState, ID3D11ShaderResourceView, ID3D11Texture2D,
-    ID3D11UnorderedAccessView, ID3D11VertexShader,
+    D3D11_BIND_CONSTANT_BUFFER, D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_BIND_UNORDERED_ACCESS,
+    D3D11_BOX, D3D11_BUFFER_DESC, D3D11_COMPARISON_NEVER, D3D11_FILTER_MIN_MAG_MIP_LINEAR,
+    D3D11_RENDER_TARGET_VIEW_DESC, D3D11_RENDER_TARGET_VIEW_DESC_0, D3D11_RESOURCE_MISC_BUFFER_STRUCTURED,
+    D3D11_RTV_DIMENSION_TEXTURE2DARRAY, D3D11_SAMPLER_DESC, D3D11_TEX2D_ARRAY_RTV, D3D11_TEXTURE_ADDRESS_CLAMP,
+    D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, D3D11_VIEWPORT, ID3D11Buffer, ID3D11ComputeShader, ID3D11Device,
+    ID3D11DeviceContext, ID3D11PixelShader, ID3D11RenderTargetView, ID3D11SamplerState, ID3D11ShaderResourceView,
+    ID3D11Texture2D, ID3D11UnorderedAccessView, ID3D11VertexShader,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_R16_UNORM, DXGI_FORMAT_R16G16_UNORM,
@@ -145,8 +142,8 @@ fn code() -> Result<&'static Code, String> {
     .map_err(Clone::clone)
 }
 
-/// A one-element structured buffer of 4-byte values, with a view for the compute shaders and,
-/// when `read`, one for the pixel shaders.
+/// A one-element structured buffer of 4-byte values, with a view for the compute shaders and, when `read`, one for the
+/// pixel shaders.
 fn cell(
     device: &ID3D11Device,
     read: bool,
@@ -154,12 +151,7 @@ fn cell(
     let desc = D3D11_BUFFER_DESC {
         ByteWidth: 4,
         Usage: D3D11_USAGE_DEFAULT,
-        BindFlags: D3D11_BIND_UNORDERED_ACCESS.0 as u32
-            | if read {
-                D3D11_BIND_SHADER_RESOURCE.0 as u32
-            } else {
-                0
-            },
+        BindFlags: D3D11_BIND_UNORDERED_ACCESS.0 as u32 | if read { D3D11_BIND_SHADER_RESOURCE.0 as u32 } else { 0 },
         MiscFlags: D3D11_RESOURCE_MISC_BUFFER_STRUCTURED.0 as u32,
         StructureByteStride: 4,
         ..Default::default()
@@ -168,9 +160,7 @@ fn cell(
     let (mut uav, mut srv) = (None, None);
     // SAFETY: a one-element structured buffer and views of all of it; valid out-pointers.
     unsafe {
-        device
-            .CreateBuffer(&raw const desc, None, Some(&raw mut buffer))
-            .map_err(|e| err("CreateBuffer", e))?;
+        device.CreateBuffer(&raw const desc, None, Some(&raw mut buffer)).map_err(|e| err("CreateBuffer", e))?;
         let buffer = buffer.ok_or("no buffer")?;
         device
             .CreateUnorderedAccessView(&buffer, None, Some(&raw mut uav))
@@ -191,8 +181,7 @@ struct Frames {
     input: Option<(ID3D11Texture2D, ID3D11ShaderResourceView, (u32, u32))>,
     /// The SDR picture, for the video processor.
     sdr: Option<(ID3D11Texture2D, ID3D11RenderTargetView, (u32, u32))>,
-    /// The planes of the pool's frames met (texture address, array slice): a pool goes round
-    /// the same few.
+    /// The planes of the pool's frames met (texture address, array slice): a pool goes round the same few.
     planes: Vec<((usize, u32), [ID3D11RenderTargetView; 2])>,
 }
 
@@ -218,20 +207,15 @@ pub struct CardHdr {
     frames: Mutex<Frames>,
 }
 
-// SAFETY: the device is free-threaded and multithread protected (see `d3d_convert`), and what
-// changes is behind the mutex.
+// SAFETY: the device is free-threaded and multithread protected (see `d3d_convert`), and what changes is behind the
+// mutex.
 unsafe impl Send for CardHdr {}
 // SAFETY: see above.
 unsafe impl Sync for CardHdr {}
 
 impl CardHdr {
     /// The shaders on `device`, for a monitor of `levels` recorded at `fps` frames a second.
-    pub fn new(
-        device: &ID3D11Device,
-        context: &ID3D11DeviceContext,
-        levels: Levels,
-        fps: f64,
-    ) -> Result<Self, String> {
+    pub fn new(device: &ID3D11Device, context: &ID3D11DeviceContext, levels: Levels, fps: f64) -> Result<Self, String> {
         let code = code()?;
         let (mut peak, mut follow, mut corner) = (None, None, None);
         let (mut to_sdr, mut to_luma, mut to_chroma) = (None, None, None);
@@ -254,24 +238,12 @@ impl CardHdr {
         // SAFETY: bytecode compiled for these stages; valid descriptions and out-pointers.
         unsafe {
             let shader = |e| err("shader", e);
-            device
-                .CreateComputeShader(&code.peak, None, Some(&raw mut peak))
-                .map_err(shader)?;
-            device
-                .CreateComputeShader(&code.follow, None, Some(&raw mut follow))
-                .map_err(shader)?;
-            device
-                .CreateVertexShader(&code.corner, None, Some(&raw mut corner))
-                .map_err(shader)?;
-            device
-                .CreatePixelShader(&code.to_sdr, None, Some(&raw mut to_sdr))
-                .map_err(shader)?;
-            device
-                .CreatePixelShader(&code.to_luma, None, Some(&raw mut to_luma))
-                .map_err(shader)?;
-            device
-                .CreatePixelShader(&code.to_chroma, None, Some(&raw mut to_chroma))
-                .map_err(shader)?;
+            device.CreateComputeShader(&code.peak, None, Some(&raw mut peak)).map_err(shader)?;
+            device.CreateComputeShader(&code.follow, None, Some(&raw mut follow)).map_err(shader)?;
+            device.CreateVertexShader(&code.corner, None, Some(&raw mut corner)).map_err(shader)?;
+            device.CreatePixelShader(&code.to_sdr, None, Some(&raw mut to_sdr)).map_err(shader)?;
+            device.CreatePixelShader(&code.to_luma, None, Some(&raw mut to_luma)).map_err(shader)?;
+            device.CreatePixelShader(&code.to_chroma, None, Some(&raw mut to_chroma)).map_err(shader)?;
             device
                 .CreateSamplerState(&raw const sampling, Some(&raw mut sampler))
                 .map_err(|e| err("CreateSamplerState", e))?;
@@ -301,8 +273,7 @@ impl CardHdr {
         })
     }
 
-    /// The `rect` part of `texture` (scRGB) tone mapped to SDR: a BGRA texture of its size,
-    /// valid until the next call.
+    /// The `rect` part of `texture` (scRGB) tone mapped to SDR: a BGRA texture of its size, valid until the next call.
     pub fn to_sdr(&self, texture: &ID3D11Texture2D, rect: RECT) -> Result<ID3D11Texture2D, String> {
         let mut frames = self.frames.lock().map_err(|_| "lock poisoned")?;
         let (input, size) = self.input(&mut frames, texture, rect)?;
@@ -317,11 +288,8 @@ impl CardHdr {
             )?;
             let mut view = None;
             // SAFETY: a render target view of a texture of this device.
-            unsafe {
-                self.device
-                    .CreateRenderTargetView(&made, None, Some(&raw mut view))
-            }
-            .map_err(|e| err("CreateRenderTargetView", e))?;
+            unsafe { self.device.CreateRenderTargetView(&made, None, Some(&raw mut view)) }
+                .map_err(|e| err("CreateRenderTargetView", e))?;
             frames.sdr = Some((made, view.ok_or("no view")?, size));
         }
         let Some((sdr, target, _)) = frames.sdr.clone() else {
@@ -348,8 +316,8 @@ impl CardHdr {
         Ok(sdr)
     }
 
-    /// The `rect` part of `texture` (scRGB) as BT.2020 / PQ, scaled into slice `slice` of the
-    /// P010 texture `dst` (`out` pixels: both even).
+    /// The `rect` part of `texture` (scRGB) as BT.2020 / PQ, scaled into slice `slice` of the P010 texture `dst` (`out`
+    /// pixels: both even).
     pub fn to_pq(
         &self,
         texture: &ID3D11Texture2D,
@@ -370,29 +338,16 @@ impl CardHdr {
                         Format: format,
                         ViewDimension: D3D11_RTV_DIMENSION_TEXTURE2DARRAY,
                         Anonymous: D3D11_RENDER_TARGET_VIEW_DESC_0 {
-                            Texture2DArray: D3D11_TEX2D_ARRAY_RTV {
-                                MipSlice: 0,
-                                FirstArraySlice: slice,
-                                ArraySize: 1,
-                            },
+                            Texture2DArray: D3D11_TEX2D_ARRAY_RTV { MipSlice: 0, FirstArraySlice: slice, ArraySize: 1 },
                         },
                     };
                     let mut view = None;
                     // SAFETY: a plane view of a P010 texture of this device.
-                    unsafe {
-                        self.device.CreateRenderTargetView(
-                            dst,
-                            Some(&raw const desc),
-                            Some(&raw mut view),
-                        )
-                    }
-                    .map_err(|e| err("plane view", e))?;
+                    unsafe { self.device.CreateRenderTargetView(dst, Some(&raw const desc), Some(&raw mut view)) }
+                        .map_err(|e| err("plane view", e))?;
                     view.ok_or_else(|| "no plane view".to_owned())
                 };
-                let planes = [
-                    view(DXGI_FORMAT_R16_UNORM)?,
-                    view(DXGI_FORMAT_R16G16_UNORM)?,
-                ];
+                let planes = [view(DXGI_FORMAT_R16_UNORM)?, view(DXGI_FORMAT_R16G16_UNORM)?];
                 if frames.planes.len() >= KEPT_PLANES {
                     frames.planes.remove(0);
                 }
@@ -416,29 +371,16 @@ impl CardHdr {
         texture: &ID3D11Texture2D,
         rect: RECT,
     ) -> Result<(ID3D11ShaderResourceView, (u32, u32)), String> {
-        let size = (
-            (rect.right - rect.left).max(1) as u32,
-            (rect.bottom - rect.top).max(1) as u32,
-        );
+        let size = ((rect.right - rect.left).max(1) as u32, (rect.bottom - rect.top).max(1) as u32);
         if frames.input.as_ref().is_none_or(|(_, _, s)| *s != size) {
             let mut desc = D3D11_TEXTURE2D_DESC::default();
             // SAFETY: `desc` is a valid out-pointer.
             unsafe { texture.GetDesc(&raw mut desc) };
-            let made = d3d::texture(
-                &self.device,
-                size,
-                desc.Format,
-                D3D11_BIND_SHADER_RESOURCE.0 as u32,
-                0,
-                None,
-            )?;
+            let made = d3d::texture(&self.device, size, desc.Format, D3D11_BIND_SHADER_RESOURCE.0 as u32, 0, None)?;
             let mut view = None;
             // SAFETY: a shader resource view of a texture of this device.
-            unsafe {
-                self.device
-                    .CreateShaderResourceView(&made, None, Some(&raw mut view))
-            }
-            .map_err(|e| err("CreateShaderResourceView", e))?;
+            unsafe { self.device.CreateShaderResourceView(&made, None, Some(&raw mut view)) }
+                .map_err(|e| err("CreateShaderResourceView", e))?;
             frames.input = Some((made, view.ok_or("no view")?, size));
         }
         let Some((input, view, _)) = frames.input.as_ref() else {
@@ -452,19 +394,10 @@ impl CardHdr {
             bottom: rect.top.max(0) as u32 + size.1,
             back: 1,
         };
-        // SAFETY: both textures belong to this device, in the same format; the box is the part
-        // the caller asks for, inside the frame.
+        // SAFETY: both textures belong to this device, in the same format; the box is the part the caller asks for,
+        // inside the frame.
         unsafe {
-            self.context.CopySubresourceRegion(
-                input,
-                0,
-                0,
-                0,
-                0,
-                texture,
-                0,
-                Some(&raw const from),
-            );
+            self.context.CopySubresourceRegion(input, 0, 0, 0, 0, texture, 0, Some(&raw const from));
         }
         Ok((view.clone(), size))
     }
@@ -472,12 +405,7 @@ impl CardHdr {
     fn set_params(&self, size: (u32, u32), out: (u32, u32)) {
         let white = self.levels.sdr_white_nits.max(1.0);
         let mut params = [0_u8; 32];
-        let floats = [
-            80.0 / white,
-            self.levels.peak_nits / white,
-            self.steps.0,
-            self.steps.1,
-        ];
+        let floats = [80.0 / white, self.levels.peak_nits / white, self.steps.0, self.steps.1];
         for (at, v) in floats.iter().enumerate() {
             params[at * 4..at * 4 + 4].copy_from_slice(&v.to_le_bytes());
         }
@@ -487,8 +415,7 @@ impl CardHdr {
         params[28..32].copy_from_slice(&(out.1 as f32).to_le_bytes());
         // SAFETY: a 32-byte constant buffer of this device, written whole.
         unsafe {
-            self.context
-                .UpdateSubresource(&self.params, 0, None, params.as_ptr().cast(), 0, 0);
+            self.context.UpdateSubresource(&self.params, 0, None, params.as_ptr().cast(), 0, 0);
         }
     }
 
@@ -537,26 +464,16 @@ mod tests {
     use windows::Win32::Graphics::Direct3D11::{
         D3D11_CPU_ACCESS_READ, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE, D3D11_USAGE_STAGING,
     };
-    use windows::Win32::Graphics::Dxgi::Common::{
-        DXGI_FORMAT_P010, DXGI_FORMAT_R16G16B16A16_FLOAT,
-    };
+    use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_P010, DXGI_FORMAT_R16G16B16A16_FLOAT};
 
-    const LEVELS: Levels = Levels {
-        sdr_white_nits: 240.0,
-        peak_nits: 1000.0,
-    };
+    const LEVELS: Levels = Levels { sdr_white_nits: 240.0, peak_nits: 1000.0 };
 
     fn device() -> Option<(ID3D11Device, ID3D11DeviceContext)> {
         crate::d3d_convert::create_device(None).ok()
     }
 
-    /// A scRGB texture of `size`, each pixel given by `pixel(x, y)`, as a capture frame is
-    /// (not readable by shaders).
-    fn frame(
-        device: &ID3D11Device,
-        (w, h): (u32, u32),
-        pixel: impl Fn(u32, u32) -> [f32; 3],
-    ) -> ID3D11Texture2D {
+    /// A scRGB texture of `size`, each pixel given by `pixel(x, y)`, as a capture frame is (not readable by shaders).
+    fn frame(device: &ID3D11Device, (w, h): (u32, u32), pixel: impl Fn(u32, u32) -> [f32; 3]) -> ID3D11Texture2D {
         let halves: Vec<u16> = (0..h)
             .flat_map(|y| (0..w).map(move |x| (x, y)))
             .flat_map(|(x, y)| {
@@ -591,19 +508,13 @@ mod tests {
             desc.BindFlags = 0;
             desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
             let mut staging = None;
-            device
-                .CreateTexture2D(&raw const desc, None, Some(&raw mut staging))
-                .unwrap();
+            device.CreateTexture2D(&raw const desc, None, Some(&raw mut staging)).unwrap();
             let staging = staging.unwrap();
             context.CopyResource(&staging, texture);
             let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-            context
-                .Map(&staging, 0, D3D11_MAP_READ, 0, Some(&raw mut mapped))
-                .unwrap();
+            context.Map(&staging, 0, D3D11_MAP_READ, 0, Some(&raw mut mapped)).unwrap();
             let pitch = mapped.RowPitch as usize;
-            let bytes =
-                std::slice::from_raw_parts(mapped.pData.cast::<u8>(), pitch * rows as usize)
-                    .to_vec();
+            let bytes = std::slice::from_raw_parts(mapped.pData.cast::<u8>(), pitch * rows as usize).to_vec();
             context.Unmap(&staging, 0);
             (bytes, pitch)
         }
@@ -613,16 +524,11 @@ mod tests {
     fn expected(rgb: [f32; 3]) -> [i32; 3] {
         let [r, g, b] = colour::scrgb_to_pq(rgb).map(|c| f64::from(c) / 65535.0);
         let y = 0.2627 * r + 0.6780 * g + 0.0593 * b;
-        [
-            64.0 + 876.0 * y,
-            512.0 + 896.0 * (b - y) / 1.8814,
-            512.0 + 896.0 * (r - y) / 1.4746,
-        ]
-        .map(|v| v.round() as i32)
+        [64.0 + 876.0 * y, 512.0 + 896.0 * (b - y) / 1.8814, 512.0 + 896.0 * (r - y) / 1.4746].map(|v| v.round() as i32)
     }
 
-    /// HDR frames come out as the processor codes them, scaled or not: SDR white, a bright
-    /// saturated orange, a 1000-nit white, a colour wider than BT.709, black.
+    /// HDR frames come out as the processor codes them, scaled or not: SDR white, a bright saturated orange, a 1000-nit
+    /// white, a colour wider than BT.709, black.
     #[test]
     fn pq_planes_hold_the_processor_s_codes() {
         let Some((device, context)) = device() else {
@@ -631,54 +537,27 @@ mod tests {
         };
         let hdr = CardHdr::new(&device, &context, LEVELS, 60.0).unwrap();
         for out in [(64u32, 48u32), (32, 24)] {
-            for rgb in [
-                [3.0, 3.0, 3.0],
-                [10.0, 4.0, 0.2],
-                [12.5, 12.5, 12.5],
-                [-0.3, 1.2, 1.1],
-                [0.0, 0.0, 0.0],
-            ] {
+            for rgb in [[3.0, 3.0, 3.0], [10.0, 4.0, 0.2], [12.5, 12.5, 12.5], [-0.3, 1.2, 1.1], [0.0, 0.0, 0.0]] {
                 let source = frame(&device, (80, 60), |_, _| rgb);
-                let dst = d3d::texture(
-                    &device,
-                    out,
-                    DXGI_FORMAT_P010,
-                    D3D11_BIND_RENDER_TARGET.0 as u32,
-                    0,
-                    None,
-                )
-                .unwrap();
-                let rect = RECT {
-                    left: 8,
-                    top: 6,
-                    right: 72,
-                    bottom: 54,
-                };
+                let dst =
+                    d3d::texture(&device, out, DXGI_FORMAT_P010, D3D11_BIND_RENDER_TARGET.0 as u32, 0, None).unwrap();
+                let rect = RECT { left: 8, top: 6, right: 72, bottom: 54 };
                 hdr.to_pq(&source, rect, &dst, 0, out).unwrap();
                 let (bytes, pitch) = read(&device, &context, &dst, out.1 * 3 / 2);
-                let at = |offset: usize| {
-                    i32::from(u16::from_le_bytes([bytes[offset], bytes[offset + 1]]) >> 6)
-                };
+                let at = |offset: usize| i32::from(u16::from_le_bytes([bytes[offset], bytes[offset + 1]]) >> 6);
                 let (cx, cy) = (out.0 as usize / 4, out.1 as usize / 4);
                 let chroma = out.1 as usize * pitch + cy * pitch + cx * 4;
-                let got = [
-                    at((out.1 as usize / 2) * pitch + out.0 as usize),
-                    at(chroma),
-                    at(chroma + 2),
-                ];
+                let got = [at((out.1 as usize / 2) * pitch + out.0 as usize), at(chroma), at(chroma + 2)];
                 let want = expected(rgb);
                 for (g, w) in got.iter().zip(want) {
-                    assert!(
-                        (g - w).abs() <= 1,
-                        "{rgb:?} at {out:?}: {got:?}, not {want:?}"
-                    );
+                    assert!((g - w).abs() <= 1, "{rgb:?} at {out:?}: {got:?}, not {want:?}");
                 }
             }
         }
     }
 
-    /// SDR frames are tone mapped as the screenshots are: up to the picture's brightest pixel,
-    /// white staying white without highlights, and followed smoothly from frame to frame.
+    /// SDR frames are tone mapped as the screenshots are: up to the picture's brightest pixel, white staying white
+    /// without highlights, and followed smoothly from frame to frame.
     #[test]
     fn sdr_frames_follow_the_brightest_pixel() {
         let Some((device, context)) = device() else {
@@ -687,20 +566,13 @@ mod tests {
         };
         let hdr = CardHdr::new(&device, &context, LEVELS, 60.0).unwrap();
         let white = LEVELS.sdr_white_nits / 80.0;
-        let rect = RECT {
-            left: 0,
-            top: 0,
-            right: 32,
-            bottom: 16,
-        };
+        let rect = RECT { left: 0, top: 0, right: 32, bottom: 16 };
         let pixel = |sdr: &ID3D11Texture2D, x: usize| {
             let (bytes, _) = read(&device, &context, sdr, 1);
             [bytes[x * 4], bytes[x * 4 + 1], bytes[x * 4 + 2]]
         };
         // The first frame takes its own brightest pixel: a highlight on the right half.
-        let lit = frame(&device, (32, 16), |x, _| {
-            if x < 16 { [white; 3] } else { [12.5; 3] }
-        });
+        let lit = frame(&device, (32, 16), |x, _| if x < 16 { [white; 3] } else { [12.5; 3] });
         let sdr = hdr.to_sdr(&lit, rect).unwrap();
         assert_eq!(pixel(&sdr, 20), [255; 3]);
         let scale = 80.0 / LEVELS.sdr_white_nits;
@@ -708,10 +580,7 @@ mod tests {
         let code = |v: f32| (colour::srgb_encode(v) * 255.0).round() as u8;
         let rolled = code(colour::roll_off(1.0, h));
         let got = pixel(&sdr, 4);
-        assert!(
-            got.iter().all(|&c| c.abs_diff(rolled) <= 1),
-            "{got:?}, not {rolled}"
-        );
+        assert!(got.iter().all(|&c| c.abs_diff(rolled) <= 1), "{got:?}, not {rolled}");
         // The highlight gone: white comes back to 255 slowly (half a second on), not at once.
         let plain = frame(&device, (32, 16), |_, _| [white; 3]);
         for _ in 0..30 {

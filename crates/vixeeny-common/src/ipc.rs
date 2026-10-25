@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Daemon ↔ app IPC: `postcard` messages with a 4-byte little-endian length prefix
-//! over a named pipe.
+//! Daemon ↔ app IPC: `postcard` messages with a 4-byte little-endian length prefix over a named pipe.
 //!
-//! The daemon owns the listener. Binding it is also the single-instance lock: if another
-//! daemon already answers on the endpoint, [`bind`] reports [`BindError::AlreadyRunning`].
+//! The daemon owns the listener. Binding it is also the single-instance lock: if another daemon already answers on the
+//! endpoint, [`bind`] reports [`BindError::AlreadyRunning`].
 
 use std::io::{self, Read, Write};
 
@@ -33,8 +32,8 @@ pub enum ActionId {
     ReplayEdit,
     OverlayToggle,
     OpenSettings,
-    /// Not a shortcut: keeps the app running while the replay is on, to start it during
-    /// full-screen games (the daemon sends it at startup and when the settings change).
+    /// Not a shortcut: keeps the app running while the replay is on, to start it during full-screen games (the daemon
+    /// sends it at startup and when the settings change).
     ReplayWatch,
 }
 
@@ -80,8 +79,7 @@ impl ActionId {
         matches!(self, Self::CaptureRegion | Self::CaptureScrolling)
     }
 
-    /// The daemon captures the screens the moment the shortcut is pressed, for the app to
-    /// save (they are not shown).
+    /// The daemon captures the screens the moment the shortcut is pressed, for the app to save (they are not shown).
     pub const fn holds_screen(self) -> bool {
         matches!(self, Self::CaptureFullscreen | Self::CaptureAllMonitors)
     }
@@ -91,8 +89,8 @@ impl ActionId {
     }
 }
 
-/// The screens the daemon froze the moment a zone capture was asked for: one GPU texture per
-/// monitor, shared with the app, and the window that shows it until the editor is up.
+/// The screens the daemon froze the moment a zone capture was asked for: one GPU texture per monitor, shared with the
+/// app, and the window that shows it until the editor is up.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Frozen {
     /// LUID of the graphics adapter that holds the textures (the app must open them there).
@@ -110,8 +108,7 @@ pub struct FrozenScreen {
     /// Shared handle of the texture: BGRA 8-bit, or RGBA half floats (scRGB) when `hdr`.
     pub texture: u64,
     pub hdr: bool,
-    /// The window showing the frozen screen; the app posts it [`THAW_MESSAGE`] once its own
-    /// windows cover the screens.
+    /// The window showing the frozen screen; the app posts it [`THAW_MESSAGE`] once its own windows cover the screens.
     pub window: u64,
 }
 
@@ -119,8 +116,7 @@ pub struct FrozenScreen {
 pub const THAW_MESSAGE: u32 = 0x8076;
 
 impl Frozen {
-    /// Command-line form (`--frozen`), for an app started by the press itself:
-    /// `adapter;x,y,w,h,texture,hdr,window;…`.
+    /// Command-line form (`--frozen`), for an app started by the press itself: `adapter;x,y,w,h,texture,hdr,window;…`.
     pub fn to_arg(&self) -> String {
         let mut out = self.adapter.to_string();
         for s in &self.screens {
@@ -171,10 +167,7 @@ pub enum RecState {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DaemonToApp {
-    RunAction {
-        action: ActionId,
-        frozen: Option<Frozen>,
-    },
+    RunAction { action: ActionId, frozen: Option<Frozen> },
     ConfigChanged,
     Shutdown,
 }
@@ -201,16 +194,15 @@ pub enum ControlRequest {
     QuitForUpdate,
     /// Runs an action, like its shortcut would.
     Action(ActionId),
-    /// `true` while the settings window records a shortcut: the global shortcuts are released so
-    /// that pressing one does not run it. `false` (or any reload of the settings) gives them back.
+    /// `true` while the settings window records a shortcut: the global shortcuts are released so that pressing one does
+    /// not run it. `false` (or any reload of the settings) gives them back.
     PauseHotkeys(bool),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ControlReply {
     Ok,
-    /// To [`ControlRequest::QuitForUpdate`]: the daemon's process, which ends now or after
-    /// the recording.
+    /// To [`ControlRequest::QuitForUpdate`]: the daemon's process, which ends now or after the recording.
     Quitting {
         pid: u32,
     },
@@ -246,10 +238,8 @@ pub enum BindError {
 /// Writes one framed message.
 pub fn write_msg<W: Write, T: Serialize>(w: &mut W, msg: &T) -> Result<(), IpcError> {
     let payload = postcard::to_stdvec(msg)?;
-    let len = u32::try_from(payload.len())
-        .ok()
-        .filter(|n| *n <= MAX_MESSAGE_BYTES)
-        .ok_or(IpcError::TooLarge(u32::MAX))?;
+    let len =
+        u32::try_from(payload.len()).ok().filter(|n| *n <= MAX_MESSAGE_BYTES).ok_or(IpcError::TooLarge(u32::MAX))?;
     w.write_all(&len.to_le_bytes())?;
     w.write_all(&payload)?;
     w.flush()?;
@@ -273,10 +263,9 @@ pub fn read_msg<R: Read, T: DeserializeOwned>(r: &mut R) -> Result<Option<T>, Ip
     Ok(Some(postcard::from_bytes(&payload)?))
 }
 
-/// Who may open the daemon's named pipe (SDDL): not network logons, the system and the user
-/// `sid`, by name: the owner of what a program with the administrator's rights makes is the
-/// Administrators group, which this user's other programs are not. The label lets them write
-/// to it all the same (it would take the creator's level otherwise).
+/// Who may open the daemon's named pipe (SDDL): not network logons, the system and the user `sid`, by name: the owner
+/// of what a program with the administrator's rights makes is the Administrators group, which this user's other
+/// programs are not. The label lets them write to it all the same (it would take the creator's level otherwise).
 fn pipe_sddl(sid: &str) -> String {
     format!("D:P(D;;GA;;;NU)(A;;GA;;;SY)(A;;GA;;;{sid})S:(ML;;NW;;;ME)")
 }
@@ -288,21 +277,17 @@ pub struct Endpoint {
 }
 
 impl Endpoint {
-    /// The per-user endpoint (one daemon per user session), named after the user's SID: two
-    /// accounts never share it, whatever their names. `VIXEENY_IPC_NAME` overrides the name,
-    /// e.g. for benchmarks running next to a normal install.
+    /// The per-user endpoint (one daemon per user session), named after the user's SID: two accounts never share it,
+    /// whatever their names. `VIXEENY_IPC_NAME` overrides the name, e.g. for benchmarks running next to a normal
+    /// install.
     pub fn current_user() -> Self {
-        let user = identity::current_sid()
-            .or_else(|| std::env::var("USERNAME").ok())
-            .unwrap_or_else(|| "user".into());
-        Self::named(
-            &std::env::var("VIXEENY_IPC_NAME").unwrap_or_else(|_| format!("vixeeny-{user}")),
-        )
+        let user = identity::current_sid().or_else(|| std::env::var("USERNAME").ok()).unwrap_or_else(|| "user".into());
+        Self::named(&std::env::var("VIXEENY_IPC_NAME").unwrap_or_else(|_| format!("vixeeny-{user}")))
     }
 
-    /// The name the versions before 0.20 gave the endpoint (after the user's name, not their
-    /// SID): only to stop the daemon of such a version, which an update from it may leave
-    /// running. `None` when it is the same, or the name is set by `VIXEENY_IPC_NAME` (tests).
+    /// The name the versions before 0.20 gave the endpoint (after the user's name, not their SID): only to stop the
+    /// daemon of such a version, which an update from it may leave running. `None` when it is the same, or the name is
+    /// set by `VIXEENY_IPC_NAME` (tests).
     pub fn older_user() -> Option<Self> {
         if std::env::var_os("VIXEENY_IPC_NAME").is_some() {
             return None;
@@ -312,8 +297,8 @@ impl Endpoint {
         (older != Self::current_user()).then_some(older)
     }
 
-    /// Asks the daemon here to stop the way an update does; returns its process, which ends
-    /// now or once a recording is finished. `Ok(None)`: no daemon of this user answers here.
+    /// Asks the daemon here to stop the way an update does; returns its process, which ends now or once a recording is
+    /// finished. `Ok(None)`: no daemon of this user answers here.
     pub fn ask_to_quit(&self) -> Result<Option<u32>, IpcError> {
         let Ok(mut stream) = self.connect() else {
             return Ok(None);
@@ -321,24 +306,14 @@ impl Endpoint {
         write_msg(&mut stream, &Hello::Control(ControlRequest::QuitForUpdate))?;
         match read_msg::<_, ControlReply>(&mut stream)? {
             Some(ControlReply::Quitting { pid }) => Ok(Some(pid)),
-            _ => Err(IpcError::Io(io::Error::other(
-                "the daemon did not agree to stop",
-            ))),
+            _ => Err(IpcError::Io(io::Error::other("the daemon did not agree to stop"))),
         }
     }
 
     /// An endpoint with an explicit name (tests).
     pub fn named(name: &str) -> Self {
-        let base = name
-            .chars()
-            .map(|c| {
-                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                    c
-                } else {
-                    '_'
-                }
-            })
-            .collect();
+        let base =
+            name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
         Self { base }
     }
 
@@ -346,35 +321,26 @@ impl Endpoint {
         self.base.clone().to_ns_name::<GenericNamespaced>()
     }
 
-    /// Connects to the running daemon. The pipe must belong to this user: one another account
-    /// made under this name is left before anything is written to it (so it learns nothing and
-    /// cannot act as this user).
+    /// Connects to the running daemon. The pipe must belong to this user: one another account made under this name is
+    /// left before anything is written to it (so it learns nothing and cannot act as this user).
     pub fn connect(&self) -> io::Result<Stream> {
         let stream = Stream::connect(self.name()?)?;
         let server = interprocess::local_socket::traits::StreamCommon::peer_creds(&stream)?.pid();
         if !server.is_some_and(identity::same_user) {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "the Vixeeny pipe belongs to another user",
-            ));
+            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "the Vixeeny pipe belongs to another user"));
         }
         Ok(stream)
     }
 
-    /// Listener options. The pipe is closed to everyone but the current user and the system: the
-    /// default access control would let any local account connect and, for instance, make the
-    /// daemon quit or run actions.
+    /// Listener options. The pipe is closed to everyone but the current user and the system: the default access control
+    /// would let any local account connect and, for instance, make the daemon quit or run actions.
     fn options(&self) -> io::Result<ListenerOptions<'static>> {
         use interprocess::os::windows::local_socket::ListenerOptionsExt;
         use interprocess::os::windows::security_descriptor::SecurityDescriptor;
-        // Protected DACL: deny network logons, allow the system and the user who started the
-        // daemon; nobody else.
-        let sid = identity::current_sid()
-            .ok_or_else(|| io::Error::other("cannot read this process's account"))?;
+        // Protected DACL: deny network logons, allow the system and the user who started the daemon; nobody else.
+        let sid = identity::current_sid().ok_or_else(|| io::Error::other("cannot read this process's account"))?;
         let sddl = widestring::U16CString::from_str(pipe_sddl(&sid)).map_err(io::Error::other)?;
-        Ok(ListenerOptions::new()
-            .name(self.name()?)
-            .security_descriptor(SecurityDescriptor::deserialize(&sddl)?))
+        Ok(ListenerOptions::new().name(self.name()?).security_descriptor(SecurityDescriptor::deserialize(&sddl)?))
     }
 
     /// Creates the daemon's listener, doubling as the single-instance lock.
@@ -382,8 +348,8 @@ impl Endpoint {
         match self.options()?.create_sync() {
             Ok(listener) => Ok(listener),
             Err(first) => {
-                // Something owns the name. A successful connection means a live daemon; a named
-                // pipe cannot be stale, so failing to connect means it is busy.
+                // Something owns the name. A successful connection means a live daemon; a named pipe cannot be stale,
+                // so failing to connect means it is busy.
                 if self.connect().is_ok() {
                     return Err(BindError::AlreadyRunning);
                 }
@@ -397,9 +363,7 @@ impl Endpoint {
 mod identity {
     use windows::Win32::Foundation::{CloseHandle, HANDLE, HLOCAL, LocalFree};
     use windows::Win32::Security::Authorization::ConvertSidToStringSidW;
-    use windows::Win32::Security::{
-        EqualSid, GetTokenInformation, PSID, TOKEN_QUERY, TOKEN_USER, TokenUser,
-    };
+    use windows::Win32::Security::{EqualSid, GetTokenInformation, PSID, TOKEN_QUERY, TOKEN_USER, TokenUser};
     use windows::Win32::System::Threading::{
         GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
     };
@@ -415,15 +379,8 @@ mod identity {
         let _ = unsafe { GetTokenInformation(token, TokenUser, None, 0, &raw mut size) };
         let mut buffer = vec![0_u64; (size as usize).div_ceil(8)];
         // SAFETY: `buffer` holds `size` bytes.
-        let read = unsafe {
-            GetTokenInformation(
-                token,
-                TokenUser,
-                Some(buffer.as_mut_ptr().cast()),
-                size,
-                &raw mut size,
-            )
-        };
+        let read =
+            unsafe { GetTokenInformation(token, TokenUser, Some(buffer.as_mut_ptr().cast()), size, &raw mut size) };
         // SAFETY: opened above, closed once.
         let _ = unsafe { CloseHandle(token) };
         read.ok()?;
@@ -449,16 +406,15 @@ mod identity {
         result
     }
 
-    /// Whether `pid` runs as this process's user. `false` when it cannot be told (a process
-    /// of another user cannot be opened).
+    /// Whether `pid` runs as this process's user. `false` when it cannot be told (a process of another user cannot be
+    /// opened).
     pub fn same_user(pid: u32) -> bool {
         // SAFETY: the pseudo-handle of this process.
         let Some(ours) = token_user(unsafe { GetCurrentProcess() }) else {
             return false;
         };
         // SAFETY: plain arguments; the handle is closed below.
-        let Ok(process) = (unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) })
-        else {
+        let Ok(process) = (unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }) else {
             return false;
         };
         let theirs = token_user(process);
@@ -503,16 +459,7 @@ mod tests {
         };
         Frozen {
             adapter: -42,
-            screens: vec![
-                screen,
-                FrozenScreen {
-                    x: 0,
-                    width: 3840,
-                    height: 2160,
-                    hdr: true,
-                    ..screen
-                },
-            ],
+            screens: vec![screen, FrozenScreen { x: 0, width: 3840, height: 2160, hdr: true, ..screen }],
         }
     }
 
@@ -527,28 +474,19 @@ mod tests {
     #[test]
     fn framing_roundtrip() {
         let mut buf = Vec::new();
-        let msg = DaemonToApp::RunAction {
-            action: ActionId::CaptureRegion,
-            frozen: Some(frozen()),
-        };
+        let msg = DaemonToApp::RunAction { action: ActionId::CaptureRegion, frozen: Some(frozen()) };
         write_msg(&mut buf, &msg).unwrap();
         write_msg(&mut buf, &DaemonToApp::Shutdown).unwrap();
         let mut r = Cursor::new(buf);
         assert_eq!(read_msg::<_, DaemonToApp>(&mut r).unwrap(), Some(msg));
-        assert_eq!(
-            read_msg::<_, DaemonToApp>(&mut r).unwrap(),
-            Some(DaemonToApp::Shutdown)
-        );
+        assert_eq!(read_msg::<_, DaemonToApp>(&mut r).unwrap(), Some(DaemonToApp::Shutdown));
         assert_eq!(read_msg::<_, DaemonToApp>(&mut r).unwrap(), None);
     }
 
     #[test]
     fn oversized_length_is_rejected() {
         let mut r = Cursor::new((MAX_MESSAGE_BYTES + 1).to_le_bytes().to_vec());
-        assert!(matches!(
-            read_msg::<_, Hello>(&mut r),
-            Err(IpcError::TooLarge(_))
-        ));
+        assert!(matches!(read_msg::<_, Hello>(&mut r), Err(IpcError::TooLarge(_))));
     }
 
     #[test]
@@ -587,10 +525,7 @@ mod tests {
         write_msg(&mut client, &Hello::Control(ControlRequest::OpenSettings)).unwrap();
         let reply: ControlReply = read_msg(&mut client).unwrap().unwrap();
         assert_eq!(reply, ControlReply::Ok);
-        assert_eq!(
-            server.join().unwrap(),
-            Hello::Control(ControlRequest::OpenSettings)
-        );
+        assert_eq!(server.join().unwrap(), Hello::Control(ControlRequest::OpenSettings));
     }
     /// What an update, or a newer daemon, asks a daemon of any version that answers.
     #[test]
@@ -605,10 +540,7 @@ mod tests {
             hello
         });
         assert_eq!(ep.ask_to_quit().unwrap(), Some(42));
-        assert_eq!(
-            server.join().unwrap(),
-            Hello::Control(ControlRequest::QuitForUpdate)
-        );
+        assert_eq!(server.join().unwrap(), Hello::Control(ControlRequest::QuitForUpdate));
     }
 
     #[test]
@@ -621,9 +553,6 @@ mod tests {
         let Ok(user) = std::env::var("USERNAME") else {
             return;
         };
-        assert_eq!(
-            Endpoint::older_user(),
-            Some(Endpoint::named(&format!("vixeeny-{user}")))
-        );
+        assert_eq!(Endpoint::older_user(), Some(Endpoint::named(&format!("vixeeny-{user}"))));
     }
 }

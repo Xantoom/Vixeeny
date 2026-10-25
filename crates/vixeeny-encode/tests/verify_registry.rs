@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! `cargo xtask verify-registry`: the registry against the real encoders of the linked FFmpeg,
-//! and the probe against the software encoders.
-//! Needs the native build: `cargo xtask build-native ffmpeg`.
+//! `cargo xtask verify-registry`: the registry against the real encoders of the linked FFmpeg, and the probe against
+//! the software encoders. Needs the native build: `cargo xtask build-native ffmpeg`.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use vixeeny_encode::ffmpeg_probe::{FfmpegProber, verify};
@@ -16,11 +15,7 @@ fn the_registry_matches_ffmpeg() {
     for m in &mismatches {
         eprintln!("{}: {}", m.encoder, m.what);
     }
-    assert!(
-        mismatches.is_empty(),
-        "{} mismatch(es) between registry.toml and FFmpeg",
-        mismatches.len()
-    );
+    assert!(mismatches.is_empty(), "{} mismatch(es) between registry.toml and FFmpeg", mismatches.len());
 }
 
 #[test]
@@ -35,52 +30,30 @@ fn the_probe_finds_the_software_encoders() {
         ("libsvtav1", 10, Chroma::C420),
         ("libvpx_vp9", 8, Chroma::C420),
     ] {
-        assert!(
-            result.supports(id, depth, chroma, false),
-            "{id} {depth}-bit {chroma:?}"
-        );
+        assert!(result.supports(id, depth, chroma, false), "{id} {depth}-bit {chroma:?}");
     }
     // HDR signalling opens with the 10-bit HEVC and AV1 software encoders.
     assert!(result.supports("libx265", 10, Chroma::C420, true));
     assert!(result.supports("libsvtav1", 10, Chroma::C420, true));
     for e in &result.encoders {
-        eprintln!(
-            "{} {:?}",
-            e.id,
-            e.formats
-                .iter()
-                .map(|f| (f.depth, f.chroma.name(), f.hdr))
-                .collect::<Vec<_>>()
-        );
+        eprintln!("{} {:?}", e.id, e.formats.iter().map(|f| (f.depth, f.chroma.name(), f.hdr)).collect::<Vec<_>>());
     }
 }
 
 #[test]
 fn the_verifier_catches_wrong_data() {
     let text = include_str!("../codecs/registry.toml");
-    let wrong_option = Registry::parse(&text.replacen(
-        "ffmpeg_option = \"rc-lookahead\"",
-        "ffmpeg_option = \"lookaheadx\"",
-        1,
-    ))
-    .unwrap();
+    let wrong_option =
+        Registry::parse(&text.replacen("ffmpeg_option = \"rc-lookahead\"", "ffmpeg_option = \"lookaheadx\"", 1))
+            .unwrap();
     let found = verify(&wrong_option, false);
-    assert!(
-        found.iter().any(|m| m.what.contains("lookaheadx")),
-        "{found:?}"
-    );
-    let wrong_rate =
-        Registry::parse(&text.replacen("crf = \"{quality}\"", "crfx = \"{quality}\"", 1)).unwrap();
+    assert!(found.iter().any(|m| m.what.contains("lookaheadx")), "{found:?}");
+    let wrong_rate = Registry::parse(&text.replacen("crf = \"{quality}\"", "crfx = \"{quality}\"", 1)).unwrap();
     let found = verify(&wrong_rate, false);
     assert!(found.iter().any(|m| m.what.contains("crfx")), "{found:?}");
-    let wrong_value =
-        Registry::parse(&text.replacen("\"best\", \"good\"", "\"bestest\", \"good\"", 1)).unwrap();
+    let wrong_value = Registry::parse(&text.replacen("\"best\", \"good\"", "\"bestest\", \"good\"", 1)).unwrap();
     let found = verify(&wrong_value, false);
-    assert!(
-        found.iter().any(|m| m.what.contains("bestest")),
-        "{found:?}"
-    );
-    let wrong_pixel =
-        Registry::parse(&text.replacen("ffmpeg = \"yuv420p\"", "ffmpeg = \"ya8\"", 1)).unwrap();
+    assert!(found.iter().any(|m| m.what.contains("bestest")), "{found:?}");
+    let wrong_pixel = Registry::parse(&text.replacen("ffmpeg = \"yuv420p\"", "ffmpeg = \"ya8\"", 1)).unwrap();
     assert!(!verify(&wrong_pixel, false).is_empty());
 }

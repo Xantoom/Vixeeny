@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The assembling state machine.
 //!
-//! The long image is a column of rows, each at a position in the page. A new frame is placed
-//! where its rows agree with the rows already there, then lends them its rows: rows beyond the
-//! image extend it, and a row already there takes the new frame's view of it when that view is
-//! nearer the middle of the screen (where no sticky header, footer or floating button sits).
+//! The long image is a column of rows, each at a position in the page. A new frame is placed where its rows agree with
+//! the rows already there, then lends them its rows: rows beyond the image extend it, and a row already there takes the
+//! new frame's view of it when that view is nearer the middle of the screen (where no sticky header, footer or floating
+//! button sits).
 
 use crate::frame::Frame;
 
@@ -23,8 +23,8 @@ const ROW_CAP: u32 = 64;
 const SAME_SHARE: f32 = 0.7;
 /// The same, when the whole frame is compared.
 const WHOLE_SHARE: f32 = 0.95;
-/// How much a band of a row must differ from the same band of its neighbours for the row to
-/// tell where it is (grain from the rendering stays below).
+/// How much a band of a row must differ from the same band of its neighbours for the row to tell where it is (grain
+/// from the rendering stays below).
 const DETAIL: u32 = 10;
 /// A band that changed by this much or less stayed still (grain from the rendering).
 const STILL: u16 = 3;
@@ -39,17 +39,14 @@ const MARGIN: f32 = 3.0;
 pub struct Config {
     /// The assembled image never gets taller than this (30 000 px).
     pub max_height: u32,
-    /// Smallest overlap between a frame and the image, as a fraction of the frame. Frames that
-    /// overlap less are reported as [`Push::Lost`].
+    /// Smallest overlap between a frame and the image, as a fraction of the frame. Frames that overlap less are
+    /// reported as [`Push::Lost`].
     pub min_overlap: f32,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Self {
-            max_height: 30_000,
-            min_overlap: 0.12,
-        }
+        Self { max_height: 30_000, min_overlap: 0.12 }
     }
 }
 
@@ -81,16 +78,12 @@ pub enum Push {
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum StitchError {
     #[error("frame size changed from {expected:?} to {got:?}")]
-    SizeChanged {
-        expected: (u32, u32),
-        got: (u32, u32),
-    },
+    SizeChanged { expected: (u32, u32), got: (u32, u32) },
 }
 
 pub struct Stitched {
     pub frame: Frame,
-    /// The layer pushed with every frame, assembled from the same rows (see
-    /// [`Stitcher::push_layered`]).
+    /// The layer pushed with every frame, assembled from the same rows (see [`Stitcher::push_layered`]).
     pub layer: Option<Vec<u8>>,
     /// The height limit cut the image.
     pub truncated: bool,
@@ -126,19 +119,11 @@ impl Canvas {
     }
 
     fn get(&self, p: isize) -> Option<&Row> {
-        if p >= 0 {
-            self.below.get(p as usize)
-        } else {
-            self.above.get((-1 - p) as usize)
-        }
+        if p >= 0 { self.below.get(p as usize) } else { self.above.get((-1 - p) as usize) }
     }
 
     fn get_mut(&mut self, p: isize) -> Option<&mut Row> {
-        if p >= 0 {
-            self.below.get_mut(p as usize)
-        } else {
-            self.above.get_mut((-1 - p) as usize)
-        }
+        if p >= 0 { self.below.get_mut(p as usize) } else { self.above.get_mut((-1 - p) as usize) }
     }
 
     /// Every row, top to bottom.
@@ -150,8 +135,8 @@ impl Canvas {
 /// What is known of a frame to place it.
 struct Seen {
     sigs: Vec<Sig>,
-    /// Per row, the bands that changed since the previous frame (1) and those that did not
-    /// (0): what stays put on the screen while the content moves says nothing of the move.
+    /// Per row, the bands that changed since the previous frame (1) and those that did not (0): what stays put on the
+    /// screen while the content moves says nothing of the move.
     moving: Vec<Sig>,
     /// The rows with a band that changed, at most [`SAMPLED_ROWS`], evenly spread.
     sampled: Vec<usize>,
@@ -198,13 +183,9 @@ impl Stitcher {
         self.push_layered(frame, None)
     }
 
-    /// [`push`](Self::push), with `layer`: other bytes for the same rows (the HDR pixels of a
-    /// frame whose SDR rendering is matched), kept from the same rows as the frame's.
-    pub fn push_layered(
-        &mut self,
-        frame: &Frame,
-        layer: Option<&[u8]>,
-    ) -> Result<Push, StitchError> {
+    /// [`push`](Self::push), with `layer`: other bytes for the same rows (the HDR pixels of a frame whose SDR rendering
+    /// is matched), kept from the same rows as the frame's.
+    pub fn push_layered(&mut self, frame: &Frame, layer: Option<&[u8]>) -> Result<Push, StitchError> {
         let got = (frame.width, frame.height);
         match self.size {
             Some(expected) if expected != got => {
@@ -244,9 +225,7 @@ impl Stitcher {
         let n = frame.height as usize;
         Row {
             pixels: frame.row(i).into(),
-            layer: layer
-                .filter(|_| self.layered)
-                .map(|l| layer_row(l, n, i).into()),
+            layer: layer.filter(|_| self.layered).map(|l| layer_row(l, n, i).into()),
             sig: sigs[i],
             view: view(i, n),
         }
@@ -259,28 +238,21 @@ impl Stitcher {
             .zip(&self.prev)
             .map(|(a, b)| std::array::from_fn(|k| u16::from(a[k].abs_diff(b[k]) > STILL)))
             .collect();
-        let mut rows: Vec<usize> = (0..sigs.len())
-            .filter(|&i| moving[i].iter().any(|m| *m != 0) && detailed(&sigs, i))
-            .collect();
-        // Only a narrow column moved (a scroll bar's thumb, a blinking caret): it says nothing
-        // of how the content moved.
-        let bands = (0..BANDS)
-            .filter(|&k| rows.iter().any(|&i| moving[i][k] != 0))
-            .count();
+        let mut rows: Vec<usize> =
+            (0..sigs.len()).filter(|&i| moving[i].iter().any(|m| *m != 0) && detailed(&sigs, i)).collect();
+        // Only a narrow column moved (a scroll bar's thumb, a blinking caret): it says nothing of how the content
+        // moved.
+        let bands = (0..BANDS).filter(|&k| rows.iter().any(|&i| moving[i][k] != 0)).count();
         let used = self.size.map_or(BANDS, |(w, _)| BANDS.min(w as usize));
         // A few rows changed (grain, a small animation): not a scroll.
         if bands < MOVING_BANDS.min(used) || rows.len() < MOVED_ROWS.min(sigs.len() / 4) {
             rows.clear();
         }
-        Seen {
-            sigs,
-            moving,
-            sampled: spread(rows),
-        }
+        Seen { sigs, moving, sampled: spread(rows) }
     }
 
-    /// The whole frame, every band of every row: when what moved cannot be found, the frame
-    /// came out of a stretch with nothing in it (blank space), and is placed by all it shows.
+    /// The whole frame, every band of every row: when what moved cannot be found, the frame came out of a stretch with
+    /// nothing in it (blank space), and is placed by all it shows.
     fn whole(seen: &Seen) -> Seen {
         Seen {
             sigs: seen.sigs.clone(),
@@ -292,9 +264,7 @@ impl Stitcher {
     /// Where the top row of the frame goes, if it can be told.
     fn place(&self, seen: &Seen) -> Option<isize> {
         let n = seen.sigs.len() as isize;
-        let overlap = ((n as f32 * self.config.min_overlap) as isize)
-            .max(4)
-            .min(n - 1);
+        let overlap = ((n as f32 * self.config.min_overlap) as isize).max(4).min(n - 1);
         let (lo, hi) = (self.canvas.lo(), self.canvas.hi());
         // Every place the frame overlaps the image enough.
         let first = lo - n + overlap;
@@ -305,20 +275,14 @@ impl Stitcher {
         let ranges: &[(isize, isize, bool)] = if self.lost {
             &[(first, last, false)]
         } else {
-            &[
-                (guess - near, guess + near, true),
-                (around.0, around.1, false),
-                (first, last, false),
-            ]
+            &[(guess - near, guess + near, true), (around.0, around.1, false), (first, last, false)]
         };
         for &(from, to, narrow) in ranges {
             let (from, to) = (from.max(first), to.min(last));
             if from > to {
                 continue;
             }
-            let scores: Vec<(isize, Score)> = (from..=to)
-                .filter_map(|p| self.score(seen, p).map(|s| (p, s)))
-                .collect();
+            let scores: Vec<(isize, Score)> = (from..=to).filter_map(|p| self.score(seen, p).map(|s| (p, s))).collect();
             if let Some(p) = best(&scores, guess, self.enough(seen), SAME_SHARE) {
                 // At the edge of a narrow search, a better place may lie beyond it.
                 if !narrow || (p > from || from == first) && (p < to || to == last) {
@@ -331,18 +295,14 @@ impl Stitcher {
         }
         let whole = Self::whole(seen);
         let (from, to) = (around.0.max(first), around.1.min(last));
-        let scores: Vec<(isize, Score)> = (from..=to)
-            .filter_map(|p| self.score(&whole, p).map(|s| (p, s)))
-            .collect();
+        let scores: Vec<(isize, Score)> = (from..=to).filter_map(|p| self.score(&whole, p).map(|s| (p, s))).collect();
         best(&scores, guess, self.enough(&whole), WHOLE_SHARE)
     }
 
     /// The rows a place must compare to be a proof: as many as the smallest overlap holds.
     fn enough(&self, seen: &Seen) -> u32 {
         let sampled = seen.sampled.len() as u32;
-        sampled
-            .min(MOVED_ROWS as u32)
-            .max((sampled as f32 * self.config.min_overlap) as u32)
+        sampled.min(MOVED_ROWS as u32).max((sampled as f32 * self.config.min_overlap) as u32)
     }
 
     /// How well the frame agrees with the image with its top row at `pos`.
@@ -405,20 +365,13 @@ impl Stitcher {
         match (down, up) {
             (0, 0) if wanted > 0 => Push::Full,
             (0, 0) => Push::Unchanged,
-            (rows, 0) => Push::Added {
-                rows,
-                direction: Direction::Down,
-            },
-            (_, rows) => Push::Added {
-                rows,
-                direction: Direction::Up,
-            },
+            (rows, 0) => Push::Added { rows, direction: Direction::Down },
+            (_, rows) => Push::Added { rows, direction: Direction::Up },
         }
     }
 
-    /// Row `i` of the frame replaces the image's row at `p` when it is seen in the middle half
-    /// of the screen (the newest view of it there wins: a picture that has loaded since), or
-    /// nearer the middle than before.
+    /// Row `i` of the frame replaces the image's row at `p` when it is seen in the middle half of the screen (the
+    /// newest view of it there wins: a picture that has loaded since), or nearer the middle than before.
     fn improve(&mut self, frame: &Frame, layer: Option<&[u8]>, sigs: &[Sig], i: usize, p: isize) {
         let n = frame.height as usize;
         let seen = view(i, n);
@@ -465,11 +418,7 @@ impl Stitcher {
     /// The final image. `None` when no frame was pushed.
     pub fn finish(self) -> Option<Stitched> {
         let (frame, layer) = self.assemble()?;
-        Some(Stitched {
-            frame,
-            layer,
-            truncated: self.truncated,
-        })
+        Some(Stitched { frame, layer, truncated: self.truncated })
     }
 }
 
@@ -499,50 +448,32 @@ impl Score {
     }
 }
 
-/// The place to take among `scores`: the best agreeing one, when it is clearly better than
-/// any other; among places alike (content that repeats), the nearest to `guess`.
+/// The place to take among `scores`: the best agreeing one, when it is clearly better than any other; among places
+/// alike (content that repeats), the nearest to `guess`.
 fn best(scores: &[(isize, Score)], guess: isize, enough: u32, share: f32) -> Option<isize> {
     let good: Vec<(isize, f32)> = scores
         .iter()
         .filter(|(_, s)| s.rows >= enough && s.same as f32 >= s.rows as f32 * share)
         .map(|(p, s)| (*p, s.mean()))
         .collect();
-    let (top, top_mean) = good.iter().copied().min_by(|a, b| {
-        a.1.total_cmp(&b.1)
-            .then(a.0.abs_diff(guess).cmp(&b.0.abs_diff(guess)))
-    })?;
+    let (top, top_mean) =
+        good.iter().copied().min_by(|a, b| a.1.total_cmp(&b.1).then(a.0.abs_diff(guess).cmp(&b.0.abs_diff(guess))))?;
     // Places as good as the best, apart from its neighbours: the content repeats.
-    let alike: Vec<isize> = good
-        .iter()
-        .filter(|(p, m)| p.abs_diff(top) > 2 && *m < top_mean + MARGIN)
-        .map(|(p, _)| *p)
-        .collect();
+    let alike: Vec<isize> =
+        good.iter().filter(|(p, m)| p.abs_diff(top) > 2 && *m < top_mean + MARGIN).map(|(p, _)| *p).collect();
     if alike.is_empty() {
         return Some(top);
     }
-    alike
-        .into_iter()
-        .chain([top])
-        .min_by_key(|p| p.abs_diff(guess))
+    alike.into_iter().chain([top]).min_by_key(|p| p.abs_diff(guess))
 }
 
-/// Whether row `i` differs from both rows next to it: a row of blank space (or of a flat
-/// colour) is the same everywhere, and cannot tell where it is, even next to an edge.
+/// Whether row `i` differs from both rows next to it: a row of blank space (or of a flat colour) is the same
+/// everywhere, and cannot tell where it is, even next to an edge.
 fn detailed(sigs: &[Sig], i: usize) -> bool {
     let apart = |j: usize| {
-        sigs.get(j).map(|o| {
-            o.iter()
-                .zip(&sigs[i])
-                .map(|(a, b)| u32::from(a.abs_diff(*b)))
-                .max()
-                .unwrap_or(0)
-        })
+        sigs.get(j).map(|o| o.iter().zip(&sigs[i]).map(|(a, b)| u32::from(a.abs_diff(*b))).max().unwrap_or(0))
     };
-    [apart(i.wrapping_sub(1)), apart(i + 1)]
-        .into_iter()
-        .flatten()
-        .min()
-        .is_some_and(|d| d > DETAIL)
+    [apart(i.wrapping_sub(1)), apart(i + 1)].into_iter().flatten().min().is_some_and(|d| d > DETAIL)
 }
 
 /// At most [`SAMPLED_ROWS`] of `rows`, evenly spread.
@@ -550,9 +481,7 @@ fn spread(rows: Vec<usize>) -> Vec<usize> {
     if rows.len() <= SAMPLED_ROWS {
         return rows;
     }
-    (0..SAMPLED_ROWS)
-        .map(|k| rows[k * rows.len() / SAMPLED_ROWS])
-        .collect()
+    (0..SAMPLED_ROWS).map(|k| rows[k * rows.len() / SAMPLED_ROWS]).collect()
 }
 
 /// The signature of every row of `frame`.

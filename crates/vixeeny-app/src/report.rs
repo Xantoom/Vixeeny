@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! "Report a problem": one text file with the system info and the logs of the last days, without
-//! the user's name or folders, shown in the Explorer next to GitHub's bug form (already holding
-//! the system info), so that the file only has to be dropped there.
+//! "Report a problem": one text file with the system info and the logs of the last days, without the user's name or
+//! folders, shown in the Explorer next to GitHub's bug form (already holding the system info), so that the file only
+//! has to be dropped there.
 
 use std::path::{Path, PathBuf};
 
@@ -34,9 +34,7 @@ pub fn create(config: &Config) -> anyhow::Result<PathBuf> {
     let mut text = String::new();
     let _ = writeln!(text, "Vixeeny report, {}\n", vixeeny_platform::local_time());
     let _ = writeln!(text, "===== Problems of the last {DAYS} days =====");
-    text.push_str(&problems(
-        logs_read.iter().map(|(_, content)| content.as_str()),
-    ));
+    text.push_str(&problems(logs_read.iter().map(|(_, content)| content.as_str())));
     let _ = writeln!(text, "\n===== Crashes =====");
     text.push_str(&crashes());
     text.push('\n');
@@ -44,17 +42,14 @@ pub fn create(config: &Config) -> anyhow::Result<PathBuf> {
     let _ = writeln!(text, "\n===== Settings =====");
     text.push_str(&config.to_toml().unwrap_or_default());
     let _ = writeln!(text, "\n===== Encoder detection =====");
-    let detection =
-        vixeeny_common::paths::hw_cache_file().and_then(|p| std::fs::read_to_string(p).ok());
+    let detection = vixeeny_common::paths::hw_cache_file().and_then(|p| std::fs::read_to_string(p).ok());
     text.push_str(detection.as_deref().unwrap_or("(none)\n"));
     for (name, content) in &logs_read {
         let _ = write!(text, "\n===== {name} =====\n{content}");
     }
     let text = private.hide(&text);
 
-    let dir = logs
-        .parent()
-        .map_or_else(|| logs.clone(), |d| d.join("reports"));
+    let dir = logs.parent().map_or_else(|| logs.clone(), |d| d.join("reports"));
     std::fs::create_dir_all(&dir).context("cannot create the reports folder")?;
     let t = vixeeny_platform::local_time();
     let path = dir.join(format!("Vixeeny-report-{}_{}.txt", t.date(), t.time()));
@@ -69,8 +64,8 @@ pub fn create(config: &Config) -> anyhow::Result<PathBuf> {
 /// Problems listed in the summary at most.
 const MAX_PROBLEMS: usize = 40;
 
-/// The warnings and errors of `logs` (crashes included), each once: how many times, when last,
-/// and its last wording; the most recent first. Numbers do not make two problems different.
+/// The warnings and errors of `logs` (crashes included), each once: how many times, when last, and its last wording;
+/// the most recent first. Numbers do not make two problems different.
 fn problems<'a>(logs: impl Iterator<Item = &'a str>) -> String {
     use std::collections::HashMap;
     use std::fmt::Write as _;
@@ -213,11 +208,7 @@ struct Private {
 impl Private {
     fn of_this_user() -> Self {
         let var = |name| std::env::var(name).ok().filter(|v: &String| v.len() > 1);
-        Self::new(
-            var("USERPROFILE").as_deref(),
-            var("USERNAME").as_deref(),
-            var("COMPUTERNAME").as_deref(),
-        )
+        Self::new(var("USERPROFILE").as_deref(), var("USERNAME").as_deref(), var("COMPUTERNAME").as_deref())
     }
 
     fn new(profile: Option<&str>, user: Option<&str>, computer: Option<&str>) -> Self {
@@ -275,11 +266,7 @@ mod tests {
 
     #[test]
     fn the_user_cannot_be_recognised() {
-        let private = Private::new(
-            Some(r"C:\Users\Xavier"),
-            Some("Xavier"),
-            Some("DESKTOP-1234"),
-        );
+        let private = Private::new(Some(r"C:\Users\Xavier"), Some("Xavier"), Some("DESKTOP-1234"));
         let text = "started C:\\Users\\Xavier\\AppData\\x.exe\n\
                     folder = \"C:\\\\Users\\\\Xavier\\\\Videos\"\n\
                     cannot write c:\\users\\xavier\\Pictures\\a.png on DESKTOP-1234\n\
@@ -306,10 +293,7 @@ mod tests {
              gone\n   1 x, last 2026-10-21 09:00:00.000 +02:00: WARN vixeeny_app::record: 3 \
              frame(s) lost\n"
         );
-        assert_eq!(
-            problems(["2026-10-22 10:00:00.000 +02:00  INFO ok"].into_iter()),
-            "(none)\n"
-        );
+        assert_eq!(problems(["2026-10-22 10:00:00.000 +02:00  INFO ok"].into_iter()), "(none)\n");
     }
 
     #[test]

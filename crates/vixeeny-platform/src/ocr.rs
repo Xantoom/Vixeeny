@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Reading the text of a picture with the OCR engine built into Windows 10 and 11
-//! (`Windows.Media.Ocr`): offline, in the languages the user installed with their recognition
-//! pack. Small pictures are enlarged first: the engine misses text only a few pixels high.
+//! Reading the text of a picture with the OCR engine built into Windows 10 and 11 (`Windows.Media.Ocr`): offline, in
+//! the languages the user installed with their recognition pack. Small pictures are enlarged first: the engine misses
+//! text only a few pixels high.
 
 /// Why nothing could be read.
 #[derive(Debug, thiserror::Error)]
@@ -43,22 +43,15 @@ fn resize_for(width: u32, height: u32, max: u32) -> Resize {
 /// Twice as large, interpolated (top-down BGRA, tightly packed).
 fn double(width: u32, height: u32, bgra: &[u8]) -> Vec<u8> {
     let (w, h) = (width as usize, height as usize);
-    let at =
-        |x: usize, y: usize, c: usize| f32::from(bgra[(y.min(h - 1) * w + x.min(w - 1)) * 4 + c]);
+    let at = |x: usize, y: usize, c: usize| f32::from(bgra[(y.min(h - 1) * w + x.min(w - 1)) * 4 + c]);
     let mut out = vec![0; w * h * 16];
     for y in 0..h * 2 {
         // Output pixel centres sit a quarter of a source pixel either side of the source centres.
-        let (y0, fy) = if y % 2 == 0 {
-            ((y / 2).saturating_sub(1), if y == 0 { 0.0 } else { 0.75 })
-        } else {
-            (y / 2, 0.25)
-        };
+        let (y0, fy) =
+            if y % 2 == 0 { ((y / 2).saturating_sub(1), if y == 0 { 0.0 } else { 0.75 }) } else { (y / 2, 0.25) };
         for x in 0..w * 2 {
-            let (x0, fx) = if x % 2 == 0 {
-                ((x / 2).saturating_sub(1), if x == 0 { 0.0 } else { 0.75 })
-            } else {
-                (x / 2, 0.25)
-            };
+            let (x0, fx) =
+                if x % 2 == 0 { ((x / 2).saturating_sub(1), if x == 0 { 0.0 } else { 0.75 }) } else { (x / 2, 0.25) };
             for c in 0..4 {
                 let top = at(x0, y0, c) * (1.0 - fx) + at(x0 + 1, y0, c) * fx;
                 let bottom = at(x0, y0 + 1, c) * (1.0 - fx) + at(x0 + 1, y0 + 1, c) * fx;
@@ -90,8 +83,7 @@ fn shrink(width: u32, height: u32, bgra: &[u8], factor: u32) -> (u32, u32, Vec<u
     (ow, oh, out)
 }
 
-/// The text of a picture (top-down BGRA, tightly packed), one line per line read. Empty when
-/// there is none.
+/// The text of a picture (top-down BGRA, tightly packed), one line per line read. Empty when there is none.
 pub fn recognize(width: u32, height: u32, bgra: &[u8]) -> Result<String, OcrError> {
     use windows::Graphics::Imaging::{BitmapPixelFormat, SoftwareBitmap};
     use windows::Media::Ocr::OcrEngine;
@@ -113,20 +105,11 @@ pub fn recognize(width: u32, height: u32, bgra: &[u8]) -> Result<String, OcrErro
     };
     let (width, height, pixels) = match resize_for(width, height, OcrEngine::MaxImageDimension()?) {
         Resize::Double => (width * 2, height * 2, double(width, height, bgra)),
-        Resize::Keep => (
-            width,
-            height,
-            bgra[..width as usize * height as usize * 4].to_vec(),
-        ),
+        Resize::Keep => (width, height, bgra[..width as usize * height as usize * 4].to_vec()),
         Resize::Shrink(factor) => shrink(width, height, bgra, factor),
     };
     let buffer = CryptographicBuffer::CreateFromByteArray(&pixels)?;
-    let bitmap = SoftwareBitmap::CreateCopyFromBuffer(
-        &buffer,
-        BitmapPixelFormat::Bgra8,
-        width as i32,
-        height as i32,
-    )?;
+    let bitmap = SoftwareBitmap::CreateCopyFromBuffer(&buffer, BitmapPixelFormat::Bgra8, width as i32, height as i32)?;
     let result = engine.RecognizeAsync(&bitmap)?.join()?;
     let mut lines = Vec::new();
     for line in result.Lines()? {
@@ -159,10 +142,7 @@ mod tests {
 
     #[test]
     fn shrinking_averages_blocks() {
-        let src: Vec<u8> = [0u8, 100, 200, 60]
-            .iter()
-            .flat_map(|&v| [v, v, v, 255])
-            .collect();
+        let src: Vec<u8> = [0u8, 100, 200, 60].iter().flat_map(|&v| [v, v, v, 255]).collect();
         let (w, h, out) = shrink(2, 2, &src, 2);
         assert_eq!((w, h), (1, 1));
         assert_eq!(out, [90, 90, 90, 255]);

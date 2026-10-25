@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Where the toolbar's buttons and the style panel's controls are, in interface units (one unit
-//! is one physical pixel at 100 %; multiply by the interface scale), and what a point hits.
+//! Where the toolbar's buttons and the style panel's controls are, in interface units (one unit is one physical pixel
+//! at 100 %; multiply by the interface scale), and what a point hits.
 //!
-//! The bar lies above or below the zone and stands upright beside it: its buttons are laid
-//! along its length (`along`) the same way in both, only the axes swap.
+//! The bar lies above or below the zone and stands upright beside it: its buttons are laid along its length (`along`)
+//! the same way in both, only the axes swap.
 
 use vixeeny_editor::Tool;
 
@@ -50,16 +50,8 @@ impl Kit {
     }
 }
 
-const KITS: [Kit; 8] = [
-    Kit::Zone,
-    Kit::Pen,
-    Kit::Highlighter,
-    Kit::Arrow,
-    Kit::Shape,
-    Kit::Text,
-    Kit::Marker,
-    Kit::Mask,
-];
+const KITS: [Kit; 8] =
+    [Kit::Zone, Kit::Pen, Kit::Highlighter, Kit::Arrow, Kit::Shape, Kit::Text, Kit::Marker, Kit::Mask];
 
 /// The tool each two-tool button takes now: what the panel last chose for it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,11 +63,7 @@ pub struct Picks {
 
 impl Default for Picks {
     fn default() -> Self {
-        Self {
-            arrow: Tool::Arrow,
-            shape: Tool::Rect,
-            mask: Tool::Blur,
-        }
+        Self { arrow: Tool::Arrow, shape: Tool::Rect, mask: Tool::Blur }
     }
 }
 
@@ -196,21 +184,13 @@ pub const TIP_DELAY_MS: u32 = 450;
 
 /// The bar's size, lying or upright.
 pub fn bar_size(upright: bool) -> (f32, f32) {
-    if upright {
-        (BAR_H, BAR_W)
-    } else {
-        (BAR_W, BAR_H)
-    }
+    if upright { (BAR_H, BAR_W) } else { (BAR_W, BAR_H) }
 }
 
 /// Where button `k` is, relative to the bar's top-left corner.
 pub fn button_xy(k: usize, upright: bool) -> (f32, f32) {
     let along = button(k).along;
-    if upright {
-        (BUTTON_Y, along)
-    } else {
-        (along, BUTTON_Y)
-    }
+    if upright { (BUTTON_Y, along) } else { (along, BUTTON_Y) }
 }
 
 /// The button under `(x, y)`, relative to the bar's top-left corner, in units.
@@ -269,15 +249,12 @@ fn tool_tip(tool: Option<Tool>) -> Tip {
     }
 }
 
-/// The tip of button `k` (`live`: the screens are shown live), and for a two-tool button the
-/// tip of its other tool, which a right-click takes.
+/// The tip of button `k` (`live`: the screens are shown live), and for a two-tool button the tip of its other tool,
+/// which a right-click takes.
 pub fn tip_of(k: usize, picks: &Picks, live: bool) -> (Tip, Option<Tip>) {
     let tip = match button(k).button {
         Button::Tool(kit) => {
-            return (
-                tool_tip(picks.tool(kit)),
-                other_tool(kit, picks).map(|t| tool_tip(Some(t))),
-            );
+            return (tool_tip(picks.tool(kit)), other_tool(kit, picks).map(|t| tool_tip(Some(t))));
         }
         Button::Live if live => Tip::Freeze,
         Button::Live => Tip::Live,
@@ -301,9 +278,8 @@ pub fn other_tool(kit: Kit, picks: &Picks) -> Option<Tool> {
 
 // ---- the style panel
 //
-// Three rows: the colours given, ended by the colour picker; the colours last used, ended by
-// the eyedropper; the size, ended by its value. The shapes add their fill; the picker opens
-// under it all.
+// Three rows: the colours given, ended by the colour picker; the colours last used, ended by the eyedropper; the size,
+// ended by its value. The shapes add their fill; the picker opens under it all.
 
 pub const PANEL_W: f32 = 268.0;
 /// Recent colours shown.
@@ -322,10 +298,7 @@ pub struct PanelForm {
 impl PanelForm {
     /// The panel for the tool in hand.
     pub fn of(tool: Option<Tool>, picker: bool) -> Self {
-        Self {
-            fill: matches!(tool, Some(Tool::Rect | Tool::Ellipse)),
-            picker,
-        }
+        Self { fill: matches!(tool, Some(Tool::Rect | Tool::Ellipse)), picker }
     }
 
     /// Where the colour picker starts.
@@ -380,8 +353,8 @@ pub const SIZE_LABEL: (f32, f32) = (206.0, 54.0);
 /// The fill switch of the shapes.
 pub const FILL: (f32, f32) = (10.0, 126.0);
 
-/// Where the slider's knob is for `width` (0–1) when sizes go up to `max`: the small sizes,
-/// the most used, get more room.
+/// Where the slider's knob is for `width` (0–1) when sizes go up to `max`: the small sizes, the most used, get more
+/// room.
 pub fn size_to_slider(width: f32, max: f32) -> f32 {
     ((width.clamp(1.0, max) - 1.0) / (max - 1.0).max(1.0)).sqrt()
 }
@@ -398,24 +371,14 @@ fn in_box(x: f32, y: f32, at: (f32, f32), w: f32, h: f32) -> bool {
 }
 
 /// What `(x, y)` (relative to the panel's top-left corner, in units) is on.
-pub fn panel_at(
-    x: f32,
-    y: f32,
-    palette: usize,
-    recent: usize,
-    form: &PanelForm,
-) -> Option<PanelHit> {
+pub fn panel_at(x: f32, y: f32, palette: usize, recent: usize, form: &PanelForm) -> Option<PanelHit> {
     if !(0.0..PANEL_W).contains(&x) || !(0.0..form.height()).contains(&y) {
         return None;
     }
     let (sx, sy, sl) = SIZE_TRACK;
-    let hit = if let Some(i) =
-        (0..palette).find(|&i| in_box(x, y, (swatch_x(i), 10.0), SWATCH, SWATCH))
-    {
+    let hit = if let Some(i) = (0..palette).find(|&i| in_box(x, y, (swatch_x(i), 10.0), SWATCH, SWATCH)) {
         PanelHit::Palette(i)
-    } else if let Some(i) =
-        (0..recent.min(RECENT_SHOWN)).find(|&i| in_box(x, y, (swatch_x(i), 42.0), SWATCH, SWATCH))
-    {
+    } else if let Some(i) = (0..recent.min(RECENT_SHOWN)).find(|&i| in_box(x, y, (swatch_x(i), 42.0), SWATCH, SWATCH)) {
         PanelHit::Recent(i)
     } else if in_box(x, y, OWN_COLOUR, SWATCH, SWATCH) {
         PanelHit::OwnColour
@@ -457,37 +420,22 @@ pub fn hue_at(form: &PanelForm, y: f32) -> f32 {
 
 /// The centre of the style button along the bar.
 pub fn style_centre() -> f32 {
-    buttons()
-        .find(|b| b.button == Button::Style)
-        .map_or(0.0, |b| b.along + BUTTON / 2.0)
+    buttons().find(|b| b.button == Button::Style).map_or(0.0, |b| b.along + BUTTON / 2.0)
 }
 
-/// Where the panel goes, relative to the bar (units), by the style button: before the bar
-/// (above it, or left of an upright one) when `before_first` and there is room (`room` before
-/// and after the bar, across it), else after it; the other way round when not `before_first`.
-pub fn panel_offset(
-    upright: bool,
-    before_first: bool,
-    room: (f32, f32),
-    height: f32,
-) -> (f32, f32) {
+/// Where the panel goes, relative to the bar (units), by the style button: before the bar (above it, or left of an
+/// upright one) when `before_first` and there is room (`room` before and after the bar, across it), else after it; the
+/// other way round when not `before_first`.
+pub fn panel_offset(upright: bool, before_first: bool, room: (f32, f32), height: f32) -> (f32, f32) {
     let (w, h) = (PANEL_W, height);
     // Across the bar: before it (above / left) or after it (below / right).
     let (size, thickness) = if upright { (w, BAR_H) } else { (h, BAR_H) };
     let before_fits = room.0 >= size + 8.0;
     let after_fits = room.1 >= size + 8.0;
-    let before = if before_first {
-        before_fits || !after_fits
-    } else {
-        !after_fits && before_fits
-    };
+    let before = if before_first { before_fits || !after_fits } else { !after_fits && before_fits };
     let across = if before { -size - 8.0 } else { thickness + 8.0 };
     let along = style_centre() - if upright { h } else { w } / 2.0;
-    if upright {
-        (across, along)
-    } else {
-        (along, across)
-    }
+    if upright { (across, along) } else { (along, across) }
 }
 
 #[cfg(test)]
@@ -535,14 +483,8 @@ mod tests {
         assert_eq!(Kit::of(Some(Tool::Ellipse)), Some(Kit::Shape));
         assert_eq!(Kit::of(None), Some(Kit::Zone));
         assert_eq!(Kit::of(Some(Tool::Eyedropper)), None);
-        let mask = BUTTONS
-            .iter()
-            .position(|b| b.button == Button::Tool(Kit::Mask))
-            .unwrap_or(0);
-        assert_eq!(
-            tip_of(mask, &picks, false),
-            (Tip::Pixelate, Some(Tip::Blur))
-        );
+        let mask = BUTTONS.iter().position(|b| b.button == Button::Tool(Kit::Mask)).unwrap_or(0);
+        assert_eq!(tip_of(mask, &picks, false), (Tip::Pixelate, Some(Tip::Blur)));
         assert_eq!(tip_of(2, &picks, false), (Tip::Pen, None));
         assert_eq!(tip_of(1, &picks, false).0, Tip::Live);
         assert_eq!(tip_of(1, &picks, true).0, Tip::Freeze);
@@ -555,10 +497,7 @@ mod tests {
         let pen = PanelForm::of(Some(Tool::Pen), false);
         let rect = PanelForm::of(Some(Tool::Rect), false);
         assert!(!pen.fill && rect.fill && rect.height() > pen.height());
-        assert_eq!(
-            PanelForm::of(Some(Tool::Ellipse), true).height(),
-            PANEL_MAX_H
-        );
+        assert_eq!(PanelForm::of(Some(Tool::Ellipse), true).height(), PANEL_MAX_H);
     }
 
     #[test]
@@ -570,10 +509,7 @@ mod tests {
         assert_eq!(panel_at(12.0, 44.0, 8, 0, &pen), Some(PanelHit::Background));
         assert_eq!(panel_at(12.0, 44.0, 8, 2, &pen), Some(PanelHit::Recent(0)));
         assert_eq!(panel_at(210.0, 50.0, 8, 8, &pen), Some(PanelHit::Recent(7)));
-        assert_eq!(
-            panel_at(245.0, 50.0, 8, 8, &pen),
-            Some(PanelHit::Eyedropper)
-        );
+        assert_eq!(panel_at(245.0, 50.0, 8, 8, &pen), Some(PanelHit::Eyedropper));
         assert_eq!(panel_at(100.0, 97.0, 8, 0, &pen), Some(PanelHit::Size));
         assert_eq!(panel_at(20.0, 140.0, 8, 0, &pen), None);
         assert_eq!(panel_at(20.0, 140.0, 8, 0, &rect), Some(PanelHit::Fill));
@@ -607,9 +543,6 @@ mod tests {
         let (x, y) = panel_offset(true, false, (500.0, 500.0), h);
         assert_eq!((x, y), (BAR_H + 8.0, style_centre() - h / 2.0));
         // On the left: on its left.
-        assert_eq!(
-            panel_offset(true, true, (500.0, 500.0), h).0,
-            -PANEL_W - 8.0
-        );
+        assert_eq!(panel_offset(true, true, (500.0, 500.0), h).0, -PANEL_W - 8.0);
     }
 }

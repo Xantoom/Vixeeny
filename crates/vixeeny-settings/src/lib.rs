@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The settings model: every setting is a [`Row`] with a way to read it from a
-//! [`Config`] and a validated way to write it. The settings window only draws rows; a change is
-//! applied the moment it is made.
+//! The settings model: every setting is a [`Row`] with a way to read it from a [`Config`] and a validated way to write
+//! it. The settings window only draws rows; a change is applied the moment it is made.
 //!
 //! No UI and no OS code here, so all of it is tested on any machine.
 
@@ -64,8 +63,7 @@ impl Section {
         }
     }
 
-    /// Whether the section is made of [`Row`]s (the shortcuts and the about page have a page
-    /// of their own).
+    /// Whether the section is made of [`Row`]s (the shortcuts and the about page have a page of their own).
     pub const fn is_rows(self) -> bool {
         !matches!(self, Self::Shortcuts | Self::About)
     }
@@ -85,8 +83,7 @@ pub struct Opt {
     pub value: String,
     /// What the user reads.
     pub label: String,
-    /// The title of the options under it, not one to choose (without a label: a line between
-    /// two groups).
+    /// The title of the options under it, not one to choose (without a label: a line between two groups).
     pub heading: bool,
     /// The one advised: marked so in the list.
     pub recommended: bool,
@@ -117,14 +114,14 @@ pub enum Kind {
     Info,
     /// A button (its value: its text) that the host answers; nothing to edit.
     Button,
-    /// Starts a new group of rows (shown apart from the one above), titled by its label when it
-    /// has one; nothing to edit.
+    /// Starts a new group of rows (shown apart from the one above), titled by its label when it has one; nothing to
+    /// edit.
     Header,
-    /// Shows or hides the rows under it (its value: whether they are shown). Its state is the
-    /// window's, not a setting: see [`Env::open`].
+    /// Shows or hides the rows under it (its value: whether they are shown). Its state is the window's, not a setting:
+    /// see [`Env::open`].
     Expander,
-    /// A colour (`#rrggbb`), or the two ends of a gradient (`#rrggbb,#rrggbb`), with colours
-    /// and gradients ready to take.
+    /// A colour (`#rrggbb`), or the two ends of a gradient (`#rrggbb,#rrggbb`), with colours and gradients ready to
+    /// take.
     Colour {
         swatches: Vec<[u8; 3]>,
         pairs: Vec<([u8; 3], [u8; 3])>,
@@ -145,27 +142,24 @@ pub enum Picker {
     List,
     /// Left, right, top, bottom: an edge of the screen.
     Edge,
-    /// The top and bottom corners and middles of the screen, then a place of the user's (its
-    /// value `custom:<x>:<y>`, thousandths of the room across and down).
+    /// The top and bottom corners and middles of the screen, then a place of the user's (its value `custom:<x>:<y>`,
+    /// thousandths of the room across and down).
     Corner,
 }
 
 pub struct Row {
     pub id: String,
     pub label: String,
-    /// Something wrong with this setting as it is, behind a warning sign beside the label
-    /// (empty = none).
+    /// Something wrong with this setting as it is, behind a warning sign beside the label (empty = none).
     pub warning: String,
-    /// What the setting does and what to choose, behind an "i" beside the label (empty =
-    /// none).
+    /// What the setting does and what to choose, behind an "i" beside the label (empty = none).
     pub info: String,
     /// A picture before the label (a program's icon).
     pub icon: Option<Icon>,
     pub kind: Kind,
     /// How a choice is drawn.
     pub picker: Picker,
-    /// Shown greyed out: it does not apply with the other settings as they are (the "i" says
-    /// why).
+    /// Shown greyed out: it does not apply with the other settings as they are (the "i" says why).
     pub greyed: bool,
     /// What a number counts (`kbit/s`), written after it.
     pub unit: String,
@@ -193,8 +187,7 @@ impl Row {
         !self.greyed && !matches!(self.kind, Kind::Info | Kind::Header)
     }
 
-    /// Checks `value` against the kind of the row, then writes it. Numbers are brought into
-    /// range and onto the step.
+    /// Checks `value` against the kind of the row, then writes it. Numbers are brought into range and onto the step.
     pub fn apply(&self, config: &mut Config, value: Value) -> Result<(), Invalid> {
         if self.greyed {
             return Err(Invalid);
@@ -226,10 +219,7 @@ impl Row {
                 if !(1..=2).contains(&colours.len()) {
                     return Err(Invalid);
                 }
-                let codes: Vec<String> = colours
-                    .into_iter()
-                    .map(vixeeny_common::config::hex)
-                    .collect();
+                let codes: Vec<String> = colours.into_iter().map(vixeeny_common::config::hex).collect();
                 Value::Text(codes.join(","))
             }
             _ => return Err(Invalid),
@@ -293,8 +283,7 @@ pub struct AudioDevices {
     pub outputs: Vec<AudioEntry>,
     pub inputs: Vec<AudioEntry>,
     pub programs: Vec<AudioEntry>,
-    /// The programs (executable names, lower case) that look like games: those the replay
-    /// lists.
+    /// The programs (executable names, lower case) that look like games: those the replay lists.
     pub games: Vec<String>,
 }
 
@@ -322,16 +311,14 @@ pub struct Env {
     pub admin: Admin,
 }
 
-/// Where Vixeeny is with the administrator's rights (to keep the input of the programs that
-/// have them, games often).
+/// Where Vixeeny is with the administrator's rights (to keep the input of the programs that have them, games often).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Admin {
     /// Nothing to offer: a portable Vixeeny, a standard account.
     #[default]
     Hidden,
     Granted,
-    /// The rights can be given; `moves`: Vixeeny is installed in Program Files first (it is in
-    /// the user's own folders).
+    /// The rights can be given; `moves`: Vixeeny is installed in Program Files first (it is in the user's own folders).
     Missing {
         moves: bool,
     },
@@ -348,10 +335,7 @@ pub struct Display {
 
 impl Default for Display {
     fn default() -> Self {
-        Self {
-            hdr: false,
-            max_refresh: 60,
-        }
+        Self { hdr: false, max_refresh: 60 }
     }
 }
 
@@ -421,13 +405,7 @@ impl Env {
 
 /// The title of the options that follow, in a list.
 fn heading(label: impl Into<String>) -> Opt {
-    Opt {
-        value: String::new(),
-        label: label.into(),
-        heading: true,
-        recommended: false,
-        caution: false,
-    }
+    Opt { value: String::new(), label: label.into(), heading: true, recommended: false, caution: false }
 }
 
 /// A line between two groups of options, in a list.
@@ -436,29 +414,17 @@ fn separator() -> Opt {
 }
 
 fn opt(value: &str, label: impl Into<String>) -> Opt {
-    Opt {
-        heading: false,
-        value: value.to_owned(),
-        label: label.into(),
-        recommended: false,
-        caution: false,
-    }
+    Opt { heading: false, value: value.to_owned(), label: label.into(), recommended: false, caution: false }
 }
 
 /// An option that usually does harm, shown in the warning colour.
 fn discouraged(value: &str, label: impl Into<String>) -> Opt {
-    Opt {
-        caution: true,
-        ..opt(value, label)
-    }
+    Opt { caution: true, ..opt(value, label) }
 }
 
 /// The option advised, marked so in the list.
 fn advised(value: &str, label: impl Into<String>) -> Opt {
-    Opt {
-        recommended: true,
-        ..opt(value, label)
-    }
+    Opt { recommended: true, ..opt(value, label) }
 }
 
 fn row(id: impl Into<String>, label: String, kind: Kind, get: Get, set: Set) -> Row {
@@ -482,12 +448,7 @@ fn row(id: impl Into<String>, label: String, kind: Kind, get: Get, set: Set) -> 
     }
 }
 
-fn toggle(
-    id: &str,
-    label: String,
-    get: impl Fn(&Config) -> bool + 'static,
-    set: fn(&mut Config, bool),
-) -> Row {
+fn toggle(id: &str, label: String, get: impl Fn(&Config) -> bool + 'static, set: fn(&mut Config, bool)) -> Row {
     row(
         id,
         label,
@@ -569,12 +530,7 @@ fn choice(
     text_like(Kind::Choice(options), id, label, get, set)
 }
 
-fn folder(
-    id: &str,
-    label: String,
-    get: fn(&Config) -> String,
-    set: fn(&mut Config, String),
-) -> Row {
+fn folder(id: &str, label: String, get: fn(&Config) -> String, set: fn(&mut Config, String)) -> Row {
     text_like(Kind::Folder, id, label, get, set)
 }
 
@@ -616,52 +572,27 @@ fn warned(mut row: Row, text: String) -> Row {
 
 /// Starts a new group: the rows below it are shown apart, under `title` (empty: none).
 fn header(id: &str, title: String) -> Row {
-    row(
-        id,
-        title,
-        Kind::Header,
-        Box::new(|_| Value::Text(String::new())),
-        Box::new(|_, _| Err(Invalid)),
-    )
+    row(id, title, Kind::Header, Box::new(|_| Value::Text(String::new())), Box::new(|_, _| Err(Invalid)))
 }
 
-/// A closed section of rows, open when `env` says so: the caller adds the rows under it only
-/// then.
+/// A closed section of rows, open when `env` says so: the caller adds the rows under it only then.
 fn expander(env: &Env, id: &str, label: String) -> (Row, bool) {
     let open = env.open.contains(id);
-    let row = row(
-        id,
-        label,
-        Kind::Expander,
-        Box::new(move |_| Value::Bool(open)),
-        Box::new(|_, _| Err(Invalid)),
-    );
+    let row = row(id, label, Kind::Expander, Box::new(move |_| Value::Bool(open)), Box::new(|_, _| Err(Invalid)));
     (row, open)
 }
 
 /// A button showing `text`: the host is told when it is pressed (by the row's id).
 fn button(id: &str, label: String, text: String) -> Row {
-    row(
-        id,
-        label,
-        Kind::Button,
-        Box::new(move |_| Value::Text(text.clone())),
-        Box::new(|_, _| Err(Invalid)),
-    )
+    row(id, label, Kind::Button, Box::new(move |_| Value::Text(text.clone())), Box::new(|_, _| Err(Invalid)))
 }
 
 fn info(id: &str, label: String, value: String) -> Row {
-    row(
-        id,
-        label,
-        Kind::Info,
-        Box::new(move |_| Value::Text(value.clone())),
-        Box::new(|_, _| Err(Invalid)),
-    )
+    row(id, label, Kind::Info, Box::new(move |_| Value::Text(value.clone())), Box::new(|_, _| Err(Invalid)))
 }
 
-/// The rows of a section (empty for the sections that have a page of their own). Rows that do
-/// not apply with the current settings are left out, so a page only shows what matters.
+/// The rows of a section (empty for the sections that have a page of their own). Rows that do not apply with the
+/// current settings are left out, so a page only shows what matters.
 pub fn rows(section: Section, env: &Env, config: &Config) -> Vec<Row> {
     let mut rows = match section {
         Section::General => pages::general(env),
@@ -676,11 +607,7 @@ pub fn rows(section: Section, env: &Env, config: &Config) -> Vec<Row> {
     // What the setting does, then what the page added for it now (an estimate).
     for row in &mut rows {
         if let Some(text) = info::info(&row.id, env, config) {
-            row.info = if row.info.is_empty() {
-                text
-            } else {
-                format!("{text}\n\n{}", row.info)
-            };
+            row.info = if row.info.is_empty() { text } else { format!("{text}\n\n{}", row.info) };
         }
     }
     rows
@@ -779,15 +706,9 @@ pub fn folded(text: &str) -> String {
 /// Whether every word of `query` begins a word of `text` (both folded), in any order.
 pub fn matches(query: &str, text: &str) -> bool {
     let text = folded(text);
-    let words: Vec<&str> = text
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| !w.is_empty())
-        .collect();
+    let words: Vec<&str> = text.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
     let query = folded(query);
-    let mut wanted = query
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| !w.is_empty())
-        .peekable();
+    let mut wanted = query.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).peekable();
     wanted.peek().is_some() && wanted.all(|q| words.iter().any(|w| w.starts_with(q)))
 }
 
@@ -802,11 +723,7 @@ pub fn search(query: &str, env: &Env, config: &Config) -> Vec<Found> {
                 .into_iter()
                 .filter(|r| !matches!(r.kind, Kind::Header | Kind::Expander))
                 .filter(|r| matches(query, &r.label))
-                .map(move |r| Found {
-                    section,
-                    id: r.id,
-                    label: r.label,
-                })
+                .map(move |r| Found { section, id: r.id, label: r.label })
         })
         .collect()
 }
@@ -815,21 +732,13 @@ pub fn search(query: &str, env: &Env, config: &Config) -> Vec<Found> {
 pub fn video_problems(config: &Config, source: (u32, u32), lang: Lang) -> Vec<String> {
     use vixeeny_encode::registry::Registry;
     use vixeeny_encode::validate::{Context, Severity, validate};
-    static REGISTRY: std::sync::LazyLock<Option<Registry>> =
-        std::sync::LazyLock::new(|| Registry::builtin().ok());
+    static REGISTRY: std::sync::LazyLock<Option<Registry>> = std::sync::LazyLock::new(|| Registry::builtin().ok());
     let Some(registry) = REGISTRY.as_ref() else {
         return Vec::new();
     };
-    let ctx = Context {
-        registry,
-        source,
-        probe: None,
-    };
+    let ctx = Context { registry, source, probe: None };
     // The variable frame rate of older settings is not used any more.
-    let profile = Video {
-        vfr: false,
-        ..config.video.clone()
-    };
+    let profile = Video { vfr: false, ..config.video.clone() };
     validate(&profile, &ctx)
         .into_iter()
         .filter(|i| i.severity == Severity::Error)
@@ -847,8 +756,7 @@ fn problem_text(kind: &vixeeny_encode::validate::IssueKind, lang: Lang) -> Strin
         ),
         I::UnknownContainer(_) | I::ContainerNotSupported { .. } => (
             "This encoder cannot write to the chosen container: pick another one.".into(),
-            "Cet encodeur ne peut pas écrire dans le conteneur choisi : choisissez-en un autre."
-                .into(),
+            "Cet encodeur ne peut pas écrire dans le conteneur choisi : choisissez-en un autre.".into(),
         ),
         I::UnknownChroma(_) | I::FormatNotSupported { .. } => (
             "This encoder does not support the chosen colour format.".into(),
@@ -862,26 +770,22 @@ fn problem_text(kind: &vixeeny_encode::validate::IssueKind, lang: Lang) -> Strin
             "HDR cannot be stored in this container.".into(),
             "Le HDR ne peut pas être enregistré dans ce conteneur.".into(),
         ),
-        I::VfrContainer(_) => (
-            "A variable frame rate needs MKV or WebM.".into(),
-            "Une cadence variable demande MKV ou WebM.".into(),
-        ),
+        I::VfrContainer(_) => {
+            ("A variable frame rate needs MKV or WebM.".into(), "Une cadence variable demande MKV ou WebM.".into())
+        }
         I::AudioCodec { .. } | I::UnknownAudioCodec(_) => (
             "The audio codec does not fit the container.".into(),
             "Le codec audio ne convient pas au conteneur.".into(),
         ),
-        I::UnknownPreset(_) => (
-            "Unknown preset: choose one again.".into(),
-            "Préréglage inconnu : choisissez-en un.".into(),
-        ),
+        I::UnknownPreset(_) => {
+            ("Unknown preset: choose one again.".into(), "Préréglage inconnu : choisissez-en un.".into())
+        }
         I::ZeroFps | I::BadResolution(_) => (
             "The resolution or the frame rate is not valid.".into(),
             "La résolution ou la cadence n'est pas valide.".into(),
         ),
         I::TooLarge { max: (w, h) } => (
-            format!(
-                "This encoder takes pictures of {w} × {h} at most: choose HEVC or AV1, or a lower resolution."
-            ),
+            format!("This encoder takes pictures of {w} × {h} at most: choose HEVC or AV1, or a lower resolution."),
             format!(
                 "Cet encodeur accepte des images de {w} × {h} au plus : choisissez HEVC ou AV1, ou une définition plus basse."
             ),
@@ -943,13 +847,10 @@ mod tests {
             ids.dedup();
             assert_eq!(ids.len(), rows.len(), "{section:?}");
             // A greyed row takes nothing (it may show what applies instead of the setting).
-            for row in rows.iter().filter(|r| {
-                !r.greyed
-                    && !matches!(
-                        r.kind,
-                        Kind::Info | Kind::Header | Kind::Expander | Kind::Button
-                    )
-            }) {
+            for row in rows
+                .iter()
+                .filter(|r| !r.greyed && !matches!(r.kind, Kind::Info | Kind::Header | Kind::Expander | Kind::Button))
+            {
                 let mut copy = config.clone();
                 let value = row.value(&config);
                 row.apply(&mut copy, value.clone())
@@ -966,10 +867,7 @@ mod tests {
         let theme = row(&rows_, "theme");
         assert_eq!(theme.apply(&mut c, Value::Text("dark".into())), Ok(()));
         assert_eq!(c.general.theme, "dark");
-        assert_eq!(
-            theme.apply(&mut c, Value::Text("purple".into())),
-            Err(Invalid)
-        );
+        assert_eq!(theme.apply(&mut c, Value::Text("purple".into())), Err(Invalid));
         assert_eq!(theme.apply(&mut c, Value::Bool(true)), Err(Invalid));
         assert_eq!(c.general.theme, "dark");
         // Numbers are clamped and put on the step.
@@ -993,18 +891,11 @@ mod tests {
     #[test]
     fn the_widget_goes_to_a_preset_or_a_place_of_the_user_s() {
         let mut c = Config::default();
-        let place = rows(Section::Overlay, &env(), &c)
-            .into_iter()
-            .find(|r| r.id == "widget_corner")
-            .unwrap();
-        place
-            .apply(&mut c, Value::Text("bottom_center".into()))
-            .unwrap();
+        let place = rows(Section::Overlay, &env(), &c).into_iter().find(|r| r.id == "widget_corner").unwrap();
+        place.apply(&mut c, Value::Text("bottom_center".into())).unwrap();
         assert_eq!(c.recording_widget.corner, "bottom_center");
         // A click in the picker: a place, read back as it was given.
-        place
-            .apply(&mut c, Value::Text("custom:250:1000".into()))
-            .unwrap();
+        place.apply(&mut c, Value::Text("custom:250:1000".into())).unwrap();
         assert_eq!(c.recording_widget.corner, "custom");
         assert_eq!(c.recording_widget.custom, (0.25, 1.0));
         assert_eq!(place.value(&c), Value::Text("custom:250:1000".into()));
@@ -1012,11 +903,7 @@ mod tests {
         place.apply(&mut c, Value::Text("top_left".into())).unwrap();
         place.apply(&mut c, Value::Text("custom".into())).unwrap();
         assert_eq!(c.recording_widget.custom, (0.25, 1.0));
-        assert!(
-            place
-                .apply(&mut c, Value::Text("middle:1:2".into()))
-                .is_err()
-        );
+        assert!(place.apply(&mut c, Value::Text("middle:1:2".into())).is_err());
     }
 
     #[test]
@@ -1036,13 +923,8 @@ mod tests {
         let mut c = Config::default();
         let updates = rows(Section::Updates, &env(), &c);
         assert_eq!(updates.len(), 1);
-        assert!(matches!(
-            row(&updates, "auto_update").value(&c),
-            Value::Bool(true)
-        ));
-        row(&updates, "auto_update")
-            .apply(&mut c, Value::Bool(false))
-            .unwrap();
+        assert!(matches!(row(&updates, "auto_update").value(&c), Value::Bool(true)));
+        row(&updates, "auto_update").apply(&mut c, Value::Bool(false)).unwrap();
         assert!(!c.general.check_updates && !c.general.auto_update);
     }
 
@@ -1055,10 +937,7 @@ mod tests {
         let mut c = Config::default();
         let slow = env();
         assert_eq!(rates(&slow, &c), ["30", "60"]);
-        let fast = env().with_display(Display {
-            hdr: true,
-            max_refresh: 144,
-        });
+        let fast = env().with_display(Display { hdr: true, max_refresh: 144 });
         assert_eq!(rates(&fast, &c), ["30", "60", "120"]);
         let fps = |e: &Env, c: &Config| row(&rows(Section::Video, e, c), "fps").value(c);
         assert_eq!(fps(&slow, &c), Value::Text("60".into()));
@@ -1104,27 +983,19 @@ mod tests {
         let mut c = Config::default();
         // The replay's settings show while it runs.
         c.replay.enabled = true;
-        for (section, id) in [
-            (Section::Image, "dir_images"),
-            (Section::Video, "dir_videos"),
-            (Section::Replay, "dir_replays"),
-        ] {
+        for (section, id) in
+            [(Section::Image, "dir_images"), (Section::Video, "dir_videos"), (Section::Replay, "dir_replays")]
+        {
             let page = rows(section, &env(), &c);
             assert!(matches!(row(&page, id).kind, Kind::Folder), "{id}");
         }
         let video = rows(Section::Video, &env(), &c);
-        row(&video, "dir_videos")
-            .apply(&mut c, Value::Text(" D:\\Clips ".into()))
-            .unwrap();
+        row(&video, "dir_videos").apply(&mut c, Value::Text(" D:\\Clips ".into())).unwrap();
         assert_eq!(c.paths.videos, "D:\\Clips");
         // Each kind names its files its own way; a template cannot be emptied.
         let image = rows(Section::Image, &env(), &c);
-        row(&image, "template:images")
-            .apply(&mut c, Value::Text("{app}-{time}".into()))
-            .unwrap();
-        row(&video, "template:videos")
-            .apply(&mut c, Value::Text(" ".into()))
-            .unwrap();
+        row(&image, "template:images").apply(&mut c, Value::Text("{app}-{time}".into())).unwrap();
+        row(&video, "template:videos").apply(&mut c, Value::Text(" ".into())).unwrap();
         assert_eq!(c.paths.naming.images.template, "{app}-{time}");
         assert_eq!(c.paths.naming.videos.template, "{app}_{date}_{time}");
         let replay = rows(Section::Replay, &env(), &c);
@@ -1136,12 +1007,7 @@ mod tests {
     #[test]
     fn each_image_format_offers_its_encoder_options() {
         let mut c = Config::default();
-        let ids = |c: &Config| -> Vec<String> {
-            rows(Section::Image, &env(), c)
-                .into_iter()
-                .map(|r| r.id)
-                .collect()
-        };
+        let ids = |c: &Config| -> Vec<String> { rows(Section::Image, &env(), c).into_iter().map(|r| r.id).collect() };
         for (format, own) in [
             ("png", &["png_compression", "png_optimize"][..]),
             ("jpeg", &["jpeg_quality"]),
@@ -1158,11 +1024,7 @@ mod tests {
             let others = ids
                 .iter()
                 .filter(|i| i.contains('_') && !i.starts_with(format))
-                .filter(|i| {
-                    ["png", "jpeg", "webp", "avif", "jxl"]
-                        .iter()
-                        .any(|f| i.starts_with(f))
-                })
+                .filter(|i| ["png", "jpeg", "webp", "avif", "jxl"].iter().any(|f| i.starts_with(f)))
                 .count();
             assert_eq!(others, 0, "{format}");
         }
@@ -1178,10 +1040,7 @@ mod tests {
         let mut c = Config::default();
         // Only the switch while the replay is off.
         let off = rows(Section::Replay, &env(), &c);
-        assert_eq!(
-            off.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
-            ["replay_enabled"]
-        );
+        assert_eq!(off.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["replay_enabled"]);
         c.replay.enabled = true;
         let replay = rows(Section::Replay, &env(), &c);
         let duration = row(&replay, "replay_duration");
@@ -1190,9 +1049,7 @@ mod tests {
         // An older duration shows as the closest one offered.
         c.replay.duration_seconds = 45;
         assert_eq!(duration.value(&c), Value::Text("30".into()));
-        row(&replay, "replay_storage")
-            .apply(&mut c, Value::Text("disk".into()))
-            .unwrap();
+        row(&replay, "replay_storage").apply(&mut c, Value::Text("disk".into())).unwrap();
         assert_eq!(c.replay.storage, "disk");
     }
 
@@ -1203,12 +1060,7 @@ mod tests {
             encoders: vec![EncoderProbe {
                 id: "nvenc_h264".into(),
                 adapter: Some(0),
-                formats: vec![FormatProbe {
-                    depth: 8,
-                    chroma: Chroma::C420,
-                    uhd: true,
-                    hdr: false,
-                }],
+                formats: vec![FormatProbe { depth: 8, chroma: Chroma::C420, uhd: true, hdr: false }],
                 tools: None,
                 max: None,
             }],
@@ -1241,14 +1093,9 @@ mod tests {
         let video = rows(Section::Video, &e, &c);
         assert_eq!(encoder_options(&video), ["nvenc_h264"]);
         // `auto` shows the encoder it resolves to.
-        assert_eq!(
-            row(&video, "encoder").value(&c),
-            Value::Text("nvenc_h264".into())
-        );
+        assert_eq!(row(&video, "encoder").value(&c), Value::Text("nvenc_h264".into()));
         // Software lists the software encoders only, and resets the choice.
-        row(&video, "encoder_kind")
-            .apply(&mut c, Value::Text("software".into()))
-            .unwrap();
+        row(&video, "encoder_kind").apply(&mut c, Value::Text("software".into())).unwrap();
         let video = rows(Section::Video, &e, &c);
         let software = encoder_options(&video);
         assert!(software.contains(&"libx264".to_owned()));
@@ -1260,14 +1107,7 @@ mod tests {
     fn the_video_page_speaks_in_pixels_and_offers_16_9_on_a_wide_screen() {
         use crate::machine::{Machine, Screen};
         let screen = |width, height| Machine {
-            screens: vec![Screen {
-                number: 1,
-                primary: true,
-                name: "Screen".into(),
-                width,
-                height,
-                hz: 144,
-            }],
+            screens: vec![Screen { number: 1, primary: true, name: "Screen".into(), width, height, hz: 144 }],
             ..Machine::default()
         };
         let options = |rows_: &[Row], id: &str| match &row(rows_, id).kind {
@@ -1279,13 +1119,7 @@ mod tests {
         let video = rows(Section::Video, &uhd, &c);
         assert_eq!(
             options(&video, "resolution"),
-            [
-                "3840 × 2160 (4K UHD)",
-                "2560 × 1440 (QHD)",
-                "1920 × 1080 (Full HD)",
-                "1280 × 720 (HD)",
-                "854 × 480 (SD)"
-            ]
+            ["3840 × 2160 (4K UHD)", "2560 × 1440 (QHD)", "1920 × 1080 (Full HD)", "1280 × 720 (HD)", "854 × 480 (SD)"]
         );
         // The screen's own height, set by name (or a larger screen's): the screen's size, once.
         c.video.resolution = "2160p".into();
@@ -1303,19 +1137,11 @@ mod tests {
         // An ultrawide screen can be recorded as 16:9, and the sizes follow.
         let wide = env().with_machine(screen(3440, 1440));
         let video = rows(Section::Video, &wide, &c);
-        assert_eq!(
-            options(&video, "aspect"),
-            ["The screen's (21:9)", "16:9, cropped in the middle"]
-        );
+        assert_eq!(options(&video, "aspect"), ["The screen's (21:9)", "16:9, cropped in the middle"]);
         assert_eq!(options(&video, "resolution")[1], "2580 × 1080");
-        row(&video, "aspect")
-            .apply(&mut c, Value::Text("16:9".into()))
-            .unwrap();
+        row(&video, "aspect").apply(&mut c, Value::Text("16:9".into())).unwrap();
         let video = rows(Section::Video, &wide, &c);
-        assert_eq!(
-            options(&video, "resolution")[..2],
-            ["2560 × 1440 (QHD)", "1920 × 1080 (Full HD)"]
-        );
+        assert_eq!(options(&video, "resolution")[..2], ["2560 × 1440 (QHD)", "1920 × 1080 (Full HD)"]);
     }
 
     #[test]
@@ -1325,9 +1151,7 @@ mod tests {
         c.video.params.insert("rc.quality".into(), "40".into());
         let env = with_nvenc();
         let video = rows(Section::Video, &env, &c);
-        row(&video, "preset")
-            .apply(&mut c, Value::Text("custom".into()))
-            .unwrap();
+        row(&video, "preset").apply(&mut c, Value::Text("custom".into())).unwrap();
         assert_eq!(c.video.preset, "custom");
         // NVENC's best quality: CQ 19, not the 40 left from before nor the scale's 23.
         assert_eq!(c.video.params["rc.quality"], "19");
@@ -1335,9 +1159,7 @@ mod tests {
         // Back and forth within custom keeps what was set by hand.
         c.video.params.insert("rc.quality".into(), "21".into());
         let video = rows(Section::Video, &env, &c);
-        row(&video, "preset")
-            .apply(&mut c, Value::Text("custom".into()))
-            .unwrap();
+        row(&video, "preset").apply(&mut c, Value::Text("custom".into())).unwrap();
         assert_eq!(c.video.params["rc.quality"], "21");
     }
 
@@ -1348,11 +1170,7 @@ mod tests {
         let closed = rows(Section::Video, &with_nvenc(), &c);
         assert!(matches!(row(&closed, "expert_video").kind, Kind::Expander));
         assert!(closed.iter().any(|r| r.id == "p:preset"));
-        assert!(
-            !closed
-                .iter()
-                .any(|r| r.id == "p:multipass" || r.id == "chroma")
-        );
+        assert!(!closed.iter().any(|r| r.id == "p:multipass" || r.id == "chroma"));
         let open = with_nvenc().with_open(["expert_video".to_owned()].into());
         let opened = rows(Section::Video, &open, &c);
         assert!(opened.iter().any(|r| r.id == "p:multipass"));
@@ -1362,10 +1180,7 @@ mod tests {
     #[test]
     fn hdr_is_one_switch() {
         let mut c = Config::default();
-        let env = env().with_display(Display {
-            hdr: true,
-            max_refresh: 60,
-        });
+        let env = env().with_display(Display { hdr: true, max_refresh: 60 });
         let images = rows(Section::Image, &env, &c);
         let hdr = row(&images, "image_hdr");
         assert_eq!(hdr.value(&c), Value::Bool(false));
@@ -1383,9 +1198,7 @@ mod tests {
         let video = rows(Section::Video, &env, &c);
         row(&video, "hdr").apply(&mut c, Value::Bool(true)).unwrap();
         assert_eq!(c.video.hdr, "keep_hdr");
-        row(&video, "hdr")
-            .apply(&mut c, Value::Bool(false))
-            .unwrap();
+        row(&video, "hdr").apply(&mut c, Value::Bool(false)).unwrap();
         assert_eq!(c.video.hdr, "tonemap_sdr");
     }
 
@@ -1393,29 +1206,15 @@ mod tests {
     fn presets_are_quality_balanced_compact_or_custom_and_custom_shows_the_encoder_options() {
         let mut c = Config::default();
         c.video.encoder_kind = "software".into();
-        let ids = |c: &Config| -> Vec<String> {
-            rows(Section::Video, &env(), c)
-                .into_iter()
-                .map(|r| r.id)
-                .collect()
-        };
+        let ids = |c: &Config| -> Vec<String> { rows(Section::Video, &env(), c).into_iter().map(|r| r.id).collect() };
         assert!(!ids(&c).iter().any(|i| i.starts_with("p:")));
-        assert_eq!(
-            row(&rows(Section::Video, &env(), &c), "preset").value(&c),
-            Value::Text("small".into())
-        );
+        assert_eq!(row(&rows(Section::Video, &env(), &c), "preset").value(&c), Value::Text("small".into()));
         c.video.preset = "balanced".into();
-        assert_eq!(
-            row(&rows(Section::Video, &env(), &c), "preset").value(&c),
-            Value::Text("balanced".into())
-        );
+        assert_eq!(row(&rows(Section::Video, &env(), &c), "preset").value(&c), Value::Text("balanced".into()));
         // Older presets are shown as custom.
         c.video.preset = "performance".into();
         let video = rows(Section::Video, &env(), &c);
-        assert_eq!(
-            row(&video, "preset").value(&c),
-            Value::Text("custom".into())
-        );
+        assert_eq!(row(&video, "preset").value(&c), Value::Text("custom".into()));
         c.video.preset = "custom".into();
         let video = rows(Section::Video, &env(), &c);
         assert!(ids(&c).iter().any(|i| i == "p:rc.quality"));
@@ -1426,14 +1225,10 @@ mod tests {
         assert_eq!(c.video.params["rc.quality"], "18");
         assert_eq!(crf.value(&c), Value::Int(18));
         // Values are shown by name.
-        let Kind::Choice(presets) = &row(&video, "p:preset").kind else {
-            panic!("the preset is a list")
-        };
+        let Kind::Choice(presets) = &row(&video, "p:preset").kind else { panic!("the preset is a list") };
         assert_eq!(presets[0].label, "Ultra fast");
         // The fields follow the rate mode: a bitrate replaces the quality.
-        row(&video, "p:rc.mode")
-            .apply(&mut c, Value::Text("vbr".into()))
-            .unwrap();
+        row(&video, "p:rc.mode").apply(&mut c, Value::Text("vbr".into())).unwrap();
         let after = ids(&c);
         assert!(!after.iter().any(|i| i == "p:rc.quality"));
         assert!(after.iter().any(|i| i == "p:rc.bitrate"));
@@ -1448,21 +1243,9 @@ mod tests {
         c.video.audio.capture = "system".into();
         c.video.audio.sources = vec!["system".into()];
         let e = env().with_audio(AudioDevices {
-            outputs: vec![AudioEntry {
-                id: "{out-1}".into(),
-                name: "Headset".into(),
-                icon: None,
-            }],
-            inputs: vec![AudioEntry {
-                id: "{in-1}".into(),
-                name: "Blue Yeti".into(),
-                icon: None,
-            }],
-            programs: vec![AudioEntry {
-                id: "spotify.exe".into(),
-                name: "Spotify".into(),
-                icon: None,
-            }],
+            outputs: vec![AudioEntry { id: "{out-1}".into(), name: "Headset".into(), icon: None }],
+            inputs: vec![AudioEntry { id: "{in-1}".into(), name: "Blue Yeti".into(), icon: None }],
+            programs: vec![AudioEntry { id: "spotify.exe".into(), name: "Spotify".into(), icon: None }],
             games: Vec::new(),
         });
         let audio = rows(Section::Audio, &e, &c);
@@ -1475,35 +1258,25 @@ mod tests {
         // One track: nothing to route.
         assert!(!has_in(&audio, "audio_routing"));
         // On: the Windows default, then the one picked.
-        row(&audio, "mic_on")
-            .apply(&mut c, Value::Bool(true))
-            .unwrap();
+        row(&audio, "mic_on").apply(&mut c, Value::Bool(true)).unwrap();
         assert_eq!(c.video.audio.sources, ["system", "mic"]);
         let audio = rows(Section::Audio, &e, &c);
         assert!(row(&audio, "mic_volume").meter);
-        assert_eq!(
-            row(&audio, "mic_volume").number_text(100, Lang::Fr),
-            "100\u{a0}%"
-        );
+        assert_eq!(row(&audio, "mic_volume").number_text(100, Lang::Fr), "100\u{a0}%");
         match &row(&audio, "audio_routing").kind {
             Kind::Choice(o) => assert_eq!(o.len(), 2),
             _ => panic!("audio_routing is a choice"),
         }
         match &row(&audio, "mic_device").kind {
-            Kind::Choice(o) => assert_eq!(
-                o.iter().map(|o| o.label.as_str()).collect::<Vec<_>>(),
-                ["Windows default", "Blue Yeti"]
-            ),
+            Kind::Choice(o) => {
+                assert_eq!(o.iter().map(|o| o.label.as_str()).collect::<Vec<_>>(), ["Windows default", "Blue Yeti"])
+            }
             _ => panic!("mic_device is a choice"),
         }
-        row(&audio, "mic_device")
-            .apply(&mut c, Value::Text("mic:{in-1}".into()))
-            .unwrap();
+        row(&audio, "mic_device").apply(&mut c, Value::Text("mic:{in-1}".into())).unwrap();
         // The recorded program: the microphone stays.
         let set = |c: &mut Config, mode: &str| {
-            row(&rows(Section::Audio, &e, c), "audio_capture")
-                .apply(c, Value::Text(mode.into()))
-                .unwrap();
+            row(&rows(Section::Audio, &e, c), "audio_capture").apply(c, Value::Text(mode.into())).unwrap();
         };
         set(&mut c, "target");
         assert_eq!(c.video.audio.sources, ["mic:{in-1}", TARGET_SOURCE]);
@@ -1511,19 +1284,14 @@ mod tests {
         set(&mut c, "output");
         assert_eq!(c.video.audio.sources, ["mic:{in-1}", "out:{out-1}"]);
         let audio = rows(Section::Audio, &e, &c);
-        assert_eq!(
-            row(&audio, "audio_output").value(&c),
-            Value::Text("out:{out-1}".into())
-        );
+        assert_eq!(row(&audio, "audio_output").value(&c), Value::Text("out:{out-1}".into()));
         // Chosen programs: ticked one by one; none ticked is still that choice.
         set(&mut c, "programs");
         assert_eq!(c.video.audio.sources, ["mic:{in-1}"]);
         assert_eq!(capture(&c), Value::Text("programs".into()));
         let audio = rows(Section::Audio, &e, &c);
         assert_eq!(row(&audio, "src:app:spotify.exe").label, "Spotify");
-        row(&audio, "src:app:spotify.exe")
-            .apply(&mut c, Value::Bool(true))
-            .unwrap();
+        row(&audio, "src:app:spotify.exe").apply(&mut c, Value::Bool(true)).unwrap();
         assert_eq!(c.video.audio.sources, ["mic:{in-1}", "app:spotify.exe"]);
         // Another mode, then back: the device and the programs chosen come back.
         c.video.audio.set_aside = vec!["out:{out-2}".into()];
@@ -1538,9 +1306,7 @@ mod tests {
         let audio = rows(Section::Audio, &e, &c);
         assert_eq!(row(&audio, "src:app:game.exe").label, "game.exe (closed)");
         // Off removes the microphone, whichever it was.
-        row(&audio, "mic_on")
-            .apply(&mut c, Value::Bool(false))
-            .unwrap();
+        row(&audio, "mic_on").apply(&mut c, Value::Bool(false)).unwrap();
         assert_eq!(c.video.audio.sources, ["app:spotify.exe", "app:game.exe"]);
         // Older settings without the field: read from their sources.
         let mut old = Config::default();
@@ -1584,9 +1350,7 @@ mod tests {
         assert!(c.video.audio.volumes.is_empty());
         c.video.audio.sources.push("mic".into());
         let audio = rows(Section::Audio, &env(), &c);
-        row(&audio, "mic_volume")
-            .apply(&mut c, Value::Int(60))
-            .unwrap();
+        row(&audio, "mic_volume").apply(&mut c, Value::Int(60)).unwrap();
         assert_eq!(c.video.audio.volumes["mic"], 0.6);
         // Nothing recorded besides the microphone: no volume for it.
         c.video.audio.capture = "none".into();
@@ -1603,10 +1367,7 @@ mod tests {
         assert_eq!(after.value(&c), Value::Text("0".into()));
         after.apply(&mut c, Value::Text("10".into())).unwrap();
         assert_eq!(c.replay.after_seconds, 10);
-        assert_eq!(
-            row(&rows(Section::Overlay, &env(), &c), "overlay_edge").picker,
-            Picker::Edge
-        );
+        assert_eq!(row(&rows(Section::Overlay, &env(), &c), "overlay_edge").picker, Picker::Edge);
     }
 
     #[test]
@@ -1634,10 +1395,7 @@ mod tests {
         assert!(video_problems(&c, (1920, 1080), Lang::En).is_empty());
         c.video.container = "avi".into();
         let problems = video_problems(&c, (1920, 1080), Lang::Fr);
-        assert!(
-            problems.iter().any(|p| p.contains("conteneur")),
-            "{problems:?}"
-        );
+        assert!(problems.iter().any(|p| p.contains("conteneur")), "{problems:?}");
     }
 
     #[test]
@@ -1661,21 +1419,9 @@ mod tests {
         c.replay.enabled = true;
         c.replay.duration_seconds = 300;
         // Under the storage's name.
-        let hint = |env: &Env, c: &Config| {
-            row(&rows(Section::Replay, env, c), "replay_storage")
-                .detail
-                .clone()
-        };
-        assert!(
-            hint(&with_ram(64), &c).ends_with("in RAM"),
-            "{}",
-            hint(&with_ram(64), &c)
-        );
-        assert!(
-            hint(&with_ram(8), &c).contains("on the disk"),
-            "{}",
-            hint(&with_ram(8), &c)
-        );
+        let hint = |env: &Env, c: &Config| row(&rows(Section::Replay, env, c), "replay_storage").detail.clone();
+        assert!(hint(&with_ram(64), &c).ends_with("in RAM"), "{}", hint(&with_ram(64), &c));
+        assert!(hint(&with_ram(8), &c).contains("on the disk"), "{}", hint(&with_ram(8), &c));
         c.replay.storage = "disk".into();
         assert!(!hint(&with_ram(64), &c).contains(" in RAM"));
         assert!(hint(&with_ram(64), &c).contains("GB"));
@@ -1688,22 +1434,14 @@ mod tests {
         let video = rows(Section::Video, &with_nvenc(), &c);
         assert!(row(&video, "encoder_kind").info.starts_with("Hardware:"));
         assert!(!row(&video, "encoder_kind").info.contains("Recommended"));
-        assert!(
-            row(&video, "p:preset")
-                .info
-                .contains("Recommended here: P4")
-        );
+        assert!(row(&video, "p:preset").info.contains("Recommended here: P4"));
         assert!(row(&video, "p:preset").info.contains("P6 and P7"));
         assert!(row(&video, "p:rc.quality").info.contains("Recommended: 24"));
         // The speed that keeps up is marked in the list too, and only it.
         let Kind::Choice(presets) = &row(&video, "p:preset").kind else {
             panic!("the preset is a choice");
         };
-        let marked: Vec<_> = presets
-            .iter()
-            .filter(|o| o.recommended)
-            .map(|o| o.label.as_str())
-            .collect();
+        let marked: Vec<_> = presets.iter().filter(|o| o.recommended).map(|o| o.label.as_str()).collect();
         assert_eq!(marked, ["P4"]);
         // A setting with nothing to add has no "i".
         assert!(row(&video, "video_cursor").info.is_empty());

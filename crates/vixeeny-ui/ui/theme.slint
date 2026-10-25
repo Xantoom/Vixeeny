@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// The design tokens of every Vixeeny window: calm neutral surfaces (few borders, hairline
-// dividers), the system accent for what is chosen, and short eased motion. The host sets `dark`,
-// `accent-base` (the system accent colour) and `font` once per window; everything else follows.
+// The design tokens of every Vixeeny window: calm neutral surfaces (few borders, hairline dividers), the system accent
+// for what is chosen, and short eased motion. The host sets `dark`, `accent-base` (the system accent colour) and `font`
+// once per window; everything else follows.
 export global Theme {
     in property <bool> dark: true;
     in property <color> accent-base: #0078d4;
@@ -11,8 +11,8 @@ export global Theme {
     in property <float> motion: 1.0;
     // The icon of the program, for title bars, task bars and the like (set by the host).
     in property <image> app-icon;
-    // Mica (Windows 11) is behind the window: the usual background veils it, a little
-    // see-through, and the cards veil that.
+    // Mica (Windows 11) is behind the window: the usual background veils it, a little see-through, and the cards veil
+    // that.
     in property <bool> mica: false;
 
     // ---- surfaces

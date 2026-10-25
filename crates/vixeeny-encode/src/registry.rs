@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The codec registry: everything the application knows about encoders is data in
-//! `codecs/registry.toml`, embedded in the binary.
+//! The codec registry: everything the application knows about encoders is data in `codecs/registry.toml`, embedded in
+//! the binary.
 
 use std::collections::BTreeMap;
 
@@ -29,8 +29,7 @@ impl Family {
         }
     }
 
-    /// Hardware encoders are preferred in this order: AV1 (the smallest files for the quality),
-    /// HEVC, H.264, VP9.
+    /// Hardware encoders are preferred in this order: AV1 (the smallest files for the quality), HEVC, H.264, VP9.
     pub const fn preference(self) -> u8 {
         match self {
             Self::Av1 => 0,
@@ -133,8 +132,8 @@ pub struct QualityScale {
     pub min: i64,
     pub max: i64,
     pub default: i64,
-    /// The encoder's own scale runs the other way (AMF's QVBR: 51 is the best): the user's
-    /// value, lower is better as everywhere else, is mirrored into it.
+    /// The encoder's own scale runs the other way (AMF's QVBR: 51 is the best): the user's value, lower is better as
+    /// everywhere else, is mirrored into it.
     #[serde(default)]
     pub inverted: bool,
 }
@@ -142,11 +141,7 @@ pub struct QualityScale {
 impl QualityScale {
     /// The encoder's value of `quality`, a value of the user's scale.
     pub fn to_encoder(&self, quality: i64) -> i64 {
-        if self.inverted {
-            self.min + self.max - quality
-        } else {
-            quality
-        }
+        if self.inverted { self.min + self.max - quality } else { quality }
     }
 }
 
@@ -162,9 +157,7 @@ impl RateControl {
     /// Whether `mode` uses the user's value of `placeholder` (`{maxrate}`, ...).
     pub fn uses(&self, mode: RateMode, placeholder: &str) -> bool {
         self.modes.get(&mode).is_some_and(|options| {
-            options
-                .values()
-                .any(|v| matches!(v, OptionValue::Text(s) if s.contains(placeholder)))
+            options.values().any(|v| matches!(v, OptionValue::Text(s) if s.contains(placeholder)))
         })
     }
 }
@@ -172,8 +165,7 @@ impl RateControl {
 /// What the rate-control options of the registry may contain.
 pub const PLACEHOLDERS: [&str; 4] = ["{quality}", "{bitrate}", "{maxrate}", "{bufsize}"];
 
-/// The keys of the rate control in the custom options of a profile (`Video::params`); the
-/// rates are in kbit/s.
+/// The keys of the rate control in the custom options of a profile (`Video::params`); the rates are in kbit/s.
 pub mod rate_keys {
     pub const MODE: &str = "rc.mode";
     pub const QUALITY: &str = "rc.quality";
@@ -326,10 +318,10 @@ impl Param {
                 let hi = self.max.map_or(i64::MAX, |m| m as i64);
                 v.clamp(lo, hi).to_string()
             }),
-            ParamType::Float => raw.parse::<f64>().ok().map(|v| {
-                v.clamp(self.min.unwrap_or(f64::MIN), self.max.unwrap_or(f64::MAX))
-                    .to_string()
-            }),
+            ParamType::Float => raw
+                .parse::<f64>()
+                .ok()
+                .map(|v| v.clamp(self.min.unwrap_or(f64::MIN), self.max.unwrap_or(f64::MAX)).to_string()),
             ParamType::Bool => match raw {
                 "1" | "true" | "on" => Some("1".into()),
                 "0" | "false" | "off" => Some("0".into()),
@@ -361,13 +353,11 @@ pub struct Encoder {
 }
 
 impl Encoder {
-    /// The rate mode of the custom options: the user's when the encoder has it (a constant
-    /// bitrate falls back to the variable one), else constant quality.
+    /// The rate mode of the custom options: the user's when the encoder has it (a constant bitrate falls back to the
+    /// variable one), else constant quality.
     pub fn rate_mode(&self, params: &BTreeMap<String, String>) -> RateMode {
         let has = |m: &RateMode| self.rate_control.modes.contains_key(m);
-        let wanted = params
-            .get(rate_keys::MODE)
-            .and_then(|m| RateMode::from_setting(m));
+        let wanted = params.get(rate_keys::MODE).and_then(|m| RateMode::from_setting(m));
         match wanted {
             Some(m) if has(&m) => m,
             Some(RateMode::Cbr) if has(&RateMode::Vbr) => RateMode::Vbr,
@@ -377,21 +367,15 @@ impl Encoder {
 
     /// The modes the encoder offers, in the order of [`RateMode::ALL`].
     pub fn rate_modes(&self) -> impl Iterator<Item = RateMode> + '_ {
-        RateMode::ALL
-            .into_iter()
-            .filter(|m| self.rate_control.modes.contains_key(m))
+        RateMode::ALL.into_iter().filter(|m| self.rate_control.modes.contains_key(m))
     }
 
-    /// The FFmpeg options of the `custom` preset: the options of the chosen rate mode, then
-    /// every parameter with the user's value (by key) or its default. Values that do not parse
-    /// fall back to the default; numbers are clamped to their range.
+    /// The FFmpeg options of the `custom` preset: the options of the chosen rate mode, then every parameter with the
+    /// user's value (by key) or its default. Values that do not parse fall back to the default; numbers are clamped to
+    /// their range.
     pub fn custom_options(&self, params: &BTreeMap<String, String>) -> BTreeMap<String, String> {
         let number = |key: &str, default: i64, (lo, hi): (i64, i64)| {
-            params
-                .get(key)
-                .and_then(|v| v.parse::<f64>().ok())
-                .map_or(default, |v| v.round() as i64)
-                .clamp(lo, hi)
+            params.get(key).and_then(|v| v.parse::<f64>().ok()).map_or(default, |v| v.round() as i64).clamp(lo, hi)
         };
         let scale = &self.rate_control.quality;
         let mode = self.rate_mode(params);
@@ -405,11 +389,7 @@ impl Encoder {
         let quality = scale.to_encoder(quality);
         let bitrate = number(rate_keys::BITRATE, DEFAULT_BITRATE, BITRATE_RANGE);
         let maxrate = number(rate_keys::MAXRATE, DEFAULT_MAXRATE, BITRATE_RANGE).max(bitrate);
-        let peak = if self.rate_control.uses(mode, "{maxrate}") {
-            maxrate
-        } else {
-            bitrate
-        };
+        let peak = if self.rate_control.uses(mode, "{maxrate}") { maxrate } else { bitrate };
         let values = [
             ("{quality}", quality),
             ("{bitrate}", bitrate * 1000),
@@ -439,14 +419,11 @@ impl Encoder {
         options
     }
 
-    /// The custom settings that reproduce `preset`, where the parameters allow: constant
-    /// quality at its level, and each parameter the preset sets (the others keep their default).
+    /// The custom settings that reproduce `preset`, where the parameters allow: constant quality at its level, and each
+    /// parameter the preset sets (the others keep their default).
     pub fn preset_params(&self, preset: PresetName) -> BTreeMap<String, String> {
         let options = self.presets.get(preset);
-        let mut params = BTreeMap::from([(
-            rate_keys::MODE.to_owned(),
-            RateMode::Quality.name().to_owned(),
-        )]);
+        let mut params = BTreeMap::from([(rate_keys::MODE.to_owned(), RateMode::Quality.name().to_owned())]);
         let scale = &self.rate_control.quality;
         let level = self
             .rate_control
@@ -458,118 +435,66 @@ impl Encoder {
             .find_map(|(k, _)| options.get(k)?.to_ffmpeg().parse::<i64>().ok());
         if let Some(level) = level {
             // The mirror of a mirrored scale is the user's value.
-            params.insert(
-                rate_keys::QUALITY.to_owned(),
-                scale.to_encoder(level).to_string(),
-            );
+            params.insert(rate_keys::QUALITY.to_owned(), scale.to_encoder(level).to_string());
         }
         for param in &self.params {
-            if let Some(value) = options
-                .get(&param.ffmpeg_option)
-                .and_then(|v| param.parse(&v.to_ffmpeg()))
-            {
+            if let Some(value) = options.get(&param.ffmpeg_option).and_then(|v| param.parse(&v.to_ffmpeg())) {
                 params.insert(param.key.clone(), value);
             }
         }
         params
     }
 
-    /// The speed option that keeps up with `pixel_rate` (width × height × frames a second), and
-    /// its value: the best one that still keeps up, with a margin, while a game runs.
+    /// The speed option that keeps up with `pixel_rate` (width × height × frames a second), and its value: the best one
+    /// that still keeps up, with a margin, while a game runs.
     ///
-    /// NVENC: frames a second at 1080p of one encoder of its generation ([`nvenc_speeds`]).
-    /// P5 at most: P6 and P7 cost two to three times more for 1 to 3 % (SSIMULACRA 2, VMAF).
-    /// H.264 starts at P4, as good as P5 there and half as fast again. Where none keeps up,
-    /// the fastest, which [`Encoder::fit_tools`] may split between the encoders.
+    /// NVENC: frames a second at 1080p of one encoder of its generation ([`nvenc_speeds`]). P5 at most: P6 and P7 cost
+    /// two to three times more for 1 to 3 % (SSIMULACRA 2, VMAF). H.264 starts at P4, as good as P5 there and half as
+    /// fast again. Where none keeps up, the fastest, which [`Encoder::fit_tools`] may split between the encoders.
     ///
     /// AMD: the best preset whose throughput, as the driver gives it for this engine
-    /// ([`Tools::amf_throughput`](crate::probe::Tools)), keeps up. Without it, and on Intel,
-    /// from the speed of the media engine at its default preset ([`Tools::engine_fps`],
-    /// measured per generation); AMF's quality preset is then taken as halving it (rigaya's
-    /// quality settings, which add the pre-analysis, cost 40 to 75 % on H.264 and AV1).
-    pub fn speed_for(
-        &self,
-        pixel_rate: u64,
-        tools: Option<crate::probe::Tools>,
-    ) -> Option<(&'static str, String)> {
+    /// ([`Tools::amf_throughput`](crate::probe::Tools)), keeps up. Without it, and on Intel, from the speed of the
+    /// media engine at its default preset ([`Tools::engine_fps`], measured per generation); AMF's quality preset is
+    /// then taken as halving it (rigaya's quality settings, which add the pre-analysis, cost 40 to 75 % on H.264 and
+    /// AV1).
+    pub fn speed_for(&self, pixel_rate: u64, tools: Option<crate::probe::Tools>) -> Option<(&'static str, String)> {
         let needed = frames_needed(pixel_rate);
         let engine = f64::from(tools.map_or(0, |t| t.engine_fps));
         let amf_throughput = tools.map_or([0; 4], |t| t.amf_throughput);
         let pick = |key: &'static str, steps: &[(&str, f64)]| {
-            let value = steps
-                .iter()
-                .find(|(_, fps)| *fps >= needed)
-                .or(steps.last())
-                .map(|(v, _)| (*v).to_owned())?;
+            let value = steps.iter().find(|(_, fps)| *fps >= needed).or(steps.last()).map(|(v, _)| (*v).to_owned())?;
             Some((key, value))
         };
         let nvenc = self.id.starts_with("nvenc");
         let amf = self.id.starts_with("amf");
         let qsv = self.id.starts_with("qsv");
         match (self.family, self.id.as_str()) {
-            _ if nvenc => pick(
-                "preset",
-                nvenc_speeds(self.family, tools.map(|t| t.generation).unwrap_or_default()),
-            ),
+            _ if nvenc => pick("preset", nvenc_speeds(self.family, tools.map(|t| t.generation).unwrap_or_default())),
             _ if amf && amf_throughput[..3].iter().all(|&t| t > 0) => {
                 let [_, balanced, quality, _] = amf_throughput.map(frames_of_macroblocks);
-                pick(
-                    "quality",
-                    &[
-                        ("quality", quality),
-                        ("balanced", balanced),
-                        ("speed", f64::MAX),
-                    ],
-                )
+                pick("quality", &[("quality", quality), ("balanced", balanced), ("speed", f64::MAX)])
             }
-            _ if amf && engine > 0.0 => pick(
-                "quality",
-                &[
-                    ("quality", engine * AMF_QUALITY_SHARE),
-                    ("balanced", engine),
-                    ("speed", f64::MAX),
-                ],
-            ),
-            _ if qsv && engine > 0.0 => pick(
-                "preset",
-                &[
-                    ("medium", engine),
-                    ("fast", engine * 1.5),
-                    ("veryfast", f64::MAX),
-                ],
-            ),
-            // Not measured (no probe): their media engines are rated for 4K at 60 FPS, so the
-            // best preset up to that, one step faster above.
-            _ if amf => pick(
-                "quality",
-                &[("quality", 312.0), ("balanced", 624.0), ("speed", f64::MAX)],
-            ),
-            _ if qsv => pick(
-                "preset",
-                &[("medium", 312.0), ("fast", 624.0), ("veryfast", f64::MAX)],
-            ),
+            _ if amf && engine > 0.0 => {
+                pick("quality", &[("quality", engine * AMF_QUALITY_SHARE), ("balanced", engine), ("speed", f64::MAX)])
+            }
+            _ if qsv && engine > 0.0 => {
+                pick("preset", &[("medium", engine), ("fast", engine * 1.5), ("veryfast", f64::MAX)])
+            }
+            // Not measured (no probe): their media engines are rated for 4K at 60 FPS, so the best preset up to that,
+            // one step faster above.
+            _ if amf => pick("quality", &[("quality", 312.0), ("balanced", 624.0), ("speed", f64::MAX)]),
+            _ if qsv => pick("preset", &[("medium", 312.0), ("fast", 624.0), ("veryfast", f64::MAX)]),
             // Software encoders share the processor with the game.
-            (_, "libx264") => pick(
-                "preset",
-                &[
-                    ("veryfast", 78.0),
-                    ("superfast", 156.0),
-                    ("ultrafast", f64::MAX),
-                ],
-            ),
+            (_, "libx264") => pick("preset", &[("veryfast", 78.0), ("superfast", 156.0), ("ultrafast", f64::MAX)]),
             (_, "libx265") => pick("preset", &[("superfast", 78.0), ("ultrafast", f64::MAX)]),
-            (_, "libsvtav1") => pick(
-                "preset",
-                &[("10", 78.0), ("11", 156.0), ("12", 312.0), ("13", f64::MAX)],
-            ),
+            (_, "libsvtav1") => pick("preset", &[("10", 78.0), ("11", 156.0), ("12", 312.0), ("13", f64::MAX)]),
             (_, "libvpx_vp9") => pick("cpu-used", &[("6", 78.0), ("7", 156.0), ("8", f64::MAX)]),
             _ => None,
         }
     }
 
-    /// The FFmpeg options of a simple preset for a recording of `size` at `fps`: the encoder's
-    /// speed follows the number of pixels to encode, and from 4K on the quality scale eases a
-    /// little (the same look, much lighter files).
+    /// The FFmpeg options of a simple preset for a recording of `size` at `fps`: the encoder's speed follows the number
+    /// of pixels to encode, and from 4K on the quality scale eases a little (the same look, much lighter files).
     pub fn preset_options(
         &self,
         preset: PresetName,
@@ -577,12 +502,8 @@ impl Encoder {
         fps: u32,
         tools: Option<crate::probe::Tools>,
     ) -> BTreeMap<String, String> {
-        let mut options: BTreeMap<String, String> = self
-            .presets
-            .get(preset)
-            .iter()
-            .map(|(k, v)| (k.clone(), v.to_ffmpeg()))
-            .collect();
+        let mut options: BTreeMap<String, String> =
+            self.presets.get(preset).iter().map(|(k, v)| (k.clone(), v.to_ffmpeg())).collect();
         let rate = u64::from(width) * u64::from(height) * u64::from(fps.max(1));
         // The fast preset keeps its own speed.
         if preset != PresetName::Performance
@@ -594,8 +515,8 @@ impl Encoder {
         }
         if height >= 2000 {
             let scale = &self.rate_control.quality;
-            // Two steps of a 0-51 scale, as much on the others: at the same level a 4K picture
-            // measures 2 to 3 steps better per pixel than 1080p (SSIMULACRA 2), for 15 % less.
+            // Two steps of a 0-51 scale, as much on the others: at the same level a 4K picture measures 2 to 3 steps
+            // better per pixel than 1080p (SSIMULACRA 2), for 15 % less.
             let step = 2 * ((scale.max - scale.min) as f64 / 51.0).round().max(1.0) as i64;
             let ease = if scale.inverted { -step } else { step };
             let quality_options: Vec<String> = self
@@ -618,22 +539,21 @@ impl Encoder {
         options
     }
 
-    /// Fits FFmpeg `options` to the tools of the GPU's encoder (`tools`: its driver's answer;
-    /// `None`, not described: they are left as they are).
+    /// Fits FFmpeg `options` to the tools of the GPU's encoder (`tools`: its driver's answer; `None`, not described:
+    /// they are left as they are).
     ///
-    /// With `choose`, what the options leave open is chosen as NVIDIA advises for recording
-    /// (Video Codec SDK 13.1 programming guide, recommended settings; NVIDIA's broadcasting
-    /// guide): the look-ahead on, [`LOOKAHEAD_FRAMES`] of it, which then picks up to 4 B-frames
-    /// for each group, else 2 B-frames. Without `choose` (the fast preset), the encoder's own.
+    /// With `choose`, what the options leave open is chosen as NVIDIA advises for recording (Video Codec SDK 13.1
+    /// programming guide, recommended settings; NVIDIA's broadcasting guide): the look-ahead on, [`LOOKAHEAD_FRAMES`]
+    /// of it, which then picks up to 4 B-frames for each group, else 2 B-frames. Without `choose` (the fast preset),
+    /// the encoder's own.
     ///
-    /// What the encoder lacks is left out rather than refused when it opens: B-frames beyond
-    /// its most (none for HEVC on Pascal), B-frames as references (and always for H.264, which
-    /// some decoders play wrong with them, as OBS found), the look-ahead, the temporal AQ.
+    /// What the encoder lacks is left out rather than refused when it opens: B-frames beyond its most (none for HEVC on
+    /// Pascal), B-frames as references (and always for H.264, which some decoders play wrong with them, as OBS found),
+    /// the look-ahead, the temporal AQ.
     ///
-    /// AMF: B-frames cost about 40 % of the engine's speed (RX 6900 XT, H.264: 139 to 84 FPS
-    /// for 1.3 VMAF), the pre-analysis two thirds (84 to 26 FPS for 0.4 to 0.7 VMAF), so the
-    /// latter is never chosen, and 2 B-frames (AMD's advice for recording) only when the
-    /// engine has that much to spare at `pixel_rate` beside the quality preset.
+    /// AMF: B-frames cost about 40 % of the engine's speed (RX 6900 XT, H.264: 139 to 84 FPS for 1.3 VMAF), the
+    /// pre-analysis two thirds (84 to 26 FPS for 0.4 to 0.7 VMAF), so the latter is never chosen, and 2 B-frames (AMD's
+    /// advice for recording) only when the engine has that much to spare at `pixel_rate` beside the quality preset.
     pub fn fit_tools(
         &self,
         options: &mut BTreeMap<String, String>,
@@ -641,23 +561,19 @@ impl Encoder {
         choose: bool,
         pixel_rate: u64,
     ) {
-        // Constant quality with no ceiling of its own is held to one all the same: NVENC's, of
-        // the smallest level the picture fits (HEVC at 1080p60: about 17 Mbit/s, which turns the
-        // busiest scenes of the quality presets to blocks), AMF's 30 Mbit/s. Half a bit per
-        // pixel leaves the quality to the encoder; NVENC then signals the level that holds it
-        // (HEVC at 1080p60: 5.0, high tier).
-        let constant_quality = ["cq", "qvbr_quality_level"]
-            .iter()
-            .any(|k| options.contains_key(*k));
+        // Constant quality with no ceiling of its own is held to one all the same: NVENC's, of the smallest level the
+        // picture fits (HEVC at 1080p60: about 17 Mbit/s, which turns the busiest scenes of the quality presets to
+        // blocks), AMF's 30 Mbit/s. Half a bit per pixel leaves the quality to the encoder; NVENC then signals the
+        // level that holds it (HEVC at 1080p60: 5.0, high tier).
+        let constant_quality = ["cq", "qvbr_quality_level"].iter().any(|k| options.contains_key(*k));
         if constant_quality && !options.contains_key("maxrate") {
             options.insert("maxrate".into(), (pixel_rate / 2).max(1).to_string());
         }
         let Some(tools) = tools else {
             return;
         };
-        let number = |options: &BTreeMap<String, String>, key: &str| {
-            options.get(key).and_then(|v| v.parse::<u32>().ok())
-        };
+        let number =
+            |options: &BTreeMap<String, String>, key: &str| options.get(key).and_then(|v| v.parse::<u32>().ok());
         if self.vendor == Vendor::Amd {
             let spare = match tools.amf_throughput {
                 [.., 0] => f64::from(tools.engine_fps) * AMF_QUALITY_SHARE * AMF_BFRAMES_SHARE,
@@ -707,9 +623,7 @@ impl Encoder {
         } else {
             options.remove("rc-lookahead");
         }
-        let references = self.family != Family::H264
-            && tools.bframe_ref_middle
-            && bframes.is_none_or(|n| n >= 2);
+        let references = self.family != Family::H264 && tools.bframe_ref_middle && bframes.is_none_or(|n| n >= 2);
         if !references {
             options.remove("b_ref_mode");
         }
@@ -721,18 +635,16 @@ impl Encoder {
         }
     }
 
-    /// NVENC, HEVC and AV1: the deepest look-ahead when the encoder has the time for it, and a
-    /// frame split between the encoders only when its preset cannot keep up otherwise.
+    /// NVENC, HEVC and AV1: the deepest look-ahead when the encoder has the time for it, and a frame split between the
+    /// encoders only when its preset cannot keep up otherwise.
     ///
-    /// Look-ahead level 3 gives the bits to the frames that need them: at the same size the
-    /// worst 5 % of the frames of fast games gain 9 to 36 % (SSIMULACRA 2), for 3 % of HEVC's
-    /// speed and a third of AV1's (RTX 5080), hence [`DEEP_LOOKAHEAD_SHARE`] of the speed
-    /// table. It does not run with the split.
+    /// Look-ahead level 3 gives the bits to the frames that need them: at the same size the worst 5 % of the frames of
+    /// fast games gain 9 to 36 % (SSIMULACRA 2), for 3 % of HEVC's speed and a third of AV1's (RTX 5080), hence
+    /// [`DEEP_LOOKAHEAD_SHARE`] of the speed table. It does not run with the split.
     ///
-    /// The split leaves a seam across the middle of the picture (the strongest edge of every
-    /// 4K encode measured, at all levels), so NVENC's own choice of it (P1 and P2 from 4K) is
-    /// turned off, and it is forced only when the preset (the fastest when none keeps up) is
-    /// too slow.
+    /// The split leaves a seam across the middle of the picture (the strongest edge of every 4K encode measured, at all
+    /// levels), so NVENC's own choice of it (P1 and P2 from 4K) is turned off, and it is forced only when the preset
+    /// (the fastest when none keeps up) is too slow.
     fn fit_speed(
         &self,
         options: &mut BTreeMap<String, String>,
@@ -743,35 +655,24 @@ impl Encoder {
         let speeds = nvenc_speeds(self.family, tools.generation);
         let needed = frames_needed(pixel_rate);
         // FFmpeg's default preset is P4; P6 and P7 are not in the table (slower than P5).
-        let preset = options
-            .get("preset")
-            .map_or("p4", String::as_str)
-            .to_owned();
-        let speed = speeds
-            .iter()
-            .find(|(p, _)| *p == preset)
-            .map(|(_, fps)| *fps);
+        let preset = options.get("preset").map_or("p4", String::as_str).to_owned();
+        let speed = speeds.iter().find(|(p, _)| *p == preset).map(|(_, fps)| *fps);
         if tools.engines >= 2 {
             let split = speed.is_some_and(|fps| fps < needed);
             let mode = if split { "forced" } else { "disabled" };
             options.insert("split_encode_mode".into(), mode.into());
             if split {
-                // The fastest preset, taken when none kept up, gives way to the best one the
-                // split keeps up with; a preset set by hand stays.
+                // The fastest preset, taken when none kept up, gives way to the best one the split keeps up with; a
+                // preset set by hand stays.
                 if speeds.last().is_some_and(|(p, _)| *p == preset)
-                    && let Some((better, _)) =
-                        speeds.iter().find(|(_, fps)| fps * SPLIT_GAIN >= needed)
+                    && let Some((better, _)) = speeds.iter().find(|(_, fps)| fps * SPLIT_GAIN >= needed)
                 {
                     options.insert("preset".into(), (*better).into());
                 }
                 return;
             }
         }
-        let share = if self.family == Family::Av1 {
-            DEEP_LOOKAHEAD_SHARE.1
-        } else {
-            DEEP_LOOKAHEAD_SHARE.0
-        };
+        let share = if self.family == Family::Av1 { DEEP_LOOKAHEAD_SHARE.1 } else { DEEP_LOOKAHEAD_SHARE.0 };
         if deep_lookahead
             && tools.lookahead_level >= 3
             && !options.contains_key("lookahead_level")
@@ -781,8 +682,8 @@ impl Encoder {
         }
     }
 
-    /// AMF's pre-analysis takes only 8-bit pictures: with 10 bits the encoder does not open
-    /// (AMD's AMF issue 399), so it is left out.
+    /// AMF's pre-analysis takes only 8-bit pictures: with 10 bits the encoder does not open (AMD's AMF issue 399), so
+    /// it is left out.
     pub fn fit_depth(&self, options: &mut BTreeMap<String, String>, depth: u8) {
         if self.vendor == Vendor::Amd && depth > 8 {
             options.remove("preanalysis");
@@ -790,14 +691,12 @@ impl Encoder {
     }
 
     pub fn supports_format(&self, depth: u8, chroma: Chroma) -> bool {
-        self.pixel_formats
-            .iter()
-            .any(|p| p.depth == depth && p.chroma == chroma)
+        self.pixel_formats.iter().any(|p| p.depth == depth && p.chroma == chroma)
     }
 }
 
-/// The frames of 1080p a second an encoder must keep up with for `pixel_rate`, with a third to
-/// spare (clocks drop under a game's load, the quality presets add a quarter-resolution pass).
+/// The frames of 1080p a second an encoder must keep up with for `pixel_rate`, with a third to spare (clocks drop under
+/// a game's load, the quality presets add a quarter-resolution pass).
 fn frames_needed(pixel_rate: u64) -> f64 {
     pixel_rate as f64 / (1920.0 * 1080.0) * 1.3
 }
@@ -807,12 +706,11 @@ fn frames_of_macroblocks(macroblocks: u64) -> f64 {
     macroblocks as f64 * 256.0 / (1920.0 * 1080.0)
 }
 
-/// The presets of an NVENC encoder that each gain speed, best first, and the frames of 1080p a
-/// second one encoder keeps up with at each, with the presets' other tools (look-ahead,
-/// quarter-resolution pass, B-frames). Measured on an RTX 5080 (Blackwell), the slower of
-/// 1080p and 4K: HEVC is no faster below P3, AV1 at P4 than P5, H.264 below P2. The older
-/// generations are scaled by their P5 in the NVENC Application Note (Video Codec SDK 13.0):
-/// Turing and Ampere encode at the same pace; AV1 starts with Ada.
+/// The presets of an NVENC encoder that each gain speed, best first, and the frames of 1080p a second one encoder keeps
+/// up with at each, with the presets' other tools (look-ahead, quarter-resolution pass, B-frames). Measured on an RTX
+/// 5080 (Blackwell), the slower of 1080p and 4K: HEVC is no faster below P3, AV1 at P4 than P5, H.264 below P2. The
+/// older generations are scaled by their P5 in the NVENC Application Note (Video Codec SDK 13.0): Turing and Ampere
+/// encode at the same pace; AV1 starts with Ada.
 fn nvenc_speeds(family: Family, generation: NvencGeneration) -> &'static [(&'static str, f64)] {
     use NvencGeneration::{Ada, Blackwell, Turing};
     match (family, generation) {
@@ -828,21 +726,20 @@ fn nvenc_speeds(family: Family, generation: NvencGeneration) -> &'static [(&'sta
     }
 }
 
-/// The share of NVENC's speed (HEVC, AV1) left with look-ahead level 3, the lower of 1080p and
-/// 4K (RTX 5080: HEVC 0.97 and 0.83, AV1 0.65 and 0.61).
+/// The share of NVENC's speed (HEVC, AV1) left with look-ahead level 3, the lower of 1080p and 4K (RTX 5080: HEVC 0.97
+/// and 0.83, AV1 0.65 and 0.61).
 const DEEP_LOOKAHEAD_SHARE: (f64, f64) = (0.83, 0.61);
 
-/// The speed the split between two encoders gives (RTX 5080, 4K at P5: HEVC 124 to 207 FPS,
-/// AV1 118 to 194).
+/// The speed the split between two encoders gives (RTX 5080, 4K at P5: HEVC 124 to 207 FPS, AV1 118 to 194).
 const SPLIT_GAIN: f64 = 1.6;
 
-/// The share of AMF's balanced speed its quality preset keeps, and of that what is left with
-/// B-frames on (see [`Encoder::fit_tools`]).
+/// The share of AMF's balanced speed its quality preset keeps, and of that what is left with B-frames on (see
+/// [`Encoder::fit_tools`]).
 const AMF_QUALITY_SHARE: f64 = 0.5;
 const AMF_BFRAMES_SHARE: f64 = 0.6;
 
-/// The look-ahead of the presets where the GPU has it, in frames: enough for NVENC to pick the
-/// B-frames of each group (OBS takes as many); more costs graphics memory, which the game uses.
+/// The look-ahead of the presets where the GPU has it, in frames: enough for NVENC to pick the B-frames of each group
+/// (OBS takes as many); more costs graphics memory, which the game uses.
 pub const LOOKAHEAD_FRAMES: u32 = 8;
 
 #[derive(Debug, thiserror::Error)]
@@ -880,10 +777,7 @@ impl Registry {
                 return bad(format!("duplicate id `{}`", e.id));
             }
             if e.pixel_formats.is_empty() || e.containers.is_empty() {
-                return bad(format!(
-                    "`{}`: pixel_formats and containers must not be empty",
-                    e.id
-                ));
+                return bad(format!("`{}`: pixel_formats and containers must not be empty", e.id));
             }
             if e.kind == Kind::Software && e.vendor != Vendor::None {
                 return bad(format!("`{}`: a software encoder has no vendor", e.id));
@@ -915,10 +809,7 @@ impl Registry {
                     return bad(format!("`{}`.{}: enum without values", e.id, p.key));
                 }
                 if p.key.starts_with("rc.") {
-                    return bad(format!(
-                        "`{}`.{}: `rc.` keys are the rate control's",
-                        e.id, p.key
-                    ));
+                    return bad(format!("`{}`.{}: `rc.` keys are the rate control's", e.id, p.key));
                 }
                 if p.parse(&p.default.to_ffmpeg()).as_deref() != Some(&p.default.to_ffmpeg()) {
                     return bad(format!("`{}`.{}: bad default", e.id, p.key));

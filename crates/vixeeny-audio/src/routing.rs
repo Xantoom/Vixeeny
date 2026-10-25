@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! From the profile's `[audio]` section to tracks: "one source = one track" (default),
-//! "mix everything" into one, or the advanced mode where the user names the tracks.
+//! From the profile's `[audio]` section to tracks: "one source = one track" (default), "mix everything" into one, or
+//! the advanced mode where the user names the tracks.
 
 use vixeeny_common::config::Audio;
 
@@ -23,20 +23,12 @@ pub struct TrackPlan {
     pub channels: usize,
 }
 
-/// Gives each track the layout of its richest source, at most `max` channels (2 keeps every
-/// track stereo). `probe` tells the channels a source delivers when allowed up to `max`.
-pub fn assign_channels(
-    tracks: &mut [TrackPlan],
-    max: usize,
-    probe: impl Fn(&crate::SourceKind, usize) -> usize,
-) {
+/// Gives each track the layout of its richest source, at most `max` channels (2 keeps every track stereo). `probe`
+/// tells the channels a source delivers when allowed up to `max`.
+pub fn assign_channels(tracks: &mut [TrackPlan], max: usize, probe: impl Fn(&crate::SourceKind, usize) -> usize) {
     for track in tracks {
-        track.channels = track
-            .members
-            .iter()
-            .map(|m| probe(&m.source.kind, max))
-            .max()
-            .map_or(2, |n| crate::track_channels(n, max));
+        track.channels =
+            track.members.iter().map(|m| probe(&m.source.kind, max)).max().map_or(2, |n| crate::track_channels(n, max));
     }
 }
 
@@ -47,26 +39,13 @@ pub const CAPTURE_VOLUME: &str = "capture";
 
 /// The tracks of a profile, and the source names that could not be understood.
 pub fn plan_tracks(audio: &Audio) -> (Vec<TrackPlan>, Vec<String>) {
-    // A source's own volume, else that of its side: the microphone (`mic`) or what is recorded
-    // besides it (`capture`), as the settings window sets them.
+    // A source's own volume, else that of its side: the microphone (`mic`) or what is recorded besides it (`capture`),
+    // as the settings window sets them.
     let volume = |s: &SourceSpec| {
-        let side = if matches!(s.kind, crate::SourceKind::Microphone(_)) {
-            MIC_VOLUME
-        } else {
-            CAPTURE_VOLUME
-        };
-        audio
-            .volumes
-            .get(&s.name)
-            .or_else(|| audio.volumes.get(side))
-            .copied()
-            .unwrap_or(1.0)
-            .clamp(0.0, 4.0)
+        let side = if matches!(s.kind, crate::SourceKind::Microphone(_)) { MIC_VOLUME } else { CAPTURE_VOLUME };
+        audio.volumes.get(&s.name).or_else(|| audio.volumes.get(side)).copied().unwrap_or(1.0).clamp(0.0, 4.0)
     };
-    let member = |s: SourceSpec| TrackMember {
-        volume: volume(&s),
-        source: s,
-    };
+    let member = |s: SourceSpec| TrackMember { volume: volume(&s), source: s };
     let mut unknown = Vec::new();
     let parse_all = |texts: &[String], unknown: &mut Vec<String>| {
         let (good, bad) = crate::spec::parse_sources(texts);
@@ -80,11 +59,7 @@ pub fn plan_tracks(audio: &Audio) -> (Vec<TrackPlan>, Vec<String>) {
             if sources.is_empty() {
                 Vec::new()
             } else {
-                vec![TrackPlan {
-                    channels: 2,
-                    title: "Mix".into(),
-                    members: sources.into_iter().map(member).collect(),
-                }]
+                vec![TrackPlan { channels: 2, title: "Mix".into(), members: sources.into_iter().map(member).collect() }]
             }
         }
         "advanced" => audio
@@ -94,11 +69,7 @@ pub fn plan_tracks(audio: &Audio) -> (Vec<TrackPlan>, Vec<String>) {
                 let sources = parse_all(&t.sources, &mut unknown);
                 (!sources.is_empty()).then(|| TrackPlan {
                     channels: 2,
-                    title: if t.name.trim().is_empty() {
-                        sources[0].title()
-                    } else {
-                        t.name.trim().to_owned()
-                    },
+                    title: if t.name.trim().is_empty() { sources[0].title() } else { t.name.trim().to_owned() },
                     members: sources.into_iter().map(member).collect(),
                 })
             })
@@ -106,11 +77,7 @@ pub fn plan_tracks(audio: &Audio) -> (Vec<TrackPlan>, Vec<String>) {
         // "one_track_per_source", and anything unknown falls back to it.
         _ => parse_all(&audio.sources, &mut unknown)
             .into_iter()
-            .map(|s| TrackPlan {
-                channels: 2,
-                title: s.title(),
-                members: vec![member(s)],
-            })
+            .map(|s| TrackPlan { channels: 2, title: s.title(), members: vec![member(s)] })
             .collect(),
     };
 
@@ -141,10 +108,7 @@ mod tests {
 
     #[test]
     fn one_track_per_source_is_the_default() {
-        let (tracks, unknown) = plan_tracks(&audio(
-            "one_track_per_source",
-            &["mic", "system", "app:Spotify.exe"],
-        ));
+        let (tracks, unknown) = plan_tracks(&audio("one_track_per_source", &["mic", "system", "app:Spotify.exe"]));
         let titles: Vec<_> = tracks.iter().map(|t| t.title.as_str()).collect();
         assert_eq!(titles, ["Micro", "System", "Spotify"]);
         assert!(tracks.iter().all(|t| t.members.len() == 1));
@@ -162,22 +126,10 @@ mod tests {
     fn advanced_tracks_are_the_users_with_shared_sources() {
         let mut a = audio("advanced", &[]);
         a.tracks = vec![
-            AudioTrack {
-                name: "Tout".into(),
-                sources: vec!["mic".into(), "system".into(), "app:Spotify.exe".into()],
-            },
-            AudioTrack {
-                name: "Micro seul".into(),
-                sources: vec!["mic".into()],
-            },
-            AudioTrack {
-                name: String::new(),
-                sources: vec!["app:Spotify.exe".into()],
-            },
-            AudioTrack {
-                name: "vide".into(),
-                sources: vec!["nonsense".into()],
-            },
+            AudioTrack { name: "Tout".into(), sources: vec!["mic".into(), "system".into(), "app:Spotify.exe".into()] },
+            AudioTrack { name: "Micro seul".into(), sources: vec!["mic".into()] },
+            AudioTrack { name: String::new(), sources: vec!["app:Spotify.exe".into()] },
+            AudioTrack { name: "vide".into(), sources: vec!["nonsense".into()] },
         ];
         let (tracks, unknown) = plan_tracks(&a);
         let titles: Vec<_> = tracks.iter().map(|t| t.title.as_str()).collect();

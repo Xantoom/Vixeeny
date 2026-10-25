@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! What the popups (side strip, notification, recording widget) share: a borderless window whose
-//! only content is a DirectComposition tree, the routing of its messages, a mailbox for the
-//! messages of other threads, and the message loop.
+//! What the popups (side strip, notification, recording widget) share: a borderless window whose only content is a
+//! DirectComposition tree, the routing of its messages, a mailbox for the messages of other threads, and the message
+//! loop.
 //!
-//! Nothing presents frames the way a game does: a popup draws into its surfaces when something
-//! changes and the compositor runs its motion. A screen with a variable refresh rate keeps its
-//! rate while one is up.
+//! Nothing presents frames the way a game does: a popup draws into its surfaces when something changes and the
+//! compositor runs its motion. A screen with a variable refresh rate keeps its rate while one is up.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -19,13 +18,11 @@ use windows::Win32::Graphics::Dwm::DwmFlush;
 use windows::Win32::Graphics::Gdi::{
     GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, ValidateRect,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::{
-    SetFocus, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent,
-};
+use windows::Win32::UI::Input::KeyboardAndMouse::{SetFocus, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent};
 use windows::Win32::UI::WindowsAndMessaging::{
-    DestroyWindow, DispatchMessageW, GetMessageW, MA_NOACTIVATE, MSG, PostMessageW, SW_SHOW,
-    SW_SHOWNOACTIVATE, SetCursor, SetForegroundWindow, ShowWindow, TranslateMessage, WM_APP,
-    WM_DPICHANGED, WM_ERASEBKGND, WM_MOUSEACTIVATE, WM_PAINT,
+    DestroyWindow, DispatchMessageW, GetMessageW, MA_NOACTIVATE, MSG, PostMessageW, SW_SHOW, SW_SHOWNOACTIVATE,
+    SetCursor, SetForegroundWindow, ShowWindow, TranslateMessage, WM_APP, WM_DPICHANGED, WM_ERASEBKGND,
+    WM_MOUSEACTIVATE, WM_PAINT,
 };
 use windows::core::Result;
 
@@ -75,10 +72,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
 /// The low and high signed words of a message parameter (pointer coordinates).
 pub fn point(lparam: LPARAM) -> (f32, f32) {
     let v = lparam.0;
-    (
-        f32::from(v as u16 as i16),
-        f32::from((v >> 16) as u16 as i16),
-    )
+    (f32::from(v as u16 as i16), f32::from((v >> 16) as u16 as i16))
 }
 
 /// One popup window and its visual tree.
@@ -95,21 +89,14 @@ impl Popup {
         let hwnd = window::create_popup(wndproc, geometry, focus, capture)?;
         // SAFETY: plain creation calls for a window of this thread.
         let made = unsafe {
-            gfx.dcomp
-                .CreateTargetForHwnd(hwnd, true)
-                .and_then(|target| {
-                    let root = scene::visual(gfx)?;
-                    target.SetRoot(&root)?;
-                    Ok((target, root))
-                })
+            gfx.dcomp.CreateTargetForHwnd(hwnd, true).and_then(|target| {
+                let root = scene::visual(gfx)?;
+                target.SetRoot(&root)?;
+                Ok((target, root))
+            })
         };
         match made {
-            Ok((target, root)) => Ok(Self {
-                hwnd,
-                _target: target,
-                root,
-                focus,
-            }),
+            Ok((target, root)) => Ok(Self { hwnd, _target: target, root, focus }),
             Err(e) => {
                 // SAFETY: the window was created above by this thread.
                 let _ = unsafe { DestroyWindow(hwnd) };
@@ -118,27 +105,20 @@ impl Popup {
         }
     }
 
-    /// A window of its own (taskbar, Alt+Tab) over `geometry`, titled `title`; see
-    /// [`window::create_app_window`]. It takes the keyboard when shown.
+    /// A window of its own (taskbar, Alt+Tab) over `geometry`, titled `title`; see [`window::create_app_window`]. It
+    /// takes the keyboard when shown.
     pub fn new_window(gfx: &Gfx, geometry: PhysicalRect, title: &str) -> Result<Self> {
         let hwnd = window::create_app_window(wndproc, geometry, title)?;
         // SAFETY: plain creation calls for a window of this thread.
         let made = unsafe {
-            gfx.dcomp
-                .CreateTargetForHwnd(hwnd, true)
-                .and_then(|target| {
-                    let root = scene::visual(gfx)?;
-                    target.SetRoot(&root)?;
-                    Ok((target, root))
-                })
+            gfx.dcomp.CreateTargetForHwnd(hwnd, true).and_then(|target| {
+                let root = scene::visual(gfx)?;
+                target.SetRoot(&root)?;
+                Ok((target, root))
+            })
         };
         match made {
-            Ok((target, root)) => Ok(Self {
-                hwnd,
-                _target: target,
-                root,
-                focus: Focus::Take,
-            }),
+            Ok((target, root)) => Ok(Self { hwnd, _target: target, root, focus: Focus::Take }),
             Err(e) => {
                 // SAFETY: the window was created above by this thread.
                 let _ = unsafe { DestroyWindow(hwnd) };
@@ -153,8 +133,8 @@ impl Popup {
         HANDLERS.with(|h| h.borrow_mut().insert(key(self.hwnd), handler));
     }
 
-    /// Shows the window once what was committed so far is on the compositor: it appears with
-    /// its content. One that activates takes the keyboard.
+    /// Shows the window once what was committed so far is on the compositor: it appears with its content. One that
+    /// activates takes the keyboard.
     pub fn show(&self, gfx: &Gfx) -> Result<()> {
         // SAFETY: plain calls on a window of this thread.
         unsafe {
@@ -178,8 +158,8 @@ impl Popup {
         window::set_cloak(self.hwnd, true);
     }
 
-    /// Takes the window off the screen until the next [`Popup::show`]: unlike [`Popup::hide`],
-    /// it no longer takes the clicks where it was.
+    /// Takes the window off the screen until the next [`Popup::show`]: unlike [`Popup::hide`], it no longer takes the
+    /// clicks where it was.
     pub fn withdraw(&self) {
         window::set_cloak(self.hwnd, true);
         // SAFETY: plain call on a window of this thread.
@@ -236,70 +216,45 @@ pub fn passive(msg: u32) -> Option<LRESULT> {
 
 /// The part of the monitor nearest to `p` that the taskbar and the docked bars leave free.
 pub fn work_area_at(p: POINT) -> Option<RECT> {
-    let mut info = MONITORINFO {
-        cbSize: size_of::<MONITORINFO>() as u32,
-        ..Default::default()
-    };
+    let mut info = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
     // SAFETY: plain calls; `info` is a valid, sized out-pointer.
     unsafe {
         let monitor = MonitorFromPoint(p, MONITOR_DEFAULTTONEAREST);
-        GetMonitorInfoW(monitor, &mut info)
-            .as_bool()
-            .then_some(info.rcWork)
+        GetMonitorInfoW(monitor, &mut info).as_bool().then_some(info.rcWork)
     }
 }
 
-/// The top-left corner that keeps a `size` window at `at` inside `area` (pinned to its top-left
-/// corner when larger).
+/// The top-left corner that keeps a `size` window at `at` inside `area` (pinned to its top-left corner when larger).
 pub fn keep_inside(at: (i32, i32), size: (i32, i32), area: RECT) -> (i32, i32) {
     let fit = |v: i32, len: i32, lo: i32, hi: i32| v.min(hi - len).max(lo);
-    (
-        fit(at.0, size.0, area.left, area.right),
-        fit(at.1, size.1, area.top, area.bottom),
-    )
+    (fit(at.0, size.0, area.left, area.right), fit(at.1, size.1, area.top, area.bottom))
 }
 
-/// Shows the system's context menu of `items` under the pointer, for the window `owner`, the
-/// last item set apart (a "Close"), in the dark or light theme. Returns the chosen item. The
-/// window that had the keyboard gets it back unless an item was chosen.
+/// Shows the system's context menu of `items` under the pointer, for the window `owner`, the last item set apart (a
+/// "Close"), in the dark or light theme. Returns the chosen item. The window that had the keyboard gets it back unless
+/// an item was chosen.
 pub fn context_menu(owner: HWND, items: &[String], dark: bool) -> Option<usize> {
     use windows::Win32::UI::WindowsAndMessaging::{
-        AppendMenuW, CreatePopupMenu, DestroyMenu, GetCursorPos, GetForegroundWindow, MF_SEPARATOR,
-        MF_STRING, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, WM_NULL,
+        AppendMenuW, CreatePopupMenu, DestroyMenu, GetCursorPos, GetForegroundWindow, MF_SEPARATOR, MF_STRING,
+        TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, WM_NULL,
     };
     menu_theme(dark);
-    // SAFETY: plain menu calls; the menu is destroyed before returning, the strings outlive the
-    // calls that read them.
+    // SAFETY: plain menu calls; the menu is destroyed before returning, the strings outlive the calls that read them.
     unsafe {
         let menu = CreatePopupMenu().ok()?;
-        let labels: Vec<windows::core::HSTRING> =
-            items.iter().map(std::convert::Into::into).collect();
+        let labels: Vec<windows::core::HSTRING> = items.iter().map(std::convert::Into::into).collect();
         for (i, label) in labels.iter().enumerate() {
             if i + 1 == labels.len() && i > 0 {
                 let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
             }
-            let _ = AppendMenuW(
-                menu,
-                MF_STRING,
-                i + 1,
-                windows::core::PCWSTR(label.as_ptr()),
-            );
+            let _ = AppendMenuW(menu, MF_STRING, i + 1, windows::core::PCWSTR(label.as_ptr()));
         }
         let mut at = POINT::default();
         let _ = GetCursorPos(&mut at);
         // The menu closes on a click elsewhere only when its window is in the foreground.
         let before = GetForegroundWindow();
         let _ = SetForegroundWindow(owner);
-        let chosen = TrackPopupMenu(
-            menu,
-            TPM_RETURNCMD | TPM_RIGHTBUTTON,
-            at.x,
-            at.y,
-            None,
-            owner,
-            None,
-        )
-        .0 as usize;
+        let chosen = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, at.x, at.y, None, owner, None).0 as usize;
         let _ = PostMessageW(Some(owner), WM_NULL, WPARAM(0), LPARAM(0));
         let _ = DestroyMenu(menu);
         if chosen == 0 && !before.is_invalid() {
@@ -309,9 +264,8 @@ pub fn context_menu(owner: HWND, items: &[String], dark: bool) -> Option<usize> 
     }
 }
 
-/// Puts the menus of this process in the dark or light theme. Windows only exposes this through
-/// two unnamed functions of uxtheme (`SetPreferredAppMode`, `FlushMenuThemes`, Windows 10 1903
-/// and later); without them the menus stay light.
+/// Puts the menus of this process in the dark or light theme. Windows only exposes this through two unnamed functions
+/// of uxtheme (`SetPreferredAppMode`, `FlushMenuThemes`, Windows 10 1903 and later); without them the menus stay light.
 fn menu_theme(dark: bool) {
     use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
     type SetMode = unsafe extern "system" fn(i32) -> i32;
@@ -338,8 +292,8 @@ pub fn set_pointer(p: Pointer) {
     unsafe { SetCursor(Some(window::cursor(p))) };
 }
 
-/// The receiving end of a mailbox: a message-only window of this thread. Mail sent from any
-/// thread is handed to its callback here, on a turn of the message loop.
+/// The receiving end of a mailbox: a message-only window of this thread. Mail sent from any thread is handed to its
+/// callback here, on a turn of the message loop.
 pub struct Mailbox {
     hwnd: HWND,
 }
@@ -360,10 +314,7 @@ pub struct Sender<T> {
 
 impl<T> Clone for Sender<T> {
     fn clone(&self) -> Self {
-        Self {
-            tx: self.tx.clone(),
-            hwnd: self.hwnd,
-        }
+        Self { tx: self.tx.clone(), hwnd: self.hwnd }
     }
 }
 
@@ -374,15 +325,7 @@ impl<T: Send> Sender<T> {
             return false;
         }
         // SAFETY: plain call; a window that is gone makes it fail, nothing else.
-        unsafe {
-            PostMessageW(
-                Some(HWND(self.hwnd as *mut _)),
-                WM_MAIL,
-                WPARAM(0),
-                LPARAM(0),
-            )
-        }
-        .is_ok()
+        unsafe { PostMessageW(Some(HWND(self.hwnd as *mut _)), WM_MAIL, WPARAM(0), LPARAM(0)) }.is_ok()
     }
 }
 
@@ -400,13 +343,7 @@ pub fn mailbox<T: Send + 'static>(on_mail: impl Fn(T) + 'static) -> Result<(Mail
         Some(LRESULT(0))
     });
     HANDLERS.with(|h| h.borrow_mut().insert(key(hwnd), handler));
-    Ok((
-        Mailbox { hwnd },
-        Sender {
-            tx,
-            hwnd: key(hwnd),
-        },
-    ))
+    Ok((Mailbox { hwnd }, Sender { tx, hwnd: key(hwnd) }))
 }
 
 /// Runs the message loop of this thread while `keep` says so (asked after every message).

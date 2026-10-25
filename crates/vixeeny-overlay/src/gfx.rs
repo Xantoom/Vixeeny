@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The devices (Direct3D 11 → Direct2D → DirectComposition, DirectWrite for text) and a small
-//! drawing API over a Direct2D context: rounded boxes, text, icons, shadows, bitmaps. The editor
-//! and the popups (side strip, notification, recording widget) draw with it.
+//! The devices (Direct3D 11 → Direct2D → DirectComposition, DirectWrite for text) and a small drawing API over a
+//! Direct2D context: rounded boxes, text, icons, shadows, bitmaps. The editor and the popups (side strip, notification,
+//! recording widget) draw with it.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -11,39 +11,32 @@ use windows::Win32::Foundation::{E_INVALIDARG, HMODULE, POINT, RECT};
 use windows::Win32::Graphics::Direct2D::Common::{
     D2D_RECT_F, D2D_SIZE_U, D2D1_ALPHA_MODE, D2D1_ALPHA_MODE_IGNORE, D2D1_ALPHA_MODE_PREMULTIPLIED,
     D2D1_BEZIER_SEGMENT, D2D1_COLOR_F, D2D1_COMPOSITE_MODE_SOURCE_OVER, D2D1_FIGURE_BEGIN_FILLED,
-    D2D1_FIGURE_END_CLOSED, D2D1_FIGURE_END_OPEN, D2D1_FILL_MODE_WINDING, D2D1_GRADIENT_STOP,
-    D2D1_PIXEL_FORMAT,
+    D2D1_FIGURE_END_CLOSED, D2D1_FIGURE_END_OPEN, D2D1_FILL_MODE_WINDING, D2D1_GRADIENT_STOP, D2D1_PIXEL_FORMAT,
 };
 use windows::Win32::Graphics::Direct2D::{
-    CLSID_D2D1Shadow, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_BITMAP_OPTIONS_NONE,
-    D2D1_BITMAP_OPTIONS_TARGET, D2D1_BITMAP_PROPERTIES1, D2D1_DEVICE_CONTEXT_OPTIONS_NONE,
-    D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_ELLIPSE, D2D1_EXTEND_MODE_CLAMP,
-    D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_GAMMA_2_2, D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC,
-    D2D1_INTERPOLATION_MODE_LINEAR, D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
-    D2D1_LAYER_OPTIONS1_NONE, D2D1_LAYER_PARAMETERS1, D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES,
-    D2D1_PROPERTY_TYPE_FLOAT, D2D1_PROPERTY_TYPE_VECTOR4, D2D1_ROUNDED_RECT,
-    D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION, D2D1_SHADOW_PROP_COLOR,
-    D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, D2D1CreateFactory, ID2D1Bitmap1, ID2D1Brush, ID2D1Device,
-    ID2D1DeviceContext, ID2D1Factory1, ID2D1Geometry, ID2D1Image, ID2D1Layer, ID2D1PathGeometry,
-    ID2D1RenderTarget, ID2D1SolidColorBrush,
+    CLSID_D2D1Shadow, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_BITMAP_OPTIONS_NONE, D2D1_BITMAP_OPTIONS_TARGET,
+    D2D1_BITMAP_PROPERTIES1, D2D1_DEVICE_CONTEXT_OPTIONS_NONE, D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_ELLIPSE,
+    D2D1_EXTEND_MODE_CLAMP, D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_GAMMA_2_2,
+    D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC, D2D1_INTERPOLATION_MODE_LINEAR,
+    D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR, D2D1_LAYER_OPTIONS1_NONE, D2D1_LAYER_PARAMETERS1,
+    D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES, D2D1_PROPERTY_TYPE_FLOAT, D2D1_PROPERTY_TYPE_VECTOR4, D2D1_ROUNDED_RECT,
+    D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION, D2D1_SHADOW_PROP_COLOR, D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE,
+    D2D1CreateFactory, ID2D1Bitmap1, ID2D1Brush, ID2D1Device, ID2D1DeviceContext, ID2D1Factory1, ID2D1Geometry,
+    ID2D1Image, ID2D1Layer, ID2D1PathGeometry, ID2D1RenderTarget, ID2D1SolidColorBrush,
 };
-use windows::Win32::Graphics::Direct3D::{
-    D3D_DRIVER_TYPE, D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP,
-};
+use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE, D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP};
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAP_READ,
-    D3D11_MAPPED_SUBRESOURCE, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
-    D3D11CreateDevice, ID3D11Device, ID3D11Texture2D,
+    D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE,
+    D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING, D3D11CreateDevice, ID3D11Device, ID3D11Texture2D,
 };
 use windows::Win32::Graphics::DirectComposition::{
     DCompositionCreateDevice2, IDCompositionDesktopDevice, IDCompositionSurface,
 };
 use windows::Win32::Graphics::DirectWrite::{
-    DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-    DWRITE_FONT_WEIGHT, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD,
-    DWRITE_LINE_SPACING_METHOD_UNIFORM, DWRITE_PARAGRAPH_ALIGNMENT_CENTER,
-    DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_TEXT_METRICS,
-    DWRITE_WORD_WRAPPING_NO_WRAP, DWRITE_WORD_WRAPPING_WRAP, DWriteCreateFactory, IDWriteFactory,
+    DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT,
+    DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_LINE_SPACING_METHOD_UNIFORM,
+    DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_LEADING,
+    DWRITE_TEXT_METRICS, DWRITE_WORD_WRAPPING_NO_WRAP, DWRITE_WORD_WRAPPING_WRAP, DWriteCreateFactory, IDWriteFactory,
     IDWriteFactory5, IDWriteFontCollection, IDWriteTextLayout,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
@@ -70,12 +63,7 @@ pub fn color(c: Rgba) -> D2D1_COLOR_F {
 
 /// `(x, y, w, h)` → a Direct2D rectangle.
 pub fn rect(x: f32, y: f32, w: f32, h: f32) -> D2D_RECT_F {
-    D2D_RECT_F {
-        left: x,
-        top: y,
-        right: x + w,
-        bottom: y + h,
-    }
+    D2D_RECT_F { left: x, top: y, right: x + w, bottom: y + h }
 }
 
 fn v2(x: f32, y: f32) -> Vector2 {
@@ -129,8 +117,8 @@ pub(crate) fn d3d_device(driver: D3D_DRIVER_TYPE) -> Result<ID3D11Device> {
 /// The Inter font as a DirectWrite collection (from the bytes in the binary).
 fn inter_collection(dwrite: &IDWriteFactory) -> Result<IDWriteFontCollection> {
     let factory: IDWriteFactory5 = dwrite.cast()?;
-    // SAFETY: `INTER` is a static, so the memory the font file refers to lives as long as the
-    // process; the loader is registered before it is used.
+    // SAFETY: `INTER` is a static, so the memory the font file refers to lives as long as the process; the loader is
+    // registered before it is used.
     unsafe {
         let loader = factory.CreateInMemoryFontFileLoader()?;
         factory.RegisterFontFileLoader(&loader)?;
@@ -155,27 +143,24 @@ struct Offered(ID3D11Device);
 unsafe impl Send for Offered {}
 
 static OFFERED: std::sync::Mutex<Option<Offered>> = std::sync::Mutex::new(None);
-static WARMING: std::sync::Mutex<Option<std::thread::JoinHandle<Option<Offered>>>> =
-    std::sync::Mutex::new(None);
+static WARMING: std::sync::Mutex<Option<std::thread::JoinHandle<Option<Offered>>>> = std::sync::Mutex::new(None);
 
 thread_local! {
     /// The devices of this thread's windows, kept from one window to the next.
     static SHARED: RefCell<Option<std::rc::Rc<Gfx>>> = const { RefCell::new(None) };
 }
 
-/// Starts making the Direct3D device on a thread of its own (a tenth of a second), while the
-/// program starts: the first window does not wait for it.
+/// Starts making the Direct3D device on a thread of its own (a tenth of a second), while the program starts: the first
+/// window does not wait for it.
 pub fn warm() {
-    let made = std::thread::Builder::new()
-        .name("gfx-warm".into())
-        .spawn(|| hardware_device().ok().map(Offered));
+    let made = std::thread::Builder::new().name("gfx-warm".into()).spawn(|| hardware_device().ok().map(Offered));
     if let (Ok(handle), Ok(mut warming)) = (made, WARMING.lock()) {
         *warming = Some(handle);
     }
 }
 
-/// A device already made (the one that read the frozen screens): the windows of this thread
-/// use it rather than making their own, unless they have one.
+/// A device already made (the one that read the frozen screens): the windows of this thread use it rather than making
+/// their own, unless they have one.
 pub fn offer_device(device: ID3D11Device) {
     if SHARED.with(|s| s.borrow().as_ref().is_some_and(|g| g.alive())) {
         return;
@@ -197,8 +182,8 @@ impl Gfx {
         Self::with_device(hardware_device()?)
     }
 
-    /// This thread's devices: made once (from the device offered or warmed, if any) and kept
-    /// for the next windows; made again if the graphics card was reset.
+    /// This thread's devices: made once (from the device offered or warmed, if any) and kept for the next windows; made
+    /// again if the graphics card was reset.
     pub fn shared() -> Result<std::rc::Rc<Self>> {
         if let Some(gfx) = SHARED.with(|s| s.borrow().clone())
             && gfx.alive()
@@ -217,8 +202,8 @@ impl Gfx {
         Ok(gfx)
     }
 
-    /// Gives back what the graphics card and the system keep for this process while nothing
-    /// is on screen; the next drawing takes again what it needs. For a process that waits.
+    /// Gives back what the graphics card and the system keep for this process while nothing is on screen; the next
+    /// drawing takes again what it needs. For a process that waits.
     pub fn trim(&self) {
         // SAFETY: plain calls; nothing is being drawn (the caller shows nothing).
         unsafe {
@@ -245,53 +230,29 @@ impl Gfx {
         let dxgi: IDXGIDevice = d3d.cast()?;
         // SAFETY: plain factory and device creation on live objects.
         let (factory, d2d, dc, dcomp, dwrite) = unsafe {
-            let factory: ID2D1Factory1 =
-                D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
+            let factory: ID2D1Factory1 = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
             let d2d: ID2D1Device = factory.CreateDevice(&dxgi)?;
             let dc = d2d.CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE)?;
             let dcomp: IDCompositionDesktopDevice = DCompositionCreateDevice2(&d2d)?;
             let dwrite: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
             (factory, d2d, dc, dcomp, dwrite)
         };
-        let inter = inter_collection(&dwrite)
-            .map_err(|e| tracing::warn!("the Inter font is not available: {e}"))
-            .ok();
-        Ok(Self {
-            d3d,
-            factory,
-            d2d,
-            dc,
-            dcomp,
-            dwrite,
-            inter,
-            icons: RefCell::default(),
-        })
+        let inter = inter_collection(&dwrite).map_err(|e| tracing::warn!("the Inter font is not available: {e}")).ok();
+        Ok(Self { d3d, factory, d2d, dc, dcomp, dwrite, inter, icons: RefCell::default() })
     }
 
     /// A transparent surface of `w`×`h` pixels for drawn content.
     pub fn surface(&self, w: u32, h: u32) -> Result<IDCompositionSurface> {
         // SAFETY: plain creation call.
         unsafe {
-            self.dcomp.CreateSurface(
-                w.max(1),
-                h.max(1),
-                DXGI_FORMAT_B8G8R8A8_UNORM,
-                DXGI_ALPHA_MODE_PREMULTIPLIED,
-            )
+            self.dcomp.CreateSurface(w.max(1), h.max(1), DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_ALPHA_MODE_PREMULTIPLIED)
         }
     }
 
     /// An opaque surface (pictures).
     pub fn opaque_surface(&self, w: u32, h: u32) -> Result<IDCompositionSurface> {
         // SAFETY: plain creation call.
-        unsafe {
-            self.dcomp.CreateSurface(
-                w.max(1),
-                h.max(1),
-                DXGI_FORMAT_B8G8R8A8_UNORM,
-                DXGI_ALPHA_MODE_IGNORE,
-            )
-        }
+        unsafe { self.dcomp.CreateSurface(w.max(1), h.max(1), DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_ALPHA_MODE_IGNORE) }
     }
 
     /// Draws the whole of `surface` (`w`×`h`), cleared first.
@@ -302,15 +263,10 @@ impl Gfx {
         h: u32,
         f: impl FnOnce(&Canvas<'_>) -> Result<()>,
     ) -> Result<()> {
-        let update = RECT {
-            left: 0,
-            top: 0,
-            right: w.max(1) as i32,
-            bottom: h.max(1) as i32,
-        };
+        let update = RECT { left: 0, top: 0, right: w.max(1) as i32, bottom: h.max(1) as i32 };
         let mut offset = POINT::default();
-        // SAFETY: `update` lies inside the surface; the context returned is only used until
-        // `EndDraw`, which is always called.
+        // SAFETY: `update` lies inside the surface; the context returned is only used until `EndDraw`, which is always
+        // called.
         let dc: ID2D1DeviceContext = unsafe { surface.BeginDraw(Some(&update), &mut offset)? };
         // SAFETY: plain state calls on the context DirectComposition gave.
         unsafe {
@@ -327,11 +283,7 @@ impl Gfx {
     }
 
     /// A picture: `img`'s `(x, y, w, h)` part, 1:1.
-    pub fn picture(
-        &self,
-        img: &RgbaImage,
-        part: (u32, u32, u32, u32),
-    ) -> Result<IDCompositionSurface> {
+    pub fn picture(&self, img: &RgbaImage, part: (u32, u32, u32, u32)) -> Result<IDCompositionSurface> {
         let (_, _, w, h) = part;
         let surface = self.opaque_surface(w, h)?;
         let bitmap = self.bitmap(img, part)?;
@@ -365,24 +317,15 @@ impl Gfx {
             return Err(E_INVALIDARG.into());
         }
         let props = D2D1_BITMAP_PROPERTIES1 {
-            pixelFormat: D2D1_PIXEL_FORMAT {
-                format,
-                alphaMode: alpha,
-            },
+            pixelFormat: D2D1_PIXEL_FORMAT { format, alphaMode: alpha },
             dpiX: 96.0,
             dpiY: 96.0,
             bitmapOptions: D2D1_BITMAP_OPTIONS_NONE,
             colorContext: std::mem::ManuallyDrop::new(None),
         };
-        let size = D2D_SIZE_U {
-            width: w,
-            height: h,
-        };
+        let size = D2D_SIZE_U { width: w, height: h };
         // SAFETY: `pixels` holds `h` rows `stride` bytes apart, each with `w` pixels (checked).
-        unsafe {
-            self.dc
-                .CreateBitmap(size, Some(pixels.as_ptr().cast()), stride, &props)
-        }
+        unsafe { self.dc.CreateBitmap(size, Some(pixels.as_ptr().cast()), stride, &props) }
     }
 
     /// `img`'s `(x, y, w, h)` part as a Direct2D bitmap (opaque).
@@ -391,13 +334,7 @@ impl Gfx {
         let stride = img.width * 4;
         let start = y as usize * stride as usize + x as usize * 4;
         let pixels = img.data.get(start..).unwrap_or_default();
-        self.new_bitmap(
-            (w, h),
-            stride,
-            pixels,
-            DXGI_FORMAT_R8G8B8A8_UNORM,
-            D2D1_ALPHA_MODE_IGNORE,
-        )
+        self.new_bitmap((w, h), stride, pixels, DXGI_FORMAT_R8G8B8A8_UNORM, D2D1_ALPHA_MODE_IGNORE)
     }
 
     fn format(
@@ -433,13 +370,11 @@ impl Gfx {
             format.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)?;
             if font == Font::Inter {
                 // The editor's own line metrics, so the field matches the drawn text.
-                let ascent = vixeeny_editor::text::font()
-                    .horizontal_line_metrics(size)
-                    .map_or(size * 0.95, |m| m.ascent);
+                let ascent =
+                    vixeeny_editor::text::font().horizontal_line_metrics(size).map_or(size * 0.95, |m| m.ascent);
                 format.SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, size * 1.25, ascent)?;
             }
-            self.dwrite
-                .CreateTextLayout(&wide, &format, 100_000.0, 100_000.0)
+            self.dwrite.CreateTextLayout(&wide, &format, 100_000.0, 100_000.0)
         }
     }
 
@@ -452,52 +387,31 @@ impl Gfx {
         Ok((m.widthIncludingTrailingWhitespace, m.height))
     }
 
-    /// `text` in the interface font at `size` pixels, wrapped at `width` (one line when it fits),
-    /// semi-bold or regular, with its size.
+    /// `text` in the interface font at `size` pixels, wrapped at `width` (one line when it fits), semi-bold or regular,
+    /// with its size.
     pub fn paragraph(&self, text: &str, size: f32, bold: bool, width: f32) -> Result<Paragraph> {
-        let weight = if bold {
-            DWRITE_FONT_WEIGHT_SEMI_BOLD
-        } else {
-            DWRITE_FONT_WEIGHT_NORMAL
-        };
+        let weight = if bold { DWRITE_FONT_WEIGHT_SEMI_BOLD } else { DWRITE_FONT_WEIGHT_NORMAL };
         let format = self.format(size, Font::Ui, weight)?;
         let wide: Vec<u16> = text.encode_utf16().collect();
         let mut m = DWRITE_TEXT_METRICS::default();
         // SAFETY: plain calls on live objects; the out-pointer is valid.
         let layout = unsafe {
             format.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP)?;
-            let layout = self
-                .dwrite
-                .CreateTextLayout(&wide, &format, width.max(1.0), 100_000.0)?;
+            let layout = self.dwrite.CreateTextLayout(&wide, &format, width.max(1.0), 100_000.0)?;
             layout.GetMetrics(&mut m)?;
             layout
         };
-        Ok(Paragraph {
-            layout,
-            width: m.widthIncludingTrailingWhitespace,
-            height: m.height,
-            lines: m.lineCount,
-        })
+        Ok(Paragraph { layout, width: m.widthIncludingTrailingWhitespace, height: m.height, lines: m.lineCount })
     }
 
     /// [`Gfx::paragraph`] on `max_lines` lines at most: a longer text is cut, ending with "…".
-    pub fn paragraph_lines(
-        &self,
-        text: &str,
-        size: f32,
-        bold: bool,
-        width: f32,
-        max_lines: u32,
-    ) -> Result<Paragraph> {
+    pub fn paragraph_lines(&self, text: &str, size: f32, bold: bool, width: f32, max_lines: u32) -> Result<Paragraph> {
         let whole = self.paragraph(text, size, bold, width)?;
         if whole.lines <= max_lines {
             return Ok(whole);
         }
         let cut = |chars: usize| {
-            let end = text
-                .char_indices()
-                .nth(chars)
-                .map_or(text.len(), |(i, _)| i);
+            let end = text.char_indices().nth(chars).map_or(text.len(), |(i, _)| i);
             format!("{}…", text[..end].trim_end())
         };
         // The most characters that still fit.
@@ -523,24 +437,12 @@ impl Gfx {
             }
         }
         let alpha = D2D1_ALPHA_MODE_PREMULTIPLIED;
-        self.new_bitmap(
-            (w, h),
-            w * 4,
-            &premultiplied,
-            DXGI_FORMAT_R8G8B8A8_UNORM,
-            alpha,
-        )
+        self.new_bitmap((w, h), w * 4, &premultiplied, DXGI_FORMAT_R8G8B8A8_UNORM, alpha)
     }
 
     /// A BGRA picture (opaque, `w`×`h`, rows packed) as a Direct2D bitmap.
     pub fn bgra_bitmap(&self, w: u32, h: u32, bgra: &[u8]) -> Result<ID2D1Bitmap1> {
-        self.new_bitmap(
-            (w, h),
-            w * 4,
-            bgra,
-            DXGI_FORMAT_B8G8R8A8_UNORM,
-            D2D1_ALPHA_MODE_IGNORE,
-        )
+        self.new_bitmap((w, h), w * 4, bgra, DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE)
     }
 
     /// Replaces the pixels of a bitmap made by [`Gfx::bgra_bitmap`] (same size).
@@ -557,8 +459,7 @@ impl Gfx {
         let (mut x, mut y) = (0.0, 0.0);
         let mut metrics = Default::default();
         // SAFETY: the out-pointers are valid.
-        let ok =
-            unsafe { layout.HitTestTextPosition(position, false, &mut x, &mut y, &mut metrics) };
+        let ok = unsafe { layout.HitTestTextPosition(position, false, &mut x, &mut y, &mut metrics) };
         if ok.is_ok() { x } else { 0.0 }
     }
 
@@ -590,11 +491,7 @@ impl Gfx {
                         }),
                     }
                 }
-                sink.EndFigure(if f.closed {
-                    D2D1_FIGURE_END_CLOSED
-                } else {
-                    D2D1_FIGURE_END_OPEN
-                });
+                sink.EndFigure(if f.closed { D2D1_FIGURE_END_CLOSED } else { D2D1_FIGURE_END_OPEN });
             }
             sink.Close()?;
             Ok(geometry)
@@ -602,12 +499,7 @@ impl Gfx {
     }
 
     /// Draws off screen into a `w`×`h` bitmap and returns its premultiplied BGRA pixels (tests).
-    pub fn render(
-        &self,
-        w: u32,
-        h: u32,
-        f: impl FnOnce(&Canvas<'_>) -> Result<()>,
-    ) -> Result<Vec<u8>> {
+    pub fn render(&self, w: u32, h: u32, f: impl FnOnce(&Canvas<'_>) -> Result<()>) -> Result<Vec<u8>> {
         let props = |options| D2D1_BITMAP_PROPERTIES1 {
             pixelFormat: D2D1_PIXEL_FORMAT {
                 format: DXGI_FORMAT_B8G8R8A8_UNORM,
@@ -618,13 +510,10 @@ impl Gfx {
             bitmapOptions: options,
             colorContext: std::mem::ManuallyDrop::new(None),
         };
-        let size = D2D_SIZE_U {
-            width: w,
-            height: h,
-        };
+        let size = D2D_SIZE_U { width: w, height: h };
         let dc = &self.dc;
-        // SAFETY: the bitmaps are created, drawn and read on this thread; the mapped memory is
-        // read within `Map`/`Unmap`, row by row within `pitch × h`.
+        // SAFETY: the bitmaps are created, drawn and read on this thread; the mapped memory is read within
+        // `Map`/`Unmap`, row by row within `pitch × h`.
         unsafe {
             let target = dc.CreateBitmap(size, None, 0, &props(D2D1_BITMAP_OPTIONS_TARGET))?;
             dc.SetTarget(&target);
@@ -642,16 +531,11 @@ impl Gfx {
     }
 }
 
-/// The pixels of `bitmap` (`bytes` per pixel), rows packed. Read through Direct3D, whose `Map`
-/// waits for the copy: Direct2D's could hand over rows the copy had not written yet (seen on
-/// the software renderer under load).
-pub(crate) fn read_back(
-    bitmap: &ID2D1Bitmap1,
-    (w, h): (u32, u32),
-    bytes: usize,
-) -> Result<Vec<u8>> {
-    // SAFETY: a staging copy of the bitmap's own texture, on its device; the mapped memory is
-    // read within `Map`/`Unmap`, row by row within `RowPitch × h`.
+/// The pixels of `bitmap` (`bytes` per pixel), rows packed. Read through Direct3D, whose `Map` waits for the copy:
+/// Direct2D's could hand over rows the copy had not written yet (seen on the software renderer under load).
+pub(crate) fn read_back(bitmap: &ID2D1Bitmap1, (w, h): (u32, u32), bytes: usize) -> Result<Vec<u8>> {
+    // SAFETY: a staging copy of the bitmap's own texture, on its device; the mapped memory is read within
+    // `Map`/`Unmap`, row by row within `RowPitch × h`.
     unsafe {
         let texture: ID3D11Texture2D = bitmap.GetSurface()?.cast()?;
         let device = texture.GetDevice()?;
@@ -664,8 +548,7 @@ pub(crate) fn read_back(
         desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
         let mut staging = None;
         device.CreateTexture2D(&desc, None, Some(&raw mut staging))?;
-        let staging = staging
-            .ok_or_else(|| windows::core::Error::from(windows::Win32::Foundation::E_FAIL))?;
+        let staging = staging.ok_or_else(|| windows::core::Error::from(windows::Win32::Foundation::E_FAIL))?;
         context.CopyResource(&staging, &texture);
         let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
         context.Map(&staging, 0, D3D11_MAP_READ, 0, Some(&raw mut mapped))?;
@@ -711,11 +594,7 @@ impl Canvas<'_> {
 
     pub fn fill_round(&self, r: D2D_RECT_F, radius: f32, c: Rgba) -> Result<()> {
         let brush = self.brush(c)?;
-        let rounded = D2D1_ROUNDED_RECT {
-            rect: r,
-            radiusX: radius,
-            radiusY: radius,
-        };
+        let rounded = D2D1_ROUNDED_RECT { rect: r, radiusX: radius, radiusY: radius };
         // SAFETY: plain drawing call.
         unsafe { self.dc.FillRoundedRectangle(&rounded, &brush) };
         Ok(())
@@ -726,12 +605,7 @@ impl Canvas<'_> {
         let brush = self.brush(c)?;
         let half = width / 2.0;
         let rounded = D2D1_ROUNDED_RECT {
-            rect: D2D_RECT_F {
-                left: r.left + half,
-                top: r.top + half,
-                right: r.right - half,
-                bottom: r.bottom - half,
-            },
+            rect: D2D_RECT_F { left: r.left + half, top: r.top + half, right: r.right - half, bottom: r.bottom - half },
             radiusX: (radius - half).max(0.0),
             radiusY: (radius - half).max(0.0),
         };
@@ -742,11 +616,7 @@ impl Canvas<'_> {
 
     pub fn fill_circle(&self, cx: f32, cy: f32, radius: f32, c: Rgba) -> Result<()> {
         let brush = self.brush(c)?;
-        let e = D2D1_ELLIPSE {
-            point: v2(cx, cy),
-            radiusX: radius,
-            radiusY: radius,
-        };
+        let e = D2D1_ELLIPSE { point: v2(cx, cy), radiusX: radius, radiusY: radius };
         // SAFETY: plain drawing call.
         unsafe { self.dc.FillEllipse(&e, &brush) };
         Ok(())
@@ -756,11 +626,7 @@ impl Canvas<'_> {
     pub fn stroke_circle(&self, cx: f32, cy: f32, radius: f32, width: f32, c: Rgba) -> Result<()> {
         let brush = self.brush(c)?;
         let r = radius - width / 2.0;
-        let e = D2D1_ELLIPSE {
-            point: v2(cx, cy),
-            radiusX: r,
-            radiusY: r,
-        };
+        let e = D2D1_ELLIPSE { point: v2(cx, cy), radiusX: r, radiusY: r };
         // SAFETY: plain drawing call.
         unsafe { self.dc.DrawEllipse(&e, &brush, width, None) };
         Ok(())
@@ -785,12 +651,7 @@ impl Canvas<'_> {
                 (r.right - r.left).max(0.0),
                 (r.bottom - r.top).max(0.0),
             )?;
-            self.dc.DrawTextLayout(
-                v2(r.left, r.top),
-                &layout,
-                &brush,
-                D2D1_DRAW_TEXT_OPTIONS_NONE,
-            );
+            self.dc.DrawTextLayout(v2(r.left, r.top), &layout, &brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
         }
         Ok(())
     }
@@ -800,8 +661,7 @@ impl Canvas<'_> {
         let brush = self.brush(c)?;
         // SAFETY: plain drawing call.
         unsafe {
-            self.dc
-                .DrawTextLayout(v2(x, y), layout, &brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
+            self.dc.DrawTextLayout(v2(x, y), layout, &brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
         }
         Ok(())
     }
@@ -826,8 +686,7 @@ impl Canvas<'_> {
 
     /// The soft shadow of a rounded box (`blur` as in CSS, `dy` down).
     pub fn shadow(&self, r: D2D_RECT_F, radius: f32, blur: f32, dy: f32, c: Rgba) -> Result<()> {
-        // SAFETY: the context's target is switched to a command list and back; the effect reads
-        // the closed list.
+        // SAFETY: the context's target is switched to a command list and back; the effect reads the closed list.
         unsafe {
             let list = self.dc.CreateCommandList()?;
             let target = self.dc.GetTarget()?;
@@ -836,14 +695,7 @@ impl Canvas<'_> {
             self.dc.SetTarget(&list);
             self.dc.SetTransform(&Matrix3x2::identity());
             let brush = self.brush(Rgba([0.0, 0.0, 0.0, 1.0]))?;
-            self.dc.FillRoundedRectangle(
-                &D2D1_ROUNDED_RECT {
-                    rect: r,
-                    radiusX: radius,
-                    radiusY: radius,
-                },
-                &brush,
-            );
+            self.dc.FillRoundedRectangle(&D2D1_ROUNDED_RECT { rect: r, radiusX: radius, radiusY: radius }, &brush);
             self.dc.SetTarget(&target);
             self.dc.SetTransform(&old);
             list.Close()?;
@@ -859,11 +711,7 @@ impl Canvas<'_> {
             for v in c.0 {
                 rgba.extend_from_slice(&v.to_le_bytes());
             }
-            effect.SetValue(
-                D2D1_SHADOW_PROP_COLOR.0 as u32,
-                D2D1_PROPERTY_TYPE_VECTOR4,
-                &rgba,
-            )?;
+            effect.SetValue(D2D1_SHADOW_PROP_COLOR.0 as u32, D2D1_PROPERTY_TYPE_VECTOR4, &rgba)?;
             let output = effect.GetOutput()?;
             self.dc.DrawImage(
                 &output,
@@ -880,14 +728,7 @@ impl Canvas<'_> {
     pub fn pixels(&self, bitmap: &ID2D1Bitmap1, r: D2D_RECT_F) -> Result<()> {
         // SAFETY: plain drawing call.
         unsafe {
-            self.dc.DrawBitmap(
-                bitmap,
-                Some(&r),
-                1.0,
-                D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
-                None,
-                None,
-            );
+            self.dc.DrawBitmap(bitmap, Some(&r), 1.0, D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR, None, None);
         }
         Ok(())
     }
@@ -896,31 +737,20 @@ impl Canvas<'_> {
     pub fn picture(&self, bitmap: &ID2D1Bitmap1, r: D2D_RECT_F) -> Result<()> {
         // SAFETY: plain drawing call.
         unsafe {
-            self.dc.DrawBitmap(
-                bitmap,
-                Some(&r),
-                1.0,
-                D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC,
-                None,
-                None,
-            );
+            self.dc.DrawBitmap(bitmap, Some(&r), 1.0, D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC, None, None);
         }
         Ok(())
     }
 
     /// Clips what follows to the rounded box `r` until [`Canvas::pop_layer`].
     pub fn push_round_clip(&self, r: D2D_RECT_F, radius: f32) -> Result<()> {
-        // SAFETY: the geometry is created on the context's factory and kept by the layer until
-        // `pop_layer`.
+        // SAFETY: the geometry is created on the context's factory and kept by the layer until `pop_layer`.
         unsafe {
-            let mask = self
-                .gfx
-                .factory
-                .CreateRoundedRectangleGeometry(&D2D1_ROUNDED_RECT {
-                    rect: r,
-                    radiusX: radius,
-                    radiusY: radius,
-                })?;
+            let mask = self.gfx.factory.CreateRoundedRectangleGeometry(&D2D1_ROUNDED_RECT {
+                rect: r,
+                radiusX: radius,
+                radiusY: radius,
+            })?;
             let mask: ID2D1Geometry = mask.cast()?;
             let params = D2D1_LAYER_PARAMETERS1 {
                 contentBounds: rect(-1e6, -1e6, 2e6, 2e6),
@@ -952,37 +782,18 @@ impl Canvas<'_> {
         to: (f32, f32),
         stops: &[(f32, Rgba)],
     ) -> Result<()> {
-        let stops: Vec<D2D1_GRADIENT_STOP> = stops
-            .iter()
-            .map(|(position, c)| D2D1_GRADIENT_STOP {
-                position: *position,
-                color: color(*c),
-            })
-            .collect();
+        let stops: Vec<D2D1_GRADIENT_STOP> =
+            stops.iter().map(|(position, c)| D2D1_GRADIENT_STOP { position: *position, color: color(*c) }).collect();
         // SAFETY: plain creation and drawing calls.
         unsafe {
             let target: &ID2D1RenderTarget = self.dc;
-            let collection = target.CreateGradientStopCollection(
-                &stops,
-                D2D1_GAMMA_2_2,
-                D2D1_EXTEND_MODE_CLAMP,
-            )?;
+            let collection = target.CreateGradientStopCollection(&stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP)?;
             let brush = self.dc.CreateLinearGradientBrush(
-                &D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
-                    startPoint: v2(from.0, from.1),
-                    endPoint: v2(to.0, to.1),
-                },
+                &D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES { startPoint: v2(from.0, from.1), endPoint: v2(to.0, to.1) },
                 None,
                 &collection,
             )?;
-            self.dc.FillRoundedRectangle(
-                &D2D1_ROUNDED_RECT {
-                    rect: r,
-                    radiusX: radius,
-                    radiusY: radius,
-                },
-                &brush,
-            );
+            self.dc.FillRoundedRectangle(&D2D1_ROUNDED_RECT { rect: r, radiusX: radius, radiusY: radius }, &brush);
         }
         Ok(())
     }
@@ -991,8 +802,6 @@ impl Canvas<'_> {
 /// An opaque 1×1 surface of colour `c`, to be scaled into rectangles by its visual.
 pub fn solid(gfx: &Gfx, c: Rgba) -> Result<IDCompositionSurface> {
     let surface = gfx.surface(1, 1)?;
-    gfx.draw(&surface, 1, 1, |canvas| {
-        canvas.fill_rect(rect(0.0, 0.0, 1.0, 1.0), c)
-    })?;
+    gfx.draw(&surface, 1, 1, |canvas| canvas.fill_rect(rect(0.0, 0.0, 1.0, 1.0), c))?;
     Ok(surface)
 }

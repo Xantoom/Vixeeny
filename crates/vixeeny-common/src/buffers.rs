@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Frame-sized byte buffers handed back once used, so that a stream of frames reuses the same
-//! memory instead of asking the system for megabytes (and faulting them in) at every frame.
+//! Frame-sized byte buffers handed back once used, so that a stream of frames reuses the same memory instead of asking
+//! the system for megabytes (and faulting them in) at every frame.
 
 use std::sync::{Arc, Mutex};
 
-/// Spare buffers kept: what one frame in flight and one being converted need. More would only
-/// hold memory after a burst.
+/// Spare buffers kept: what one frame in flight and one being converted need. More would only hold memory after a
+/// burst.
 const SPARE: usize = 2;
 
 /// Shared between the producer (`take`) and the consumer (`give`); cloning shares the pool.

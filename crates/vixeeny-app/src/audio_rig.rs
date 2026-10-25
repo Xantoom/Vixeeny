@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The audio side of a recording: the sources (one capture per distinct source, even when
-//! several tracks use it), one mixer per track, and the pump that moves finished blocks to the
-//! recorder. Called from the recording thread, a few times per second.
+//! The audio side of a recording: the sources (one capture per distinct source, even when several tracks use it), one
+//! mixer per track, and the pump that moves finished blocks to the recorder. Called from the recording thread, a few
+//! times per second.
 
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use vixeeny_audio::WasapiSource as OsSource;
-use vixeeny_audio::{
-    AudioChunk, AudioSink, AudioSource, Mixer, SourceEvent, SourceSpec, TrackPlan,
-};
+use vixeeny_audio::{AudioChunk, AudioSink, AudioSource, Mixer, SourceEvent, SourceSpec, TrackPlan};
 use vixeeny_common::config::Config;
 use vixeeny_encode::recorder::Recorder;
 
@@ -40,8 +38,8 @@ struct TrackRt {
     members: Vec<usize>,
 }
 
-/// Noise reduction of one microphone source. The filter holds a little audio inside, so output
-/// samples are placed on the timeline by counting them from where the input stream began.
+/// Noise reduction of one microphone source. The filter holds a little audio inside, so output samples are placed on
+/// the timeline by counting them from where the input stream began.
 struct Denoise {
     filter: vixeeny_encode::denoise::Denoiser,
     /// Time of the first sample of the current continuous stretch, nanoseconds.
@@ -60,12 +58,7 @@ fn frames_ns(frames: i64) -> i64 {
 impl Denoise {
     fn new() -> Option<Self> {
         match vixeeny_encode::denoise::Denoiser::new(12.0, -45.0) {
-            Ok(filter) => Some(Self {
-                filter,
-                base_ns: 0,
-                in_frames: 0,
-                out_frames: 0,
-            }),
+            Ok(filter) => Some(Self { filter, base_ns: 0, in_frames: 0, out_frames: 0 }),
             Err(e) => {
                 tracing::warn!("microphone noise reduction is not available: {e}");
                 None
@@ -127,10 +120,7 @@ impl Rig {
                 members.push(index);
             }
             let volumes: Vec<f32> = track.members.iter().map(|m| m.volume).collect();
-            tracks.push(TrackRt {
-                mixer: Mixer::with_channels(&volumes, 0, track.channels),
-                members,
-            });
+            tracks.push(TrackRt { mixer: Mixer::with_channels(&volumes, 0, track.channels), members });
         }
         let mut sources: Vec<(SourceSpec, OsSource)> = wanted
             .into_iter()
@@ -141,10 +131,7 @@ impl Rig {
             })
             .collect();
         for (i, (spec, source)) in sources.iter_mut().enumerate() {
-            let sink = ChannelSink {
-                source: i,
-                tx: tx.clone(),
-            };
+            let sink = ChannelSink { source: i, tx: tx.clone() };
             if let Err(e) = source.start(Box::new(sink)) {
                 tracing::warn!("audio source `{}` did not start: {e}", spec.name);
             }
@@ -157,14 +144,7 @@ impl Rig {
                     .flatten()
             })
             .collect();
-        Self {
-            denoise,
-            sources,
-            rx,
-            tracks,
-            origin,
-            notice,
-        }
+        Self { denoise, sources, rx, tracks, origin, notice }
     }
 
     /// Moves what arrived into the mixers and the final blocks to the recorder.
@@ -189,19 +169,13 @@ impl Rig {
                 }
                 Msg::Event(source, SourceEvent::Lost(reason)) => {
                     // The track stays silent until the source returns.
-                    let name = self
-                        .sources
-                        .get(source)
-                        .map_or("?", |(s, _)| s.name.as_str());
+                    let name = self.sources.get(source).map_or("?", |(s, _)| s.name.as_str());
                     tracing::warn!("audio source `{name}` lost: {reason}");
                     let text = format!("{name}: {reason}");
                     crate::toast::notify(&self.notice, &Toast::Failed(Failed::Audio, text));
                 }
                 Msg::Event(source, SourceEvent::Back) => {
-                    let name = self
-                        .sources
-                        .get(source)
-                        .map_or("?", |(s, _)| s.name.as_str());
+                    let name = self.sources.get(source).map_or("?", |(s, _)| s.name.as_str());
                     tracing::info!("audio source `{name}` is back");
                 }
             }

@@ -48,17 +48,12 @@ pub struct Mismatch {
     pub what: String,
 }
 
-/// Looks `name` up in the encoder's private options, then in the generic codec options. When
-/// `unit` is given, looks for a constant of that unit instead.
-fn find_option(
-    codec: &ffmpeg_next::Codec,
-    name: &str,
-    unit: Option<&CStr>,
-) -> Option<*const ffi::AVOption> {
+/// Looks `name` up in the encoder's private options, then in the generic codec options. When `unit` is given, looks for
+/// a constant of that unit instead.
+fn find_option(codec: &ffmpeg_next::Codec, name: &str, unit: Option<&CStr>) -> Option<*const ffi::AVOption> {
     let name = CString::new(name).ok()?;
-    // SAFETY: `priv_class` is either null or a static class; `avcodec_get_class` returns a
-    // static class. `av_opt_find` with FAKE_OBJ only reads the class through the pointer to
-    // the class pointer we pass, which lives for the call.
+    // SAFETY: `priv_class` is either null or a static class; `avcodec_get_class` returns a static class. `av_opt_find`
+    // with FAKE_OBJ only reads the class through the pointer to the class pointer we pass, which lives for the call.
     unsafe {
         let mut classes: Vec<*const ffi::AVClass> = Vec::new();
         let private = (*codec.as_ptr()).priv_class;
@@ -83,20 +78,14 @@ fn find_option(
     None
 }
 
-/// Compares the registry with the encoders of the linked FFmpeg (`ffmpeg -h encoder=…`): every
-/// option, enum value, preset option and pixel format must exist. Software encoders must be
-/// built in; hardware ones must be when `require_hardware` (the build ships them all),
-/// otherwise they are skipped when absent.
+/// Compares the registry with the encoders of the linked FFmpeg (`ffmpeg -h encoder=…`): every option, enum value,
+/// preset option and pixel format must exist. Software encoders must be built in; hardware ones must be when
+/// `require_hardware` (the build ships them all), otherwise they are skipped when absent.
 pub fn verify(registry: &Registry, require_hardware: bool) -> Vec<Mismatch> {
     let _ = ffmpeg_next::init();
     let mut out = Vec::new();
     for e in registry.encoders() {
-        let mut bad = |what: String| {
-            out.push(Mismatch {
-                encoder: e.id.clone(),
-                what,
-            })
-        };
+        let mut bad = |what: String| out.push(Mismatch { encoder: e.id.clone(), what });
         let Some(codec) = encoder::find_by_name(&e.ffmpeg_encoder) else {
             if e.kind == Kind::Software || require_hardware {
                 bad(format!("encoder `{}` is not built in", e.ffmpeg_encoder));
@@ -105,10 +94,7 @@ pub fn verify(registry: &Registry, require_hardware: bool) -> Vec<Mismatch> {
         };
         for p in &e.params {
             let Some(option) = find_option(&codec, &p.ffmpeg_option, None) else {
-                bad(format!(
-                    "param `{}`: no option `{}`",
-                    p.key, p.ffmpeg_option
-                ));
+                bad(format!("param `{}`: no option `{}`", p.key, p.ffmpeg_option));
                 continue;
             };
             if p.kind != ParamType::Enum {
@@ -126,10 +112,7 @@ pub fn verify(registry: &Registry, require_hardware: bool) -> Vec<Mismatch> {
                     continue; // never written
                 }
                 if find_option(&codec, value, Some(unit)).is_none() {
-                    bad(format!(
-                        "param `{}`: `{}` has no value `{value}`",
-                        p.key, p.ffmpeg_option
-                    ));
+                    bad(format!("param `{}`: `{}` has no value `{value}`", p.key, p.ffmpeg_option));
                 }
             }
         }

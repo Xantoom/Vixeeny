@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Hardware probing. The driver of every GPU is asked what its video encoder can do
-//! (codecs, 10-bit, 4:2:2 / 4:4:4, largest picture). Nothing is ever encoded: no heavy work
-//! happens outside a recording. A GPU whose driver cannot answer offers no hardware encoder;
-//! software encoders built into FFmpeg offer what the registry declares. The work is done by a
-//! [`Prober`], so it can be tested with fake adapters; the real one is `ffmpeg_probe`.
+//! Hardware probing. The driver of every GPU is asked what its video encoder can do (codecs, 10-bit, 4:2:2 / 4:4:4,
+//! largest picture). Nothing is ever encoded: no heavy work happens outside a recording. A GPU whose driver cannot
+//! answer offers no hardware encoder; software encoders built into FFmpeg offer what the registry declares. The work is
+//! done by a [`Prober`], so it can be tested with fake adapters; the real one is `ffmpeg_probe`.
 //!
-//! The probe runs in a child process (`vixeeny-app --probe`, see [`run_child`]) so that a driver
-//! crash cannot take the app down; its result is cached in `hw_cache.toml`.
+//! The probe runs in a child process (`vixeeny-app --probe`, see [`run_child`]) so that a driver crash cannot take the
+//! app down; its result is cached in `hw_cache.toml`.
 
 use std::io::Read;
 use std::path::Path;
@@ -62,14 +61,14 @@ pub struct EncoderProbe {
     /// The tools of the GPU's encoder for this codec, when its driver describes them.
     #[serde(default)]
     pub tools: Option<Tools>,
-    /// The largest picture (width, height) the GPU's encoder takes, when its driver says
-    /// (H.264 stops at 4096 on NVIDIA and AMD, HEVC too on AMD's oldest engines).
+    /// The largest picture (width, height) the GPU's encoder takes, when its driver says (H.264 stops at 4096 on NVIDIA
+    /// and AMD, HEVC too on AMD's oldest engines).
     #[serde(default)]
     pub max: Option<(u32, u32)>,
 }
 
-/// The coding tools a GPU's encoder has for one codec, as its driver describes them (NVENC's
-/// and AMF's capability queries; oneVPL describes none of them).
+/// The coding tools a GPU's encoder has for one codec, as its driver describes them (NVENC's and AMF's capability
+/// queries; oneVPL describes none of them).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Tools {
     /// The most B-frames between two reference frames (0: none, as HEVC on Pascal;
@@ -77,19 +76,17 @@ pub struct Tools {
     pub max_bframes: u32,
     /// The middle B-frame of a group can serve as a reference.
     pub bframe_ref_middle: bool,
-    /// The look-ahead (NVENC, where it also picks how many B-frames each group takes) or the
-    /// pre-analysis (AMF).
+    /// The look-ahead (NVENC, where it also picks how many B-frames each group takes) or the pre-analysis (AMF).
     pub lookahead: bool,
     /// The temporal adaptive quantization.
     pub temporal_aq: bool,
-    /// AMD and Intel: frames of 1080p a second the media engine keeps up with at its default
-    /// speed, as measured on the slowest chip of its generation. 0: not known (NVENC's speeds
-    /// are per codec, in the registry).
+    /// AMD and Intel: frames of 1080p a second the media engine keeps up with at its default speed, as measured on the
+    /// slowest chip of its generation. 0: not known (NVENC's speeds are per codec, in the registry).
     #[serde(default)]
     pub engine_fps: u32,
-    /// AMF: the macroblocks (16 × 16) a second its driver says the engine keeps up with at the
-    /// speed, balanced and quality presets, then the quality one with 2 B-frames (0: not
-    /// said). More precise than [`Tools::engine_fps`], which stands in for it.
+    /// AMF: the macroblocks (16 × 16) a second its driver says the engine keeps up with at the speed, balanced and
+    /// quality presets, then the quality one with 2 B-frames (0: not said). More precise than [`Tools::engine_fps`],
+    /// which stands in for it.
     #[serde(default)]
     pub amf_throughput: [u64; 4],
     /// NVENC: the encoders of the GPU (2 or more split a large frame between them).
@@ -103,8 +100,8 @@ pub struct Tools {
     pub generation: NvencGeneration,
 }
 
-/// The NVENC generations whose speeds differ (NVENC Application Note): Turing and Ampere encode
-/// at about the same pace, Ada (the first with AV1) and Blackwell (the first with 4:2:2) faster.
+/// The NVENC generations whose speeds differ (NVENC Application Note): Turing and Ampere encode at about the same pace,
+/// Ada (the first with AV1) and Blackwell (the first with 4:2:2) faster.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NvencGeneration {
     #[default]
@@ -128,15 +125,13 @@ pub struct ProbeResult {
 impl ProbeResult {
     /// Whether `encoder` opened with this format on some GPU.
     pub fn supports(&self, encoder: &str, depth: u8, chroma: Chroma, hdr: bool) -> bool {
-        self.encoders.iter().filter(|e| e.id == encoder).any(|e| {
-            e.formats
-                .iter()
-                .any(|f| f.depth == depth && f.chroma == chroma && (!hdr || f.hdr))
-        })
+        self.encoders
+            .iter()
+            .filter(|e| e.id == encoder)
+            .any(|e| e.formats.iter().any(|f| f.depth == depth && f.chroma == chroma && (!hdr || f.hdr)))
     }
 
-    /// Whether `encoder` takes pictures of `size` on a GPU that has it (always when its
-    /// driver does not say how large).
+    /// Whether `encoder` takes pictures of `size` on a GPU that has it (always when its driver does not say how large).
     pub fn fits(&self, encoder: &str, (width, height): (u32, u32)) -> bool {
         self.encoders
             .iter()
@@ -146,16 +141,11 @@ impl ProbeResult {
 
     /// The tools of `encoder` on the first GPU that has it, when its driver describes them.
     pub fn tools(&self, encoder: &str) -> Option<Tools> {
-        self.encoders
-            .iter()
-            .find(|e| e.id == encoder && !e.formats.is_empty())
-            .and_then(|e| e.tools)
+        self.encoders.iter().find(|e| e.id == encoder && !e.formats.is_empty()).and_then(|e| e.tools)
     }
 
     pub fn is_available(&self, encoder: &str) -> bool {
-        self.encoders
-            .iter()
-            .any(|e| e.id == encoder && !e.formats.is_empty())
+        self.encoders.iter().any(|e| e.id == encoder && !e.formats.is_empty())
     }
 }
 
@@ -183,8 +173,8 @@ pub trait Prober {
     fn adapters(&self) -> Vec<Adapter>;
     /// Whether FFmpeg has `encoder` built in.
     fn built_in(&self, encoder: &Encoder) -> bool;
-    /// The encoders of `adapter`'s GPU as its driver describes them, one entry per codec. `Err`
-    /// when the driver cannot be asked.
+    /// The encoders of `adapter`'s GPU as its driver describes them, one entry per codec. `Err` when the driver cannot
+    /// be asked.
     fn driver_caps(&self, adapter: &Adapter) -> Result<Vec<DriverCaps>, String>;
 }
 
@@ -192,11 +182,9 @@ pub trait Prober {
 fn candidate_adapters<'a>(encoder: &Encoder, adapters: &'a [Adapter]) -> Vec<Option<&'a Adapter>> {
     match encoder.vendor {
         Vendor::None => vec![None],
-        Vendor::Nvidia | Vendor::Amd | Vendor::Intel => adapters
-            .iter()
-            .filter(|a| !a.software && a.vendor == encoder.vendor)
-            .map(Some)
-            .collect(),
+        Vendor::Nvidia | Vendor::Amd | Vendor::Intel => {
+            adapters.iter().filter(|a| !a.software && a.vendor == encoder.vendor).map(Some).collect()
+        }
     }
 }
 
@@ -220,31 +208,24 @@ fn described_formats(encoder: &Encoder, caps: &[DriverCaps]) -> Vec<FormatProbe>
         .collect()
 }
 
-/// A software encoder: what the registry declares (`cargo xtask verify-registry` checks it
-/// against FFmpeg), at any size.
+/// A software encoder: what the registry declares (`cargo xtask verify-registry` checks it against FFmpeg), at any
+/// size.
 fn declared_formats(encoder: &Encoder) -> Vec<FormatProbe> {
     encoder
         .pixel_formats
         .iter()
-        .map(|f| FormatProbe {
-            depth: f.depth,
-            chroma: f.chroma,
-            uhd: true,
-            hdr: encoder.hdr && f.depth >= 10,
-        })
+        .map(|f| FormatProbe { depth: f.depth, chroma: f.chroma, uhd: true, hdr: encoder.hdr && f.depth >= 10 })
         .collect()
 }
 
-/// What the answer of the probe depends on besides the machine: the way it probes (bump
-/// [`PROBE_REVISION`] when that changes), the encoders it knows (the registry) and the FFmpeg
-/// they are built into. A new version of Vixeeny that changes none of them keeps the cache.
+/// What the answer of the probe depends on besides the machine: the way it probes (bump [`PROBE_REVISION`] when that
+/// changes), the encoders it knows (the registry) and the FFmpeg they are built into. A new version of Vixeeny that
+/// changes none of them keeps the cache.
 pub fn identity() -> String {
     // FNV-1a: stable from one build to the next, unlike the standard hasher.
     let registry = crate::registry::REGISTRY
         .bytes()
-        .fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
-            (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
-        });
+        .fold(0xcbf2_9ce4_8422_2325_u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3));
     // SAFETY: a plain query of the linked library.
     let avcodec = unsafe { ffmpeg_next::ffi::avcodec_version() };
     format!("probe {PROBE_REVISION}, registry {registry:016x}, avcodec {avcodec}")
@@ -253,8 +234,8 @@ pub fn identity() -> String {
 /// The way the probe works: bumped when a change of it must run it again everywhere.
 pub const PROBE_REVISION: u32 = 6;
 
-/// Probes every encoder. `version` is what the answer depends on besides the machine (see
-/// [`identity`]), part of the cache key.
+/// Probes every encoder. `version` is what the answer depends on besides the machine (see [`identity`]), part of the
+/// cache key.
 pub fn probe(registry: &Registry, prober: &dyn Prober, version: &str) -> ProbeResult {
     let adapters = prober.adapters();
     // One question per GPU, whatever the number of its encoders.
@@ -298,23 +279,14 @@ pub fn probe(registry: &Registry, prober: &dyn Prober, version: &str) -> ProbeRe
             }
         }
     }
-    ProbeResult {
-        key: cache_key(&adapters, version),
-        adapters,
-        encoders,
-    }
+    ProbeResult { key: cache_key(&adapters, version), adapters, encoders }
 }
 
 /// The set {GPU, driver version, [`identity`]}: a new key means a new probe.
 pub fn cache_key(adapters: &[Adapter], version: &str) -> String {
     let mut parts: Vec<String> = adapters
         .iter()
-        .map(|a| {
-            format!(
-                "{:04x}:{:04x}:{}:{}",
-                a.vendor_id, a.device_id, a.name, a.driver_version
-            )
-        })
+        .map(|a| format!("{:04x}:{:04x}:{}:{}", a.vendor_id, a.device_id, a.name, a.driver_version))
         .collect();
     parts.sort();
     format!("vixeeny {version}; {}", parts.join("; "))
@@ -351,10 +323,7 @@ pub fn run_child(exe: &Path, timeout: Duration) -> Result<ProbeResult, ProbeErro
         .stderr(Stdio::null())
         .spawn()
         .map_err(ProbeError::Spawn)?;
-    let mut stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| ProbeError::Failed("no stdout".into()))?;
+    let mut stdout = child.stdout.take().ok_or_else(|| ProbeError::Failed("no stdout".into()))?;
     // The output ends when the child does: its reader wakes this thread then.
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
@@ -389,8 +358,7 @@ pub fn save_cache(path: &Path, result: &ProbeResult) -> Result<(), ProbeError> {
     std::fs::rename(&tmp, path).map_err(|e| ProbeError::Cache(e.to_string()))
 }
 
-/// The cache when it is current, else a fresh probe (`run`) which is then cached. `adapters`
-/// are the GPUs present now.
+/// The cache when it is current, else a fresh probe (`run`) which is then cached. `adapters` are the GPUs present now.
 pub fn cached_or_probe(
     path: &Path,
     adapters: &[Adapter],

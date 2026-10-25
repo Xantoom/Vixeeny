@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Hardware encoder probe. `vixeeny-app --probe` is the child process that asks the
-//! GPU drivers what their encoders can do and prints the result as TOML; `--probe-report` runs
-//! it (through the cache) and prints a readable report, for the 🧪 check against the vendor
-//! documentation.
+//! Hardware encoder probe. `vixeeny-app --probe` is the child process that asks the GPU drivers what their encoders can
+//! do and prints the result as TOML; `--probe-report` runs it (through the cache) and prints a readable report, for the
+//! 🧪 check against the vendor documentation.
 
 use std::time::Duration;
 
@@ -41,8 +40,7 @@ pub fn child() -> anyhow::Result<()> {
     use vixeeny_encode::ffmpeg_probe::FfmpegProber;
     let registry = Registry::builtin()?;
     let prober = FfmpegProber::new(adapters());
-    let result =
-        vixeeny_encode::probe::probe(&registry, &prober, &vixeeny_encode::probe::identity());
+    let result = vixeeny_encode::probe::probe(&registry, &prober, &vixeeny_encode::probe::identity());
     print!("{}", vixeeny_encode::probe::to_toml(&result)?);
     Ok(())
 }
@@ -54,12 +52,7 @@ pub fn current(force: bool) -> anyhow::Result<ProbeResult> {
         let _ = std::fs::remove_file(&path);
     }
     let exe = std::env::current_exe()?;
-    Ok(cached_or_probe(
-        &path,
-        &adapters(),
-        &vixeeny_encode::probe::identity(),
-        || run_child(&exe, TIMEOUT),
-    )?)
+    Ok(cached_or_probe(&path, &adapters(), &vixeeny_encode::probe::identity(), || run_child(&exe, TIMEOUT))?)
 }
 
 /// The probe result if the cache already holds it (no process is started).
@@ -69,8 +62,8 @@ pub fn cached() -> Option<ProbeResult> {
     vixeeny_encode::probe::load_cache(&path, &key)
 }
 
-/// `--warm-probe`: fills the cache when it is missing, so the first recording and the settings
-/// find the answer ready. The daemon starts it in the background at launch.
+/// `--warm-probe`: fills the cache when it is missing, so the first recording and the settings find the answer ready.
+/// The daemon starts it in the background at launch.
 pub fn warm() -> anyhow::Result<()> {
     current(false).map(|_| ())
 }
@@ -90,22 +83,14 @@ pub fn report(force: bool) -> anyhow::Result<()> {
             a.vendor_id,
             a.device_id,
             a.driver_version,
-            if a.software {
-                " (software renderer, not used)"
-            } else {
-                ""
-            }
+            if a.software { " (software renderer, not used)" } else { "" }
         );
     }
     println!("\nEncoders:");
     let registry = Registry::builtin()?;
     for e in &result.encoders {
-        let name = registry
-            .get(&e.id)
-            .map_or(e.id.as_str(), |r| r.display_name.as_str());
-        let on = e
-            .adapter
-            .map_or(String::new(), |i| format!(" (GPU index {i})"));
+        let name = registry.get(&e.id).map_or(e.id.as_str(), |r| r.display_name.as_str());
+        let on = e.adapter.map_or(String::new(), |i| format!(" (GPU index {i})"));
         println!("  {name}{on}");
         for f in &e.formats {
             println!(

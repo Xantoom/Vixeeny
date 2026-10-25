@@ -6,8 +6,8 @@ use std::path::Path;
 use ffmpeg_next::software::scaling;
 use ffmpeg_next::{codec, format, frame, media};
 
-/// RGBA pixels of a frame of `path` (width, height, bytes) at most `max_side` pixels on the long
-/// side, or `None` when the file has no video or cannot be decoded.
+/// RGBA pixels of a frame of `path` (width, height, bytes) at most `max_side` pixels on the long side, or `None` when
+/// the file has no video or cannot be decoded.
 pub fn video_thumbnail(path: &Path, max_side: u32) -> Option<(u32, u32, Vec<u8>)> {
     ffmpeg_next::init().ok()?;
     crate::ffmpeg_log::install();
@@ -39,20 +39,10 @@ fn scale(source: &frame::Video, max_side: u32) -> Option<(u32, u32, Vec<u8>)> {
         return None;
     }
     let ratio = (max_side as f32 / w.max(h) as f32).min(1.0);
-    let (tw, th) = (
-        ((w as f32 * ratio).round() as u32).max(1),
-        ((h as f32 * ratio).round() as u32).max(1),
-    );
-    let mut scaler = scaling::Context::get(
-        source.format(),
-        w,
-        h,
-        ffmpeg_next::format::Pixel::RGBA,
-        tw,
-        th,
-        scaling::Flags::AREA,
-    )
-    .ok()?;
+    let (tw, th) = (((w as f32 * ratio).round() as u32).max(1), ((h as f32 * ratio).round() as u32).max(1));
+    let mut scaler =
+        scaling::Context::get(source.format(), w, h, ffmpeg_next::format::Pixel::RGBA, tw, th, scaling::Flags::AREA)
+            .ok()?;
     let mut out = frame::Video::empty();
     scaler.run(source, &mut out).ok()?;
     // Rows may be padded: copy them one by one.

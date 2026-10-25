@@ -11,25 +11,22 @@
 //! ├─ scroll bar
 //! └─ toolbar · style panel · tip
 //! ```
-//! Rectangles are 1×1 solid surfaces scaled by their visual: moving the zone moves visuals, it
-//! draws nothing.
+//! Rectangles are 1×1 solid surfaces scaled by their visual: moving the zone moves visuals, it draws nothing.
 
 use std::cell::{Cell, RefCell};
 
 use vixeeny_editor::{Rect, RgbaImage};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::DirectComposition::{
-    DCOMPOSITION_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, DCOMPOSITION_BORDER_MODE_HARD,
-    IDCompositionAnimation, IDCompositionEffectGroup, IDCompositionSurface, IDCompositionTarget,
-    IDCompositionVisual, IDCompositionVisual2,
+    DCOMPOSITION_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, DCOMPOSITION_BORDER_MODE_HARD, IDCompositionAnimation,
+    IDCompositionEffectGroup, IDCompositionSurface, IDCompositionTarget, IDCompositionVisual, IDCompositionVisual2,
 };
 use windows::core::Result;
 use windows_numerics::Matrix3x2;
 
 use crate::gfx::Gfx;
 
-/// Largest side of one picture surface (textures are limited to 16384; smaller tiles also keep
-/// each upload short).
+/// Largest side of one picture surface (textures are limited to 16384; smaller tiles also keep each upload short).
 pub const TILE: u32 = 4096;
 /// Where a hidden visual goes.
 const PARKED: f32 = -1.0e6;
@@ -62,18 +59,13 @@ pub fn snap(r: &Rect) -> Px {
     (x0, y0, (x1 - x0).max(0.0), (y1 - y0).max(0.0))
 }
 
-/// The veil over `area` around `hole` (both in image pixels): top, bottom, left, right. Without a
-/// hole the top one covers everything.
+/// The veil over `area` around `hole` (both in image pixels): top, bottom, left, right. Without a hole the top one
+/// covers everything.
 pub fn veil_rects(area: Px, hole: Option<Px>) -> [Px; 4] {
     let (ax, ay, aw, ah) = area;
     let (ar, ab) = (ax + aw, ay + ah);
     let Some((hx, hy, hw, hh)) = hole else {
-        return [
-            area,
-            (0.0, 0.0, 0.0, 0.0),
-            (0.0, 0.0, 0.0, 0.0),
-            (0.0, 0.0, 0.0, 0.0),
-        ];
+        return [area, (0.0, 0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 0.0)];
     };
     let top_end = hy.clamp(ay, ab);
     let bottom_start = (hy + hh).clamp(ay, ab);
@@ -92,12 +84,7 @@ pub fn veil_rects(area: Px, hole: Option<Px>) -> [Px; 4] {
 pub fn border_rects(zone: Px, width: f32) -> [Px; 4] {
     let (x, y, w, h) = zone;
     let t = width.min(w / 2.0).min(h / 2.0).max(0.0);
-    [
-        (x, y, w, t),
-        (x, y + h - t, w, t),
-        (x, y + t, t, h - 2.0 * t),
-        (x + w - t, y + t, t, h - 2.0 * t),
-    ]
+    [(x, y, w, t), (x, y + h - t, w, t), (x, y + t, t, h - 2.0 * t), (x + w - t, y + t, t, h - 2.0 * t)]
 }
 
 /// The centres of the eight handles, clockwise from the top-left corner.
@@ -108,21 +95,15 @@ pub fn handle_centres(zone: Px) -> [(f32, f32); 8] {
     std::array::from_fn(|i| (x + w * fx[i], y + h * fy[i]))
 }
 
-/// The rising of a value from `from` to `to` over `seconds`, decelerating (1 − (1 − t)³), as an
-/// animation the compositor runs on its own.
+/// The rising of a value from `from` to `to` over `seconds`, decelerating (1 − (1 − t)³), as an animation the
+/// compositor runs on its own.
 pub fn ease_out(gfx: &Gfx, from: f32, to: f32, seconds: f64) -> Result<IDCompositionAnimation> {
     let d = seconds as f32;
     let delta = to - from;
     // SAFETY: plain calls on a new animation object.
     unsafe {
         let a = gfx.dcomp.CreateAnimation()?;
-        a.AddCubic(
-            0.0,
-            from,
-            3.0 * delta / d,
-            -3.0 * delta / (d * d),
-            delta / (d * d * d),
-        )?;
+        a.AddCubic(0.0, from, 3.0 * delta / d, -3.0 * delta / (d * d), delta / (d * d * d))?;
         a.End(seconds, to)?;
         Ok(a)
     }
@@ -145,8 +126,8 @@ pub fn visual(gfx: &Gfx) -> Result<IDCompositionVisual2> {
     unsafe { gfx.dcomp.CreateVisual() }
 }
 
-/// Adds `child` on top of `parent`'s children. (Without a reference visual, `insertAbove`
-/// false is what puts it above its siblings.)
+/// Adds `child` on top of `parent`'s children. (Without a reference visual, `insertAbove` false is what puts it above
+/// its siblings.)
 pub fn add(parent: &IDCompositionVisual2, child: &IDCompositionVisual2) -> Result<()> {
     // SAFETY: both visuals belong to the same device.
     unsafe { parent.AddVisual(child, false, None::<&IDCompositionVisual>) }
@@ -277,8 +258,7 @@ impl<L: PartialEq + Clone> Piece<L> {
             if motion {
                 effect.SetOpacity(&ease_out(gfx, 0.0, 1.0, seconds)?)?;
                 if rise != 0.0 {
-                    self.visual
-                        .SetOffsetY(&ease_out(gfx, y + rise, y, seconds)?)?;
+                    self.visual.SetOffsetY(&ease_out(gfx, y + rise, y, seconds)?)?;
                 }
             } else {
                 effect.SetOpacity2(1.0)?;
@@ -299,13 +279,7 @@ impl<L> Piece<L> {
             return Ok(());
         }
         // SAFETY: plain property calls with an animation of the same device.
-        unsafe {
-            if motion {
-                effect.SetOpacity(&ease_out(gfx, from, to, 0.15)?)
-            } else {
-                effect.SetOpacity2(to)
-            }
-        }
+        unsafe { if motion { effect.SetOpacity(&ease_out(gfx, from, to, 0.15)?) } else { effect.SetOpacity2(to) } }
     }
 }
 
@@ -316,20 +290,11 @@ pub struct Picture {
 
 impl Picture {
     pub fn new(gfx: &Gfx) -> Result<Self> {
-        Ok(Self {
-            visual: visual(gfx)?,
-        })
+        Ok(Self { visual: visual(gfx)? })
     }
 
     /// Shows `img`'s `part` with its top-left corner at `(x, y)`.
-    pub fn set(
-        &self,
-        gfx: &Gfx,
-        img: &RgbaImage,
-        part: (u32, u32, u32, u32),
-        x: f32,
-        y: f32,
-    ) -> Result<()> {
+    pub fn set(&self, gfx: &Gfx, img: &RgbaImage, part: (u32, u32, u32, u32), x: f32, y: f32) -> Result<()> {
         // SAFETY: plain tree calls on visuals of this device.
         unsafe { self.visual.RemoveAllVisuals()? };
         for tile in tiles(part) {
@@ -338,16 +303,10 @@ impl Picture {
             // SAFETY: plain property calls on a new visual.
             unsafe {
                 v.SetContent(&surface)?;
-                v.SetBitmapInterpolationMode(
-                    DCOMPOSITION_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
-                )?;
+                v.SetBitmapInterpolationMode(DCOMPOSITION_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR)?;
                 v.SetBorderMode(DCOMPOSITION_BORDER_MODE_HARD)?;
             }
-            set_offset(
-                &v,
-                x + (tile.0 - part.0) as f32,
-                y + (tile.1 - part.1) as f32,
-            )?;
+            set_offset(&v, x + (tile.0 - part.0) as f32, y + (tile.1 - part.1) as f32)?;
             add(&self.visual, &v)?;
         }
         Ok(())
@@ -442,9 +401,7 @@ impl Pane {
         let veil: [IDCompositionVisual2; 4] = match veil {
             [Some(a), Some(b), Some(c), Some(d)] => [a, b, c, d],
             _ => {
-                return Err(windows::core::Error::from_hresult(
-                    windows::Win32::Foundation::E_FAIL,
-                ));
+                return Err(windows::core::Error::from_hresult(windows::Win32::Foundation::E_FAIL));
             }
         };
         for v in &veil {
@@ -492,9 +449,7 @@ impl Pane {
             <[IDCompositionVisual2; 8]>::try_from(handles),
             <[IDCompositionVisual2; 4]>::try_from(outline),
         ) else {
-            return Err(windows::core::Error::from_hresult(
-                windows::Win32::Foundation::E_FAIL,
-            ));
+            return Err(windows::core::Error::from_hresult(windows::Win32::Foundation::E_FAIL));
         };
         Ok(Self {
             hwnd,
@@ -543,10 +498,7 @@ impl Pane {
     /// Whether `r` (image pixels), grown by `margin`, touches this window's area.
     pub fn sees(&self, r: Px, margin: f32) -> bool {
         let (x, y, w, h) = self.area_px();
-        r.0 - margin < x + w
-            && r.0 + r.2 + margin > x
-            && r.1 - margin < y + h
-            && r.1 + r.3 + margin > y
+        r.0 - margin < x + w && r.0 + r.2 + margin > x && r.1 - margin < y + h && r.1 + r.3 + margin > y
     }
 }
 

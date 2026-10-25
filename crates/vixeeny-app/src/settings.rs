@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The settings window, a process of its own (`vixeeny-app --settings`)
-//! so the recording hotkeys keep working while it is open. Changes are saved as soon as they stop
-//! for a moment, and the daemon is asked to reload.
+//! The settings window, a process of its own (`vixeeny-app --settings`) so the recording hotkeys keep working while it
+//! is open. Changes are saved as soon as they stop for a moment, and the daemon is asked to reload.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -30,16 +29,12 @@ pub fn spawn(updates: bool) -> anyhow::Result<()> {
     if updates {
         command.arg("--updates");
     }
-    command
-        .spawn()
-        .context("cannot start the settings window")?;
+    command.spawn().context("cannot start the settings window")?;
     Ok(())
 }
 
 fn load_config() -> Config {
-    vixeeny_common::paths::config_file()
-        .and_then(|path| Config::load(&path).ok())
-        .unwrap_or_default()
+    vixeeny_common::paths::config_file().and_then(|path| Config::load(&path).ok()).unwrap_or_default()
 }
 
 /// The settings file as this window last read or wrote it.
@@ -56,10 +51,7 @@ impl OnDisk {
     }
 
     fn read() -> Self {
-        Self {
-            stamp: Self::stamp(),
-            config: load_config(),
-        }
+        Self { stamp: Self::stamp(), config: load_config() }
     }
 
     /// Reads the file again if another program wrote it (one that cannot be read is ignored).
@@ -69,15 +61,13 @@ impl OnDisk {
             return;
         }
         self.stamp = stamp;
-        if let Some(config) =
-            vixeeny_common::paths::config_file().and_then(|path| Config::load(&path).ok())
-        {
+        if let Some(config) = vixeeny_common::paths::config_file().and_then(|path| Config::load(&path).ok()) {
             self.config = config;
         }
     }
 
-    /// Saves `ours` over what the file holds now: the changes made elsewhere since it was read
-    /// stay, unless `ours` changed the same settings.
+    /// Saves `ours` over what the file holds now: the changes made elsewhere since it was read stay, unless `ours`
+    /// changed the same settings.
     fn write(&mut self, ours: &Config) {
         let base = self.config.clone();
         self.refresh();
@@ -100,18 +90,13 @@ pub fn save(config: &Config) {
     }
     // The replay's folder exists from the moment the replay is on, not before.
     if config.replay.enabled {
-        vixeeny_common::paths::ready_dir(
-            &config.paths.replays,
-            vixeeny_common::paths::DEFAULT_REPLAYS,
-        );
+        vixeeny_common::paths::ready_dir(&config.paths.replays, vixeeny_common::paths::DEFAULT_REPLAYS);
     }
     let telling = std::thread::spawn(|| {
         let result = Endpoint::current_user().connect().and_then(|mut stream| {
             ipc::write_msg(&mut stream, &Hello::Control(ControlRequest::ReloadConfig))
                 .map_err(std::io::Error::other)?;
-            ipc::read_msg::<_, ipc::ControlReply>(&mut stream)
-                .map(|_| ())
-                .map_err(std::io::Error::other)
+            ipc::read_msg::<_, ipc::ControlReply>(&mut stream).map(|_| ()).map_err(std::io::Error::other)
         });
         if let Err(e) = result {
             tracing::debug!("the daemon was not told about the new settings: {e}");
@@ -135,9 +120,7 @@ fn finish_saving() {
 }
 
 fn update_state() -> UpdateState {
-    vixeeny_updater::state::file()
-        .map(|p| UpdateState::load(&p))
-        .unwrap_or_default()
+    vixeeny_updater::state::file().map(|p| UpdateState::load(&p)).unwrap_or_default()
 }
 
 /// What the update card says, from what the last check and download left.
@@ -153,13 +136,9 @@ fn update_view(lang: Lang) -> UpdateView {
             action: tr(Key::UpdateRestart, lang).into(),
         };
     }
-    // An error only matters while its version is still to be installed (a newer Vixeeny,
-    // installed since, by hand for instance, forgets it).
-    if let Some(error) = state
-        .error
-        .as_ref()
-        .filter(|_| state.newer_than(current).is_some())
-    {
+    // An error only matters while its version is still to be installed (a newer Vixeeny, installed since, by hand for
+    // instance, forgets it).
+    if let Some(error) = state.error.as_ref().filter(|_| state.newer_than(current).is_some()) {
         return UpdateView {
             stage: UpdateStage::Failed,
             title: tr(Key::UpdateFailedShort, lang).into(),
@@ -195,10 +174,7 @@ fn moment(unix: u64, lang: Lang) -> String {
     let offset = i64::from(vixeeny_platform::utc_offset_minutes()) * 60;
     let t = vixeeny_common::time::LocalTime::from_unix_utc(unix.saturating_add_signed(offset), 0);
     match lang {
-        Lang::Fr => format!(
-            "{:02}/{:02}/{} à {:02}:{:02}",
-            t.day, t.month, t.year, t.hour, t.minute
-        ),
+        Lang::Fr => format!("{:02}/{:02}/{} à {:02}:{:02}", t.day, t.month, t.year, t.hour, t.minute),
         _ => format!("{}, {:02}:{:02}", t.date(), t.hour, t.minute),
     }
 }
@@ -238,19 +214,14 @@ fn admin_state() -> vixeeny_settings::Admin {
     let protected = exe.parent().is_some_and(elevation::protected_install);
     match elevation::rights() {
         Rights::Standard => Admin::Hidden,
-        Rights::Elevated
-            if protected && elevation::task_starts(&exe.with_file_name("Vixeeny.exe")) =>
-        {
-            Admin::Granted
-        }
+        Rights::Elevated if protected && elevation::task_starts(&exe.with_file_name("Vixeeny.exe")) => Admin::Granted,
         Rights::Elevated | Rights::Limited => Admin::Missing { moves: !protected },
     }
 }
 
-/// The button of the administrator's rights. In Program Files, a Vixeeny program with them
-/// (Windows asks) gives them and starts Vixeeny again; in the user's folders, the installer,
-/// downloaded, puts Vixeeny in Program Files and gives them. This window closes once either
-/// runs.
+/// The button of the administrator's rights. In Program Files, a Vixeeny program with them (Windows asks) gives them
+/// and starts Vixeeny again; in the user's folders, the installer, downloaded, puts Vixeeny in Program Files and gives
+/// them. This window closes once either runs.
 fn grant_admin(handle: &PanelHandle, lang: Lang) {
     static BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     if BUSY.swap(true, std::sync::atomic::Ordering::Relaxed) {
@@ -284,17 +255,12 @@ fn start_granting(handle: &PanelHandle, lang: Lang) -> anyhow::Result<bool> {
             let percent = (done * 100).checked_div(total).unwrap_or(0);
             if percent != shown {
                 shown = percent;
-                handle.set_extra(
-                    tr(Key::SetAdminDownloading, lang).replace("{percent}", &percent.to_string()),
-                );
+                handle.set_extra(tr(Key::SetAdminDownloading, lang).replace("{percent}", &percent.to_string()));
             }
         })?;
         handle.set_extra(String::new());
         // For all users, without its pages: it moves Vixeeny and starts it again.
-        elevation::run_as_admin(
-            &setup.path,
-            "/ALLUSERS /SILENT /SUPPRESSMSGBOXES /NORESTART /NOCANCEL",
-        )
+        elevation::run_as_admin(&setup.path, "/ALLUSERS /SILENT /SUPPRESSMSGBOXES /NORESTART /NOCANCEL")
     };
     match started {
         Ok(()) => Ok(true),
@@ -309,16 +275,9 @@ fn megabytes(bytes: u64) -> String {
 
 /// Downloads with the progress on the card; the card then offers to restart.
 fn download_update(handle: PanelHandle, lang: Lang) {
-    let version = update_state()
-        .newer_than(env!("CARGO_PKG_VERSION"))
-        .map(|r| r.version.clone())
-        .unwrap_or_default();
+    let version = update_state().newer_than(env!("CARGO_PKG_VERSION")).map(|r| r.version.clone()).unwrap_or_default();
     let title = tr(Key::UpdateDownloading, lang).replace("{version}", &version);
-    handle.set_update(UpdateView {
-        stage: UpdateStage::Downloading,
-        title: title.clone(),
-        ..UpdateView::default()
-    });
+    handle.set_update(UpdateView { stage: UpdateStage::Downloading, title: title.clone(), ..UpdateView::default() });
     std::thread::spawn(move || {
         let mut shown = u64::MAX;
         let result = client::download(&mut |done, total| {
@@ -364,10 +323,7 @@ fn restart_for_update(handle: &PanelHandle, lang: Lang) {
 }
 
 fn about_lines(lang: Lang) -> Vec<Line> {
-    vec![Line {
-        text: tr(Key::AboutLicense, lang).into(),
-        detail: REPO.into(),
-    }]
+    vec![Line { text: tr(Key::AboutLicense, lang).into(), detail: REPO.into() }]
 }
 
 /// `--settings [--updates]`: the window, until it is closed.
@@ -383,13 +339,8 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
         return Ok(());
     };
     let look = look_of(&config);
-    let panel = SettingsPanel::new(
-        config,
-        vixeeny_platform::user_locale(),
-        env!("CARGO_PKG_VERSION"),
-        look,
-    )
-    .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let panel = SettingsPanel::new(config, vixeeny_platform::user_locale(), env!("CARGO_PKG_VERSION"), look)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
     panel.capture_keys();
     panel.set_audio_source(audio_devices);
     panel.set_machine_source(vixeeny_platform::machine::machine);
@@ -402,20 +353,15 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     start_probe_watch(&panel);
     let handle = panel.handle();
     panel.on_meter(meter(handle.clone()));
-    // The shortcuts the daemon could not register (it registers them again after each change).
-    // Windows tells when the settings file or the taken shortcuts change.
-    let (config_changed, taken_changed) =
-        (vixeeny_ui::bell::Bell::new(), vixeeny_ui::bell::Bell::new());
-    if let (Some(config_dir), Some(taken)) = (
-        vixeeny_common::paths::config_dir(),
-        vixeeny_common::paths::hotkeys_taken_file(),
-    ) && let Some(taken_dir) = taken.parent()
+    // The shortcuts the daemon could not register (it registers them again after each change). Windows tells when the
+    // settings file or the taken shortcuts change.
+    let (config_changed, taken_changed) = (vixeeny_ui::bell::Bell::new(), vixeeny_ui::bell::Bell::new());
+    if let (Some(config_dir), Some(taken)) =
+        (vixeeny_common::paths::config_dir(), vixeeny_common::paths::hotkeys_taken_file())
+        && let Some(taken_dir) = taken.parent()
     {
         let bells = [config_changed.clone(), taken_changed.clone()];
-        let watched =
-            vixeeny_platform::on_dir_change(&[config_dir, taken_dir.to_path_buf()], move |i| {
-                bells[i].ring()
-            });
+        let watched = vixeeny_platform::on_dir_change(&[config_dir, taken_dir.to_path_buf()], move |i| bells[i].ring());
         if !watched {
             tracing::warn!("settings: cannot watch the settings folders");
         }
@@ -435,13 +381,12 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     );
 
     let weak = panel.window().as_weak();
-    // Saved once the changes stop for a moment: a slider sends one per step, and each save
-    // makes the daemon reload. Closing the window saves what is left.
+    // Saved once the changes stop for a moment: a slider sends one per step, and each save makes the daemon reload.
+    // Closing the window saves what is left.
     let saving = vixeeny_ui::slint::Timer::default();
     let unsaved = Rc::new(RefCell::new(None::<Config>));
     let pending = Rc::clone(&unsaved);
-    // Others may write the file too: the window shows what they wrote and keeps it when it
-    // saves.
+    // Others may write the file too: the window shows what they wrote and keeps it when it saves.
     let file = Rc::new(RefCell::new(OnDisk::read()));
     panel.watch_config(
         {
@@ -462,17 +407,13 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     panel.on_change(move |config| {
         *pending.borrow_mut() = Some(config.clone());
         let (pending, writer) = (Rc::clone(&pending), Rc::clone(&writer));
-        saving.start(
-            vixeeny_ui::slint::TimerMode::SingleShot,
-            SAVE_DELAY,
-            move || {
-                if let Some(config) = pending.borrow_mut().take() {
-                    writer.borrow_mut().write(&config);
-                }
-            },
-        );
-        // Only when the look changes: dressing the window again (icon, title bar, Mica) on
-        // every change made the switches stutter.
+        saving.start(vixeeny_ui::slint::TimerMode::SingleShot, SAVE_DELAY, move || {
+            if let Some(config) = pending.borrow_mut().take() {
+                writer.borrow_mut().write(&config);
+            }
+        });
+        // Only when the look changes: dressing the window again (icon, title bar, Mica) on every change made the
+        // switches stutter.
         let look = look_of(config);
         if shown_look.replace(look) != look
             && let Some(w) = weak.upgrade()
@@ -492,9 +433,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
         let handle = handle.clone();
         let weak = panel.window().as_weak();
         panel.on_section(move |section| {
-            let lang = weak
-                .upgrade()
-                .map_or(lang, |_| crate::lang(&load_config().general.language));
+            let lang = weak.upgrade().map_or(lang, |_| crate::lang(&load_config().general.language));
             match section {
                 Section::About => {
                     handle.set_lines(about_lines(lang));
@@ -502,11 +441,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
                 }
                 Section::Updates => {
                     let checked = update_state().checked_at;
-                    let due = UpdateState {
-                        checked_at: checked,
-                        ..UpdateState::default()
-                    }
-                    .due(now());
+                    let due = UpdateState { checked_at: checked, ..UpdateState::default() }.due(now());
                     if due && client::ready().is_none() {
                         check_for_update(handle.clone(), lang);
                     } else {
@@ -579,16 +514,10 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
 
     // The sidebar shows when an update waits for a restart.
     panel.set_update(&update_view(lang));
-    panel.select_section(if open_updates {
-        Section::Updates
-    } else {
-        Section::General
-    });
+    panel.select_section(if open_updates { Section::Updates } else { Section::General });
     // A second launch finds the window by this mark and brings it forward.
     vixeeny_ui::theme::when_native(panel.window(), |handle| {
-        if let Err(e) =
-            vixeeny_platform::tag_window(vixeeny_platform::WindowId(handle), SETTINGS_TAG)
-        {
+        if let Err(e) = vixeeny_platform::tag_window(vixeeny_platform::WindowId(handle), SETTINGS_TAG) {
             tracing::warn!("{e}");
         }
     });
@@ -603,9 +532,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
 }
 
 fn now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs())
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }
 
 /// Light or dark by the setting (or the system), with the accent colour of the system.
@@ -617,13 +544,7 @@ pub fn look_of(config: &Config) -> vixeeny_ui::theme::Look {
 fn audio_devices() -> vixeeny_settings::AudioDevices {
     use vixeeny_settings::{AudioDevices, AudioEntry};
     let devices = |list: Vec<vixeeny_audio::DeviceInfo>| {
-        list.into_iter()
-            .map(|d| AudioEntry {
-                id: d.id,
-                name: d.name,
-                icon: None,
-            })
-            .collect()
+        list.into_iter().map(|d| AudioEntry { id: d.id, name: d.name, icon: None }).collect()
     };
     let (programs, games) = programs(vixeeny_audio::list_applications());
     AudioDevices {
@@ -646,50 +567,35 @@ const SHELL_PROGRAMS: &[&str] = &[
     "textinputhost.exe",
 ];
 
-/// The programs that can be recorded, once each (a browser has many processes): those with an
-/// audio session, and those with a window (a browser closes its audio process while silent).
-/// Named as their executable describes itself ("Spotify" rather than "Spotify.exe"), with
-/// their icon; those playing first, then by name. With them, those that look like games
-/// (executable names, lower case).
+/// The programs that can be recorded, once each (a browser has many processes): those with an audio session, and those
+/// with a window (a browser closes its audio process while silent). Named as their executable describes itself
+/// ("Spotify" rather than "Spotify.exe"), with their icon; those playing first, then by name. With them, those that
+/// look like games (executable names, lower case).
 fn programs(apps: Vec<vixeeny_audio::AppInfo>) -> (Vec<vixeeny_settings::AudioEntry>, Vec<String>) {
     use vixeeny_platform::games;
     let signals = games::GameSignals::read();
     let mut found = Vec::new();
-    let windowed = vixeeny_platform::top_level_windows()
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|w| {
-            let path = w.exe_path?;
-            let exe = path.rsplit(['\\', '/']).next()?.to_owned();
-            Some(vixeeny_audio::AppInfo {
-                pid: w.pid,
-                exe,
-                active: false,
-            })
-        });
+    let windowed = vixeeny_platform::top_level_windows().unwrap_or_default().into_iter().filter_map(|w| {
+        let path = w.exe_path?;
+        let exe = path.rsplit(['\\', '/']).next()?.to_owned();
+        Some(vixeeny_audio::AppInfo { pid: w.pid, exe, active: false })
+    });
     let mut seen = std::collections::HashSet::new();
     let mut entries: Vec<(bool, vixeeny_settings::AudioEntry)> = apps
         .into_iter()
         .chain(windowed)
         .filter(|a| {
             let exe = a.exe.to_ascii_lowercase();
-            !exe.is_empty()
-                && !exe.starts_with("vixeeny")
-                && !SHELL_PROGRAMS.contains(&exe.as_str())
+            !exe.is_empty() && !exe.starts_with("vixeeny") && !SHELL_PROGRAMS.contains(&exe.as_str())
         })
         .filter(|a| seen.insert(a.exe.to_ascii_lowercase()))
         .map(|a| {
             let path = vixeeny_platform::process_path(a.pid);
             let exe = a.exe.to_ascii_lowercase();
-            if !games::is_launcher(&exe)
-                && path.as_deref().is_some_and(|p| signals.installed_game(p))
-            {
+            if !games::is_launcher(&exe) && path.as_deref().is_some_and(|p| signals.installed_game(p)) {
                 found.push(exe);
             }
-            let meta = path
-                .as_deref()
-                .map(vixeeny_platform::exe_metadata)
-                .unwrap_or_default();
+            let meta = path.as_deref().map(vixeeny_platform::exe_metadata).unwrap_or_default();
             let name = meta
                 .file_description
                 .or(meta.product_name)
@@ -699,33 +605,21 @@ fn programs(apps: Vec<vixeeny_audio::AppInfo>) -> (Vec<vixeeny_settings::AudioEn
             let icon = path
                 .as_deref()
                 .and_then(|p| vixeeny_platform::exe_icon(p, 48))
-                .map(|(width, height, rgba)| vixeeny_settings::Icon {
-                    width,
-                    height,
-                    rgba: rgba.into(),
-                });
-            let entry = vixeeny_settings::AudioEntry {
-                id: a.exe,
-                name: name.trim().to_owned(),
-                icon,
-            };
+                .map(|(width, height, rgba)| vixeeny_settings::Icon { width, height, rgba: rgba.into() });
+            let entry = vixeeny_settings::AudioEntry { id: a.exe, name: name.trim().to_owned(), icon };
             (a.active, entry)
         })
         .collect();
-    entries.sort_by(|(a_on, a), (b_on, b)| {
-        b_on.cmp(a_on)
-            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-    });
+    entries
+        .sort_by(|(a_on, a), (b_on, b)| b_on.cmp(a_on).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
     (entries.into_iter().map(|(_, e)| e).collect(), found)
 }
 
-/// Measures the microphone the audio page shows the level of: a capture of it while the page
-/// is on screen, its loudest sample every 50 ms sent to the window when the bar would move
-/// (the window is drawn again for each level it is given).
+/// Measures the microphone the audio page shows the level of: a capture of it while the page is on screen, its loudest
+/// sample every 50 ms sent to the window when the bar would move (the window is drawn again for each level it is
+/// given).
 fn meter(handle: PanelHandle) -> impl Fn(Option<String>) {
-    use vixeeny_audio::{
-        AudioChunk, AudioSink, AudioSource, SourceEvent, SourceSpec, WasapiSource,
-    };
+    use vixeeny_audio::{AudioChunk, AudioSink, AudioSource, SourceEvent, SourceSpec, WasapiSource};
     /// Steps of the bar, one per decibel: a level that stays on the same step is not sent.
     const STEPS: f32 = 60.0;
     struct Level {
@@ -764,12 +658,7 @@ fn meter(handle: PanelHandle) -> impl Fn(Option<String>) {
             return;
         };
         let mut source = WasapiSource::new(spec.kind);
-        let sink = Level {
-            handle: handle.clone(),
-            peak: 0.0,
-            sent: std::time::Instant::now(),
-            shown: 0.0,
-        };
+        let sink = Level { handle: handle.clone(), peak: 0.0, sent: std::time::Instant::now(), shown: 0.0 };
         match source.start(Box::new(sink)) {
             Ok(()) => *running.borrow_mut() = Some(source),
             Err(e) => tracing::warn!("cannot measure the microphone: {e}"),
@@ -777,32 +666,24 @@ fn meter(handle: PanelHandle) -> impl Fn(Option<String>) {
     }
 }
 
-/// The thread telling the daemon to release or give back its shortcuts, one request after the
-/// other: they arrive in the order they were made.
-static PAUSES: Mutex<Option<(std::sync::mpsc::Sender<bool>, std::thread::JoinHandle<()>)>> =
-    Mutex::new(None);
+/// The thread telling the daemon to release or give back its shortcuts, one request after the other: they arrive in the
+/// order they were made.
+static PAUSES: Mutex<Option<(std::sync::mpsc::Sender<bool>, std::thread::JoinHandle<()>)>> = Mutex::new(None);
 /// The daemon's shortcuts were last asked to be released.
 static PAUSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Releases (or gives back) the global shortcuts of the daemon while a shortcut is recorded.
 fn pause_hotkeys(paused: bool) {
     PAUSED.store(paused, std::sync::atomic::Ordering::Relaxed);
-    let mut pauses = PAUSES
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut pauses = PAUSES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let (tx, _) = pauses.get_or_insert_with(|| {
         let (tx, rx) = std::sync::mpsc::channel::<bool>();
         let thread = std::thread::spawn(move || {
             for paused in rx {
                 let told = Endpoint::current_user().connect().and_then(|mut stream| {
-                    ipc::write_msg(
-                        &mut stream,
-                        &Hello::Control(ControlRequest::PauseHotkeys(paused)),
-                    )
-                    .map_err(std::io::Error::other)?;
-                    ipc::read_msg::<_, ipc::ControlReply>(&mut stream)
-                        .map(|_| ())
-                        .map_err(std::io::Error::other)
+                    ipc::write_msg(&mut stream, &Hello::Control(ControlRequest::PauseHotkeys(paused)))
+                        .map_err(std::io::Error::other)?;
+                    ipc::read_msg::<_, ipc::ControlReply>(&mut stream).map(|_| ()).map_err(std::io::Error::other)
                 });
                 if let Err(e) = told {
                     tracing::debug!("the daemon was not told about the shortcuts: {e}");
@@ -814,24 +695,21 @@ fn pause_hotkeys(paused: bool) {
     let _ = tx.send(paused);
 }
 
-/// Gives the daemon its shortcuts back if the window closes while one is recorded, and waits
-/// until it is told (before the process ends).
+/// Gives the daemon its shortcuts back if the window closes while one is recorded, and waits until it is told (before
+/// the process ends).
 fn resume_hotkeys() {
     if PAUSED.load(std::sync::atomic::Ordering::Relaxed) {
         pause_hotkeys(false);
     }
-    let pauses = PAUSES
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .take();
+    let pauses = PAUSES.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
     if let Some((tx, thread)) = pauses {
         drop(tx);
         let _ = thread.join();
     }
 }
 
-/// The hardware probe for the video page: the cache if it exists, else a background run whose
-/// answer the page picks up when it is there.
+/// The hardware probe for the video page: the cache if it exists, else a background run whose answer the page picks up
+/// when it is there.
 fn start_probe_watch(panel: &SettingsPanel) {
     match crate::probe::cached() {
         Some(cached) => panel.set_probe(Some(cached), false),

@@ -9,10 +9,7 @@ const W: u32 = 64;
 struct Rng(u64);
 impl Rng {
     fn next(&mut self) -> u8 {
-        self.0 = self
-            .0
-            .wrapping_mul(6_364_136_223_846_793_005)
-            .wrapping_add(1_442_695_040_888_963_407);
+        self.0 = self.0.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
         (self.0 >> 33) as u8
     }
 }
@@ -55,12 +52,7 @@ fn screen(page: &[u8], height: usize, h: usize, f: usize) -> Screen<'_> {
     let mut rng = Rng(99);
     let header = (0..h * rb).map(|_| rng.next()).collect();
     let footer = (0..f * rb).map(|_| rng.next()).collect();
-    Screen {
-        page,
-        header,
-        footer,
-        height,
-    }
+    Screen { page, header, footer, height }
 }
 
 fn run(screen: &Screen<'_>, offsets: &[usize]) -> Stitched {
@@ -138,13 +130,7 @@ fn identical_frames_are_unchanged() {
     let mut st = Stitcher::new(Config::default());
     assert_eq!(st.push(&s.frame(0)).unwrap(), Push::First);
     assert_eq!(st.push(&s.frame(0)).unwrap(), Push::Unchanged);
-    assert_eq!(
-        st.push(&s.frame(20)).unwrap(),
-        Push::Added {
-            rows: 20,
-            direction: Direction::Down
-        }
-    );
+    assert_eq!(st.push(&s.frame(20)).unwrap(), Push::Added { rows: 20, direction: Direction::Down });
     assert_eq!(st.push(&s.frame(20)).unwrap(), Push::Unchanged);
     assert_eq!(st.height(), 120);
 }
@@ -183,10 +169,7 @@ fn noisy_frames_still_match() {
 fn height_limit_truncates() {
     let p = page(600, &[]);
     let s = screen(&p, 100, 0, 0);
-    let mut st = Stitcher::new(Config {
-        max_height: 150,
-        ..Config::default()
-    });
+    let mut st = Stitcher::new(Config { max_height: 150, ..Config::default() });
     let mut last = Push::First;
     for o in [0, 30, 60, 90, 120] {
         last = st.push(&s.frame(o)).unwrap();
@@ -204,10 +187,7 @@ fn size_change_is_an_error() {
     let mut st = Stitcher::new(Config::default());
     st.push(&s.frame(0)).unwrap();
     let other = screen(&p, 90, 0, 0);
-    assert!(matches!(
-        st.push(&other.frame(0)),
-        Err(StitchError::SizeChanged { .. })
-    ));
+    assert!(matches!(st.push(&other.frame(0)), Err(StitchError::SizeChanged { .. })));
     // Still usable afterwards.
     st.push(&s.frame(10)).unwrap();
     assert_eq!(st.height(), 110);
@@ -241,11 +221,7 @@ fn the_preview_shows_the_assembled_image() {
 
 /// A layer of another size per pixel: each pixel's bytes twice.
 fn doubled(data: &[u8]) -> Vec<u8> {
-    data.as_chunks::<4>()
-        .0
-        .iter()
-        .flat_map(|p| [*p, *p].concat())
-        .collect()
+    data.as_chunks::<4>().0.iter().flat_map(|p| [*p, *p].concat()).collect()
 }
 
 #[test]
@@ -255,8 +231,7 @@ fn a_layer_follows_the_rows_kept() {
     let mut st = Stitcher::new(Config::default());
     for o in [0, 30, 70, 50, 110, 160, 200, 170] {
         let frame = s.frame(o);
-        st.push_layered(&frame, Some(&doubled(&frame.data)))
-            .unwrap();
+        st.push_layered(&frame, Some(&doubled(&frame.data))).unwrap();
     }
     let out = st.finish().unwrap();
     assert_eq!(out.frame.data, expected(&s, 200));
@@ -266,8 +241,7 @@ fn a_layer_follows_the_rows_kept() {
     for (i, o) in [0, 30, 60].into_iter().enumerate() {
         let frame = s.frame(o);
         let layer = doubled(&frame.data);
-        st.push_layered(&frame, (i != 1).then_some(layer.as_slice()))
-            .unwrap();
+        st.push_layered(&frame, (i != 1).then_some(layer.as_slice())).unwrap();
     }
     assert!(st.finish().unwrap().layer.is_none());
 }
@@ -290,9 +264,7 @@ fn text_page(width: usize, rows: usize) -> Vec<u8> {
             }
             for r in 0..18 {
                 for x in 0..width {
-                    let ink = r < 12
-                        && words.iter().any(|&(a, b)| (a..b).contains(&x))
-                        && rng.next().is_multiple_of(3);
+                    let ink = r < 12 && words.iter().any(|&(a, b)| (a..b).contains(&x)) && rng.next().is_multiple_of(3);
                     let v = if ink { 30 } else { 255 };
                     data.extend_from_slice(&[v, v, v, 255]);
                 }
@@ -320,15 +292,13 @@ fn fast_scrolls_over_text_keep_the_page_and_nothing_that_floats() {
         data.extend_from_slice(&page[(o + 20) * rb..(o + H) * rb]);
         for y in 0..H {
             for x in PW - 6..PW {
-                let thumb =
-                    (o * (H - 40) / (rows - H)..o * (H - 40) / (rows - H) + 40).contains(&y);
+                let thumb = (o * (H - 40) / (rows - H)..o * (H - 40) / (rows - H) + 40).contains(&y);
                 let v = if thumb { 120 } else { 235 };
                 data[(y * PW + x) * 4..(y * PW + x) * 4 + 4].copy_from_slice(&[v, v, v, 255]);
             }
             if (H - 40..H - 20).contains(&y) && o > 100 {
                 for x in PW - 40..PW - 16 {
-                    data[(y * PW + x) * 4..(y * PW + x) * 4 + 4]
-                        .copy_from_slice(&[200, 80, 20, 255]);
+                    data[(y * PW + x) * 4..(y * PW + x) * 4 + 4].copy_from_slice(&[200, 80, 20, 255]);
                 }
             }
         }
@@ -336,18 +306,14 @@ fn fast_scrolls_over_text_keep_the_page_and_nothing_that_floats() {
     };
     // Jumps of up to three quarters of the zone are followed.
     let mut st = Stitcher::new(Config::default());
-    for o in [
-        0, 37, 120, 260, 410, 380, 300, 450, 600, 740, 700, 850, 1000,
-    ] {
+    for o in [0, 37, 120, 260, 410, 380, 300, 450, 600, 740, 700, 850, 1000] {
         assert_ne!(st.push(&frame(o)).unwrap(), Push::Lost, "{o}");
     }
     assert_eq!(st.height() as usize, rows);
-    // Up to half the zone a frame (what a capture at 60 frames a second sees of a very fast
-    // scroll), every row is also seen in the middle of the screen, away from what floats.
+    // Up to half the zone a frame (what a capture at 60 frames a second sees of a very fast scroll), every row is also
+    // seen in the middle of the screen, away from what floats.
     let mut st = Stitcher::new(Config::default());
-    for o in [
-        0, 37, 120, 210, 300, 260, 180, 280, 380, 470, 570, 660, 740, 700, 800, 900, 1000,
-    ] {
+    for o in [0, 37, 120, 210, 300, 260, 180, 280, 380, 470, 570, 660, 740, 700, 800, 900, 1000] {
         assert_ne!(st.push(&frame(o)).unwrap(), Push::Lost, "{o}");
     }
     let out = st.finish().unwrap().frame;

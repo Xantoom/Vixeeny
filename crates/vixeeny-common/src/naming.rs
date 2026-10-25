@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! File names and per-application folders: application name resolution, name
-//! sanitising, filename templates. Pure functions, no I/O except the `exists` callback.
+//! File names and per-application folders: application name resolution, name sanitising, filename templates. Pure
+//! functions, no I/O except the `exists` callback.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -13,20 +13,18 @@ pub const DESKTOP_APP_NAME: &str = "Desktop";
 pub const MAX_NAME_CHARS: usize = 100;
 
 const RESERVED: &[&str] = &[
-    "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$", "COM0", "COM1", "COM2", "COM3", "COM4",
-    "COM5", "COM6", "COM7", "COM8", "COM9", "COM¹", "COM²", "COM³", "LPT0", "LPT1", "LPT2", "LPT3",
-    "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9", "LPT¹", "LPT²", "LPT³",
+    "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$", "COM0", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
+    "COM8", "COM9", "COM¹", "COM²", "COM³", "LPT0", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8",
+    "LPT9", "LPT¹", "LPT²", "LPT³",
 ];
 
-/// Turns arbitrary text into a name every file system accepts: forbidden characters removed,
-/// control characters dropped, no trailing space or dot, Windows reserved names prefixed,
-/// at most [`MAX_NAME_CHARS`] characters. Never returns an empty string.
+/// Turns arbitrary text into a name every file system accepts: forbidden characters removed, control characters
+/// dropped, no trailing space or dot, Windows reserved names prefixed, at most [`MAX_NAME_CHARS`] characters. Never
+/// returns an empty string.
 pub fn sanitize(name: &str) -> String {
     let cleaned: String = name
         .chars()
-        .filter(|c| {
-            !c.is_control() && !matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')
-        })
+        .filter(|c| !c.is_control() && !matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'))
         .collect();
     let mut cleaned: String = cleaned.trim().chars().take(MAX_NAME_CHARS).collect();
     // Truncation can expose a trailing space or dot again.
@@ -36,19 +34,15 @@ pub fn sanitize(name: &str) -> String {
     if cleaned.is_empty() {
         return DEFAULT_APP_NAME.to_owned();
     }
-    let stem = cleaned
-        .split('.')
-        .next()
-        .unwrap_or_default()
-        .to_ascii_uppercase();
+    let stem = cleaned.split('.').next().unwrap_or_default().to_ascii_uppercase();
     if RESERVED.contains(&stem.as_str()) {
         cleaned.insert(0, '_');
     }
     cleaned
 }
 
-/// Whether an executable name says nothing about the product (Unreal Engine shipping builds,
-/// platform suffixes, generic words).
+/// Whether an executable name says nothing about the product (Unreal Engine shipping builds, platform suffixes, generic
+/// words).
 pub fn is_generic_exe_name(stem: &str) -> bool {
     let lower = stem.to_ascii_lowercase();
     lower.contains("shipping")
@@ -57,28 +51,14 @@ pub fn is_generic_exe_name(stem: &str) -> bool {
         || lower.contains("x64")
         || matches!(
             lower.as_str(),
-            "game"
-                | "client"
-                | "main"
-                | "app"
-                | "application"
-                | "launcher"
-                | "start"
-                | "run"
-                | "play"
+            "game" | "client" | "main" | "app" | "application" | "launcher" | "start" | "run" | "play"
         )
 }
 
 /// `C:\Games\Foo\Client-Win64-Shipping.exe` → `Client-Win64-Shipping`.
 pub fn exe_stem(exe_path: &str) -> &str {
     let file = exe_path.rsplit(['\\', '/']).next().unwrap_or(exe_path);
-    file.rsplit_once('.').map_or(file, |(stem, ext)| {
-        if ext.eq_ignore_ascii_case("exe") {
-            stem
-        } else {
-            file
-        }
-    })
+    file.rsplit_once('.').map_or(file, |(stem, ext)| if ext.eq_ignore_ascii_case("exe") { stem } else { file })
 }
 
 /// What is known about the application that owns a window.
@@ -96,16 +76,14 @@ fn non_empty(s: Option<&str>) -> Option<&str> {
     s.map(str::trim).filter(|s| !s.is_empty())
 }
 
-/// A game engine's own name, left in the version resource by the game (Unreal's `UE4`): it
-/// says nothing of the game.
+/// A game engine's own name, left in the version resource by the game (Unreal's `UE4`): it says nothing of the game.
 fn not_an_engine(s: Option<&str>) -> Option<&str> {
     const ENGINES: &[&str] = &["ue4", "ue5", "unrealgame", "unreal engine", "unity"];
     non_empty(s).filter(|s| !ENGINES.contains(&s.to_lowercase().as_str()))
 }
 
-/// Resolves the display name in this order: user table, `ProductName`,
-/// `FileDescription`, window title, executable name (unless generic). `None` means unknown:
-/// callers use [`DEFAULT_APP_NAME`]. The result is already sanitised.
+/// Resolves the display name in this order: user table, `ProductName`, `FileDescription`, window title, executable name
+/// (unless generic). `None` means unknown: callers use [`DEFAULT_APP_NAME`]. The result is already sanitised.
 pub fn resolve_app_name(info: &AppInfo<'_>, user_map: &BTreeMap<String, String>) -> Option<String> {
     let stem = info.exe_path.map(exe_stem);
     if let Some(stem) = stem {
@@ -139,9 +117,8 @@ pub struct Vars {
     pub monitor: String,
 }
 
-/// Expands `{app}`, `{title}`, `{date}`, `{time}`, `{ms}`, `{width}`, `{height}`, `{monitor}`
-/// and `{counter}` (replaced by `counter`). Unknown variables expand to nothing. The result is
-/// sanitised.
+/// Expands `{app}`, `{title}`, `{date}`, `{time}`, `{ms}`, `{width}`, `{height}`, `{monitor}` and `{counter}` (replaced
+/// by `counter`). Unknown variables expand to nothing. The result is sanitised.
 pub fn expand_template(template: &str, vars: &Vars, counter: u32) -> String {
     let mut out = String::new();
     let mut rest = template;
@@ -171,9 +148,8 @@ pub fn expand_template(template: &str, vars: &Vars, counter: u32) -> String {
     sanitize(&out)
 }
 
-/// Where a capture is written: `<dir>[/<app>]/<name>.<ext>`. A free file name is found with
-/// `exists`: with `{counter}` in the template the counter is incremented, otherwise `_2`, `_3`…
-/// is appended.
+/// Where a capture is written: `<dir>[/<app>]/<name>.<ext>`. A free file name is found with `exists`: with `{counter}`
+/// in the template the counter is incremented, otherwise `_2`, `_3`… is appended.
 pub fn output_path(
     dir: &Path,
     per_app_subfolder: bool,
@@ -182,19 +158,11 @@ pub fn output_path(
     ext: &str,
     exists: impl Fn(&Path) -> bool,
 ) -> PathBuf {
-    let dir = if per_app_subfolder {
-        dir.join(sanitize(&vars.app))
-    } else {
-        dir.to_path_buf()
-    };
+    let dir = if per_app_subfolder { dir.join(sanitize(&vars.app)) } else { dir.to_path_buf() };
     let has_counter = template.contains("{counter}");
     for n in 1u32.. {
         let stem = expand_template(template, vars, n);
-        let name = if has_counter || n == 1 {
-            stem
-        } else {
-            format!("{stem}_{n}")
-        };
+        let name = if has_counter || n == 1 { stem } else { format!("{stem}_{n}") };
         let path = dir.join(format!("{name}.{ext}"));
         if !exists(&path) {
             return path;
@@ -208,10 +176,7 @@ mod tests {
     use super::*;
 
     fn map(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
-        pairs
-            .iter()
-            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
-            .collect()
+        pairs.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect()
     }
 
     #[test]
@@ -246,10 +211,7 @@ mod tests {
 
     #[test]
     fn exe_stems() {
-        assert_eq!(
-            exe_stem(r"C:\Games\Foo\Client-Win64-Shipping.exe"),
-            "Client-Win64-Shipping"
-        );
+        assert_eq!(exe_stem(r"C:\Games\Foo\Client-Win64-Shipping.exe"), "Client-Win64-Shipping");
         assert_eq!(exe_stem("tool.EXE"), "tool");
         assert_eq!(exe_stem("archive.tar.gz"), "archive.tar.gz");
     }
@@ -272,75 +234,34 @@ mod tests {
             window_title: Some("Title"),
         };
         let table = map(&[("client-win64-shipping.exe", "Wuthering Waves")]);
-        assert_eq!(
-            resolve_app_name(&info, &table).as_deref(),
-            Some("Wuthering Waves")
-        );
+        assert_eq!(resolve_app_name(&info, &table).as_deref(), Some("Wuthering Waves"));
         // Without a table entry: ProductName, then FileDescription, then title.
         let none = BTreeMap::new();
         assert_eq!(resolve_app_name(&info, &none).as_deref(), Some("Product"));
-        let info = AppInfo {
-            product_name: None,
-            ..info
-        };
-        assert_eq!(
-            resolve_app_name(&info, &none).as_deref(),
-            Some("Description")
-        );
-        let info = AppInfo {
-            file_description: Some("  "),
-            ..info
-        };
+        let info = AppInfo { product_name: None, ..info };
+        assert_eq!(resolve_app_name(&info, &none).as_deref(), Some("Description"));
+        let info = AppInfo { file_description: Some("  "), ..info };
         assert_eq!(resolve_app_name(&info, &none).as_deref(), Some("Title"));
         // An engine's own name (Unreal games say `UE4`) is passed over.
-        let info = AppInfo {
-            product_name: Some("UE4"),
-            file_description: Some("Unreal Engine"),
-            ..info
-        };
+        let info = AppInfo { product_name: Some("UE4"), file_description: Some("Unreal Engine"), ..info };
         assert_eq!(resolve_app_name(&info, &none).as_deref(), Some("Title"));
     }
 
     #[test]
     fn generic_exe_falls_back_to_unknown_but_title_wins() {
-        let generic = AppInfo {
-            exe_path: Some("Client-Win64-Shipping.exe"),
-            ..AppInfo::default()
-        };
+        let generic = AppInfo { exe_path: Some("Client-Win64-Shipping.exe"), ..AppInfo::default() };
         assert_eq!(resolve_app_name(&generic, &BTreeMap::new()), None);
-        let with_title = AppInfo {
-            window_title: Some("Wuthering Waves"),
-            ..generic
-        };
-        assert_eq!(
-            resolve_app_name(&with_title, &BTreeMap::new()).as_deref(),
-            Some("Wuthering Waves")
-        );
-        let plain = AppInfo {
-            exe_path: Some("C:/x/Blender.exe"),
-            ..AppInfo::default()
-        };
-        assert_eq!(
-            resolve_app_name(&plain, &BTreeMap::new()).as_deref(),
-            Some("Blender")
-        );
+        let with_title = AppInfo { window_title: Some("Wuthering Waves"), ..generic };
+        assert_eq!(resolve_app_name(&with_title, &BTreeMap::new()).as_deref(), Some("Wuthering Waves"));
+        let plain = AppInfo { exe_path: Some("C:/x/Blender.exe"), ..AppInfo::default() };
+        assert_eq!(resolve_app_name(&plain, &BTreeMap::new()).as_deref(), Some("Blender"));
     }
 
     #[test]
     fn user_table_ignores_blank_names_and_extension_in_key() {
-        let info = AppInfo {
-            exe_path: Some("a/Foo.exe"),
-            product_name: Some("P"),
-            ..AppInfo::default()
-        };
-        assert_eq!(
-            resolve_app_name(&info, &map(&[("Foo", "Bar")])).as_deref(),
-            Some("Bar")
-        );
-        assert_eq!(
-            resolve_app_name(&info, &map(&[("foo.exe", "  ")])).as_deref(),
-            Some("P")
-        );
+        let info = AppInfo { exe_path: Some("a/Foo.exe"), product_name: Some("P"), ..AppInfo::default() };
+        assert_eq!(resolve_app_name(&info, &map(&[("Foo", "Bar")])).as_deref(), Some("Bar"));
+        assert_eq!(resolve_app_name(&info, &map(&[("foo.exe", "  ")])).as_deref(), Some("P"));
     }
 
     fn vars() -> Vars {
@@ -358,23 +279,14 @@ mod tests {
 
     #[test]
     fn default_template() {
-        assert_eq!(
-            expand_template("{app}_{date}_{time}", &vars(), 1),
-            "Wuthering Waves_2026-10-01_17-12-00"
-        );
+        assert_eq!(expand_template("{app}_{date}_{time}", &vars(), 1), "Wuthering Waves_2026-10-01_17-12-00");
     }
 
     #[test]
     fn all_variables() {
         let t = "{title}-{ms}-{width}x{height}-m{monitor}-{counter}-{nope}";
-        assert_eq!(
-            expand_template(t, &vars(), 5),
-            "Title x-007-3840x2160-m1-5-"
-        );
-        assert_eq!(
-            expand_template("a{unterminated", &vars(), 1),
-            "a{unterminated"
-        );
+        assert_eq!(expand_template(t, &vars(), 5), "Title x-007-3840x2160-m1-5-");
+        assert_eq!(expand_template("a{unterminated", &vars(), 1), "a{unterminated");
     }
 
     #[test]
@@ -387,37 +299,19 @@ mod tests {
     #[test]
     fn output_path_with_subfolder_and_collisions() {
         let dir = Path::new("pics");
-        let taken: Vec<PathBuf> = vec![
-            Path::new("pics")
-                .join("Wuthering Waves")
-                .join("Wuthering Waves_2026-10-01_17-12-00.png"),
-        ];
+        let taken: Vec<PathBuf> =
+            vec![Path::new("pics").join("Wuthering Waves").join("Wuthering Waves_2026-10-01_17-12-00.png")];
         let exists = |p: &Path| taken.iter().any(|t| t == p);
         let p = output_path(dir, true, "{app}_{date}_{time}", &vars(), "png", exists);
-        assert_eq!(
-            p,
-            Path::new("pics")
-                .join("Wuthering Waves")
-                .join("Wuthering Waves_2026-10-01_17-12-00_2.png")
-        );
+        assert_eq!(p, Path::new("pics").join("Wuthering Waves").join("Wuthering Waves_2026-10-01_17-12-00_2.png"));
         let flat = output_path(dir, false, "{app}_{date}_{time}", &vars(), "png", |_| false);
-        assert_eq!(
-            flat,
-            Path::new("pics").join("Wuthering Waves_2026-10-01_17-12-00.png")
-        );
+        assert_eq!(flat, Path::new("pics").join("Wuthering Waves_2026-10-01_17-12-00.png"));
     }
 
     #[test]
     fn counter_template_increments_the_counter() {
         let taken = |p: &Path| p.ends_with("shot_1.png") || p.ends_with("shot_2.png");
-        let p = output_path(
-            Path::new("d"),
-            false,
-            "shot_{counter}",
-            &vars(),
-            "png",
-            taken,
-        );
+        let p = output_path(Path::new("d"), false, "shot_{counter}", &vars(), "png", taken);
         assert_eq!(p, Path::new("d").join("shot_3.png"));
     }
 }

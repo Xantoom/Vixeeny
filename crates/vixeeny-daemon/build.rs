@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The Windows resource of the executable: its icon, the tray icon shown while recording and the
-//! version information. "Vixeeny" is the description Task Manager and the taskbar show.
+//! The Windows resource of the executable: its icon, the tray icon shown while recording and the version information.
+//! "Vixeeny" is the description Task Manager and the taskbar show.
 
 fn main() {
     println!("cargo:rerun-if-changed=../../packaging/icons/vixeeny.ico");

@@ -37,12 +37,7 @@ impl Rect {
 
     /// The rectangle spanned by two opposite corners, in any order.
     pub fn from_corners(a: Point, b: Point) -> Self {
-        Self::new(
-            a.x.min(b.x),
-            a.y.min(b.y),
-            (a.x - b.x).abs(),
-            (a.y - b.y).abs(),
-        )
+        Self::new(a.x.min(b.x), a.y.min(b.y), (a.x - b.x).abs(), (a.y - b.y).abs())
     }
 
     pub fn right(&self) -> f32 {
@@ -58,12 +53,7 @@ impl Rect {
     }
 
     pub fn inflate(&self, by: f32) -> Self {
-        Self::new(
-            self.x - by,
-            self.y - by,
-            self.w + 2.0 * by,
-            self.h + 2.0 * by,
-        )
+        Self::new(self.x - by, self.y - by, self.w + 2.0 * by, self.h + 2.0 * by)
     }
 
     pub fn translate(&self, dx: f32, dy: f32) -> Self {
@@ -72,20 +62,12 @@ impl Rect {
 
     pub fn union(&self, other: &Self) -> Self {
         let (x, y) = (self.x.min(other.x), self.y.min(other.y));
-        Self::new(
-            x,
-            y,
-            self.right().max(other.right()) - x,
-            self.bottom().max(other.bottom()) - y,
-        )
+        Self::new(x, y, self.right().max(other.right()) - x, self.bottom().max(other.bottom()) - y)
     }
 
     pub fn intersect(&self, other: &Self) -> Option<Self> {
         let (x, y) = (self.x.max(other.x), self.y.max(other.y));
-        let (r, b) = (
-            self.right().min(other.right()),
-            self.bottom().min(other.bottom()),
-        );
+        let (r, b) = (self.right().min(other.right()), self.bottom().min(other.bottom()));
         (r > x && b > y).then(|| Self::new(x, y, r - x, b - y))
     }
 
@@ -111,8 +93,8 @@ pub fn distance_to_segment(p: Point, a: Point, b: Point) -> f32 {
     p.distance(Point::new(a.x + t * dx, a.y + t * dy))
 }
 
-/// Snaps the direction `from`→`to` to the nearest multiple of `step_deg`, keeping the length
-/// (Shift while drawing a line or an arrow).
+/// Snaps the direction `from`→`to` to the nearest multiple of `step_deg`, keeping the length (Shift while drawing a
+/// line or an arrow).
 pub fn snap_angle(from: Point, to: Point, step_deg: f32) -> Point {
     let (dx, dy) = (to.x - from.x, to.y - from.y);
     let len = dx.hypot(dy);

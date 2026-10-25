@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! A source for tests: a tone in chunks dated like a real device's (its clock can drift),
-//! driven by the caller so that an hour of audio runs in a moment.
+//! A source for tests: a tone in chunks dated like a real device's (its clock can drift), driven by the caller so that
+//! an hour of audio runs in a moment.
 
 use crate::{AudioChunk, CHANNELS, SAMPLE_RATE};
 
@@ -17,14 +17,7 @@ pub struct FakeAudioSource {
 
 impl FakeAudioSource {
     pub fn new(frequency: f32) -> Self {
-        Self {
-            frequency,
-            amplitude: 0.5,
-            beep_ms: 100,
-            period_ms: 1_000,
-            drift: 1.0,
-            produced: 0,
-        }
+        Self { frequency, amplitude: 0.5, beep_ms: 100, period_ms: 1_000, drift: 1.0, produced: 0 }
     }
 
     /// One chunk of `frames` frames, dated on the master clock.

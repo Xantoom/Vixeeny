@@ -1,18 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! HDR screens made SDR on the graphics card: compute shaders run the tone mapper of
-//! `vixeeny_image::tonemap` (same steps, same numbers) on the half floats Windows composes them
-//! in, so only 8-bit BGRA crosses to memory: half the bytes, and no float work left for the
-//! processor. Any failure falls back to the processor's tone mapper.
+//! HDR screens made SDR on the graphics card: compute shaders run the tone mapper of `vixeeny_image::tonemap` (same
+//! steps, same numbers) on the half floats Windows composes them in, so only 8-bit BGRA crosses to memory: half the
+//! bytes, and no float work left for the processor. Any failure falls back to the processor's tone mapper.
 
 use std::cell::RefCell;
 use std::sync::OnceLock;
 
 use vixeeny_platform::{HdrInfo, PhysicalRect};
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11_BIND_CONSTANT_BUFFER, D3D11_BIND_SHADER_RESOURCE, D3D11_BIND_UNORDERED_ACCESS, D3D11_BOX,
-    D3D11_BUFFER_DESC, D3D11_RESOURCE_MISC_BUFFER_STRUCTURED, D3D11_TEXTURE2D_DESC,
-    D3D11_USAGE_DEFAULT, ID3D11Buffer, ID3D11ComputeShader, ID3D11Device, ID3D11DeviceContext,
-    ID3D11ShaderResourceView, ID3D11Texture2D, ID3D11UnorderedAccessView,
+    D3D11_BIND_CONSTANT_BUFFER, D3D11_BIND_SHADER_RESOURCE, D3D11_BIND_UNORDERED_ACCESS, D3D11_BOX, D3D11_BUFFER_DESC,
+    D3D11_RESOURCE_MISC_BUFFER_STRUCTURED, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, ID3D11Buffer,
+    ID3D11ComputeShader, ID3D11Device, ID3D11DeviceContext, ID3D11ShaderResourceView, ID3D11Texture2D,
+    ID3D11UnorderedAccessView,
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_R32_UINT;
 use windows::core::s;
@@ -22,9 +21,9 @@ use vixeeny_platform::d3d::{compile, texture};
 use crate::CaptureError;
 use crate::wgc::os;
 
-/// `tonemap_frame`, step for step (the functions are `colour::HLSL`): `peak` finds the brightest
-/// pixel, `main` rolls the picture off up to it and packs it as BGRA bytes, rounded as the
-/// processor rounds them. The brightest pixel stays on the card between the two.
+/// `tonemap_frame`, step for step (the functions are `colour::HLSL`): `peak` finds the brightest pixel, `main` rolls
+/// the picture off up to it and packs it as BGRA bytes, rounded as the processor rounds them. The brightest pixel stays
+/// on the card between the two.
 const SHADER: &str = r"
 Texture2D<float4> src : register(t0);
 RWTexture2D<uint> dst : register(u0);
@@ -66,10 +65,7 @@ fn bytecode() -> Result<&'static Code, CaptureError> {
     CODE.get_or_init(|| {
         let source = format!("{}{SHADER}", vixeeny_common::colour::HLSL);
         let cs = s!("cs_5_0");
-        Ok((
-            compile(&source, s!("peak"), cs)?,
-            compile(&source, s!("main"), cs)?,
-        ))
+        Ok((compile(&source, s!("peak"), cs)?, compile(&source, s!("main"), cs)?))
     })
     .as_ref()
     .map_err(|e| CaptureError::Os(e.clone()))
@@ -103,12 +99,8 @@ impl CardToneMap {
         let (mut peak, mut shader) = (None, None);
         // SAFETY: bytecode compiled for cs_5_0; the out-pointers are valid.
         unsafe {
-            device
-                .CreateComputeShader(peak_code, None, Some(&raw mut peak))
-                .map_err(os("CreateComputeShader"))?;
-            device
-                .CreateComputeShader(main_code, None, Some(&raw mut shader))
-                .map_err(os("CreateComputeShader"))?;
+            device.CreateComputeShader(peak_code, None, Some(&raw mut peak)).map_err(os("CreateComputeShader"))?;
+            device.CreateComputeShader(main_code, None, Some(&raw mut shader)).map_err(os("CreateComputeShader"))?;
         }
         let desc = D3D11_BUFFER_DESC {
             ByteWidth: 16,
@@ -118,8 +110,7 @@ impl CardToneMap {
         };
         let mut params = None;
         // SAFETY: a 16-byte constant buffer; the out-pointer is valid.
-        unsafe { device.CreateBuffer(&desc, None, Some(&raw mut params)) }
-            .map_err(os("CreateBuffer"))?;
+        unsafe { device.CreateBuffer(&desc, None, Some(&raw mut params)) }.map_err(os("CreateBuffer"))?;
         let desc = D3D11_BUFFER_DESC {
             ByteWidth: 4,
             Usage: D3D11_USAGE_DEFAULT,
@@ -132,9 +123,7 @@ impl CardToneMap {
         let mut brightest = None;
         // SAFETY: a one-element structured buffer and a view of all of it; valid out-pointers.
         unsafe {
-            device
-                .CreateBuffer(&desc, None, Some(&raw mut buffer))
-                .map_err(os("CreateBuffer"))?;
+            device.CreateBuffer(&desc, None, Some(&raw mut buffer)).map_err(os("CreateBuffer"))?;
             let buffer = buffer.ok_or_else(|| CaptureError::Os("no buffer".into()))?;
             device
                 .CreateUnorderedAccessView(&buffer, None, Some(&raw mut brightest))
@@ -162,8 +151,8 @@ impl CardToneMap {
     }
 }
 
-/// `area` of `source` (scRGB half floats) tone-mapped to SDR in a staging texture of BGRA
-/// pixels, queued on the GPU: mapping it waits for the work.
+/// `area` of `source` (scRGB half floats) tone-mapped to SDR in a staging texture of BGRA pixels, queued on the GPU:
+/// mapping it waits for the work.
 pub(crate) fn stage(
     device: &ID3D11Device,
     context: &ID3D11DeviceContext,
@@ -176,35 +165,18 @@ pub(crate) fn stage(
     let mut desc = D3D11_TEXTURE2D_DESC::default();
     // SAFETY: `desc` is a valid out-pointer.
     unsafe { source.GetDesc(&mut desc) };
-    // The source may not be readable by shaders (a capture frame, a shared texture): its area
-    // is copied first, a cheap copy on the card.
-    let input = texture(
-        device,
-        size,
-        desc.Format,
-        D3D11_BIND_SHADER_RESOURCE.0 as u32,
-        0,
-        None,
-    )
-    .map_err(CaptureError::Os)?;
-    let output = texture(
-        device,
-        size,
-        DXGI_FORMAT_R32_UINT,
-        D3D11_BIND_UNORDERED_ACCESS.0 as u32,
-        0,
-        None,
-    )
-    .map_err(CaptureError::Os)?;
-    let staging =
-        texture(device, size, DXGI_FORMAT_R32_UINT, 0, 0, None).map_err(CaptureError::Os)?;
+    // The source may not be readable by shaders (a capture frame, a shared texture): its area is copied first, a cheap
+    // copy on the card.
+    let input =
+        texture(device, size, desc.Format, D3D11_BIND_SHADER_RESOURCE.0 as u32, 0, None).map_err(CaptureError::Os)?;
+    let output = texture(device, size, DXGI_FORMAT_R32_UINT, D3D11_BIND_UNORDERED_ACCESS.0 as u32, 0, None)
+        .map_err(CaptureError::Os)?;
+    let staging = texture(device, size, DXGI_FORMAT_R32_UINT, 0, 0, None).map_err(CaptureError::Os)?;
     let mut view: Option<ID3D11ShaderResourceView> = None;
     let mut target: Option<ID3D11UnorderedAccessView> = None;
     // SAFETY: views of textures of this device, with their own formats.
     unsafe {
-        device
-            .CreateShaderResourceView(&input, None, Some(&raw mut view))
-            .map_err(os("CreateShaderResourceView"))?;
+        device.CreateShaderResourceView(&input, None, Some(&raw mut view)).map_err(os("CreateShaderResourceView"))?;
         device
             .CreateUnorderedAccessView(&output, None, Some(&raw mut target))
             .map_err(os("CreateUnorderedAccessView"))?;
@@ -223,8 +195,8 @@ pub(crate) fn stage(
         bottom: area.y as u32 + area.height,
         back: 1,
     };
-    // SAFETY: every resource belongs to this device; the box lies inside the source (checked by
-    // the callers); the views are unbound once dispatched.
+    // SAFETY: every resource belongs to this device; the box lies inside the source (checked by the callers); the views
+    // are unbound once dispatched.
     unsafe {
         context.CopySubresourceRegion(&input, 0, 0, 0, 0, source, 0, Some(&from));
         context.UpdateSubresource(&card.params, 0, None, params.as_ptr().cast(), 0, 0);
@@ -275,10 +247,7 @@ mod tests {
                 }
             })
             .collect();
-        let info = HdrInfo {
-            sdr_white_nits: 203.0,
-            peak_nits: 1000.0,
-        };
+        let info = HdrInfo { sdr_white_nits: 203.0, peak_nits: 1000.0 };
         // With highlights, and the same with nothing above SDR white (2.5375 here).
         let dim: Vec<f32> = rgba.iter().map(|&v| v.min(2.5)).collect();
         for rgba in [rgba, dim] {
@@ -295,24 +264,12 @@ mod tests {
         rgba: &[f32],
         info: &HdrInfo,
     ) -> u8 {
-        let halves: Vec<u16> = rgba
-            .iter()
-            .map(|&v| vixeeny_common::half::from_f32(v))
-            .collect();
-        let exact: Vec<f32> = halves
-            .iter()
-            .map(|&v| vixeeny_common::half::to_f32(v))
-            .collect();
-        let source = texture(
-            device,
-            (w, h),
-            DXGI_FORMAT_R16G16B16A16_FLOAT,
-            D3D11_BIND_SHADER_RESOURCE.0 as u32,
-            0,
-            None,
-        )
-        .map_err(CaptureError::Os)
-        .unwrap();
+        let halves: Vec<u16> = rgba.iter().map(|&v| vixeeny_common::half::from_f32(v)).collect();
+        let exact: Vec<f32> = halves.iter().map(|&v| vixeeny_common::half::to_f32(v)).collect();
+        let source =
+            texture(device, (w, h), DXGI_FORMAT_R16G16B16A16_FLOAT, D3D11_BIND_SHADER_RESOURCE.0 as u32, 0, None)
+                .map_err(CaptureError::Os)
+                .unwrap();
         // SAFETY: `halves` holds `h` rows of `w * 8` bytes; same device.
         unsafe { context.UpdateSubresource(&source, 0, None, halves.as_ptr().cast(), w * 8, 0) };
         // A part, as a zone capture asks for: rolled off up to its own brightest pixel.
@@ -323,13 +280,8 @@ mod tests {
                 exact[at..at + area.width as usize * 4].to_vec()
             })
             .collect();
-        let expected = tonemap_frame(
-            &part,
-            &ToneMapParams {
-                sdr_white_nits: info.sdr_white_nits,
-                peak_nits: info.peak_nits,
-            },
-        );
+        let expected =
+            tonemap_frame(&part, &ToneMapParams { sdr_white_nits: info.sdr_white_nits, peak_nits: info.peak_nits });
         let staging = stage(device, context, &source, &area, info).unwrap();
         let raw = map(context, &staging, area.width, area.height).unwrap();
         let mut worst = 0;

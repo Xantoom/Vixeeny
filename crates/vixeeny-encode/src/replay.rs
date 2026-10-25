@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The replay buffer: a ring of encoded packets, in RAM or in temporary files on
-//! disk, cut on key frames. Nothing is re-encoded: a save remuxes the last seconds of packets into
-//! a file.
+//! The replay buffer: a ring of encoded packets, in RAM or in temporary files on disk, cut on key frames. Nothing is
+//! re-encoded: a save remuxes the last seconds of packets into a file.
 //!
 //! Times are media time in audio samples (48 kHz), the same unit for video and audio.
 
@@ -20,31 +19,23 @@ use crate::registry::Family;
 /// A packet shared between the ring and a save in progress, without copying its data.
 pub fn share(packet: &Packet) -> Packet {
     let mut copy = Packet::empty();
-    // SAFETY: both are valid `AVPacket`s; the reference counts the data buffer, so the copy owns
-    // its own fields (timestamps) over the same bytes.
+    // SAFETY: both are valid `AVPacket`s; the reference counts the data buffer, so the copy owns its own fields
+    // (timestamps) over the same bytes.
     unsafe { ffi::av_packet_ref(copy.as_mut_ptr(), packet.as_ptr()) };
     copy
 }
 
-/// What the ring holds for `seconds` of replay at the given bitrates (video + all audio tracks,
-/// in kbit/s). One more key frame interval is kept beyond the duration, so a save always starts
-/// on a key frame at least `seconds` back.
+/// What the ring holds for `seconds` of replay at the given bitrates (video + all audio tracks, in kbit/s). One more
+/// key frame interval is kept beyond the duration, so a save always starts on a key frame at least `seconds` back.
 pub fn estimate_ram_bytes(total_kbps: u32, seconds: u32, keyframe_seconds: f64) -> u64 {
     let span = f64::from(seconds) + keyframe_seconds;
     (f64::from(total_kbps) * 1000.0 / 8.0 * span) as u64
 }
 
-/// The bitrate (video and sound) a recording is expected to reach, in kbit/s: a generous guess
-/// for a busy game, as the constant-quality modes follow the picture. `bitrate` is the video
-/// target of a custom variable-bitrate profile, when it has one; `share` is what the preset
-/// spends next to the quality one (1).
-pub fn expected_kbps(
-    family: Family,
-    (width, height): (u32, u32),
-    fps: u32,
-    share: f64,
-    bitrate: Option<u32>,
-) -> u32 {
+/// The bitrate (video and sound) a recording is expected to reach, in kbit/s: a generous guess for a busy game, as the
+/// constant-quality modes follow the picture. `bitrate` is the video target of a custom variable-bitrate profile, when
+/// it has one; `share` is what the preset spends next to the quality one (1).
+pub fn expected_kbps(family: Family, (width, height): (u32, u32), fps: u32, share: f64, bitrate: Option<u32>) -> u32 {
     let video = bitrate.map_or_else(
         || {
             // The best-quality presets at 1080p and 60 fps.
@@ -92,23 +83,22 @@ pub fn expected_bytes(kbps: u32, seconds: u32) -> u64 {
     estimate_ram_bytes(kbps, clamp_seconds(seconds), 2.0)
 }
 
-/// Where `storage = "auto"` keeps a replay of `bytes`: in RAM up to [`ram_budget`] of the
-/// installed memory, on the disk beyond.
+/// Where `storage = "auto"` keeps a replay of `bytes`: in RAM up to [`ram_budget`] of the installed memory, on the disk
+/// beyond.
 pub fn fits_in_ram(bytes: u64, ram_bytes: u64) -> bool {
     bytes <= ram_budget(ram_bytes)
 }
 
-/// What a replay may take in RAM on a machine with `ram_bytes` installed: a quarter of what
-/// Windows and a game leave (8 GB for them), at most 4 GB. Nothing on 8 GB (the disk then), 2 GB
-/// on 16 GB, 4 GB from 24 GB.
+/// What a replay may take in RAM on a machine with `ram_bytes` installed: a quarter of what Windows and a game leave (8
+/// GB for them), at most 4 GB. Nothing on 8 GB (the disk then), 2 GB on 16 GB, 4 GB from 24 GB.
 pub fn ram_budget(ram_bytes: u64) -> u64 {
     const KEPT: u64 = 8 << 30;
     const MAX: u64 = 4 << 30;
     (ram_bytes.saturating_sub(KEPT) / 4).min(MAX)
 }
 
-/// Whether the RAM free right now holds a replay of `bytes` and still leaves 4 GB to the rest
-/// (a game already loaded, a browser...).
+/// Whether the RAM free right now holds a replay of `bytes` and still leaves 4 GB to the rest (a game already loaded, a
+/// browser...).
 pub fn fits_in_free_ram(bytes: u64, free_bytes: u64) -> bool {
     bytes.saturating_add(4 << 30) <= free_bytes
 }
@@ -150,8 +140,8 @@ impl SegInner {
     }
 }
 
-/// One file of packet data; deleted when the last packet that lives in it is forgotten (a save in
-/// progress keeps it alive).
+/// One file of packet data; deleted when the last packet that lives in it is forgotten (a save in progress keeps it
+/// alive).
 struct Segment {
     path: PathBuf,
     inner: Mutex<SegInner>,
@@ -159,26 +149,12 @@ struct Segment {
 
 impl Segment {
     fn create(path: PathBuf) -> io::Result<Arc<Self>> {
-        let file = File::options()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&path)?;
-        Ok(Arc::new(Self {
-            path,
-            inner: Mutex::new(SegInner {
-                file,
-                pending: Vec::new(),
-                flushed: 0,
-            }),
-        }))
+        let file = File::options().read(true).write(true).create(true).truncate(true).open(&path)?;
+        Ok(Arc::new(Self { path, inner: Mutex::new(SegInner { file, pending: Vec::new(), flushed: 0 }) }))
     }
 
     fn lock(&self) -> io::Result<std::sync::MutexGuard<'_, SegInner>> {
-        self.inner
-            .lock()
-            .map_err(|_| io::Error::other("replay segment lock poisoned"))
+        self.inner.lock().map_err(|_| io::Error::other("replay segment lock poisoned"))
     }
 
     /// Appends `data`; gives its offset.
@@ -193,8 +169,7 @@ impl Segment {
     }
 
     fn len(&self) -> u64 {
-        self.lock()
-            .map_or(0, |i| i.flushed + i.pending.len() as u64)
+        self.lock().map_or(0, |i| i.flushed + i.pending.len() as u64)
     }
 
     fn read(&self, offset: u64, len: usize) -> io::Result<Vec<u8>> {
@@ -299,28 +274,18 @@ impl DiskStore {
         let n = RINGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let dir = base.join(format!("ring-{}-{n}", std::process::id()));
         std::fs::create_dir_all(&dir)?;
-        Ok(Self {
-            dir,
-            current: None,
-            next_id: 0,
-        })
+        Ok(Self { dir, current: None, next_id: 0 })
     }
 
     /// Writes `packet`; a key frame may start a new segment.
     fn store(&mut self, packet: &Packet, may_roll: bool) -> io::Result<Held> {
-        let roll = self
-            .current
-            .as_ref()
-            .is_none_or(|s| may_roll && s.len() >= SEGMENT_BYTES);
+        let roll = self.current.as_ref().is_none_or(|s| may_roll && s.len() >= SEGMENT_BYTES);
         if roll {
             let path = self.dir.join(format!("seg-{}.bin", self.next_id));
             self.next_id += 1;
             self.current = Some(Segment::create(path)?);
         }
-        let segment = self
-            .current
-            .as_ref()
-            .ok_or_else(|| io::Error::other("no segment"))?;
+        let segment = self.current.as_ref().ok_or_else(|| io::Error::other("no segment"))?;
         let data = packet.data().unwrap_or_default();
         let offset = segment.append(data)?;
         Ok(Held::Disk(Arc::new(DiskPacket {
@@ -338,8 +303,8 @@ impl DiskStore {
 impl Drop for DiskStore {
     fn drop(&mut self) {
         self.current = None;
-        // Empty once the segments are gone; a save still running keeps its files and the folder
-        // (the stale-folder cleanup of a later run removes it).
+        // Empty once the segments are gone; a save still running keeps its files and the folder (the stale-folder
+        // cleanup of a later run removes it).
         let _ = std::fs::remove_dir(&self.dir);
     }
 }
@@ -386,9 +351,9 @@ impl Ring {
     pub fn with_storage(seconds: u32, tracks: usize, storage: &Storage) -> Self {
         let store = match storage {
             Storage::Ram => None,
-            Storage::Disk(base) => DiskStore::new(base)
-                .inspect_err(|e| tracing::warn!("replay on disk unavailable, using RAM: {e}"))
-                .ok(),
+            Storage::Disk(base) => {
+                DiskStore::new(base).inspect_err(|e| tracing::warn!("replay on disk unavailable, using RAM: {e}")).ok()
+            }
         };
         Self {
             keep: i64::from(seconds) * i64::from(SAMPLE_RATE),
@@ -427,16 +392,9 @@ impl Ring {
                 return;
             }
         }
-        let entry = Entry {
-            t,
-            packet: self.keep(packet, packet.is_key()),
-        };
+        let entry = Entry { t, packet: self.keep(packet, packet.is_key()) };
         if packet.is_key() || self.gops.is_empty() {
-            self.gops.push_back(Gop {
-                start: t,
-                packets: Vec::new(),
-                bytes: 0,
-            });
+            self.gops.push_back(Gop { start: t, packets: Vec::new(), bytes: 0 });
         }
         if let Some(gop) = self.gops.back_mut() {
             gop.packets.push(entry);
@@ -482,33 +440,17 @@ impl Ring {
     pub fn snapshot(&self, seconds: u32) -> Option<Snapshot> {
         let want = i64::from(seconds) * i64::from(SAMPLE_RATE);
         // The oldest key frame that is no more than `want` back; else the newest one.
-        let first = self
-            .gops
-            .iter()
-            .position(|g| self.newest - g.start <= want)
-            .unwrap_or(self.gops.len().checked_sub(1)?);
+        let first =
+            self.gops.iter().position(|g| self.newest - g.start <= want).unwrap_or(self.gops.len().checked_sub(1)?);
         let start = self.gops.get(first)?.start;
-        let video = self
-            .gops
-            .iter()
-            .skip(first)
-            .flat_map(|g| g.packets.iter().map(|e| (e.t, e.packet.clone())))
-            .collect();
+        let video =
+            self.gops.iter().skip(first).flat_map(|g| g.packets.iter().map(|e| (e.t, e.packet.clone()))).collect();
         let audio = self
             .audio
             .iter()
-            .map(|q| {
-                q.iter()
-                    .filter(|e| e.t >= start)
-                    .map(|e| (e.t, e.packet.clone()))
-                    .collect()
-            })
+            .map(|q| q.iter().filter(|e| e.t >= start).map(|e| (e.t, e.packet.clone())).collect())
             .collect();
-        Some(Snapshot {
-            start,
-            video,
-            audio,
-        })
+        Some(Snapshot { start, video, audio })
     }
 }
 
@@ -537,10 +479,7 @@ mod tests {
         assert!(fits_in_free_ram(small, 6 << 30));
         assert!(!fits_in_free_ram(small, 4 << 30));
         // A custom bitrate is taken as it is.
-        assert_eq!(
-            expected_kbps(Family::Av1, (3840, 2160), 60, 1.0, Some(8_000)),
-            8_512
-        );
+        assert_eq!(expected_kbps(Family::Av1, (3840, 2160), 60, 1.0, Some(8_000)), 8_512);
     }
     use std::path::PathBuf;
 
@@ -585,10 +524,7 @@ mod tests {
             let estimate = estimate_ram_bytes(20_000, seconds, 1.0) as f64;
             let used = ring.bytes() as f64;
             assert!(used <= estimate * 1.1, "{seconds}: {used} > {estimate}");
-            assert!(
-                used >= estimate * 0.9,
-                "{seconds}: {used} too far under {estimate}"
-            );
+            assert!(used >= estimate * 0.9, "{seconds}: {used} too far under {estimate}");
         }
     }
 
@@ -644,11 +580,7 @@ mod tests {
         let (_, last) = snap.video.last().unwrap();
         assert_eq!(last.load().unwrap().size(), 500 + 89);
         assert_eq!(snap.audio[0].len(), 90);
-        assert!(
-            snap.audio[0]
-                .iter()
-                .all(|(_, p)| p.load().unwrap().size() == 40)
-        );
+        assert!(snap.audio[0].iter().all(|(_, p)| p.load().unwrap().size() == 40));
         drop(snap);
         drop(ring);
         let _ = std::fs::remove_dir_all(base);

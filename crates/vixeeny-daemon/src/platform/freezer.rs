@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The frozen screens of a zone capture (and those held for a full-screen one), made by the
-//! daemon on its own thread (it has the message loop the windows need) with a Direct3D device
-//! kept ready.
+//! The frozen screens of a zone capture (and those held for a full-screen one), made by the daemon on its own thread
+//! (it has the message loop the windows need) with a Direct3D device kept ready.
 
 use std::time::Instant;
 
@@ -17,37 +16,28 @@ pub struct GpuFreezer {
 impl GpuFreezer {
     /// Creates the device now, so the first press is as fast as the next ones.
     pub fn new() -> Self {
-        Self {
-            gpu: Self::device(),
-        }
+        Self { gpu: Self::device() }
     }
 
     fn device() -> Option<Gpu> {
-        Gpu::new()
-            .map_err(|e| tracing::warn!("no device for the frozen screens: {e}"))
-            .ok()
+        Gpu::new().map_err(|e| tracing::warn!("no device for the frozen screens: {e}")).ok()
     }
 
-    /// Freezes (`show`) or holds the screens; a second try on a new device when the old one
-    /// was lost (driver update, sleep).
+    /// Freezes (`show`) or holds the screens; a second try on a new device when the old one was lost (driver update,
+    /// sleep).
     fn take(&mut self, show: bool, cursor: bool) -> Option<Frozen> {
         if freeze::is_active() {
             return None;
         }
         let started = Instant::now();
-        let monitors = vixeeny_platform::monitors()
-            .map_err(|e| tracing::warn!("cannot list the monitors: {e}"))
-            .ok()?;
+        let monitors =
+            vixeeny_platform::monitors().map_err(|e| tracing::warn!("cannot list the monitors: {e}")).ok()?;
         for _ in 0..2 {
             if self.gpu.is_none() {
                 self.gpu = Self::device();
             }
             let gpu = self.gpu.as_ref()?;
-            let taken = if show {
-                freeze::freeze(gpu, &monitors)
-            } else {
-                freeze::hold(gpu, &monitors, cursor)
-            };
+            let taken = if show { freeze::freeze(gpu, &monitors) } else { freeze::hold(gpu, &monitors, cursor) };
             match taken {
                 Ok(frozen) => {
                     tracing::debug!(

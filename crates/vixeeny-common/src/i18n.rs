@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Every text the user sees, in English and French: the daemon reads this table too, without
-//! Slint or gettext.
+//! Every text the user sees, in English and French: the daemon reads this table too, without Slint or gettext.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lang {
@@ -386,22 +385,17 @@ keys! {
 }
 
 impl Lang {
-    /// Parses a BCP-47-ish tag (`fr`, `fr-FR`, `fr_FR.UTF-8`); unknown languages fall back to
-    /// English.
+    /// Parses a BCP-47-ish tag (`fr`, `fr-FR`, `fr_FR.UTF-8`); unknown languages fall back to English.
     pub fn from_tag(tag: &str) -> Self {
-        let primary = tag
-            .split(['-', '_', '.', '@'])
-            .next()
-            .unwrap_or_default()
-            .to_ascii_lowercase();
+        let primary = tag.split(['-', '_', '.', '@']).next().unwrap_or_default().to_ascii_lowercase();
         match primary.as_str() {
             "fr" => Self::Fr,
             _ => Self::En,
         }
     }
 
-    /// Resolves the `general.language` setting. `auto` uses `os_locale`, the tag reported by
-    /// the OS, when available, else the `LC_ALL` / `LC_MESSAGES` / `LANG` variables.
+    /// Resolves the `general.language` setting. `auto` uses `os_locale`, the tag reported by the OS, when available,
+    /// else the `LC_ALL` / `LC_MESSAGES` / `LANG` variables.
     pub fn resolve(setting: &str, os_locale: Option<&str>) -> Self {
         if setting != "auto" {
             return Self::from_tag(setting);
@@ -434,11 +428,7 @@ mod tests {
     use super::*;
 
     fn placeholders(text: &str) -> Vec<&str> {
-        let mut found: Vec<&str> = text
-            .split('{')
-            .skip(1)
-            .filter_map(|rest| rest.split('}').next())
-            .collect();
+        let mut found: Vec<&str> = text.split('{').skip(1).filter_map(|rest| rest.split('}').next()).collect();
         found.sort_unstable();
         found
     }
@@ -449,11 +439,7 @@ mod tests {
             let (en, fr) = (tr(*key, Lang::En), tr(*key, Lang::Fr));
             assert!(!en.trim().is_empty(), "{key:?} has no English text");
             assert!(!fr.trim().is_empty(), "{key:?} has no French text");
-            assert_eq!(
-                placeholders(en),
-                placeholders(fr),
-                "{key:?}: the placeholders differ between languages"
-            );
+            assert_eq!(placeholders(en), placeholders(fr), "{key:?}: the placeholders differ between languages");
         }
     }
 

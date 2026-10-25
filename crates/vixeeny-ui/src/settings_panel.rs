@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The settings window. It owns a copy of the [`Config`], applies every change the
-//! moment it is made (the host is told through [`SettingsPanel::on_change`]), and leaves what
-//! needs the OS (folders to browse and open, the hardware list) to the host.
+//! The settings window. It owns a copy of the [`Config`], applies every change the moment it is made (the host is told
+//! through [`SettingsPanel::on_change`]), and leaves what needs the OS (folders to browse and open, the hardware list)
+//! to the host.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -14,14 +14,13 @@ use vixeeny_common::ipc::ActionId;
 use vixeeny_encode::probe::ProbeResult;
 use vixeeny_settings::shortcuts::{self, Refusal};
 use vixeeny_settings::{
-    Admin, AudioDevices, Display, Env, Found, Kind, Machine, Picker, Row, Section, Value, rows,
-    search, video_problems,
+    Admin, AudioDevices, Display, Env, Found, Kind, Machine, Picker, Row, Section, Value, rows, search, video_problems,
 };
 
 use crate::theme::{self, Look};
 use crate::{
-    LineItem, PcTile, SearchHit, SettingGroup, SettingRow, SettingsWindow, ShortcutKey,
-    ShortcutRow, ShortcutSpan, UiTexts,
+    LineItem, PcTile, SearchHit, SettingGroup, SettingRow, SettingsWindow, ShortcutKey, ShortcutRow, ShortcutSpan,
+    UiTexts,
 };
 
 /// One line of the about page.
@@ -74,8 +73,8 @@ pub enum Captured {
     Combination(String),
 }
 
-/// The keys held while a shortcut is recorded: the modifiers in the order they went down, then
-/// the key. Letting go of a key ends the shortcut; Escape cancels (the slot keeps its shortcut).
+/// The keys held while a shortcut is recorded: the modifiers in the order they went down, then the key. Letting go of a
+/// key ends the shortcut; Escape cancels (the slot keeps its shortcut).
 #[derive(Debug, Default)]
 pub struct Chord {
     mods: Vec<&'static str>,
@@ -105,8 +104,8 @@ impl Chord {
         ChordStep::Held(self.text())
     }
 
-    /// A key went up: the shortcut is complete once it has a key. Letting go of modifiers alone
-    /// forgets them (a key that only reports its release, Print Screen, still counts).
+    /// A key went up: the shortcut is complete once it has a key. Letting go of modifiers alone forgets them (a key
+    /// that only reports its release, Print Screen, still counts).
     pub fn release(&mut self, code: &str) -> ChordStep {
         match modifier(code) {
             Some(name) if self.key.is_none() => {
@@ -191,28 +190,20 @@ pub struct PanelHandle(slint::Weak<SettingsWindow>);
 
 impl PanelHandle {
     pub fn set_lines(&self, lines: Vec<Line>) {
-        let _ = self
-            .0
-            .upgrade_in_event_loop(move |w| w.set_lines(line_model(lines, None)));
+        let _ = self.0.upgrade_in_event_loop(move |w| w.set_lines(line_model(lines, None)));
     }
 
     pub fn set_extra(&self, text: String) {
-        let _ = self
-            .0
-            .upgrade_in_event_loop(move |w| w.set_extra(text.into()));
+        let _ = self.0.upgrade_in_event_loop(move |w| w.set_extra(text.into()));
     }
 
     pub fn set_update(&self, view: UpdateView) {
-        let _ = self
-            .0
-            .upgrade_in_event_loop(move |w| show_update(&w, &view));
+        let _ = self.0.upgrade_in_event_loop(move |w| show_update(&w, &view));
     }
 
     /// How loud the microphone is now, 0 to 1 (from the thread that measures it).
     pub fn set_mic_level(&self, level: f32) {
-        let _ = self
-            .0
-            .upgrade_in_event_loop(move |w| w.set_mic_level(level));
+        let _ = self.0.upgrade_in_event_loop(move |w| w.set_mic_level(level));
     }
 
     /// Closes the window (the program then ends).
@@ -227,11 +218,7 @@ fn line_model(lines: Vec<Line>, selected: Option<usize>) -> ModelRc<LineItem> {
     let items: Vec<LineItem> = lines
         .into_iter()
         .enumerate()
-        .map(|(i, l)| LineItem {
-            text: l.text.into(),
-            detail: l.detail.into(),
-            selected: selected == Some(i),
-        })
+        .map(|(i, l)| LineItem { text: l.text.into(), detail: l.detail.into(), selected: selected == Some(i) })
         .collect();
     ModelRc::from(Rc::new(VecModel::from(items)))
 }
@@ -261,12 +248,7 @@ fn pc_tiles(tiles: &[vixeeny_settings::machine::Tile]) -> ModelRc<PcTile> {
 }
 
 fn strings(items: impl IntoIterator<Item = String>) -> ModelRc<SharedString> {
-    ModelRc::from(Rc::new(VecModel::from(
-        items
-            .into_iter()
-            .map(SharedString::from)
-            .collect::<Vec<_>>(),
-    )))
+    ModelRc::from(Rc::new(VecModel::from(items.into_iter().map(SharedString::from).collect::<Vec<_>>())))
 }
 
 fn ui_texts(lang: Lang) -> UiTexts {
@@ -384,15 +366,12 @@ fn drop_leaving(window: &SettingsWindow) {
     }
 }
 
-/// Puts back, where they were, the rows of `old` that `new` no longer has, marked as leaving:
-/// they fold away instead of vanishing.
+/// Puts back, where they were, the rows of `old` that `new` no longer has, marked as leaving: they fold away instead of
+/// vanishing.
 fn keep_leaving(old: &[Vec<SettingRow>], new: &mut Vec<Vec<SettingRow>>) {
-    let kept: std::collections::HashSet<SharedString> =
-        new.iter().flatten().map(|r| r.id.clone()).collect();
+    let kept: std::collections::HashSet<SharedString> = new.iter().flatten().map(|r| r.id.clone()).collect();
     let find = |new: &[Vec<SettingRow>], id: &SharedString| {
-        new.iter()
-            .enumerate()
-            .find_map(|(g, rows)| rows.iter().position(|r| r.id == *id).map(|i| (g, i)))
+        new.iter().enumerate().find_map(|(g, rows)| rows.iter().position(|r| r.id == *id).map(|i| (g, i)))
     };
     for (gi, group) in old.iter().enumerate() {
         for (ri, row) in group.iter().enumerate() {
@@ -402,8 +381,7 @@ fn keep_leaving(old: &[Vec<SettingRow>], new: &mut Vec<Vec<SettingRow>>) {
             let mut leaving = row.clone();
             leaving.leaving = true;
             leaving.fresh = false;
-            // After the row above it (still there, or leaving too), else before the next one
-            // that stays.
+            // After the row above it (still there, or leaving too), else before the next one that stays.
             let place = group[..ri]
                 .iter()
                 .rev()
@@ -426,18 +404,15 @@ fn keep_leaving(old: &[Vec<SettingRow>], new: &mut Vec<Vec<SettingRow>>) {
     }
 }
 
-/// Shows `groups`. When the page keeps its shape (same groups, same rows) only the rows that
-/// changed are updated, in place: their controls stay, so a toggle slides instead of being
-/// redrawn in its new state, and nothing flickers. On the same page, rows that appear unfold
-/// and rows that go fold away.
+/// Shows `groups`. When the page keeps its shape (same groups, same rows) only the rows that changed are updated, in
+/// place: their controls stay, so a toggle slides instead of being redrawn in its new state, and nothing flickers. On
+/// the same page, rows that appear unfold and rows that go fold away.
 fn show_groups(window: &SettingsWindow, groups: Vec<Titled>) {
     // Rows still folding away from the change before go at once.
     drop_leaving(window);
     // Each row's group title: a group that only folds away has none.
-    let title_of: std::collections::HashMap<SharedString, SharedString> = groups
-        .iter()
-        .flat_map(|(title, rows)| rows.iter().map(move |r| (r.id.clone(), title.clone())))
-        .collect();
+    let title_of: std::collections::HashMap<SharedString, SharedString> =
+        groups.iter().flat_map(|(title, rows)| rows.iter().map(move |r| (r.id.clone(), title.clone()))).collect();
     let titles: Vec<SharedString> = groups.iter().map(|(t, _)| t.clone()).collect();
     let groups: Vec<Vec<SettingRow>> = groups.into_iter().map(|(_, rows)| rows).collect();
     let current = window.get_groups();
@@ -445,10 +420,7 @@ fn show_groups(window: &SettingsWindow, groups: Vec<Titled>) {
         && groups.iter().enumerate().all(|(i, rows)| {
             current.row_data(i).is_some_and(|g| {
                 g.rows.row_count() == rows.len()
-                    && rows
-                        .iter()
-                        .enumerate()
-                        .all(|(j, r)| g.rows.row_data(j).is_some_and(|old| old.id == r.id))
+                    && rows.iter().enumerate().all(|(j, r)| g.rows.row_data(j).is_some_and(|old| old.id == r.id))
             })
         });
     if same_shape {
@@ -462,11 +434,7 @@ fn show_groups(window: &SettingsWindow, groups: Vec<Titled>) {
                 current.set_row_data(i, group.clone());
             }
             for (j, row) in rows.into_iter().enumerate() {
-                if group
-                    .rows
-                    .row_data(j)
-                    .is_some_and(|old| !same_row(&old, &row))
-                {
+                if group.rows.row_data(j).is_some_and(|old| !same_row(&old, &row)) {
                     group.rows.set_row_data(j, row);
                 }
             }
@@ -474,8 +442,7 @@ fn show_groups(window: &SettingsWindow, groups: Vec<Titled>) {
         return;
     }
     let old: Vec<Vec<SettingRow>> = current.iter().map(|g| g.rows.iter().collect()).collect();
-    let old_ids: std::collections::HashSet<SharedString> =
-        old.iter().flatten().map(|r| r.id.clone()).collect();
+    let old_ids: std::collections::HashSet<SharedString> = old.iter().flatten().map(|r| r.id.clone()).collect();
     let same_page = groups.iter().flatten().any(|r| old_ids.contains(&r.id));
     let mut groups: Vec<Vec<SettingRow>> = groups
         .into_iter()
@@ -493,11 +460,7 @@ fn show_groups(window: &SettingsWindow, groups: Vec<Titled>) {
     let model: Vec<SettingGroup> = groups
         .into_iter()
         .map(|rows| SettingGroup {
-            title: rows
-                .iter()
-                .find_map(|r| title_of.get(&r.id).filter(|_| !r.leaving))
-                .cloned()
-                .unwrap_or_default(),
+            title: rows.iter().find_map(|r| title_of.get(&r.id).filter(|_| !r.leaving)).cloned().unwrap_or_default(),
             rows: ModelRc::from(Rc::new(VecModel::from(rows))),
         })
         .collect();
@@ -515,19 +478,12 @@ fn show_groups(window: &SettingsWindow, groups: Vec<Titled>) {
 
 /// Whether a shortcut starts a group of actions (captures, recording, the program).
 const fn starts_group(action: ActionId) -> bool {
-    matches!(
-        action,
-        ActionId::CaptureRegion | ActionId::RecordToggle | ActionId::OverlayToggle
-    )
+    matches!(action, ActionId::CaptureRegion | ActionId::RecordToggle | ActionId::OverlayToggle)
 }
 
 fn picture(icon: Option<&vixeeny_settings::Icon>) -> slint::Image {
     icon.map_or_else(slint::Image::default, |icon| {
-        slint::Image::from_rgba8(slint::SharedPixelBuffer::clone_from_slice(
-            &icon.rgba,
-            icon.width,
-            icon.height,
-        ))
+        slint::Image::from_rgba8(slint::SharedPixelBuffer::clone_from_slice(&icon.rgba, icon.width, icon.height))
     })
 }
 
@@ -577,8 +533,8 @@ fn row_model(row: &Row, config: &Config, lang: Lang) -> SettingRow {
                 Picker::Edge => 10,
                 Picker::Corner => 11,
             };
-            // The corner picker's own place: `custom:<x>:<y>`, drawn where it is (`min`, `max`:
-            // thousandths across and down, -1 for none).
+            // The corner picker's own place: `custom:<x>:<y>`, drawn where it is (`min`, `max`: thousandths across and
+            // down, -1 for none).
             let (value, place) = match t.split_once(':') {
                 Some((value, place)) if row.picker == Picker::Corner => (value, Some(place)),
                 _ => (t.as_str(), None),
@@ -588,29 +544,20 @@ fn row_model(row: &Row, config: &Config, lang: Lang) -> SettingRow {
                 Some((x.parse::<i32>().ok()?, y.parse::<i32>().ok()?))
             });
             (out.min, out.max) = place.unwrap_or((-1, -1));
-            out.selected = options
-                .iter()
-                .position(|o| o.value == value)
-                .map_or(-1, |i| i as i32);
+            out.selected = options.iter().position(|o| o.value == value).map_or(-1, |i| i as i32);
             out.options = strings(options.iter().map(|o| o.label.clone()));
-            out.separators = options
-                .iter()
-                .filter(|o| o.heading && o.label.is_empty())
-                .count() as i32;
+            out.separators = options.iter().filter(|o| o.heading && o.label.is_empty()).count() as i32;
             if options.iter().any(|o| o.heading) {
-                out.headings = ModelRc::from(Rc::new(VecModel::from(
-                    options.iter().map(|o| o.heading).collect::<Vec<_>>(),
-                )));
+                out.headings =
+                    ModelRc::from(Rc::new(VecModel::from(options.iter().map(|o| o.heading).collect::<Vec<_>>())));
             }
             if options.iter().any(|o| o.recommended) {
-                out.marks = ModelRc::from(Rc::new(VecModel::from(
-                    options.iter().map(|o| o.recommended).collect::<Vec<_>>(),
-                )));
+                out.marks =
+                    ModelRc::from(Rc::new(VecModel::from(options.iter().map(|o| o.recommended).collect::<Vec<_>>())));
             }
             if options.iter().any(|o| o.caution) {
-                out.cautions = ModelRc::from(Rc::new(VecModel::from(
-                    options.iter().map(|o| o.caution).collect::<Vec<_>>(),
-                )));
+                out.cautions =
+                    ModelRc::from(Rc::new(VecModel::from(options.iter().map(|o| o.caution).collect::<Vec<_>>())));
             }
         }
         (Kind::Expander, Value::Bool(open)) => {
@@ -618,11 +565,7 @@ fn row_model(row: &Row, config: &Config, lang: Lang) -> SettingRow {
             out.on = open;
         }
         (Kind::Number { min, max, step } | Kind::Slider { min, max, step }, Value::Int(n)) => {
-            out.kind = if matches!(row.kind, Kind::Slider { .. }) {
-                8
-            } else {
-                2
-            };
+            out.kind = if matches!(row.kind, Kind::Slider { .. }) { 8 } else { 2 };
             out.num = n as i32;
             out.shown = row.number_text(n, lang).into();
             out.min = *min as i32;
@@ -644,15 +587,10 @@ fn row_model(row: &Row, config: &Config, lang: Lang) -> SettingRow {
         (Kind::Colour { swatches, pairs }, Value::Text(t)) => {
             let colours = |list: Vec<[u8; 3]>| {
                 ModelRc::from(Rc::new(VecModel::from(
-                    list.into_iter()
-                        .map(|[r, g, b]| slint::Color::from_rgb_u8(r, g, b))
-                        .collect::<Vec<_>>(),
+                    list.into_iter().map(|[r, g, b]| slint::Color::from_rgb_u8(r, g, b)).collect::<Vec<_>>(),
                 )))
             };
-            let current: Vec<[u8; 3]> = t
-                .split(',')
-                .filter_map(vixeeny_common::config::parse_hex)
-                .collect();
+            let current: Vec<[u8; 3]> = t.split(',').filter_map(vixeeny_common::config::parse_hex).collect();
             out.kind = 12;
             out.options = strings(current.iter().map(|&c| hex(c).to_uppercase()));
             out.colours = colours(current);
@@ -669,10 +607,7 @@ fn row_model(row: &Row, config: &Config, lang: Lang) -> SettingRow {
 
 impl State {
     fn lang(&self) -> Lang {
-        Lang::resolve(
-            &self.config.borrow().general.language,
-            self.os_locale.as_deref(),
-        )
+        Lang::resolve(&self.config.borrow().general.language, self.os_locale.as_deref())
     }
 
     /// Tells the host the settings changed; while a slider is held, once it is let go.
@@ -693,9 +628,8 @@ impl State {
     }
 }
 
-/// The title bar drawn by the window itself: moving, minimizing, maximizing, closing and
-/// resizing go to the system through winit. Windows 11 still gives the frameless window its
-/// shadow and rounded corners.
+/// The title bar drawn by the window itself: moving, minimizing, maximizing, closing and resizing go to the system
+/// through winit. Windows 11 still gives the frameless window its shadow and rounded corners.
 fn wire_chrome(window: &SettingsWindow) {
     window.on_minimize_window({
         let weak = window.as_weak();
@@ -719,8 +653,7 @@ fn wire_chrome(window: &SettingsWindow) {
         let weak = window.as_weak();
         move || {
             if let Some(w) = weak.upgrade() {
-                w.window()
-                    .dispatch_event(slint::platform::WindowEvent::CloseRequested);
+                w.window().dispatch_event(slint::platform::WindowEvent::CloseRequested);
             }
         }
     });
@@ -761,9 +694,7 @@ fn wire_chrome(window: &SettingsWindow) {
         theme::when_native(window, {
             let weak = window.as_weak();
             move |_| {
-                use slint::winit_030::winit::platform::windows::{
-                    CornerPreference, WindowExtWindows,
-                };
+                use slint::winit_030::winit::platform::windows::{CornerPreference, WindowExtWindows};
                 if let Some(w) = weak.upgrade() {
                     w.window().with_winit_window(|w| {
                         w.set_undecorated_shadow(true);
@@ -869,8 +800,8 @@ impl SettingsPanel {
         self.refresh();
     }
 
-    /// The shortcuts the daemon could not register (their text as the settings file has them,
-    /// any spelling): the shortcuts page marks them.
+    /// The shortcuts the daemon could not register (their text as the settings file has them, any spelling): the
+    /// shortcuts page marks them.
     pub fn set_taken_shortcuts(&self, taken: Vec<String>) {
         if *self.state.taken.borrow() == taken {
             return;
@@ -881,34 +812,21 @@ impl SettingsPanel {
         }
     }
 
-    /// Asks `read` for the shortcuts the daemon could not register now, and again each time
-    /// `changed` rings (their file changed).
-    pub fn watch_taken_shortcuts(
-        &self,
-        read: impl Fn() -> Vec<String> + 'static,
-        changed: &crate::bell::Bell,
-    ) {
+    /// Asks `read` for the shortcuts the daemon could not register now, and again each time `changed` rings (their file
+    /// changed).
+    pub fn watch_taken_shortcuts(&self, read: impl Fn() -> Vec<String> + 'static, changed: &crate::bell::Bell) {
         self.set_taken_shortcuts(read());
         let (weak, state) = (self.window.as_weak(), self.state.clone());
         changed.on_ring(move || {
             if let Some(window) = weak.upgrade() {
-                SettingsPanel {
-                    window,
-                    state: state.clone(),
-                }
-                .set_taken_shortcuts(read());
+                SettingsPanel { window, state: state.clone() }.set_taken_shortcuts(read());
             }
         });
     }
 
-    /// Each time `changed` rings (the settings file changed), `read` gets the settings the
-    /// window shows and may return others (written by another program): the window then shows
-    /// those, without reporting a change.
-    pub fn watch_config(
-        &self,
-        read: impl Fn(&Config) -> Option<Config> + 'static,
-        changed: &crate::bell::Bell,
-    ) {
+    /// Each time `changed` rings (the settings file changed), `read` gets the settings the window shows and may return
+    /// others (written by another program): the window then shows those, without reporting a change.
+    pub fn watch_config(&self, read: impl Fn(&Config) -> Option<Config> + 'static, changed: &crate::bell::Bell) {
         let (weak, state) = (self.window.as_weak(), self.state.clone());
         changed.on_ring(move || {
             let Some(window) = weak.upgrade() else {
@@ -916,10 +834,7 @@ impl SettingsPanel {
             };
             let shown = state.config.borrow().clone();
             if let Some(config) = read(&shown).filter(|c| *c != shown) {
-                let panel = SettingsPanel {
-                    window,
-                    state: state.clone(),
-                };
+                let panel = SettingsPanel { window, state: state.clone() };
                 let language = shown.general.language != config.general.language;
                 *state.config.borrow_mut() = config;
                 if language {
@@ -932,9 +847,8 @@ impl SettingsPanel {
         });
     }
 
-    /// Called with the microphone to measure (`mic` or `mic:<id>`) while the audio page shows
-    /// its level, and with `None` when it stops showing it. The host then measures it and
-    /// reports through [`SettingsPanel::set_mic_level`].
+    /// Called with the microphone to measure (`mic` or `mic:<id>`) while the audio page shows its level, and with
+    /// `None` when it stops showing it. The host then measures it and reports through [`SettingsPanel::set_mic_level`].
     pub fn on_meter(&self, f: impl Fn(Option<String>) + 'static) {
         *self.state.on_meter.borrow_mut() = Box::new(f);
     }
@@ -950,8 +864,8 @@ impl SettingsPanel {
         self.refresh();
     }
 
-    /// Where the audio page's devices and programs come from: asked on another thread now,
-    /// and again each time the page is opened (programs come and go).
+    /// Where the audio page's devices and programs come from: asked on another thread now, and again each time the page
+    /// is opened (programs come and go).
     pub fn set_audio_source(&self, source: impl Fn() -> AudioDevices + Send + Sync + 'static) {
         *self.state.audio_source.borrow_mut() = Some(std::sync::Arc::new(source));
         self.load_audio();
@@ -985,15 +899,13 @@ impl SettingsPanel {
         let slot: std::sync::Arc<std::sync::Mutex<Option<T>>> = std::sync::Arc::default();
         let bell = crate::bell::Bell::new();
         let (filled, ring) = (slot.clone(), bell.clone());
-        let started = std::thread::Builder::new()
-            .name(name.into())
-            .spawn(move || {
-                let value = make();
-                if let Ok(mut s) = filled.lock() {
-                    *s = Some(value);
-                }
-                ring.ring();
-            });
+        let started = std::thread::Builder::new().name(name.into()).spawn(move || {
+            let value = make();
+            if let Ok(mut s) = filled.lock() {
+                *s = Some(value);
+            }
+            ring.ring();
+        });
         if started.is_err() {
             return;
         }
@@ -1015,8 +927,8 @@ impl SettingsPanel {
         self.refresh();
     }
 
-    /// Called with `true` when a shortcut starts being recorded and `false` when it stops: the
-    /// host stops the global shortcuts meanwhile, or pressing one would run it.
+    /// Called with `true` when a shortcut starts being recorded and `false` when it stops: the host stops the global
+    /// shortcuts meanwhile, or pressing one would run it.
     pub fn on_recording(&self, f: impl Fn(bool) + 'static) {
         *self.state.on_recording.borrow_mut() = Box::new(f);
     }
@@ -1035,10 +947,7 @@ impl SettingsPanel {
     }
 
     pub fn current_section(&self) -> Section {
-        Section::ALL
-            .get(self.window.get_section() as usize)
-            .copied()
-            .unwrap_or(Section::General)
+        Section::ALL.get(self.window.get_section() as usize).copied().unwrap_or(Section::General)
     }
 
     pub fn set_lines(&self, lines: Vec<Line>) {
@@ -1064,16 +973,11 @@ impl SettingsPanel {
         let lang = self.state.lang();
         self.rebuild_env();
         self.window.set_t(ui_texts(lang));
-        self.window.set_section_titles(strings(
-            Section::ALL.iter().map(|s| tr(s.title(), lang).to_owned()),
-        ));
-        self.window
-            .set_version(format!("Version {}", self.state.version).into());
+        self.window.set_section_titles(strings(Section::ALL.iter().map(|s| tr(s.title(), lang).to_owned())));
+        self.window.set_version(format!("Version {}", self.state.version).into());
         self.window.set_tagline(tr(Key::AboutTagline, lang).into());
-        self.window
-            .set_search_placeholder(tr(Key::UiSearch, lang).into());
-        self.window
-            .set_search_title(tr(Key::UiSearchTitle, lang).into());
+        self.window.set_search_placeholder(tr(Key::UiSearch, lang).into());
+        self.window.set_search_title(tr(Key::UiSearchTitle, lang).into());
     }
 
     /// The model's view of this machine: language, hardware probe, audio devices.
@@ -1104,15 +1008,7 @@ impl SettingsPanel {
             let metered = built
                 .iter()
                 .any(|r| r.meter)
-                .then(|| {
-                    config
-                        .video
-                        .audio
-                        .sources
-                        .iter()
-                        .find(|s| *s == "mic" || s.starts_with("mic:"))
-                        .cloned()
-                })
+                .then(|| config.video.audio.sources.iter().find(|s| *s == "mic" || s.starts_with("mic:")).cloned())
                 .flatten();
             *state.rows.borrow_mut() = built;
             self.meter(metered);
@@ -1121,11 +1017,8 @@ impl SettingsPanel {
             self.window.set_groups(ModelRc::default());
             state.rows.borrow_mut().clear();
         }
-        let overview = if section == Section::About {
-            vixeeny_settings::machine::overview(&env)
-        } else {
-            Default::default()
-        };
+        let overview =
+            if section == Section::About { vixeeny_settings::machine::overview(&env) } else { Default::default() };
         self.window.set_pc_system(pc_tiles(&overview.system));
         self.window.set_pc_gpus(pc_tiles(&overview.gpus));
         self.window.set_pc_screens(pc_tiles(&overview.screens));
@@ -1135,11 +1028,8 @@ impl SettingsPanel {
         } else {
             String::new()
         };
-        let heading = if notice.is_empty() {
-            String::new()
-        } else {
-            format!("{}\n{notice}", tr(Key::SetProblems, env.lang))
-        };
+        let heading =
+            if notice.is_empty() { String::new() } else { format!("{}\n{notice}", tr(Key::SetProblems, env.lang)) };
         self.window.set_notice(heading.into());
         drop(config);
         drop(env);
@@ -1235,21 +1125,14 @@ impl SettingsPanel {
         for (i, row) in table.iter().enumerate() {
             match spans.last_mut() {
                 Some(span) if !row.group => span.count += 1,
-                _ => spans.push(ShortcutSpan {
-                    start: i as i32,
-                    count: 1,
-                }),
+                _ => spans.push(ShortcutSpan { start: i as i32, count: 1 }),
             }
         }
         // The second column is drawn whole only once a second shortcut is set.
-        let seconds = table
-            .iter()
-            .any(|row| row.keys.row_data(1).is_some_and(|key| !key.text.is_empty()));
+        let seconds = table.iter().any(|row| row.keys.row_data(1).is_some_and(|key| !key.text.is_empty()));
         self.window.set_two_columns(seconds);
-        self.window
-            .set_shortcut_spans(ModelRc::from(Rc::new(VecModel::from(spans))));
-        self.window
-            .set_shortcuts(ModelRc::from(Rc::new(VecModel::from(table))));
+        self.window.set_shortcut_spans(ModelRc::from(Rc::new(VecModel::from(spans))));
+        self.window.set_shortcuts(ModelRc::from(Rc::new(VecModel::from(table))));
     }
 
     /// Writes `text` into a slot of a shortcut (empty clears it); errors show under the row.
@@ -1271,8 +1154,9 @@ impl SettingsPanel {
                 match refusal {
                     Refusal::Invalid(error) => invalid_shortcut(&error, lang),
                     Refusal::Duplicate => tr(Key::ShortcutDuplicate, lang).to_owned(),
-                    Refusal::Conflict(other) => tr(Key::ShortcutConflict, lang)
-                        .replace("{action}", action_label(other, lang)),
+                    Refusal::Conflict(other) => {
+                        tr(Key::ShortcutConflict, lang).replace("{action}", action_label(other, lang))
+                    }
                 },
             )],
         };
@@ -1285,17 +1169,15 @@ impl SettingsPanel {
         let was = self.state.recording.replace(target).is_some();
         *self.state.chord.borrow_mut() = Chord::default();
         self.window.set_recording_keys(SharedString::new());
-        self.window
-            .set_recording_row(target.map_or(-1, |(row, _)| row as i32));
-        self.window
-            .set_recording_slot(target.map_or(-1, |(_, slot)| slot as i32));
+        self.window.set_recording_row(target.map_or(-1, |(row, _)| row as i32));
+        self.window.set_recording_slot(target.map_or(-1, |(_, slot)| slot as i32));
         if was != target.is_some() {
             (self.state.on_recording.borrow())(target.is_some());
         }
     }
 
-    /// What the user pressed while a shortcut is being recorded (the combination, or the slot
-    /// emptied). Returns whether a shortcut was being recorded.
+    /// What the user pressed while a shortcut is being recorded (the combination, or the slot emptied). Returns whether
+    /// a shortcut was being recorded.
     pub fn captured(&self, pressed: Captured) -> bool {
         let Some((row, slot)) = self.state.recording.get() else {
             return false;
@@ -1308,19 +1190,15 @@ impl SettingsPanel {
         true
     }
 
-    /// A key went down (`down`) or up while a shortcut may be recorded; `code` is its
-    /// `KeyboardEvent.code` name. Returns whether the key was taken.
+    /// A key went down (`down`) or up while a shortcut may be recorded; `code` is its `KeyboardEvent.code` name.
+    /// Returns whether the key was taken.
     pub fn key(&self, code: &str, down: bool) -> bool {
         if self.state.recording.get().is_none() {
             return false;
         }
         let step = {
             let mut chord = self.state.chord.borrow_mut();
-            if down {
-                chord.press(code)
-            } else {
-                chord.release(code)
-            }
+            if down { chord.press(code) } else { chord.release(code) }
         };
         match step {
             ChordStep::Held(text) => {
@@ -1334,9 +1212,8 @@ impl SettingsPanel {
         true
     }
 
-    /// Hooks the events of the window: the keys of a recorded shortcut are read from the keys
-    /// themselves, the size and the presses of the pointer followed. Needs the real (winit)
-    /// backend, which keeps one hook per window.
+    /// Hooks the events of the window: the keys of a recorded shortcut are read from the keys themselves, the size and
+    /// the presses of the pointer followed. Needs the real (winit) backend, which keeps one hook per window.
     #[cfg(feature = "desktop")]
     pub fn capture_keys(&self) {
         use slint::winit_030::winit::event::{ElementState, WindowEvent};
@@ -1344,12 +1221,7 @@ impl SettingsPanel {
         use slint::winit_030::{EventResult, WinitWindowAccessor};
         let (weak, state) = (self.window.as_weak(), self.state.clone());
         self.window.window().on_winit_window_event(move |_, event| {
-            let panel = || {
-                weak.upgrade().map(|window| SettingsPanel {
-                    window,
-                    state: state.clone(),
-                })
-            };
+            let panel = || weak.upgrade().map(|window| SettingsPanel { window, state: state.clone() });
             match event {
                 // Maximized by the system too (double click, Win+Up, a drag to the top): follow it.
                 WindowEvent::Resized(_) => {
@@ -1359,10 +1231,7 @@ impl SettingsPanel {
                     }
                 }
                 // A press outside the text field being typed in takes the focus away from it.
-                WindowEvent::MouseInput {
-                    state: ElementState::Pressed,
-                    ..
-                } => {
+                WindowEvent::MouseInput { state: ElementState::Pressed, .. } => {
                     if let Some(w) = weak.upgrade() {
                         w.global::<crate::Fields>().invoke_pressed();
                     }
@@ -1374,9 +1243,7 @@ impl SettingsPanel {
                     }
                 }
                 WindowEvent::KeyboardInput { event, .. } if state.recording.get().is_some() => {
-                    if let (PhysicalKey::Code(code), false, Some(p)) =
-                        (event.physical_key, event.repeat, panel())
-                    {
+                    if let (PhysicalKey::Code(code), false, Some(p)) = (event.physical_key, event.repeat, panel()) {
                         p.key(&format!("{code:?}"), event.state == ElementState::Pressed);
                     }
                     return EventResult::PreventDefault;
@@ -1400,11 +1267,7 @@ impl SettingsPanel {
             for (action, _) in shortcuts::table(&config) {
                 let label = action_label(action, lang);
                 if vixeeny_settings::matches(query, label) {
-                    found.push(Found {
-                        section: Section::Shortcuts,
-                        id: String::new(),
-                        label: label.to_owned(),
-                    });
+                    found.push(Found { section: Section::Shortcuts, id: String::new(), label: label.to_owned() });
                 }
             }
             found
@@ -1414,19 +1277,11 @@ impl SettingsPanel {
             .map(|f| SearchHit {
                 label: f.label.as_str().into(),
                 page: tr(f.section.title(), lang).into(),
-                section: Section::ALL
-                    .iter()
-                    .position(|s| *s == f.section)
-                    .unwrap_or(0) as i32,
+                section: Section::ALL.iter().position(|s| *s == f.section).unwrap_or(0) as i32,
             })
             .collect();
-        self.window
-            .set_search_hits(ModelRc::from(Rc::new(VecModel::from(hits))));
-        self.window.set_search_none(
-            tr(Key::UiSearchNone, lang)
-                .replace("{query}", query.trim())
-                .into(),
-        );
+        self.window.set_search_hits(ModelRc::from(Rc::new(VecModel::from(hits))));
+        self.window.set_search_none(tr(Key::UiSearchNone, lang).replace("{query}", query.trim()).into());
         *state.found.borrow_mut() = found;
     }
 
@@ -1463,10 +1318,7 @@ impl SettingsPanel {
         let w = &self.window;
         let weak = w.as_weak();
         let panel = |weak: &slint::Weak<SettingsWindow>, state: &Rc<State>| {
-            weak.upgrade().map(|window| SettingsPanel {
-                window,
-                state: state.clone(),
-            })
+            weak.upgrade().map(|window| SettingsPanel { window, state: state.clone() })
         };
 
         w.on_section_changed({
@@ -1491,11 +1343,7 @@ impl SettingsPanel {
                     return;
                 };
                 // An expander opens or closes rows: the window's state, not a setting.
-                let expander = state
-                    .rows
-                    .borrow()
-                    .iter()
-                    .any(|r| r.id == id && matches!(r.kind, Kind::Expander));
+                let expander = state.rows.borrow().iter().any(|r| r.id == id && matches!(r.kind, Kind::Expander));
                 if expander {
                     {
                         let mut open = state.open.borrow_mut();
@@ -1561,8 +1409,7 @@ impl SettingsPanel {
         w.on_row_code({
             let edit = edit.clone();
             move |id, index, code| {
-                let value =
-                    vixeeny_common::config::parse_hex(&code).and_then(|c| recolour(&id, index, c));
+                let value = vixeeny_common::config::parse_hex(&code).and_then(|c| recolour(&id, index, c));
                 let edit = edit.clone();
                 // Typed in a field, as `row-text`: applied once the field is done with.
                 if let Some(value) = value {
@@ -1576,8 +1423,8 @@ impl SettingsPanel {
             let state = self.state.clone();
             move |on| state.slide(on)
         });
-        // A field also reports when it loses the focus, which happens while the page is
-        // rebuilt (another page, a row that goes): the change waits for the rebuild to end.
+        // A field also reports when it loses the focus, which happens while the page is rebuilt (another page, a row
+        // that goes): the change waits for the rebuild to end.
         w.on_row_text({
             let edit = edit.clone();
             move |id, text| {
@@ -1590,17 +1437,10 @@ impl SettingsPanel {
         w.on_row_chosen({
             let (edit, state) = (edit.clone(), self.state.clone());
             move |id, index| {
-                let value = state
-                    .rows
-                    .borrow()
-                    .iter()
-                    .find(|r| r.id == id.as_str())
-                    .and_then(|r| match &r.kind {
-                        Kind::Choice(options) => {
-                            options.get(index as usize).map(|o| o.value.clone())
-                        }
-                        _ => None,
-                    });
+                let value = state.rows.borrow().iter().find(|r| r.id == id.as_str()).and_then(|r| match &r.kind {
+                    Kind::Choice(options) => options.get(index as usize).map(|o| o.value.clone()),
+                    _ => None,
+                });
                 if let Some(value) = value {
                     edit(&id, Value::Text(value));
                 }
@@ -1609,12 +1449,8 @@ impl SettingsPanel {
         w.on_row_browse({
             let (edit, state) = (edit, self.state.clone());
             move |id| {
-                let current = state
-                    .rows
-                    .borrow()
-                    .iter()
-                    .find(|r| r.id == id.as_str())
-                    .map(|r| r.value(&state.config.borrow()));
+                let current =
+                    state.rows.borrow().iter().find(|r| r.id == id.as_str()).map(|r| r.value(&state.config.borrow()));
                 let start = match current {
                     Some(Value::Text(t)) => t,
                     _ => String::new(),
@@ -1677,8 +1513,7 @@ impl SettingsPanel {
             }
         });
 
-        // The button that opens a folder row's folder: the host opens it. A button row: the
-        // host is told its id.
+        // The button that opens a folder row's folder: the host opens it. A button row: the host is told its id.
         w.on_row_action({
             let (weak, state) = (weak.clone(), self.state.clone());
             move |id, action| {
@@ -1689,12 +1524,8 @@ impl SettingsPanel {
                     (state.on_page_action.borrow())(p.current_section(), &id, "");
                     return;
                 }
-                let folder = state
-                    .rows
-                    .borrow()
-                    .iter()
-                    .find(|r| r.id == id.as_str())
-                    .map(|r| r.value(&state.config.borrow()));
+                let folder =
+                    state.rows.borrow().iter().find(|r| r.id == id.as_str()).map(|r| r.value(&state.config.borrow()));
                 if let (Some(Value::Text(folder)), "open") = (folder, action.as_str()) {
                     (state.on_page_action.borrow())(p.current_section(), "open-folder", &folder);
                 }
@@ -1716,9 +1547,7 @@ impl SettingsPanel {
 /// Why a shortcut is not a key combination, in the user's language.
 fn invalid_shortcut(error: &HotkeyError, lang: Lang) -> String {
     match error {
-        HotkeyError::Empty | HotkeyError::ModifierOnly => {
-            tr(Key::ShortcutModifierOnly, lang).to_owned()
-        }
+        HotkeyError::Empty | HotkeyError::ModifierOnly => tr(Key::ShortcutModifierOnly, lang).to_owned(),
         HotkeyError::UnknownKey(key) => tr(Key::ShortcutUnknownKey, lang).replace("{key}", key),
         HotkeyError::NeedsModifier(code) => {
             tr(Key::ShortcutNeedsModifier, lang).replace("{key}", &shortcut_label(code, lang))
@@ -1737,10 +1566,7 @@ pub fn key_names(text: &str, lang: Lang) -> Vec<String> {
     }
     text.split('+')
         .map(|part| {
-            let name = part
-                .strip_prefix("Key")
-                .or_else(|| part.strip_prefix("Digit"))
-                .unwrap_or(part);
+            let name = part.strip_prefix("Key").or_else(|| part.strip_prefix("Digit")).unwrap_or(part);
             match name {
                 "PrintScreen" if lang == Lang::Fr => "Impr. écran".to_owned(),
                 "PrintScreen" => "Print Screen".to_owned(),

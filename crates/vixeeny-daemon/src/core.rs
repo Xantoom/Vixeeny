@@ -4,8 +4,8 @@
 use vixeeny_common::i18n::Key;
 use vixeeny_common::ipc::{ActionId, AppToDaemon, ControlRequest, DaemonToApp, RecState};
 
-/// Identifies one launch of `vixeeny-app`, so the exit of an old process cannot be mistaken for
-/// the exit of the one that replaced it.
+/// Identifies one launch of `vixeeny-app`, so the exit of an old process cannot be mistaken for the exit of the one
+/// that replaced it.
 pub type SpawnId = u64;
 
 /// Something that happened.
@@ -27,8 +27,8 @@ pub enum Event {
         success: bool,
     },
     TrayQuit,
-    /// A window (its handle) came to the foreground, or the one there went full screen or
-    /// left it (the runtime looks for a game).
+    /// A window (its handle) came to the foreground, or the one there went full screen or left it (the runtime looks
+    /// for a game).
     Foreground(u64),
 }
 
@@ -106,10 +106,7 @@ impl Core {
             Event::AppExited { id, success } => self.on_exit(id, success, &mut fx),
             Event::Foreground(_) => {}
         }
-        if self.update_waiting
-            && self.recording_state() == RecState::Idle
-            && !fx.contains(&Effect::Quit)
-        {
+        if self.update_waiting && self.recording_state() == RecState::Idle && !fx.contains(&Effect::Quit) {
             self.update_waiting = false;
             self.quit(&mut fx);
         }
@@ -118,10 +115,7 @@ impl Core {
 
     fn run(&mut self, action: ActionId, fx: &mut Vec<Effect>) {
         if self.connected && self.ready && !self.exit_expected {
-            fx.push(Effect::SendToApp(DaemonToApp::RunAction {
-                action,
-                frozen: None,
-            }));
+            fx.push(Effect::SendToApp(DaemonToApp::RunAction { action, frozen: None }));
         } else if self.current.is_some() && !self.exit_expected {
             // Starting up: deliver once `Ready` arrives.
             self.queued.push(action);
@@ -131,10 +125,7 @@ impl Core {
             self.exit_expected = false;
             self.ready = false;
             // The spawned app receives its first action on its command line.
-            fx.push(Effect::SpawnApp {
-                id: self.last_id,
-                action,
-            });
+            fx.push(Effect::SpawnApp { id: self.last_id, action });
         }
     }
 
@@ -143,10 +134,7 @@ impl Core {
             AppToDaemon::Ready => {
                 self.ready = true;
                 for action in self.queued.drain(..) {
-                    fx.push(Effect::SendToApp(DaemonToApp::RunAction {
-                        action,
-                        frozen: None,
-                    }));
+                    fx.push(Effect::SendToApp(DaemonToApp::RunAction { action, frozen: None }));
                 }
             }
             AppToDaemon::RecordingStateChanged(state) => {
@@ -203,19 +191,13 @@ mod tests {
     }
 
     fn run(action: ActionId) -> Effect {
-        Effect::SendToApp(DaemonToApp::RunAction {
-            action,
-            frozen: None,
-        })
+        Effect::SendToApp(DaemonToApp::RunAction { action, frozen: None })
     }
 
     /// Spawns launch 1 and brings it to the ready state.
     fn ready_app() -> Core {
         let mut core = Core::new();
-        assert_eq!(
-            core.handle(Event::Action(ActionId::OpenSettings)),
-            vec![spawn(1, ActionId::OpenSettings)]
-        );
+        assert_eq!(core.handle(Event::Action(ActionId::OpenSettings)), vec![spawn(1, ActionId::OpenSettings)]);
         core.handle(Event::AppConnected);
         assert!(core.handle(Event::App(AppToDaemon::Ready)).is_empty());
         core
@@ -225,56 +207,32 @@ mod tests {
     fn actions_while_starting_are_queued_then_delivered() {
         let mut core = Core::new();
         core.handle(Event::Action(ActionId::OpenSettings));
-        assert!(
-            core.handle(Event::Action(ActionId::CaptureRegion))
-                .is_empty()
-        );
+        assert!(core.handle(Event::Action(ActionId::CaptureRegion)).is_empty());
         core.handle(Event::AppConnected);
-        assert_eq!(
-            core.handle(Event::App(AppToDaemon::Ready)),
-            vec![run(ActionId::CaptureRegion)]
-        );
+        assert_eq!(core.handle(Event::App(AppToDaemon::Ready)), vec![run(ActionId::CaptureRegion)]);
     }
 
     #[test]
     fn running_app_gets_actions_directly() {
         let mut core = ready_app();
-        assert_eq!(
-            core.handle(Event::Action(ActionId::CaptureWindow)),
-            vec![run(ActionId::CaptureWindow)]
-        );
+        assert_eq!(core.handle(Event::Action(ActionId::CaptureWindow)), vec![run(ActionId::CaptureWindow)]);
     }
 
     #[test]
     fn second_launch_opens_settings() {
         let mut core = Core::new();
-        assert_eq!(
-            core.handle(Event::Control(ControlRequest::OpenSettings)),
-            vec![spawn(1, ActionId::OpenSettings)]
-        );
+        assert_eq!(core.handle(Event::Control(ControlRequest::OpenSettings)), vec![spawn(1, ActionId::OpenSettings)]);
     }
 
     #[test]
     fn idle_app_is_replaced_on_next_action_and_its_exit_is_ignored() {
         let mut core = ready_app();
         core.handle(Event::App(AppToDaemon::Idle));
-        assert_eq!(
-            core.handle(Event::Action(ActionId::CaptureRegion)),
-            vec![spawn(2, ActionId::CaptureRegion)]
-        );
-        // The old process quits after the new one started: nothing happens, in particular no
-        // crash notification and the new launch stays tracked.
-        assert!(
-            core.handle(Event::AppExited {
-                id: 1,
-                success: false
-            })
-            .is_empty()
-        );
-        assert!(
-            core.handle(Event::Action(ActionId::CaptureWindow))
-                .is_empty()
-        );
+        assert_eq!(core.handle(Event::Action(ActionId::CaptureRegion)), vec![spawn(2, ActionId::CaptureRegion)]);
+        // The old process quits after the new one started: nothing happens, in particular no crash notification and the
+        // new launch stays tracked.
+        assert!(core.handle(Event::AppExited { id: 1, success: false }).is_empty());
+        assert!(core.handle(Event::Action(ActionId::CaptureWindow)).is_empty());
     }
 
     #[test]
@@ -282,63 +240,32 @@ mod tests {
         let mut core = ready_app();
         core.handle(Event::App(AppToDaemon::Idle));
         assert!(core.handle(Event::AppDisconnected).is_empty());
-        assert!(
-            core.handle(Event::AppExited {
-                id: 1,
-                success: true
-            })
-            .is_empty()
-        );
-        assert_eq!(
-            core.handle(Event::Action(ActionId::OpenSettings)),
-            vec![spawn(2, ActionId::OpenSettings)]
-        );
+        assert!(core.handle(Event::AppExited { id: 1, success: true }).is_empty());
+        assert_eq!(core.handle(Event::Action(ActionId::OpenSettings)), vec![spawn(2, ActionId::OpenSettings)]);
     }
 
     #[test]
     fn crash_without_idle_notifies_exactly_once() {
         let mut core = ready_app();
         assert!(core.handle(Event::AppDisconnected).is_empty());
-        assert_eq!(
-            core.handle(Event::AppExited {
-                id: 1,
-                success: false
-            }),
-            vec![Effect::Notify(Key::AppCrashed)]
-        );
+        assert_eq!(core.handle(Event::AppExited { id: 1, success: false }), vec![Effect::Notify(Key::AppCrashed)]);
     }
 
     #[test]
     fn crash_during_startup_notifies_and_a_retry_works() {
         let mut core = Core::new();
         core.handle(Event::Action(ActionId::OpenSettings));
-        assert_eq!(
-            core.handle(Event::AppExited {
-                id: 1,
-                success: false
-            }),
-            vec![Effect::Notify(Key::AppCrashed)]
-        );
-        assert_eq!(
-            core.handle(Event::Action(ActionId::OpenSettings)),
-            vec![spawn(2, ActionId::OpenSettings)]
-        );
+        assert_eq!(core.handle(Event::AppExited { id: 1, success: false }), vec![Effect::Notify(Key::AppCrashed)]);
+        assert_eq!(core.handle(Event::Action(ActionId::OpenSettings)), vec![spawn(2, ActionId::OpenSettings)]);
     }
 
     #[test]
     fn an_update_waits_for_the_end_of_a_recording() {
         let mut core = Core::default();
-        core.handle(Event::App(AppToDaemon::RecordingStateChanged(
-            RecState::Recording,
-        )));
-        assert!(
-            core.handle(Event::Control(ControlRequest::QuitForUpdate))
-                .is_empty()
-        );
+        core.handle(Event::App(AppToDaemon::RecordingStateChanged(RecState::Recording)));
+        assert!(core.handle(Event::Control(ControlRequest::QuitForUpdate)).is_empty());
         assert_eq!(
-            core.handle(Event::App(AppToDaemon::RecordingStateChanged(
-                RecState::Idle,
-            ))),
+            core.handle(Event::App(AppToDaemon::RecordingStateChanged(RecState::Idle,))),
             vec![Effect::SetRecording(RecState::Idle), Effect::Quit,]
         );
     }
@@ -347,49 +274,26 @@ mod tests {
     fn recording_state_drives_the_tray_and_resets_when_the_app_vanishes() {
         let mut core = ready_app();
         assert_eq!(
-            core.handle(Event::App(AppToDaemon::RecordingStateChanged(
-                RecState::Recording
-            ))),
+            core.handle(Event::App(AppToDaemon::RecordingStateChanged(RecState::Recording))),
             vec![Effect::SetRecording(RecState::Recording)]
         );
-        assert_eq!(
-            core.handle(Event::AppDisconnected),
-            vec![Effect::SetRecording(RecState::Idle)]
-        );
+        assert_eq!(core.handle(Event::AppDisconnected), vec![Effect::SetRecording(RecState::Idle)]);
         assert_eq!(core.recording_state(), RecState::Idle);
-        assert_eq!(
-            core.handle(Event::AppExited {
-                id: 1,
-                success: false
-            }),
-            vec![Effect::Notify(Key::AppCrashed)]
-        );
+        assert_eq!(core.handle(Event::AppExited { id: 1, success: false }), vec![Effect::Notify(Key::AppCrashed)]);
     }
 
     #[test]
     fn the_settings_window_or_the_app_has_the_config_reloaded() {
         let mut core = Core::new();
-        assert_eq!(
-            core.handle(Event::Control(ControlRequest::ReloadConfig)),
-            vec![Effect::ReloadConfig]
-        );
-        assert_eq!(
-            core.handle(Event::App(AppToDaemon::ConfigChanged)),
-            vec![Effect::ReloadConfig]
-        );
+        assert_eq!(core.handle(Event::Control(ControlRequest::ReloadConfig)), vec![Effect::ReloadConfig]);
+        assert_eq!(core.handle(Event::App(AppToDaemon::ConfigChanged)), vec![Effect::ReloadConfig]);
     }
 
     #[test]
     fn quit_tells_a_connected_app_to_shut_down() {
-        assert_eq!(
-            Core::new().handle(Event::Control(ControlRequest::Quit)),
-            vec![Effect::Quit]
-        );
+        assert_eq!(Core::new().handle(Event::Control(ControlRequest::Quit)), vec![Effect::Quit]);
         let mut core = ready_app();
-        assert_eq!(
-            core.handle(Event::TrayQuit),
-            vec![Effect::SendToApp(DaemonToApp::Shutdown), Effect::Quit]
-        );
+        assert_eq!(core.handle(Event::TrayQuit), vec![Effect::SendToApp(DaemonToApp::Shutdown), Effect::Quit]);
     }
 
     #[test]
@@ -397,9 +301,7 @@ mod tests {
         let mut a = Core::new();
         let mut b = Core::new();
         assert_eq!(
-            a.handle(Event::Control(ControlRequest::Action(
-                ActionId::CaptureRegion
-            ))),
+            a.handle(Event::Control(ControlRequest::Action(ActionId::CaptureRegion))),
             b.handle(Event::Action(ActionId::CaptureRegion)),
         );
     }

@@ -1,38 +1,32 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The annotations drawn by the graphics card, over a picture of the screens under them (frozen,
-//! or the newest live one), with the shapes of the export (`vixeeny_editor::render`).
+//! The annotations drawn by the graphics card, over a picture of the screens under them (frozen, or the newest live
+//! one), with the shapes of the export (`vixeeny_editor::render`).
 //!
-//! Everything is drawn into one bitmap the size of the area the annotations cover: the screens,
-//! then each annotation in order. A blur, a pixelation or a highlight works on what is under it,
-//! so the bitmap is copied aside first and the effect drawn back from the copy. Live, a second
-//! bitmap tells where something is drawn: only there does the result cover the screens, and
-//! the live pictures of the screens are copied in on the graphics card.
+//! Everything is drawn into one bitmap the size of the area the annotations cover: the screens, then each annotation in
+//! order. A blur, a pixelation or a highlight works on what is under it, so the bitmap is copied aside first and the
+//! effect drawn back from the copy. Live, a second bitmap tells where something is drawn: only there does the result
+//! cover the screens, and the live pictures of the screens are copied in on the graphics card.
 
-use vixeeny_editor::render::{
-    Segment, arrow_shape, letters, smooth, stroke_width, text_background,
-};
+use vixeeny_editor::render::{Segment, arrow_shape, letters, smooth, stroke_width, text_background};
 use vixeeny_editor::{Annotation, Color, Point, Rect, RgbaImage};
 use windows::Win32::Graphics::Direct2D::Common::{
-    D2D_RECT_F, D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_BLEND_MODE_MULTIPLY,
-    D2D1_BORDER_MODE_HARD, D2D1_COLOR_F, D2D1_COMPOSITE_MODE, D2D1_COMPOSITE_MODE_DESTINATION_IN,
-    D2D1_COMPOSITE_MODE_SOURCE_COPY, D2D1_COMPOSITE_MODE_SOURCE_OVER, D2D1_FIGURE_BEGIN_FILLED,
-    D2D1_FIGURE_BEGIN_HOLLOW, D2D1_FIGURE_END_CLOSED, D2D1_FIGURE_END_OPEN, D2D1_PIXEL_FORMAT,
+    D2D_RECT_F, D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_BLEND_MODE_MULTIPLY, D2D1_BORDER_MODE_HARD,
+    D2D1_COLOR_F, D2D1_COMPOSITE_MODE, D2D1_COMPOSITE_MODE_DESTINATION_IN, D2D1_COMPOSITE_MODE_SOURCE_COPY,
+    D2D1_COMPOSITE_MODE_SOURCE_OVER, D2D1_FIGURE_BEGIN_FILLED, D2D1_FIGURE_BEGIN_HOLLOW, D2D1_FIGURE_END_CLOSED,
+    D2D1_FIGURE_END_OPEN, D2D1_PIXEL_FORMAT,
 };
 use windows::Win32::Graphics::Direct2D::{
-    CLSID_D2D1Blend, CLSID_D2D1Border, CLSID_D2D1ColorMatrix, CLSID_D2D1Crop,
-    CLSID_D2D1GaussianBlur, CLSID_D2D1Scale, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
-    D2D1_BITMAP_OPTIONS_TARGET, D2D1_BITMAP_PROPERTIES1, D2D1_BLEND_PROP_MODE,
-    D2D1_BORDER_EDGE_MODE_CLAMP, D2D1_BORDER_PROP_EDGE_MODE_X, D2D1_BORDER_PROP_EDGE_MODE_Y,
-    D2D1_CAP_STYLE_ROUND, D2D1_COLORMATRIX_PROP_CLAMP_OUTPUT, D2D1_COLORMATRIX_PROP_COLOR_MATRIX,
-    D2D1_CROP_PROP_RECT, D2D1_DASH_STYLE_SOLID, D2D1_ELLIPSE, D2D1_GAUSSIANBLUR_PROP_BORDER_MODE,
-    D2D1_GAUSSIANBLUR_PROP_STANDARD_DEVIATION, D2D1_INTERPOLATION_MODE_LINEAR,
-    D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR, D2D1_LINE_JOIN_ROUND, D2D1_PROPERTY_TYPE_BOOL,
-    D2D1_PROPERTY_TYPE_ENUM, D2D1_PROPERTY_TYPE_FLOAT, D2D1_PROPERTY_TYPE_MATRIX_5X4,
+    CLSID_D2D1Blend, CLSID_D2D1Border, CLSID_D2D1ColorMatrix, CLSID_D2D1Crop, CLSID_D2D1GaussianBlur, CLSID_D2D1Scale,
+    D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_BITMAP_OPTIONS_TARGET, D2D1_BITMAP_PROPERTIES1, D2D1_BLEND_PROP_MODE,
+    D2D1_BORDER_EDGE_MODE_CLAMP, D2D1_BORDER_PROP_EDGE_MODE_X, D2D1_BORDER_PROP_EDGE_MODE_Y, D2D1_CAP_STYLE_ROUND,
+    D2D1_COLORMATRIX_PROP_CLAMP_OUTPUT, D2D1_COLORMATRIX_PROP_COLOR_MATRIX, D2D1_CROP_PROP_RECT, D2D1_DASH_STYLE_SOLID,
+    D2D1_ELLIPSE, D2D1_GAUSSIANBLUR_PROP_BORDER_MODE, D2D1_GAUSSIANBLUR_PROP_STANDARD_DEVIATION,
+    D2D1_INTERPOLATION_MODE_LINEAR, D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR, D2D1_LINE_JOIN_ROUND,
+    D2D1_PROPERTY_TYPE_BOOL, D2D1_PROPERTY_TYPE_ENUM, D2D1_PROPERTY_TYPE_FLOAT, D2D1_PROPERTY_TYPE_MATRIX_5X4,
     D2D1_PROPERTY_TYPE_VECTOR2, D2D1_PROPERTY_TYPE_VECTOR4, D2D1_QUADRATIC_BEZIER_SEGMENT,
-    D2D1_SCALE_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC,
-    D2D1_SCALE_INTERPOLATION_MODE_NEAREST_NEIGHBOR, D2D1_SCALE_PROP_BORDER_MODE,
-    D2D1_SCALE_PROP_CENTER_POINT, D2D1_SCALE_PROP_INTERPOLATION_MODE, D2D1_SCALE_PROP_SCALE,
-    D2D1_STROKE_STYLE_PROPERTIES1, D2D1_STROKE_TRANSFORM_TYPE_NORMAL, ID2D1Bitmap1,
+    D2D1_SCALE_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC, D2D1_SCALE_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
+    D2D1_SCALE_PROP_BORDER_MODE, D2D1_SCALE_PROP_CENTER_POINT, D2D1_SCALE_PROP_INTERPOLATION_MODE,
+    D2D1_SCALE_PROP_SCALE, D2D1_STROKE_STYLE_PROPERTIES1, D2D1_STROKE_TRANSFORM_TYPE_NORMAL, ID2D1Bitmap1,
     ID2D1DeviceContext, ID2D1Effect, ID2D1Image, ID2D1PathGeometry, ID2D1StrokeStyle1,
 };
 use windows::Win32::Graphics::Direct3D11::{D3D11_BOX, D3D11_TEXTURE2D_DESC, ID3D11Texture2D};
@@ -43,9 +37,8 @@ use windows_numerics::{Matrix3x2, Vector2};
 
 use crate::gfx::{Canvas, Gfx};
 
-/// A fresh picture of a part of the screens, on the graphics card: `width`×`height` pixels of
-/// `texture` (BGRA, on the editor's device) from `from`, to go at `x`, `y` (whole-image
-/// pixels).
+/// A fresh picture of a part of the screens, on the graphics card: `width`×`height` pixels of `texture` (BGRA, on the
+/// editor's device) from `from`, to go at `x`, `y` (whole-image pixels).
 pub struct ScreenPart {
     pub x: u32,
     pub y: u32,
@@ -66,15 +59,15 @@ impl std::fmt::Debug for ScreenPart {
     }
 }
 
-/// The letters of a text or of a marker's number, as a bitmap, and where it goes from the
-/// whole pixels of the annotation's position (see [`letters_key`]).
+/// The letters of a text or of a marker's number, as a bitmap, and where it goes from the whole pixels of the
+/// annotation's position (see [`letters_key`]).
 struct Letters {
     bitmap: ID2D1Bitmap1,
     at: D2D_RECT_F,
 }
 
-/// What a text's or a marker's letters look like, and the whole pixels the annotation is moved
-/// by from it: moved by whole pixels, the letters are the same bitmap. `None` for the others.
+/// What a text's or a marker's letters look like, and the whole pixels the annotation is moved by from it: moved by
+/// whole pixels, the letters are the same bitmap. `None` for the others.
 fn letters_key(a: &Annotation) -> Option<(Annotation, (f32, f32))> {
     let anchor = match a {
         Annotation::Text { pos, .. } => *pos,
@@ -107,8 +100,8 @@ pub struct Drawing {
     letters: Vec<(Annotation, Option<Letters>)>,
     stroke: ID2D1StrokeStyle1,
     made: Option<Made>,
-    /// Changes each time the result is drawn again, and differs from every other drawing's: a
-    /// drawing made anew (the area moved or grew) is never taken for the one before.
+    /// Changes each time the result is drawn again, and differs from every other drawing's: a drawing made anew (the
+    /// area moved or grew) is never taken for the one before.
     pub version: u64,
 }
 
@@ -133,12 +126,7 @@ fn colour(c: Color) -> D2D1_COLOR_F {
 }
 
 fn rect_f(r: &Rect) -> D2D_RECT_F {
-    D2D_RECT_F {
-        left: r.x,
-        top: r.y,
-        right: r.x + r.w.max(0.01),
-        bottom: r.y + r.h.max(0.01),
-    }
+    D2D_RECT_F { left: r.x, top: r.y, right: r.x + r.w.max(0.01), bottom: r.y + r.h.max(0.01) }
 }
 
 /// `r` rounded outwards and clamped to `w`×`h` (what the export's effects cover).
@@ -147,12 +135,7 @@ fn effect_rect(r: &Rect, w: u32, h: u32) -> Option<D2D_RECT_F> {
     let y0 = r.y.floor().max(0.0);
     let x1 = r.right().ceil().min(w as f32);
     let y1 = r.bottom().ceil().min(h as f32);
-    (x1 > x0 && y1 > y0).then_some(D2D_RECT_F {
-        left: x0,
-        top: y0,
-        right: x1,
-        bottom: y1,
-    })
+    (x1 > x0 && y1 > y0).then_some(D2D_RECT_F { left: x0, top: y0, right: x1, bottom: y1 })
 }
 
 pub(crate) fn floats(values: &[f32]) -> Vec<u8> {
@@ -161,37 +144,19 @@ pub(crate) fn floats(values: &[f32]) -> Vec<u8> {
 
 fn target(gfx: &Gfx, w: u32, h: u32) -> Result<ID2D1Bitmap1> {
     let props = D2D1_BITMAP_PROPERTIES1 {
-        pixelFormat: D2D1_PIXEL_FORMAT {
-            format: DXGI_FORMAT_B8G8R8A8_UNORM,
-            alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
-        },
+        pixelFormat: D2D1_PIXEL_FORMAT { format: DXGI_FORMAT_B8G8R8A8_UNORM, alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED },
         dpiX: 96.0,
         dpiY: 96.0,
         bitmapOptions: D2D1_BITMAP_OPTIONS_TARGET,
         colorContext: std::mem::ManuallyDrop::new(None),
     };
     // SAFETY: plain creation call.
-    unsafe {
-        gfx.dc.CreateBitmap(
-            D2D_SIZE_U {
-                width: w,
-                height: h,
-            },
-            None,
-            0,
-            &props,
-        )
-    }
+    unsafe { gfx.dc.CreateBitmap(D2D_SIZE_U { width: w, height: h }, None, 0, &props) }
 }
 
 /// Draws into `bitmap` with `f`, between `BeginDraw` and `EndDraw` (always called).
-fn into(
-    dc: &ID2D1DeviceContext,
-    bitmap: &ID2D1Bitmap1,
-    f: impl FnOnce() -> Result<()>,
-) -> Result<()> {
-    // SAFETY: plain state calls; `EndDraw` matches `BeginDraw` whatever `f` returns, and the
-    // target is unset after.
+fn into(dc: &ID2D1DeviceContext, bitmap: &ID2D1Bitmap1, f: impl FnOnce() -> Result<()>) -> Result<()> {
+    // SAFETY: plain state calls; `EndDraw` matches `BeginDraw` whatever `f` returns, and the target is unset after.
     unsafe {
         dc.SetTarget(bitmap);
         dc.SetDpi(96.0, 96.0);
@@ -205,11 +170,7 @@ fn into(
     }
 }
 
-pub(crate) fn effect(
-    dc: &ID2D1DeviceContext,
-    id: &windows::core::GUID,
-    input: &ID2D1Image,
-) -> Result<ID2D1Effect> {
+pub(crate) fn effect(dc: &ID2D1DeviceContext, id: &windows::core::GUID, input: &ID2D1Image) -> Result<ID2D1Effect> {
     // SAFETY: plain creation and property calls.
     unsafe {
         let e = dc.CreateEffect(id)?;
@@ -229,12 +190,7 @@ pub(crate) fn set(
 }
 
 pub(crate) fn set_enum(e: &ID2D1Effect, prop: i32, value: i32) -> Result<()> {
-    set(
-        e,
-        prop,
-        D2D1_PROPERTY_TYPE_ENUM,
-        &(value as u32).to_le_bytes(),
-    )
+    set(e, prop, D2D1_PROPERTY_TYPE_ENUM, &(value as u32).to_le_bytes())
 }
 
 pub(crate) fn output(e: &ID2D1Effect) -> Result<ID2D1Image> {
@@ -243,95 +199,40 @@ pub(crate) fn output(e: &ID2D1Effect) -> Result<ID2D1Image> {
 }
 
 /// `input` within `r`, its edges repeated outwards (the export's effects only see their area).
-pub(crate) fn clamped(
-    dc: &ID2D1DeviceContext,
-    input: &ID2D1Image,
-    r: D2D_RECT_F,
-) -> Result<ID2D1Image> {
+pub(crate) fn clamped(dc: &ID2D1DeviceContext, input: &ID2D1Image, r: D2D_RECT_F) -> Result<ID2D1Image> {
     let crop = effect(dc, &CLSID_D2D1Crop, input)?;
-    set(
-        &crop,
-        D2D1_CROP_PROP_RECT.0,
-        D2D1_PROPERTY_TYPE_VECTOR4,
-        &floats(&[r.left, r.top, r.right, r.bottom]),
-    )?;
+    set(&crop, D2D1_CROP_PROP_RECT.0, D2D1_PROPERTY_TYPE_VECTOR4, &floats(&[r.left, r.top, r.right, r.bottom]))?;
     let border = effect(dc, &CLSID_D2D1Border, &output(&crop)?)?;
-    set_enum(
-        &border,
-        D2D1_BORDER_PROP_EDGE_MODE_X.0,
-        D2D1_BORDER_EDGE_MODE_CLAMP.0,
-    )?;
-    set_enum(
-        &border,
-        D2D1_BORDER_PROP_EDGE_MODE_Y.0,
-        D2D1_BORDER_EDGE_MODE_CLAMP.0,
-    )?;
+    set_enum(&border, D2D1_BORDER_PROP_EDGE_MODE_X.0, D2D1_BORDER_EDGE_MODE_CLAMP.0)?;
+    set_enum(&border, D2D1_BORDER_PROP_EDGE_MODE_Y.0, D2D1_BORDER_EDGE_MODE_CLAMP.0)?;
     output(&border)
 }
 
-pub(crate) fn blurred(
-    dc: &ID2D1DeviceContext,
-    input: &ID2D1Image,
-    r: D2D_RECT_F,
-    sigma: f32,
-) -> Result<ID2D1Image> {
+pub(crate) fn blurred(dc: &ID2D1DeviceContext, input: &ID2D1Image, r: D2D_RECT_F, sigma: f32) -> Result<ID2D1Image> {
     let blur = effect(dc, &CLSID_D2D1GaussianBlur, &clamped(dc, input, r)?)?;
-    set(
-        &blur,
-        D2D1_GAUSSIANBLUR_PROP_STANDARD_DEVIATION.0,
-        D2D1_PROPERTY_TYPE_FLOAT,
-        &sigma.to_le_bytes(),
-    )?;
-    set_enum(
-        &blur,
-        D2D1_GAUSSIANBLUR_PROP_BORDER_MODE.0,
-        D2D1_BORDER_MODE_HARD.0,
-    )?;
+    set(&blur, D2D1_GAUSSIANBLUR_PROP_STANDARD_DEVIATION.0, D2D1_PROPERTY_TYPE_FLOAT, &sigma.to_le_bytes())?;
+    set_enum(&blur, D2D1_GAUSSIANBLUR_PROP_BORDER_MODE.0, D2D1_BORDER_MODE_HARD.0)?;
     output(&blur)
 }
 
 /// Cells of `block` pixels aligned to the area's corner, each of one colour.
-fn pixelated(
-    dc: &ID2D1DeviceContext,
-    input: &ID2D1Image,
-    r: D2D_RECT_F,
-    block: u32,
-) -> Result<ID2D1Image> {
+fn pixelated(dc: &ID2D1DeviceContext, input: &ID2D1Image, r: D2D_RECT_F, block: u32) -> Result<ID2D1Image> {
     let b = block.max(1) as f32;
     let scale = |input: &ID2D1Image, factor: f32, mode: i32| -> Result<ID2D1Image> {
         let s = effect(dc, &CLSID_D2D1Scale, input)?;
-        set(
-            &s,
-            D2D1_SCALE_PROP_SCALE.0,
-            D2D1_PROPERTY_TYPE_VECTOR2,
-            &floats(&[factor, factor]),
-        )?;
-        set(
-            &s,
-            D2D1_SCALE_PROP_CENTER_POINT.0,
-            D2D1_PROPERTY_TYPE_VECTOR2,
-            &floats(&[r.left, r.top]),
-        )?;
+        set(&s, D2D1_SCALE_PROP_SCALE.0, D2D1_PROPERTY_TYPE_VECTOR2, &floats(&[factor, factor]))?;
+        set(&s, D2D1_SCALE_PROP_CENTER_POINT.0, D2D1_PROPERTY_TYPE_VECTOR2, &floats(&[r.left, r.top]))?;
         set_enum(&s, D2D1_SCALE_PROP_INTERPOLATION_MODE.0, mode)?;
         set_enum(&s, D2D1_SCALE_PROP_BORDER_MODE.0, D2D1_BORDER_MODE_HARD.0)?;
         output(&s)
     };
-    let small = scale(
-        &clamped(dc, input, r)?,
-        1.0 / b,
-        D2D1_SCALE_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC.0,
-    )?;
+    let small = scale(&clamped(dc, input, r)?, 1.0 / b, D2D1_SCALE_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC.0)?;
     scale(&small, b, D2D1_SCALE_INTERPOLATION_MODE_NEAREST_NEIGHBOR.0)
 }
 
 impl Drawing {
     /// A drawing over `area` (whole-image pixels) of `screens`, made from picture `version`.
-    pub fn new(
-        gfx: &Gfx,
-        area: (u32, u32, u32, u32),
-        screens: &RgbaImage,
-        version: u64,
-    ) -> Result<Self> {
+    pub fn new(gfx: &Gfx, area: (u32, u32, u32, u32), screens: &RgbaImage, version: u64) -> Result<Self> {
         let (_, _, w, h) = area;
         let stroke = {
             let props = D2D1_STROKE_STYLE_PROPERTIES1 {
@@ -365,14 +266,9 @@ impl Drawing {
         })
     }
 
-    /// Draws the part of `screens` under `area` into `base`: the image's rows go to the
-    /// graphics card as they are, which turns them to BGRA.
-    fn picture(
-        gfx: &Gfx,
-        base: &ID2D1Bitmap1,
-        area: (u32, u32, u32, u32),
-        screens: &RgbaImage,
-    ) -> Result<()> {
+    /// Draws the part of `screens` under `area` into `base`: the image's rows go to the graphics card as they are,
+    /// which turns them to BGRA.
+    fn picture(gfx: &Gfx, base: &ID2D1Bitmap1, area: (u32, u32, u32, u32), screens: &RgbaImage) -> Result<()> {
         let source = gfx.bitmap(screens, area)?;
         into(&gfx.dc, base, || {
             // SAFETY: plain drawing call with a bitmap of the same device.
@@ -411,57 +307,28 @@ impl Drawing {
         // SAFETY: `desc` is a valid out-pointer.
         unsafe { part.texture.GetDesc(&mut desc) };
         let (sx, sy) = (part.from.0 + (x0 - part.x), part.from.1 + (y0 - part.y));
-        let (w, h) = (
-            (x1 - x0).min(desc.Width.saturating_sub(sx)),
-            (y1 - y0).min(desc.Height.saturating_sub(sy)),
-        );
+        let (w, h) = ((x1 - x0).min(desc.Width.saturating_sub(sx)), (y1 - y0).min(desc.Height.saturating_sub(sy)));
         if w == 0 || h == 0 || desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM {
             return Ok(());
         }
         // SAFETY: plain call.
         let surface: IDXGISurface = unsafe { self.base.GetSurface()? };
         let base: ID3D11Texture2D = surface.cast()?;
-        let source = D3D11_BOX {
-            left: sx,
-            top: sy,
-            front: 0,
-            right: sx + w,
-            bottom: sy + h,
-            back: 1,
-        };
-        // SAFETY: both textures are BGRA on the editor's device; the box lies inside the
-        // source and, from `(x0 - ax, y0 - ay)`, inside the base (both checked above). The
-        // base is not being drawn into (only between `BeginDraw` and `EndDraw`).
+        let source = D3D11_BOX { left: sx, top: sy, front: 0, right: sx + w, bottom: sy + h, back: 1 };
+        // SAFETY: both textures are BGRA on the editor's device; the box lies inside the source and, from
+        // `(x0 - ax, y0 - ay)`, inside the base (both checked above). The base is not being drawn into (only between
+        // `BeginDraw` and `EndDraw`).
         unsafe {
             let context = gfx.d3d.GetImmediateContext()?;
-            context.CopySubresourceRegion(
-                &base,
-                0,
-                x0 - ax,
-                y0 - ay,
-                0,
-                &part.texture,
-                0,
-                Some(&raw const source),
-            );
+            context.CopySubresourceRegion(&base, 0, x0 - ax, y0 - ay, 0, &part.texture, 0, Some(&raw const source));
         }
         self.feeds += 1;
         Ok(())
     }
 
     /// Draws `layers` (whole-image pixels) again if they, the screens or `live` changed.
-    pub fn update(
-        &mut self,
-        gfx: &Gfx,
-        layers: &std::rc::Rc<Vec<Annotation>>,
-        live: bool,
-    ) -> Result<()> {
-        let made = (
-            std::rc::Rc::as_ptr(layers) as usize,
-            self.base_version,
-            self.feeds,
-            live,
-        );
+    pub fn update(&mut self, gfx: &Gfx, layers: &std::rc::Rc<Vec<Annotation>>, live: bool) -> Result<()> {
+        let made = (std::rc::Rc::as_ptr(layers) as usize, self.base_version, self.feeds, live);
         if self.made == Some(made) {
             return Ok(());
         }
@@ -474,30 +341,19 @@ impl Drawing {
 
     fn compose(&mut self, gfx: &Gfx, layers: &[Annotation], live: bool) -> Result<()> {
         let (ax, ay, w, h) = self.area;
-        let layers: Vec<Annotation> = layers
-            .iter()
-            .map(|a| a.translated(-(ax as f32), -(ay as f32)))
-            .collect();
+        let layers: Vec<Annotation> = layers.iter().map(|a| a.translated(-(ax as f32), -(ay as f32))).collect();
         self.make_letters(gfx, &layers)?;
         let dc = &gfx.dc;
-        let uses_below = layers.iter().any(|a| {
-            matches!(
-                a,
-                Annotation::Blur { .. }
-                    | Annotation::Pixelate { .. }
-                    | Annotation::Highlight { .. }
-            )
-        });
+        let uses_below = layers
+            .iter()
+            .any(|a| matches!(a, Annotation::Blur { .. } | Annotation::Pixelate { .. } | Annotation::Highlight { .. }));
         // The bitmaps no longer needed go (one more may come with the next effect).
         if !uses_below {
             self.spare = None;
         } else if self.spare.is_none() {
             self.spare = Some(target(gfx, w, h)?);
         }
-        let needs_scratch = live
-            || layers
-                .iter()
-                .any(|a| matches!(a, Annotation::Highlight { .. }));
+        let needs_scratch = live || layers.iter().any(|a| matches!(a, Annotation::Highlight { .. }));
         if !needs_scratch {
             self.scratch = None;
         } else if self.scratch.is_none() {
@@ -510,8 +366,8 @@ impl Drawing {
         }
         let result = &self.result;
         let base: ID2D1Image = self.base.cast()?;
-        // The effects are opaque where they are drawn: drawn over, they replace what was there
-        // (a copy mode would also clear what lies outside them).
+        // The effects are opaque where they are drawn: drawn over, they replace what was there (a copy mode would also
+        // clear what lies outside them).
         into(dc, result, || {
             // SAFETY: plain drawing calls.
             unsafe {
@@ -533,15 +389,9 @@ impl Drawing {
                 Annotation::Blur { rect, .. } | Annotation::Pixelate { rect, .. } => {
                     effect_rect(rect, w, h).map(|r| (r, a))
                 }
-                Annotation::Highlight { .. } => Some((
-                    D2D_RECT_F {
-                        left: 0.0,
-                        top: 0.0,
-                        right: w as f32,
-                        bottom: h as f32,
-                    },
-                    a,
-                )),
+                Annotation::Highlight { .. } => {
+                    Some((D2D_RECT_F { left: 0.0, top: 0.0, right: w as f32, bottom: h as f32 }, a))
+                }
                 _ => None,
             };
             let Some((r, a)) = below else {
@@ -626,8 +476,7 @@ impl Drawing {
         })
     }
 
-    /// Where something is drawn: each annotation in white, then made fully opaque wherever any
-    /// of it shows.
+    /// Where something is drawn: each annotation in white, then made fully opaque wherever any of it shows.
     fn make_mask(&self, gfx: &Gfx, layers: &[Annotation], w: u32, h: u32) -> Result<()> {
         let (Some(scratch), Some(mask)) = (&self.scratch, &self.mask) else {
             return Ok(());
@@ -662,18 +511,8 @@ impl Drawing {
             0.0, 0.0, 0.0, 255.0,
             0.0, 0.0, 0.0, 0.0,
         ];
-        set(
-            &threshold,
-            D2D1_COLORMATRIX_PROP_COLOR_MATRIX.0,
-            D2D1_PROPERTY_TYPE_MATRIX_5X4,
-            &floats(&matrix),
-        )?;
-        set(
-            &threshold,
-            D2D1_COLORMATRIX_PROP_CLAMP_OUTPUT.0,
-            D2D1_PROPERTY_TYPE_BOOL,
-            &1u32.to_le_bytes(),
-        )?;
+        set(&threshold, D2D1_COLORMATRIX_PROP_COLOR_MATRIX.0, D2D1_PROPERTY_TYPE_MATRIX_5X4, &floats(&matrix))?;
+        set(&threshold, D2D1_COLORMATRIX_PROP_CLAMP_OUTPUT.0, D2D1_PROPERTY_TYPE_BOOL, &1u32.to_le_bytes())?;
         let out = output(&threshold)?;
         into(dc, mask, || {
             // SAFETY: plain drawing calls.
@@ -691,8 +530,7 @@ impl Drawing {
         })
     }
 
-    /// The bitmaps of the letters of `layers`, kept from the last drawing when unchanged or
-    /// only moved.
+    /// The bitmaps of the letters of `layers`, kept from the last drawing when unchanged or only moved.
     fn make_letters(&mut self, gfx: &Gfx, layers: &[Annotation]) -> Result<()> {
         let mut old = std::mem::take(&mut self.letters);
         for a in layers {
@@ -736,12 +574,10 @@ impl Drawing {
             for s in segments {
                 match s {
                     Segment::Line(p) => sink.AddLine(v2(p.x, p.y)),
-                    Segment::Quad(c, p) => {
-                        sink.AddQuadraticBezier(&D2D1_QUADRATIC_BEZIER_SEGMENT {
-                            point1: v2(c.x, c.y),
-                            point2: v2(p.x, p.y),
-                        })
-                    }
+                    Segment::Quad(c, p) => sink.AddQuadraticBezier(&D2D1_QUADRATIC_BEZIER_SEGMENT {
+                        point1: v2(c.x, c.y),
+                        point2: v2(p.x, p.y),
+                    }),
                 }
             }
             sink.EndFigure(D2D1_FIGURE_END_OPEN);
@@ -776,27 +612,14 @@ impl Drawing {
                 };
                 // SAFETY: plain drawing call with a live bitmap.
                 unsafe {
-                    dc.DrawBitmap(
-                        &l.bitmap,
-                        Some(&at),
-                        1.0,
-                        D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
-                        None,
-                        None,
-                    );
+                    dc.DrawBitmap(&l.bitmap, Some(&at), 1.0, D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR, None, None);
                 }
             }
         };
         match a {
             Annotation::Pen { points, style } => stroke(points, style.width, style.color)?,
-            Annotation::Highlight {
-                points,
-                color,
-                width,
-            } => stroke(points, *width, *color)?,
-            Annotation::Line { from, to, style } => {
-                stroke(&[*from, *to], style.width, style.color)?
-            }
+            Annotation::Highlight { points, color, width } => stroke(points, *width, *color)?,
+            Annotation::Line { from, to, style } => stroke(&[*from, *to], style.width, style.color)?,
             Annotation::Arrow { from, to, style } => {
                 if let Some(shape) = arrow_shape(*from, *to, style.width) {
                     stroke(&[*from, shape.shaft_end], style.width, style.color)?;
@@ -814,11 +637,7 @@ impl Drawing {
                     }
                 }
             }
-            Annotation::Rect {
-                rect,
-                style,
-                filled,
-            } => {
+            Annotation::Rect { rect, style, filled } => {
                 let r = rect_f(rect);
                 let b = brush(style.color)?;
                 // SAFETY: plain drawing calls.
@@ -830,11 +649,7 @@ impl Drawing {
                     }
                 }
             }
-            Annotation::Ellipse {
-                rect,
-                style,
-                filled,
-            } => {
+            Annotation::Ellipse { rect, style, filled } => {
                 let r = rect_f(rect);
                 let e = D2D1_ELLIPSE {
                     point: v2((r.left + r.right) / 2.0, (r.top + r.bottom) / 2.0),
@@ -858,17 +673,8 @@ impl Drawing {
                 }
                 letters(a);
             }
-            Annotation::Marker {
-                center,
-                color,
-                radius,
-                ..
-            } => {
-                let e = D2D1_ELLIPSE {
-                    point: v2(center.x, center.y),
-                    radiusX: *radius,
-                    radiusY: *radius,
-                };
+            Annotation::Marker { center, color, radius, .. } => {
+                let e = D2D1_ELLIPSE { point: v2(center.x, center.y), radiusX: *radius, radiusY: *radius };
                 // SAFETY: plain drawing call.
                 unsafe { dc.FillEllipse(&e, &brush(*color)?) };
                 letters(a);
@@ -878,20 +684,14 @@ impl Drawing {
         Ok(())
     }
 
-    /// Draws the result on `c`, its top-left corner at `at`; live, only where something is
-    /// drawn (the screens show elsewhere).
+    /// Draws the result on `c`, its top-left corner at `at`; live, only where something is drawn (the screens show
+    /// elsewhere).
     pub fn draw(&self, c: &Canvas<'_>, at: (f32, f32), live: bool) {
         let offset = v2(at.0, at.1);
         let place = |image: &ID2D1Bitmap1, mode: D2D1_COMPOSITE_MODE| {
             // SAFETY: plain drawing call with a bitmap of the same device.
             unsafe {
-                c.dc.DrawImage(
-                    image,
-                    Some(&offset),
-                    None,
-                    D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
-                    mode,
-                );
+                c.dc.DrawImage(image, Some(&offset), None, D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR, mode);
             }
         };
         place(&self.result, D2D1_COMPOSITE_MODE_SOURCE_OVER);

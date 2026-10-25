@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! WebP through libwebp. The sRGB profile is added by wrapping the bitstream in an extended
-//! (`VP8X`) container with an `ICCP` chunk.
+//! WebP through libwebp. The sRGB profile is added by wrapping the bitstream in an extended (`VP8X`) container with an
+//! `ICCP` chunk.
 
 use std::ffi::c_void;
 
 use libwebp_sys::{
-    WebPConfig, WebPEncode, WebPMemoryWrite, WebPMemoryWriter, WebPMemoryWriterClear,
-    WebPMemoryWriterInit, WebPPicture, WebPPictureFree, WebPPictureImportRGB,
+    WebPConfig, WebPEncode, WebPMemoryWrite, WebPMemoryWriter, WebPMemoryWriterClear, WebPMemoryWriterInit,
+    WebPPicture, WebPPictureFree, WebPPictureImportRGB,
 };
 
 use crate::{Bgra, ImageError, WebpSettings, icc};
@@ -20,8 +20,8 @@ pub(crate) fn encode(image: &Bgra<'_>, settings: &WebpSettings) -> Result<Vec<u8
     let rgb = image.to_rgb();
     let mut config = WebPConfig::new().map_err(|()| err("config init"))?;
     if settings.lossless {
-        // Lossless, the quality is the effort too: libwebp's presets (`cwebp -z`) set both. Up to
-        // level 8: level 9 takes about five times as long for the same size.
+        // Lossless, the quality is the effort too: libwebp's presets (`cwebp -z`) set both. Up to level 8: level 9
+        // takes about five times as long for the same size.
         const LEVELS: [i32; 7] = [0, 1, 2, 3, 5, 7, 8];
         let level = LEVELS[usize::from(settings.effort.min(6))];
         // SAFETY: `config` is initialised.
@@ -41,16 +41,15 @@ pub(crate) fn encode(image: &Bgra<'_>, settings: &WebpSettings) -> Result<Vec<u8
     picture.width = image.width as i32;
     picture.height = image.height as i32;
     // SAFETY: `rgb` holds width × height tightly packed RGB pixels; libwebp copies them.
-    let imported =
-        unsafe { WebPPictureImportRGB(&raw mut picture, rgb.as_ptr(), image.width as i32 * 3) };
+    let imported = unsafe { WebPPictureImportRGB(&raw mut picture, rgb.as_ptr(), image.width as i32 * 3) };
     if imported == 0 {
         // SAFETY: frees what the failed import may have allocated.
         unsafe { WebPPictureFree(&raw mut picture) };
         return Err(err("importing pixels"));
     }
     let mut writer = std::mem::MaybeUninit::<WebPMemoryWriter>::uninit();
-    // SAFETY: Init fully initialises the writer; the picture only keeps a pointer to it for
-    // the duration of the encode below, and both are cleaned up on every path.
+    // SAFETY: Init fully initialises the writer; the picture only keeps a pointer to it for the duration of the encode
+    // below, and both are cleaned up on every path.
     let bitstream = unsafe {
         WebPMemoryWriterInit(writer.as_mut_ptr());
         let mut writer = writer.assume_init();
@@ -58,10 +57,7 @@ pub(crate) fn encode(image: &Bgra<'_>, settings: &WebpSettings) -> Result<Vec<u8
         picture.custom_ptr = (&raw mut writer).cast::<c_void>();
         let ok = WebPEncode(&raw const config, &raw mut picture);
         let result = if ok == 0 {
-            Err(ImageError::WebP(format!(
-                "encoder error {:?}",
-                picture.error_code
-            )))
+            Err(ImageError::WebP(format!("encoder error {:?}", picture.error_code)))
         } else {
             Ok(std::slice::from_raw_parts(writer.mem, writer.size).to_vec())
         };
@@ -87,12 +83,7 @@ fn le24(v: u32) -> [u8; 3] {
 }
 
 /// Wraps a simple-format WebP (`RIFF…WEBP` + image chunk) with `VP8X` and `ICCP`.
-pub(crate) fn with_icc(
-    webp: &[u8],
-    width: u32,
-    height: u32,
-    profile: &[u8],
-) -> Result<Vec<u8>, ImageError> {
+pub(crate) fn with_icc(webp: &[u8], width: u32, height: u32, profile: &[u8]) -> Result<Vec<u8>, ImageError> {
     if webp.len() < 12 || &webp[0..4] != b"RIFF" || &webp[8..12] != b"WEBP" {
         return Err(ImageError::WebP("not a RIFF/WEBP stream".into()));
     }

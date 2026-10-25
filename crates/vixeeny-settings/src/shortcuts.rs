@@ -50,14 +50,10 @@ pub fn table(config: &Config) -> Vec<(ActionId, [String; MAX_PER_ACTION])> {
         .collect()
 }
 
-/// Sets slot `slot` of `action` to `text` (empty clears it). The shortcut is written with its
-/// canonical names, its modifiers in the order given. Nothing changes when it is refused.
+/// Sets slot `slot` of `action` to `text` (empty clears it). The shortcut is written with its canonical names, its
+/// modifiers in the order given. Nothing changes when it is refused.
 pub fn set(config: &mut Config, action: ActionId, slot: usize, text: &str) -> Result<(), Refusal> {
-    let mut slots = table(config)
-        .into_iter()
-        .find(|(a, _)| *a == action)
-        .map(|(_, s)| s)
-        .unwrap_or_default();
+    let mut slots = table(config).into_iter().find(|(a, _)| *a == action).map(|(_, s)| s).unwrap_or_default();
     let Some(target) = slots.get_mut(slot) else {
         return Ok(());
     };
@@ -72,11 +68,7 @@ pub fn set(config: &mut Config, action: ActionId, slot: usize, text: &str) -> Re
                     continue; // the slot being replaced
                 }
                 if Hotkey::parse(used).is_ok_and(|h| h == hotkey) {
-                    return Err(if other == action {
-                        Refusal::Duplicate
-                    } else {
-                        Refusal::Conflict(other)
-                    });
+                    return Err(if other == action { Refusal::Duplicate } else { Refusal::Conflict(other) });
                 }
             }
         }
@@ -136,10 +128,7 @@ mod tests {
         let config = Config::default();
         let table = table(&config);
         assert_eq!(table.len(), 12);
-        let save = table
-            .iter()
-            .find(|(a, _)| *a == ActionId::ReplaySave)
-            .unwrap();
+        let save = table.iter().find(|(a, _)| *a == ActionId::ReplaySave).unwrap();
         assert_eq!(save.1, ["Ctrl+F11".to_owned(), String::new()]);
     }
 
@@ -158,22 +147,13 @@ mod tests {
     fn refused_shortcuts_change_nothing() {
         let mut c = Config::default();
         let before = c.hotkeys.clone();
-        assert!(matches!(
-            set(&mut c, ActionId::ReplayToggle, 0, "Ctrl+Nope"),
-            Err(Refusal::Invalid(_))
-        ));
+        assert!(matches!(set(&mut c, ActionId::ReplayToggle, 0, "Ctrl+Nope"), Err(Refusal::Invalid(_))));
         // Ctrl+F11 belongs to the replay save.
-        assert_eq!(
-            set(&mut c, ActionId::ReplayToggle, 0, "Ctrl+F11"),
-            Err(Refusal::Conflict(ActionId::ReplaySave))
-        );
+        assert_eq!(set(&mut c, ActionId::ReplayToggle, 0, "Ctrl+F11"), Err(Refusal::Conflict(ActionId::ReplaySave)));
         assert_eq!(c.hotkeys, before);
         // The same shortcut twice in one action.
         set(&mut c, ActionId::ReplayToggle, 0, "Alt+F9").unwrap();
-        assert_eq!(
-            set(&mut c, ActionId::ReplayToggle, 1, "Alt+F9"),
-            Err(Refusal::Duplicate)
-        );
+        assert_eq!(set(&mut c, ActionId::ReplayToggle, 1, "Alt+F9"), Err(Refusal::Duplicate));
     }
 
     #[test]

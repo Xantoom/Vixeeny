@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! One Print Screen session: the frozen image, the zone, the tools and the commands.
-//! Everything the UI needs is read from [`Session::view`]; everything the user does goes
-//! through the `pointer_*`, `key` and `choose_*` methods. No UI toolkit is involved.
+//! One Print Screen session: the frozen image, the zone, the tools and the commands. Everything the UI needs is read
+//! from [`Session::view`]; everything the user does goes through the `pointer_*`, `key` and `choose_*` methods. No UI
+//! toolkit is involved.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -12,8 +12,7 @@ use crate::model::{Annotation, AnnotationId, Color};
 use crate::render::{RgbaImage, render_region};
 use crate::selection::{BarPlace, CursorHint, Selection, place_toolbar};
 
-/// The drawing area of the layers grows by blocks of this many pixels (see
-/// [`View::layers_area`]).
+/// The drawing area of the layers grows by blocks of this many pixels (see [`View::layers_area`]).
 pub const LAYER_BLOCK: u32 = 128;
 /// Drawn around the annotations' bounds: joins and anti-aliasing reach a little past them.
 const LAYER_MARGIN: f32 = 8.0;
@@ -24,8 +23,7 @@ type Area = (u32, u32, u32, u32);
 
 /// Size of the toolbar, in image pixels (the UI lays out its content to fit).
 pub const TOOLBAR_SIZE: (f32, f32) = (651.0, 46.0);
-/// The thickness the tools start with, and the largest one, at 100 % (they grow with the
-/// interface scale).
+/// The thickness the tools start with, and the largest one, at 100 % (they grow with the interface scale).
 pub const DEFAULT_WIDTH: f32 = 4.0;
 pub const MAX_WIDTH: f32 = 40.0;
 /// Space around the toolbar.
@@ -88,13 +86,12 @@ pub struct View {
     pub live: bool,
     /// The largest thickness.
     pub max_width: f32,
-    /// What to draw over the screens, bottom to top (image pixels): the annotations and the
-    /// gesture in progress. The same `Rc` comes back while nothing changes.
+    /// What to draw over the screens, bottom to top (image pixels): the annotations and the gesture in progress. The
+    /// same `Rc` comes back while nothing changes.
     pub layers: Rc<Vec<Annotation>>,
-    /// Where they are drawn (whole image pixels: x, y, width, height): what they cover, in
-    /// the zone, rounded out to blocks of [`LAYER_BLOCK`] pixels. It only grows while the zone
-    /// stays, by one more block where it grows, so it changes seldom while drawing. `None` while
-    /// there is nothing to draw.
+    /// Where they are drawn (whole image pixels: x, y, width, height): what they cover, in the zone, rounded out to
+    /// blocks of [`LAYER_BLOCK`] pixels. It only grows while the zone stays, by one more block where it grows, so it
+    /// changes seldom while drawing. `None` while there is nothing to draw.
     pub layers_area: Option<(u32, u32, u32, u32)>,
     /// Changes when the picture of the screens is replaced (see [`Session::replace_base`]).
     pub base_version: u64,
@@ -139,14 +136,13 @@ pub struct Session {
     ui_scale: f32,
     /// The monitors, in image pixels: the toolbar stays on one of them.
     screens: Vec<Rect>,
-    /// The layers last given (see [`View::layers`]), and what they were made from: the
-    /// document's revision, the annotation hidden and the gesture in progress.
+    /// The layers last given (see [`View::layers`]), and what they were made from: the document's revision, the
+    /// annotation hidden and the gesture in progress.
     layers: RefCell<(Rc<Vec<Annotation>>, Option<LayersKey>)>,
     /// The last layers area given, and the zone it was for (see [`View::layers_area`]).
     area: RefCell<Option<(Area, Area)>>,
     base_version: u64,
-    /// The screens are shown live: the annotations are drawn over nothing (see
-    /// [`Session::set_live`]).
+    /// The screens are shown live: the annotations are drawn over nothing (see [`Session::set_live`]).
     live: bool,
 }
 
@@ -174,8 +170,7 @@ impl Session {
         }
     }
 
-    /// The monitors the image spans (image pixels), so that the toolbar never straddles two
-    /// of them.
+    /// The monitors the image spans (image pixels), so that the toolbar never straddles two of them.
     pub fn with_screens(mut self, screens: Vec<Rect>) -> Self {
         if !screens.is_empty() {
             self.screens = screens;
@@ -197,8 +192,8 @@ impl Session {
             .unwrap_or_else(|| Rect::new(0.0, 0.0, self.base.width as f32, self.base.height as f32))
     }
 
-    /// A picture shown inside the image (`area`, image pixels) rather than the whole of it: the
-    /// zone starts as the picture and never leaves it.
+    /// A picture shown inside the image (`area`, image pixels) rather than the whole of it: the zone starts as the
+    /// picture and never leaves it.
     pub fn within(mut self, area: Rect) -> Self {
         self.selection.limit_to(area);
         self.selection.select_all();
@@ -211,8 +206,8 @@ impl Session {
         self
     }
 
-    /// The interface scale (the monitor's, 1.0 at 100 %): the toolbar grows with it, and the
-    /// tools start as thick as they look at 100 %.
+    /// The interface scale (the monitor's, 1.0 at 100 %): the toolbar grows with it, and the tools start as thick as
+    /// they look at 100 %.
     pub fn set_ui_scale(&mut self, scale: f32) {
         self.ui_scale = scale.clamp(0.5, 4.0);
         self.set_width(DEFAULT_WIDTH * self.ui_scale);
@@ -223,9 +218,8 @@ impl Session {
         MAX_WIDTH * self.ui_scale
     }
 
-    /// Shows the screens live (`true`) or frozen. Live, the annotations are drawn over nothing,
-    /// and the host takes a fresh picture of the screens before it exports (see
-    /// [`Session::replace_base`]).
+    /// Shows the screens live (`true`) or frozen. Live, the annotations are drawn over nothing, and the host takes a
+    /// fresh picture of the screens before it exports (see [`Session::replace_base`]).
     pub fn set_live(&mut self, live: bool) {
         self.live = live;
     }
@@ -234,8 +228,8 @@ impl Session {
         self.live
     }
 
-    /// Takes `base` (a fresh picture of the same screens) instead of the frozen one. `false`,
-    /// and nothing changes, when it is not the same size.
+    /// Takes `base` (a fresh picture of the same screens) instead of the frozen one. `false`, and nothing changes, when
+    /// it is not the same size.
     pub fn replace_base(&mut self, base: RgbaImage) -> bool {
         if (base.width, base.height) != (self.base.width, self.base.height) {
             return false;
@@ -245,22 +239,16 @@ impl Session {
         true
     }
 
-    /// Live, the part of the screens (whole image pixels) that annotations take their pixels
-    /// from: the zone, while it holds a blur, a pixelation or a highlight. The host follows it,
-    /// to draw the layers over it. `None` while nothing needs it, and while the zone is being moved
-    /// or resized.
+    /// Live, the part of the screens (whole image pixels) that annotations take their pixels from: the zone, while it
+    /// holds a blur, a pixelation or a highlight. The host follows it, to draw the layers over it. `None` while nothing
+    /// needs it, and while the zone is being moved or resized.
     pub fn live_area(&self) -> Option<(u32, u32, u32, u32)> {
         if !self.live || self.target == Some(Target::Selection) {
             return None;
         }
         let area = self.zone_px()?;
         let effect = |a: &Annotation| {
-            matches!(
-                a,
-                Annotation::Blur { .. }
-                    | Annotation::Pixelate { .. }
-                    | Annotation::Highlight { .. }
-            )
+            matches!(a, Annotation::Blur { .. } | Annotation::Pixelate { .. } | Annotation::Highlight { .. })
         };
         let used = self.editor.doc.items.iter().any(|i| effect(&i.annotation))
             || self.editor.preview().is_some_and(|a| effect(&a));
@@ -302,8 +290,8 @@ impl Session {
         self.tool
     }
 
-    /// `None` = adjust the zone (move, resize). Choosing a tool before a zone exists is allowed
-    /// and takes effect once the zone is drawn.
+    /// `None` = adjust the zone (move, resize). Choosing a tool before a zone exists is allowed and takes effect once
+    /// the zone is drawn.
     pub fn choose_tool(&mut self, tool: Option<Tool>) {
         self.text_input = None;
         if tool == Some(Tool::Eyedropper) && self.tool != tool {
@@ -324,8 +312,8 @@ impl Session {
         let scale = self.ui_scale;
         let settings = &mut self.editor.settings;
         settings.style.width = width;
-        // One thickness control sizes every tool (defaults at width 4, at 100 %: 24 px text,
-        // 14 px markers, blur radius 6, 10 px mosaic cells).
+        // One thickness control sizes every tool (defaults at width 4, at 100 %: 24 px text, 14 px markers, blur radius
+        // 6, 10 px mosaic cells).
         settings.text_size = 8.0 * scale + 4.0 * width;
         settings.marker_radius = 10.0 * scale + width;
         settings.blur_radius = 1.5 * width;
@@ -339,16 +327,10 @@ impl Session {
     fn route(&self, p: Point) -> Target {
         match (self.tool, self.selection.rect()) {
             (tool, Some(rect))
-                if self.selection.is_settled()
-                    && self.selection.handle_at(p).is_none()
-                    && rect.contains(p) =>
+                if self.selection.is_settled() && self.selection.handle_at(p).is_none() && rect.contains(p) =>
             {
                 // The zone tool moves an annotation when it is pressed on one, the zone else.
-                if tool.is_some() || self.editor.doc.hit_test(p).is_some() {
-                    Target::Editor
-                } else {
-                    Target::Selection
-                }
+                if tool.is_some() || self.editor.doc.hit_test(p).is_some() { Target::Editor } else { Target::Selection }
             }
             _ => Target::Selection,
         }
@@ -359,8 +341,7 @@ impl Session {
         matches!(self.tool, None | Some(Tool::Select))
     }
 
-    /// The outline of the selected annotation (of its moved copy during a move), while
-    /// annotations can be picked.
+    /// The outline of the selected annotation (of its moved copy during a move), while annotations can be picked.
     fn selected(&self) -> Option<Rect> {
         if !self.picking() {
             return None;
@@ -372,8 +353,8 @@ impl Session {
         self.editor.doc.get(id).map(Annotation::bounds)
     }
 
-    /// The size of what the tool in hand draws, in image pixels (the stroke's width, the
-    /// marker's or the text's height, the blur's reach); `None` for tools that draw nothing.
+    /// The size of what the tool in hand draws, in image pixels (the stroke's width, the marker's or the text's height,
+    /// the blur's reach); `None` for tools that draw nothing.
     pub fn brush(&self) -> Option<f32> {
         let s = &self.editor.settings;
         Some(match self.tool? {
@@ -387,8 +368,7 @@ impl Session {
         })
     }
 
-    /// Makes what the tools draw larger (`steps` > 0) or smaller, by steps that grow with the
-    /// size (the mouse wheel).
+    /// Makes what the tools draw larger (`steps` > 0) or smaller, by steps that grow with the size (the mouse wheel).
     pub fn grow(&mut self, steps: i32) {
         let mut width = self.editor.settings.style.width;
         for _ in 0..steps.unsigned_abs() {
@@ -407,9 +387,7 @@ impl Session {
             Target::Selection => {
                 self.editor.deselect();
                 // Starting a new zone leaves the tool and the zone-bound gesture state.
-                if self.selection.rect().is_none_or(|r| !r.contains(p))
-                    && self.selection.handle_at(p).is_none()
-                {
+                if self.selection.rect().is_none_or(|r| !r.contains(p)) && self.selection.handle_at(p).is_none() {
                     self.tool = None;
                 }
                 self.selection.pointer_down(p);
@@ -443,8 +421,8 @@ impl Session {
         }
     }
 
-    /// Ends the gesture. Returns a command when the zone just became final and an automatic
-    /// command was requested (see [`Session::with_auto_command`]).
+    /// Ends the gesture. Returns a command when the zone just became final and an automatic command was requested (see
+    /// [`Session::with_auto_command`]).
     pub fn pointer_up(&mut self, p: Point, mods: Modifiers) -> Option<Command> {
         self.cursor = p;
         match self.target.take() {
@@ -460,8 +438,8 @@ impl Session {
         None
     }
 
-    /// Ends a gesture the window could not see the end of (it lost the mouse) where the pointer
-    /// last was. A zone finished this way waits for a real release to run its automatic command.
+    /// Ends a gesture the window could not see the end of (it lost the mouse) where the pointer last was. A zone
+    /// finished this way waits for a real release to run its automatic command.
     pub fn interrupt(&mut self) {
         if self.target.is_none() {
             return;
@@ -560,24 +538,14 @@ impl Session {
     /// The final image: the zone with its annotations. `None` while there is no zone.
     pub fn export(&self) -> Option<RgbaImage> {
         let zone = self.selection.rect()?;
-        render_region(
-            &self.base,
-            self.editor.doc.items.iter().map(|i| &i.annotation),
-            &zone,
-        )
+        render_region(&self.base, self.editor.doc.items.iter().map(|i| &i.annotation), &zone)
     }
 
     /// Where the pointer is, to pick the cursor shape.
     pub fn cursor_hint(&self) -> CursorHint {
         match (self.tool, self.selection.rect()) {
-            (Some(t), Some(r))
-                if r.contains(self.cursor) && self.selection.handle_at(self.cursor).is_none() =>
-            {
-                if t == Tool::Select {
-                    CursorHint::Default
-                } else {
-                    CursorHint::Crosshair
-                }
+            (Some(t), Some(r)) if r.contains(self.cursor) && self.selection.handle_at(self.cursor).is_none() => {
+                if t == Tool::Select { CursorHint::Default } else { CursorHint::Crosshair }
             }
             _ => self.selection.cursor_at(self.cursor),
         }
@@ -623,11 +591,7 @@ impl Session {
 
     /// What `layers` cover in `zone`, by blocks.
     fn needed_area((zx, zy, zw, zh): Area, layers: &[Annotation]) -> Option<Area> {
-        let covered = layers
-            .iter()
-            .map(Annotation::bounds)
-            .reduce(|a, b| a.union(&b))?
-            .inflate(LAYER_MARGIN);
+        let covered = layers.iter().map(Annotation::bounds).reduce(|a, b| a.union(&b))?.inflate(LAYER_MARGIN);
         let block = LAYER_BLOCK as f32;
         let x0 = ((covered.x / block).floor() * block).max(zx as f32) as u32;
         let y0 = ((covered.y / block).floor() * block).max(zy as f32) as u32;
@@ -665,10 +629,7 @@ impl Session {
             toolbar: zone.filter(|_| settled).map(|z| {
                 place_toolbar(
                     &z,
-                    (
-                        TOOLBAR_SIZE.0 * self.ui_scale,
-                        TOOLBAR_SIZE.1 * self.ui_scale,
-                    ),
+                    (TOOLBAR_SIZE.0 * self.ui_scale, TOOLBAR_SIZE.1 * self.ui_scale),
                     |p| self.screen_at(p),
                     GAP * self.ui_scale,
                 )
@@ -698,32 +659,16 @@ impl Session {
     }
 }
 
-/// `last` if it holds `needed`; otherwise both, one more block out on each side where `needed`
-/// goes past `last`, inside `zone`.
+/// `last` if it holds `needed`; otherwise both, one more block out on each side where `needed` goes past `last`, inside
+/// `zone`.
 fn grown(last: Area, needed: Area, (zx, zy, zw, zh): Area) -> Area {
     let block = LAYER_BLOCK;
     let (lx1, ly1) = (last.0 + last.2, last.1 + last.3);
     let (nx1, ny1) = (needed.0 + needed.2, needed.1 + needed.3);
-    let x0 = if needed.0 < last.0 {
-        needed.0.saturating_sub(block).max(zx)
-    } else {
-        last.0
-    };
-    let y0 = if needed.1 < last.1 {
-        needed.1.saturating_sub(block).max(zy)
-    } else {
-        last.1
-    };
-    let x1 = if nx1 > lx1 {
-        (nx1 + block).min(zx + zw)
-    } else {
-        lx1
-    };
-    let y1 = if ny1 > ly1 {
-        (ny1 + block).min(zy + zh)
-    } else {
-        ly1
-    };
+    let x0 = if needed.0 < last.0 { needed.0.saturating_sub(block).max(zx) } else { last.0 };
+    let y0 = if needed.1 < last.1 { needed.1.saturating_sub(block).max(zy) } else { last.1 };
+    let x1 = if nx1 > lx1 { (nx1 + block).min(zx + zw) } else { lx1 };
+    let y1 = if ny1 > ly1 { (ny1 + block).min(zy + zh) } else { ly1 };
     (x0, y0, x1 - x0, y1 - y0)
 }
 

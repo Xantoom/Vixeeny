@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Windows: a message-only window owns the loop. Other threads wake it with `PostMessageW`
-//! (not `PostThreadMessage`, which is dropped while a menu is open); the window procedure
-//! drains the event queue, so events are handled even inside the tray menu's modal loop.
+//! Windows: a message-only window owns the loop. Other threads wake it with `PostMessageW` (not `PostThreadMessage`,
+//! which is dropped while a menu is open); the window procedure drains the event queue, so events are handled even
+//! inside the tray menu's modal loop.
 
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -13,9 +13,8 @@ use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Globalization::GetUserDefaultLocaleName;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, HWND_MESSAGE, MSG,
-    PostMessageW, PostQuitMessage, RegisterClassExW, TranslateMessage, WINDOW_EX_STYLE,
-    WINDOW_STYLE, WM_APP, WNDCLASSEXW,
+    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, HWND_MESSAGE, MSG, PostMessageW, PostQuitMessage,
+    RegisterClassExW, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WNDCLASSEXW,
 };
 use windows::core::w;
 
@@ -45,8 +44,8 @@ struct WindowWaker {
 impl Waker for WindowWaker {
     fn wake(&self) {
         let hwnd = HWND(self.hwnd.load(Ordering::Relaxed) as *mut _);
-        // SAFETY: PostMessageW may be called from any thread. If the window is already
-        // destroyed the call just fails, which is fine during shutdown.
+        // SAFETY: PostMessageW may be called from any thread. If the window is already destroyed the call just fails,
+        // which is fine during shutdown.
         let _ = unsafe { PostMessageW(Some(hwnd), WM_WAKE, WPARAM(0), LPARAM(0)) };
     }
 }
@@ -59,23 +58,15 @@ struct ForegroundGames {
 
 impl Games for ForegroundGames {
     fn hook(&mut self, tx: EventTx) -> bool {
-        let hooked =
-            vixeeny_platform::on_foreground_change(move |w| tx.send(Event::Foreground(w.0)));
+        let hooked = vixeeny_platform::on_foreground_change(move |w| tx.send(Event::Foreground(w.0)));
         if !hooked {
             tracing::warn!("Windows refused the foreground hook: games are not detected");
         }
         hooked
     }
 
-    fn game(
-        &mut self,
-        window: Option<u64>,
-        config: &vixeeny_common::config::Config,
-    ) -> Option<u32> {
-        let lists = vixeeny_platform::games::Lists {
-            always: &config.replay.always,
-            never: &config.replay.never,
-        };
+    fn game(&mut self, window: Option<u64>, config: &vixeeny_common::config::Config) -> Option<u32> {
+        let lists = vixeeny_platform::games::Lists { always: &config.replay.always, never: &config.replay.never };
         match window {
             Some(w) => self.detector.game_at(vixeeny_platform::WindowId(w), lists),
             None => self.detector.game_in_front(lists),
@@ -98,13 +89,9 @@ fn os_locale() -> Option<String> {
 
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if msg == WM_WAKE {
-        // `try_borrow_mut`: a re-entrant wake (from inside the runtime) is picked up by the
-        // pump that is already running.
-        let flow = RUNTIME.with(|cell| {
-            cell.try_borrow_mut()
-                .ok()
-                .and_then(|mut rt| rt.as_mut().map(Runtime::pump))
-        });
+        // `try_borrow_mut`: a re-entrant wake (from inside the runtime) is picked up by the pump that is already
+        // running.
+        let flow = RUNTIME.with(|cell| cell.try_borrow_mut().ok().and_then(|mut rt| rt.as_mut().map(Runtime::pump)));
         if flow == Some(Flow::Quit) {
             // SAFETY: plain call, no pointers involved.
             unsafe { PostQuitMessage(0) };
@@ -116,8 +103,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
 }
 
 fn create_window() -> anyhow::Result<HWND> {
-    // SAFETY: standard window-class registration and window creation with valid arguments; the
-    // class name is a static string and the window procedure has the required signature.
+    // SAFETY: standard window-class registration and window creation with valid arguments; the class name is a static
+    // string and the window procedure has the required signature.
     unsafe {
         let instance = GetModuleHandleW(None).context("GetModuleHandleW")?;
         let class = w!("VixeenyDaemonWindow");
@@ -150,17 +137,10 @@ fn create_window() -> anyhow::Result<HWND> {
 }
 
 pub fn run(startup: Startup) -> anyhow::Result<()> {
-    let Startup {
-        config,
-        config_path,
-        listener,
-        link,
-    } = startup;
+    let Startup { config, config_path, listener, link } = startup;
 
     let hwnd = create_window()?;
-    let waker = Arc::new(WindowWaker {
-        hwnd: AtomicIsize::new(hwnd.0 as isize),
-    });
+    let waker = Arc::new(WindowWaker { hwnd: AtomicIsize::new(hwnd.0 as isize) });
     let (sender, receiver) = channel();
     let tx = EventTx::new(sender, waker);
 
@@ -179,19 +159,10 @@ pub fn run(startup: Startup) -> anyhow::Result<()> {
         .context("starting the IPC thread")?;
 
     crate::update_check::spawn(config_path.clone());
-    let mut runtime = Runtime::new(
-        config,
-        config_path,
-        os_locale,
-        tray,
-        Box::new(hotkeys),
-        spawner,
-        link,
-        tx,
-        receiver,
-    )
-    .with_freezer(Box::new(GpuFreezer::new()))
-    .with_games(Box::<ForegroundGames>::default());
+    let mut runtime =
+        Runtime::new(config, config_path, os_locale, tray, Box::new(hotkeys), spawner, link, tx, receiver)
+            .with_freezer(Box::new(GpuFreezer::new()))
+            .with_games(Box::<ForegroundGames>::default());
     runtime.apply_config();
     runtime.start_replay_if_configured();
     RUNTIME.with(|cell| *cell.borrow_mut() = Some(runtime));
@@ -203,8 +174,8 @@ pub fn run(startup: Startup) -> anyhow::Result<()> {
     }
 
     let mut msg = MSG::default();
-    // SAFETY: `msg` is a valid MSG for the duration of the loop; GetMessageW blocks until a
-    // message arrives (no polling) and returns 0 on WM_QUIT, -1 on error.
+    // SAFETY: `msg` is a valid MSG for the duration of the loop; GetMessageW blocks until a message arrives (no
+    // polling) and returns 0 on WM_QUIT, -1 on error.
     unsafe {
         while GetMessageW(&mut msg, None, 0, 0).0 > 0 {
             let _ = TranslateMessage(&msg);

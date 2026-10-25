@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! `cargo xtask dist [--out <dir>]` (Windows release layout).
 //!
-//! `dist` expects `cargo build --release` to have produced the two programs, and gathers them
-//! with the FFmpeg DLLs and the licences into `<out>/stage` (what the installer packs), then
-//! writes the update archive `Vixeeny-<version>-windows-x64.zip` and the portable archive
-//! `Vixeeny-<version>-windows-x64-portable.zip` (the same files plus `portable.flag`).
+//! `dist` expects `cargo build --release` to have produced the two programs, and gathers them with the FFmpeg DLLs and
+//! the licences into `<out>/stage` (what the installer packs), then writes the update archive
+//! `Vixeeny-<version>-windows-x64.zip` and the portable archive `Vixeeny-<version>-windows-x64-portable.zip` (the same
+//! files plus `portable.flag`).
 
 use std::fmt::Write as _;
 use std::io::Write as _;
@@ -37,8 +37,8 @@ fn files_under(dir: &Path) -> Result<Vec<PathBuf>> {
     Ok(found)
 }
 
-/// The list of the files of a version: the next update removes those it no longer has
-/// (`vixeeny-updater`'s `swap::MANIFEST`).
+/// The list of the files of a version: the next update removes those it no longer has (`vixeeny-updater`'s
+/// `swap::MANIFEST`).
 const MANIFEST: &str = "files.txt";
 
 fn manifest(stage: &Path) -> Result<String> {
@@ -66,14 +66,10 @@ fn deflated() -> zip::write::SimpleFileOptions {
         .compression_level(Some(9))
 }
 
-/// A copy of the archive `from` with the files `extra` added: what is already compressed is not
-/// compressed again.
+/// A copy of the archive `from` with the files `extra` added: what is already compressed is not compressed again.
 fn extend_zip(from: &Path, extra: &[(&str, &[u8])], out: &Path) -> Result<()> {
     std::fs::copy(from, out)?;
-    let file = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(out)?;
+    let file = std::fs::OpenOptions::new().read(true).write(true).open(out)?;
     let mut zip = zip::ZipWriter::new_append(file)?;
     for (name, data) in extra {
         zip.start_file(*name, deflated())?;
@@ -83,8 +79,8 @@ fn extend_zip(from: &Path, extra: &[(&str, &[u8])], out: &Path) -> Result<()> {
     Ok(())
 }
 
-/// The libraries of the build with their licences: the crates (from `cargo metadata`) and the
-/// native libraries (from `native/versions.toml`).
+/// The libraries of the build with their licences: the crates (from `cargo metadata`) and the native libraries (from
+/// `native/versions.toml`).
 pub fn third_party_licenses() -> Result<String> {
     let root = root();
     let output = std::process::Command::new("cargo")
@@ -115,9 +111,8 @@ pub fn third_party_licenses() -> Result<String> {
         "Vixeeny is free software under the GNU GPL v3 or later (see LICENSE).\n\n\
          Native libraries (source code: see the releases and native/versions.toml):\n",
     );
-    let versions: toml::Table = std::fs::read_to_string(root.join("native/versions.toml"))?
-        .parse()
-        .context("native/versions.toml")?;
+    let versions: toml::Table =
+        std::fs::read_to_string(root.join("native/versions.toml"))?.parse().context("native/versions.toml")?;
     for (name, entry) in &versions {
         if let Some(license) = entry.get("license").and_then(toml::Value::as_str) {
             let tag = entry.get("tag").and_then(toml::Value::as_str).unwrap_or("");
@@ -139,21 +134,9 @@ pub fn third_party_licenses() -> Result<String> {
 
 /// An FFmpeg DLL (`avcodec-63.dll`, `swscale-10.dll`…); not `avrt.dll`, a Windows one.
 fn is_ffmpeg(dll: &str) -> bool {
-    const LIBRARIES: [&str; 7] = [
-        "avcodec",
-        "avdevice",
-        "avfilter",
-        "avformat",
-        "avutil",
-        "swresample",
-        "swscale",
-    ];
+    const LIBRARIES: [&str; 7] = ["avcodec", "avdevice", "avfilter", "avformat", "avutil", "swresample", "swscale"];
     let dll = dll.to_ascii_lowercase();
-    dll.ends_with(".dll")
-        && LIBRARIES.iter().any(|lib| {
-            dll.strip_prefix(lib)
-                .is_some_and(|rest| rest.starts_with('-'))
-        })
+    dll.ends_with(".dll") && LIBRARIES.iter().any(|lib| dll.strip_prefix(lib).is_some_and(|rest| rest.starts_with('-')))
 }
 
 pub fn dist(args: &[String]) -> Result<()> {
@@ -192,20 +175,13 @@ pub fn dist(args: &[String]) -> Result<()> {
         }
     }
     std::fs::copy(root.join("LICENSE"), stage.join("LICENSE"))?;
-    std::fs::write(
-        stage.join("THIRD-PARTY-LICENSES.txt"),
-        third_party_licenses()?,
-    )?;
+    std::fs::write(stage.join("THIRD-PARTY-LICENSES.txt"), third_party_licenses()?)?;
     std::fs::write(stage.join(MANIFEST), manifest(&stage)?)?;
 
     let base = format!("Vixeeny-{version}-windows-x64");
     let update = out.join(format!("{base}.zip"));
     write_zip(&stage, &update)?;
-    extend_zip(
-        &update,
-        &[("portable.flag", b"")],
-        &out.join(format!("{base}-portable.zip")),
-    )?;
+    extend_zip(&update, &[("portable.flag", b"")], &out.join(format!("{base}-portable.zip")))?;
     println!("wrote {}", out.display());
     Ok(())
 }
@@ -245,19 +221,14 @@ mod tests {
         extend_zip(&update, &[("portable.flag", b"")], &portable)?;
 
         let mut zip = zip::ZipArchive::new(std::fs::File::open(&portable)?)?;
-        let mut names: Vec<_> = zip
-            .file_names()
-            .map(|n| n.map(std::borrow::Cow::into_owned))
-            .collect::<Result<_, _>>()?;
+        let mut names: Vec<_> =
+            zip.file_names().map(|n| n.map(std::borrow::Cow::into_owned)).collect::<Result<_, _>>()?;
         names.sort();
         assert_eq!(names, ["a.txt", "portable.flag", "sub/b.txt"]);
         let mut text = String::new();
         std::io::Read::read_to_string(&mut zip.by_name("a.txt")?, &mut text)?;
         assert_eq!(text, "a".repeat(10_000));
-        assert_eq!(
-            zip::ZipArchive::new(std::fs::File::open(&update)?)?.len(),
-            2
-        );
+        assert_eq!(zip::ZipArchive::new(std::fs::File::open(&update)?)?.len(), 2);
         std::fs::remove_dir_all(&dir)?;
         Ok(())
     }

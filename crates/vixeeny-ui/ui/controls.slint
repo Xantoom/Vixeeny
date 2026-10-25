@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// The controls of every Vixeeny window, drawn after the Windows 11 (Fluent) ones: plain Slint
-// elements only (std-widgets would pull the SVG decoder in), colours and motion from `Theme`.
+// The controls of every Vixeeny window, drawn after the Windows 11 (Fluent) ones: plain Slint elements only
+// (std-widgets would pull the SVG decoder in), colours and motion from `Theme`.
 import { Theme } from "theme.slint";
 import { Icons } from "icons.slint";
 export { Theme } from "theme.slint";
 export { Icons } from "icons.slint";
 
-// The tooltip under the pointer. The window draws it above everything (`TipLayer`): a popup
-// would take the pointer from what it belongs to, and close again at once.
+// The tooltip under the pointer. The window draws it above everything (`TipLayer`): a popup would take the pointer from
+// what it belongs to, and close again at once.
 export global Tip {
     // Empty while none shows.
     in-out property <string> text;
@@ -303,8 +303,7 @@ export component TextBox inherits Rectangle {
 
 export component ComboBox inherits Rectangle {
     in property <[string]> options;
-    // Options that only title the ones under them (not chosen); one without a label is a line
-    // between two groups.
+    // Options that only title the ones under them (not chosen); one without a label is a line between two groups.
     in property <[bool]> headings;
     // How many of them are lines (shorter rows).
     in property <int> separators;
@@ -367,8 +366,8 @@ export component ComboBox inherits Rectangle {
     // A row is 38 px high with 2 px under it; a line between groups, 9 px.
     property <length> list-h: (root.options.length - root.separators) * 40px + root.separators * 11px + 8px;
     menu := PopupWindow {
-        // At least as wide as the box, wider when a choice needs it: then it grows to the left,
-        // its right edge on the box's (the boxes sit at the right of the page).
+        // At least as wide as the box, wider when a choice needs it: then it grows to the left, its right edge on the
+        // box's (the boxes sit at the right of the page).
         x: root.width - self.width;
         y: root.height + 2px;
         width: max(root.width, measure.preferred-width + 40px + root.mark-w);
@@ -606,9 +605,8 @@ component Swatch inherits Rectangle {
     }
 }
 
-// One colour, or the two ends of a gradient with the gradient between them; each opens a
-// picker: a square of saturation (across) and brightness (down), a bar of hues, the code in
-// hexadecimal and a few colours ready to take.
+// One colour, or the two ends of a gradient with the gradient between them; each opens a picker: a square of saturation
+// (across) and brightness (down), a bar of hues, the code in hexadecimal and a few colours ready to take.
 export component ColourField inherits Rectangle {
     // One colour, or two: the ends of a gradient.
     in property <[color]> colours;
@@ -626,8 +624,8 @@ export component ColourField inherits Rectangle {
     // Dragged in the square or the bar (`true`) and let go.
     callback sliding(bool);
 
-    // The end being picked, and its hue, saturation and brightness: kept here, so that the hue
-    // stays while the colour is grey.
+    // The end being picked, and its hue, saturation and brightness: kept here, so that the hue stays while the colour
+    // is grey.
     property <int> editing;
     property <float> hue;
     property <float> sat;
@@ -866,8 +864,8 @@ export component ColourField inherits Rectangle {
     accessible-role: button;
 }
 
-// An entry of the side navigation. The highlight of the current one is drawn by the list (it
-// slides from one entry to the next).
+// An entry of the side navigation. The highlight of the current one is drawn by the list (it slides from one entry to
+// the next).
 export component NavItem inherits Rectangle {
     in property <string> text;
     in property <string> icon;
@@ -908,7 +906,6 @@ export component NavItem inherits Rectangle {
     accessible-label: root.text;
 }
 
-// Rows that belong together: each is a card of its own, a few pixels apart.
 // A card: rounded and outlined, on the card colour.
 export component Card inherits Rectangle {
     border-radius: Theme.radius-card;
@@ -917,10 +914,10 @@ export component Card inherits Rectangle {
     background: Theme.card;
 }
 
+// Rows that belong together: each is a card of its own, a few pixels apart.
 export component Group inherits VerticalLayout {
     spacing: 8px;
 }
-
 
 // The tooltip of the window, its last child.
 export component TipLayer inherits Rectangle {
@@ -999,9 +996,8 @@ export component InfoTip inherits Rectangle {
     accessible-label: root.text;
 }
 
-// A setting, as a card: a title (and a line of explanation) on the left, the control on the
-// right; narrower than `stack-under`, the control goes under the text. The text wraps, and the
-// height follows it.
+// A setting, as a card: a title (and a line of explanation) on the left, the control on the right; narrower than
+// `stack-under`, the control goes under the text. The text wraps, and the height follows it.
 export component GroupRow inherits Rectangle {
     in property <string> title;
     in property <string> description;
@@ -1018,15 +1014,14 @@ export component GroupRow inherits Rectangle {
     in property <string> glyph;
     // The colour of the glyph and the title (green for "all is well", for instance).
     in property <color> tint: Theme.text;
-    // A row that appears on a page already shown (a setting that only makes sense with the
-    // one above): it unfolds from nothing instead of popping in.
+    // A row that appears on a page already shown (a setting that only makes sense with the one above): it unfolds from
+    // nothing instead of popping in.
     in property <bool> unfold: false;
     // A row that no longer applies: it folds away to nothing before it is removed.
     in property <bool> fold: false;
     // Found by a search: outlined in the accent colour for a moment.
     in property <bool> flash: false;
-    // A card of its own; else a row of a card shared with its group (no frame), under a line
-    // when `divider`.
+    // A card of its own; else a row of a card shared with its group (no frame), under a line when `divider`.
     in property <bool> framed: true;
     in property <bool> divider: false;
     // Belongs to the row above it: set in.
@@ -1066,9 +1061,9 @@ export component GroupRow inherits Rectangle {
     border-width: root.flash ? 2px : (root.framed ? 1px : 0px);
     border-color: root.flash ? Theme.accent : Theme.stroke;
     animate border-color { duration: Theme.t-slow; }
-    // A card of its own changes its fill; a row of a shared card shades it (another card's
-    // colour on top would whiten it behind Mica). At rest the shade keeps its colour, at no
-    // opacity: from `transparent` (black) the animation passes through grey.
+    // A card of its own changes its fill; a row of a shared card shades it (another card's colour on top would whiten
+    // it behind Mica). At rest the shade keeps its colour, at no opacity: from `transparent` (black) the animation
+    // passes through grey.
     background: root.framed
         ? (root.clickable && touch.pressed ? Theme.card-pressed : (root.clickable && touch.has-hover ? Theme.card-hover : Theme.card))
         : (root.clickable && touch.pressed ? Theme.subtle-pressed : (root.clickable && touch.has-hover ? Theme.subtle-hover : Theme.subtle-hover.with-alpha(0)));
@@ -1306,10 +1301,9 @@ export component SearchBox inherits Rectangle {
     accessible-label: root.placeholder;
 }
 
-// A small screen to click on: an edge (left, right, top, bottom) of it, or a place for a small
-// window (top left, top centre, top right, bottom left, bottom centre, bottom right, then one of
-// the user's: a click or a drag anywhere else puts it there). The chosen one is in the accent
-// colour.
+// A small screen to click on: an edge (left, right, top, bottom) of it, or a place for a small window (top left, top
+// centre, top right, bottom left, bottom centre, bottom right, then one of the user's: a click or a drag anywhere else
+// puts it there). The chosen one is in the accent colour.
 export component ScreenPicker inherits Rectangle {
     // false: the four edges; true: the six places and the user's own.
     in property <bool> corners;

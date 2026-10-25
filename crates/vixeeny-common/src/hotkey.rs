@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Keyboard shortcuts as written in the config (`Ctrl+Shift+R`): parsing, canonical form,
-//! limits and conflicts. No OS code here; the daemon registers the result.
+//! Keyboard shortcuts as written in the config (`Ctrl+Shift+R`): parsing, canonical form, limits and conflicts. No OS
+//! code here; the daemon registers the result.
 //!
-//! Key names inside [`Hotkey::code`] follow the W3C `KeyboardEvent.code` names (`KeyR`,
-//! `Digit5`, `F5`, `PrintScreen`), which is what the registration backends use.
+//! Key names inside [`Hotkey::code`] follow the W3C `KeyboardEvent.code` names (`KeyR`, `Digit5`, `F5`, `PrintScreen`),
+//! which is what the registration backends use.
 
 use std::fmt;
 
@@ -52,9 +52,7 @@ fn allowed_bare(code: &str) -> bool {
 }
 
 fn is_function_key(code: &str) -> bool {
-    code.strip_prefix('F')
-        .and_then(|n| n.parse::<u8>().ok())
-        .is_some_and(|n| (1..=24).contains(&n))
+    code.strip_prefix('F').and_then(|n| n.parse::<u8>().ok()).is_some_and(|n| (1..=24).contains(&n))
 }
 
 /// Maps a user-written key to its `code` name.
@@ -81,9 +79,7 @@ fn key_code(token: &str) -> Option<String> {
     }
     // Already a code name, e.g. `KeyR` or `Digit5`.
     let code_like = |prefix: &str, ok: fn(char) -> bool| {
-        token
-            .strip_prefix(prefix)
-            .is_some_and(|rest| rest.len() == 1 && rest.chars().all(ok))
+        token.strip_prefix(prefix).is_some_and(|rest| rest.len() == 1 && rest.chars().all(ok))
     };
     if code_like("Key", |c| c.is_ascii_uppercase()) || code_like("Digit", |c| c.is_ascii_digit()) {
         return Some(token.to_owned());
@@ -128,9 +124,7 @@ impl Hotkey {
                     if code.is_some() || token.is_empty() {
                         return Err(HotkeyError::UnknownKey(text.to_owned()));
                     }
-                    code = Some(
-                        key_code(token).ok_or_else(|| HotkeyError::UnknownKey(token.to_owned()))?,
-                    );
+                    code = Some(key_code(token).ok_or_else(|| HotkeyError::UnknownKey(token.to_owned()))?);
                 }
             }
         }
@@ -141,8 +135,8 @@ impl Hotkey {
         Ok(Self { mods, code })
     }
 
-    /// Spells `self` keeping the order its modifiers were written in (`Shift+Ctrl+R` stays so,
-    /// as the user pressed them); `written` is the text that parsed into `self`.
+    /// Spells `self` keeping the order its modifiers were written in (`Shift+Ctrl+R` stays so, as the user pressed
+    /// them); `written` is the text that parsed into `self`.
     pub fn in_order(&self, written: &str) -> String {
         let mut out = String::new();
         for token in written.split('+').map(str::trim) {
@@ -160,10 +154,7 @@ impl Hotkey {
 
     /// The key without its modifiers, as written (`R`, `5`, `F8`).
     fn key_name(&self) -> &str {
-        self.code
-            .strip_prefix("Key")
-            .or_else(|| self.code.strip_prefix("Digit"))
-            .unwrap_or(&self.code)
+        self.code.strip_prefix("Key").or_else(|| self.code.strip_prefix("Digit")).unwrap_or(&self.code)
     }
 }
 
@@ -181,12 +172,9 @@ fn modifier_name(token: &str) -> Option<&'static str> {
 impl fmt::Display for Hotkey {
     /// Canonical spelling, e.g. `Ctrl+Alt+Shift+Win+R`; parsing it gives back `self`.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (on, name) in [
-            (self.mods.ctrl, "Ctrl"),
-            (self.mods.alt, "Alt"),
-            (self.mods.shift, "Shift"),
-            (self.mods.meta, "Win"),
-        ] {
+        for (on, name) in
+            [(self.mods.ctrl, "Ctrl"), (self.mods.alt, "Alt"), (self.mods.shift, "Shift"), (self.mods.meta, "Win")]
+        {
             if on {
                 write!(f, "{name}+")?;
             }
@@ -220,19 +208,15 @@ pub struct Resolution {
     pub problems: Vec<Problem>,
 }
 
-/// Validates the configured shortcuts. The first claim on a combination wins, in
-/// [`ActionId::ALL`] order; the others are reported and dropped.
+/// Validates the configured shortcuts. The first claim on a combination wins, in [`ActionId::ALL`] order; the others
+/// are reported and dropped.
 pub fn resolve(hotkeys: &Hotkeys) -> Resolution {
     let mut out = Resolution::default();
     for (action, texts) in hotkeys.bindings() {
         let mut kept = 0;
         for text in texts {
             let mut problem = |kind| {
-                out.problems.push(Problem {
-                    action,
-                    text: text.clone(),
-                    kind,
-                });
+                out.problems.push(Problem { action, text: text.clone(), kind });
             };
             let hotkey = match Hotkey::parse(text) {
                 Ok(h) => h,
@@ -242,11 +226,7 @@ pub fn resolve(hotkeys: &Hotkeys) -> Resolution {
                 }
             };
             if let Some((owner, _)) = out.bindings.iter().find(|(_, h)| *h == hotkey) {
-                let kind = if *owner == action {
-                    ProblemKind::Duplicate
-                } else {
-                    ProblemKind::Conflict(*owner)
-                };
+                let kind = if *owner == action { ProblemKind::Duplicate } else { ProblemKind::Conflict(*owner) };
                 problem(kind);
             } else if kept >= MAX_PER_ACTION {
                 problem(ProblemKind::TooMany);
@@ -271,13 +251,7 @@ mod tests {
     #[test]
     fn parses_defaults() {
         assert_eq!(p("PrintScreen").code, "PrintScreen");
-        assert_eq!(
-            p("Alt+PrintScreen").mods,
-            Modifiers {
-                alt: true,
-                ..Default::default()
-            }
-        );
+        assert_eq!(p("Alt+PrintScreen").mods, Modifiers { alt: true, ..Default::default() });
         let h = p("Ctrl+Shift+R");
         assert_eq!(h.code, "KeyR");
         assert!(h.mods.ctrl && h.mods.shift && !h.mods.alt);
@@ -302,22 +276,10 @@ mod tests {
     fn rejects_bad_input() {
         assert_eq!(Hotkey::parse(""), Err(HotkeyError::Empty));
         assert_eq!(Hotkey::parse("Ctrl+Shift"), Err(HotkeyError::ModifierOnly));
-        assert!(matches!(
-            Hotkey::parse("Ctrl+Nope"),
-            Err(HotkeyError::UnknownKey(_))
-        ));
-        assert!(matches!(
-            Hotkey::parse("Ctrl+A+B"),
-            Err(HotkeyError::UnknownKey(_))
-        ));
-        assert!(matches!(
-            Hotkey::parse("Ctrl++"),
-            Err(HotkeyError::UnknownKey(_))
-        ));
-        assert!(matches!(
-            Hotkey::parse("R"),
-            Err(HotkeyError::NeedsModifier(_))
-        ));
+        assert!(matches!(Hotkey::parse("Ctrl+Nope"), Err(HotkeyError::UnknownKey(_))));
+        assert!(matches!(Hotkey::parse("Ctrl+A+B"), Err(HotkeyError::UnknownKey(_))));
+        assert!(matches!(Hotkey::parse("Ctrl++"), Err(HotkeyError::UnknownKey(_))));
+        assert!(matches!(Hotkey::parse("R"), Err(HotkeyError::NeedsModifier(_))));
         assert!(Hotkey::parse("F13").is_ok());
         assert!(Hotkey::parse("F25").is_err());
     }
@@ -334,19 +296,11 @@ mod tests {
         let mut k = Hotkeys::default();
         k.open_settings = ["Ctrl+1", "Ctrl+2", "Ctrl+3"].map(String::from).into();
         let r = resolve(&k);
-        let count = r
-            .bindings
-            .iter()
-            .filter(|(a, _)| *a == ActionId::OpenSettings)
-            .count();
+        let count = r.bindings.iter().filter(|(a, _)| *a == ActionId::OpenSettings).count();
         assert_eq!(count, 2);
         assert_eq!(
             r.problems,
-            vec![Problem {
-                action: ActionId::OpenSettings,
-                text: "Ctrl+3".into(),
-                kind: ProblemKind::TooMany
-            }]
+            vec![Problem { action: ActionId::OpenSettings, text: "Ctrl+3".into(), kind: ProblemKind::TooMany }]
         );
     }
 
@@ -358,11 +312,7 @@ mod tests {
         assert!(r.bindings.contains(&(ActionId::RecordToggle, p("Ctrl+F9"))));
         assert!(!r.bindings.iter().any(|(a, _)| *a == ActionId::OpenSettings));
         assert_eq!(r.problems.len(), 2);
-        assert!(
-            r.problems
-                .iter()
-                .all(|x| x.kind == ProblemKind::Conflict(ActionId::RecordToggle))
-        );
+        assert!(r.problems.iter().all(|x| x.kind == ProblemKind::Conflict(ActionId::RecordToggle)));
     }
 
     #[test]
@@ -379,9 +329,6 @@ mod tests {
         k.capture_region = vec!["Nope".into(), "Ctrl+Alt+P".into()];
         let r = resolve(&k);
         assert_eq!(r.problems.len(), 1);
-        assert!(
-            r.bindings
-                .contains(&(ActionId::CaptureRegion, p("Ctrl+Alt+P")))
-        );
+        assert!(r.bindings.contains(&(ActionId::CaptureRegion, p("Ctrl+Alt+P"))));
     }
 }

@@ -17,27 +17,17 @@ fn main() -> Result<()> {
         Some("verify-registry") => verify_registry(),
         Some("dist") => dist::dist(&args.collect::<Vec<_>>()),
         Some("icons") => icons::run(),
-        _ => bail!(
-            "usage: cargo xtask <build-native [lib…]|dist [--out dir]|icons|verify-registry|bench-idle>"
-        ),
+        _ => bail!("usage: cargo xtask <build-native [lib…]|dist [--out dir]|icons|verify-registry|bench-idle>"),
     }
 }
 
-/// `cargo xtask verify-registry`: compares `registry.toml` with the encoders of the linked
-/// FFmpeg (the native build of `cargo xtask build-native`).
+/// `cargo xtask verify-registry`: compares `registry.toml` with the encoders of the linked FFmpeg (the native build of
+/// `cargo xtask build-native`).
 fn verify_registry() -> Result<()> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let work = root.join("native/build/work");
     let mut cmd = std::process::Command::new("cargo");
-    cmd.current_dir(&root).args([
-        "test",
-        "-p",
-        "vixeeny-encode",
-        "--test",
-        "verify_registry",
-        "--",
-        "--nocapture",
-    ]);
+    cmd.current_dir(&root).args(["test", "-p", "vixeeny-encode", "--test", "verify_registry", "--", "--nocapture"]);
     let ffmpeg = work.join("ffmpeg-prebuilt");
     let bin = ffmpeg.join("bin");
     let path = std::env::var_os("PATH").unwrap_or_default();

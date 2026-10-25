@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! What the programs share: the settings file, the IPC messages, shortcuts, texts, paths, file
-//! names, logs, time, colour maths and the look of the windows.
+//! What the programs share: the settings file, the IPC messages, shortcuts, texts, paths, file names, logs, time,
+//! colour maths and the look of the windows.
 
 pub mod buffers;
 pub mod colour;
@@ -16,14 +16,11 @@ pub mod naming;
 pub mod paths;
 pub mod time;
 
-/// A test that needs hardware this machine may lack (a monitor, a graphics card, an encoder)
-/// gives up through here: the reason is printed, and with `VIXEENY_REAL_HARDWARE` set (the
-/// developer's machine, which has it all) giving up is a failure instead.
+/// A test that needs hardware this machine may lack (a monitor, a graphics card, an encoder) gives up through here: the
+/// reason is printed, and with `VIXEENY_REAL_HARDWARE` set (the developer's machine, which has it all) giving up is a
+/// failure instead.
 #[doc(hidden)]
 pub fn skip_test(reason: impl std::fmt::Display) {
-    assert!(
-        std::env::var_os("VIXEENY_REAL_HARDWARE").is_none(),
-        "this machine should not skip: {reason}"
-    );
+    assert!(std::env::var_os("VIXEENY_REAL_HARDWARE").is_none(), "this machine should not skip: {reason}");
     eprintln!("skipped: {reason}");
 }

@@ -1,17 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! WASAPI sources (Windows): the speakers' loopback, microphones, and per-application loopback
-//! (Windows 10 2004+ "process loopback": the audio one process tree plays, whatever the
-//! speakers do).
+//! WASAPI sources (Windows): the speakers' loopback, microphones, and per-application loopback (Windows 10 2004+
+//! "process loopback": the audio one process tree plays, whatever the speakers do).
 //!
-//! All streams are opened as 48 kHz float with `AUTOCONVERTPCM`, so Windows does the sample-rate
-//! conversion. Speakers and microphones keep their own layout (stereo, 5.1 or 7.1, up to what the
-//! track asked for); process loopback is stereo. Each packet is dated with the QPC time the driver gives
-//! (100 ns units), the same clock as `vixeeny_platform::monotonic_ns`.
+//! All streams are opened as 48 kHz float with `AUTOCONVERTPCM`, so Windows does the sample-rate conversion. Speakers
+//! and microphones keep their own layout (stereo, 5.1 or 7.1, up to what the track asked for); process loopback is
+//! stereo. Each packet is dated with the QPC time the driver gives (100 ns units), the same clock as
+//! `vixeeny_platform::monotonic_ns`.
 //!
-//! A source that fails (device unplugged, application gone) reports `Lost` and tries again each
-//! time Windows reports a device or a new audio session: the track is silent meanwhile and
-//! recovers by itself. Nothing is polled: the capture thread sleeps until
-//! the driver, the device list, the followed process or `stop` wakes it.
+//! A source that fails (device unplugged, application gone) reports `Lost` and tries again each time Windows reports a
+//! device or a new audio session: the track is silent meanwhile and recovers by itself. Nothing is polled: the capture
+//! thread sleeps until the driver, the device list, the followed process or `stop` wakes it.
 
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -20,37 +18,33 @@ use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, PROPERTYKEY, WAIT_OBJECT_0};
 use windows::Win32::Media::Audio::{
     AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
-    AUDCLNT_STREAMFLAGS_EVENTCALLBACK, AUDCLNT_STREAMFLAGS_LOOPBACK,
-    AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, AUDIOCLIENT_ACTIVATION_PARAMS,
-    AUDIOCLIENT_ACTIVATION_PARAMS_0, AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK,
-    AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS, ActivateAudioInterfaceAsync, DEVICE_STATE,
-    DEVICE_STATE_ACTIVE, EDataFlow, ERole, IActivateAudioInterfaceAsyncOperation,
-    IActivateAudioInterfaceCompletionHandler, IActivateAudioInterfaceCompletionHandler_Impl,
-    IAudioCaptureClient, IAudioClient, IAudioSessionControl, IAudioSessionControl2,
-    IAudioSessionManager2, IAudioSessionNotification, IAudioSessionNotification_Impl, IMMDevice,
+    AUDCLNT_STREAMFLAGS_EVENTCALLBACK, AUDCLNT_STREAMFLAGS_LOOPBACK, AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
+    AUDIOCLIENT_ACTIVATION_PARAMS, AUDIOCLIENT_ACTIVATION_PARAMS_0, AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK,
+    AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS, ActivateAudioInterfaceAsync, DEVICE_STATE, DEVICE_STATE_ACTIVE, EDataFlow,
+    ERole, IActivateAudioInterfaceAsyncOperation, IActivateAudioInterfaceCompletionHandler,
+    IActivateAudioInterfaceCompletionHandler_Impl, IAudioCaptureClient, IAudioClient, IAudioSessionControl,
+    IAudioSessionControl2, IAudioSessionManager2, IAudioSessionNotification, IAudioSessionNotification_Impl, IMMDevice,
     IMMDeviceEnumerator, IMMNotificationClient, IMMNotificationClient_Impl, MMDeviceEnumerator,
-    PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE, VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK,
-    WAVEFORMATEX, WAVEFORMATEXTENSIBLE, WAVEFORMATEXTENSIBLE_0, eCapture, eConsole, eRender,
+    PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE, VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, WAVEFORMATEX,
+    WAVEFORMATEXTENSIBLE, WAVEFORMATEXTENSIBLE_0, eCapture, eConsole, eRender,
 };
 use windows::Win32::System::Com::StructuredStorage::{PROPVARIANT, PROPVARIANT_0_0};
 use windows::Win32::System::Com::{
-    CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree,
-    CoUninitialize, STGM_READ,
+    CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, STGM_READ,
 };
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
 use windows::Win32::System::Threading::{
-    AvRevertMmThreadCharacteristics, AvSetMmThreadCharacteristicsW, CreateEventW, INFINITE,
-    OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
-    QueryFullProcessImageNameW, ResetEvent, SetEvent, WaitForMultipleObjects, WaitForSingleObject,
+    AvRevertMmThreadCharacteristics, AvSetMmThreadCharacteristicsW, CreateEventW, INFINITE, OpenProcess,
+    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, QueryFullProcessImageNameW, ResetEvent, SetEvent,
+    WaitForMultipleObjects, WaitForSingleObject,
 };
 use windows::Win32::System::Variant::VT_BLOB;
 use windows::core::{GUID, Interface, PCWSTR, PWSTR, Ref, implement};
 
 use crate::{
-    AudioChunk, AudioError, AudioSink, AudioSource, CHANNELS, SAMPLE_RATE, SourceEvent, SourceKind,
-    track_channels,
+    AudioChunk, AudioError, AudioSink, AudioSource, CHANNELS, SAMPLE_RATE, SourceEvent, SourceKind, track_channels,
 };
 
 /// `AUDCLNT_E_DEVICE_INVALIDATED`.
@@ -80,8 +74,8 @@ pub(crate) struct ComGuard;
 
 impl ComGuard {
     pub(crate) fn new() -> Self {
-        // SAFETY: balanced by `CoUninitialize` in `Drop`; an already initialised thread (S_FALSE)
-        // is fine, a different apartment model (an error) leaves COM usable as it is.
+        // SAFETY: balanced by `CoUninitialize` in `Drop`; an already initialised thread (S_FALSE) is fine, a different
+        // apartment model (an error) leaves COM usable as it is.
         let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
         Self
     }
@@ -114,8 +108,8 @@ fn device_id(device: &IMMDevice) -> String {
 }
 
 fn friendly_name(device: &IMMDevice) -> String {
-    // SAFETY: the property store and the value are used and cleared within this function; the
-    // string pointer is only read while the value is alive and only when its type says it is one.
+    // SAFETY: the property store and the value are used and cleared within this function; the string pointer is only
+    // read while the value is alive and only when its type says it is one.
     unsafe {
         let Ok(store) = device.OpenPropertyStore(STGM_READ) else {
             return String::new();
@@ -126,9 +120,7 @@ fn friendly_name(device: &IMMDevice) -> String {
         let inner = &value.Anonymous.Anonymous;
         let name = if inner.vt.0 == 31 {
             // VT_LPWSTR
-            PWSTR(inner.Anonymous.pwszVal.0)
-                .to_string()
-                .unwrap_or_default()
+            PWSTR(inner.Anonymous.pwszVal.0).to_string().unwrap_or_default()
         } else {
             String::new()
         };
@@ -160,10 +152,7 @@ fn list_endpoints(flow: windows::Win32::Media::Audio::EDataFlow) -> Vec<DeviceIn
         let count = devices.GetCount().unwrap_or(0);
         (0..count)
             .filter_map(|i| devices.Item(i).ok())
-            .map(|d| DeviceInfo {
-                id: device_id(&d),
-                name: friendly_name(&d),
-            })
+            .map(|d| DeviceInfo { id: device_id(&d), name: friendly_name(&d) })
             .collect()
     }
 }
@@ -220,9 +209,8 @@ pub fn list_applications() -> Vec<AppInfo> {
                     continue;
                 };
                 let Some(exe) = exe_of(pid) else { continue };
-                let active = control
-                    .GetState()
-                    .is_ok_and(|s| s == windows::Win32::Media::Audio::AudioSessionStateActive);
+                let active =
+                    control.GetState().is_ok_and(|s| s == windows::Win32::Media::Audio::AudioSessionStateActive);
                 match apps.iter_mut().find(|a| a.exe.eq_ignore_ascii_case(&exe)) {
                     Some(a) => a.active |= active,
                     None => apps.push(AppInfo { pid, exe, active }),
@@ -233,16 +221,13 @@ pub fn list_applications() -> Vec<AppInfo> {
     apps
 }
 
-/// The root process of `exe` (the one whose parent is not the same program): its tree is what
-/// process loopback captures.
+/// The root process of `exe` (the one whose parent is not the same program): its tree is what process loopback
+/// captures.
 fn find_process(exe: &str) -> Option<u32> {
     // SAFETY: a Toolhelp snapshot walked with the documented First/Next calls; handle closed.
     unsafe {
         let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0).ok()?;
-        let mut entry = PROCESSENTRY32W {
-            dwSize: size_of::<PROCESSENTRY32W>() as u32,
-            ..Default::default()
-        };
+        let mut entry = PROCESSENTRY32W { dwSize: size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
         let mut matching: Vec<(u32, u32)> = Vec::new();
         let mut more = Process32FirstW(snapshot, &raw mut entry).is_ok();
         while more {
@@ -262,8 +247,8 @@ fn find_process(exe: &str) -> Option<u32> {
     }
 }
 
-/// The capture format: 48 kHz float. More than two channels need the extensible form, with the
-/// speaker mask (FL FR FC LFE BL BR [SL SR]).
+/// The capture format: 48 kHz float. More than two channels need the extensible form, with the speaker mask (FL FR FC
+/// LFE BL BR [SL SR]).
 pub(crate) fn wave_format(channels: usize) -> WAVEFORMATEXTENSIBLE {
     let bytes_per_frame = (channels * 4) as u16;
     let mut format = WAVEFORMATEX {
@@ -283,9 +268,7 @@ pub(crate) fn wave_format(channels: usize) -> WAVEFORMATEXTENSIBLE {
     }
     WAVEFORMATEXTENSIBLE {
         Format: format,
-        Samples: WAVEFORMATEXTENSIBLE_0 {
-            wValidBitsPerSample: 32,
-        },
+        Samples: WAVEFORMATEXTENSIBLE_0 { wValidBitsPerSample: 32 },
         dwChannelMask: mask,
         // KSDATAFORMAT_SUBTYPE_IEEE_FLOAT
         SubFormat: GUID::from_u128(0x00000003_0000_0010_8000_00aa00389b71),
@@ -307,10 +290,7 @@ fn mix_channels(client: &IAudioClient) -> Option<usize> {
 }
 
 /// Completion handler of `ActivateAudioInterfaceAsync`: signals an event.
-#[implement(
-    IActivateAudioInterfaceCompletionHandler,
-    windows::Win32::System::Com::IAgileObject
-)]
+#[implement(IActivateAudioInterfaceCompletionHandler, windows::Win32::System::Com::IAgileObject)]
 struct ActivateHandler {
     done: HANDLE,
 }
@@ -364,8 +344,7 @@ enum Read {
     Loopback,
 }
 
-/// Whether a stream ends when Windows picks another default device, so that it opens again on
-/// the new one.
+/// Whether a stream ends when Windows picks another default device, so that it opens again on the new one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Follow {
     Default,
@@ -391,14 +370,7 @@ fn initialise(client: &IAudioClient, read: Read, channels: usize) -> Result<HAND
     // SAFETY: `format` outlives the call; the event is created, attached and returned.
     unsafe {
         client
-            .Initialize(
-                AUDCLNT_SHAREMODE_SHARED,
-                flags,
-                2_000_000,
-                0,
-                (&raw const format).cast::<WAVEFORMATEX>(),
-                None,
-            )
+            .Initialize(AUDCLNT_SHAREMODE_SHARED, flags, 2_000_000, 0, (&raw const format).cast::<WAVEFORMATEX>(), None)
             .map_err(os("Initialize"))?;
         let event = CreateEventW(None, false, false, PCWSTR::null()).map_err(os("CreateEvent"))?;
         client.SetEventHandle(event).map_err(os("SetEventHandle"))?;
@@ -421,32 +393,16 @@ fn finish_open(
     };
     let event = initialise(&client, read, channels)?;
     // SAFETY: the client is initialised; the service is requested for the capture interface.
-    let capture: IAudioCaptureClient =
-        unsafe { client.GetService() }.map_err(os("GetService(capture)"))?;
+    let capture: IAudioCaptureClient = unsafe { client.GetService() }.map_err(os("GetService(capture)"))?;
     // SAFETY: as above.
     unsafe { client.Start() }.map_err(os("Start"))?;
-    Ok(Stream {
-        client,
-        capture,
-        event,
-        device_id,
-        follow,
-        channels,
-        process: None,
-    })
+    Ok(Stream { client, capture, event, device_id, follow, channels, process: None })
 }
 
 fn open_device(endpoint: &Endpoint, max_channels: usize) -> Result<Stream, AudioError> {
     // SAFETY: activating the audio client of a live endpoint.
-    let client: IAudioClient =
-        unsafe { endpoint.device.Activate(CLSCTX_ALL, None) }.map_err(os("Activate"))?;
-    finish_open(
-        client,
-        endpoint.read,
-        Some(device_id(&endpoint.device)),
-        endpoint.follow,
-        max_channels,
-    )
+    let client: IAudioClient = unsafe { endpoint.device.Activate(CLSCTX_ALL, None) }.map_err(os("Activate"))?;
+    finish_open(client, endpoint.read, Some(device_id(&endpoint.device)), endpoint.follow, max_channels)
 }
 
 fn open_process_loopback(pid: u32) -> Result<Stream, AudioError> {
@@ -460,8 +416,8 @@ fn open_process_loopback(pid: u32) -> Result<Stream, AudioError> {
         },
     };
     let mut variant = PROPVARIANT::default();
-    // SAFETY: the blob points at `params`, which outlives the activation call; the variant is
-    // never cleared (it does not own the blob).
+    // SAFETY: the blob points at `params`, which outlives the activation call; the variant is never cleared (it does
+    // not own the blob).
     unsafe {
         let inner: &mut PROPVARIANT_0_0 = &mut variant.Anonymous.Anonymous;
         inner.vt = VT_BLOB;
@@ -469,8 +425,7 @@ fn open_process_loopback(pid: u32) -> Result<Stream, AudioError> {
         inner.Anonymous.blob.pBlobData = (&raw const params).cast_mut().cast();
     }
     // SAFETY: a manual-reset-free event, closed below.
-    let done =
-        unsafe { CreateEventW(None, false, false, PCWSTR::null()) }.map_err(os("CreateEvent"))?;
+    let done = unsafe { CreateEventW(None, false, false, PCWSTR::null()) }.map_err(os("CreateEvent"))?;
     let handler: IActivateAudioInterfaceCompletionHandler = ActivateHandler { done }.into();
     let iid: GUID = IAudioClient::IID;
     // SAFETY: the parameters live until the wait below ends; the handler is agile.
@@ -497,15 +452,11 @@ fn open_process_loopback(pid: u32) -> Result<Stream, AudioError> {
         let waited = WaitForSingleObject(done, 5_000);
         let _ = CloseHandle(done);
         if waited != WAIT_OBJECT_0 {
-            return Err(AudioError::Os(
-                "process loopback activation timed out".into(),
-            ));
+            return Err(AudioError::Os("process loopback activation timed out".into()));
         }
         let mut hr = windows::core::HRESULT(0);
         let mut unknown = None;
-        operation
-            .GetActivateResult(&raw mut hr, &raw mut unknown)
-            .map_err(os("GetActivateResult"))?;
+        operation.GetActivateResult(&raw mut hr, &raw mut unknown).map_err(os("GetActivateResult"))?;
         hr.ok().map_err(os("activation"))?;
         unknown
             .ok_or_else(|| AudioError::Os("no audio client".into()))?
@@ -520,66 +471,45 @@ fn open_process_loopback(pid: u32) -> Result<Stream, AudioError> {
 
 /// The endpoint a speakers/microphone source reads, `None` for an application.
 fn endpoint(kind: &SourceKind) -> Result<Option<Endpoint>, AudioError> {
-    let at = |device, read, follow| {
-        Some(Endpoint {
-            device,
-            read,
-            follow,
-        })
-    };
+    let at = |device, read, follow| Some(Endpoint { device, read, follow });
     Ok(match kind {
         SourceKind::System => {
             let e = enumerator()?;
             // SAFETY: a live enumerator.
-            let device = unsafe { e.GetDefaultAudioEndpoint(eRender, eConsole) }
-                .map_err(os("default output"))?;
+            let device = unsafe { e.GetDefaultAudioEndpoint(eRender, eConsole) }.map_err(os("default output"))?;
             at(device, Read::Loopback, Follow::Default)
         }
         SourceKind::Output(wanted) => {
             let e = enumerator()?;
             // SAFETY: live enumerator and collection; every item is checked.
             let found = unsafe {
-                let devices = e
-                    .EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE)
-                    .map_err(os("render devices"))?;
+                let devices = e.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE).map_err(os("render devices"))?;
                 let count = devices.GetCount().unwrap_or(0);
                 (0..count).filter_map(|i| devices.Item(i).ok()).find(|d| {
-                    device_id(d) == *wanted
-                        || friendly_name(d)
-                            .to_lowercase()
-                            .contains(&wanted.to_lowercase())
+                    device_id(d) == *wanted || friendly_name(d).to_lowercase().contains(&wanted.to_lowercase())
                 })
             };
-            let device = found.ok_or_else(|| {
-                AudioError::Unavailable(format!("no output device matches `{wanted}`"))
-            })?;
+            let device =
+                found.ok_or_else(|| AudioError::Unavailable(format!("no output device matches `{wanted}`")))?;
             at(device, Read::Loopback, Follow::Fixed)
         }
         SourceKind::Microphone(None) => {
             let e = enumerator()?;
             // SAFETY: a live enumerator.
-            let device = unsafe { e.GetDefaultAudioEndpoint(eCapture, eConsole) }
-                .map_err(os("default microphone"))?;
+            let device = unsafe { e.GetDefaultAudioEndpoint(eCapture, eConsole) }.map_err(os("default microphone"))?;
             at(device, Read::Capture, Follow::Default)
         }
         SourceKind::Microphone(Some(wanted)) | SourceKind::Input(wanted) => {
             let e = enumerator()?;
             // SAFETY: live enumerator and collection; every item is checked.
             let found = unsafe {
-                let devices = e
-                    .EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE)
-                    .map_err(os("capture devices"))?;
+                let devices = e.EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE).map_err(os("capture devices"))?;
                 let count = devices.GetCount().unwrap_or(0);
                 (0..count).filter_map(|i| devices.Item(i).ok()).find(|d| {
-                    device_id(d) == *wanted
-                        || friendly_name(d)
-                            .to_lowercase()
-                            .contains(&wanted.to_lowercase())
+                    device_id(d) == *wanted || friendly_name(d).to_lowercase().contains(&wanted.to_lowercase())
                 })
             };
-            let device = found.ok_or_else(|| {
-                AudioError::Unavailable(format!("no microphone matches `{wanted}`"))
-            })?;
+            let device = found.ok_or_else(|| AudioError::Unavailable(format!("no microphone matches `{wanted}`")))?;
             at(device, Read::Capture, Follow::Fixed)
         }
         SourceKind::Application(_) => None,
@@ -593,13 +523,12 @@ fn open(kind: &SourceKind, max_channels: usize) -> Result<Stream, AudioError> {
     let SourceKind::Application(exe) = kind else {
         return Err(AudioError::Unsupported);
     };
-    let pid = find_process(exe)
-        .ok_or_else(|| AudioError::Unavailable(format!("{exe} is not running")))?;
+    let pid = find_process(exe).ok_or_else(|| AudioError::Unavailable(format!("{exe} is not running")))?;
     open_process_loopback(pid)
 }
 
-/// The channels `kind` would deliver now when allowed up to `max`: its device's own layout
-/// (stereo, 5.1 or 7.1), stereo for an application or when the device cannot be examined.
+/// The channels `kind` would deliver now when allowed up to `max`: its device's own layout (stereo, 5.1 or 7.1), stereo
+/// for an application or when the device cannot be examined.
 pub fn source_channels(kind: &SourceKind, max: usize) -> usize {
     let _com = ComGuard::new();
     let Ok(Some(Endpoint { device, .. })) = endpoint(kind) else {
@@ -607,9 +536,7 @@ pub fn source_channels(kind: &SourceKind, max: usize) -> usize {
     };
     // SAFETY: activating the audio client of a live endpoint, only to read its mix format.
     let client: Option<IAudioClient> = unsafe { device.Activate(CLSCTX_ALL, None) }.ok();
-    client
-        .and_then(|c| mix_channels(&c))
-        .map_or(CHANNELS, |n| track_channels(n, max))
+    client.and_then(|c| mix_channels(&c)).map_or(CHANNELS, |n| track_channels(n, max))
 }
 
 /// A Windows event shared between threads.
@@ -624,9 +551,7 @@ impl Event {
     /// `manual`: stays signalled until reset (otherwise one wait consumes it).
     fn new(manual: bool) -> Result<Self, AudioError> {
         // SAFETY: a plain call; the handle is closed in `Drop`.
-        unsafe { CreateEventW(None, manual, false, PCWSTR::null()) }
-            .map(Self)
-            .map_err(os("CreateEvent"))
+        unsafe { CreateEventW(None, manual, false, PCWSTR::null()) }.map(Self).map_err(os("CreateEvent"))
     }
 
     fn set(&self) {
@@ -667,12 +592,7 @@ impl IMMNotificationClient_Impl for Changes_Impl {
         Ok(())
     }
 
-    fn OnDefaultDeviceChanged(
-        &self,
-        _: EDataFlow,
-        role: ERole,
-        _: &PCWSTR,
-    ) -> windows::core::Result<()> {
+    fn OnDefaultDeviceChanged(&self, _: EDataFlow, role: ERole, _: &PCWSTR) -> windows::core::Result<()> {
         if role == eConsole {
             self.0.set();
         }
@@ -691,8 +611,8 @@ impl IAudioSessionNotification_Impl for Changes_Impl {
     }
 }
 
-/// What a capture thread listens to besides its stream: the device list, and (while an
-/// application is not playing) the new audio sessions of every output.
+/// What a capture thread listens to besides its stream: the device list, and (while an application is not playing) the
+/// new audio sessions of every output.
 struct Listening {
     enumerator: IMMDeviceEnumerator,
     changes: IMMNotificationClient,
@@ -709,28 +629,20 @@ impl Listening {
         // SAFETY: unregistered in `Drop`.
         unsafe { enumerator.RegisterEndpointNotificationCallback(&changes) }
             .map_err(os("RegisterEndpointNotificationCallback"))?;
-        Ok(Self {
-            enumerator,
-            changes,
-            sessions: Vec::new(),
-            changed,
-        })
+        Ok(Self { enumerator, changes, sessions: Vec::new(), changed })
     }
 
-    /// Listens to the sessions that start on the outputs present now (an application that
-    /// starts playing), replacing the previous registrations.
+    /// Listens to the sessions that start on the outputs present now (an application that starts playing), replacing
+    /// the previous registrations.
     fn follow_sessions(&mut self) {
         self.forget_sessions();
         let Ok(notify) = self.changes.cast::<IAudioSessionNotification>() else {
             return;
         };
-        // SAFETY: live enumerator and collection; each manager is unregistered later. Windows
-        // only reports new sessions once the session list was asked for.
+        // SAFETY: live enumerator and collection; each manager is unregistered later. Windows only reports new sessions
+        // once the session list was asked for.
         unsafe {
-            let Ok(devices) = self
-                .enumerator
-                .EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE)
-            else {
+            let Ok(devices) = self.enumerator.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE) else {
                 return;
             };
             for i in 0..devices.GetCount().unwrap_or(0) {
@@ -763,10 +675,7 @@ impl Drop for Listening {
     fn drop(&mut self) {
         self.forget_sessions();
         // SAFETY: registered by `new`.
-        let _ = unsafe {
-            self.enumerator
-                .UnregisterEndpointNotificationCallback(&self.changes)
-        };
+        let _ = unsafe { self.enumerator.UnregisterEndpointNotificationCallback(&self.changes) };
     }
 }
 
@@ -776,13 +685,7 @@ enum Ended {
     Lost(String),
 }
 
-fn capture_loop(
-    stream: &Stream,
-    kind: &SourceKind,
-    sink: &mut dyn AudioSink,
-    stop: &Event,
-    changed: &Event,
-) -> Ended {
+fn capture_loop(stream: &Stream, kind: &SourceKind, sink: &mut dyn AudioSink, stop: &Event, changed: &Event) -> Ended {
     let mut handles = vec![stream.event, stop.0, changed.0];
     handles.extend(stream.process);
     loop {
@@ -812,8 +715,8 @@ fn capture_loop(
             _ => return Ended::Lost("wait failed".into()),
         }
         loop {
-            // SAFETY: documented GetNextPacketSize / GetBuffer / ReleaseBuffer sequence; the
-            // slice is only read before the buffer is released.
+            // SAFETY: documented GetNextPacketSize / GetBuffer / ReleaseBuffer sequence; the slice is only read before
+            // the buffer is released.
             let step = unsafe {
                 let available = match stream.capture.GetNextPacketSize() {
                     Ok(n) => n,
@@ -826,13 +729,9 @@ fn capture_loop(
                 let mut frames = 0u32;
                 let mut flags = 0u32;
                 let mut qpc = 0u64;
-                if let Err(e) = stream.capture.GetBuffer(
-                    &raw mut data,
-                    &raw mut frames,
-                    &raw mut flags,
-                    None,
-                    Some(&raw mut qpc),
-                ) {
+                if let Err(e) =
+                    stream.capture.GetBuffer(&raw mut data, &raw mut frames, &raw mut flags, None, Some(&raw mut qpc))
+                {
                     return if e.code().0 == DEVICE_INVALIDATED {
                         Ended::Lost("device removed".into())
                     } else {
@@ -840,18 +739,13 @@ fn capture_loop(
                     };
                 }
                 let count = frames as usize * stream.channels;
-                let samples =
-                    if flags & (AUDCLNT_BUFFERFLAGS_SILENT.0 as u32) != 0 || data.is_null() {
-                        vec![0.0f32; count]
-                    } else {
-                        std::slice::from_raw_parts(data.cast::<f32>(), count).to_vec()
-                    };
+                let samples = if flags & (AUDCLNT_BUFFERFLAGS_SILENT.0 as u32) != 0 || data.is_null() {
+                    vec![0.0f32; count]
+                } else {
+                    std::slice::from_raw_parts(data.cast::<f32>(), count).to_vec()
+                };
                 let _ = stream.capture.ReleaseBuffer(frames);
-                AudioChunk {
-                    time_ns: (qpc as i64).saturating_mul(100),
-                    channels: stream.channels,
-                    samples,
-                }
+                AudioChunk { time_ns: (qpc as i64).saturating_mul(100), channels: stream.channels, samples }
             };
             sink.on_audio(step);
         }
@@ -859,16 +753,10 @@ fn capture_loop(
 }
 
 fn default_changed(stream: &Stream, kind: &SourceKind) -> bool {
-    let flow = if matches!(kind, SourceKind::System) {
-        eRender
-    } else {
-        eCapture
-    };
+    let flow = if matches!(kind, SourceKind::System) { eRender } else { eCapture };
     let Ok(e) = enumerator() else { return false };
     // SAFETY: a live enumerator.
-    let current = unsafe { e.GetDefaultAudioEndpoint(flow, eConsole) }
-        .ok()
-        .map(|d| device_id(&d));
+    let current = unsafe { e.GetDefaultAudioEndpoint(flow, eConsole) }.ok().map(|d| device_id(&d));
     current.is_some() && current != stream.device_id
 }
 
@@ -889,26 +777,19 @@ impl WasapiSource {
 
     /// A source that keeps its device's surround layout, up to `max_channels`.
     pub fn with_max_channels(kind: SourceKind, max_channels: usize) -> Self {
-        Self {
-            kind,
-            max_channels,
-            stop: None,
-            thread: None,
-        }
+        Self { kind, max_channels, stop: None, thread: None }
     }
 }
 
-/// Has Windows schedule this thread as audio work (the "Audio" task of the multimedia class
-/// scheduler): a busy game does not delay it into gaps. Undone when dropped.
+/// Has Windows schedule this thread as audio work (the "Audio" task of the multimedia class scheduler): a busy game
+/// does not delay it into gaps. Undone when dropped.
 struct AudioPriority(HANDLE);
 
 impl AudioPriority {
     fn new() -> Option<Self> {
         let mut index = 0;
         // SAFETY: a constant task name and a valid out-pointer.
-        unsafe { AvSetMmThreadCharacteristicsW(windows::core::w!("Audio"), &raw mut index) }
-            .ok()
-            .map(Self)
+        unsafe { AvSetMmThreadCharacteristicsW(windows::core::w!("Audio"), &raw mut index) }.ok().map(Self)
     }
 }
 
@@ -956,8 +837,7 @@ fn run(kind: &SourceKind, max_channels: usize, mut sink: Box<dyn AudioSink>, sto
             listening.follow_sessions();
         }
         // SAFETY: live events.
-        let waited =
-            unsafe { WaitForMultipleObjects(&[stop.0, listening.changed.0], false, INFINITE) };
+        let waited = unsafe { WaitForMultipleObjects(&[stop.0, listening.changed.0], false, INFINITE) };
         if waited.0 != WAIT_OBJECT_0.0 + 1 {
             return;
         }

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! `cargo xtask build-native`: unpack FFmpeg (`native/build/work/ffmpeg.zip`, made by
-//! `packaging/ffmpeg/build.sh`), then fetch the image libraries of `native/versions.toml` by exact commit and build them statically with MSVC into
+//! `cargo xtask build-native`: unpack FFmpeg (`native/build/work/ffmpeg.zip`, made by `packaging/ffmpeg/build.sh`),
+//! then fetch the image libraries of `native/versions.toml` by exact commit and build them statically with MSVC into
 //! `native/build/work/prefix`. Run it from a Visual Studio developer prompt.
 
 use std::collections::BTreeMap;
@@ -38,23 +38,18 @@ struct Ctx {
 }
 
 pub fn build(only: &[String]) -> Result<()> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .canonicalize()?;
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize()?;
     // Drop the `\\?\` verbatim prefix: cygpath and the build tools do not understand it.
     let root = PathBuf::from(root.to_string_lossy().trim_start_matches(r"\\?\"));
-    let mut table: toml::Table =
-        toml::from_str(&std::fs::read_to_string(root.join("native/versions.toml"))?)
-            .context("parsing native/versions.toml")?;
+    let mut table: toml::Table = toml::from_str(&std::fs::read_to_string(root.join("native/versions.toml"))?)
+        .context("parsing native/versions.toml")?;
     // FFmpeg is described there but built by packaging/ffmpeg/build.sh.
     table.remove("ffmpeg");
     let libs: BTreeMap<String, Lib> = table.try_into()?;
     let work = root.join("native/build/work");
     let prefix = work.join("prefix");
     std::fs::create_dir_all(&prefix)?;
-    let jobs = std::thread::available_parallelism()
-        .map_or(2, std::num::NonZero::get)
-        .to_string();
+    let jobs = std::thread::available_parallelism().map_or(2, std::num::NonZero::get).to_string();
     let ctx = Ctx { work, prefix, jobs };
 
     if only.is_empty() || only.iter().any(|o| o == "ffmpeg") {
@@ -64,9 +59,7 @@ pub fn build(only: &[String]) -> Result<()> {
         if !only.is_empty() && !only.iter().any(|o| o == name) {
             continue;
         }
-        let lib = libs
-            .get(*name)
-            .with_context(|| format!("{name} missing from versions.toml"))?;
+        let lib = libs.get(*name).with_context(|| format!("{name} missing from versions.toml"))?;
         let stamp = ctx.work.join(format!("{name}.stamp"));
         let stamp_value = format!("{}+{}", lib.commit, recipe_rev(name));
         if std::fs::read_to_string(&stamp).is_ok_and(|s| s == stamp_value) {
@@ -85,8 +78,8 @@ pub fn build(only: &[String]) -> Result<()> {
     normalize_msvc_libs(&ctx)
 }
 
-/// Downloads the pinned prebuilt FFmpeg (shared, GPL) into `work/ffmpeg-prebuilt`, verifying
-/// its SHA-256. `FFMPEG_DIR` must point there for `ffmpeg-sys-next`, and `bin` must be on PATH.
+/// Downloads the pinned prebuilt FFmpeg (shared, GPL) into `work/ffmpeg-prebuilt`, verifying its SHA-256. `FFMPEG_DIR`
+/// must point there for `ffmpeg-sys-next`, and `bin` must be on PATH.
 fn ffmpeg_prebuilt(ctx: &Ctx) -> Result<()> {
     let dest = ctx.work.join("ffmpeg-prebuilt");
     let stamp = dest.join(".sha256");
@@ -99,10 +92,7 @@ fn ffmpeg_prebuilt(ctx: &Ctx) -> Result<()> {
             zip_path.display()
         );
     };
-    let hex: String = Sha256::digest(&bytes)
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect();
+    let hex: String = Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect();
     if std::fs::read_to_string(&stamp).is_ok_and(|s| s == hex) {
         println!("== ffmpeg: up to date");
         return msvc_import_libs(&dest);
@@ -114,10 +104,7 @@ fn ffmpeg_prebuilt(ctx: &Ctx) -> Result<()> {
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i)?;
         // Drop the single top-level directory of the archive.
-        let Some(rel) = entry
-            .enclosed_name()
-            .and_then(|n| n.components().skip(1).collect::<PathBuf>().into())
-        else {
+        let Some(rel) = entry.enclosed_name().and_then(|n| n.components().skip(1).collect::<PathBuf>().into()) else {
             continue;
         };
         if rel.as_os_str().is_empty() {
@@ -137,17 +124,13 @@ fn ffmpeg_prebuilt(ctx: &Ctx) -> Result<()> {
     msvc_import_libs(&dest)
 }
 
-/// Rewrites the import libraries `lib/<name>.lib` from the `.def` files, in the MSVC format.
-/// The build's own are MinGW import libraries, which the linker cannot delay-load: with these,
-/// `vixeeny-app` loads FFmpeg only when a video needs it (see its build script).
+/// Rewrites the import libraries `lib/<name>.lib` from the `.def` files, in the MSVC format. The build's own are MinGW
+/// import libraries, which the linker cannot delay-load: with these, `vixeeny-app` loads FFmpeg only when a video needs
+/// it (see its build script).
 fn msvc_import_libs(ffmpeg: &Path) -> Result<()> {
     let lib = ffmpeg.join("lib");
     // `lib.exe` from the MSVC environment, else LLVM's (cross builds).
-    let tool = if Command::new("lib").arg("/?").output().is_ok() {
-        "lib"
-    } else {
-        "llvm-lib"
-    };
+    let tool = if Command::new("lib").arg("/?").output().is_ok() { "lib" } else { "llvm-lib" };
     for entry in std::fs::read_dir(&lib)?.flatten() {
         let def = entry.file_name().to_string_lossy().into_owned();
         // `avcodec-63.def` describes `avcodec-63.dll`; the library is `avcodec.lib`.
@@ -164,12 +147,7 @@ fn msvc_import_libs(ffmpeg: &Path) -> Result<()> {
         let result = run(
             &lib,
             tool,
-            &[
-                &format!("/def:{stem}.def.msvc"),
-                "/machine:x64",
-                &format!("/out:{name}.lib"),
-                "/nologo",
-            ],
+            &[&format!("/def:{stem}.def.msvc"), "/machine:x64", &format!("/out:{name}.lib"), "/nologo"],
             &[],
         );
         let _ = std::fs::remove_file(&named);
@@ -187,17 +165,13 @@ fn run(dir: &Path, prog: &str, args: &[&str], env: &[(&str, String)]) -> Result<
         .status()
         .with_context(|| format!("spawning {prog}"))?;
     if !status.success() {
-        bail!(
-            "`{prog} {}` failed in {}: {status}",
-            args.join(" "),
-            dir.display()
-        );
+        bail!("`{prog} {}` failed in {}: {status}", args.join(" "), dir.display());
     }
     Ok(())
 }
 
-/// `cl` links `-lfoo` as `foo.lib`, so make every `libfoo.{a,lib}` available under
-/// that name too, and drop Unix-only libraries from the `.pc` files.
+/// `cl` links `-lfoo` as `foo.lib`, so make every `libfoo.{a,lib}` available under that name too, and drop Unix-only
+/// libraries from the `.pc` files.
 fn normalize_msvc_libs(ctx: &Ctx) -> Result<()> {
     let dir = ctx.prefix.join("lib");
     if !dir.exists() {
@@ -212,9 +186,7 @@ fn normalize_msvc_libs(ctx: &Ctx) -> Result<()> {
                 .lines()
                 .map(|line| {
                     line.split(' ')
-                        .filter(|t| {
-                            !matches!(*t, "-lm" | "-lpthread" | "-ldl" | "-lstdc++" | "-UEB_DLL")
-                        })
+                        .filter(|t| !matches!(*t, "-lm" | "-lpthread" | "-ldl" | "-lstdc++" | "-UEB_DLL"))
                         // libjxl.pc names `jxl-static`; the library is installed as `jxl.lib`.
                         .map(|t| if t == "-ljxl-static" { "-ljxl" } else { t })
                         .collect::<Vec<_>>()
@@ -229,9 +201,7 @@ fn normalize_msvc_libs(ctx: &Ctx) -> Result<()> {
         let Some(file) = path.file_name().and_then(|f| f.to_str()) else {
             continue;
         };
-        let Some(stem) = file
-            .strip_prefix("lib")
-            .and_then(|f| f.strip_suffix(".a").or_else(|| f.strip_suffix(".lib")))
+        let Some(stem) = file.strip_prefix("lib").and_then(|f| f.strip_suffix(".a").or_else(|| f.strip_suffix(".lib")))
         else {
             continue;
         };
@@ -251,35 +221,12 @@ fn fetch(ctx: &Ctx, name: &str, lib: &Lib) -> Result<PathBuf> {
         run(&src, "git", &["init", "-q"], &[])?;
         run(&src, "git", &["remote", "add", "origin", &lib.url], &[])?;
     }
-    run(
-        &src,
-        "git",
-        &["fetch", "-q", "--depth", "1", "origin", &lib.commit],
-        &[],
-    )?;
-    run(
-        &src,
-        "git",
-        &["checkout", "-q", "--force", &lib.commit],
-        &[],
-    )?;
+    run(&src, "git", &["fetch", "-q", "--depth", "1", "origin", &lib.commit], &[])?;
+    run(&src, "git", &["checkout", "-q", "--force", &lib.commit], &[])?;
     if !lib.tag.contains(' ') {
         run(&src, "git", &["tag", "-f", &lib.tag, &lib.commit], &[])?;
     }
-    run(
-        &src,
-        "git",
-        &[
-            "submodule",
-            "update",
-            "-q",
-            "--init",
-            "--recursive",
-            "--depth",
-            "1",
-        ],
-        &[],
-    )?;
+    run(&src, "git", &["submodule", "update", "-q", "--init", "--recursive", "--depth", "1"], &[])?;
     Ok(src)
 }
 
@@ -314,28 +261,18 @@ fn configure_and_build(ctx: &Ctx, src: &Path, sub: &str, extra: &[&str]) -> Resu
     run(src, "cmake", &["--build", &build, "-j", &ctx.jobs], &[])
 }
 
-/// MSVC on Windows. Elsewhere (WSL) the Windows libraries are cross-built with the clang-cl
-/// toolchain of cargo-xwin, so that the Windows tests run from Linux link them too.
+/// MSVC on Windows. Elsewhere (WSL) the Windows libraries are cross-built with the clang-cl toolchain of cargo-xwin, so
+/// that the Windows tests run from Linux link them too.
 fn compilers() -> Result<Vec<String>> {
     if cfg!(windows) {
-        return Ok(vec![
-            "-DCMAKE_C_COMPILER=cl".into(),
-            "-DCMAKE_CXX_COMPILER=cl".into(),
-        ]);
+        return Ok(vec!["-DCMAKE_C_COMPILER=cl".into(), "-DCMAKE_CXX_COMPILER=cl".into()]);
     }
     let home = std::env::var("HOME").context("HOME")?;
-    let toolchain = Path::new(&home)
-        .join(".cache/cargo-xwin/cmake/clang-cl/x86_64-pc-windows-msvc-toolchain.cmake");
+    let toolchain = Path::new(&home).join(".cache/cargo-xwin/cmake/clang-cl/x86_64-pc-windows-msvc-toolchain.cmake");
     if !toolchain.exists() {
-        bail!(
-            "{} is missing: run any `cargo xwin` build once to create it",
-            toolchain.display()
-        );
+        bail!("{} is missing: run any `cargo xwin` build once to create it", toolchain.display());
     }
-    Ok(vec![format!(
-        "-DCMAKE_TOOLCHAIN_FILE={}",
-        toolchain.display()
-    )])
+    Ok(vec![format!("-DCMAKE_TOOLCHAIN_FILE={}", toolchain.display())])
 }
 
 /// The options of libjxl, and of jpegli, which builds from the same tree.
@@ -351,8 +288,7 @@ const JPEGXL: &[&str] = &[
     "-DJPEGXL_ENABLE_PLUGINS=OFF",
     "-DJPEGXL_ENABLE_VIEWERS=OFF",
     "-DJPEGXL_STATIC=ON",
-    // JPEGXL_STATIC would default to the static CRT (/MT); everything else here and
-    // the Rust side use /MD.
+    // JPEGXL_STATIC would default to the static CRT (/MT); everything else here and the Rust side use /MD.
     "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL",
     "-DBUILD_TESTING=OFF",
 ];
@@ -384,8 +320,7 @@ fn recipe(ctx: &Ctx, name: &str, src: &Path) -> Result<()> {
             run(src, "cmake", &["--install", &build], &[])
         }
         "libultrahdr" => {
-            // Forward slashes: libultrahdr's CMake re-reads these paths as strings, where a
-            // backslash starts an escape.
+            // Forward slashes: libultrahdr's CMake re-reads these paths as strings, where a backslash starts an escape.
             let turbo = turbo_prefix(ctx).to_string_lossy().replace('\\', "/");
             let include = format!("-DJPEG_INCLUDE_DIR={turbo}/include");
             let library = format!("-DJPEG_LIBRARY={turbo}/lib/jpeg-static.lib");
@@ -399,8 +334,8 @@ fn recipe(ctx: &Ctx, name: &str, src: &Path) -> Result<()> {
                     "-DUHDR_ENABLE_HEIF=OFF",
                     "-DUHDR_BUILD_EXAMPLES=OFF",
                     "-DUHDR_ENABLE_INSTALL=OFF",
-                    // A static build would otherwise force the static CRT (/MT); this switch keeps
-                    // the runtime given below (/MD), like everything else here and the Rust side.
+                    // A static build would otherwise force the static CRT (/MT); this switch keeps the runtime given
+                    // below (/MD), like everything else here and the Rust side.
                     "-DBUILD_FOR_WINUI=ON",
                     "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL",
                 ],
@@ -411,14 +346,12 @@ fn recipe(ctx: &Ctx, name: &str, src: &Path) -> Result<()> {
     }
 }
 
-/// jpegli's own install step leaves out the core library (only its helpers are installed), so
-/// copy `jpegli-static` to `jpegli.lib` and describe it for pkg-config. Its C API
-/// (`jpegli_*`) is declared by `vixeeny-image`.
+/// jpegli's own install step leaves out the core library (only its helpers are installed), so copy `jpegli-static` to
+/// `jpegli.lib` and describe it for pkg-config. Its C API (`jpegli_*`) is declared by `vixeeny-image`.
 fn install_jpegli(ctx: &Ctx, src: &Path) -> Result<()> {
     let built = src.join("vx-build/lib");
     let (from, to) = ("jpegli-static.lib", "jpegli.lib");
-    std::fs::copy(built.join(from), ctx.prefix.join("lib").join(to))
-        .with_context(|| format!("copying {from}"))?;
+    std::fs::copy(built.join(from), ctx.prefix.join("lib").join(to)).with_context(|| format!("copying {from}"))?;
     let pc = format!(
         "prefix={p}\nlibdir=${{prefix}}/lib\nincludedir=${{prefix}}/include\n\n\
          Name: libjpegli\nDescription: jpegli, libjpeg-compatible JPEG codec\nVersion: 0.12.0\n\
@@ -435,25 +368,18 @@ fn turbo_prefix(ctx: &Ctx) -> PathBuf {
     ctx.work.join("turbo-prefix")
 }
 
-/// libultrahdr installs nothing when cross-built: copy its library, its libjpeg-turbo and its
-/// header, and describe them for pkg-config.
+/// libultrahdr installs nothing when cross-built: copy its library, its libjpeg-turbo and its header, and describe them
+/// for pkg-config.
 fn install_ultrahdr(ctx: &Ctx, src: &Path) -> Result<()> {
     let lib = ctx.prefix.join("lib");
     for (from, to) in [
         (src.join("vx-build/uhdr-static.lib"), "uhdr.lib"),
-        (
-            turbo_prefix(ctx).join("lib/jpeg-static.lib"),
-            "uhdr_jpeg.lib",
-        ),
+        (turbo_prefix(ctx).join("lib/jpeg-static.lib"), "uhdr_jpeg.lib"),
     ] {
-        std::fs::copy(&from, lib.join(to))
-            .with_context(|| format!("copying {}", from.display()))?;
+        std::fs::copy(&from, lib.join(to)).with_context(|| format!("copying {}", from.display()))?;
     }
-    std::fs::copy(
-        src.join("ultrahdr_api.h"),
-        ctx.prefix.join("include/ultrahdr_api.h"),
-    )
-    .context("copying ultrahdr_api.h")?;
+    std::fs::copy(src.join("ultrahdr_api.h"), ctx.prefix.join("include/ultrahdr_api.h"))
+        .context("copying ultrahdr_api.h")?;
     let pc = format!(
         "prefix={p}\nlibdir=${{prefix}}/lib\nincludedir=${{prefix}}/include\n\n\
          Name: libuhdr\nDescription: libultrahdr, JPEG with an HDR gain map\nVersion: 2.0.2\n\

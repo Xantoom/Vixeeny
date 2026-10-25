@@ -1,19 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Putting an image on the clipboard: a `PNG` entry for browsers, Discord and
-//! most editors, and a `CF_DIBV5` bitmap for everything else (Paint, Office). Both are lossless.
-//! In another format (JPEG, WebP…), the encoded file goes on instead of the `PNG` entry, as a file
-//! (`CF_HDROP`: browsers and Discord upload it as it is, Explorer pastes it) and, for JPEG, as
-//! `JFIF` (Office).
+//! Putting an image on the clipboard: a `PNG` entry for browsers, Discord and most editors, and a `CF_DIBV5` bitmap for
+//! everything else (Paint, Office). Both are lossless. In another format (JPEG, WebP…), the encoded file goes on
+//! instead of the `PNG` entry, as a file (`CF_HDROP`: browsers and Discord upload it as it is, Explorer pastes it) and,
+//! for JPEG, as `JFIF` (Office).
 
 use std::path::Path;
 
 /// UTF-16, NUL-terminated, as little-endian bytes (`CF_UNICODETEXT`). Line breaks become CRLF.
 pub fn utf16_z(text: &str) -> Vec<u8> {
     let crlf = text.replace("\r\n", "\n").replace('\n', "\r\n");
-    crlf.encode_utf16()
-        .chain(std::iter::once(0))
-        .flat_map(u16::to_le_bytes)
-        .collect()
+    crlf.encode_utf16().chain(std::iter::once(0)).flat_map(u16::to_le_bytes).collect()
 }
 
 /// A `BITMAPV5HEADER` followed by bottom-up BGRA pixels, from top-down BGRA input.
@@ -66,15 +62,12 @@ fn with_clipboard(
     fill: impl FnOnce(&dyn Fn(u32, &[u8]) -> crate::Result<()>) -> crate::Result<()>,
 ) -> crate::Result<()> {
     use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL};
-    use windows::Win32::System::DataExchange::{
-        CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData,
-    };
+    use windows::Win32::System::DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData};
     use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
 
     use crate::PlatformError;
 
-    let os =
-        |what: &str, e: windows::core::Error| PlatformError::Os(format!("clipboard {what}: {e}"));
+    let os = |what: &str, e: windows::core::Error| PlatformError::Os(format!("clipboard {what}: {e}"));
 
     // Clipboard owners hold it briefly; retry a few times before giving up.
     let mut opened = false;
@@ -94,11 +87,10 @@ fn with_clipboard(
         // SAFETY: the clipboard is open.
         unsafe { EmptyClipboard() }.map_err(|e| os("empty", e))?;
         let put = |format: u32, bytes: &[u8]| -> crate::Result<()> {
-            // SAFETY: allocates a movable block of the right size; the lock gives a writable
-            // pointer to it for the copy; on success the system owns the block.
+            // SAFETY: allocates a movable block of the right size; the lock gives a writable pointer to it for the
+            // copy; on success the system owns the block.
             unsafe {
-                let mem: HGLOBAL =
-                    GlobalAlloc(GMEM_MOVEABLE, bytes.len()).map_err(|e| os("alloc", e))?;
+                let mem: HGLOBAL = GlobalAlloc(GMEM_MOVEABLE, bytes.len()).map_err(|e| os("alloc", e))?;
                 let ptr = GlobalLock(mem);
                 if ptr.is_null() {
                     let _ = GlobalFree(Some(mem));
@@ -114,8 +106,8 @@ fn with_clipboard(
             Ok(())
         };
         fill(&put)?;
-        // Captures can show anything on the screen: they stay on this PC (the clipboard
-        // history, Win+V, keeps them), never synced to the user's other devices.
+        // Captures can show anything on the screen: they stay on this PC (the clipboard history, Win+V, keeps them),
+        // never synced to the user's other devices.
         // SAFETY: registering a named format has no preconditions.
         let cloud = unsafe {
             windows::Win32::System::DataExchange::RegisterClipboardFormatW(windows::core::w!(
@@ -159,9 +151,7 @@ pub fn copy_image(width: u32, height: u32, bgra: &[u8], clip: ImageClip<'_>) -> 
     const DROPEFFECT_COPY: u32 = 1;
 
     if bgra.len() < width as usize * height as usize * 4 {
-        return Err(crate::PlatformError::Os(
-            "clipboard: pixel buffer too small".into(),
-        ));
+        return Err(crate::PlatformError::Os("clipboard: pixel buffer too small".into()));
     }
     // SAFETY: registering a named format has no preconditions.
     let named = |name: PCWSTR| unsafe { RegisterClipboardFormatW(name) };
@@ -195,20 +185,14 @@ mod tests {
         let d = drop_files(&[std::path::Path::new("C:\\a.jpg")]);
         assert_eq!(&d[..4], &20u32.to_le_bytes());
         assert_eq!(&d[16..20], &1u32.to_le_bytes());
-        let wide: Vec<u16> = d[20..]
-            .chunks(2)
-            .map(|c| u16::from_le_bytes([c[0], c[1]]))
-            .collect();
+        let wide: Vec<u16> = d[20..].chunks(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
         let expected: Vec<u16> = "C:\\a.jpg".encode_utf16().chain([0, 0]).collect();
         assert_eq!(wide, expected);
     }
 
     #[test]
     fn text_is_utf16_with_crlf_and_a_terminator() {
-        assert_eq!(
-            utf16_z("a\nb"),
-            [b'a', 0, b'\r', 0, b'\n', 0, b'b', 0, 0, 0]
-        );
+        assert_eq!(utf16_z("a\nb"), [b'a', 0, b'\r', 0, b'\n', 0, b'b', 0, 0, 0]);
         assert_eq!(utf16_z(""), [0, 0]);
         assert_eq!(utf16_z("a\r\nb"), utf16_z("a\nb"));
         // outside the BMP: a surrogate pair

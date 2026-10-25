@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The notification, after the Windows 11 ones, drawn natively: a card in the corner
-//! of the screen with the thumbnail of the capture, a title and the whole text. Clicking the card
-//! opens the file, its button the folder (or the settings for an error). It slides in, never
-//! takes the keyboard, and goes by itself after a while unless the pointer is on it. A screenshot
-//! shows as its picture alone for 3 s: a click opens it, a right-click offers a menu.
+//! The notification, after the Windows 11 ones, drawn natively: a card in the corner of the screen with the thumbnail
+//! of the capture, a title and the whole text. Clicking the card opens the file, its button the folder (or the settings
+//! for an error). It slides in, never takes the keyboard, and goes by itself after a while unless the pointer is on it.
+//! A screenshot shows as its picture alone for 3 s: a click opens it, a right-click offers a menu.
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
@@ -13,8 +12,8 @@ use vixeeny_platform::PhysicalRect;
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
 use windows::Win32::UI::WindowsAndMessaging::{
-    KillTimer, SetTimer, WM_CAPTURECHANGED, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP,
-    WM_MOUSEMOVE, WM_RBUTTONUP, WM_SETCURSOR, WM_TIMER,
+    KillTimer, SetTimer, WM_CAPTURECHANGED, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_RBUTTONUP,
+    WM_SETCURSOR, WM_TIMER,
 };
 use windows::core::Result;
 
@@ -58,16 +57,12 @@ pub enum ToastEvent {
     Edit,
 }
 
-/// Where the card goes: the bottom-right (or `top`-right) corner of the work area of a monitor
-/// (what the taskbar leaves free), `margin` physical pixels from its edges.
+/// Where the card goes: the bottom-right (or `top`-right) corner of the work area of a monitor (what the taskbar leaves
+/// free), `margin` physical pixels from its edges.
 pub fn corner(work: PhysicalRect, size: (u32, u32), margin: u32, top: bool) -> (i32, i32) {
     (
         work.x + work.width as i32 - size.0 as i32 - margin as i32,
-        if top {
-            work.y + margin as i32
-        } else {
-            work.y + work.height as i32 - size.1 as i32 - margin as i32
-        },
+        if top { work.y + margin as i32 } else { work.y + work.height as i32 - size.1 as i32 - margin as i32 },
     )
 }
 
@@ -137,12 +132,7 @@ impl CardLayout {
             None
         } else {
             let label = gfx.paragraph(&content.action_label, 12.0 * u, false, 1.0e5)?;
-            let at = (
-                x0 + text_x,
-                top + text_h + gap + 6.0 * u,
-                (label.width + 24.0 * u).ceil(),
-                26.0 * u,
-            );
+            let at = (x0 + text_x, top + text_h + gap + 6.0 * u, (label.width + 24.0 * u).ceil(), 26.0 * u);
             text_h += gap + 36.0 * u;
             Some((label, at))
         };
@@ -154,21 +144,9 @@ impl CardLayout {
         let inner = text_h.max(picture.3).max(40.0 * u);
         let card_h = (inner + 2.0 * PAD * u).ceil();
         let card = (x0, y0, card_w, card_h);
-        let size = (
-            (WIDTH * u).ceil() as u32,
-            (card_h + (ABOVE + BELOW) * u).ceil() as u32,
-        );
+        let size = ((WIDTH * u).ceil() as u32, (card_h + (ABOVE + BELOW) * u).ceil() as u32);
         let close = (x0 + card_w - 28.0 * u, y0 + 6.0 * u, 22.0 * u, 22.0 * u);
-        Ok(Self {
-            u,
-            size,
-            card,
-            picture,
-            heading: (heading, heading_at),
-            body: (body, body_at),
-            button,
-            close,
-        })
+        Ok(Self { u, size, card, picture, heading: (heading, heading_at), body: (body, body_at), button, close })
     }
 
     /// The card of a picture alone: the picture's shape, as large as fits [`PICTURE_MAX`].
@@ -181,10 +159,7 @@ impl CardLayout {
         let empty = || gfx.paragraph("", 12.0 * u, false, 1.0);
         Ok(Self {
             u,
-            size: (
-                (card_w + 2.0 * SIDE * u).ceil() as u32,
-                (card_h + (ABOVE + BELOW) * u).ceil() as u32,
-            ),
+            size: ((card_w + 2.0 * SIDE * u).ceil() as u32, (card_h + (ABOVE + BELOW) * u).ceil() as u32),
             card,
             picture: card,
             heading: (empty()?, (x0, y0)),
@@ -269,10 +244,7 @@ pub fn paint_card(
             let scale = (pw / *w as f32).min(ph / *h as f32);
             let (dw, dh) = (*w as f32 * scale, *h as f32 * scale);
             c.push_round_clip(frame, 6.0 * u)?;
-            let drawn = c.picture(
-                bitmap,
-                rect(px + (pw - dw) / 2.0, py + (ph - dh) / 2.0, dw, dh),
-            );
+            let drawn = c.picture(bitmap, rect(px + (pw - dw) / 2.0, py + (ph - dh) / 2.0, dw, dh));
             c.pop_layer();
             drawn?;
         }
@@ -341,16 +313,7 @@ impl Card {
                 gfx,
                 &look,
                 || Ok(size),
-                |c| {
-                    paint_card(
-                        c,
-                        &self.theme,
-                        &self.content,
-                        &self.layout,
-                        self.thumb.as_ref(),
-                        &look,
-                    )
-                },
+                |c| paint_card(c, &self.theme, &self.content, &self.layout, self.thumb.as_ref(), &look),
             )
             // SAFETY: plain call.
             .and_then(|()| unsafe { gfx.dcomp.Commit() });
@@ -363,11 +326,7 @@ impl Card {
         // SAFETY: plain timer calls on a window of this thread.
         unsafe {
             if on {
-                let ms = if self.content.picture_only {
-                    PICTURE_LIFETIME_MS
-                } else {
-                    LIFETIME_MS
-                };
+                let ms = if self.content.picture_only { PICTURE_LIFETIME_MS } else { LIFETIME_MS };
                 SetTimer(Some(self.popup.hwnd), LIFETIME_TIMER, ms, None);
             } else {
                 let _ = KillTimer(Some(self.popup.hwnd), LIFETIME_TIMER);
@@ -408,8 +367,8 @@ impl Shared {
 
     fn message(&self, id: u64, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
         let result = self.handle(id, msg, wparam, lparam);
-        // Once the card is gone (dropped with the message), unless `done` showed another: the
-        // process waits for the next one with as little as it can hold.
+        // Once the card is gone (dropped with the message), unless `done` showed another: the process waits for the
+        // next one with as little as it can hold.
         if self.trim_due.take() && self.current.borrow().is_none() {
             self.gfx.trim();
         }
@@ -420,12 +379,7 @@ impl Shared {
         if let Some(r) = popup::passive(msg) {
             return Some(r);
         }
-        let card = self
-            .current
-            .borrow()
-            .as_ref()
-            .filter(|(shown, _)| *shown == id)
-            .map(|(_, c)| c.clone())?;
+        let card = self.current.borrow().as_ref().filter(|(shown, _)| *shown == id).map(|(_, c)| c.clone())?;
         let gfx = &self.gfx;
         let (x, y) = popup::point(lparam);
         let mut look = card.look.get();
@@ -468,8 +422,7 @@ impl Shared {
             WM_CAPTURECHANGED => card.press.set(None),
             WM_RBUTTONUP if !card.content.menu.is_empty() => {
                 card.set_timer(false);
-                let chosen =
-                    popup::context_menu(card.popup.hwnd, &card.content.menu, card.content.dark);
+                let chosen = popup::context_menu(card.popup.hwnd, &card.content.menu, card.content.dark);
                 let event = match chosen {
                     Some(0) => Some(Some(ToastEvent::Activated)),
                     Some(1) => Some(Some(ToastEvent::Edit)),
@@ -538,9 +491,8 @@ impl Toasts {
         self.shared.current.borrow().is_none()
     }
 
-    /// Shows a card in the bottom-right (or top-right) corner of `work`, the work area of a monitor (physical
-    /// pixels, at `dpi`), in the
-    /// place of the one on screen (whose `done` is not called). `done` learns what the user did
+    /// Shows a card in the bottom-right (or top-right) corner of `work`, the work area of a monitor (physical pixels,
+    /// at `dpi`), in the place of the one on screen (whose `done` is not called). `done` learns what the user did
     /// (`None`: the card went by itself or was closed) once the card is gone.
     pub fn show(
         &self,
@@ -556,12 +508,8 @@ impl Toasts {
         let u = layout.u;
         let (x, y) = corner(work, layout.size, (12.0 * u) as u32, content.top);
         // Never in a capture or a recording: the card is about them, not part of them.
-        let popup = Popup::new(
-            gfx,
-            PhysicalRect::new(x, y, layout.size.0, layout.size.1),
-            Focus::Never,
-            Capture::Hidden,
-        )?;
+        let popup =
+            Popup::new(gfx, PhysicalRect::new(x, y, layout.size.0, layout.size.1), Focus::Never, Capture::Hidden)?;
         let piece = Piece::new(gfx, true)?;
         scene::add(&popup.root, &piece.visual)?;
         let thumb = match &content.thumb {
@@ -577,28 +525,18 @@ impl Toasts {
         let card = Rc::new(Card {
             content: content.clone(),
             layout,
-            theme: Theme::new(Look {
-                dark: content.dark,
-                animations: animate,
-                ..Look::default()
-            }),
+            theme: Theme::new(Look { dark: content.dark, animations: animate, ..Look::default() }),
             popup,
             piece,
             thumb,
-            look: Cell::new(CardLook {
-                hovered: false,
-                hover: None,
-                held: None,
-            }),
+            look: Cell::new(CardLook { hovered: false, hover: None, held: None }),
             press: Cell::new(None),
             done: RefCell::new(Some(Box::new(done))),
         });
         let id = shared.count.get() + 1;
         shared.count.set(id);
         let weak: Weak<Shared> = Rc::downgrade(shared);
-        card.popup.on_message(move |msg, wparam, lparam| {
-            weak.upgrade()?.message(id, msg, wparam, lparam)
-        });
+        card.popup.on_message(move |msg, wparam, lparam| weak.upgrade()?.message(id, msg, wparam, lparam));
         // Drawn where it slides in from, transparent: it appears with the slide.
         let slide = 40.0 * u;
         scene::set_offset(&card.piece.visual, if animate { slide } else { 0.0 }, 0.0)?;
@@ -611,9 +549,7 @@ impl Toasts {
         if animate && let Some(effect) = &card.piece.effect {
             // SAFETY: plain property calls with animations of the same device.
             unsafe {
-                card.piece
-                    .visual
-                    .SetOffsetX(&scene::ease_out(gfx, slide, 0.0, ENTER)?)?;
+                card.piece.visual.SetOffsetX(&scene::ease_out(gfx, slide, 0.0, ENTER)?)?;
                 effect.SetOpacity(&scene::ease_out(gfx, 0.0, 1.0, ENTER)?)?;
                 gfx.dcomp.Commit()?;
             }
@@ -633,33 +569,11 @@ mod tests {
     #[test]
     fn the_card_sits_in_the_bottom_right_corner() {
         // Above a 48-pixel taskbar.
-        assert_eq!(
-            corner(PhysicalRect::new(0, 0, 1920, 1032), (360, 96), 16, false),
-            (1544, 920)
-        );
+        assert_eq!(corner(PhysicalRect::new(0, 0, 1920, 1032), (360, 96), 16, false), (1544, 920));
         // A second monitor to the left keeps its own corner; a taskbar on top moves nothing.
-        assert_eq!(
-            corner(
-                PhysicalRect::new(-1920, 40, 1920, 1040),
-                (360, 96),
-                16,
-                false
-            ),
-            (-376, 968)
-        );
+        assert_eq!(corner(PhysicalRect::new(-1920, 40, 1920, 1040), (360, 96), 16, false), (-376, 968));
         // At the top, under a taskbar on top.
-        assert_eq!(
-            corner(PhysicalRect::new(0, 0, 1920, 1032), (360, 96), 16, true),
-            (1544, 16)
-        );
-        assert_eq!(
-            corner(
-                PhysicalRect::new(-1920, 40, 1920, 1040),
-                (360, 96),
-                16,
-                true
-            ),
-            (-376, 56)
-        );
+        assert_eq!(corner(PhysicalRect::new(0, 0, 1920, 1032), (360, 96), 16, true), (1544, 16));
+        assert_eq!(corner(PhysicalRect::new(-1920, 40, 1920, 1040), (360, 96), 16, true), (-376, 56));
     }
 }

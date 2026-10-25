@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! IPC server: accepts connections, turns what clients say into [`Event`]s and lets the
-//! runtime talk back to the app. Every thread here blocks in a read or an accept; none polls.
+//! IPC server: accepts connections, turns what clients say into [`Event`]s and lets the runtime talk back to the app.
+//! Every thread here blocks in a read or an accept; none polls.
 
 use std::io;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -8,8 +8,8 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use vixeeny_common::ipc::{
-    self, AppToDaemon, ControlReply, DaemonToApp, Hello, IpcError, Listener, ListenerTrait,
-    SendHalf, Stream, StreamTrait,
+    self, AppToDaemon, ControlReply, DaemonToApp, Hello, IpcError, Listener, ListenerTrait, SendHalf, Stream,
+    StreamTrait,
 };
 
 use crate::core::Event;
@@ -98,14 +98,11 @@ pub fn serve(listener: &Listener, tx: &EventTx, link: &AppLink) {
         };
         let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
         let (tx, link) = (tx.clone(), link.clone());
-        let spawned = std::thread::Builder::new()
-            .name(format!("ipc-{id}"))
-            .stack_size(128 * 1024)
-            .spawn(move || {
-                if let Err(e) = connection(stream, id, &tx, &link) {
-                    tracing::debug!("ipc connection {id} ended: {e}");
-                }
-            });
+        let spawned = std::thread::Builder::new().name(format!("ipc-{id}")).stack_size(128 * 1024).spawn(move || {
+            if let Err(e) = connection(stream, id, &tx, &link) {
+                tracing::debug!("ipc connection {id} ended: {e}");
+            }
+        });
         if let Err(e) = spawned {
             tracing::error!("cannot start an ipc thread: {e}");
         }
@@ -121,9 +118,7 @@ fn connection(stream: Stream, id: u64, tx: &EventTx, link: &AppLink) -> Result<(
         Hello::Control(request) => {
             tx.send(Event::Control(request));
             let reply = if request == ipc::ControlRequest::QuitForUpdate {
-                ControlReply::Quitting {
-                    pid: std::process::id(),
-                }
+                ControlReply::Quitting { pid: std::process::id() }
             } else {
                 ControlReply::Ok
             };
@@ -155,13 +150,8 @@ fn connection(stream: Stream, id: u64, tx: &EventTx, link: &AppLink) -> Result<(
 }
 
 /// Tells a running daemon to open the settings (second launch). Returns the I/O result.
-pub fn ask_running_daemon(
-    endpoint: &ipc::Endpoint,
-    request: ipc::ControlRequest,
-) -> io::Result<()> {
+pub fn ask_running_daemon(endpoint: &ipc::Endpoint, request: ipc::ControlRequest) -> io::Result<()> {
     let mut stream = endpoint.connect()?;
     ipc::write_msg(&mut stream, &Hello::Control(request)).map_err(io::Error::other)?;
-    ipc::read_msg::<_, ControlReply>(&mut stream)
-        .map(|_| ())
-        .map_err(io::Error::other)
+    ipc::read_msg::<_, ControlReply>(&mut stream).map(|_| ()).map_err(io::Error::other)
 }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The administrator's rights (see `vixeeny_platform::elevation`), each run with them:
-//! `--admin register` by the installer, `--admin grant <pid>` by the settings' button (the
-//! settings window `pid` closes meanwhile), `--admin remove` by the uninstaller.
+//! The administrator's rights (see `vixeeny_platform::elevation`), each run with them: `--admin register` by the
+//! installer, `--admin grant <pid>` by the settings' button (the settings window `pid` closes meanwhile),
+//! `--admin remove` by the uninstaller.
 
 use std::time::Duration;
 
@@ -13,8 +13,8 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     match args.first().map(String::as_str) {
         Some("register") => register(),
         Some("grant") => {
-            // The settings window shows again once Vixeeny has the rights: the one that asked
-            // must be gone by then, or it would take the new one's place.
+            // The settings window shows again once Vixeeny has the rights: the one that asked must be gone by then, or
+            // it would take the new one's place.
             if let Some(pid) = args.get(1).and_then(|p| p.parse().ok()) {
                 let (ended, end) = std::sync::mpsc::channel();
                 if vixeeny_platform::on_process_exit(pid, move || {
@@ -29,10 +29,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
                 return Err(e);
             }
             // Started again from here, with the rights.
-            vixeeny_updater::client::restart_daemon(
-                Duration::from_secs(30 * 60),
-                Some(ControlRequest::OpenSettings),
-            )
+            vixeeny_updater::client::restart_daemon(Duration::from_secs(30 * 60), Some(ControlRequest::OpenSettings))
         }
         Some("remove") => elevation::remove_tasks().map_err(Into::into),
         _ => anyhow::bail!("usage: --admin register | grant <pid> | remove"),

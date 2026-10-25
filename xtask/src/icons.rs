@@ -1,25 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! `cargo xtask icons`: draws the application icon (a near-black rounded tile with a white V
-//! framed by the corners of a capture zone, after the Vixely logo) at every size and writes
-//! `packaging/icons/`: `vixeeny.ico` (the programs and the installer), `vixeeny-recording.ico`
-//! (the tray while recording), and PNGs for the windows (64), the repository page (256) and
-//! the installer (48 to 256).
-//! The files are committed; run this again only when the drawing changes.
+//! `cargo xtask icons`: draws the application icon (a near-black rounded tile with a white V framed by the corners of a
+//! capture zone, after the Vixely logo) at every size and writes `packaging/icons/`: `vixeeny.ico` (the programs and
+//! the installer), `vixeeny-recording.ico` (the tray while recording), and PNGs for the windows (64), the repository
+//! page (256) and the installer (48 to 256). The files are committed; run this again only when the drawing changes.
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use tiny_skia::{
-    Color, FillRule, LineCap, LineJoin, Paint, PathBuilder, Pixmap, Stroke, Transform,
-};
+use tiny_skia::{Color, FillRule, LineCap, LineJoin, Paint, PathBuilder, Pixmap, Stroke, Transform};
 
 /// The ink of the tile, the same near-black as the Vixely logo.
 const INK: (u8, u8, u8) = (0x13, 0x14, 0x16);
 const SIZES: [u32; 7] = [16, 24, 32, 48, 64, 128, 256];
 /// The sizes also written as PNG files.
 const PNGS: [u32; 4] = [48, 64, 128, 256];
-/// Below this size the capture corners would blur into the letter: the small icons show the V
-/// alone, larger.
+/// Below this size the capture corners would blur into the letter: the small icons show the V alone, larger.
 const DETAILED_FROM: u32 = 32;
 
 fn out_dir() -> PathBuf {
@@ -51,18 +46,11 @@ fn tile() -> Option<tiny_skia::Path> {
     p.finish()
 }
 
-/// The V, a heavy geometric letter with flat terminals, centred on (16, 16) and `scale` times
-/// its size in the detailed icon.
+/// The V, a heavy geometric letter with flat terminals, centred on (16, 16) and `scale` times its size in the detailed
+/// icon.
 fn letter(scale: f32) -> Option<tiny_skia::Path> {
-    const POINTS: [(f32, f32); 7] = [
-        (10.2, 10.6),
-        (13.5, 10.6),
-        (16.0, 17.05),
-        (18.5, 10.6),
-        (21.8, 10.6),
-        (17.6, 21.4),
-        (14.4, 21.4),
-    ];
+    const POINTS: [(f32, f32); 7] =
+        [(10.2, 10.6), (13.5, 10.6), (16.0, 17.05), (18.5, 10.6), (21.8, 10.6), (17.6, 21.4), (14.4, 21.4)];
     let at = |(x, y): (f32, f32)| (16.0 + (x - 16.0) * scale, 16.0 + (y - 16.0) * scale);
     let mut p = PathBuilder::new();
     let (x, y) = at(POINTS[0]);
@@ -79,12 +67,7 @@ fn letter(scale: f32) -> Option<tiny_skia::Path> {
 fn corners() -> Option<tiny_skia::Path> {
     let (lo, hi, arm) = (6.0, 26.0, 4.0);
     let mut p = PathBuilder::new();
-    for (x, y, dx, dy) in [
-        (lo, lo, 1.0, 1.0),
-        (hi, lo, -1.0, 1.0),
-        (lo, hi, 1.0, -1.0),
-        (hi, hi, -1.0, -1.0),
-    ] {
+    for (x, y, dx, dy) in [(lo, lo, 1.0, 1.0), (hi, lo, -1.0, 1.0), (lo, hi, 1.0, -1.0), (hi, hi, -1.0, -1.0)] {
         p.move_to(x, y + dy * arm);
         p.line_to(x, y);
         p.line_to(x + dx * arm, y);
@@ -92,25 +75,12 @@ fn corners() -> Option<tiny_skia::Path> {
     p.finish()
 }
 
-/// The red dot of the "recording" tray icon, ringed with the tile's ink so it stays round on
-/// the letter.
+/// The red dot of the "recording" tray icon, ringed with the tile's ink so it stays round on the letter.
 fn recording_dot(pixmap: &mut Pixmap, size: u32) -> Result<()> {
     let scale = Transform::from_scale(size as f32 / 32.0, size as f32 / 32.0);
     let circle = |r: f32| PathBuilder::from_circle(24.5, 7.5, r).context("dot");
-    pixmap.fill_path(
-        &circle(7.5)?,
-        &paint(INK.0, INK.1, INK.2, 255),
-        FillRule::Winding,
-        scale,
-        None,
-    );
-    pixmap.fill_path(
-        &circle(5.5)?,
-        &paint(0xe5, 0x32, 0x2d, 255),
-        FillRule::Winding,
-        scale,
-        None,
-    );
+    pixmap.fill_path(&circle(7.5)?, &paint(INK.0, INK.1, INK.2, 255), FillRule::Winding, scale, None);
+    pixmap.fill_path(&circle(5.5)?, &paint(0xe5, 0x32, 0x2d, 255), FillRule::Winding, scale, None);
     Ok(())
 }
 
@@ -118,37 +88,14 @@ fn recording_dot(pixmap: &mut Pixmap, size: u32) -> Result<()> {
 pub fn pixmap(size: u32) -> Result<Pixmap> {
     let mut pixmap = Pixmap::new(size, size).context("pixmap")?;
     let scale = Transform::from_scale(size as f32 / 32.0, size as f32 / 32.0);
-    pixmap.fill_path(
-        &tile().context("tile")?,
-        &paint(INK.0, INK.1, INK.2, 255),
-        FillRule::Winding,
-        scale,
-        None,
-    );
+    pixmap.fill_path(&tile().context("tile")?, &paint(INK.0, INK.1, INK.2, 255), FillRule::Winding, scale, None);
     let white = paint(255, 255, 255, 255);
     if size >= DETAILED_FROM {
-        let stroke = Stroke {
-            width: 1.7,
-            line_cap: LineCap::Round,
-            line_join: LineJoin::Round,
-            ..Stroke::default()
-        };
+        let stroke = Stroke { width: 1.7, line_cap: LineCap::Round, line_join: LineJoin::Round, ..Stroke::default() };
         pixmap.stroke_path(&corners().context("corners")?, &white, &stroke, scale, None);
-        pixmap.fill_path(
-            &letter(1.12).context("letter")?,
-            &white,
-            FillRule::Winding,
-            scale,
-            None,
-        );
+        pixmap.fill_path(&letter(1.12).context("letter")?, &white, FillRule::Winding, scale, None);
     } else {
-        pixmap.fill_path(
-            &letter(1.55).context("letter")?,
-            &white,
-            FillRule::Winding,
-            scale,
-            None,
-        );
+        pixmap.fill_path(&letter(1.55).context("letter")?, &white, FillRule::Winding, scale, None);
     }
     Ok(pixmap)
 }
@@ -179,10 +126,8 @@ fn ico(images: &[(u32, Vec<u8>)]) -> Vec<u8> {
 pub fn run() -> Result<()> {
     let dir = out_dir();
     std::fs::create_dir_all(&dir)?;
-    let images: Vec<(u32, Vec<u8>)> = SIZES
-        .iter()
-        .map(|&size| draw(size).map(|png| (size, png)))
-        .collect::<Result<_>>()?;
+    let images: Vec<(u32, Vec<u8>)> =
+        SIZES.iter().map(|&size| draw(size).map(|png| (size, png))).collect::<Result<_>>()?;
     for (size, png) in images.iter().filter(|(s, _)| PNGS.contains(s)) {
         std::fs::write(dir.join(format!("vixeeny-{size}.png")), png)?;
     }
@@ -212,9 +157,6 @@ mod tests {
         assert_eq!(&ico[..6], &[0, 0, 1, 0, 2, 0]);
         // The second entry is 256 px (written as 0) and starts after the first image.
         assert_eq!(ico[6 + 16], 0);
-        assert_eq!(
-            u32::from_le_bytes(ico[6 + 16 + 12..6 + 16 + 16].try_into().unwrap_or([0; 4])),
-            6 + 32 + 3
-        );
+        assert_eq!(u32::from_le_bytes(ico[6 + 16 + 12..6 + 16 + 16].try_into().unwrap_or([0; 4])), 6 + 32 + 3);
     }
 }

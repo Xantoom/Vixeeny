@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Notifications: a card with the thumbnail after a capture, a recording or a replay,
-//! and a clear message with a way out when something fails. The cards are shown by a process of
-//! their own (`vixeeny-app --toast-host`), so they never hold up the next hotkey. It is started
-//! once and reads the next cards on its standard input: a card costs no new process. It ends with
-//! the process that started it (its input closes), once its card is gone. A capture's thumbnail
+//! Notifications: a card with the thumbnail after a capture, a recording or a replay, and a clear message with a way
+//! out when something fails. The cards are shown by a process of their own (`vixeeny-app --toast-host`), so they never
+//! hold up the next hotkey. It is started once and reads the next cards on its standard input: a card costs no new
+//! process. It ends with the process that started it (its input closes), once its card is gone. A capture's thumbnail
 //! goes along, made from the picture in memory: the card process does not read the file again.
 
 use std::path::PathBuf;
@@ -25,8 +24,7 @@ pub enum Toast {
     TextCopied(String),
     /// A new version can be installed (sent by the daemon); a click opens the settings.
     Update(String),
-    /// A game started (its executable, and the name it is shown by): the replay runs with it
-    /// (`true`) or is off.
+    /// A game started (its executable, and the name it is shown by): the replay runs with it (`true`) or is off.
     Replay(bool, PathBuf, String),
 }
 
@@ -103,31 +101,21 @@ impl Failed {
 impl Toast {
     /// The card for `path`, written with `lost` frames lost.
     pub fn saved(kind: Saved, path: PathBuf, lost: u64) -> Self {
-        if lost > 0 {
-            Self::Lossy(kind, path, lost)
-        } else {
-            Self::Saved(kind, path)
-        }
+        if lost > 0 { Self::Lossy(kind, path, lost) } else { Self::Saved(kind, path) }
     }
 
     /// The arguments after `--toast`.
     pub fn to_args(&self) -> [String; 2] {
         match self {
-            Self::Saved(kind, path) => {
-                [format!("saved-{}", kind.name()), path.display().to_string()]
-            }
-            Self::Lossy(kind, path, lost) => [
-                format!("lossy-{}", kind.name()),
-                format!("{lost}|{}", path.display()),
-            ],
+            Self::Saved(kind, path) => [format!("saved-{}", kind.name()), path.display().to_string()],
+            Self::Lossy(kind, path, lost) => [format!("lossy-{}", kind.name()), format!("{lost}|{}", path.display())],
             Self::Failed(kind, message) => [format!("failed-{}", kind.name()), message.clone()],
             Self::Update(text) => ["update".to_owned(), text.clone()],
             Self::TextCopied(text) => ["text-copied".to_owned(), text.clone()],
             // A path holds no `|`.
-            Self::Replay(on, exe, name) => [
-                if *on { "replay-on" } else { "replay-off" }.to_owned(),
-                format!("{}|{name}", exe.display()),
-            ],
+            Self::Replay(on, exe, name) => {
+                [if *on { "replay-on" } else { "replay-off" }.to_owned(), format!("{}|{name}", exe.display())]
+            }
         }
     }
 
@@ -140,11 +128,7 @@ impl Toast {
             "saved-replay" => saved(Saved::Replay),
             "lossy-recording" | "lossy-replay" => {
                 let (lost, path) = text.split_once('|')?;
-                let kind = if kind == "lossy-replay" {
-                    Saved::Replay
-                } else {
-                    Saved::Recording
-                };
+                let kind = if kind == "lossy-replay" { Saved::Replay } else { Saved::Recording };
                 Some(Self::Lossy(kind, PathBuf::from(path), lost.parse().ok()?))
             }
             "failed-capture" => failed(Failed::Capture),
@@ -159,11 +143,7 @@ impl Toast {
             "update" => Some(Self::Update(text.to_owned())),
             "replay-on" | "replay-off" => {
                 let (exe, name) = text.split_once('|')?;
-                Some(Self::Replay(
-                    kind == "replay-on",
-                    PathBuf::from(exe),
-                    name.to_owned(),
-                ))
+                Some(Self::Replay(kind == "replay-on", PathBuf::from(exe), name.to_owned()))
             }
             _ => None,
         }
@@ -172,25 +152,17 @@ impl Toast {
 
 /// The advice for the failures the user can fix: a full disk, a folder without write access.
 pub fn hint(error: &anyhow::Error) -> Option<Key> {
-    error
-        .chain()
-        .filter_map(|e| e.downcast_ref::<std::io::Error>())
-        .find_map(|e| match (e.raw_os_error(), e.kind()) {
-            // ERROR_DISK_FULL, ERROR_HANDLE_DISK_FULL, ENOSPC.
-            (Some(112 | 39 | 28), _) | (_, std::io::ErrorKind::StorageFull) => {
-                Some(Key::ToastDiskFull)
-            }
-            (_, std::io::ErrorKind::PermissionDenied) => Some(Key::ToastAccessDenied),
-            _ => None,
-        })
+    error.chain().filter_map(|e| e.downcast_ref::<std::io::Error>()).find_map(|e| match (e.raw_os_error(), e.kind()) {
+        // ERROR_DISK_FULL, ERROR_HANDLE_DISK_FULL, ENOSPC.
+        (Some(112 | 39 | 28), _) | (_, std::io::ErrorKind::StorageFull) => Some(Key::ToastDiskFull),
+        (_, std::io::ErrorKind::PermissionDenied) => Some(Key::ToastAccessDenied),
+        _ => None,
+    })
 }
 
 /// The text a failure card shows: the advice when there is one, else the error itself.
 pub fn failure_text(error: &anyhow::Error, lang: vixeeny_common::i18n::Lang) -> String {
-    hint(error).map_or_else(
-        || format!("{error:#}"),
-        |key| vixeeny_common::i18n::tr(key, lang).to_owned(),
-    )
+    hint(error).map_or_else(|| format!("{error:#}"), |key| vixeeny_common::i18n::tr(key, lang).to_owned())
 }
 
 /// A thumbnail.
@@ -237,16 +209,11 @@ static HOST: std::sync::Mutex<Option<std::process::Child>> = std::sync::Mutex::n
 
 fn send_to_host(message: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
-    let mut host = HOST
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut host = HOST.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(child) = host.as_mut()
         && matches!(child.try_wait(), Ok(None))
         && let Some(stdin) = child.stdin.as_mut()
-        && stdin
-            .write_all(message)
-            .and_then(|()| stdin.flush())
-            .is_ok()
+        && stdin.write_all(message).and_then(|()| stdin.flush()).is_ok()
     {
         return Ok(());
     }
@@ -312,14 +279,12 @@ fn decode_line(line: &str) -> Option<(Toast, Option<(u32, u32)>)> {
     Some((Toast::from_args(kind, &text)?, thumb))
 }
 
-/// What the card shows, in the current language and theme; `thumb`, the capture's thumbnail
-/// when it came along (else it is made from the file).
+/// What the card shows, in the current language and theme; `thumb`, the capture's thumbnail when it came along (else it
+/// is made from the file).
 fn content_of(toast: &Toast, thumb: Option<Thumb>) -> ToastContent {
     use vixeeny_common::i18n::tr;
 
-    let config = vixeeny_common::paths::config_file()
-        .and_then(|p| Config::load(&p).ok())
-        .unwrap_or_default();
+    let config = vixeeny_common::paths::config_file().and_then(|p| Config::load(&p).ok()).unwrap_or_default();
     let lang = crate::lang(&config.general.language);
     let dark = crate::dark(&config);
     match toast {
@@ -331,22 +296,15 @@ fn content_of(toast: &Toast, thumb: Option<Thumb>) -> ToastContent {
                 thumb: Some(thumb),
                 dark,
                 picture_only: true,
-                menu: [
-                    Key::ToastMenuOpen,
-                    Key::ToastMenuEdit,
-                    Key::ToastMenuReveal,
-                    Key::ToastMenuClose,
-                ]
-                .map(|k| tr(k, lang).to_owned())
-                .to_vec(),
+                menu: [Key::ToastMenuOpen, Key::ToastMenuEdit, Key::ToastMenuReveal, Key::ToastMenuClose]
+                    .map(|k| tr(k, lang).to_owned())
+                    .to_vec(),
                 ..ToastContent::default()
             }
         }
         Toast::Saved(kind, path) => ToastContent {
             heading: tr(kind.title(), lang).into(),
-            body: path
-                .file_name()
-                .map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
+            body: path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
             thumb: crate::thumbnail::thumbnail(path, 256),
             error: false,
             dark,
@@ -387,21 +345,9 @@ fn content_of(toast: &Toast, thumb: Option<Thumb>) -> ToastContent {
         Toast::Replay(on, exe, name) => {
             let path = exe.display().to_string();
             ToastContent {
-                heading: tr(
-                    if *on {
-                        Key::ToastReplayOn
-                    } else {
-                        Key::ToastReplayOff
-                    },
-                    lang,
-                )
-                .into(),
+                heading: tr(if *on { Key::ToastReplayOn } else { Key::ToastReplayOff }, lang).into(),
                 body: name.clone(),
-                thumb: vixeeny_platform::exe_icon(&path, 64).map(|(width, height, data)| Thumb {
-                    width,
-                    height,
-                    data,
-                }),
+                thumb: vixeeny_platform::exe_icon(&path, 64).map(|(width, height, data)| Thumb { width, height, data }),
                 dark,
                 top: true,
                 ..ToastContent::default()
@@ -419,8 +365,7 @@ fn content_of(toast: &Toast, thumb: Option<Thumb>) -> ToastContent {
     }
 }
 
-/// Shows the card for `toast` in a corner of the main monitor (see [`ToastContent::top`]);
-/// `act` runs once it is gone.
+/// Shows the card for `toast` in a corner of the main monitor (see [`ToastContent::top`]); `act` runs once it is gone.
 fn show(toasts: &Toasts, toast: Toast, thumb: Option<Thumb>) -> anyhow::Result<()> {
     let content = content_of(&toast, thumb);
     let monitors = vixeeny_platform::monitors()?;
@@ -429,13 +374,9 @@ fn show(toasts: &Toasts, toast: Toast, thumb: Option<Thumb>) -> anyhow::Result<(
         .find(|m| m.primary)
         .or_else(|| monitors.first())
         .ok_or_else(|| anyhow::anyhow!("no monitor"))?;
-    toasts.show(
-        &content,
-        monitor.work,
-        monitor.dpi,
-        vixeeny_platform::animations_enabled(),
-        move |event| act(event, &toast),
-    )?;
+    toasts.show(&content, monitor.work, monitor.dpi, vixeeny_platform::animations_enabled(), move |event| {
+        act(event, &toast)
+    })?;
     Ok(())
 }
 
@@ -456,9 +397,7 @@ fn act(event: Option<ToastEvent>, toast: &Toast) {
             let _ = vixeeny_platform::open_path("ms-settings:regionlanguage");
         }
         (Some(_), Toast::Failed(Failed::Crash, _)) => {
-            let config = vixeeny_common::paths::config_file()
-                .and_then(|p| Config::load(&p).ok())
-                .unwrap_or_default();
+            let config = vixeeny_common::paths::config_file().and_then(|p| Config::load(&p).ok()).unwrap_or_default();
             if let Err(e) = crate::report::create(&config) {
                 tracing::error!("report: {e:#}");
             }
@@ -479,8 +418,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     let [kind, text] = args else {
         anyhow::bail!("usage: --toast <kind> <text>");
     };
-    let toast =
-        Toast::from_args(kind, text).ok_or_else(|| anyhow::anyhow!("unknown toast `{kind}`"))?;
+    let toast = Toast::from_args(kind, text).ok_or_else(|| anyhow::anyhow!("unknown toast `{kind}`"))?;
     vixeeny_platform::ensure_dpi_aware();
     let toasts = Toasts::new()?;
     show(&toasts, toast, None)?;
@@ -488,8 +426,8 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// `--toast-host`: shows the cards read on standard input, a new one replacing the one on
-/// screen. Ends once the input is closed and no card is left.
+/// `--toast-host`: shows the cards read on standard input, a new one replacing the one on screen. Ends once the input
+/// is closed and no card is left.
 pub fn run_host() -> anyhow::Result<()> {
     use std::cell::Cell;
     use std::io::{BufRead, Read};
@@ -510,39 +448,33 @@ pub fn run_host() -> anyhow::Result<()> {
             None => closed.set(true),
         }
     })?;
-    std::thread::Builder::new()
-        .name("toast-input".into())
-        .spawn(move || {
-            let mut input = std::io::stdin().lock();
-            let mut line = Vec::new();
-            loop {
-                line.clear();
-                match input.read_until(b'\n', &mut line) {
-                    Ok(0) | Err(_) => break,
-                    Ok(_) => {}
-                }
-                let text = String::from_utf8_lossy(&line);
-                let Some((toast, size)) = decode_line(text.trim_end_matches(['\n', '\r'])) else {
-                    continue;
-                };
-                let thumb = match size {
-                    Some((w, h)) => {
-                        let mut rgba = vec![0; w as usize * h as usize * 4];
-                        if input.read_exact(&mut rgba).is_err() {
-                            break;
-                        }
-                        Some(Thumb {
-                            width: w,
-                            height: h,
-                            data: rgba,
-                        })
-                    }
-                    None => None,
-                };
-                sender.send(Some((toast, thumb)));
+    std::thread::Builder::new().name("toast-input".into()).spawn(move || {
+        let mut input = std::io::stdin().lock();
+        let mut line = Vec::new();
+        loop {
+            line.clear();
+            match input.read_until(b'\n', &mut line) {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {}
             }
-            sender.send(None);
-        })?;
+            let text = String::from_utf8_lossy(&line);
+            let Some((toast, size)) = decode_line(text.trim_end_matches(['\n', '\r'])) else {
+                continue;
+            };
+            let thumb = match size {
+                Some((w, h)) => {
+                    let mut rgba = vec![0; w as usize * h as usize * 4];
+                    if input.read_exact(&mut rgba).is_err() {
+                        break;
+                    }
+                    Some(Thumb { width: w, height: h, data: rgba })
+                }
+                None => None,
+            };
+            sender.send(Some((toast, thumb)));
+        }
+        sender.send(None);
+    })?;
     vixeeny_overlay::popup::pump_while(|| !(closed.get() && toasts.is_empty()));
     Ok(())
 }
@@ -569,23 +501,12 @@ Merci"
             ),
             Toast::Failed(Failed::NoText, String::new()),
             Toast::Failed(Failed::Ocr, "no language".into()),
-            Toast::Replay(
-                true,
-                PathBuf::from(r"D:\Games\Hades\Hades.exe"),
-                "Hades".into(),
-            ),
-            Toast::Replay(
-                false,
-                PathBuf::from("Client-Win64-Shipping.exe"),
-                "Wuthering | Waves".into(),
-            ),
+            Toast::Replay(true, PathBuf::from(r"D:\Games\Hades\Hades.exe"), "Hades".into()),
+            Toast::Replay(false, PathBuf::from("Client-Win64-Shipping.exe"), "Wuthering | Waves".into()),
         ] {
             let line = encode_line(&toast.to_args());
             assert_eq!(line.matches('\n').count(), 1);
-            assert_eq!(
-                decode_line(line.trim_end_matches('\n')),
-                Some((toast, None))
-            );
+            assert_eq!(decode_line(line.trim_end_matches('\n')), Some((toast, None)));
         }
         assert_eq!(
             Toast::saved(Saved::Replay, PathBuf::from("r.mp4"), 0),
@@ -599,27 +520,13 @@ Merci"
     fn a_thumbnail_follows_its_card_as_pixels() {
         let toast = Toast::Saved(Saved::Image, PathBuf::from(r"C:\a\b.png"));
         let rgba: Vec<u8> = (0..2 * 3 * 4).map(|i| i as u8).collect();
-        let message = encode(
-            &toast,
-            Some(&Thumb {
-                width: 2,
-                height: 3,
-                data: rgba.clone(),
-            }),
-        );
+        let message = encode(&toast, Some(&Thumb { width: 2, height: 3, data: rgba.clone() }));
         let end = message.iter().position(|&b| b == b'\n').expect("a line");
         let line = std::str::from_utf8(&message[..end]).expect("text");
         assert_eq!(decode_line(line), Some((toast.clone(), Some((2, 3)))));
         assert_eq!(&message[end + 1..], rgba);
         // A thumbnail that does not match its size, or too large, is left out.
-        let bad = encode(
-            &toast,
-            Some(&Thumb {
-                width: 2,
-                height: 3,
-                data: vec![0; 5],
-            }),
-        );
+        let bad = encode(&toast, Some(&Thumb { width: 2, height: 3, data: vec![0; 5] }));
         assert_eq!(bad, encode_line(&toast.to_args()).into_bytes());
         assert_eq!(decode_line("saved-image\tx\t5000x2"), None);
     }

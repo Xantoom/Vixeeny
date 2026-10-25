@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Video and audio encoding: the codec registry, profile validation, hardware probing, the
-//! recorder, the replay ring and cutting.
+//! Video and audio encoding: the codec registry, profile validation, hardware probing, the recorder, the replay ring
+//! and cutting.
 
 pub mod card_hdr;
 mod card_scale;

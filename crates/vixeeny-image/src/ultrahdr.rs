@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! JPEG Ultra HDR through libultrahdr: the SDR rendering (tone-mapped, encoded by jpegli) is
-//! the picture every viewer shows; a gain map computed from the HDR capture lets HDR screens
-//! restore its highlights. The HDR picture goes in on BT.2020 primaries: the gain map, one per
-//! channel, is then computed there (ISO 21496-1's alternate colour space, named by its ICC
-//! profile), and HDR screens get back the colours wider than sRGB too.
+//! JPEG Ultra HDR through libultrahdr: the SDR rendering (tone-mapped, encoded by jpegli) is the picture every viewer
+//! shows; a gain map computed from the HDR capture lets HDR screens restore its highlights. The HDR picture goes in on
+//! BT.2020 primaries: the gain map, one per channel, is then computed there (ISO 21496-1's alternate colour space,
+//! named by its ICC profile), and HDR screens get back the colours wider than sRGB too.
 
 use std::ptr;
 
@@ -25,12 +24,7 @@ fn check(status: ffi::uhdr_error_info_t, what: &str) -> Result<(), ImageError> {
         return Ok(());
     }
     let detail = if status.has_detail != 0 {
-        let bytes: Vec<u8> = status
-            .detail
-            .iter()
-            .take_while(|&&c| c != 0)
-            .map(|&c| c as u8)
-            .collect();
+        let bytes: Vec<u8> = status.detail.iter().take_while(|&&c| c != 0).map(|&c| c as u8).collect();
         String::from_utf8_lossy(&bytes).into_owned()
     } else {
         format!("error {}", status.error_code)
@@ -44,10 +38,7 @@ const UHDR_WHITE_NITS: f32 = 203.0;
 pub(crate) fn encode(image: &Hdr<'_>, settings: &JpegSettings) -> Result<Vec<u8>, ImageError> {
     let sdr = image.to_sdr();
     let stride = image.width as usize * 4;
-    let base = crate::jpegli::encode(
-        &Bgra::new(image.width, image.height, stride, &sdr),
-        settings,
-    )?;
+    let base = crate::jpegli::encode(&Bgra::new(image.width, image.height, stride, &sdr), settings)?;
     drop(sdr);
     let pixels = image.width as usize * image.height as usize;
     let scale = 80.0 / UHDR_WHITE_NITS;
@@ -62,9 +53,8 @@ pub(crate) fn encode(image: &Hdr<'_>, settings: &JpegSettings) -> Result<Vec<u8>
         })
         .collect();
 
-    // SAFETY: the encoder is released by its RAII wrapper; the images it is given point into
-    // `halves` and `base`, which outlive `uhdr_encode`; the encoded stream belongs to the
-    // encoder and is copied out before it is released.
+    // SAFETY: the encoder is released by its RAII wrapper; the images it is given point into `halves` and `base`, which
+    // outlive `uhdr_encode`; the encoded stream belongs to the encoder and is copied out before it is released.
     unsafe {
         let enc = Encoder(ffi::uhdr_create_encoder());
         if enc.0.is_null() {
@@ -77,17 +67,10 @@ pub(crate) fn encode(image: &Hdr<'_>, settings: &JpegSettings) -> Result<Vec<u8>
             range: ffi::uhdr_color_range_UHDR_CR_FULL_RANGE,
             w: image.width,
             h: image.height,
-            planes: [
-                halves.as_ptr().cast_mut().cast(),
-                ptr::null_mut(),
-                ptr::null_mut(),
-            ],
+            planes: [halves.as_ptr().cast_mut().cast(), ptr::null_mut(), ptr::null_mut()],
             stride: [image.width, 0, 0],
         };
-        check(
-            ffi::uhdr_enc_set_raw_image(enc.0, &raw mut hdr, ffi::uhdr_img_label_UHDR_HDR_IMG),
-            "hdr picture",
-        )?;
+        check(ffi::uhdr_enc_set_raw_image(enc.0, &raw mut hdr, ffi::uhdr_img_label_UHDR_HDR_IMG), "hdr picture")?;
         let mut sdr = ffi::uhdr_compressed_image_t {
             data: base.as_ptr().cast_mut().cast(),
             data_sz: base.len(),
@@ -98,11 +81,7 @@ pub(crate) fn encode(image: &Hdr<'_>, settings: &JpegSettings) -> Result<Vec<u8>
         };
         // Same codec in and out: jpegli's JPEG becomes the primary picture as it is.
         check(
-            ffi::uhdr_enc_set_compressed_image(
-                enc.0,
-                &raw mut sdr,
-                ffi::uhdr_img_label_UHDR_SDR_IMG,
-            ),
+            ffi::uhdr_enc_set_compressed_image(enc.0, &raw mut sdr, ffi::uhdr_img_label_UHDR_SDR_IMG),
             "sdr picture",
         )?;
         check(
@@ -114,10 +93,7 @@ pub(crate) fn encode(image: &Hdr<'_>, settings: &JpegSettings) -> Result<Vec<u8>
             "quality",
         )?;
         check(
-            ffi::uhdr_enc_set_target_display_peak_brightness(
-                enc.0,
-                image.peak_nits.clamp(UHDR_WHITE_NITS, 10_000.0),
-            ),
+            ffi::uhdr_enc_set_target_display_peak_brightness(enc.0, image.peak_nits.clamp(UHDR_WHITE_NITS, 10_000.0)),
             "peak brightness",
         )?;
         check(ffi::uhdr_encode(enc.0), "encode")?;

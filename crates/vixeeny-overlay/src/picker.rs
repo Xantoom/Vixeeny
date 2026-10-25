@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Pointing at the window to capture: a light veil over the screens, the window under the
-//! pointer clear of it and outlined in the accent colour. A click takes it; Escape or a right
-//! click gives up.
+//! Pointing at the window to capture: a light veil over the screens, the window under the pointer clear of it and
+//! outlined in the accent colour. A click takes it; Escape or a right click gives up.
 //!
-//! Nothing is drawn while the pointer moves: the veil and the outline are solid visuals the
-//! compositor stretches over their rectangles.
+//! Nothing is drawn while the pointer moves: the veil and the outline are solid visuals the compositor stretches over
+//! their rectangles.
 
 use std::cell::Cell;
 use std::rc::{Rc, Weak};
@@ -14,8 +13,7 @@ use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::DirectComposition::IDCompositionVisual2;
 use windows::Win32::UI::Input::KeyboardAndMouse::{VIRTUAL_KEY, VK_ESCAPE};
 use windows::Win32::UI::WindowsAndMessaging::{
-    WA_INACTIVE, WM_ACTIVATE, WM_CLOSE, WM_KEYDOWN, WM_LBUTTONDOWN, WM_MOUSEMOVE, WM_RBUTTONDOWN,
-    WM_SETCURSOR,
+    WA_INACTIVE, WM_ACTIVATE, WM_CLOSE, WM_KEYDOWN, WM_LBUTTONDOWN, WM_MOUSEMOVE, WM_RBUTTONDOWN, WM_SETCURSOR,
 };
 use windows::core::Result;
 
@@ -56,20 +54,13 @@ impl Inner {
         self.pointed.set(at);
         let hole: Option<Px> = at.map(|i| {
             let w = self.windows[i];
-            (
-                (w.x - self.origin.0) as f32,
-                (w.y - self.origin.1) as f32,
-                w.width as f32,
-                w.height as f32,
-            )
+            ((w.x - self.origin.0) as f32, (w.y - self.origin.1) as f32, w.width as f32, w.height as f32)
         });
         let area = (0.0, 0.0, self.size.0 as f32, self.size.1 as f32);
         for (v, r) in self.veil.iter().zip(scene::veil_rects(area, hole)) {
             scene::place(v, r)?;
         }
-        let border = hole.map_or([(0.0, 0.0, 0.0, 0.0); 4], |h| {
-            scene::border_rects(h, self.width)
-        });
+        let border = hole.map_or([(0.0, 0.0, 0.0, 0.0); 4], |h| scene::border_rects(h, self.width));
         for (v, r) in self.outline.iter().zip(border) {
             scene::place(v, r)?;
         }
@@ -85,10 +76,7 @@ impl Inner {
             }
             WM_MOUSEMOVE => {
                 let (x, y) = popup::point(lparam);
-                let at = window_at(
-                    &self.windows,
-                    (x as i32 + self.origin.0, y as i32 + self.origin.1),
-                );
+                let at = window_at(&self.windows, (x as i32 + self.origin.0, y as i32 + self.origin.1));
                 if at != self.pointed.get()
                     && let Err(e) = self.point(at)
                 {
@@ -97,10 +85,7 @@ impl Inner {
             }
             WM_LBUTTONDOWN => {
                 let (x, y) = popup::point(lparam);
-                let at = window_at(
-                    &self.windows,
-                    (x as i32 + self.origin.0, y as i32 + self.origin.1),
-                );
+                let at = window_at(&self.windows, (x as i32 + self.origin.0, y as i32 + self.origin.1));
                 // Beside every window: nothing to take.
                 if at.is_some() {
                     self.chosen.set(at);
@@ -117,9 +102,9 @@ impl Inner {
     }
 }
 
-/// Lets the user click one of `windows` (in screen pixels, front to back) over
-/// `bounds`, all the screens; `pointer` is where the pointer is now, `scale` the interface
-/// scale of the screens. Returns the index of the window taken, `None` when the user gave up.
+/// Lets the user click one of `windows` (in screen pixels, front to back) over `bounds`, all the screens; `pointer` is
+/// where the pointer is now, `scale` the interface scale of the screens. Returns the index of the window taken, `None`
+/// when the user gave up.
 pub fn pick(
     windows: Vec<PhysicalRect>,
     bounds: PhysicalRect,
@@ -158,9 +143,7 @@ pub fn pick(
         done: Cell::new(false),
     });
     let weak: Weak<Inner> = Rc::downgrade(&inner);
-    inner
-        .popup
-        .on_message(move |msg, wparam, lparam| weak.upgrade()?.message(msg, wparam, lparam));
+    inner.popup.on_message(move |msg, wparam, lparam| weak.upgrade()?.message(msg, wparam, lparam));
     inner.point(window_at(&inner.windows, pointer))?;
     inner.popup.show(&gfx)?;
     popup::pump_while(|| !inner.done.get());
@@ -174,10 +157,7 @@ mod tests {
 
     #[test]
     fn the_front_window_under_the_pointer_is_taken() {
-        let windows = [
-            PhysicalRect::new(0, 0, 100, 100),
-            PhysicalRect::new(50, 50, 200, 200),
-        ];
+        let windows = [PhysicalRect::new(0, 0, 100, 100), PhysicalRect::new(50, 50, 200, 200)];
         assert_eq!(window_at(&windows, (60, 60)), Some(0));
         assert_eq!(window_at(&windows, (120, 60)), Some(1));
         assert_eq!(window_at(&windows, (300, 300)), None);

@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! HDR kept as HDR: what the files say about their colours, that the highlights survive, and
-//! that their thumbnails look like the SDR rendering.
+//! HDR kept as HDR: what the files say about their colours, that the highlights survive, and that their thumbnails look
+//! like the SDR rendering.
 
 use super::*;
 
 /// SDR white on the captured screen.
 const WHITE_NITS: f32 = 240.0;
 
-/// An HDR desktop as scRGB (1.0 = 80 nits): the left half is SDR content (a grey ramp up to SDR
-/// white), the right half a game: a 1000-nit sun on a dark sky, and a BT.2020 green outside
-/// sRGB.
+/// An HDR desktop as scRGB (1.0 = 80 nits): the left half is SDR content (a grey ramp up to SDR white), the right half
+/// a game: a 1000-nit sun on a dark sky, and a BT.2020 green outside sRGB.
 fn scene(w: u32, h: u32) -> Vec<f32> {
     let white = WHITE_NITS / 80.0;
     let mut rgba = Vec::with_capacity(w as usize * h as usize * 4);
@@ -32,13 +31,7 @@ fn scene(w: u32, h: u32) -> Vec<f32> {
 }
 
 fn hdr(rgba: &[f32], w: u32, h: u32) -> Hdr<'_> {
-    Hdr {
-        width: w,
-        height: h,
-        rgba,
-        sdr_white_nits: WHITE_NITS,
-        peak_nits: 1000.0,
-    }
+    Hdr { width: w, height: h, rgba, sdr_white_nits: WHITE_NITS, peak_nits: 1000.0 }
 }
 
 /// PQ signal (0…1) of `nits` grey.
@@ -53,10 +46,7 @@ fn png_samples(bytes: &[u8]) -> (u32, Vec<[f32; 3]>) {
     let mut reader = decoder.read_info().unwrap();
     let mut buf = vec![0; reader.output_buffer_size().unwrap()];
     let info = reader.next_frame(&mut buf).unwrap();
-    assert_eq!(
-        (info.color_type, info.bit_depth),
-        (png::ColorType::Rgb, png::BitDepth::Sixteen)
-    );
+    assert_eq!((info.color_type, info.bit_depth), (png::ColorType::Rgb, png::BitDepth::Sixteen));
     let px = buf[..info.buffer_size()]
         .as_chunks::<6>()
         .0
@@ -79,34 +69,21 @@ fn an_hdr_png_keeps_the_highlights_and_says_it_is_pq() {
     let (w, h) = (64, 32);
     let rgba = scene(w, h);
     for oxipng_level in [None, Some(2)] {
-        let settings = Settings {
-            png: PngSettings {
-                compression: PngCompression::Fast,
-                oxipng_level,
-            },
-            ..Settings::default()
-        };
+        let settings =
+            Settings { png: PngSettings { compression: PngCompression::Fast, oxipng_level }, ..Settings::default() };
         let bytes = encode_hdr(ImageFormat::Png, &hdr(&rgba, w, h), &settings).unwrap();
         // BT.2020, PQ, RGB, full range; no sRGB chunk contradicting it.
         let at = bytes.windows(4).position(|c| c == b"cICP").unwrap();
         assert_eq!(&bytes[at + 4..at + 8], &[9, 16, 0, 1]);
         assert!(!bytes.windows(4).any(|c| c == b"sRGB"));
         // Its light and the screen's, in 0.0001 nits: the sun, rounded up, and a 1000-nit peak.
-        let reader = png::Decoder::new(std::io::Cursor::new(&bytes))
-            .read_info()
-            .unwrap();
+        let reader = png::Decoder::new(std::io::Cursor::new(&bytes)).read_info().unwrap();
         let info = reader.info();
         let cll = info.content_light_level.unwrap();
-        assert!(
-            (10_000_000..=10_000_100).contains(&cll.max_content_light_level),
-            "{cll:?}"
-        );
+        assert!((10_000_000..=10_000_100).contains(&cll.max_content_light_level), "{cll:?}");
         assert!(cll.max_frame_average_light_level < cll.max_content_light_level);
         let screen = info.mastering_display_color_volume.unwrap();
-        assert_eq!(
-            (screen.max_luminance, screen.min_luminance),
-            (10_000_000, 1)
-        );
+        assert_eq!((screen.max_luminance, screen.min_luminance), (10_000_000, 1));
         assert_eq!(screen.chromaticities.green.1.into_scaled(), 79_700);
         let (width, px) = png_samples(&bytes);
         let at = |x: u32, y: u32| px[(y * width + x) as usize];
@@ -115,13 +92,9 @@ fn an_hdr_png_keeps_the_highlights_and_says_it_is_pq() {
         let sun = at(w - 1, 0);
         assert!((white[1] - pq_of(WHITE_NITS)).abs() < 2e-3, "{white:?}");
         assert!((sun[1] - pq_of(1000.0)).abs() < 2e-3, "{sun:?}");
-        // The wide green stays the BT.2020 primary: red and blue under 0.1 nit (PQ is steep
-        // near black), green at 180.
+        // The wide green stays the BT.2020 primary: red and blue under 0.1 nit (PQ is steep near black), green at 180.
         let green = at(w - 1, h - 1);
-        assert!(
-            green[1] > 0.5 && green[0] < pq_of(0.1) && green[2] < pq_of(0.1),
-            "{green:?}"
-        );
+        assert!(green[1] > 0.5 && green[0] < pq_of(0.1) && green[2] < pq_of(0.1), "{green:?}");
     }
 }
 
@@ -152,8 +125,8 @@ fn hdr_thumbnails_look_like_the_sdr_rendering() {
     let black = bgra_at(&d, 0, 0);
     let sun = bgra_at(&d, w - 1, 0);
     let sky = bgra_at(&d, w / 2 + 2, h - 1);
-    // Not the washed-out grey of PQ codes shown as sRGB: black is black, white is near white,
-    // the sun is the brightest, the sky stays dark.
+    // Not the washed-out grey of PQ codes shown as sRGB: black is black, white is near white, the sun is the brightest,
+    // the sky stays dark.
     assert_eq!(black, [0, 0, 0]);
     assert!(white.iter().all(|&c| c > 225), "{white:?}");
     assert!(sun.iter().all(|&c| c >= white[0]), "{sun:?}");
@@ -164,13 +137,7 @@ fn hdr_thumbnails_look_like_the_sdr_rendering() {
 fn an_hdr_avif_is_tagged_bt2100_pq_and_reads_back_like_the_png() {
     let (w, h) = (64, 32);
     let rgba = scene(w, h);
-    let settings = Settings {
-        avif: AvifSettings {
-            quality: 95,
-            ..AvifSettings::default()
-        },
-        ..Settings::default()
-    };
+    let settings = Settings { avif: AvifSettings { quality: 95, ..AvifSettings::default() }, ..Settings::default() };
     let avif = encode_hdr(ImageFormat::Avif, &hdr(&rgba, w, h), &settings).unwrap();
     let at = avif.windows(4).position(|c| c == b"colr").unwrap();
     assert_eq!(&avif[at + 4..at + 8], b"nclx");
@@ -186,19 +153,13 @@ fn an_hdr_avif_is_tagged_bt2100_pq_and_reads_back_like_the_png() {
     // ... given to the picture: after its size, depth, AV1 configuration and colours.
     let at = avif.windows(4).position(|c| c == b"ipma").unwrap();
     assert_eq!(&avif[at + 12..at + 21], &[0, 1, 6, 1, 2, 0x83, 4, 5, 6]);
-    // The YCbCr conversion is Vixeeny's and the decoder's is FFmpeg's: the same thumbnail as
-    // the PNG (lossless) says both use the same matrix.
+    // The YCbCr conversion is Vixeeny's and the decoder's is FFmpeg's: the same thumbnail as the PNG (lossless) says
+    // both use the same matrix.
     let from_avif = crate::decode(&avif).unwrap();
     let png = encode_hdr(ImageFormat::Png, &hdr(&rgba, w, h), &Settings::default()).unwrap();
     let from_png = crate::decode(&png).unwrap();
     // Away from edges (4:2:0 chroma) and the ramp's steep end.
-    for (x, y) in [
-        (8, 8),
-        (w / 4, 20),
-        (w - 6, 6),
-        (w / 2 + 6, h - 6),
-        (w - 6, h - 6),
-    ] {
+    for (x, y) in [(8, 8), (w / 4, 20), (w - 6, 6), (w / 2 + 6, h - 6), (w - 6, h - 6)] {
         let (a, b) = (bgra_at(&from_avif, x, y), bgra_at(&from_png, x, y));
         for (p, q) in a.iter().zip(b) {
             assert!(p.abs_diff(q) <= 8, "({x}, {y}): avif {a:?} png {b:?}");
@@ -226,17 +187,12 @@ mod native {
         let (w, h) = (64, 32);
         let rgba = scene(w, h);
         let bytes = encode_hdr(ImageFormat::Jxl, &hdr(&rgba, w, h), &Settings::default()).unwrap();
-        let image = JxlImage::builder()
-            .read(std::io::Cursor::new(&bytes))
-            .unwrap();
+        let image = JxlImage::builder().read(std::io::Cursor::new(&bytes)).unwrap();
         // Tone mapped from the sun rather than PQ's 10 000 nits.
         let target = image.image_header().metadata.tone_mapping.intensity_target;
         assert!((target - 1000.0).abs() < 1.0, "{target}");
         let encoding = format!("{:?}", image.image_header().metadata.colour_encoding);
-        assert!(
-            encoding.contains("Pq") && encoding.contains("Bt2100"),
-            "{encoding}"
-        );
+        assert!(encoding.contains("Pq") && encoding.contains("Bt2100"), "{encoding}");
         // Lossless: the samples are the PQ codes, the sun above SDR white.
         let render = image.render_frame(0).unwrap();
         let fb = render.image_all_channels();
@@ -255,13 +211,7 @@ mod native {
         assert!(bytes.windows(4).any(|c| c == b"MPF\0"));
         let iso = b"urn:iso:std:iso:ts:21496:-1";
         assert!(bytes.windows(iso.len()).any(|c| c == iso));
-        assert!(
-            bytes
-                .windows(3)
-                .filter(|c| *c == [0xff, 0xd8, 0xff])
-                .count()
-                >= 2
-        );
+        assert!(bytes.windows(3).filter(|c| *c == [0xff, 0xd8, 0xff]).count() >= 2);
         // Every viewer shows the primary picture: the SDR rendering.
         let primary = crate::decode(&bytes).unwrap();
         let sdr = image.to_sdr();
@@ -273,8 +223,8 @@ mod native {
                 assert!(p.abs_diff(q) <= 6, "({x}, {y}): {got:?} vs {want:?}");
             }
         }
-        // An HDR screen gets the sun back, and the green as the BT.2020 primary, not the
-        // sRGB green it is on the SDR picture.
+        // An HDR screen gets the sun back, and the green as the BT.2020 primary, not the sRGB green it is on the SDR
+        // picture.
         let (cg, at) = ultra_hdr_rendition(&bytes);
         assert_eq!(cg, crate::native::uhdr_color_gamut_UHDR_CG_BT_2100);
         let sun = at(w - 6, 6);
@@ -284,17 +234,11 @@ mod native {
         assert!(green[0] < 8.0 && green[2] < 8.0, "{green:?}");
     }
 
-    /// The HDR picture libultrahdr rebuilds from an Ultra HDR JPEG for a 1000-nit screen: its
-    /// gamut, and its linear RGB in nits at a pixel.
-    fn ultra_hdr_rendition(
-        bytes: &[u8],
-    ) -> (
-        crate::native::uhdr_color_gamut_t,
-        impl Fn(u32, u32) -> [f32; 3],
-    ) {
+    /// The HDR picture libultrahdr rebuilds from an Ultra HDR JPEG for a 1000-nit screen: its gamut, and its linear RGB
+    /// in nits at a pixel.
+    fn ultra_hdr_rendition(bytes: &[u8]) -> (crate::native::uhdr_color_gamut_t, impl Fn(u32, u32) -> [f32; 3]) {
         use crate::native as ffi;
-        // SAFETY: the decoder is released below, after its picture is copied out; the input
-        // outlives the decode.
+        // SAFETY: the decoder is released below, after its picture is copied out; the input outlives the decode.
         unsafe {
             let dec = ffi::uhdr_create_decoder();
             let mut input = ffi::uhdr_compressed_image_t {
@@ -309,23 +253,13 @@ mod native {
                 assert_eq!(e.error_code, ffi::uhdr_codec_err_UHDR_CODEC_OK);
             };
             ok(ffi::uhdr_dec_set_image(dec, &raw mut input));
-            ok(ffi::uhdr_dec_set_out_img_format(
-                dec,
-                ffi::uhdr_img_fmt_UHDR_IMG_FMT_64bppRGBAHalfFloat,
-            ));
-            ok(ffi::uhdr_dec_set_out_color_transfer(
-                dec,
-                ffi::uhdr_color_transfer_UHDR_CT_LINEAR,
-            ));
+            ok(ffi::uhdr_dec_set_out_img_format(dec, ffi::uhdr_img_fmt_UHDR_IMG_FMT_64bppRGBAHalfFloat));
+            ok(ffi::uhdr_dec_set_out_color_transfer(dec, ffi::uhdr_color_transfer_UHDR_CT_LINEAR));
             ok(ffi::uhdr_dec_set_out_max_display_boost(dec, 1000.0 / 203.0));
             ok(ffi::uhdr_decode(dec));
             let out = &*ffi::uhdr_get_decoded_image(dec);
             let stride = out.stride[0] as usize;
-            let halves = std::slice::from_raw_parts(
-                out.planes[0].cast::<u16>(),
-                stride * out.h as usize * 4,
-            )
-            .to_vec();
+            let halves = std::slice::from_raw_parts(out.planes[0].cast::<u16>(), stride * out.h as usize * 4).to_vec();
             let cg = out.cg;
             ffi::uhdr_release_decoder(dec);
             // 1.0 is 203 nits.

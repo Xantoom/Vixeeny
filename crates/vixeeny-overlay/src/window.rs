@@ -1,24 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The native windows: borderless, top-most popups without a redirection bitmap (their only
-//! content is a DirectComposition tree), created cloaked so they appear with their first content.
-//! The editor has its own class; the popups (side strip, notification, recording widget) share
-//! another, and a message-only window carries the messages other threads post.
+//! The native windows: borderless, top-most popups without a redirection bitmap (their only content is a
+//! DirectComposition tree), created cloaked so they appear with their first content. The editor has its own class; the
+//! popups (side strip, notification, recording widget) share another, and a message-only window carries the messages
+//! other threads post.
 
 use std::sync::OnceLock;
 
 use vixeeny_editor::CursorHint;
 use vixeeny_platform::PhysicalRect;
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
-use windows::Win32::Graphics::Dwm::{
-    DWMWA_CLOAK, DWMWA_TRANSITIONS_FORCEDISABLED, DwmSetWindowAttribute,
-};
+use windows::Win32::Graphics::Dwm::{DWMWA_CLOAK, DWMWA_TRANSITIONS_FORCEDISABLED, DwmSetWindowAttribute};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CS_DBLCLKS, CreateWindowExW, DefWindowProcW, HCURSOR, HWND_MESSAGE, HWND_NOTOPMOST,
-    HWND_TOPMOST, IDC_ARROW, IDC_CROSS, IDC_HAND, IDC_SIZEALL, IDC_SIZENESW, IDC_SIZENS,
-    IDC_SIZENWSE, IDC_SIZEWE, LoadCursorW, RegisterClassExW, SWP_NOACTIVATE, SWP_NOMOVE,
-    SWP_NOSIZE, SetWindowDisplayAffinity, SetWindowPos, WDA_EXCLUDEFROMCAPTURE,
-    WINDOW_DISPLAY_AFFINITY, WINDOW_EX_STYLE, WINDOW_STYLE, WNDCLASSEXW, WS_EX_NOACTIVATE,
+    CS_DBLCLKS, CreateWindowExW, DefWindowProcW, HCURSOR, HWND_MESSAGE, HWND_NOTOPMOST, HWND_TOPMOST, IDC_ARROW,
+    IDC_CROSS, IDC_HAND, IDC_SIZEALL, IDC_SIZENESW, IDC_SIZENS, IDC_SIZENWSE, IDC_SIZEWE, LoadCursorW,
+    RegisterClassExW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowDisplayAffinity, SetWindowPos,
+    WDA_EXCLUDEFROMCAPTURE, WINDOW_DISPLAY_AFFINITY, WINDOW_EX_STYLE, WINDOW_STYLE, WNDCLASSEXW, WS_EX_NOACTIVATE,
     WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{BOOL, PCWSTR, Result, w};
@@ -30,9 +27,7 @@ pub type WndProc = unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM) -> LRESU
 
 fn instance() -> HINSTANCE {
     // SAFETY: plain call; `None` asks for this executable's module.
-    unsafe { GetModuleHandleW(None) }
-        .map(Into::into)
-        .unwrap_or_default()
+    unsafe { GetModuleHandleW(None) }.map(Into::into).unwrap_or_default()
 }
 
 /// Registers a window class once per process.
@@ -88,12 +83,7 @@ fn popup_window(class: PCWSTR, ex: WINDOW_EX_STYLE, rect: PhysicalRect) -> Resul
     let off = BOOL::from(true);
     // SAFETY: `off` outlives the call, which sets an attribute of the window just created.
     let _ = unsafe {
-        DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_TRANSITIONS_FORCEDISABLED,
-            (&raw const off).cast(),
-            size_of::<BOOL>() as u32,
-        )
+        DwmSetWindowAttribute(hwnd, DWMWA_TRANSITIONS_FORCEDISABLED, (&raw const off).cast(), size_of::<BOOL>() as u32)
     };
     Ok(hwnd)
 }
@@ -104,11 +94,7 @@ pub fn create(proc: WndProc, x: i32, y: i32, w: u32, h: u32) -> Result<HWND> {
     if !register(CLASS, proc, &DONE) {
         return Err(windows::core::Error::from_thread());
     }
-    popup_window(
-        CLASS,
-        WINDOW_EX_STYLE::default(),
-        PhysicalRect::new(x, y, w, h),
-    )
+    popup_window(CLASS, WINDOW_EX_STYLE::default(), PhysicalRect::new(x, y, w, h))
 }
 
 const POPUP_CLASS: PCWSTR = w!("VixeenyPopup");
@@ -132,12 +118,7 @@ pub enum Capture {
 }
 
 /// A cloaked, hidden popup over `geometry` (physical pixels).
-pub fn create_popup(
-    proc: WndProc,
-    geometry: PhysicalRect,
-    focus: Focus,
-    capture: Capture,
-) -> Result<HWND> {
+pub fn create_popup(proc: WndProc, geometry: PhysicalRect, focus: Focus, capture: Capture) -> Result<HWND> {
     if !register(POPUP_CLASS, proc, &POPUP_DONE) {
         return Err(windows::core::Error::from_thread());
     }
@@ -155,13 +136,13 @@ pub fn create_popup(
     Ok(hwnd)
 }
 
-/// A cloaked, hidden window of its own over `rect` (physical pixels): in the taskbar and
-/// Alt+Tab, under the windows that come after it, with rounded corners on Windows 11.
+/// A cloaked, hidden window of its own over `rect` (physical pixels): in the taskbar and Alt+Tab, under the windows
+/// that come after it, with rounded corners on Windows 11.
 pub fn create_app_window(proc: WndProc, rect: PhysicalRect, title: &str) -> Result<HWND> {
     use windows::Win32::Graphics::Dwm::DWMWA_WINDOW_CORNER_PREFERENCE;
     use windows::Win32::UI::WindowsAndMessaging::{
-        GetSystemMetrics, ICON_BIG, ICON_SMALL, IMAGE_ICON, LR_DEFAULTCOLOR, LoadImageW, SM_CXICON,
-        SM_CXSMICON, SendMessageW, WM_SETICON, WS_EX_APPWINDOW, WS_MINIMIZEBOX, WS_SYSMENU,
+        GetSystemMetrics, ICON_BIG, ICON_SMALL, IMAGE_ICON, LR_DEFAULTCOLOR, LoadImageW, SM_CXICON, SM_CXSMICON,
+        SendMessageW, WM_SETICON, WS_EX_APPWINDOW, WS_MINIMIZEBOX, WS_SYSMENU,
     };
     if !register(POPUP_CLASS, proc, &POPUP_DONE) {
         return Err(windows::core::Error::from_thread());
@@ -181,20 +162,8 @@ pub fn create_app_window(proc: WndProc, rect: PhysicalRect, title: &str) -> Resu
             let size = GetSystemMetrics(metric);
             // MAKEINTRESOURCE(1).
             let name = PCWSTR(std::ptr::without_provenance(1));
-            if let Ok(icon) = LoadImageW(
-                Some(instance()),
-                name,
-                IMAGE_ICON,
-                size,
-                size,
-                LR_DEFAULTCOLOR,
-            ) {
-                SendMessageW(
-                    hwnd,
-                    WM_SETICON,
-                    Some(WPARAM(kind as usize)),
-                    Some(LPARAM(icon.0 as isize)),
-                );
+            if let Ok(icon) = LoadImageW(Some(instance()), name, IMAGE_ICON, size, size, LR_DEFAULTCOLOR) {
+                SendMessageW(hwnd, WM_SETICON, Some(WPARAM(kind as usize)), Some(LPARAM(icon.0 as isize)));
             }
         }
         // DWMWCP_ROUND.
@@ -237,24 +206,13 @@ pub fn create_message_window(proc: WndProc) -> Result<HWND> {
 pub fn set_cloak(hwnd: HWND, on: bool) {
     let value = BOOL::from(on);
     // SAFETY: plain call on a window of this thread.
-    let _ = unsafe {
-        DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_CLOAK,
-            (&raw const value).cast(),
-            size_of::<BOOL>() as u32,
-        )
-    };
+    let _ = unsafe { DwmSetWindowAttribute(hwnd, DWMWA_CLOAK, (&raw const value).cast(), size_of::<BOOL>() as u32) };
 }
 
-/// Leaves the window out of screen captures (`on`), or puts it back; `false` when Windows
-/// cannot (before Windows 10 2004).
+/// Leaves the window out of screen captures (`on`), or puts it back; `false` when Windows cannot (before Windows 10
+/// 2004).
 pub fn set_excluded(hwnd: HWND, on: bool) -> bool {
-    let affinity = if on {
-        WDA_EXCLUDEFROMCAPTURE
-    } else {
-        WINDOW_DISPLAY_AFFINITY(0)
-    };
+    let affinity = if on { WDA_EXCLUDEFROMCAPTURE } else { WINDOW_DISPLAY_AFFINITY(0) };
     // SAFETY: plain call on a window of this thread.
     unsafe { SetWindowDisplayAffinity(hwnd, affinity) }.is_ok()
 }
@@ -263,17 +221,7 @@ pub fn set_excluded(hwnd: HWND, on: bool) -> bool {
 pub fn set_topmost(hwnd: HWND, on: bool) {
     let after = if on { HWND_TOPMOST } else { HWND_NOTOPMOST };
     // SAFETY: plain call on a window of this thread.
-    let _ = unsafe {
-        SetWindowPos(
-            hwnd,
-            Some(after),
-            0,
-            0,
-            0,
-            0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-        )
-    };
+    let _ = unsafe { SetWindowPos(hwnd, Some(after), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) };
 }
 
 pub fn default_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {

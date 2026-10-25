@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The side overlay: the actions of Vixeeny as a strip of icons on one edge of the
-//! screen, drawn natively. The name of the action under the pointer (or the keyboard) shows
-//! beside the strip. It slides and fades in, takes the arrow keys, Enter and Escape, and goes
-//! away when the user clicks elsewhere, unless it is pinned. Nothing runs while it is still.
+//! The side overlay: the actions of Vixeeny as a strip of icons on one edge of the screen, drawn natively. The name of
+//! the action under the pointer (or the keyboard) shows beside the strip. It slides and fades in, takes the arrow keys,
+//! Enter and Escape, and goes away when the user clicks elsewhere, unless it is pinned. Nothing runs while it is still.
 //!
-//! The pure parts (the entries, the keyboard order, where everything goes, what input does) are
-//! plain code the tests drive; [`SidePanel`] puts them on a window.
+//! The pure parts (the entries, the keyboard order, where everything goes, what input does) are plain code the tests
+//! drive; [`SidePanel`] puts them on a window.
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
@@ -13,13 +12,12 @@ use std::rc::{Rc, Weak};
 use vixeeny_platform::PhysicalRect;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetKeyState, ReleaseCapture, SetCapture, VIRTUAL_KEY, VK_DOWN, VK_ESCAPE, VK_LEFT, VK_RETURN,
-    VK_RIGHT, VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
+    GetKeyState, ReleaseCapture, SetCapture, VIRTUAL_KEY, VK_DOWN, VK_ESCAPE, VK_LEFT, VK_RETURN, VK_RIGHT, VK_SHIFT,
+    VK_SPACE, VK_TAB, VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    KillTimer, PostMessageW, SetTimer, WA_INACTIVE, WM_ACTIVATE, WM_CAPTURECHANGED, WM_CLOSE,
-    WM_KEYDOWN, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_SETCURSOR,
-    WM_TIMER,
+    KillTimer, PostMessageW, SetTimer, WA_INACTIVE, WM_ACTIVATE, WM_CAPTURECHANGED, WM_CLOSE, WM_KEYDOWN,
+    WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_SETCURSOR, WM_TIMER,
 };
 use windows::core::Result;
 
@@ -138,25 +136,11 @@ pub struct Entry {
 
 impl Entry {
     fn action(choice: Choice, glyph: i32, label: &str) -> Self {
-        Self {
-            id: choice.id(),
-            glyph,
-            label: label.to_owned(),
-            enabled: true,
-            header: false,
-            active: false,
-        }
+        Self { id: choice.id(), glyph, label: label.to_owned(), enabled: true, header: false, active: false }
     }
 
     fn header(n: i32, label: &str) -> Self {
-        Self {
-            id: HEADER_ID + n,
-            glyph: 0,
-            label: label.to_uppercase(),
-            enabled: false,
-            header: true,
-            active: false,
-        }
+        Self { id: HEADER_ID + n, glyph: 0, label: label.to_uppercase(), enabled: false, header: true, active: false }
     }
 
     const fn selectable(&self) -> bool {
@@ -182,15 +166,8 @@ pub fn entries(texts: &SideTexts, state: &SideState) -> Vec<Entry> {
     };
     record.active = state.recording;
     list.push(record);
-    let mut replay = Entry::action(
-        Choice::ReplayToggle,
-        8,
-        if state.replay {
-            &texts.replay_stop
-        } else {
-            &texts.replay_start
-        },
-    );
+    let mut replay =
+        Entry::action(Choice::ReplayToggle, 8, if state.replay { &texts.replay_stop } else { &texts.replay_start });
     replay.active = state.replay;
     list.push(replay);
     let mut save = Entry::action(Choice::ReplaySave, 9, &texts.replay_save);
@@ -200,8 +177,8 @@ pub fn entries(texts: &SideTexts, state: &SideState) -> Vec<Entry> {
     list
 }
 
-/// The entry reached by moving `delta` (±1) selectable entries from `current`, wrapping around.
-/// `current` is returned when nothing can be selected.
+/// The entry reached by moving `delta` (±1) selectable entries from `current`, wrapping around. `current` is returned
+/// when nothing can be selected.
 pub fn next_selectable(entries: &[Entry], current: i32, delta: i32) -> i32 {
     let n = entries.len() as i32;
     if n == 0 {
@@ -219,10 +196,7 @@ pub fn next_selectable(entries: &[Entry], current: i32, delta: i32) -> i32 {
 
 /// The first entry the keyboard can reach.
 pub fn first_selectable(entries: &[Entry]) -> i32 {
-    entries
-        .iter()
-        .position(Entry::selectable)
-        .map_or(-1, |i| i as i32)
+    entries.iter().position(Entry::selectable).map_or(-1, |i| i as i32)
 }
 
 // Layout constants, in logical pixels.
@@ -236,13 +210,10 @@ const SMALL: f64 = 28.0;
 const TIP_ROOM: f64 = 220.0;
 const TIP_HEIGHT: f64 = 40.0;
 
-/// The window's size in logical pixels: the strip (the pin and close buttons, a separator, the
-/// entries), the room for the label beside it, and the margin it slides in through.
+/// The window's size in logical pixels: the strip (the pin and close buttons, a separator, the entries), the room for
+/// the label beside it, and the margin it slides in through.
 fn logical_size(entries: &[Entry], vertical: bool) -> (f64, f64) {
-    let along: f64 = entries
-        .iter()
-        .map(|e| if e.header { SEPARATOR } else { BUTTON })
-        .sum();
+    let along: f64 = entries.iter().map(|e| if e.header { SEPARATOR } else { BUTTON }).sum();
     let along = 2.0 * PAD + SMALL + SEPARATOR + along + GAP * (entries.len() + 1) as f64;
     let across = BUTTON + 2.0 * PAD;
     if vertical {
@@ -252,14 +223,8 @@ fn logical_size(entries: &[Entry], vertical: bool) -> (f64, f64) {
     }
 }
 
-/// Where the window goes on `monitor` (physical pixels; `dpi` 96 = 100 %): flush against `edge`,
-/// centred along it.
-pub fn panel_geometry(
-    edge: Edge,
-    monitor: PhysicalRect,
-    dpi: u32,
-    entries: &[Entry],
-) -> PhysicalRect {
+/// Where the window goes on `monitor` (physical pixels; `dpi` 96 = 100 %): flush against `edge`, centred along it.
+pub fn panel_geometry(edge: Edge, monitor: PhysicalRect, dpi: u32, entries: &[Entry]) -> PhysicalRect {
     let scale = f64::from(dpi.max(48)) / 96.0;
     let (mx, my, mw, mh) = (monitor.x, monitor.y, monitor.width, monitor.height);
     let (w, h) = logical_size(entries, edge.is_vertical());
@@ -317,22 +282,14 @@ fn inside((x, y, w, h): Box2, px: f32, py: f32) -> bool {
 pub fn slots(entries: &[Entry], vertical: bool) -> (Vec<(Slot, Box2)>, (f32, f32)) {
     let (pad, gap, button) = (PAD as f32, GAP as f32, BUTTON as f32);
     let (separator, small) = (SEPARATOR as f32, SMALL as f32);
-    // `along` runs down a column (vertical) or across a row; `boxed` turns (along, across) boxes
-    // into (x, y) ones.
+    // `along` runs down a column (vertical) or across a row; `boxed` turns (along, across) boxes into (x, y) ones.
     let boxed = |along: f32, along_len: f32, across: f32, across_len: f32| {
-        if vertical {
-            (across, along, across_len, along_len)
-        } else {
-            (along, across, along_len, across_len)
-        }
+        if vertical { (across, along, across_len, along_len) } else { (along, across, along_len, across_len) }
     };
     let mut out = Vec::with_capacity(entries.len() + 3);
     let mut at = pad;
     out.push((Slot::Pin, boxed(at, small, pad, button / 2.0)));
-    out.push((
-        Slot::Close,
-        boxed(at, small, pad + button / 2.0, button / 2.0),
-    ));
+    out.push((Slot::Close, boxed(at, small, pad + button / 2.0, button / 2.0)));
     // Pin and close share a row of a column (and a column of a row), one above the other.
     if !vertical {
         out[0].1 = (pad, pad, small, button / 2.0);
@@ -348,11 +305,7 @@ pub fn slots(entries: &[Entry], vertical: bool) -> (Vec<(Slot, Box2)>, (f32, f32
     }
     let along = at - gap + pad;
     let across = button + 2.0 * pad;
-    let size = if vertical {
-        (across, along)
-    } else {
-        (along, across)
-    };
+    let size = if vertical { (across, along) } else { (along, across) };
     (out, size)
 }
 
@@ -378,17 +331,8 @@ impl StripLayout {
         let m = MARGIN as f32 * u;
         let x = if edge == Edge::Right { ww - m - sw } else { m };
         let y = if edge == Edge::Bottom { wh - m - sh } else { m };
-        let slots = logical
-            .into_iter()
-            .map(|(s, (bx, by, bw, bh))| (s, (bx * u, by * u, bw * u, bh * u)))
-            .collect();
-        Self {
-            edge,
-            u,
-            window: (ww, wh),
-            strip: (x, y, sw, sh),
-            slots,
-        }
+        let slots = logical.into_iter().map(|(s, (bx, by, bw, bh))| (s, (bx * u, by * u, bw * u, bh * u))).collect();
+        Self { edge, u, window: (ww, wh), strip: (x, y, sw, sh), slots }
     }
 
     /// What is at `(x, y)` (window pixels).
@@ -414,8 +358,7 @@ impl StripLayout {
         self.slots.iter().find(|(s, _)| *s == slot).map(|(_, b)| *b)
     }
 
-    /// Where the label of entry `i`, `size` big, goes: beside the strip, level with the entry,
-    /// inside the window.
+    /// Where the label of entry `i`, `size` big, goes: beside the strip, level with the entry, inside the window.
     pub fn tip_origin(&self, i: usize, (tw, th): (f32, f32)) -> (f32, f32) {
         let u = self.u;
         let (sx, sy, sw, sh) = self.strip;
@@ -423,18 +366,10 @@ impl StripLayout {
         let (bx, by, bw, bh) = self.slot(Slot::Entry(i)).unwrap_or_default();
         let clamp = |v: f32, max: f32| v.min(max - 4.0 * u).max(4.0 * u);
         if self.edge.is_vertical() {
-            let x = if self.edge == Edge::Right {
-                sx - tw - 8.0 * u
-            } else {
-                sx + sw + 8.0 * u
-            };
+            let x = if self.edge == Edge::Right { sx - tw - 8.0 * u } else { sx + sw + 8.0 * u };
             (x, clamp(sy + by + bh / 2.0 - th / 2.0, wh - th))
         } else {
-            let y = if self.edge == Edge::Bottom {
-                sy - th - 8.0 * u
-            } else {
-                sy + sh + 8.0 * u
-            };
+            let y = if self.edge == Edge::Bottom { sy - th - 8.0 * u } else { sy + sh + 8.0 * u };
             (clamp(sx + bx + bw / 2.0 - tw / 2.0, ww - tw), y)
         }
     }
@@ -626,20 +561,11 @@ fn glyph(kind: i32) -> &'static str {
 /// Size of the strip's surface: the strip and room for its shadow.
 pub fn strip_surface(layout: &StripLayout) -> (u32, u32) {
     let m = 2.0 * SHADOW * layout.u;
-    (
-        (layout.strip.2 + m).ceil() as u32,
-        (layout.strip.3 + m).ceil() as u32,
-    )
+    ((layout.strip.2 + m).ceil() as u32, (layout.strip.3 + m).ceil() as u32)
 }
 
 /// The strip, its top-left corner `SHADOW` logical pixels into the surface.
-pub fn paint_strip(
-    c: &Canvas<'_>,
-    t: &Theme,
-    layout: &StripLayout,
-    entries: &[Entry],
-    look: &StripLook,
-) -> Result<()> {
+pub fn paint_strip(c: &Canvas<'_>, t: &Theme, layout: &StripLayout, entries: &[Entry], look: &StripLook) -> Result<()> {
     let u = layout.u;
     let o = SHADOW * u;
     let (_, _, sw, sh) = layout.strip;
@@ -651,15 +577,9 @@ pub fn paint_strip(
     // A hairline across a separator box.
     let divider = |(x, y, w, h): Box2| {
         if vertical {
-            c.fill_rect(
-                rect(x + 8.0 * u, y + (h - 1.0) / 2.0, w - 16.0 * u, 1.0),
-                t.divider,
-            )
+            c.fill_rect(rect(x + 8.0 * u, y + (h - 1.0) / 2.0, w - 16.0 * u, 1.0), t.divider)
         } else {
-            c.fill_rect(
-                rect(x + (w - 1.0) / 2.0, y + 8.0 * u, 1.0, h - 16.0 * u),
-                t.divider,
-            )
+            c.fill_rect(rect(x + (w - 1.0) / 2.0, y + 8.0 * u, 1.0, h - 16.0 * u), t.divider)
         }
     };
     for (slot, (bx, by, bw, bh)) in &layout.slots {
@@ -667,11 +587,7 @@ pub fn paint_strip(
         match *slot {
             Slot::Divider => divider(b)?,
             Slot::Pin | Slot::Close => {
-                let target = if *slot == Slot::Pin {
-                    Target::Pin
-                } else {
-                    Target::Close
-                };
+                let target = if *slot == Slot::Pin { Target::Pin } else { Target::Close };
                 let active = *slot == Slot::Pin && look.pinned;
                 let fill = if active {
                     Some(t.accent_soft)
@@ -692,13 +608,7 @@ pub fn paint_strip(
                 };
                 let tint = if active { t.accent } else { t.text_2 };
                 let size = 14.0 * u;
-                c.icon(
-                    icon,
-                    b.0 + (b.2 - size) / 2.0,
-                    b.1 + (b.3 - size) / 2.0,
-                    size,
-                    tint,
-                )?;
+                c.icon(icon, b.0 + (b.2 - size) / 2.0, b.1 + (b.3 - size) / 2.0, size, tint)?;
             }
             Slot::Entry(i) => {
                 let Some(e) = entries.get(i) else {
@@ -709,11 +619,7 @@ pub fn paint_strip(
                     continue;
                 }
                 if look.selected == i as i32 && e.selectable() {
-                    let fill = if look.pressed {
-                        t.subtle_pressed
-                    } else {
-                        t.selected
-                    };
+                    let fill = if look.pressed { t.subtle_pressed } else { t.selected };
                     c.fill_round(rect(b.0, b.1, b.2, b.3), 10.0 * u, fill)?;
                 }
                 let tint = if e.glyph == 6 || e.glyph == 7 {
@@ -723,19 +629,9 @@ pub fn paint_strip(
                 } else {
                     t.text
                 };
-                let tint = if e.enabled {
-                    tint
-                } else {
-                    tint.with_alpha(tint.0[3] * 0.38)
-                };
+                let tint = if e.enabled { tint } else { tint.with_alpha(tint.0[3] * 0.38) };
                 let size = 20.0 * u;
-                c.icon(
-                    glyph(e.glyph),
-                    b.0 + (b.2 - size) / 2.0,
-                    b.1 + (b.3 - size) / 2.0,
-                    size,
-                    tint,
-                )?;
+                c.icon(glyph(e.glyph), b.0 + (b.2 - size) / 2.0, b.1 + (b.3 - size) / 2.0, size, tint)?;
                 // A dot under the actions that are on (recording, replay buffer).
                 if e.active {
                     let dot = if e.glyph == 7 { t.record } else { t.accent };
@@ -806,19 +702,12 @@ impl Inner {
             |c| paint_strip(c, t, &m.layout, &m.entries, &look),
         )?;
         let u = m.layout.u;
-        let tip = m
-            .tip()
-            .filter(|_| self.entered.get() && !self.exiting.get());
+        let tip = m.tip().filter(|_| self.entered.get() && !self.exiting.get());
         match tip {
             Some((i, text)) => {
                 let bubble = tip_bubble(gfx, u, text)?;
                 let text = text.to_owned();
-                self.tip.show(
-                    gfx,
-                    &text,
-                    || Ok(tip_surface(u, bubble)),
-                    |c| paint_tip(c, t, u, &text, bubble),
-                )?;
+                self.tip.show(gfx, &text, || Ok(tip_surface(u, bubble)), |c| paint_tip(c, t, u, &text, bubble))?;
                 let (x, y) = m.layout.tip_origin(i, bubble);
                 let m = TIP_SHADOW * u;
                 let (x, y) = ((x - m).round(), (y - m).round());
@@ -831,12 +720,8 @@ impl Inner {
                 {
                     // SAFETY: plain property calls with animations of the same device.
                     unsafe {
-                        self.tip
-                            .visual
-                            .SetOffsetX(&scene::ease_out(gfx, x0, x, TIP_MOVE)?)?;
-                        self.tip
-                            .visual
-                            .SetOffsetY(&scene::ease_out(gfx, y0, y, TIP_MOVE)?)?;
+                        self.tip.visual.SetOffsetX(&scene::ease_out(gfx, x0, x, TIP_MOVE)?)?;
+                        self.tip.visual.SetOffsetY(&scene::ease_out(gfx, y0, y, TIP_MOVE)?)?;
                     }
                 }
             }
@@ -846,8 +731,8 @@ impl Inner {
         unsafe { gfx.dcomp.Commit() }
     }
 
-    /// Slides the strip from `from` to `to` (window pixels, its rest offset and its outside
-    /// one), fading it `fade.0` → `fade.1`.
+    /// Slides the strip from `from` to `to` (window pixels, its rest offset and its outside one), fading it `fade.0` →
+    /// `fade.1`.
     fn slide(&self, from: (f32, f32), to: (f32, f32), fade: (f32, f32), enter: bool) -> Result<()> {
         let gfx = &self.gfx;
         let o = SHADOW * self.model.borrow().layout.u;
@@ -856,11 +741,7 @@ impl Inner {
             return Ok(());
         };
         let ease = |a: f32, b: f32| {
-            if enter {
-                scene::ease_out(gfx, a, b, ENTER)
-            } else {
-                scene::ease_in(gfx, a, b, EXIT)
-            }
+            if enter { scene::ease_out(gfx, a, b, ENTER) } else { scene::ease_in(gfx, a, b, EXIT) }
         };
         // SAFETY: plain property calls with animations of the same device.
         unsafe {
@@ -899,14 +780,7 @@ impl Inner {
             if self.animate {
                 // A little longer than the animation, so its last frame is drawn.
                 // SAFETY: plain timer call on a window of this thread.
-                unsafe {
-                    SetTimer(
-                        Some(self.popup.hwnd),
-                        EXIT_TIMER,
-                        (EXIT * 1000.0) as u32 + 30,
-                        None,
-                    )
-                };
+                unsafe { SetTimer(Some(self.popup.hwnd), EXIT_TIMER, (EXIT * 1000.0) as u32 + 30, None) };
             } else {
                 self.done.set(true);
             }
@@ -998,20 +872,11 @@ pub struct SidePanel {
 }
 
 impl SidePanel {
-    /// The strip for `state`, in a window over `geometry` (physical pixels, see
-    /// [`panel_geometry`]) of a monitor at `dpi`.
-    pub fn new(
-        texts: &SideTexts,
-        state: &SideState,
-        geometry: PhysicalRect,
-        dpi: u32,
-    ) -> Result<Self> {
+    /// The strip for `state`, in a window over `geometry` (physical pixels, see [`panel_geometry`]) of a monitor at
+    /// `dpi`.
+    pub fn new(texts: &SideTexts, state: &SideState, geometry: PhysicalRect, dpi: u32) -> Result<Self> {
         let gfx = Gfx::shared()?;
-        let theme = Theme::new(Look {
-            dark: state.dark,
-            animations: state.animate,
-            ..Look::default()
-        });
+        let theme = Theme::new(Look { dark: state.dark, animations: state.animate, ..Look::default() });
         let entries = entries(texts, state);
         let layout = StripLayout::new(state.edge, &entries, dpi, (geometry.width, geometry.height));
         // Never in a capture: nor in a recording, a replay or a screen share.
@@ -1033,9 +898,7 @@ impl SidePanel {
             done: Cell::new(false),
         });
         let weak: Weak<Inner> = Rc::downgrade(&inner);
-        inner
-            .popup
-            .on_message(move |msg, wparam, lparam| weak.upgrade()?.message(msg, wparam, lparam));
+        inner.popup.on_message(move |msg, wparam, lparam| weak.upgrade()?.message(msg, wparam, lparam));
         Ok(Self { inner })
     }
 
@@ -1049,26 +912,19 @@ impl SidePanel {
         self.inner.model.borrow().pinned
     }
 
-    /// What a click elsewhere does: closes the strip (unless it is pinned) on the next turn of
-    /// the message loop. Safe to call from a hook.
+    /// What a click elsewhere does: closes the strip (unless it is pinned) on the next turn of the message loop. Safe
+    /// to call from a hook.
     pub fn dismisser(&self) -> impl Fn() + 'static {
         let hwnd = self.inner.popup.hwnd.0 as isize;
         move || {
             // SAFETY: plain call; a window that is gone makes it fail, nothing else.
-            let _ = unsafe {
-                PostMessageW(
-                    Some(HWND(hwnd as *mut _)),
-                    popup::WM_POPUP,
-                    WPARAM(DISMISS),
-                    LPARAM(0),
-                )
-            };
+            let _ = unsafe { PostMessageW(Some(HWND(hwnd as *mut _)), popup::WM_POPUP, WPARAM(DISMISS), LPARAM(0)) };
         }
     }
 
-    /// Shows the strip, slides it in, and runs until something is picked, Escape is pressed, or
-    /// the user goes elsewhere. `dress` gets the native handle once the window is on screen.
-    /// Once the animation is over nothing runs: the loop sleeps until the next input.
+    /// Shows the strip, slides it in, and runs until something is picked, Escape is pressed, or the user goes
+    /// elsewhere. `dress` gets the native handle once the window is on screen. Once the animation is over nothing runs:
+    /// the loop sleeps until the next input.
     pub fn run_with(&self, dress: impl FnOnce(u64)) -> Result<Option<Choice>> {
         let inner = &self.inner;
         let (rest, out) = inner.model.borrow().layout.travel();
@@ -1081,12 +937,7 @@ impl SidePanel {
         unsafe {
             inner.gfx.dcomp.Commit()?;
             if inner.animate {
-                SetTimer(
-                    Some(inner.popup.hwnd),
-                    ENTER_TIMER,
-                    (ENTER * 1000.0) as u32,
-                    None,
-                );
+                SetTimer(Some(inner.popup.hwnd), ENTER_TIMER, (ENTER * 1000.0) as u32, None);
             }
         }
         dress(inner.popup.hwnd.0 as u64);
@@ -1119,14 +970,7 @@ mod tests {
     }
 
     pub(crate) fn state() -> SideState {
-        SideState {
-            recording: false,
-            replay: false,
-            dark: true,
-            edge: Edge::Right,
-            animate: false,
-            pinned: false,
-        }
+        SideState { recording: false, replay: false, dark: true, edge: Edge::Right, animate: false, pinned: false }
     }
 
     #[test]
@@ -1143,25 +987,15 @@ mod tests {
     fn entries_follow_the_state() {
         let mut s = state();
         let list = entries(&texts(), &s);
-        let find =
-            |list: &[Entry], c: Choice| list.iter().find(|e| e.id == c.id()).unwrap().clone();
+        let find = |list: &[Entry], c: Choice| list.iter().find(|e| e.id == c.id()).unwrap().clone();
         assert_eq!(find(&list, Choice::RecordToggle).label, "Record");
-        assert!(
-            !find(&list, Choice::ReplaySave).enabled,
-            "no replay, nothing to save"
-        );
+        assert!(!find(&list, Choice::ReplaySave).enabled, "no replay, nothing to save");
         s.recording = true;
         s.replay = true;
         let list = entries(&texts(), &s);
         let record = find(&list, Choice::RecordToggle);
-        assert_eq!(
-            (record.label.as_str(), record.active),
-            ("Stop recording", true)
-        );
-        assert_eq!(
-            find(&list, Choice::ReplayToggle).label,
-            "Stop replay buffer"
-        );
+        assert_eq!((record.label.as_str(), record.active), ("Stop recording", true));
+        assert_eq!(find(&list, Choice::ReplayToggle).label, "Stop replay buffer");
         assert!(find(&list, Choice::ReplaySave).enabled);
     }
 
@@ -1175,24 +1009,12 @@ mod tests {
         assert_eq!(next_selectable(&list, last, 1), first);
         assert_eq!(next_selectable(&list, first, -1), last);
         // Down from the scrolling capture jumps over the "Video" title to Record.
-        let scrolling = list
-            .iter()
-            .position(|e| e.id == Choice::Scrolling.id())
-            .unwrap() as i32;
-        let record = list
-            .iter()
-            .position(|e| e.id == Choice::RecordToggle.id())
-            .unwrap() as i32;
+        let scrolling = list.iter().position(|e| e.id == Choice::Scrolling.id()).unwrap() as i32;
+        let record = list.iter().position(|e| e.id == Choice::RecordToggle.id()).unwrap() as i32;
         assert_eq!(next_selectable(&list, scrolling, 1), record);
         // The replay save is disabled while there is no replay: Replay → Settings.
-        let replay = list
-            .iter()
-            .position(|e| e.id == Choice::ReplayToggle.id())
-            .unwrap() as i32;
-        let settings = list
-            .iter()
-            .position(|e| e.id == Choice::Settings.id())
-            .unwrap() as i32;
+        let replay = list.iter().position(|e| e.id == Choice::ReplayToggle.id()).unwrap() as i32;
+        let settings = list.iter().position(|e| e.id == Choice::Settings.id()).unwrap() as i32;
         assert_eq!(next_selectable(&list, replay, 1), settings);
         assert_eq!(next_selectable(&[], 0, 1), 0);
     }
@@ -1214,10 +1036,7 @@ mod tests {
         let double = panel_geometry(Edge::Right, second, 192, &list);
         let single = panel_geometry(Edge::Right, second, 96, &list);
         assert_eq!(double.x + double.width as i32, 2560 + 3840);
-        assert_eq!(
-            (double.width, double.height),
-            (single.width * 2, single.height * 2)
-        );
+        assert_eq!((double.width, double.height), (single.width * 2, single.height * 2));
         // Never bigger than the monitor.
         let tiny = PhysicalRect::new(0, 0, 300, 400);
         let r = panel_geometry(Edge::Right, tiny, 96, &list);
@@ -1242,10 +1061,7 @@ mod tests {
             let s = strip_at_100(edge, false);
             let (x, y, w, h) = s.layout.strip;
             let (ww, wh) = s.layout.window;
-            assert!(
-                x >= 0.0 && y >= 0.0 && x + w <= ww && y + h <= wh,
-                "{edge:?}"
-            );
+            assert!(x >= 0.0 && y >= 0.0 && x + w <= ww && y + h <= wh, "{edge:?}");
             // Flush with the margin on its own edge.
             match edge {
                 Edge::Right => assert_eq!(x + w, ww - 12.0),
@@ -1254,10 +1070,7 @@ mod tests {
             }
             for (slot, (bx, by, bw, bh)) in &s.layout.slots {
                 assert!(*bx >= 0.0 && *by >= 0.0, "{slot:?}");
-                assert!(
-                    bx + bw <= w + 0.01 && by + bh <= h + 0.01,
-                    "{edge:?} {slot:?}"
-                );
+                assert!(bx + bw <= w + 0.01 && by + bh <= h + 0.01, "{edge:?} {slot:?}");
             }
         }
     }
@@ -1281,8 +1094,8 @@ mod tests {
 
     #[test]
     fn clicks_pick_pin_and_dismiss() {
-        // The strip: 12 px from the window's edges, 6 px padding, the pin and close row (28), a
-        // separator (9), then the entries (separators of 9, buttons of 40), 2 px apart.
+        // The strip: 12 px from the window's edges, 6 px padding, the pin and close row (28), a separator (9), then the
+        // entries (separators of 9, buttons of 40), 2 px apart.
         let mut s = strip_at_100(Edge::Right, false);
         let (ww, _) = s.layout.window;
         let x = ww - 12.0 - 26.0;
@@ -1322,18 +1135,8 @@ mod tests {
         s.pointer_up(x, region_y + 42.0);
         assert_eq!(s.chosen, None);
         // No replay buffer: "Save replay" is disabled, the pointer does not select it.
-        let save = s
-            .entries
-            .iter()
-            .position(|e| e.id == Choice::ReplaySave.id())
-            .unwrap();
-        let (_, (_, by, _, bh)) = s
-            .layout
-            .slots
-            .iter()
-            .find(|(slot, _)| *slot == Slot::Entry(save))
-            .copied()
-            .unwrap();
+        let save = s.entries.iter().position(|e| e.id == Choice::ReplaySave.id()).unwrap();
+        let (_, (_, by, _, bh)) = s.layout.slots.iter().find(|(slot, _)| *slot == Slot::Entry(save)).copied().unwrap();
         let y = s.layout.strip.1 + by + bh / 2.0;
         let before = s.selected;
         click(&mut s, x, y);
@@ -1348,10 +1151,7 @@ mod tests {
             let (ww, wh) = s.layout.window;
             for i in 0..s.entries.len() {
                 let (x, y) = s.layout.tip_origin(i, (120.0, 30.0));
-                assert!(
-                    x >= 0.0 && y >= 0.0 && x + 120.0 <= ww && y + 30.0 <= wh,
-                    "{edge:?}"
-                );
+                assert!(x >= 0.0 && y >= 0.0 && x + 120.0 <= ww && y + 30.0 <= wh, "{edge:?}");
                 let apart = x + 120.0 <= sx || x >= sx + sw || y + 30.0 <= sy || y >= sy + sh;
                 assert!(apart, "{edge:?}: the label covers the strip");
             }

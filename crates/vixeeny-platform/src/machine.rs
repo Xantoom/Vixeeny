@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! What this computer is made of, for the settings' general page: processor, memory, graphics
-//! adapters, disks and screens. Each part is read on its own; one that cannot be read is left
-//! out rather than failing the rest.
+//! What this computer is made of, for the settings' general page: processor, memory, graphics adapters, disks and
+//! screens. Each part is read on its own; one that cannot be read is left out rather than failing the rest.
 
 use windows::Win32::Devices::Display::{
-    DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME, DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
-    DISPLAYCONFIG_MODE_INFO, DISPLAYCONFIG_PATH_INFO, DISPLAYCONFIG_SOURCE_DEVICE_NAME,
-    DISPLAYCONFIG_TARGET_DEVICE_NAME, DisplayConfigGetDeviceInfo, GetDisplayConfigBufferSizes,
-    QDC_ONLY_ACTIVE_PATHS, QueryDisplayConfig,
+    DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME, DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME, DISPLAYCONFIG_MODE_INFO,
+    DISPLAYCONFIG_PATH_INFO, DISPLAYCONFIG_SOURCE_DEVICE_NAME, DISPLAYCONFIG_TARGET_DEVICE_NAME,
+    DisplayConfigGetDeviceInfo, GetDisplayConfigBufferSizes, QDC_ONLY_ACTIVE_PATHS, QueryDisplayConfig,
 };
 use windows::Win32::Foundation::{CloseHandle, ERROR_SUCCESS};
 use windows::Win32::Graphics::Direct3D::D3D_FEATURE_LEVEL_11_0;
@@ -15,25 +13,22 @@ use windows::Win32::Graphics::Direct3D12::{
     D3D12_FEATURE_ARCHITECTURE, D3D12_FEATURE_DATA_ARCHITECTURE, D3D12CreateDevice, ID3D12Device,
 };
 use windows::Win32::Graphics::Dxgi::{
-    CreateDXGIFactory1, DXGI_ADAPTER_DESC1, DXGI_ADAPTER_FLAG_SOFTWARE, IDXGIAdapter1,
-    IDXGIFactory1,
+    CreateDXGIFactory1, DXGI_ADAPTER_DESC1, DXGI_ADAPTER_FLAG_SOFTWARE, IDXGIAdapter1, IDXGIFactory1,
 };
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE, GetDiskFreeSpaceExW,
-    GetDriveTypeW, GetLogicalDrives, GetVolumeInformationW, OPEN_EXISTING,
+    CreateFileW, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE, GetDiskFreeSpaceExW, GetDriveTypeW,
+    GetLogicalDrives, GetVolumeInformationW, OPEN_EXISTING,
 };
 use windows::Win32::System::IO::DeviceIoControl;
 use windows::Win32::System::Ioctl::{
-    DISK_GEOMETRY_EX, IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, IOCTL_STORAGE_GET_DEVICE_NUMBER,
-    IOCTL_STORAGE_QUERY_PROPERTY, PropertyStandardQuery, STORAGE_DEVICE_DESCRIPTOR,
-    STORAGE_DEVICE_NUMBER, STORAGE_PROPERTY_QUERY, StorageDeviceProperty,
+    DISK_GEOMETRY_EX, IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, IOCTL_STORAGE_GET_DEVICE_NUMBER, IOCTL_STORAGE_QUERY_PROPERTY,
+    PropertyStandardQuery, STORAGE_DEVICE_DESCRIPTOR, STORAGE_DEVICE_NUMBER, STORAGE_PROPERTY_QUERY,
+    StorageDeviceProperty,
 };
-use windows::Win32::System::Registry::{
-    HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RegGetValueW,
-};
+use windows::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RegGetValueW};
 use windows::Win32::System::SystemInformation::{
-    GetLogicalProcessorInformationEx, GetPhysicallyInstalledSystemMemory, GetSystemFirmwareTable,
-    GlobalMemoryStatusEx, MEMORYSTATUSEX, RSMB, RelationProcessorCore,
+    GetLogicalProcessorInformationEx, GetPhysicallyInstalledSystemMemory, GetSystemFirmwareTable, GlobalMemoryStatusEx,
+    MEMORYSTATUSEX, RSMB, RelationProcessorCore,
 };
 use windows::Win32::System::WindowsProgramming::DRIVE_FIXED;
 use windows::core::{HSTRING, PCWSTR, w};
@@ -42,14 +37,7 @@ use vixeeny_common::machine::{Cpu, Disk, Gpu, Machine, Module, Screen};
 
 /// Reads the parts of this computer (a few tens of milliseconds: call it off the UI thread).
 pub fn machine() -> Machine {
-    Machine {
-        cpu: cpu(),
-        ram_bytes: ram_bytes(),
-        modules: modules(),
-        gpus: gpus(),
-        disks: disks(),
-        screens: screens(),
-    }
+    Machine { cpu: cpu(), ram_bytes: ram_bytes(), modules: modules(), gpus: gpus(), disks: disks(), screens: screens() }
 }
 
 fn cpu() -> Option<Cpu> {
@@ -76,17 +64,11 @@ fn cpu() -> Option<Cpu> {
     let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
     let threads = std::thread::available_parallelism().map_or(0, |n| n.get() as u32);
     let (base, boost) = frequencies();
-    Some(Cpu {
-        name,
-        cores: cores().unwrap_or(threads),
-        threads,
-        base_mhz: base,
-        boost_mhz: boost,
-    })
+    Some(Cpu { name, cores: cores().unwrap_or(threads), threads, base_mhz: base, boost_mhz: boost })
 }
 
-/// `(base, boost)` in MHz. Windows gives the base; only Intel processors tell their maximum
-/// (CPUID leaf 0x16), AMD keeps it in registers a program cannot read.
+/// `(base, boost)` in MHz. Windows gives the base; only Intel processors tell their maximum (CPUID leaf 0x16), AMD
+/// keeps it in registers a program cannot read.
 fn frequencies() -> (u32, u32) {
     let mut mhz = 0u32;
     let mut size = size_of::<u32>() as u32;
@@ -129,19 +111,13 @@ fn cores() -> Option<u32> {
     // u64 for the alignment of the records.
     let mut buffer = vec![0u64; (size as usize).div_ceil(8)];
     // SAFETY: `buffer` holds at least `size` bytes, suitably aligned.
-    unsafe {
-        GetLogicalProcessorInformationEx(
-            RelationProcessorCore,
-            Some(buffer.as_mut_ptr().cast()),
-            &raw mut size,
-        )
-    }
-    .ok()?;
+    unsafe { GetLogicalProcessorInformationEx(RelationProcessorCore, Some(buffer.as_mut_ptr().cast()), &raw mut size) }
+        .ok()?;
     let bytes = buffer.as_ptr().cast::<u8>();
     let (mut offset, mut count) = (0usize, 0u32);
     while offset + 8 <= size as usize {
-        // SAFETY: each record starts with its relationship and its size (both u32), inside the
-        // `size` bytes the call filled.
+        // SAFETY: each record starts with its relationship and its size (both u32), inside the `size` bytes the call
+        // filled.
         let record = unsafe { bytes.add(offset).cast::<[u32; 2]>().read_unaligned() };
         if record[1] == 0 {
             break;
@@ -175,10 +151,7 @@ fn modules() -> Vec<Module> {
         return Vec::new();
     }
     // RawSMBIOSData: 4 bytes of version, the length of the tables, the tables.
-    let Some(len) = raw
-        .get(4..8)
-        .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-    else {
+    let Some(len) = raw.get(4..8).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]])) else {
         return Vec::new();
     };
     let tables = &raw[8..raw.len().min(8 + len as usize)];
@@ -208,16 +181,8 @@ fn smbios_modules(tables: &[u8]) -> Vec<Module> {
                 .map(|s| String::from_utf8_lossy(s).trim().to_owned())
                 .unwrap_or_default()
         };
-        let word = |o: usize| {
-            formatted
-                .get(o..o + 2)
-                .map_or(0, |b| u16::from_le_bytes([b[0], b[1]]))
-        };
-        let dword = |o: usize| {
-            formatted
-                .get(o..o + 4)
-                .map_or(0, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-        };
+        let word = |o: usize| formatted.get(o..o + 2).map_or(0, |b| u16::from_le_bytes([b[0], b[1]]));
+        let dword = |o: usize| formatted.get(o..o + 4).map_or(0, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
         match kind {
             17 => {
                 let size = word(0x0c);
@@ -264,9 +229,9 @@ fn smbios_modules(tables: &[u8]) -> Vec<Module> {
     out
 }
 
-/// The CAS latency the maker writes in its part number after the speed: `F5-6000J3038F16G`
-/// (G.Skill), `CMK32GX5M2B6000C30` or `…Z30` (Corsair), `KF560C30-16` (Kingston), `FF3D532G6000HC38A`
-/// (TeamGroup). 0 when the number does not say (sticks sold at the standard timings).
+/// The CAS latency the maker writes in its part number after the speed: `F5-6000J3038F16G` (G.Skill),
+/// `CMK32GX5M2B6000C30` or `…Z30` (Corsair), `KF560C30-16` (Kingston), `FF3D532G6000HC38A` (TeamGroup). 0 when the
+/// number does not say (sticks sold at the standard timings).
 fn latency(part: &str) -> u32 {
     let b = part.as_bytes();
     for i in 0..b.len() {
@@ -294,10 +259,7 @@ fn latency(part: &str) -> u32 {
 
 /// The memory free right now, in bytes (`None` when it cannot be read).
 pub fn free_ram_bytes() -> Option<u64> {
-    let mut status = MEMORYSTATUSEX {
-        dwLength: size_of::<MEMORYSTATUSEX>() as u32,
-        ..Default::default()
-    };
+    let mut status = MEMORYSTATUSEX { dwLength: size_of::<MEMORYSTATUSEX>() as u32, ..Default::default() };
     // SAFETY: `status` is a valid structure with its length set.
     unsafe { GlobalMemoryStatusEx(&raw mut status) }.ok()?;
     Some(status.ullAvailPhys)
@@ -321,20 +283,12 @@ fn gpus() -> Vec<Gpu> {
         if desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 != 0 || !first_sight(&mut seen, &desc) {
             continue;
         }
-        let len = desc
-            .Description
-            .iter()
-            .position(|c| *c == 0)
-            .unwrap_or(desc.Description.len());
+        let len = desc.Description.iter().position(|c| *c == 0).unwrap_or(desc.Description.len());
         let integrated = shares_memory(&adapter).unwrap_or(false);
         out.push(Gpu {
             name: String::from_utf16_lossy(&desc.Description[..len]),
             integrated,
-            memory_bytes: if integrated {
-                0
-            } else {
-                desc.DedicatedVideoMemory as u64
-            },
+            memory_bytes: if integrated { 0 } else { desc.DedicatedVideoMemory as u64 },
         });
     }
     // The graphics card first, the processor's graphics after.
@@ -342,20 +296,11 @@ fn gpus() -> Vec<Gpu> {
     out
 }
 
-/// Whether this adapter is a card not met yet in the enumeration. On some multi-GPU PCs
-/// Windows lists the card driving the desktop twice, at times under another LUID: the same
-/// model, board and memory is taken for the same card (two identical cards show as one).
-pub(crate) fn first_sight(
-    seen: &mut Vec<(u32, u32, u32, u32, usize)>,
-    desc: &DXGI_ADAPTER_DESC1,
-) -> bool {
-    let card = (
-        desc.VendorId,
-        desc.DeviceId,
-        desc.SubSysId,
-        desc.Revision,
-        desc.DedicatedVideoMemory,
-    );
+/// Whether this adapter is a card not met yet in the enumeration. On some multi-GPU PCs Windows lists the card driving
+/// the desktop twice, at times under another LUID: the same model, board and memory is taken for the same card (two
+/// identical cards show as one).
+pub(crate) fn first_sight(seen: &mut Vec<(u32, u32, u32, u32, usize)>, desc: &DXGI_ADAPTER_DESC1) -> bool {
+    let card = (desc.VendorId, desc.DeviceId, desc.SubSysId, desc.Revision, desc.DedicatedVideoMemory);
     if seen.contains(&card) {
         return false;
     }
@@ -363,8 +308,7 @@ pub(crate) fn first_sight(
     true
 }
 
-/// Whether the adapter works in the system memory (Direct3D 12 calls it UMA): the graphics of
-/// the processor.
+/// Whether the adapter works in the system memory (Direct3D 12 calls it UMA): the graphics of the processor.
 fn shares_memory(adapter: &IDXGIAdapter1) -> Option<bool> {
     let mut device: Option<ID3D12Device> = None;
     // SAFETY: `adapter` is valid; the device is released when dropped.
@@ -382,22 +326,14 @@ fn shares_memory(adapter: &IDXGIAdapter1) -> Option<bool> {
     Some(data.UMA.as_bool())
 }
 
-/// `(free, total)` bytes of the disk that holds `dir` (or the nearest folder above it that
-/// exists), as this user may fill it.
+/// `(free, total)` bytes of the disk that holds `dir` (or the nearest folder above it that exists), as this user may
+/// fill it.
 pub fn disk_space(dir: &std::path::Path) -> Option<(u64, u64)> {
     let dir = dir.ancestors().find(|d| d.is_dir())?;
     let path = HSTRING::from(dir.as_os_str());
     let (mut free, mut total) = (0u64, 0u64);
     // SAFETY: a NUL-terminated path and valid out-pointers.
-    unsafe {
-        GetDiskFreeSpaceExW(
-            PCWSTR(path.as_ptr()),
-            Some(&raw mut free),
-            Some(&raw mut total),
-            None,
-        )
-    }
-    .ok()?;
+    unsafe { GetDiskFreeSpaceExW(PCWSTR(path.as_ptr()), Some(&raw mut free), Some(&raw mut total), None) }.ok()?;
     Some((free, total))
 }
 
@@ -405,10 +341,7 @@ pub fn disk_space(dir: &std::path::Path) -> Option<(u64, u64)> {
 fn disks() -> Vec<Disk> {
     // SAFETY: no arguments.
     let mask = unsafe { GetLogicalDrives() };
-    (0..26u8)
-        .filter(|i| mask & (1 << i) != 0)
-        .filter_map(|i| volume(char::from(b'A' + i)))
-        .collect()
+    (0..26u8).filter(|i| mask & (1 << i) != 0).filter_map(|i| volume(char::from(b'A' + i))).collect()
 }
 
 fn volume(letter: char) -> Option<Disk> {
@@ -419,45 +352,19 @@ fn volume(letter: char) -> Option<Disk> {
     }
     let (mut total, mut free) = (0u64, 0u64);
     // SAFETY: valid out-pointers.
-    unsafe {
-        GetDiskFreeSpaceExW(
-            PCWSTR(root.as_ptr()),
-            None,
-            Some(&raw mut total),
-            Some(&raw mut free),
-        )
-    }
-    .ok()?;
+    unsafe { GetDiskFreeSpaceExW(PCWSTR(root.as_ptr()), None, Some(&raw mut total), Some(&raw mut free)) }.ok()?;
     let mut name = [0u16; 261];
     // SAFETY: `name` is a writable buffer; the other outputs are not asked for.
-    let label = unsafe {
-        GetVolumeInformationW(
-            PCWSTR(root.as_ptr()),
-            Some(&mut name),
-            None,
-            None,
-            None,
-            None,
-        )
-    }
-    .map_or_else(
-        |_| String::new(),
-        |()| {
-            let len = name.iter().position(|c| *c == 0).unwrap_or(0);
-            String::from_utf16_lossy(&name[..len])
-        },
-    );
-    let model = disk_number(letter)
-        .and_then(physical_disk)
-        .map(|(model, _)| model)
-        .unwrap_or_default();
-    Some(Disk {
-        letter: format!("{letter}:"),
-        label,
-        model,
-        bytes: total,
-        free_bytes: free,
-    })
+    let label = unsafe { GetVolumeInformationW(PCWSTR(root.as_ptr()), Some(&mut name), None, None, None, None) }
+        .map_or_else(
+            |_| String::new(),
+            |()| {
+                let len = name.iter().position(|c| *c == 0).unwrap_or(0);
+                String::from_utf16_lossy(&name[..len])
+            },
+        );
+    let model = disk_number(letter).and_then(physical_disk).map(|(model, _)| model).unwrap_or_default();
+    Some(Disk { letter: format!("{letter}:"), label, model, bytes: total, free_bytes: free })
 }
 
 /// The physical disk a volume is on (`\\.\C:`, opened without read access).
@@ -495,8 +402,7 @@ fn disk_number(letter: char) -> Option<u32> {
     asked.ok().map(|()| number.DeviceNumber)
 }
 
-/// `\\.\PhysicalDriveN`, opened without read access (no administrator rights needed): its
-/// model and size.
+/// `\\.\PhysicalDriveN`, opened without read access (no administrator rights needed): its model and size.
 fn physical_disk(n: u32) -> Option<(String, u64)> {
     let path = HSTRING::from(format!(r"\\.\PhysicalDrive{n}"));
     // SAFETY: a NUL-terminated path; the handle is closed below.
@@ -557,21 +463,13 @@ fn physical_disk(n: u32) -> Option<(String, u64)> {
             // SAFETY: the buffer is `descriptor.len() * 8` bytes, all initialised.
             unsafe { std::slice::from_raw_parts(descriptor.as_ptr().cast(), descriptor.len() * 8) };
         // SAFETY: the buffer starts with the descriptor (u64-aligned, large enough).
-        let head = unsafe {
-            descriptor
-                .as_ptr()
-                .cast::<STORAGE_DEVICE_DESCRIPTOR>()
-                .read()
-        };
+        let head = unsafe { descriptor.as_ptr().cast::<STORAGE_DEVICE_DESCRIPTOR>().read() };
         let text = |offset: u32| {
             let start = offset as usize;
             if start == 0 || start >= raw.len() {
                 return String::new();
             }
-            let end = raw[start..]
-                .iter()
-                .position(|b| *b == 0)
-                .map_or(raw.len(), |p| start + p);
+            let end = raw[start..].iter().position(|b| *b == 0).map_or(raw.len(), |p| start + p);
             String::from_utf8_lossy(&raw[start..end]).trim().to_owned()
         };
         let (vendor, product) = (text(head.VendorIdOffset), text(head.ProductIdOffset));
@@ -591,13 +489,7 @@ fn physical_disk(n: u32) -> Option<(String, u64)> {
 fn screens() -> Vec<Screen> {
     let (mut paths_len, mut modes_len) = (0u32, 0u32);
     // SAFETY: valid out-pointers.
-    let status = unsafe {
-        GetDisplayConfigBufferSizes(
-            QDC_ONLY_ACTIVE_PATHS,
-            &raw mut paths_len,
-            &raw mut modes_len,
-        )
-    };
+    let status = unsafe { GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &raw mut paths_len, &raw mut modes_len) };
     if status != ERROR_SUCCESS {
         return Vec::new();
     }
@@ -631,17 +523,11 @@ fn screens() -> Vec<Screen> {
             name.header.id = target.id;
             // SAFETY: `name` starts with its header, whose size field is set.
             let _ = unsafe { DisplayConfigGetDeviceInfo(&raw mut name.header) };
-            let len = name
-                .monitorFriendlyDeviceName
-                .iter()
-                .position(|c| *c == 0)
-                .unwrap_or(0);
+            let len = name.monitorFriendlyDeviceName.iter().position(|c| *c == 0).unwrap_or(0);
             // SAFETY: without QDC_VIRTUAL_MODE_AWARE the union holds the index of the mode.
             let index = unsafe { path.sourceInfo.Anonymous.modeInfoIdx } as usize;
             // SAFETY: the mode a source path points to is a source mode.
-            let source = modes
-                .get(index)
-                .map(|m| unsafe { m.Anonymous.sourceMode })?;
+            let source = modes.get(index).map(|m| unsafe { m.Anonymous.sourceMode })?;
             let rate = target.refreshRate;
             let hz = if rate.Denominator == 0 {
                 0
@@ -656,23 +542,12 @@ fn screens() -> Vec<Screen> {
             gdi.header.id = path.sourceInfo.id;
             // SAFETY: `gdi` starts with its header, whose size field is set.
             let _ = unsafe { DisplayConfigGetDeviceInfo(&raw mut gdi.header) };
-            let gdi_len = gdi
-                .viewGdiDeviceName
-                .iter()
-                .position(|c| *c == 0)
-                .unwrap_or(0);
+            let gdi_len = gdi.viewGdiDeviceName.iter().position(|c| *c == 0).unwrap_or(0);
             let gdi_name = String::from_utf16_lossy(&gdi.viewGdiDeviceName[..gdi_len]);
-            let gdi = gdi_name
-                .trim_start_matches(|c: char| !c.is_ascii_digit())
-                .parse()
-                .unwrap_or(u32::MAX);
-            // The display settings number the screens by their output: its adapter, then its
-            // target (not the `DISPLAY` number, which can differ).
-            let output = (
-                target.adapterId.LowPart,
-                target.adapterId.HighPart,
-                target.id,
-            );
+            let gdi = gdi_name.trim_start_matches(|c: char| !c.is_ascii_digit()).parse().unwrap_or(u32::MAX);
+            // The display settings number the screens by their output: its adapter, then its target (not the `DISPLAY`
+            // number, which can differ).
+            let output = (target.adapterId.LowPart, target.adapterId.HighPart, target.id);
             Some((
                 (gdi, output),
                 Screen {
@@ -690,14 +565,7 @@ fn screens() -> Vec<Screen> {
     screens.sort_by_key(|((gdi, output), _)| (*gdi, *output));
     screens.dedup_by_key(|((gdi, _), _)| *gdi);
     screens.sort_by_key(|((_, output), _)| *output);
-    screens
-        .into_iter()
-        .enumerate()
-        .map(|(i, (_, screen))| Screen {
-            number: i as u32 + 1,
-            ..screen
-        })
-        .collect()
+    screens.into_iter().enumerate().map(|(i, (_, screen))| Screen { number: i as u32 + 1, ..screen }).collect()
 }
 
 #[cfg(test)]
@@ -738,22 +606,12 @@ mod tests {
         t.extend_from_slice(b"F5-6000J3038F16G\0\0");
         t.extend_from_slice(&[127, 4, 0, 0, 0, 0]);
         let m = super::smbios_modules(&t);
-        assert_eq!(
-            m,
-            [super::Module {
-                bytes: 32 << 30,
-                kind: "DDR5".into(),
-                mts: 6000,
-                cl: 30,
-            }]
-        );
+        assert_eq!(m, [super::Module { bytes: 32 << 30, kind: "DDR5".into(), mts: 6000, cl: 30 }]);
     }
 
     #[test]
     fn the_free_space_of_a_folder_yet_to_be_made_is_its_disk_s() {
-        let dir = std::env::temp_dir()
-            .join("vixeeny-not-there")
-            .join("deeper");
+        let dir = std::env::temp_dir().join("vixeeny-not-there").join("deeper");
         let (free, total) = super::disk_space(&dir).expect("the temp disk");
         assert!(total > 0 && free <= total, "{free} / {total}");
     }

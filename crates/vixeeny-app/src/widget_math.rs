@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The pure parts of the recording widget: where it goes and how the two processes talk.
-//! (The widget is a process of its own, `vixeeny-app --widget …`, so the action loop of the app
-//! keeps answering the daemon while it is on screen.)
+//! The pure parts of the recording widget: where it goes and how the two processes talk. (The widget is a process of
+//! its own, `vixeeny-app --widget …`, so the action loop of the app keeps answering the daemon while it is on screen.)
 use vixeeny_common::i18n::{Key, Lang, size_label, tr};
 /// The window's size at 96 DPI, in pixels: the bar and room around it for its shadow.
 pub use vixeeny_overlay::widget::{Alert, HEIGHT, WIDTH};
@@ -9,8 +8,8 @@ use vixeeny_platform::PhysicalRect;
 /// Gap from the window to the screen edge at 96 DPI (the bar is 16 px from it).
 pub const MARGIN: u32 = 6;
 
-/// Where the widget's window can be on a monitor's work area (physical pixels; `dpi` 96 =
-/// 100 %): its left-most and right-most x, its top-most and lowest y, and its size.
+/// Where the widget's window can be on a monitor's work area (physical pixels; `dpi` 96 = 100 %): its left-most and
+/// right-most x, its top-most and lowest y, and its size.
 fn room(work: PhysicalRect, dpi: u32) -> ((i32, i32), (i32, i32), (u32, u32)) {
     let scale = |v: u32| (u64::from(v) * u64::from(dpi.max(48)) / 96) as u32;
     let (w, h, m) = (scale(WIDTH), scale(HEIGHT), scale(MARGIN));
@@ -22,18 +21,11 @@ fn room(work: PhysicalRect, dpi: u32) -> ((i32, i32), (i32, i32), (u32, u32)) {
     ((left, right), (top, bottom), (w, h))
 }
 
-/// The widget's window, in physical pixels, at `corner` of a monitor's work
-/// area (`custom`: at `custom`, fractions of the room across and down, see
-/// [`vixeeny_common::config::RecordingWidget::custom`]).
-pub fn corner_geometry(
-    corner: &str,
-    custom: (f32, f32),
-    work: PhysicalRect,
-    dpi: u32,
-) -> PhysicalRect {
+/// The widget's window, in physical pixels, at `corner` of a monitor's work area (`custom`: at `custom`, fractions of
+/// the room across and down, see [`vixeeny_common::config::RecordingWidget::custom`]).
+pub fn corner_geometry(corner: &str, custom: (f32, f32), work: PhysicalRect, dpi: u32) -> PhysicalRect {
     let ((left, right), (top, bottom), (w, h)) = room(work, dpi);
-    let along =
-        |lo: i32, hi: i32, f: f32| lo + ((hi - lo) as f32 * f.clamp(0.0, 1.0)).round() as i32;
+    let along = |lo: i32, hi: i32, f: f32| lo + ((hi - lo) as f32 * f.clamp(0.0, 1.0)).round() as i32;
     let (fx, fy) = match corner {
         "top_center" => (0.5, 0.0),
         "top_right" => (1.0, 0.0),
@@ -63,10 +55,7 @@ impl ToWidget {
     pub fn to_line(&self) -> String {
         match self {
             Self::State { paused, elapsed_ms } => {
-                format!(
-                    "state {} {elapsed_ms}\n",
-                    if *paused { "paused" } else { "recording" }
-                )
+                format!("state {} {elapsed_ms}\n", if *paused { "paused" } else { "recording" })
             }
             Self::Alert(level, text) => {
                 let level = match level {
@@ -113,10 +102,7 @@ impl ToWidget {
                     "recording" => false,
                     _ => return None,
                 };
-                Some(Self::State {
-                    paused,
-                    elapsed_ms: parts.next()?.parse().ok()?,
-                })
+                Some(Self::State { paused, elapsed_ms: parts.next()?.parse().ok()? })
             }
             _ => None,
         }
@@ -139,8 +125,7 @@ impl Health {
     /// The disk has less than `disk_percent` % free (never with 0).
     pub fn disk_low(&self, disk_percent: u8) -> bool {
         self.disk.is_some_and(|(free, total)| {
-            disk_percent > 0
-                && u128::from(free) * 100 < u128::from(total) * u128::from(disk_percent)
+            disk_percent > 0 && u128::from(free) * 100 < u128::from(total) * u128::from(disk_percent)
         })
     }
 
@@ -150,18 +135,12 @@ impl Health {
         let mut lines = Vec::new();
         if self.lost_frames > 0 {
             level = Alert::Warning;
-            lines.push(
-                tr(Key::WidgetFramesLost, lang).replace("{n}", &self.lost_frames.to_string()),
-            );
+            lines.push(tr(Key::WidgetFramesLost, lang).replace("{n}", &self.lost_frames.to_string()));
         }
         if let Some((free, _)) = self.disk
             && self.disk_low(disk_percent)
         {
-            level = if free < DISK_CRITICAL {
-                Alert::Critical
-            } else {
-                level.max(Alert::Warning)
-            };
+            level = if free < DISK_CRITICAL { Alert::Critical } else { level.max(Alert::Warning) };
             lines.push(tr(Key::WidgetDiskLow, lang).replace("{size}", &size_label(free, lang)));
         }
         (level, lines.join("\n"))
@@ -201,10 +180,7 @@ mod tests {
     #[test]
     fn corners_hug_the_edges_with_a_margin_scaled_by_dpi() {
         let monitor = PhysicalRect::new(1920, 0, 2560, 1440); // a second monitor to the right
-        assert_eq!(
-            corner_geometry("top_left", (0.0, 0.0), monitor, 96),
-            PhysicalRect::new(1926, 6, 216, 60)
-        );
+        assert_eq!(corner_geometry("top_left", (0.0, 0.0), monitor, 96), PhysicalRect::new(1926, 6, 216, 60));
         assert_eq!(
             corner_geometry("top_right", (0.0, 0.0), monitor, 96),
             PhysicalRect::new(1920 + 2560 - 216 - 6, 6, 216, 60)
@@ -228,23 +204,11 @@ mod tests {
     fn the_middles_and_a_custom_place_share_the_room_left() {
         let work = PhysicalRect::new(0, 0, 1920, 1032); // above a 48-pixel taskbar
         // 1920 - 216 - 2 × 6 = 1692 pixels of room across, 1032 - 60 - 12 = 960 down.
-        assert_eq!(
-            corner_geometry("top_center", (0.0, 0.0), work, 96),
-            PhysicalRect::new(852, 6, 216, 60)
-        );
-        assert_eq!(
-            corner_geometry("bottom_center", (0.0, 0.0), work, 96),
-            PhysicalRect::new(852, 966, 216, 60)
-        );
-        assert_eq!(
-            corner_geometry("custom", (0.25, 0.5), work, 96),
-            PhysicalRect::new(429, 486, 216, 60)
-        );
+        assert_eq!(corner_geometry("top_center", (0.0, 0.0), work, 96), PhysicalRect::new(852, 6, 216, 60));
+        assert_eq!(corner_geometry("bottom_center", (0.0, 0.0), work, 96), PhysicalRect::new(852, 966, 216, 60));
+        assert_eq!(corner_geometry("custom", (0.25, 0.5), work, 96), PhysicalRect::new(429, 486, 216, 60));
         // A place out of range stays on the screen.
-        assert_eq!(
-            corner_geometry("custom", (3.0, -1.0), work, 96),
-            PhysicalRect::new(1698, 6, 216, 60)
-        );
+        assert_eq!(corner_geometry("custom", (3.0, -1.0), work, 96), PhysicalRect::new(1698, 6, 216, 60));
     }
 
     #[test]
@@ -252,14 +216,8 @@ mod tests {
         for m in [
             ToWidget::Alert(Alert::Warning, "a \\ b\nc".into()),
             ToWidget::Alert(Alert::None, String::new()),
-            ToWidget::State {
-                paused: false,
-                elapsed_ms: 0,
-            },
-            ToWidget::State {
-                paused: true,
-                elapsed_ms: 3_725_000,
-            },
+            ToWidget::State { paused: false, elapsed_ms: 0 },
+            ToWidget::State { paused: true, elapsed_ms: 3_725_000 },
             ToWidget::Quit,
         ] {
             assert_eq!(ToWidget::parse(&m.to_line()), Some(m.clone()));
@@ -270,14 +228,7 @@ mod tests {
         for bad in ["moved 0.5 0.5", "stop now"] {
             assert_eq!(FromWidget::parse(bad), None, "{bad}");
         }
-        for bad in [
-            "",
-            "state",
-            "state running 5",
-            "state paused x",
-            "dance",
-            "alert loud x",
-        ] {
+        for bad in ["", "state", "state running 5", "state paused x", "dance", "alert loud x"] {
             assert_eq!(ToWidget::parse(bad), None, "{bad}");
         }
         assert_eq!(FromWidget::parse("go"), None);
@@ -288,25 +239,16 @@ mod tests {
         let en = Lang::En;
         const GB: u64 = 1 << 30;
         assert_eq!(Health::default().alert(5, en), (Alert::None, String::new()));
-        let lost = Health {
-            lost_frames: 42,
-            disk: Some((500 * GB, 1000 * GB)),
-        };
+        let lost = Health { lost_frames: 42, disk: Some((500 * GB, 1000 * GB)) };
         let (level, text) = lost.alert(5, en);
         assert_eq!(level, Alert::Warning);
         assert!(text.starts_with("42 frame"), "{text}");
         // Under 5 % free: a warning; under 1 GB: red.
-        let low = Health {
-            lost_frames: 0,
-            disk: Some((40 * GB, 1000 * GB)),
-        };
+        let low = Health { lost_frames: 0, disk: Some((40 * GB, 1000 * GB)) };
         assert_eq!(low.alert(5, en).0, Alert::Warning);
         assert_eq!(low.alert(2, en).0, Alert::None);
         assert_eq!(low.alert(0, en).0, Alert::None);
-        let full = Health {
-            lost_frames: 3,
-            disk: Some((GB / 2, 1000 * GB)),
-        };
+        let full = Health { lost_frames: 3, disk: Some((GB / 2, 1000 * GB)) };
         let (level, text) = full.alert(5, Lang::Fr);
         assert_eq!(level, Alert::Critical);
         assert_eq!(text.lines().count(), 2);

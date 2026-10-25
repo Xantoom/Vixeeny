@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Audio encoders of the recorder: AAC (Media Foundation, or FFmpeg's own),
-//! Opus, FLAC, PCM. Input is 48 kHz 32-bit float in 2, 6 (5.1) or 8 (7.1) channels; swresample
-//! converts to whatever the encoder wants, and a FIFO cuts the frame size it asks for.
+//! Audio encoders of the recorder: AAC (Media Foundation, or FFmpeg's own), Opus, FLAC, PCM. Input is 48 kHz 32-bit
+//! float in 2, 6 (5.1) or 8 (7.1) channels; swresample converts to whatever the encoder wants, and a FIFO cuts the
+//! frame size it asks for.
 
 use ffmpeg_next::format::Sample;
 use ffmpeg_next::format::sample::Type as SampleType;
@@ -49,8 +49,7 @@ impl AudioCodec {
 
     /// What `auto` stands for.
     pub const fn auto(container: OutputContainer, video: Family) -> Self {
-        if matches!(video, Family::Av1 | Family::Vp9) || matches!(container, OutputContainer::WebM)
-        {
+        if matches!(video, Family::Av1 | Family::Vp9) || matches!(container, OutputContainer::WebM) {
             Self::Opus
         } else {
             Self::Aac
@@ -60,8 +59,8 @@ impl AudioCodec {
     /// FFmpeg encoder names to try, best first, for `kbps` kbit/s.
     pub(crate) fn encoder_names(self, kbps: usize) -> &'static [&'static str] {
         match self {
-            // Media Foundation's AAC encoder only knows 96 to 192 kbit/s and quietly gives 192
-            // above: FFmpeg's own encoder takes the higher rates.
+            // Media Foundation's AAC encoder only knows 96 to 192 kbit/s and quietly gives 192 above: FFmpeg's own
+            // encoder takes the higher rates.
             Self::Aac if kbps > 192 => &["aac"],
             Self::Aac => &["aac_mf", "aac"],
             Self::Opus => &["libopus"],
@@ -85,11 +84,10 @@ pub struct AudioTrackConfig {
 }
 
 impl AudioCodec {
-    /// Whether the codec can carry more than two channels in `container`. AAC (Media Foundation)
-    /// and the WebM/MP4 players in the wild cannot be counted on, so those stay stereo.
+    /// Whether the codec can carry more than two channels in `container`. AAC (Media Foundation) and the WebM/MP4
+    /// players in the wild cannot be counted on, so those stay stereo.
     pub fn surround_in(self, container: OutputContainer) -> bool {
-        container == OutputContainer::Mkv
-            && matches!(self, Self::Opus | Self::Flac | Self::Pcm16 | Self::Pcm24)
+        container == OutputContainer::Mkv && matches!(self, Self::Opus | Self::Flac | Self::Pcm16 | Self::Pcm24)
     }
 }
 
@@ -107,11 +105,7 @@ pub(crate) struct AudioEncoder {
 
 impl AudioEncoder {
     pub(crate) fn open(cfg: &AudioTrackConfig, global_header: bool) -> Result<Self, RecordError> {
-        let channels = if matches!(cfg.channels, 1 | 2 | 6 | 8) {
-            cfg.channels
-        } else {
-            2
-        };
+        let channels = if matches!(cfg.channels, 1 | 2 | 6 | 8) { cfg.channels } else { 2 };
         // The setting is for a stereo pair: surround gets its share per extra pair.
         let kbps = cfg.bitrate_kbps as usize * channels.max(2) / 2;
         let codec = cfg
@@ -119,12 +113,8 @@ impl AudioEncoder {
             .encoder_names(kbps)
             .iter()
             .find_map(|n| encoder::find_by_name(n))
-            .ok_or_else(|| {
-                RecordError::Config(format!("no encoder for {:?} in this FFmpeg", cfg.codec))
-            })?;
-        let mut ctx = codec::context::Context::new_with_codec(codec)
-            .encoder()
-            .audio()?;
+            .ok_or_else(|| RecordError::Config(format!("no encoder for {:?} in this FFmpeg", cfg.codec)))?;
+        let mut ctx = codec::context::Context::new_with_codec(codec).encoder().audio()?;
         let format = codec
             .audio()
             .ok()
@@ -136,10 +126,7 @@ impl AudioEncoder {
         ctx.set_channel_layout(layout);
         ctx.set_format(format);
         ctx.set_time_base(Rational(1, SAMPLE_RATE as i32));
-        if !matches!(
-            cfg.codec,
-            AudioCodec::Flac | AudioCodec::Pcm16 | AudioCodec::Pcm24
-        ) {
+        if !matches!(cfg.codec, AudioCodec::Flac | AudioCodec::Pcm16 | AudioCodec::Pcm24) {
             ctx.set_bit_rate(kbps * 1000);
         }
         if global_header {
@@ -164,15 +151,7 @@ impl AudioEncoder {
             0 => 960,
             n => n,
         };
-        Ok(Self {
-            encoder: opened,
-            codec,
-            resampler,
-            fifo: Vec::new(),
-            frame_samples,
-            channels,
-            next_pts: 0,
-        })
+        Ok(Self { encoder: opened, codec, resampler, fifo: Vec::new(), frame_samples, channels, next_pts: 0 })
     }
 
     pub(crate) fn channels(&self) -> usize {
@@ -206,11 +185,7 @@ impl AudioEncoder {
 
     fn encode(&mut self, interleaved: &[f32], out: &mut Vec<Packet>) -> Result<(), RecordError> {
         let frames = interleaved.len() / self.channels;
-        let mut input = frame::Audio::new(
-            Sample::F32(SampleType::Packed),
-            frames,
-            layout_of(self.channels),
-        );
+        let mut input = frame::Audio::new(Sample::F32(SampleType::Packed), frames, layout_of(self.channels));
         input.set_rate(SAMPLE_RATE);
         let bytes: &[u8] = bytemuck_cast(interleaved);
         input.data_mut(0)[..bytes.len()].copy_from_slice(bytes);

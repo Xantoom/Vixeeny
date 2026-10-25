@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// The settings window: the tabs on the left, under the name of the program; the page
-// on the right, its settings in cards, one card per group under the group's title. Rows are generic (a
-// toggle, a choice, a folder…); the shortcuts, the updates and the about page have their own
-// layouts. Plain Slint elements only (std-widgets would pull the SVG decoder in for its icons).
+// The settings window: the tabs on the left, under the name of the program; the page on the right, its settings in
+// cards, one card per group under the group's title. Rows are generic (a toggle, a choice, a folder…); the shortcuts,
+// the updates and the about page have their own layouts. Plain Slint elements only (std-widgets would pull the SVG
+// decoder in for its icons).
 import { Theme, Icons, Icon, Card, Button, IconButton, Toggle, TextBox, ComboBox, NumberBox, Slider, NavItem, Group, GroupRow, InfoBar, ScrollArea, ProgressBar, SearchBox, ScreenPicker, LevelMeter, ColourField, Tip, TipLayer } from "controls.slint";
 
 // A choice of a list with pictures (a program to record).
@@ -18,11 +18,10 @@ export struct SettingRow {
     detail: string,
     // Belongs to the row above it (a program of its list): set in.
     nested: bool,
-    // 0 toggle, 1 choice, 2 number, 3 text, 4 folder, 5 info, 8 slider,
-    // 9 expander (`on`: open), 10 choice of a screen edge, 11 choice of a place on the screen
-    // (its own place, if any, in `min` and `max`: thousandths across and down, else -1),
-    // 12 colour (one, or a gradient's two: `colours`, their codes in `options`),
-    // 13 button (its text in `text`)
+    // 0 toggle, 1 choice, 2 number, 3 text, 4 folder, 5 info, 8 slider, 9 expander (`on`: open), 10 choice of a screen
+    // edge, 11 choice of a place on the screen (its own place, if any, in `min` and `max`: thousandths across and down,
+    // else -1), 12 colour (one, or a gradient's two: `colours`, their codes in `options`), 13 button (its text in
+    // `text`)
     kind: int,
     enabled: bool,
     on: bool,
@@ -52,7 +51,6 @@ export struct SettingRow {
     // The options that usually do harm, in the warning colour.
     cautions: [bool],
     selected: int,
-    // The choices of an "add" row.
     // A picture before the label (a program's icon).
     icon: image,
     has-icon: bool,
@@ -107,8 +105,8 @@ component Page inherits ScrollArea {
     }
 }
 
-// One part of this computer: its icon (a screen: its outline, to scale), a figure or a name,
-// a short line; a disk, how full it is.
+// One part of this computer: its icon (a screen: its outline, to scale), a figure or a name, a short line; a disk, how
+// full it is.
 component PcCard inherits Card {
     in property <PcTile> tile;
     HorizontalLayout {
@@ -196,8 +194,7 @@ component PcCard inherits Card {
     accessible-label: root.tile.tip + ": " + root.tile.title + " " + root.tile.detail;
 }
 
-// Cards side by side on one row (`max-rows`: on more when they do not fit), the last row
-// sharing its width.
+// Cards side by side on one row (`max-rows`: on more when they do not fit), the last row sharing its width.
 component PcTiles inherits Rectangle {
     in property <[PcTile]> tiles;
     in property <int> max-rows: 1;
@@ -255,8 +252,8 @@ export struct ShortcutKey {
     text: string,
     shown: string,
     slot: int,
-    // Kept by Windows or taken by another program (it does not reach Vixeeny): why, shown on
-    // hover over the red field (empty: it works).
+    // Kept by Windows or taken by another program (it does not reach Vixeeny): why, shown on hover over the red field
+    // (empty: it works).
     tip: string,
 }
 
@@ -362,8 +359,7 @@ component SettingLine inherits GroupRow {
         toggled(v) => { root.toggled(v); }
     }
     if root.entry.kind == 1 : ComboBox {
-        // Every value of the page has the same width; a long choice is cut here, whole in the
-        // list.
+        // Every value of the page has the same width; a long choice is cut here, whole in the list.
         width: Theme.value-w;
         options: root.entry.options;
         headings: root.entry.headings;
@@ -470,8 +466,8 @@ component SettingLine inherits GroupRow {
     }
 }
 
-// A shortcut of an action, as a field: its keys (or "none"); a click records new ones, shown
-// as they are held; the cross empties it.
+// A shortcut of an action, as a field: its keys (or "none"); a click records new ones, shown as they are held; the
+// cross empties it.
 component ShortcutField inherits Rectangle {
     in property <ShortcutKey> key;
     in property <bool> recording;
@@ -531,9 +527,9 @@ component ShortcutField inherits Rectangle {
     accessible-label: root.key.text != "" ? root.key.text : root.t.add-shortcut;
 }
 
-// One action of the shortcuts table, a row of its group's card: its name (and what went
-// wrong) on the left, its two shortcuts in the columns on the right. The second column is a
-// mere "+" until a second shortcut is set somewhere (`second-w` narrow).
+// One action of the shortcuts table, a row of its group's card: its name (and what went wrong) on the left, its two
+// shortcuts in the columns on the right. The second column is a mere "+" until a second shortcut is set somewhere
+// (`second-w` narrow).
 component ShortcutLine inherits Rectangle {
     in property <ShortcutRow> entry;
     in property <bool> recording-here;
@@ -663,15 +659,14 @@ export component SettingsWindow inherits Window {
     // The about page: the version.
     in property <string> version;
     in property <string> tagline;
-    // The updates page: 0 up to date (or not checked), 1 checking, 2 available, 3 downloading,
-    // 4 ready, 5 failed, 6 restarting
+    // The updates page: 0 up to date (or not checked), 1 checking, 2 available, 3 downloading, 4 ready, 5 failed, 6
+    // restarting
     in property <int> update-state: 0;
     in property <string> update-title;
     in property <string> update-detail;
     in property <float> update-progress: 0;
     in property <string> update-action;
-    // The page holds a setting changed from how it comes (its reset button works), and the
-    // question its reset asks.
+    // The page holds a setting changed from how it comes (its reset button works), and the question its reset asks.
     in property <bool> page-changed;
     in property <string> reset-page-title;
     // The question on screen: 0 none, 1 reset the page, 2 reset everything.
@@ -749,8 +744,8 @@ export component SettingsWindow inherits Window {
         triggered => { self.running = false; root.page-settled = true; }
     }
 
-    // Placed by hand rather than by a layout: the width of the navigation follows the width of
-    // the window, which a layout would make depend on the navigation in turn.
+    // Placed by hand rather than by a layout: the width of the navigation follows the width of the window, which a
+    // layout would make depend on the navigation in turn.
     nav := Rectangle {
         x: 0px;
         y: 0px;
@@ -849,9 +844,9 @@ export component SettingsWindow inherits Window {
         // The column of the page: as wide as the window allows, up to a comfortable width.
         property <length> column: min(self.width - 56px, 1000px);
 
-        // ---- the title of the page, on the line of the first tab: their texts share a baseline
-        // (both are centred in the same height; the baseline sits ≈ 0.41 em under the centre,
-        // so the larger title is raised by the difference).
+        // ---- the title of the page, on the line of the first tab: their texts share a baseline (both are centred in
+        // the same height; the baseline sits ≈ 0.41 em under the centre, so the larger title is raised by the
+        // difference).
         page-title := Text {
             x: 24px;
             y: root.top - (24px - 14px) * 0.41;
@@ -1010,8 +1005,7 @@ export component SettingsWindow inherits Window {
                 }
             }
 
-            // ---- shortcuts: a table, one row per action and a column per shortcut (two at
-            // most)
+            // ---- shortcuts: a table, one row per action and a column per shortcut (two at most)
             if root.section == 6 && !root.searching : Rectangle {
                 width: parent.width;
                 height: parent.height;
@@ -1121,8 +1115,7 @@ export component SettingsWindow inherits Window {
         }
         double-clicked => { root.toggle-maximized(); }
     }
-    // The search, in the title bar: over the middle of the page's column, clear of the
-    // window's buttons.
+    // The search, in the title bar: over the middle of the page's column, clear of the window's buttons.
     search := SearchBox {
         property <length> centre: nav.width + 24px + page.column / 2;
         property <length> room: min(self.centre - 140px, root.width - 3 * 46px - 24px - self.centre);

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! `cargo xtask bench-idle [--seconds N] [--daemon PATH]`: measures the idle CPU, wake-ups
-//! and memory of the daemon. Defaults to 10 minutes.
+//! `cargo xtask bench-idle [--seconds N] [--daemon PATH]`: measures the idle CPU, wake-ups and memory of the daemon.
+//! Defaults to 10 minutes.
 
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -28,11 +28,8 @@ pub fn run(args: &[String]) -> Result<()> {
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "--seconds" => {
-                seconds = it
-                    .next()
-                    .context("--seconds needs a value")?
-                    .parse()
-                    .context("--seconds must be a number")?;
+                seconds =
+                    it.next().context("--seconds needs a value")?.parse().context("--seconds must be a number")?;
             }
             "--daemon" => daemon = Some(PathBuf::from(it.next().context("--daemon needs a path")?)),
             other => bail!("unknown option `{other}`"),
@@ -48,10 +45,7 @@ pub fn run(args: &[String]) -> Result<()> {
     std::fs::create_dir_all(&scratch)?;
     let mut child = Command::new(&daemon)
         .env("VIXEENY_NO_AUTOSTART", "1")
-        .env(
-            "VIXEENY_IPC_NAME",
-            format!("vixeeny-bench-{}", std::process::id()),
-        )
+        .env("VIXEENY_IPC_NAME", format!("vixeeny-bench-{}", std::process::id()))
         .env("VIXEENY_CONFIG_DIR", scratch.join("config"))
         .env("VIXEENY_LOG_DIR", scratch.join("logs"))
         .stdin(Stdio::null())
@@ -82,8 +76,7 @@ fn measure(pid: u32, seconds: u64, child: &mut std::process::Child) -> Result<()
     let elapsed = t0.elapsed().as_secs_f64();
 
     let cpu_percent = (end.cpu_seconds - start.cpu_seconds) / elapsed * 100.0;
-    let wakeups =
-        end.context_switches.saturating_sub(start.context_switches) as f64 / elapsed * 60.0;
+    let wakeups = end.context_switches.saturating_sub(start.context_switches) as f64 / elapsed * 60.0;
     let mib = |b: f64| b / 1024.0 / 1024.0;
     let verdict = |ok: bool| if ok { "OK  " } else { "FAIL" };
 
@@ -102,17 +95,10 @@ fn measure(pid: u32, seconds: u64, child: &mut std::process::Child) -> Result<()
         mib(LIMIT_PRIVATE_BYTES),
         verdict(end.private_bytes < LIMIT_PRIVATE_BYTES)
     );
-    println!(
-        "  threads         {} (start {})",
-        end.threads, start.threads
-    );
-    println!(
-        "  context switches {} → {}",
-        start.context_switches, end.context_switches
-    );
-    let pass = cpu_percent <= LIMIT_CPU_PERCENT
-        && wakeups < LIMIT_WAKEUPS_PER_MIN
-        && end.private_bytes < LIMIT_PRIVATE_BYTES;
+    println!("  threads         {} (start {})", end.threads, start.threads);
+    println!("  context switches {} → {}", start.context_switches, end.context_switches);
+    let pass =
+        cpu_percent <= LIMIT_CPU_PERCENT && wakeups < LIMIT_WAKEUPS_PER_MIN && end.private_bytes < LIMIT_PRIVATE_BYTES;
     if !pass {
         bail!("idle targets not met");
     }
@@ -123,17 +109,14 @@ fn default_daemon() -> Result<PathBuf> {
     let mut path = std::env::current_exe()?;
     path.set_file_name("Vixeeny.exe");
     if !path.exists() {
-        bail!(
-            "{} not found; build it (`cargo build --release -p vixeeny-daemon`) or pass --daemon",
-            path.display()
-        );
+        bail!("{} not found; build it (`cargo build --release -p vixeeny-daemon`) or pass --daemon", path.display());
     }
     Ok(path)
 }
 
 fn sample(pid: u32) -> Result<Sample> {
-    // WMI raw counters are locale-independent, unlike `Get-Counter` paths. The thread counters
-    // are cumulative, so summing them gives the process's total context switches.
+    // WMI raw counters are locale-independent, unlike `Get-Counter` paths. The thread counters are cumulative, so
+    // summing them gives the process's total context switches.
     let script = format!(
         "$p = Get-CimInstance Win32_PerfFormattedData_PerfProc_Process -Filter 'IDProcess={pid}'; \
          $c = (Get-Process -Id {pid}).TotalProcessorTime.TotalSeconds; \
@@ -146,10 +129,7 @@ fn sample(pid: u32) -> Result<Sample> {
         .output()
         .context("running powershell")?;
     if !out.status.success() {
-        bail!(
-            "powershell failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
+        bail!("powershell failed: {}", String::from_utf8_lossy(&out.stderr));
     }
     let text = String::from_utf8_lossy(&out.stdout);
     let f: Vec<&str> = text.split_whitespace().collect();

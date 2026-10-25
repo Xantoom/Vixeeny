@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Waking the interface thread from another thread, without it looking from time to time: a
-//! [`Bell`] rung on any thread runs, on the interface thread, what [`Bell::on_ring`] set.
+//! Waking the interface thread from another thread, without it looking from time to time: a [`Bell`] rung on any thread
+//! runs, on the interface thread, what [`Bell::on_ring`] set.
 
 use std::future::poll_fn;
 use std::sync::{Arc, Mutex};

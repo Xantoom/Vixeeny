@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! What Vixeeny asks of Windows: monitors, DPI, windows, processes, the clipboard, the machine.
 //!
-//! All coordinates are **physical pixels** in the virtual desktop. Callers must have called
-//! [`ensure_dpi_aware`] first, otherwise Windows hands out scaled (virtualised) values.
+//! All coordinates are **physical pixels** in the virtual desktop. Callers must have called [`ensure_dpi_aware`] first,
+//! otherwise Windows hands out scaled (virtualised) values.
 
 pub mod clipboard;
 pub mod crash;
@@ -18,14 +18,13 @@ pub mod machine;
 pub mod ocr;
 mod windows_impl;
 pub use windows_impl::{
-    APP_ID, InstanceGuard, OutsideClicks, allow_foreground_handoff, animations_enabled,
-    attach_console, cursor_position, ensure_dpi_aware, exclude_from_capture, exe_icon,
-    exe_metadata, focus_tagged_window, foreground_window, gpu_adapters, harden_dll_search,
-    hdr_active, hdr_info, max_refresh_hz, mica, monitors, monotonic_ns, on_click_outside,
-    on_dir_change, on_foreground_change, on_process_exit, open_path, process_alive,
-    process_ancestors, process_name, process_path, reveal, run_in_background, set_app_id,
-    set_exe_icon, single_instance, style_window, system_accent, system_prefers_dark, tag_window,
-    top_level_windows, user_locale, wait_for_composition, wallpaper, window_info,
+    APP_ID, InstanceGuard, OutsideClicks, allow_foreground_handoff, animations_enabled, attach_console,
+    cursor_position, ensure_dpi_aware, exclude_from_capture, exe_icon, exe_metadata, focus_tagged_window,
+    foreground_window, gpu_adapters, harden_dll_search, hdr_active, hdr_info, max_refresh_hz, mica, monitors,
+    monotonic_ns, on_click_outside, on_dir_change, on_foreground_change, on_process_exit, open_path, process_alive,
+    process_ancestors, process_name, process_path, reveal, run_in_background, set_app_id, set_exe_icon,
+    single_instance, style_window, system_accent, system_prefers_dark, tag_window, top_level_windows, user_locale,
+    wait_for_composition, wallpaper, window_info,
 };
 
 /// A graphics adapter as the OS reports it (the encoder probe derives its own view from it).
@@ -43,13 +42,7 @@ pub struct GpuInfo {
 /// Decodes the 64-bit user-mode driver version DXGI reports (`a.b.c.d`, 16 bits each).
 pub fn format_driver_version(raw: i64) -> String {
     let v = raw as u64;
-    format!(
-        "{}.{}.{}.{}",
-        v >> 48,
-        (v >> 32) & 0xffff,
-        (v >> 16) & 0xffff,
-        v & 0xffff
-    )
+    format!("{}.{}.{}.{}", v >> 48, (v >> 32) & 0xffff, (v >> 16) & 0xffff, v & 0xffff)
 }
 
 /// What the desktop shows behind the windows.
@@ -128,17 +121,11 @@ pub type Result<T> = std::result::Result<T, PlatformError>;
 
 /// The monitor containing `point`, or the closest one (like `MONITOR_DEFAULTTONEAREST`).
 pub fn monitor_at(monitors: &[MonitorInfo], x: i32, y: i32) -> Option<&MonitorInfo> {
-    monitors
-        .iter()
-        .find(|m| m.rect.contains(x, y))
-        .or_else(|| monitors.iter().min_by_key(|m| m.rect.distance2(x, y)))
+    monitors.iter().find(|m| m.rect.contains(x, y)).or_else(|| monitors.iter().min_by_key(|m| m.rect.distance2(x, y)))
 }
 
 /// The monitor holding most of `rect` (ties: first).
-pub fn monitor_for_rect<'a>(
-    monitors: &'a [MonitorInfo],
-    rect: &PhysicalRect,
-) -> Option<&'a MonitorInfo> {
+pub fn monitor_for_rect<'a>(monitors: &'a [MonitorInfo], rect: &PhysicalRect) -> Option<&'a MonitorInfo> {
     monitors
         .iter()
         .max_by_key(|m| m.rect.intersection(rect).map_or(0, |r| r.area()))
@@ -150,10 +137,7 @@ pub fn monitor_for_rect<'a>(
 mod tests {
     #[test]
     fn driver_versions() {
-        assert_eq!(
-            super::format_driver_version((32i64 << 48) | (15 << 16) | 7283),
-            "32.0.15.7283"
-        );
+        assert_eq!(super::format_driver_version((32i64 << 48) | (15 << 16) | 7283), "32.0.15.7283");
     }
 
     use super::*;
@@ -172,10 +156,7 @@ mod tests {
 
     /// 4K at 150 % left of a 1080p at 100 %.
     fn layout() -> Vec<MonitorInfo> {
-        vec![
-            mon(1, 0, 0, 3840, 2160, 144),
-            mon(2, 3840, 0, 1920, 1080, 96),
-        ]
+        vec![mon(1, 0, 0, 3840, 2160, 144), mon(2, 3840, 0, 1920, 1080, 96)]
     }
 
     #[test]

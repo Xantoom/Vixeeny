@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Colour conversion of the frames read back to the CPU (full-range RGB → limited-range YUV),
-//! through swscale's frame API: it reads the captured rows where they are (no copy into an
-//! `AVFrame`) and spreads the work over every core (a 4K frame: 8 ms on one, 1.4 ms on 16).
+//! Colour conversion of the frames read back to the CPU (full-range RGB → limited-range YUV), through swscale's frame
+//! API: it reads the captured rows where they are (no copy into an `AVFrame`) and spreads the work over every core (a
+//! 4K frame: 8 ms on one, 1.4 ms on 16).
 
 use ffmpeg_next::format::Pixel;
 use ffmpeg_next::{ffi, frame};
@@ -36,32 +36,20 @@ impl Converter {
         unsafe {
             // 0: as many threads as cores.
             ffi::av_opt_set_int(ctx.cast(), c"threads".as_ptr(), 0, 0);
-            ffi::av_opt_set_int(
-                ctx.cast(),
-                c"sws_flags".as_ptr(),
-                i64::from(ffi::SwsFlags::SWS_BICUBIC as u32),
-                0,
-            );
+            ffi::av_opt_set_int(ctx.cast(), c"sws_flags".as_ptr(), i64::from(ffi::SwsFlags::SWS_BICUBIC as u32), 0);
         }
         Ok(this)
     }
 
-    /// Converts `src` into `dst` (allocated, of the encoder's format and size), with the
-    /// BT.2020 matrix for `hdr` and BT.709 otherwise.
-    pub(crate) fn run(
-        &mut self,
-        src: &Rows<'_>,
-        dst: &mut frame::Video,
-        hdr: bool,
-    ) -> Result<(), RecordError> {
-        let len = src.stride * src.height.saturating_sub(1) as usize
-            + src.width as usize * bytes_per_pixel(src.format);
+    /// Converts `src` into `dst` (allocated, of the encoder's format and size), with the BT.2020 matrix for `hdr` and
+    /// BT.709 otherwise.
+    pub(crate) fn run(&mut self, src: &Rows<'_>, dst: &mut frame::Video, hdr: bool) -> Result<(), RecordError> {
+        let len = src.stride * src.height.saturating_sub(1) as usize + src.width as usize * bytes_per_pixel(src.format);
         if src.height == 0 || src.bytes.len() < len {
             return Err(RecordError::Config("frame buffer too small".into()));
         }
-        // SAFETY: the source frame only borrows `src.bytes` (its buffer frees nothing) and is
-        // freed before this function returns; swscale reads `len` bytes from it (checked
-        // above). `dst` is a live, allocated frame.
+        // SAFETY: the source frame only borrows `src.bytes` (its buffer frees nothing) and is freed before this
+        // function returns; swscale reads `len` bytes from it (checked above). `dst` is a live, allocated frame.
         unsafe {
             let mut input = ffi::av_frame_alloc();
             if input.is_null() {
@@ -82,11 +70,8 @@ impl Converter {
             (*input).colorspace = ffi::AVColorSpace::AVCOL_SPC_RGB;
             (*input).color_range = ffi::AVColorRange::AVCOL_RANGE_JPEG;
             let out = dst.as_mut_ptr();
-            (*out).colorspace = if hdr {
-                ffi::AVColorSpace::AVCOL_SPC_BT2020_NCL
-            } else {
-                ffi::AVColorSpace::AVCOL_SPC_BT709
-            };
+            (*out).colorspace =
+                if hdr { ffi::AVColorSpace::AVCOL_SPC_BT2020_NCL } else { ffi::AVColorSpace::AVCOL_SPC_BT709 };
             (*out).color_range = ffi::AVColorRange::AVCOL_RANGE_MPEG;
             let code = if (*input).buf[0].is_null() {
                 ffi::AVERROR(ffi::ENOMEM)
@@ -128,26 +113,12 @@ mod tests {
     /// What FFmpeg's own converter gives, in one piece: the reference.
     fn reference(src: &frame::Video, out: Pixel, hdr: bool) -> frame::Video {
         let (w, h) = (src.width(), src.height());
-        let mut ctx =
-            scaling::Context::get(src.format(), w, h, out, w, h, scaling::Flags::BICUBIC).unwrap();
-        let matrix = if hdr {
-            ffi::SWS_CS_BT2020
-        } else {
-            ffi::SWS_CS_ITU709
-        };
+        let mut ctx = scaling::Context::get(src.format(), w, h, out, w, h, scaling::Flags::BICUBIC).unwrap();
+        let matrix = if hdr { ffi::SWS_CS_BT2020 } else { ffi::SWS_CS_ITU709 };
         // SAFETY: live context, static tables.
         unsafe {
             let table = ffi::sws_getCoefficients(matrix);
-            ffi::sws_setColorspaceDetails(
-                ctx.as_mut_ptr(),
-                table,
-                1,
-                table,
-                0,
-                0,
-                1 << 16,
-                1 << 16,
-            );
+            ffi::sws_setColorspaceDetails(ctx.as_mut_ptr(), table, 1, table, 0, 0, 1 << 16, 1 << 16);
         }
         let mut dst = frame::Video::new(out, w, h);
         ctx.run(src, &mut dst).unwrap();
@@ -157,20 +128,12 @@ mod tests {
     fn same(a: &frame::Video, b: &frame::Video) {
         for plane in 0..a.planes() {
             let (sa, sb) = (a.stride(plane), b.stride(plane));
-            let row = a.plane_width(plane) as usize
-                * if a.format() == Pixel::YUV420P10LE {
-                    2
-                } else {
-                    1
-                };
+            let row = a.plane_width(plane) as usize * if a.format() == Pixel::YUV420P10LE { 2 } else { 1 };
             for y in 0..a.plane_height(plane) as usize {
                 let ra = &a.data(plane)[y * sa..y * sa + row];
                 let rb = &b.data(plane)[y * sb..y * sb + row];
                 for (x, (p, q)) in ra.iter().zip(rb).enumerate() {
-                    assert!(
-                        (i32::from(*p) - i32::from(*q)).abs() <= 1,
-                        "plane {plane}, row {y}, byte {x}: {p} vs {q}"
-                    );
+                    assert!((i32::from(*p) - i32::from(*q)).abs() <= 1, "plane {plane}, row {y}, byte {x}: {p} vs {q}");
                 }
             }
         }
@@ -185,13 +148,7 @@ mod tests {
             *b = (i * 7919 % 251) as u8;
         }
         let want = reference(&src, out, hdr);
-        let rows = Rows {
-            bytes: src.data(0),
-            stride,
-            width: w,
-            height: h,
-            format: input,
-        };
+        let rows = Rows { bytes: src.data(0), stride, width: w, height: h, format: input };
         let mut got = frame::Video::new(out, w, h);
         Converter::new().unwrap().run(&rows, &mut got, hdr).unwrap();
         same(&got, &want);
@@ -212,19 +169,8 @@ mod tests {
     #[test]
     fn a_short_buffer_is_refused() {
         ffmpeg_next::init().unwrap();
-        let rows = Rows {
-            bytes: &[0; 100],
-            stride: 40,
-            width: 10,
-            height: 10,
-            format: Pixel::BGRA,
-        };
+        let rows = Rows { bytes: &[0; 100], stride: 40, width: 10, height: 10, format: Pixel::BGRA };
         let mut out = frame::Video::new(Pixel::YUV420P, 10, 10);
-        assert!(
-            Converter::new()
-                .unwrap()
-                .run(&rows, &mut out, false)
-                .is_err()
-        );
+        assert!(Converter::new().unwrap().run(&rows, &mut out, false).is_err());
     }
 }

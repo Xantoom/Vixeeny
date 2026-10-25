@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Flattens a base image and its annotations into the exported pixels.
 
-use tiny_skia::{
-    BlendMode, FillRule, IntSize, LineCap, LineJoin, Paint, Path, PathBuilder, Pixmap, Stroke,
-    Transform,
-};
+use tiny_skia::{BlendMode, FillRule, IntSize, LineCap, LineJoin, Paint, Path, PathBuilder, Pixmap, Stroke, Transform};
 
 use crate::effects::{self, Region};
 use crate::geometry::{Point, Rect};
@@ -19,16 +16,9 @@ pub struct RgbaImage {
     pub data: Vec<u8>,
 }
 
-/// Converts `rows` rows of BGRA pixels (`src_stride` bytes apart) to opaque RGBA rows
-/// (`dst_stride` apart), `width` pixels each. Several threads share the rows: two 4K screens
-/// are 66 MB.
-pub fn bgra_to_rgba(
-    src: &[u8],
-    src_stride: usize,
-    dst: &mut [u8],
-    dst_stride: usize,
-    (width, rows): (usize, usize),
-) {
+/// Converts `rows` rows of BGRA pixels (`src_stride` bytes apart) to opaque RGBA rows (`dst_stride` apart), `width`
+/// pixels each. Several threads share the rows: two 4K screens are 66 MB.
+pub fn bgra_to_rgba(src: &[u8], src_stride: usize, dst: &mut [u8], dst_stride: usize, (width, rows): (usize, usize)) {
     if rows == 0 || width == 0 {
         return;
     }
@@ -36,10 +26,7 @@ pub fn bgra_to_rgba(
     let Some(dst) = dst.get_mut(..dst_len) else {
         return;
     };
-    let threads = std::thread::available_parallelism()
-        .map_or(1, std::num::NonZero::get)
-        .min(8)
-        .min(rows.max(1));
+    let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get).min(8).min(rows.max(1));
     let per = rows.div_ceil(threads);
     std::thread::scope(|scope| {
         for (i, chunk) in dst.chunks_mut(per * dst_stride).enumerate() {
@@ -51,11 +38,7 @@ pub fn bgra_to_rgba(
                         return;
                     };
                     let out = &mut out[..width * 4];
-                    let pixels = out
-                        .as_chunks_mut::<4>()
-                        .0
-                        .iter_mut()
-                        .zip(input.as_chunks::<4>().0);
+                    let pixels = out.as_chunks_mut::<4>().0.iter_mut().zip(input.as_chunks::<4>().0);
                     for (o, i) in pixels {
                         *o = [i[2], i[1], i[0], 255];
                     }
@@ -67,52 +50,29 @@ pub fn bgra_to_rgba(
 
 impl RgbaImage {
     pub fn new(width: u32, height: u32, data: Vec<u8>) -> Option<Self> {
-        (data.len() == width as usize * height as usize * 4).then_some(Self {
-            width,
-            height,
-            data,
-        })
+        (data.len() == width as usize * height as usize * 4).then_some(Self { width, height, data })
     }
 
     pub fn filled(width: u32, height: u32, c: Color) -> Self {
         let data = [c.r, c.g, c.b, c.a].repeat(width as usize * height as usize);
-        Self {
-            width,
-            height,
-            data,
-        }
+        Self { width, height, data }
     }
 
-    /// From BGRA rows `stride` bytes apart (what the capture crate produces). Alpha is forced
-    /// to opaque: screen captures have none.
+    /// From BGRA rows `stride` bytes apart (what the capture crate produces). Alpha is forced to opaque: screen
+    /// captures have none.
     pub fn from_bgra(width: u32, height: u32, stride: usize, bgra: &[u8]) -> Option<Self> {
         let row = width as usize * 4;
         if stride < row || bgra.len() < stride * height as usize {
             return None;
         }
         let mut data = vec![0; row * height as usize];
-        bgra_to_rgba(
-            bgra,
-            stride,
-            &mut data,
-            row,
-            (width as usize, height as usize),
-        );
-        Some(Self {
-            width,
-            height,
-            data,
-        })
+        bgra_to_rgba(bgra, stride, &mut data, row, (width as usize, height as usize));
+        Some(Self { width, height, data })
     }
 
     pub fn pixel(&self, x: u32, y: u32) -> Color {
         let o = (y as usize * self.width as usize + x as usize) * 4;
-        Color {
-            r: self.data[o],
-            g: self.data[o + 1],
-            b: self.data[o + 2],
-            a: self.data[o + 3],
-        }
+        Color { r: self.data[o], g: self.data[o + 1], b: self.data[o + 2], a: self.data[o + 3] }
     }
 
     pub(crate) fn crop(&self, region: Region) -> Self {
@@ -121,11 +81,7 @@ impl RgbaImage {
             let o = (y * self.width as usize + region.x) * 4;
             data.extend_from_slice(&self.data[o..o + region.w * 4]);
         }
-        Self {
-            width: region.w as u32,
-            height: region.h as u32,
-            data,
-        }
+        Self { width: region.w as u32, height: region.h as u32, data }
     }
 }
 
@@ -138,12 +94,7 @@ fn paint(c: Color, blend: BlendMode) -> Paint<'static> {
 }
 
 fn stroke(width: f32) -> Stroke {
-    Stroke {
-        width: stroke_width(width),
-        line_cap: LineCap::Round,
-        line_join: LineJoin::Round,
-        ..Stroke::default()
-    }
+    Stroke { width: stroke_width(width), line_cap: LineCap::Round, line_join: LineJoin::Round, ..Stroke::default() }
 }
 
 /// A piece of a stroke's path, after its first point.
@@ -154,8 +105,8 @@ pub enum Segment {
     Quad(Point, Point),
 }
 
-/// The path of a stroke through `points`: quadratic smoothing through the midpoints of
-/// consecutive points. Its first point, then its segments; `None` without points.
+/// The path of a stroke through `points`: quadratic smoothing through the midpoints of consecutive points. Its first
+/// point, then its segments; `None` without points.
 pub fn smooth(points: &[Point]) -> Option<(Point, Vec<Segment>)> {
     let first = *points.first()?;
     let segments = match points.len() {
@@ -222,50 +173,25 @@ pub fn arrow_shape(from: Point, to: Point, width: f32) -> Option<ArrowShape> {
 /// The box behind a text that has a background.
 pub fn text_background(a: &Annotation) -> Option<(Rect, Color)> {
     match a {
-        Annotation::Text {
-            size,
-            background: Some(bg),
-            ..
-        } => Some((a.bounds().inflate(size * 0.2), *bg)),
+        Annotation::Text { size, background: Some(bg), .. } => Some((a.bounds().inflate(size * 0.2), *bg)),
         _ => None,
     }
 }
 
 /// The colour of a marker's number: dark on a light badge, light on a dark one.
 pub fn marker_ink(color: Color) -> Color {
-    if luminance(color) > 140.0 {
-        Color::rgb(0, 0, 0)
-    } else {
-        Color::rgb(255, 255, 255)
-    }
+    if luminance(color) > 140.0 { Color::rgb(0, 0, 0) } else { Color::rgb(255, 255, 255) }
 }
 
-/// What a text or a marker's number is written with: the text, its top-left corner, its size
-/// and colour.
+/// What a text or a marker's number is written with: the text, its top-left corner, its size and colour.
 fn writing(a: &Annotation) -> Option<(String, Point, f32, Color)> {
     match a {
-        Annotation::Text {
-            pos,
-            text,
-            size,
-            color,
-            ..
-        } => Some((text.clone(), *pos, *size, *color)),
-        Annotation::Marker {
-            center,
-            number,
-            color,
-            radius,
-        } => {
+        Annotation::Text { pos, text, size, color, .. } => Some((text.clone(), *pos, *size, *color)),
+        Annotation::Marker { center, number, color, radius } => {
             let size = radius * 1.2;
             let label = number.to_string();
             let (_, w, h) = text::layout(&label, size);
-            Some((
-                label,
-                Point::new(center.x - w / 2.0, center.y - h / 2.0),
-                size,
-                marker_ink(*color),
-            ))
+            Some((label, Point::new(center.x - w / 2.0, center.y - h / 2.0), size, marker_ink(*color)))
         }
         _ => None,
     }
@@ -284,18 +210,14 @@ fn glyph_pixels(origin: Point, content: &str, size: f32, mut f: impl FnMut(i32, 
         let gy = (origin.y + g.baseline).round() as i32 - m.ymin - m.height as i32;
         for row in 0..m.height {
             for col in 0..m.width {
-                f(
-                    gx + col as i32,
-                    gy + row as i32,
-                    coverage[row * m.width + col],
-                );
+                f(gx + col as i32, gy + row as i32, coverage[row * m.width + col]);
             }
         }
     }
 }
 
-/// The letters of a text or of a marker's number, drawn alone (straight alpha), with where
-/// the image's top-left corner goes; `None` for other annotations or no letters.
+/// The letters of a text or of a marker's number, drawn alone (straight alpha), with where the image's top-left corner
+/// goes; `None` for other annotations or no letters.
 pub fn letters(a: &Annotation) -> Option<(RgbaImage, i32, i32)> {
     let (content, origin, size, color) = writing(a)?;
     let mut hits = Vec::new();
@@ -304,11 +226,7 @@ pub fn letters(a: &Annotation) -> Option<(RgbaImage, i32, i32)> {
     let y0 = hits.iter().map(|h| h.1).min()?;
     let w = (hits.iter().map(|h| h.0).max()? - x0 + 1) as u32;
     let h = (hits.iter().map(|h| h.1).max()? - y0 + 1) as u32;
-    let mut image = RgbaImage {
-        width: w,
-        height: h,
-        data: vec![0; w as usize * h as usize * 4],
-    };
+    let mut image = RgbaImage { width: w, height: h, data: vec![0; w as usize * h as usize * 4] };
     for (x, y, c) in hits {
         let o = ((y - y0) as usize * w as usize + (x - x0) as usize) * 4;
         let px = &mut image.data[o..o + 4];
@@ -355,49 +273,21 @@ fn draw_annotation(pix: &mut Pixmap, a: &Annotation) {
     match a {
         Annotation::Pen { points, style } => {
             if let Some(path) = smooth_path(points) {
-                pix.stroke_path(
-                    &path,
-                    &paint(style.color, BlendMode::SourceOver),
-                    &stroke(style.width),
-                    id,
-                    None,
-                );
+                pix.stroke_path(&path, &paint(style.color, BlendMode::SourceOver), &stroke(style.width), id, None);
             }
         }
-        Annotation::Highlight {
-            points,
-            color,
-            width,
-        } => {
+        Annotation::Highlight { points, color, width } => {
             if let Some(path) = smooth_path(points) {
-                pix.stroke_path(
-                    &path,
-                    &paint(*color, BlendMode::Multiply),
-                    &stroke(*width),
-                    id,
-                    None,
-                );
+                pix.stroke_path(&path, &paint(*color, BlendMode::Multiply), &stroke(*width), id, None);
             }
         }
         Annotation::Line { from, to, style } => {
             if let Some(path) = smooth_path(&[*from, *to]) {
-                pix.stroke_path(
-                    &path,
-                    &paint(style.color, BlendMode::SourceOver),
-                    &stroke(style.width),
-                    id,
-                    None,
-                );
+                pix.stroke_path(&path, &paint(style.color, BlendMode::SourceOver), &stroke(style.width), id, None);
             }
         }
-        Annotation::Arrow { from, to, style } => {
-            draw_arrow(pix, *from, *to, style.color, style.width)
-        }
-        Annotation::Rect {
-            rect,
-            style,
-            filled,
-        } => {
+        Annotation::Arrow { from, to, style } => draw_arrow(pix, *from, *to, style.color, style.width),
+        Annotation::Rect { rect, style, filled } => {
             if let Some(r) = skia_rect(rect) {
                 let path = PathBuilder::from_rect(r);
                 let p = paint(style.color, BlendMode::SourceOver);
@@ -408,11 +298,7 @@ fn draw_annotation(pix: &mut Pixmap, a: &Annotation) {
                 }
             }
         }
-        Annotation::Ellipse {
-            rect,
-            style,
-            filled,
-        } => {
+        Annotation::Ellipse { rect, style, filled } => {
             if let Some(path) = skia_rect(rect).and_then(PathBuilder::from_oval) {
                 let p = paint(style.color, BlendMode::SourceOver);
                 if *filled {
@@ -438,20 +324,9 @@ fn draw_annotation(pix: &mut Pixmap, a: &Annotation) {
                 draw_text(pix, origin, &content, size, color);
             }
         }
-        Annotation::Marker {
-            center,
-            color,
-            radius,
-            ..
-        } => {
+        Annotation::Marker { center, color, radius, .. } => {
             if let Some(path) = PathBuilder::from_circle(center.x, center.y, *radius) {
-                pix.fill_path(
-                    &path,
-                    &paint(*color, BlendMode::SourceOver),
-                    FillRule::Winding,
-                    id,
-                    None,
-                );
+                pix.fill_path(&path, &paint(*color, BlendMode::SourceOver), FillRule::Winding, id, None);
             }
             if let Some((content, origin, size, color)) = writing(a) {
                 draw_text(pix, origin, &content, size, color);
@@ -489,8 +364,8 @@ fn flatten<'a>(image: RgbaImage, annotations: impl Iterator<Item = &'a Annotatio
     if image.data.len() != width as usize * height as usize * 4 {
         return image;
     }
-    // The base is opaque, so straight and premultiplied RGBA are the same bytes. Its pixels
-    // become the drawing's: no copy (two 4K screens are 66 MB).
+    // The base is opaque, so straight and premultiplied RGBA are the same bytes. Its pixels become the drawing's: no
+    // copy (two 4K screens are 66 MB).
     let Some(mut pix) = Pixmap::from_vec(image.data, size) else {
         // Not reached: the length was checked above.
         return RgbaImage::filled(width, height, Color::rgb(0, 0, 0));
@@ -511,16 +386,12 @@ fn flatten<'a>(image: RgbaImage, annotations: impl Iterator<Item = &'a Annotatio
             other => draw_annotation(&mut pix, other),
         }
     }
-    RgbaImage {
-        width,
-        height,
-        data: pix.take(),
-    }
+    RgbaImage { width, height, data: pix.take() }
 }
 
-/// The part of `base` inside `region` (rounded outwards, clamped) with `annotations` drawn on
-/// it. `None` when the region is empty. Only the region is rasterised, so a live preview of a
-/// small selection stays cheap on a large screen.
+/// The part of `base` inside `region` (rounded outwards, clamped) with `annotations` drawn on it. `None` when the
+/// region is empty. Only the region is rasterised, so a live preview of a small selection stays cheap on a large
+/// screen.
 pub fn render_region<'a>(
     base: &RgbaImage,
     annotations: impl Iterator<Item = &'a Annotation>,

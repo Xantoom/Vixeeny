@@ -15,9 +15,8 @@ use crate::core::Event;
 use crate::runtime::HotkeyBackend;
 use crate::server::EventTx;
 
-/// RegisterHotKey-based shortcuts: they fire while a game has the focus, except for
-/// games that grab the keyboard exclusively. No hook, no polling: the shortcut arrives as a
-/// message on the daemon's own loop.
+/// RegisterHotKey-based shortcuts: they fire while a game has the focus, except for games that grab the keyboard
+/// exclusively. No hook, no polling: the shortcut arrives as a message on the daemon's own loop.
 pub struct Hotkeys {
     manager: GlobalHotKeyManager,
     registered: Vec<HotKey>,
@@ -33,19 +32,12 @@ impl Hotkeys {
             if event.state() != HotKeyState::Pressed {
                 return;
             }
-            let action = handler_actions
-                .lock()
-                .ok()
-                .and_then(|map| map.get(&event.id()).copied());
+            let action = handler_actions.lock().ok().and_then(|map| map.get(&event.id()).copied());
             if let Some(action) = action {
                 handler_tx.send(Event::Action(action));
             }
         }));
-        Ok(Self {
-            manager,
-            registered: Vec::new(),
-            actions,
-        })
+        Ok(Self { manager, registered: Vec::new(), actions })
     }
 }
 
@@ -66,20 +58,13 @@ impl HotkeyBackend for Hotkeys {
         let _ = self.manager.unregister_all(&self.registered);
         self.registered.clear();
         let Ok(mut actions) = self.actions.lock() else {
-            return bindings
-                .iter()
-                .map(|(_, h)| (h.clone(), "hotkey table poisoned".into()))
-                .collect();
+            return bindings.iter().map(|(_, h)| (h.clone(), "hotkey table poisoned".into())).collect();
         };
         actions.clear();
         let mut failures = Vec::new();
         for (action, hotkey) in bindings {
-            let result = to_global(hotkey).and_then(|global| {
-                self.manager
-                    .register(global)
-                    .map(|()| global)
-                    .map_err(|e| e.to_string())
-            });
+            let result = to_global(hotkey)
+                .and_then(|global| self.manager.register(global).map(|()| global).map_err(|e| e.to_string()));
             match result {
                 Ok(global) => {
                     actions.insert(global.id(), *action);

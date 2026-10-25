@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! What the GitHub Releases API says about the latest release.
 //!
-//! A release holds the installer and the portable archive, which is also what an update
-//! installs. The archive's signature is in the release notes, in a comment the page does not
-//! show (see [`signatures`]).
+//! A release holds the installer and the portable archive, which is also what an update installs. The archive's
+//! signature is in the release notes, in a comment the page does not show (see [`signatures`]).
 
 use std::collections::BTreeMap;
 
@@ -11,9 +10,7 @@ use serde::{Deserialize, Serialize};
 
 /// Where the latest release is asked for.
 pub fn check_url(repository: &str) -> String {
-    let path = repository
-        .trim_end_matches('/')
-        .trim_start_matches("https://github.com/");
+    let path = repository.trim_end_matches('/').trim_start_matches("https://github.com/");
     format!("https://api.github.com/repos/{path}/releases/latest")
 }
 
@@ -65,8 +62,8 @@ pub struct UpdateFiles<'a> {
     pub signature: &'a str,
 }
 
-/// The comment that opens a signature in the notes: `<!-- minisign NAME`, then the text of the
-/// `.minisig` file, then `-->`.
+/// The comment that opens a signature in the notes: `<!-- minisign NAME`, then the text of the `.minisig` file, then
+/// `-->`.
 const SIGNATURE_OPENING: &str = "<!-- minisign ";
 
 /// The signatures written in release notes, by the name of the file signed.
@@ -105,18 +102,13 @@ impl Release {
             assets: api
                 .assets
                 .into_iter()
-                .map(|a| Asset {
-                    name: a.name,
-                    url: a.browser_download_url,
-                    size: a.size,
-                })
+                .map(|a| Asset { name: a.name, url: a.browser_download_url, size: a.size })
                 .collect(),
         }))
     }
 
-    /// The archive of this version for `platform` (`windows-x64`) and its signature. The
-    /// archive is found by its full name, version included: its signature names it too, so an
-    /// archive of another version is refused.
+    /// The archive of this version for `platform` (`windows-x64`) and its signature. The archive is found by its full
+    /// name, version included: its signature names it too, so an archive of another version is refused.
     pub fn files(&self, platform: &str) -> Option<UpdateFiles<'_>> {
         let name = portable_name(&self.version, platform);
         Some(UpdateFiles {
@@ -128,10 +120,7 @@ impl Release {
     /// The installer of this version and its signature.
     pub fn setup(&self) -> Option<(&Asset, &str)> {
         let name = setup_name(&self.version);
-        Some((
-            self.assets.iter().find(|a| a.name == name)?,
-            self.signatures.get(&name)?,
-        ))
+        Some((self.assets.iter().find(|a| a.name == name)?, self.signatures.get(&name)?))
     }
 }
 
@@ -145,8 +134,8 @@ pub fn portable_name(version: &str, platform: &str) -> String {
     format!("Vixeeny-{version}-{platform}-portable.zip")
 }
 
-/// Whether `latest` is a newer version than `current` (both `1.2.3`, a leading `v` allowed).
-/// An unreadable version is never newer.
+/// Whether `latest` is a newer version than `current` (both `1.2.3`, a leading `v` allowed). An unreadable version is
+/// never newer.
 pub fn is_newer(current: &str, latest: &str) -> bool {
     let parse = |v: &str| semver::Version::parse(v.trim().trim_start_matches(['v', 'V'])).ok();
     match (parse(current), parse(latest)) {
@@ -164,10 +153,7 @@ mod tests {
     fn json(version: &str, signed: &str) -> String {
         let notes = format!(
             "## What's new\n- Things\n\n{}\n",
-            signature_comment(
-                &format!("Vixeeny-{signed}-windows-x64-portable.zip"),
-                SIGNATURE
-            )
+            signature_comment(&format!("Vixeeny-{signed}-windows-x64-portable.zip"), SIGNATURE)
         );
         serde_json::json!({
             "tag_name": format!("v{version}"), "body": notes, "draft": false, "prerelease": false,
@@ -183,13 +169,9 @@ mod tests {
 
     #[test]
     fn the_portable_archive_is_found_with_its_signature_from_the_notes() {
-        let release = Release::parse(&json("0.6.0", "0.6.0"))
-            .unwrap_or_default()
-            .unwrap_or_else(|| panic!("none"));
+        let release = Release::parse(&json("0.6.0", "0.6.0")).unwrap_or_default().unwrap_or_else(|| panic!("none"));
         assert_eq!(release.version, "0.6.0");
-        let files = release
-            .files("windows-x64")
-            .unwrap_or_else(|| panic!("no files"));
+        let files = release.files("windows-x64").unwrap_or_else(|| panic!("no files"));
         assert_eq!(files.archive.url, "https://x/p.zip");
         assert_eq!(files.signature, SIGNATURE);
         assert!(release.files("windows-arm64").is_none());
@@ -204,9 +186,7 @@ mod tests {
         // Only the archive is signed in these notes.
         assert!(release.as_ref().is_some_and(|r| r.setup().is_none()));
         let mut release = release.unwrap_or_else(|| panic!("none"));
-        release
-            .signatures
-            .insert(setup_name("0.6.0"), SIGNATURE.to_owned());
+        release.signatures.insert(setup_name("0.6.0"), SIGNATURE.to_owned());
         let (setup, signature) = release.setup().unwrap_or_else(|| panic!("no installer"));
         assert_eq!(setup.url, "https://x/s.exe");
         assert_eq!(signature, SIGNATURE);

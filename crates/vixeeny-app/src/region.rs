@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Print Screen flow: freeze every screen, let the user pick a zone and annotate it,
-//! then copy, save or close. The capture happens before the first window exists, so the frozen
-//! image never contains the editor.
+//! Print Screen flow: freeze every screen, let the user pick a zone and annotate it, then copy, save or close. The
+//! capture happens before the first window exists, so the frozen image never contains the editor.
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -28,11 +27,7 @@ fn to_bgra(img: &RgbaImage) -> Vec<u8> {
 
 fn copy_to_clipboard(config: &Config, img: &RgbaImage) -> anyhow::Result<()> {
     let bgra = to_bgra(img);
-    copy_bgra(
-        config,
-        &Bgra::new(img.width, img.height, img.width as usize * 4, &bgra),
-        None,
-    )
+    copy_bgra(config, &Bgra::new(img.width, img.height, img.width as usize * 4, &bgra), None)
 }
 
 pub use crate::clipboard::copy_bgra;
@@ -50,13 +45,9 @@ fn save(
     save_bgra(config, snap, action, &bitmap, hdr, chosen)
 }
 
-/// The exported zone as HDR: the screens' light where the annotations left the picture
-/// untouched, the rest (annotations, and what they blur or cover) at SDR white.
-fn annotated_hdr(
-    session: &Session,
-    exported: &RgbaImage,
-    desktop: &HdrCapture,
-) -> Option<HdrCapture> {
+/// The exported zone as HDR: the screens' light where the annotations left the picture untouched, the rest
+/// (annotations, and what they blur or cover) at SDR white.
+fn annotated_hdr(session: &Session, exported: &RgbaImage, desktop: &HdrCapture) -> Option<HdrCapture> {
     use vixeeny_common::colour::srgb_decode;
 
     let base = session.base();
@@ -81,19 +72,11 @@ fn annotated_hdr(
             }
         }
     }
-    Some(HdrCapture {
-        frame: HdrFrame {
-            width: r.w as u32,
-            height: r.h as u32,
-            rgba,
-        },
-        info: desktop.info,
-    })
+    Some(HdrCapture { frame: HdrFrame { width: r.w as u32, height: r.h as u32, rgba }, info: desktop.info })
 }
 
-/// Close, copy, save and save-as, shared by every editor. `Some(close)` when `command` is one
-/// of them (`close`: the overlay should go away), `None` otherwise. `hdr`: the editor's
-/// picture as HDR, when HDR is kept.
+/// Close, copy, save and save-as, shared by every editor. `Some(close)` when `command` is one of them (`close`: the
+/// overlay should go away), `None` otherwise. `hdr`: the editor's picture as HDR, when HDR is kept.
 pub fn output_command(
     config: &Config,
     snapshot: &Snapshot,
@@ -133,25 +116,22 @@ pub fn output_command(
             };
             vixeeny_overlay::step_aside();
             let hdr = hdr.and_then(|desktop| annotated_hdr(session, &img, desktop));
-            Some(
-                match save(config, snapshot, action, &img, hdr.as_ref(), chosen) {
-                    Ok(path) => {
-                        tracing::debug!("saved {}", path.display());
-                        true
-                    }
-                    Err(e) => {
-                        tracing::error!("save failed: {e:#}");
-                        false
-                    }
-                },
-            )
+            Some(match save(config, snapshot, action, &img, hdr.as_ref(), chosen) {
+                Ok(path) => {
+                    tracing::debug!("saved {}", path.display());
+                    true
+                }
+                Err(e) => {
+                    tracing::error!("save failed: {e:#}");
+                    false
+                }
+            })
         }
         Command::Scroll => None,
     }
 }
 
-/// Reads the text of `img` and puts it on the clipboard; a card says what was copied, or why
-/// nothing was.
+/// Reads the text of `img` and puts it on the clipboard; a card says what was copied, or why nothing was.
 fn copy_text(config: &Config, img: &RgbaImage) {
     use crate::toast::{Failed, Toast, notify};
     use vixeeny_common::i18n::{Key, tr};
@@ -164,9 +144,7 @@ fn copy_text(config: &Config, img: &RgbaImage) {
             Ok(()) => Toast::TextCopied(text),
             Err(e) => Toast::Failed(Failed::Ocr, e.to_string()),
         },
-        Err(OcrError::NoLanguage) => {
-            Toast::Failed(Failed::Ocr, tr(Key::ToastOcrNoLanguage, lang).to_owned())
-        }
+        Err(OcrError::NoLanguage) => Toast::Failed(Failed::Ocr, tr(Key::ToastOcrNoLanguage, lang).to_owned()),
         Err(e) => {
             tracing::error!("{e}");
             Toast::Failed(Failed::Ocr, e.to_string())
@@ -175,9 +153,9 @@ fn copy_text(config: &Config, img: &RgbaImage) {
     notify(config, &toast);
 }
 
-/// Writes `bitmap` to the images folder (or to `chosen`, whose extension picks the format);
-/// `hdr`, the same picture as HDR, is written instead when HDR is kept and the format can. It
-/// is then copied to the clipboard when the settings say so.
+/// Writes `bitmap` to the images folder (or to `chosen`, whose extension picks the format); `hdr`, the same picture as
+/// HDR, is written instead when HDR is kept and the format can. It is then copied to the clipboard when the settings
+/// say so.
 pub fn save_bgra(
     config: &Config,
     snap: &Snapshot,
@@ -195,12 +173,8 @@ pub fn save_bgra(
             tracing::warn!("clipboard: {e:#}");
         }
     };
-    let output = |format| still::Output {
-        format,
-        settings: &settings,
-        keep_hdr: crate::keep_hdr(config),
-        backdrop: None,
-    };
+    let output =
+        |format| still::Output { format, settings: &settings, keep_hdr: crate::keep_hdr(config), backdrop: None };
     if let Some(path) = chosen {
         // "Save as": the extension picks the format.
         let format = path
@@ -210,8 +184,8 @@ pub fn save_bgra(
             .filter(|f| f.available())
             .unwrap_or(default_format);
         let hdr = hdr.filter(|_| output(format).hdr());
-        // The file is the clipboard's image when it is in the format of the settings; else
-        // the clipboard's is encoded side by side with it.
+        // The file is the clipboard's image when it is in the format of the settings; else the clipboard's is encoded
+        // side by side with it.
         let same = hdr.is_none() && format == default_format;
         return std::thread::scope(|scope| {
             if !same {
@@ -228,11 +202,8 @@ pub fn save_bgra(
             Ok(path)
         });
     }
-    let dir = vixeeny_common::paths::ready_dir(
-        &config.paths.images,
-        vixeeny_common::paths::DEFAULT_IMAGES,
-    )
-    .context("cannot make the images folder")?;
+    let dir = vixeeny_common::paths::ready_dir(&config.paths.images, vixeeny_common::paths::DEFAULT_IMAGES)
+        .context("cannot make the images folder")?;
     let now = vixeeny_platform::local_time();
     let dest = Destination {
         dir: &dir,
@@ -253,19 +224,10 @@ pub fn save_bgra(
 
 fn save_as_dialog(config: &Config) -> Option<PathBuf> {
     let mut dialog = rfd::FileDialog::new().set_title("Vixeeny");
-    if let Some(dir) = vixeeny_common::paths::ready_dir(
-        &config.paths.images,
-        vixeeny_common::paths::DEFAULT_IMAGES,
-    ) {
+    if let Some(dir) = vixeeny_common::paths::ready_dir(&config.paths.images, vixeeny_common::paths::DEFAULT_IMAGES) {
         dialog = dialog.set_directory(dir);
     }
-    for format in [
-        ImageFormat::Png,
-        ImageFormat::Jpeg,
-        ImageFormat::WebP,
-        ImageFormat::Avif,
-        ImageFormat::Jxl,
-    ] {
+    for format in [ImageFormat::Png, ImageFormat::Jpeg, ImageFormat::WebP, ImageFormat::Avif, ImageFormat::Jxl] {
         if format.available() {
             dialog = dialog.add_filter(format.extension().to_uppercase(), &[format.extension()]);
         }
@@ -283,8 +245,8 @@ pub enum Mode {
     Scroll,
 }
 
-/// The screens the daemon froze for this capture. They go once the editor covers them, or when
-/// this is dropped (whatever happened).
+/// The screens the daemon froze for this capture. They go once the editor covers them, or when this is dropped
+/// (whatever happened).
 struct Thaw(std::cell::RefCell<Option<Frozen>>);
 
 impl Thaw {
@@ -307,9 +269,8 @@ impl Drop for Thaw {
     }
 }
 
-/// The desktop from the frozen screens, laid out like the monitors, converted straight from
-/// the GPU's memory into the editor's image (HDR screens tone-mapped). With `keep_hdr`, also
-/// the desktop as HDR when a screen shows HDR.
+/// The desktop from the frozen screens, laid out like the monitors, converted straight from the GPU's memory into the
+/// editor's image (HDR screens tone-mapped). With `keep_hdr`, also the desktop as HDR when a screen shows HDR.
 fn frozen_desktop(
     frozen: &Frozen,
     monitors: &[vixeeny_platform::MonitorInfo],
@@ -317,19 +278,14 @@ fn frozen_desktop(
     keep_hdr: bool,
 ) -> anyhow::Result<(RgbaImage, Option<HdrCapture>)> {
     let monitor_of = |s: &vixeeny_common::ipc::FrozenScreen| {
-        monitors.iter().find(|m| {
-            (m.rect.x, m.rect.y, m.rect.width, m.rect.height) == (s.x, s.y, s.width, s.height)
-        })
+        monitors.iter().find(|m| (m.rect.x, m.rect.y, m.rect.width, m.rect.height) == (s.x, s.y, s.width, s.height))
     };
     anyhow::ensure!(
         frozen.screens.iter().all(|s| monitor_of(s).is_some()),
         "the monitors changed since the screens were frozen"
     );
     let row = bounds.width as usize * 4;
-    let covered: u64 = monitors
-        .iter()
-        .map(|m| u64::from(m.rect.width) * u64::from(m.rect.height))
-        .sum();
+    let covered: u64 = monitors.iter().map(|m| u64::from(m.rect.width) * u64::from(m.rect.height)).sum();
     let mut data = if covered == u64::from(bounds.width) * u64::from(bounds.height) {
         vec![0; row * bounds.height as usize]
     } else {
@@ -339,10 +295,7 @@ fn frozen_desktop(
     let reference = vixeeny_capture::reference(monitors).filter(|_| keep_hdr);
     let mut canvas = reference.map(|_| HdrFrame::new(bounds.width, bounds.height));
     let levels = |s: &vixeeny_common::ipc::FrozenScreen| {
-        monitor_of(s).and_then(|m| m.hdr).unwrap_or(HdrInfo {
-            sdr_white_nits: 80.0,
-            peak_nits: 1000.0,
-        })
+        monitor_of(s).and_then(|m| m.hdr).unwrap_or(HdrInfo { sdr_white_nits: 80.0, peak_nits: 1000.0 })
     };
     // The HDR screens tone-mapped on the graphics card (the others are done here).
     let mut toned = Vec::new();
@@ -384,11 +337,8 @@ fn frozen_desktop(
     if let Some(device) = vixeeny_capture::freeze::device(frozen.adapter) {
         vixeeny_overlay::gfx::offer_device(device);
     }
-    let image =
-        RgbaImage::new(bounds.width, bounds.height, data).context("unexpected image size")?;
-    let hdr = canvas
-        .zip(reference)
-        .map(|(frame, info)| HdrCapture { frame, info });
+    let image = RgbaImage::new(bounds.width, bounds.height, data).context("unexpected image size")?;
+    let hdr = canvas.zip(reference).map(|(frame, info)| HdrCapture { frame, info });
     Ok((image, hdr))
 }
 
@@ -412,8 +362,8 @@ struct LiveScreens {
     keep_hdr: bool,
     /// The HDR picture exported along (see [`output_command`]).
     hdr: std::rc::Rc<std::cell::RefCell<Option<HdrCapture>>>,
-    /// Each monitor followed: where the part followed is in the editor's image, where it is in
-    /// the monitor's picture, and its size.
+    /// Each monitor followed: where the part followed is in the editor's image, where it is in the monitor's picture,
+    /// and its size.
     streams: std::cell::RefCell<Vec<(LivePart, vixeeny_capture::VideoStream)>>,
 }
 
@@ -443,18 +393,12 @@ impl vixeeny_overlay::Screens for LiveScreens {
             return;
         };
         let (ox, oy) = self.origin;
-        let area = vixeeny_platform::PhysicalRect {
-            x: ox + x as i32,
-            y: oy + y as i32,
-            width: w,
-            height: h,
-        };
+        let area = vixeeny_platform::PhysicalRect { x: ox + x as i32, y: oy + y as i32, width: w, height: h };
         for monitor in &self.monitors {
             let Some(part) = monitor.rect.intersection(&area) else {
                 continue;
             };
-            // The whole monitor is captured; only the part followed is copied, on the
-            // graphics card, by the editor.
+            // The whole monitor is captured; only the part followed is copied, on the graphics card, by the editor.
             let target = vixeeny_capture::StreamTarget::Monitor(monitor.clone());
             let wake = wake.clone();
             match vixeeny_capture::VideoStream::start_held(
@@ -466,10 +410,7 @@ impl vixeeny_overlay::Screens for LiveScreens {
                 Ok(stream) => streams.push((
                     LivePart {
                         at: ((part.x - ox) as u32, (part.y - oy) as u32),
-                        from: (
-                            (part.x - monitor.rect.x) as u32,
-                            (part.y - monitor.rect.y) as u32,
-                        ),
+                        from: ((part.x - monitor.rect.x) as u32, (part.y - monitor.rect.y) as u32),
                         size: (part.width, part.height),
                     },
                     stream,
@@ -504,16 +445,10 @@ impl vixeeny_overlay::Screens for LiveScreens {
 }
 
 /// A picture of every screen (HDR screens tone-mapped), and with `keep_hdr` the same as HDR.
-fn grab_screens(
-    monitors: &[MonitorInfo],
-    keep_hdr: bool,
-) -> anyhow::Result<(RgbaImage, Option<HdrCapture>)> {
+fn grab_screens(monitors: &[MonitorInfo], keep_hdr: bool) -> anyhow::Result<(RgbaImage, Option<HdrCapture>)> {
     let mut backend = crate::capture_backend::Lent::take()?;
-    // Assembled on the graphics card and read once, when no screen is HDR (nothing HDR to
-    // keep then).
-    match backend.grab_desktop(monitors, |w, h, rows, stride| {
-        RgbaImage::from_bgra(w, h, stride, rows)
-    }) {
+    // Assembled on the graphics card and read once, when no screen is HDR (nothing HDR to keep then).
+    match backend.grab_desktop(monitors, |w, h, rows, stride| RgbaImage::from_bgra(w, h, stride, rows)) {
         Ok(base) => return Ok((base.context("unexpected capture buffer")?, None)),
         Err(vixeeny_capture::CaptureError::Unsupported) => {}
         Err(e) => return Err(e.into()),
@@ -522,10 +457,7 @@ fn grab_screens(
     let (frame, hdr) = if keep_hdr {
         capturer.grab_all_both(false, crate::tonemap_hdr)?
     } else {
-        let options = CaptureOptions {
-            show_cursor: false,
-            tonemap: Some(crate::tonemap_hdr),
-        };
+        let options = CaptureOptions { show_cursor: false, tonemap: Some(crate::tonemap_hdr) };
         (capturer.grab(&CaptureTarget::AllMonitors, options)?, None)
     };
     let base = RgbaImage::from_bgra(frame.width, frame.height, frame.stride, &frame.data)
@@ -536,37 +468,23 @@ fn grab_screens(
 /// A window of the zone editor while it is open.
 static OPEN: std::sync::Mutex<Option<u64>> = std::sync::Mutex::new(None);
 
-/// A zone capture's shortcut pressed again while the editor is open: it closes as Escape
-/// closes it, rather than opening once more after it. False when no editor is open.
+/// A zone capture's shortcut pressed again while the editor is open: it closes as Escape closes it, rather than opening
+/// once more after it. False when no editor is open.
 pub fn dismiss_open() -> bool {
-    let open = *OPEN
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let open = *OPEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     open.map(vixeeny_overlay::close).is_some()
 }
 
 pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Result<()> {
     let started = Instant::now();
-    tracing::debug!(
-        "zone capture ({mode:?}) starting{}",
-        if frozen.is_some() {
-            " on the frozen screens"
-        } else {
-            ""
-        }
-    );
+    tracing::debug!("zone capture ({mode:?}) starting{}", if frozen.is_some() { " on the frozen screens" } else { "" });
     let thaw = std::rc::Rc::new(Thaw(std::cell::RefCell::new(frozen)));
     vixeeny_platform::ensure_dpi_aware();
     let monitors = vixeeny_platform::monitors()?;
     let cursor = vixeeny_platform::cursor_position()?;
     let foreground = vixeeny_platform::foreground_window()?;
-    tracing::debug!(
-        "{} monitor(s) after {:?}",
-        monitors.len(),
-        started.elapsed()
-    );
-    let bounds = vixeeny_platform::virtual_bounds(monitors.iter().map(|m| &m.rect))
-        .context("no monitor found")?;
+    tracing::debug!("{} monitor(s) after {:?}", monitors.len(), started.elapsed());
+    let bounds = vixeeny_platform::virtual_bounds(monitors.iter().map(|m| &m.rect)).context("no monitor found")?;
 
     let keep_hdr = crate::keep_hdr(config);
     let from_daemon = thaw.0.borrow().as_ref().and_then(|frozen| {
@@ -578,17 +496,11 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
         Some(desktop) => desktop,
         None => grab_screens(&monitors, keep_hdr)?,
     };
-    tracing::debug!(
-        "screen read ({}x{}) after {:?}",
-        base.width,
-        base.height,
-        started.elapsed()
-    );
+    tracing::debug!("screen read ({}x{}) after {:?}", base.width, base.height, started.elapsed());
 
-    let scale = vixeeny_platform::monitor_at(&monitors, cursor.0, cursor.1)
-        .map_or(1.0, |m| m.scale_factor() as f32);
-    // One overlay window per monitor, each showing its part of the frozen desktop.
-    // The monitors in image pixels: the toolbar stays on one of them.
+    let scale = vixeeny_platform::monitor_at(&monitors, cursor.0, cursor.1).map_or(1.0, |m| m.scale_factor() as f32);
+    // One overlay window per monitor, each showing its part of the frozen desktop. The monitors in image pixels: the
+    // toolbar stays on one of them.
     let monitor_areas: Vec<Rect> = monitors
         .iter()
         .map(|m| {
@@ -600,8 +512,8 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
             )
         })
         .collect();
-    // One window per monitor, exactly over it. Its content is a DirectComposition tree (no swap
-    // chain), so Windows never takes it for a full-screen game.
+    // One window per monitor, exactly over it. Its content is a DirectComposition tree (no swap chain), so Windows
+    // never takes it for a full-screen game.
     let screens: Vec<vixeeny_overlay::Screen> = monitors
         .iter()
         .map(|m| vixeeny_overlay::Screen {
@@ -615,17 +527,9 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
             ),
         })
         .collect();
-    let scroll_snapshot = Snapshot {
-        monitors: monitors.clone(),
-        cursor,
-        foreground: foreground.clone(),
-    };
+    let scroll_snapshot = Snapshot { monitors: monitors.clone(), cursor, foreground: foreground.clone() };
     let live_monitors = monitors.clone();
-    let snapshot = Snapshot {
-        monitors,
-        cursor,
-        foreground,
-    };
+    let snapshot = Snapshot { monitors, cursor, foreground };
     // Live, the export takes a fresh picture of the screens: its HDR twin replaces this one.
     let hdr = std::rc::Rc::new(std::cell::RefCell::new(hdr));
     let live_hdr = hdr.clone();
@@ -648,22 +552,13 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
         &screens,
         vixeeny_ui::theme::default_look(),
         move |command, session| {
-            if let Some(close) = output_command(
-                &config,
-                &snapshot,
-                ActionId::CaptureRegion,
-                command,
-                session,
-                hdr.borrow().as_ref(),
-            ) {
+            if let Some(close) =
+                output_command(&config, &snapshot, ActionId::CaptureRegion, command, session, hdr.borrow().as_ref())
+            {
                 return close;
             }
             match command {
-                Command::Close
-                | Command::Copy
-                | Command::CopyText
-                | Command::Save
-                | Command::SaveAs => false,
+                Command::Close | Command::Copy | Command::CopyText | Command::Save | Command::SaveAs => false,
                 Command::Scroll => match session.zone() {
                     Some(zone) => {
                         scroll_slot.set(Some(zone));
@@ -691,19 +586,15 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
     overlay.on_first_frame(move |_| {
         tracing::debug!("editor on screen after {:?}", started.elapsed());
         shown.release();
-        // Unfrozen, the editor takes a fresh picture of the screens: its capture device is
-        // made now that the editor shows (not to slow it down).
+        // Unfrozen, the editor takes a fresh picture of the screens: its capture device is made now that the editor
+        // shows (not to slow it down).
         if matches!(mode, Mode::Editor) {
             crate::capture_backend::warm();
         }
     });
-    *OPEN
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = overlay.handles().first().copied();
+    *OPEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = overlay.handles().first().copied();
     let result = overlay.run(cursor);
-    *OPEN
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    *OPEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     drop(thaw);
     result.map_err(|e| anyhow::anyhow!("editor window: {e}"))?;
     if let Some(zone) = scroll_zone.take() {
@@ -721,65 +612,43 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
 /// Opens the editor on a picture already saved (`--edit <file>`), in a process of its own.
 pub fn open_editor(path: &std::path::Path) {
     vixeeny_platform::allow_foreground_handoff();
-    let spawned = std::env::current_exe().and_then(|exe| {
-        std::process::Command::new(exe)
-            .arg("--edit")
-            .arg(path)
-            .spawn()
-    });
+    let spawned =
+        std::env::current_exe().and_then(|exe| std::process::Command::new(exe).arg("--edit").arg(path).spawn());
     if let Err(e) = spawned {
         tracing::error!("cannot start the editor: {e}");
     }
 }
 
-/// Where a `picture` (width, height) goes on the desktop `bounds`, relative to it: centred on
-/// the monitor under the cursor when it fits there, else on the whole desktop; `None` when it
-/// is larger than the desktop.
+/// Where a `picture` (width, height) goes on the desktop `bounds`, relative to it: centred on the monitor under the
+/// cursor when it fits there, else on the whole desktop; `None` when it is larger than the desktop.
 fn place_picture(picture: (u32, u32), bounds: &Rect, monitor: &Rect) -> Option<(u32, u32)> {
     let (w, h) = (picture.0 as f32, picture.1 as f32);
     let on = |r: &Rect| {
-        (w <= r.w && h <= r.h).then(|| {
-            (
-                (r.x + ((r.w - w) / 2.0).floor()) as u32,
-                (r.y + ((r.h - h) / 2.0).floor()) as u32,
-            )
-        })
+        (w <= r.w && h <= r.h)
+            .then(|| ((r.x + ((r.w - w) / 2.0).floor()) as u32, (r.y + ((r.h - h) / 2.0).floor()) as u32))
     };
     on(monitor).or_else(|| on(&Rect::new(0.0, 0.0, bounds.w, bounds.h)))
 }
 
-/// `--edit <file>`: the picture in the editor, over a dark backdrop, the zone around it: crop
-/// it, annotate it, then copy it or save it as a new capture (the file itself is kept).
+/// `--edit <file>`: the picture in the editor, over a dark backdrop, the zone around it: crop it, annotate it, then
+/// copy it or save it as a new capture (the file itself is kept).
 pub fn run_edit(args: &[String]) -> anyhow::Result<()> {
     let path = PathBuf::from(args.first().context("usage: --edit <file>")?);
-    let config = vixeeny_common::paths::config_file()
-        .and_then(|p| Config::load(&p).ok())
-        .unwrap_or_default();
+    let config = vixeeny_common::paths::config_file().and_then(|p| Config::load(&p).ok()).unwrap_or_default();
     let bytes = std::fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
     let picture = vixeeny_image::decode(&bytes)?;
     vixeeny_platform::ensure_dpi_aware();
     let monitors = vixeeny_platform::monitors()?;
     let cursor = vixeeny_platform::cursor_position()?;
-    let desktop = vixeeny_platform::virtual_bounds(monitors.iter().map(|m| &m.rect))
-        .context("no monitor found")?;
-    let monitor =
-        vixeeny_platform::monitor_at(&monitors, cursor.0, cursor.1).context("no monitor found")?;
+    let desktop = vixeeny_platform::virtual_bounds(monitors.iter().map(|m| &m.rect)).context("no monitor found")?;
+    let monitor = vixeeny_platform::monitor_at(&monitors, cursor.0, cursor.1).context("no monitor found")?;
     let scale = monitor.scale_factor() as f32;
     let area = |r: &vixeeny_platform::PhysicalRect| {
-        Rect::new(
-            (r.x - desktop.x) as f32,
-            (r.y - desktop.y) as f32,
-            r.width as f32,
-            r.height as f32,
-        )
+        Rect::new((r.x - desktop.x) as f32, (r.y - desktop.y) as f32, r.width as f32, r.height as f32)
     };
     let bounds = Rect::new(0.0, 0.0, desktop.width as f32, desktop.height as f32);
-    let at = place_picture(
-        (picture.width, picture.height),
-        &bounds,
-        &area(&monitor.rect),
-    )
-    .context("the picture is larger than the screens")?;
+    let at = place_picture((picture.width, picture.height), &bounds, &area(&monitor.rect))
+        .context("the picture is larger than the screens")?;
     // The backdrop, the picture pasted on it.
     let mut base = RgbaImage::new(
         desktop.width,
@@ -804,19 +673,13 @@ pub fn run_edit(args: &[String]) -> anyhow::Result<()> {
             area: area(&m.rect),
         })
         .collect();
-    let session = Session::new(base, Vec::new())
-        .with_screens(monitor_areas)
-        .within(Rect::new(
-            at.0 as f32,
-            at.1 as f32,
-            picture.width as f32,
-            picture.height as f32,
-        ));
-    let snapshot = Snapshot {
-        monitors,
-        cursor,
-        foreground: None,
-    };
+    let session = Session::new(base, Vec::new()).with_screens(monitor_areas).within(Rect::new(
+        at.0 as f32,
+        at.1 as f32,
+        picture.width as f32,
+        picture.height as f32,
+    ));
+    let snapshot = Snapshot { monitors, cursor, foreground: None };
     let tips = toolbar_tips(crate::lang(&config.general.language));
     let overlay = vixeeny_overlay::Overlay::on_screens(
         session,
@@ -824,22 +687,12 @@ pub fn run_edit(args: &[String]) -> anyhow::Result<()> {
         &screens,
         vixeeny_ui::theme::default_look(),
         move |command, session| {
-            output_command(
-                &config,
-                &snapshot,
-                ActionId::CaptureRegion,
-                command,
-                session,
-                None,
-            )
-            .unwrap_or(false)
+            output_command(&config, &snapshot, ActionId::CaptureRegion, command, session, None).unwrap_or(false)
         },
     )
     .map_err(|e| anyhow::anyhow!("cannot create the editor window: {e}"))?;
     overlay.set_tips(&tips);
-    overlay
-        .run(cursor)
-        .map_err(|e| anyhow::anyhow!("editor window: {e}"))
+    overlay.run(cursor).map_err(|e| anyhow::anyhow!("editor window: {e}"))
 }
 
 /// What the toolbar's buttons do, in the order of `vixeeny_overlay::layout::Tip`.
@@ -883,10 +736,7 @@ mod tests {
     #[test]
     fn every_tip_of_the_toolbar_has_its_text() {
         use vixeeny_overlay::layout::{TIP_COUNT, Tip};
-        for lang in [
-            vixeeny_common::i18n::Lang::En,
-            vixeeny_common::i18n::Lang::Fr,
-        ] {
+        for lang in [vixeeny_common::i18n::Lang::En, vixeeny_common::i18n::Lang::Fr] {
             let tips = toolbar_tips(lang);
             assert_eq!(tips.len(), TIP_COUNT);
             assert_eq!(Tip::RightClick as usize, TIP_COUNT - 1);
@@ -899,20 +749,11 @@ mod tests {
         // Two 1920×1080 monitors side by side, the cursor on the right one.
         let bounds = Rect::new(0.0, 0.0, 3840.0, 1080.0);
         let right = Rect::new(1920.0, 0.0, 1920.0, 1080.0);
-        assert_eq!(
-            place_picture((800, 600), &bounds, &right),
-            Some((2480, 240))
-        );
-        assert_eq!(
-            place_picture((1920, 1080), &bounds, &right),
-            Some((1920, 0))
-        );
+        assert_eq!(place_picture((800, 600), &bounds, &right), Some((2480, 240)));
+        assert_eq!(place_picture((1920, 1080), &bounds, &right), Some((1920, 0)));
         // Both screens at once: across the desktop.
         assert_eq!(place_picture((3840, 1080), &bounds, &right), Some((0, 0)));
-        assert_eq!(
-            place_picture((2000, 500), &bounds, &right),
-            Some((920, 290))
-        );
+        assert_eq!(place_picture((2000, 500), &bounds, &right), Some((920, 290)));
         assert_eq!(place_picture((4000, 500), &bounds, &right), None);
     }
 
@@ -931,8 +772,7 @@ mod tests {
         assert_eq!(session.export().unwrap().width, 100);
     }
 
-    /// Text drawn by the editor is read back by the OCR engine of Windows (where a recognition
-    /// language is installed).
+    /// Text drawn by the editor is read back by the OCR engine of Windows (where a recognition language is installed).
     #[test]
     fn the_text_of_a_zone_is_read() {
         let (w, h) = (420, 80);
@@ -946,18 +786,9 @@ mod tests {
         session.pointer_up(Point::new(20.0, 20.0), none);
         session.commit_text("Vixeeny reads 2026");
         let img = session.export().unwrap();
-        let bgra: Vec<u8> = img
-            .data
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .flat_map(|&[r, g, b, a]| [b, g, r, a])
-            .collect();
+        let bgra: Vec<u8> = img.data.as_chunks::<4>().0.iter().flat_map(|&[r, g, b, a]| [b, g, r, a]).collect();
         match vixeeny_platform::ocr::recognize(w, h, &bgra) {
-            Ok(text) => assert!(
-                text.contains("Vixeeny") && text.contains("2026"),
-                "{text:?}"
-            ),
+            Ok(text) => assert!(text.contains("Vixeeny") && text.contains("2026"), "{text:?}"),
             Err(e) => vixeeny_common::skip_test(format!("no OCR: {e}")),
         }
     }
@@ -968,15 +799,8 @@ mod tests {
         let (w, h) = (200, 100);
         let base = RgbaImage::new(w, h, [128, 128, 128, 255].repeat((w * h) as usize)).unwrap();
         let desktop = HdrCapture {
-            frame: HdrFrame {
-                width: w,
-                height: h,
-                rgba: [12.5, 12.5, 12.5, 1.0].repeat((w * h) as usize),
-            },
-            info: HdrInfo {
-                sdr_white_nits: 240.0,
-                peak_nits: 1000.0,
-            },
+            frame: HdrFrame { width: w, height: h, rgba: [12.5, 12.5, 12.5, 1.0].repeat((w * h) as usize) },
+            info: HdrInfo { sdr_white_nits: 240.0, peak_nits: 1000.0 },
         };
         let mut session = Session::new(base, Vec::new());
         session.select_all();

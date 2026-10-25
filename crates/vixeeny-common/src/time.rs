@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Wall-clock time in the user's time zone, for file names (`{date}`, `{time}`, `{ms}`) and log
-//! lines; the platform layer reads it.
+//! Wall-clock time in the user's time zone, for file names (`{date}`, `{time}`, `{ms}`) and log lines; the platform
+//! layer reads it.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LocalTime {
@@ -78,20 +78,11 @@ mod tests {
     #[test]
     fn civil_conversion() {
         let t = LocalTime::from_unix_utc(0, 0);
-        assert_eq!(
-            (t.date(), t.time()),
-            ("1970-01-01".into(), "00-00-00".into())
-        );
+        assert_eq!((t.date(), t.time()), ("1970-01-01".into(), "00-00-00".into()));
         // 2026-10-01 17:12:00 UTC
         let t = LocalTime::from_unix_utc(1_790_874_720, 5);
-        assert_eq!(
-            (t.date(), t.time(), t.millisecond),
-            ("2026-10-01".into(), "17-12-00".into(), 5)
-        );
+        assert_eq!((t.date(), t.time(), t.millisecond), ("2026-10-01".into(), "17-12-00".into(), 5));
         // Leap day.
-        assert_eq!(
-            LocalTime::from_unix_utc(1_709_164_800, 0).date(),
-            "2024-02-29"
-        );
+        assert_eq!(LocalTime::from_unix_utc(1_709_164_800, 0).date(), "2024-02-29");
     }
 }

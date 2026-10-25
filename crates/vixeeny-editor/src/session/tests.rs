@@ -26,11 +26,7 @@ fn drag(s: &mut Session, a: Point, b: Point) {
 }
 
 fn ctrl(c: char) -> KeyInput {
-    KeyInput {
-        key: Key::Char(c),
-        ctrl: true,
-        shift: false,
-    }
+    KeyInput { key: Key::Char(c), ctrl: true, shift: false }
 }
 
 #[test]
@@ -45,10 +41,8 @@ fn before_any_selection_the_screen_is_calm() {
 fn the_toolbar_stays_on_one_monitor() {
     // Two 1000×800 monitors side by side; a zone ending at the right edge of the left one.
     let base = RgbaImage::filled(2000, 800, Color::rgb(0, 0, 0));
-    let mut s = Session::new(base, Vec::new()).with_screens(vec![
-        Rect::new(0.0, 0.0, 1000.0, 800.0),
-        Rect::new(1000.0, 0.0, 1000.0, 800.0),
-    ]);
+    let mut s = Session::new(base, Vec::new())
+        .with_screens(vec![Rect::new(0.0, 0.0, 1000.0, 800.0), Rect::new(1000.0, 0.0, 1000.0, 800.0)]);
     s.pointer_down(p(400.0, 100.0), NO);
     s.pointer_move(p(990.0, 300.0), NO);
     s.pointer_up(p(990.0, 300.0), NO);
@@ -60,10 +54,7 @@ fn the_toolbar_stays_on_one_monitor() {
 fn hovering_highlights_the_window_and_a_click_selects_it() {
     let mut s = session();
     s.pointer_move(p(30.0, 30.0), NO);
-    assert_eq!(
-        s.view().hover_window,
-        Some(Rect::new(10.0, 10.0, 80.0, 60.0))
-    );
+    assert_eq!(s.view().hover_window, Some(Rect::new(10.0, 10.0, 80.0, 60.0)));
     s.pointer_down(p(30.0, 30.0), NO);
     s.pointer_up(p(30.0, 30.0), NO);
     let v = s.view();
@@ -90,10 +81,7 @@ fn tools_draw_inside_the_zone_and_the_export_contains_them() {
     s.set_filled(true);
     s.set_color(Color::rgb(0, 255, 0));
     drag(&mut s, p(30.0, 30.0), p(60.0, 60.0));
-    assert!(matches!(
-        s.editor().doc.items[0].annotation,
-        Annotation::Rect { .. }
-    ));
+    assert!(matches!(s.editor().doc.items[0].annotation, Annotation::Rect { .. }));
     let out = s.export().unwrap();
     assert_eq!((out.width, out.height), (100, 60));
     assert_eq!(out.pixel(25, 25), Color::rgb(0, 255, 0)); // inside the rectangle
@@ -162,29 +150,13 @@ fn text_tool_opens_a_field_then_commits() {
     assert!(s.is_typing());
     s.commit_text("Hello");
     assert_eq!(s.view().text_input, None);
-    assert!(
-        matches!(&s.editor().doc.items[0].annotation, Annotation::Text { text, .. } if text == "Hello")
-    );
+    assert!(matches!(&s.editor().doc.items[0].annotation, Annotation::Text { text, .. } if text == "Hello"));
     // Escape cancels the field instead of closing
     s.pointer_down(p(60.0, 60.0), NO);
     s.pointer_up(p(60.0, 60.0), NO);
-    assert_eq!(
-        s.key(KeyInput {
-            key: Key::Escape,
-            ctrl: false,
-            shift: false
-        }),
-        None
-    );
+    assert_eq!(s.key(KeyInput { key: Key::Escape, ctrl: false, shift: false }), None);
     assert_eq!(s.view().text_input, None);
-    assert_eq!(
-        s.key(KeyInput {
-            key: Key::Escape,
-            ctrl: false,
-            shift: false
-        }),
-        Some(Command::Close)
-    );
+    assert_eq!(s.key(KeyInput { key: Key::Escape, ctrl: false, shift: false }), Some(Command::Close));
 }
 
 #[test]
@@ -193,22 +165,8 @@ fn keyboard_commands() {
     assert_eq!(s.key(ctrl('c')), Some(Command::Copy));
     assert_eq!(s.key(ctrl('C')), Some(Command::Copy));
     assert_eq!(s.key(ctrl('s')), Some(Command::Save));
-    assert_eq!(
-        s.key(KeyInput {
-            key: Key::Char('s'),
-            ctrl: true,
-            shift: true
-        }),
-        Some(Command::SaveAs)
-    );
-    assert_eq!(
-        s.key(KeyInput {
-            key: Key::Char('c'),
-            ctrl: false,
-            shift: false
-        }),
-        None
-    );
+    assert_eq!(s.key(KeyInput { key: Key::Char('s'), ctrl: true, shift: true }), Some(Command::SaveAs));
+    assert_eq!(s.key(KeyInput { key: Key::Char('c'), ctrl: false, shift: false }), None);
 }
 
 #[test]
@@ -223,21 +181,13 @@ fn undo_redo_and_delete_from_the_keyboard() {
     s.key(ctrl('y'));
     assert_eq!(s.editor().doc.items.len(), 1);
     s.key(ctrl('z'));
-    s.key(KeyInput {
-        key: Key::Char('z'),
-        ctrl: true,
-        shift: true,
-    });
+    s.key(KeyInput { key: Key::Char('z'), ctrl: true, shift: true });
     assert_eq!(s.editor().doc.items.len(), 1);
     // after a redo nothing is selected: pick the shape with the Select tool, then delete it
     s.choose_tool(Some(Tool::Select));
     s.pointer_down(p(80.0, 50.0), NO);
     s.pointer_up(p(80.0, 50.0), NO);
-    s.key(KeyInput {
-        key: Key::Delete,
-        ctrl: false,
-        shift: false,
-    });
+    s.key(KeyInput { key: Key::Delete, ctrl: false, shift: false });
     assert!(s.editor().doc.items.is_empty());
     assert!(s.view().can_undo && !s.view().can_redo);
 }
@@ -301,26 +251,10 @@ fn thickness_scales_every_tool() {
     let mut s = session();
     s.set_width(4.0);
     let d = s.editor().settings.clone();
-    assert_eq!(
-        (
-            d.text_size,
-            d.marker_radius,
-            d.blur_radius,
-            d.pixelate_block
-        ),
-        (24.0, 14.0, 6.0, 10)
-    );
+    assert_eq!((d.text_size, d.marker_radius, d.blur_radius, d.pixelate_block), (24.0, 14.0, 6.0, 10));
     s.set_width(10.0);
     let t = &s.editor().settings;
-    assert_eq!(
-        (
-            t.text_size,
-            t.marker_radius,
-            t.blur_radius,
-            t.pixelate_block
-        ),
-        (48.0, 20.0, 15.0, 25)
-    );
+    assert_eq!((t.text_size, t.marker_radius, t.blur_radius, t.pixelate_block), (48.0, 20.0, 15.0, 25));
     s.set_width(0.0);
     assert_eq!(s.editor().settings.style.width, 1.0);
     assert_eq!(s.editor().settings.pixelate_block, 3);
@@ -385,17 +319,11 @@ fn the_zone_tool_moves_an_annotation_pressed_on_and_the_zone_else() {
     s.pointer_move(p(50.0, 45.0), NO);
     assert_eq!(s.view().selected, Some(Rect::new(38.0, 33.0, 34.0, 34.0)));
     s.pointer_up(p(50.0, 45.0), NO);
-    let Annotation::Rect { rect, .. } = &s.editor().doc.items[0].annotation else {
-        panic!()
-    };
+    let Annotation::Rect { rect, .. } = &s.editor().doc.items[0].annotation else { panic!() };
     assert_eq!((rect.x, rect.y), (40.0, 35.0));
     assert_eq!(s.view().selection, Some(Rect::new(10.0, 10.0, 180.0, 80.0)));
     // Arrows nudge it.
-    s.key(KeyInput {
-        key: Key::Right,
-        ctrl: false,
-        shift: false,
-    });
+    s.key(KeyInput { key: Key::Right, ctrl: false, shift: false });
     assert_eq!(s.view().selected, Some(Rect::new(39.0, 33.0, 34.0, 34.0)));
     // Elsewhere in the zone: the zone moves and nothing stays selected.
     drag(&mut s, p(150.0, 50.0), p(155.0, 50.0));
@@ -497,10 +425,7 @@ fn live_a_blurred_zone_follows_the_screens() {
 
 #[test]
 fn the_layers_are_drawn_over_what_they_cover_by_blocks() {
-    let mut s = Session::new(
-        RgbaImage::filled(1000, 800, Color::rgb(9, 9, 9)),
-        Vec::new(),
-    );
+    let mut s = Session::new(RgbaImage::filled(1000, 800, Color::rgb(9, 9, 9)), Vec::new());
     drag(&mut s, p(10.0, 10.0), p(990.0, 790.0));
     s.choose_tool(Some(Tool::Rect));
     drag(&mut s, p(300.0, 300.0), p(320.0, 310.0));

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! What the last check found, kept in `update.json` next to the settings: the settings window
-//! and the background check read it.
+//! What the last check found, kept in `update.json` next to the settings: the settings window and the background check
+//! read it.
 
 use std::path::{Path, PathBuf};
 
@@ -15,11 +15,7 @@ pub fn log(message: &str) {
         return;
     };
     let _ = std::fs::create_dir_all(&dir);
-    if let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(dir.join("update.log"))
-    {
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("update.log")) {
         let _ = writeln!(file, "{message}");
     }
 }
@@ -48,10 +44,7 @@ pub struct State {
 
 impl State {
     pub fn load(path: &Path) -> Self {
-        std::fs::read_to_string(path)
-            .ok()
-            .and_then(|text| serde_json::from_str(&text).ok())
-            .unwrap_or_default()
+        std::fs::read_to_string(path).ok().and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default()
     }
 
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
@@ -59,9 +52,8 @@ impl State {
             std::fs::create_dir_all(dir)?;
         }
         let text = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
-        // Written whole, then put in place: the check in the background and the settings
-        // window write it, and a reader never finds it half written. One temporary file per
-        // process, so two writers do not mix theirs.
+        // Written whole, then put in place: the check in the background and the settings window write it, and a reader
+        // never finds it half written. One temporary file per process, so two writers do not mix theirs.
         let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
         std::fs::write(&tmp, text)?;
         std::fs::rename(&tmp, path).inspect_err(|_| {
@@ -71,9 +63,7 @@ impl State {
 
     /// The release to offer, if it is newer than `current`.
     pub fn newer_than(&self, current: &str) -> Option<&Release> {
-        self.available
-            .as_ref()
-            .filter(|r| crate::release::is_newer(current, &r.version))
+        self.available.as_ref().filter(|r| crate::release::is_newer(current, &r.version))
     }
 
     /// A check is due every 12 hours.
@@ -114,15 +104,8 @@ mod tests {
 
     #[test]
     fn an_offer_older_than_the_running_version_is_dropped() {
-        let release = Release {
-            version: "0.5.0".into(),
-            assets: Vec::new(),
-            signatures: Default::default(),
-        };
-        let state = State {
-            available: Some(release),
-            ..State::default()
-        };
+        let release = Release { version: "0.5.0".into(), assets: Vec::new(), signatures: Default::default() };
+        let state = State { available: Some(release), ..State::default() };
         assert!(state.newer_than("0.4.0").is_some());
         assert!(state.newer_than("0.5.0").is_none());
         assert!(state.newer_than("0.6.0").is_none());
@@ -130,10 +113,7 @@ mod tests {
 
     #[test]
     fn a_check_is_due_after_a_day() {
-        let state = State {
-            checked_at: 1000,
-            ..State::default()
-        };
+        let state = State { checked_at: 1000, ..State::default() };
         assert!(!state.due(1000 + 3600));
         assert!(state.due(1000 + 24 * 3600));
     }

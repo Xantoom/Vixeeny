@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Direct image captures: full screen under the cursor, active window, all
-//! monitors. Written in the configured format in the images folder.
+//! Direct image captures: full screen under the cursor, active window, all monitors. Written in the configured format
+//! in the images folder.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use vixeeny_capture::{
-    CaptureError, CaptureOptions, CaptureTarget, Capturer, HdrCapture, HdrFrame, StillBackend,
-};
+use vixeeny_capture::{CaptureError, CaptureOptions, CaptureTarget, Capturer, HdrCapture, HdrFrame, StillBackend};
 use vixeeny_common::ipc::ActionId;
 use vixeeny_common::naming::{self, AppInfo, Vars};
 use vixeeny_common::time::LocalTime;
@@ -29,10 +27,7 @@ pub enum StillError {
     #[error(transparent)]
     Image(#[from] ImageError),
     #[error("cannot write {path}: {source}")]
-    Io {
-        path: PathBuf,
-        source: std::io::Error,
-    },
+    Io { path: PathBuf, source: std::io::Error },
 }
 
 /// What the OS says at the moment of the shortcut.
@@ -50,11 +45,9 @@ pub fn target_for(action: ActionId, snap: &Snapshot) -> Result<CaptureTarget, St
             let monitor = monitor_at(&snap.monitors, x, y).ok_or(StillError::NoMonitor)?;
             Ok(CaptureTarget::Monitor(monitor.id))
         }
-        ActionId::CaptureWindow => snap
-            .foreground
-            .as_ref()
-            .map(|w| CaptureTarget::Window(w.id))
-            .ok_or(StillError::NoWindow),
+        ActionId::CaptureWindow => {
+            snap.foreground.as_ref().map(|w| CaptureTarget::Window(w.id)).ok_or(StillError::NoWindow)
+        }
         ActionId::CaptureAllMonitors => Ok(CaptureTarget::AllMonitors),
         other => Err(StillError::NotADirectCapture(other)),
     }
@@ -62,10 +55,7 @@ pub fn target_for(action: ActionId, snap: &Snapshot) -> Result<CaptureTarget, St
 
 /// Writes next to the destination then renames, so a crash never leaves a truncated file.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), StillError> {
-    let io = |source| StillError::Io {
-        path: path.to_path_buf(),
-        source,
-    };
+    let io = |source| StillError::Io { path: path.to_path_buf(), source };
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(io)?;
     }
@@ -83,8 +73,8 @@ pub struct Output<'a> {
     pub settings: &'a Settings,
     /// HDR screens are kept as HDR when the format can hold it, rather than tone-mapped.
     pub keep_hdr: bool,
-    /// A window capture is set on the background this gives, asked once the window is
-    /// captured (reading the wallpaper takes a moment).
+    /// A window capture is set on the background this gives, asked once the window is captured (reading the wallpaper
+    /// takes a moment).
     pub backdrop: Option<&'a dyn Fn() -> Backdrop>,
 }
 
@@ -100,19 +90,18 @@ pub struct Destination<'a> {
     pub dir: &'a Path,
     pub template: &'a str,
     pub per_app_subfolder: bool,
-    /// `{app}` of a desktop capture is the full-screen application with the focus (a game),
-    /// not `Desktop`.
+    /// `{app}` of a desktop capture is the full-screen application with the focus (a game), not `Desktop`.
     pub use_foreground_app: bool,
     pub app_names: &'a BTreeMap<String, String>,
     pub now: &'a LocalTime,
-    /// Called with the image once it is saved (e.g. to copy it to the clipboard), and with the
-    /// file's bytes when they hold the image itself, so that it is not encoded again. When they
-    /// do not (an HDR file of an SDR copy), it is called while the file is written.
+    /// Called with the image once it is saved (e.g. to copy it to the clipboard), and with the file's bytes when they
+    /// hold the image itself, so that it is not encoded again. When they do not (an HDR file of an SDR copy), it is
+    /// called while the file is written.
     pub after_save: Option<&'a AfterSave<'a>>,
 }
 
-/// What [`Destination::after_save`] calls: the image, and the file's bytes when they are it. It
-/// may be called from another thread, while the file is written.
+/// What [`Destination::after_save`] calls: the image, and the file's bytes when they are it. It may be called from
+/// another thread, while the file is written.
 pub type AfterSave<'a> = dyn Fn(&Bgra<'_>, Option<&[u8]>) + Sync + 'a;
 
 /// Display name of the application a capture is attributed to.
@@ -124,17 +113,14 @@ pub(crate) fn app_name(
 ) -> String {
     let window = match action {
         ActionId::CaptureWindow => snap.foreground.as_ref(),
-        // Only a window over the screen being captured (all of them for an all-monitor
-        // capture), and never one of Vixeeny's own (a menu, the settings, a notification).
+        // Only a window over the screen being captured (all of them for an all-monitor capture), and never one of
+        // Vixeeny's own (a menu, the settings, a notification).
         _ => snap.foreground.as_ref().filter(|w| {
             let monitors: Vec<MonitorInfo> = if action == ActionId::CaptureAllMonitors {
                 snap.monitors.clone()
             } else {
                 let (x, y) = snap.cursor;
-                monitor_at(&snap.monitors, x, y)
-                    .into_iter()
-                    .cloned()
-                    .collect()
+                monitor_at(&snap.monitors, x, y).into_iter().cloned().collect()
             };
             dest.use_foreground_app && is_full_screen(w, &monitors) && !is_ours(w)
         }),
@@ -170,11 +156,9 @@ fn template_vars(
     size: (u32, u32),
 ) -> Vars {
     let monitor = match target_for(action, snap) {
-        Ok(CaptureTarget::Monitor(id)) => snap
-            .monitors
-            .iter()
-            .position(|m| m.id == id)
-            .map_or_else(String::new, |i| (i + 1).to_string()),
+        Ok(CaptureTarget::Monitor(id)) => {
+            snap.monitors.iter().position(|m| m.id == id).map_or_else(String::new, |i| (i + 1).to_string())
+        }
         _ => String::new(),
     };
     Vars {
@@ -194,8 +178,8 @@ fn template_vars(
     }
 }
 
-/// Grabs, encodes and saves. Returns the file written. `metadata` reads the version resource
-/// of an executable (a parameter so tests need no real programs).
+/// Grabs, encodes and saves. Returns the file written. `metadata` reads the version resource of an executable (a
+/// parameter so tests need no real programs).
 pub fn run<B: StillBackend>(
     action: ActionId,
     snap: &Snapshot,
@@ -207,31 +191,20 @@ pub fn run<B: StillBackend>(
 ) -> Result<PathBuf, StillError> {
     let target = target_for(action, snap)?;
     let started = std::time::Instant::now();
-    let hdr = if output.hdr() {
-        capturer.grab_hdr(&target, options.show_cursor)?
-    } else {
-        None
-    };
-    // A window set on its background: the interface scale of its screen sizes the margin. It is
-    // drawn on the capture's own graphics device.
+    let hdr = if output.hdr() { capturer.grab_hdr(&target, options.show_cursor)? } else { None };
+    // A window set on its background: the interface scale of its screen sizes the margin. It is drawn on the capture's
+    // own graphics device.
     let device = capturer.d3d_device();
-    let backdrop = output
-        .backdrop
-        .filter(|_| action == ActionId::CaptureWindow)
-        .map(|b| {
-            let scale = snap
-                .foreground
-                .as_ref()
-                .and_then(|w| {
-                    monitor_at(
-                        &snap.monitors,
-                        w.rect.x + w.rect.width as i32 / 2,
-                        w.rect.y + w.rect.height as i32 / 2,
-                    )
-                })
-                .map_or(1.0, |m| m.scale_factor() as f32);
-            (b, scale)
-        });
+    let backdrop = output.backdrop.filter(|_| action == ActionId::CaptureWindow).map(|b| {
+        let scale = snap
+            .foreground
+            .as_ref()
+            .and_then(|w| {
+                monitor_at(&snap.monitors, w.rect.x + w.rect.width as i32 / 2, w.rect.y + w.rect.height as i32 / 2)
+            })
+            .map_or(1.0, |m| m.scale_factor() as f32);
+        (b, scale)
+    });
     let path = if let Some(mut capture) = hdr {
         let grabbed = started.elapsed();
         if let Some((make, scale)) = backdrop {
@@ -239,42 +212,23 @@ pub fn run<B: StillBackend>(
             let (w, h) = (capture.frame.width, capture.frame.height);
             let white = capture.info.sdr_white_nits / 80.0;
             let layout = backdrop::layout(w, h, scale);
-            let window = card::Window::Hdr {
-                width: w,
-                height: h,
-                rgba: &capture.frame.rgba,
-            };
-            let on_card = card_setting(&layout, &b, white)
-                .map(|setting| card::set_on_card(device.as_ref(), &window, &setting));
+            let window = card::Window::Hdr { width: w, height: h, rgba: &capture.frame.rgba };
+            let on_card =
+                card_setting(&layout, &b, white).map(|setting| card::set_on_card(device.as_ref(), &window, &setting));
             capture.frame = match on_card {
-                Some(Ok(card::Set::Hdr(rgba))) => HdrFrame {
-                    width: layout.size.0,
-                    height: layout.size.1,
-                    rgba,
-                },
+                Some(Ok(card::Set::Hdr(rgba))) => HdrFrame { width: layout.size.0, height: layout.size.1, rgba },
                 card => {
                     if let Some(Err(e)) = card {
                         tracing::debug!("backdrop on the processor: {e}");
                     }
-                    let window = Linear {
-                        width: w,
-                        height: h,
-                        rgba: std::mem::take(&mut capture.frame.rgba),
-                    };
+                    let window = Linear { width: w, height: h, rgba: std::mem::take(&mut capture.frame.rgba) };
                     let set = backdrop::set_on(&window, &b, scale, white);
-                    HdrFrame {
-                        width: set.width,
-                        height: set.height,
-                        rgba: set.rgba,
-                    }
+                    HdrFrame { width: set.width, height: set.height, rgba: set.rgba }
                 }
             };
         }
         let path = save_hdr(action, snap, dest, output, metadata, &capture)?;
-        tracing::info!(
-            "grabbed (HDR) in {grabbed:?}, encoded and written in {:?}",
-            started.elapsed() - grabbed
-        );
+        tracing::info!("grabbed (HDR) in {grabbed:?}, encoded and written in {:?}", started.elapsed() - grabbed);
         path
     } else {
         let frame = capturer.grab(&target, options)?;
@@ -282,26 +236,17 @@ pub fn run<B: StillBackend>(
         let set = backdrop.map(|(make, scale)| {
             let b = make();
             let layout = backdrop::layout(frame.width, frame.height, scale);
-            let window = card::Window::Sdr {
-                width: frame.width,
-                height: frame.height,
-                stride: frame.stride,
-                bgra: &frame.data,
-            };
-            let on_card = card_setting(&layout, &b, 1.0)
-                .map(|setting| card::set_on_card(device.as_ref(), &window, &setting));
+            let window =
+                card::Window::Sdr { width: frame.width, height: frame.height, stride: frame.stride, bgra: &frame.data };
+            let on_card =
+                card_setting(&layout, &b, 1.0).map(|setting| card::set_on_card(device.as_ref(), &window, &setting));
             match on_card {
                 Some(Ok(card::Set::Sdr(bgra))) => (layout.size.0, layout.size.1, bgra),
                 card => {
                     if let Some(Err(e)) = card {
                         tracing::debug!("backdrop on the processor: {e}");
                     }
-                    let window = backdrop::linear_from_bgra(
-                        frame.width,
-                        frame.height,
-                        frame.stride,
-                        &frame.data,
-                    );
+                    let window = backdrop::linear_from_bgra(frame.width, frame.height, frame.stride, &frame.data);
                     let set = backdrop::set_on(&window, &b, scale, 1.0);
                     (set.width, set.height, backdrop::linear_to_bgra(&set))
                 }
@@ -312,17 +257,13 @@ pub fn run<B: StillBackend>(
             None => Bgra::new(frame.width, frame.height, frame.stride, &frame.data),
         };
         let path = save_image(action, snap, dest, output, metadata, &image)?;
-        tracing::info!(
-            "grabbed in {grabbed:?}, encoded and written in {:?}",
-            started.elapsed() - grabbed
-        );
+        tracing::info!("grabbed in {grabbed:?}, encoded and written in {:?}", started.elapsed() - grabbed);
         path
     };
     Ok(path)
 }
 
-/// Encodes `image` and writes it under the configured name. Shared by the direct captures and
-/// the editor's "save".
+/// Encodes `image` and writes it under the configured name. Shared by the direct captures and the editor's "save".
 pub fn save_image(
     action: ActionId,
     snap: &Snapshot,
@@ -332,23 +273,14 @@ pub fn save_image(
     image: &Bgra<'_>,
 ) -> Result<PathBuf, StillError> {
     let bytes = vixeeny_image::encode(output.format, image, output.settings)?;
-    let path = write_named(
-        action,
-        snap,
-        dest,
-        output.format,
-        metadata,
-        (image.width, image.height),
-        &bytes,
-    )?;
+    let path = write_named(action, snap, dest, output.format, metadata, (image.width, image.height), &bytes)?;
     if let Some(after) = dest.after_save {
         after(image, Some(&bytes));
     }
     Ok(path)
 }
 
-/// [`save_image`] for an HDR capture, kept as HDR. What comes after the save (the clipboard)
-/// gets the SDR rendering.
+/// [`save_image`] for an HDR capture, kept as HDR. What comes after the save (the clipboard) gets the SDR rendering.
 pub fn save_hdr(
     action: ActionId,
     snap: &Snapshot,
@@ -359,9 +291,8 @@ pub fn save_hdr(
 ) -> Result<PathBuf, StillError> {
     let image = hdr_image(capture);
     let size = (image.width, image.height);
-    // An Ultra HDR JPEG is a JPEG of the SDR rendering (with a gain map): the clipboard takes
-    // the file as it is. Other HDR files are not the SDR rendering: it is encoded on its own,
-    // side by side with the file.
+    // An Ultra HDR JPEG is a JPEG of the SDR rendering (with a gain map): the clipboard takes the file as it is. Other
+    // HDR files are not the SDR rendering: it is encoded on its own, side by side with the file.
     let reuse = output.format == ImageFormat::Jpeg;
     std::thread::scope(|scope| {
         let sdr = dest.after_save.map(|after| {
@@ -378,10 +309,7 @@ pub fn save_hdr(
         let path = write_named(action, snap, dest, output.format, metadata, size, &bytes)?;
         let sdr = sdr.and_then(|done| done.join().ok());
         if let (true, Some(after), Some(sdr)) = (reuse, dest.after_save, sdr) {
-            after(
-                &Bgra::new(size.0, size.1, size.0 as usize * 4, &sdr),
-                Some(&bytes),
-            );
+            after(&Bgra::new(size.0, size.1, size.0 as usize * 4, &sdr), Some(&bytes));
         }
         Ok(path)
     })
@@ -419,8 +347,8 @@ fn write_named(
     Ok(path)
 }
 
-/// The graphics card's version of `b`, with the processor's sizes. A picture or a gradient
-/// behind is the processor's work.
+/// The graphics card's version of `b`, with the processor's sizes. A picture or a gradient behind is the processor's
+/// work.
 fn card_setting(layout: &backdrop::Layout, b: &Backdrop, white: f32) -> Option<card::Setting> {
     let behind = match b {
         Backdrop::Blur => card::Behind::Blur,
@@ -480,24 +408,15 @@ mod tests {
 
     #[test]
     fn full_screen_follows_the_cursor() {
-        assert_eq!(
-            target_for(ActionId::CaptureFullscreen, &snapshot()).unwrap(),
-            CaptureTarget::Monitor(MonitorId(2))
-        );
+        assert_eq!(target_for(ActionId::CaptureFullscreen, &snapshot()).unwrap(), CaptureTarget::Monitor(MonitorId(2)));
     }
 
     #[test]
     fn window_needs_a_foreground_window() {
         let mut s = snapshot();
-        assert_eq!(
-            target_for(ActionId::CaptureWindow, &s).unwrap(),
-            CaptureTarget::Window(WindowId(77))
-        );
+        assert_eq!(target_for(ActionId::CaptureWindow, &s).unwrap(), CaptureTarget::Window(WindowId(77)));
         s.foreground = None;
-        assert!(matches!(
-            target_for(ActionId::CaptureWindow, &s),
-            Err(StillError::NoWindow)
-        ));
+        assert!(matches!(target_for(ActionId::CaptureWindow, &s), Err(StillError::NoWindow)));
     }
 
     fn no_metadata(_: &str) -> ExeMetadata {
@@ -532,12 +451,7 @@ mod tests {
             &mut capturer,
             &dest,
             CaptureOptions::default(),
-            Output {
-                format: ImageFormat::Png,
-                settings: &Settings::default(),
-                keep_hdr: false,
-                backdrop: None,
-            },
+            Output { format: ImageFormat::Png, settings: &Settings::default(), keep_hdr: false, backdrop: None },
             metadata,
         )
         .unwrap()
@@ -549,8 +463,8 @@ mod tests {
         dir
     }
 
-    /// A window capture on its background: larger by the margin, the background in the corner;
-    /// other captures untouched.
+    /// A window capture on its background: larger by the margin, the background in the corner; other captures
+    /// untouched.
     #[test]
     fn a_window_is_set_on_its_background() {
         let dir = temp_dir("backdrop");
@@ -597,43 +511,14 @@ mod tests {
     #[test]
     fn writes_a_decodable_png_without_clobbering() {
         let dir = temp_dir("png");
-        let snap = Snapshot {
-            foreground: None,
-            ..snapshot()
-        };
+        let snap = Snapshot { foreground: None, ..snapshot() };
         let names = BTreeMap::new();
         let tpl = "{app}_{date}_{time}";
-        let first = run_with(
-            ActionId::CaptureFullscreen,
-            &snap,
-            &dir,
-            tpl,
-            false,
-            true,
-            &names,
-            &no_metadata,
-        );
-        let second = run_with(
-            ActionId::CaptureFullscreen,
-            &snap,
-            &dir,
-            tpl,
-            false,
-            true,
-            &names,
-            &no_metadata,
-        );
-        assert_eq!(
-            first.file_name().unwrap(),
-            "Desktop_2026-10-01_17-12-00.png"
-        );
-        assert_eq!(
-            second.file_name().unwrap(),
-            "Desktop_2026-10-01_17-12-00_2.png"
-        );
-        let decoder = png::Decoder::new(std::io::BufReader::new(
-            std::fs::File::open(&first).unwrap(),
-        ));
+        let first = run_with(ActionId::CaptureFullscreen, &snap, &dir, tpl, false, true, &names, &no_metadata);
+        let second = run_with(ActionId::CaptureFullscreen, &snap, &dir, tpl, false, true, &names, &no_metadata);
+        assert_eq!(first.file_name().unwrap(), "Desktop_2026-10-01_17-12-00.png");
+        assert_eq!(second.file_name().unwrap(), "Desktop_2026-10-01_17-12-00_2.png");
+        let decoder = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(&first).unwrap()));
         let reader = decoder.read_info().unwrap();
         assert_eq!((reader.info().width, reader.info().height), (160, 100));
         assert!(!dir.join("Desktop_2026-10-01_17-12-00.png.part").exists());
@@ -645,31 +530,12 @@ mod tests {
         let dir = temp_dir("app");
         let mut snap = snapshot();
         snap.foreground.as_mut().unwrap().exe_path = Some(r"C:\G\Client-Win64-Shipping.exe".into());
-        let names: BTreeMap<_, _> = [(
-            "client-win64-shipping.exe".to_owned(),
-            "Wuthering Waves".to_owned(),
-        )]
-        .into();
-        let path = run_with(
-            ActionId::CaptureWindow,
-            &snap,
-            &dir,
-            "{app}_{date}_{time}",
-            true,
-            true,
-            &names,
-            &no_metadata,
-        );
-        assert_eq!(
-            path,
-            dir.join("Wuthering Waves")
-                .join("Wuthering Waves_2026-10-01_17-12-00.png")
-        );
+        let names: BTreeMap<_, _> = [("client-win64-shipping.exe".to_owned(), "Wuthering Waves".to_owned())].into();
+        let path =
+            run_with(ActionId::CaptureWindow, &snap, &dir, "{app}_{date}_{time}", true, true, &names, &no_metadata);
+        assert_eq!(path, dir.join("Wuthering Waves").join("Wuthering Waves_2026-10-01_17-12-00.png"));
         // Product name from the version resource wins when the table has no entry.
-        let meta = |_: &str| ExeMetadata {
-            product_name: Some("Wuthering: Waves?".into()),
-            file_description: None,
-        };
+        let meta = |_: &str| ExeMetadata { product_name: Some("Wuthering: Waves?".into()), file_description: None };
         let path = run_with(
             ActionId::CaptureWindow,
             &snap,
@@ -680,11 +546,7 @@ mod tests {
             &BTreeMap::new(),
             &meta,
         );
-        assert_eq!(
-            path,
-            dir.join("Wuthering Waves")
-                .join("Wuthering Waves-64x48.png")
-        );
+        assert_eq!(path, dir.join("Wuthering Waves").join("Wuthering Waves-64x48.png"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -693,85 +555,32 @@ mod tests {
         let dir = temp_dir("fg");
         // A window among others: the capture is the desktop's.
         let names = BTreeMap::new();
-        let windowed = run_with(
-            ActionId::CaptureFullscreen,
-            &snapshot(),
-            &dir,
-            "{app}",
-            false,
-            true,
-            &names,
-            &no_metadata,
-        );
+        let windowed =
+            run_with(ActionId::CaptureFullscreen, &snapshot(), &dir, "{app}", false, true, &names, &no_metadata);
         assert_eq!(windowed.file_name().unwrap(), "Desktop.png");
         let _ = std::fs::remove_file(&windowed);
         // A full-screen game (titled "Game", unknown exe) names it.
         let mut snap = snapshot();
         snap.foreground.as_mut().unwrap().rect = PhysicalRect::new(200, 0, 160, 100);
-        let on = run_with(
-            ActionId::CaptureFullscreen,
-            &snap,
-            &dir,
-            "{app}",
-            false,
-            true,
-            &names,
-            &no_metadata,
-        );
+        let on = run_with(ActionId::CaptureFullscreen, &snap, &dir, "{app}", false, true, &names, &no_metadata);
         assert_eq!(on.file_name().unwrap(), "Game.png");
         let _ = std::fs::remove_file(&on);
-        let off = run_with(
-            ActionId::CaptureFullscreen,
-            &snap,
-            &dir,
-            "{app}",
-            false,
-            false,
-            &names,
-            &no_metadata,
-        );
+        let off = run_with(ActionId::CaptureFullscreen, &snap, &dir, "{app}", false, false, &names, &no_metadata);
         assert_eq!(off.file_name().unwrap(), "Desktop.png");
         let _ = std::fs::remove_file(&off);
         // Vixeeny's own window over the screen (a menu, the settings) is not a game.
         let mut ours = snap.clone();
         ours.foreground.as_mut().unwrap().pid = std::process::id();
-        let own = run_with(
-            ActionId::CaptureFullscreen,
-            &ours,
-            &dir,
-            "{app}",
-            false,
-            true,
-            &names,
-            &no_metadata,
-        );
+        let own = run_with(ActionId::CaptureFullscreen, &ours, &dir, "{app}", false, true, &names, &no_metadata);
         assert_eq!(own.file_name().unwrap(), "Desktop.png");
         let _ = std::fs::remove_file(&own);
         // A game on the other screen names neither this screen's capture...
         let mut other = snapshot();
         other.foreground.as_mut().unwrap().rect = PhysicalRect::new(0, 0, 200, 100);
-        let here = run_with(
-            ActionId::CaptureFullscreen,
-            &other,
-            &dir,
-            "{app}",
-            false,
-            true,
-            &names,
-            &no_metadata,
-        );
+        let here = run_with(ActionId::CaptureFullscreen, &other, &dir, "{app}", false, true, &names, &no_metadata);
         assert_eq!(here.file_name().unwrap(), "Desktop.png");
         // ...but it does name a capture of every screen.
-        let all = run_with(
-            ActionId::CaptureAllMonitors,
-            &other,
-            &dir,
-            "{app}",
-            false,
-            true,
-            &names,
-            &no_metadata,
-        );
+        let all = run_with(ActionId::CaptureAllMonitors, &other, &dir, "{app}", false, true, &names, &no_metadata);
         assert_eq!(all.file_name().unwrap(), "Game.png");
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -781,10 +590,7 @@ mod tests {
         let dir = temp_dir("hdr");
         let mut snap = snapshot();
         snap.foreground = None;
-        snap.monitors[1].hdr = Some(vixeeny_platform::HdrInfo {
-            sdr_white_nits: 200.0,
-            peak_nits: 1000.0,
-        });
+        snap.monitors[1].hdr = Some(vixeeny_platform::HdrInfo { sdr_white_nits: 200.0, peak_nits: 1000.0 });
         let now = now();
         let names = BTreeMap::new();
         let copied = std::sync::Mutex::new(None);
@@ -806,32 +612,16 @@ mod tests {
             after_save: Some(&copy),
         };
         let settings = Settings::default();
-        let options = CaptureOptions {
-            tonemap: Some(|rgba, _| vec![7; rgba.len()]),
-            ..CaptureOptions::default()
-        };
+        let options = CaptureOptions { tonemap: Some(|rgba, _| vec![7; rgba.len()]), ..CaptureOptions::default() };
         let shoot = |format, keep_hdr| {
             let mut capturer = Capturer::new(FakeBackend::default(), snap.monitors.clone());
-            let output = Output {
-                format,
-                settings: &settings,
-                keep_hdr,
-                backdrop: None,
-            };
-            let path = run(
-                ActionId::CaptureFullscreen,
-                &snap,
-                &mut capturer,
-                &dest,
-                options,
-                output,
-                &no_metadata,
-            )
-            .unwrap();
+            let output = Output { format, settings: &settings, keep_hdr, backdrop: None };
+            let path =
+                run(ActionId::CaptureFullscreen, &snap, &mut capturer, &dest, options, output, &no_metadata).unwrap();
             std::fs::read(path).unwrap()
         };
-        // Kept: a PQ PNG; the clipboard still gets the SDR rendering (the fake's 2.0 = 160
-        // nits, under SDR white: mid grey, not the fake tone mapper's 7).
+        // Kept: a PQ PNG; the clipboard still gets the SDR rendering (the fake's 2.0 = 160 nits, under SDR white: mid
+        // grey, not the fake tone mapper's 7).
         let png = shoot(ImageFormat::Png, true);
         assert!(png.windows(4).any(|c| c == b"cICP"));
         let (width, first) = copied().unwrap();

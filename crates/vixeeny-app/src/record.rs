@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Screen recording: the capture stream feeds the recorder, on a thread of its own so
-//! the action loop keeps answering the daemon. Frames are converted on the GPU when possible
-//! (see `try_gpu`), on the CPU otherwise; a recording films the monitor
-//! under the cursor, the replay the game's window alone.
+//! Screen recording: the capture stream feeds the recorder, on a thread of its own so the action loop keeps answering
+//! the daemon. Frames are converted on the GPU when possible (see `try_gpu`), on the CPU otherwise; a recording films
+//! the monitor under the cursor, the replay the game's window alone.
 
 use crate::toast::{Failed, Saved, Toast, failure_text};
 use std::path::PathBuf;
@@ -23,9 +22,7 @@ use vixeeny_encode::cut::Reencode;
 use vixeeny_encode::d3d_convert as d3d;
 use vixeeny_encode::gpu::{Feed, GpuPipeline, HwFrame, Source as GpuSource};
 use vixeeny_encode::probe::ProbeResult;
-use vixeeny_encode::recorder::{
-    FrameFormat, OutputContainer, RecordConfig, Recorder, Split, VideoFrame,
-};
+use vixeeny_encode::recorder::{FrameFormat, OutputContainer, RecordConfig, Recorder, Split, VideoFrame};
 use vixeeny_encode::registry::Vendor;
 use vixeeny_encode::registry::{Chroma, Encoder, Kind, PresetName, Registry};
 use vixeeny_encode::replay;
@@ -44,8 +41,7 @@ enum Ctl {
     Stop,
 }
 
-/// Told each time a recording changes state (paused, resumed, ended): the app reports it then,
-/// instead of looking.
+/// Told each time a recording changes state (paused, resumed, ended): the app reports it then, instead of looking.
 static ON_CHANGE: std::sync::OnceLock<Box<dyn Fn() + Send + Sync>> = std::sync::OnceLock::new();
 
 /// Sets what is told when a recording changes state (once per process).
@@ -59,16 +55,12 @@ fn changed() {
     }
 }
 
-/// Replay files being written, each on a thread of its own: the app does not end before they
-/// are complete (a file cut short does not play).
-static SAVING: (std::sync::Mutex<usize>, std::sync::Condvar) =
-    (std::sync::Mutex::new(0), std::sync::Condvar::new());
+/// Replay files being written, each on a thread of its own: the app does not end before they are complete (a file cut
+/// short does not play).
+static SAVING: (std::sync::Mutex<usize>, std::sync::Condvar) = (std::sync::Mutex::new(0), std::sync::Condvar::new());
 
 fn saves() -> std::sync::MutexGuard<'static, usize> {
-    SAVING
-        .0
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+    SAVING.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// A replay file is being written.
@@ -76,18 +68,14 @@ pub fn saving() -> bool {
     *saves() > 0
 }
 
-/// Waits, when dropped, until the replay files being written are complete: the last thing the
-/// app does before it ends.
+/// Waits, when dropped, until the replay files being written are complete: the last thing the app does before it ends.
 pub struct SavesDone;
 
 impl Drop for SavesDone {
     fn drop(&mut self) {
         let mut count = saves();
         while *count > 0 {
-            count = SAVING
-                .1
-                .wait(count)
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            count = SAVING.1.wait(count).unwrap_or_else(std::sync::PoisonError::into_inner);
         }
     }
 }
@@ -118,16 +106,14 @@ impl Handle {
         let _ = self.ctl.send(Ctl::Save(false));
     }
 
-    /// Replay only: writes the buffer's last seconds to a new file, then opens it in the video
-    /// editor.
+    /// Replay only: writes the buffer's last seconds to a new file, then opens it in the video editor.
     pub fn save_and_edit(&self) {
         let _ = self.ctl.send(Ctl::Save(true));
     }
 
     /// The session is over: its thread ended, or is ending (it tells the change just before).
     pub fn finished(&self) -> bool {
-        self.state.load(Ordering::Acquire) == IDLE
-            || self.thread.as_ref().is_none_or(JoinHandle::is_finished)
+        self.state.load(Ordering::Acquire) == IDLE || self.thread.as_ref().is_none_or(JoinHandle::is_finished)
     }
 
     /// The state if it changed since the last call.
@@ -153,9 +139,8 @@ impl Drop for Handle {
     }
 }
 
-/// The audio settings with the recorded program in place of [`config::TARGET_SOURCE`]: the
-/// program in the foreground now (the full-screen game). Without one (the desktop, Vixeeny
-/// itself), all the PC sound.
+/// The audio settings with the recorded program in place of [`config::TARGET_SOURCE`]: the program in the foreground
+/// now (the full-screen game). Without one (the desktop, Vixeeny itself), all the PC sound.
 fn with_target(audio: &config::Audio) -> config::Audio {
     let mut audio = audio.clone();
     let wanted = |list: &[String]| list.iter().any(|s| s == config::TARGET_SOURCE);
@@ -166,11 +151,7 @@ fn with_target(audio: &config::Audio) -> config::Audio {
         .ok()
         .flatten()
         .and_then(|w| w.exe_path)
-        .and_then(|p| {
-            std::path::Path::new(&p)
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-        })
+        .and_then(|p| std::path::Path::new(&p).file_name().map(|n| n.to_string_lossy().into_owned()))
         .filter(|exe| {
             let lower = exe.to_ascii_lowercase();
             !lower.starts_with("vixeeny") && lower != "explorer.exe"
@@ -189,8 +170,7 @@ fn with_target(audio: &config::Audio) -> config::Audio {
     audio
 }
 
-/// The encoder a profile asks for: its own, or the best detected one for `auto` that takes
-/// pictures of `size`.
+/// The encoder a profile asks for: its own, or the best detected one for `auto` that takes pictures of `size`.
 fn choose_encoder<'a>(
     registry: &'a Registry,
     profile: &config::Video,
@@ -204,13 +184,11 @@ fn choose_encoder<'a>(
         }
         return validate::pick_auto(registry, probe, Some(size)).context("no encoder available");
     }
-    registry
-        .get(&profile.encoder)
-        .with_context(|| format!("unknown encoder `{}`", profile.encoder))
+    registry.get(&profile.encoder).with_context(|| format!("unknown encoder `{}`", profile.encoder))
 }
 
-/// The encoders that can write a cut part of `clip` again, best first: the one the video
-/// settings record with, then the software one of its family (a GPU encoder may be busy).
+/// The encoders that can write a cut part of `clip` again, best first: the one the video settings record with, then the
+/// software one of its family (a GPU encoder may be busy).
 pub fn reencoders(config: &Config, clip: &vixeeny_encode::cut::Clip) -> Vec<Reencode> {
     let Ok(registry) = Registry::builtin() else {
         return Vec::new();
@@ -219,11 +197,8 @@ pub fn reencoders(config: &Config, clip: &vixeeny_encode::cut::Clip) -> Vec<Reen
     let probe = crate::probe::current(false).ok();
     let size = (clip.width & !1, clip.height & !1);
     let chosen = choose_encoder(&registry, profile, probe.as_ref(), size).ok();
-    let software = chosen.and_then(|chosen| {
-        registry
-            .encoders()
-            .find(|e| e.family == chosen.family && e.kind == Kind::Software)
-    });
+    let software =
+        chosen.and_then(|chosen| registry.encoders().find(|e| e.family == chosen.family && e.kind == Kind::Software));
     let fps = (1.0 / clip.frame_seconds().max(1e-3)).round() as u32;
     let preset = PresetName::from_setting(&profile.preset).unwrap_or(PresetName::Balanced);
     let mut out: Vec<Reencode> = Vec::new();
@@ -244,17 +219,9 @@ pub fn reencoders(config: &Config, clip: &vixeeny_encode::cut::Clip) -> Vec<Reen
             custom || preset != PresetName::Performance,
             u64::from(size.0) * u64::from(size.1) * u64::from(fps.max(1)),
         );
-        let depth = if clip.deep && encoder.supports_format(10, Chroma::C420) {
-            10
-        } else {
-            8
-        };
+        let depth = if clip.deep && encoder.supports_format(10, Chroma::C420) { 10 } else { 8 };
         encoder.fit_depth(&mut options, depth);
-        out.push(Reencode {
-            encoder: encoder.clone(),
-            options: options.into_iter().collect(),
-            depth,
-        });
+        out.push(Reencode { encoder: encoder.clone(), options: options.into_iter().collect(), depth });
     }
     out
 }
@@ -262,12 +229,10 @@ pub fn reencoders(config: &Config, clip: &vixeeny_encode::cut::Clip) -> Vec<Reen
 fn parse_split(mode: &str) -> Split {
     // `off`, `size:<MB>` or `duration:<minutes>`.
     match mode.split_once(':') {
-        Some(("size", mb)) => mb
-            .parse::<u64>()
-            .map_or(Split::Off, |mb| Split::Bytes(mb * 1024 * 1024)),
-        Some(("duration", min)) => min
-            .parse::<u64>()
-            .map_or(Split::Off, |m| Split::Duration(Duration::from_secs(m * 60))),
+        Some(("size", mb)) => mb.parse::<u64>().map_or(Split::Off, |mb| Split::Bytes(mb * 1024 * 1024)),
+        Some(("duration", min)) => {
+            min.parse::<u64>().map_or(Split::Off, |m| Split::Duration(Duration::from_secs(m * 60)))
+        }
         _ => Split::Off,
     }
 }
@@ -279,12 +244,12 @@ type SaveNamer = Box<dyn FnMut() -> anyhow::Result<PathBuf> + Send>;
 struct Plan {
     config: RecordConfig,
     monitor: vixeeny_platform::MonitorInfo,
-    /// Replay only: the game's window, filmed alone (not what covers it, nor the desktop when
-    /// the user switches away). `None`: the whole monitor.
+    /// Replay only: the game's window, filmed alone (not what covers it, nor the desktop when the user switches away).
+    /// `None`: the whole monitor.
     window: Option<vixeeny_platform::WindowId>,
     cursor: bool,
-    /// Frames are captured as scRGB half floats: the monitor shows HDR, and the profile keeps
-    /// it or the GPU path tone maps it.
+    /// Frames are captured as scRGB half floats: the monitor shows HDR, and the profile keeps it or the GPU path tone
+    /// maps it.
     hdr: bool,
     namer: Namer,
     /// Replay only: the path of the next save.
@@ -313,16 +278,15 @@ struct KeepAlive {
     _parts: Option<GpuParts>,
 }
 
-// SAFETY: the device is free-threaded and multithread protected; the value is only held, never
-// used, by the recording thread.
+// SAFETY: the device is free-threaded and multithread protected; the value is only held, never used, by the recording
+// thread.
 unsafe impl Send for KeepAlive {}
 
-/// The D3D11 device of the encoder's GPU, made on a thread of its own while the rest of the
-/// recording is planned: it takes longer than all the rest (110 to 160 ms).
+/// The D3D11 device of the encoder's GPU, made on a thread of its own while the rest of the recording is planned: it
+/// takes longer than all the rest (110 to 160 ms).
 struct MadeDevice(Result<(d3d::Device, d3d::DeviceContext), String>);
 
-// SAFETY: a D3D11 device is free-threaded (and multithread protected): made on one thread, it
-// is used on another.
+// SAFETY: a D3D11 device is free-threaded (and multithread protected): made on one thread, it is used on another.
 unsafe impl Send for MadeDevice {}
 
 /// The encoder's GPU; a software encoder takes the default one.
@@ -335,10 +299,9 @@ fn vendor_of(encoder: &Encoder) -> Option<u32> {
     }
 }
 
-/// The GPU path: the video processor converts the captured textures; NVENC / AMF read them as
-/// they are, QSV through a QSV view, software encoders get them downloaded (4:2:0 only). `None`
-/// (with the reason logged) when the encoder or the machine cannot do it: the CPU path then
-/// records.
+/// The GPU path: the video processor converts the captured textures; NVENC / AMF read them as they are, QSV through a
+/// QSV view, software encoders get them downloaded (4:2:0 only). `None` (with the reason logged) when the encoder or
+/// the machine cannot do it: the CPU path then records.
 fn try_gpu(
     encoder: &Encoder,
     config: &RecordConfig,
@@ -362,10 +325,7 @@ fn try_gpu(
             GpuPipeline::new(
                 &device,
                 &context,
-                GpuSource {
-                    size: source,
-                    hdr: source_hdr,
-                },
+                GpuSource { size: source, hdr: source_hdr },
                 config.output_size,
                 config.fps,
                 config.hdr,
@@ -373,16 +333,12 @@ fn try_gpu(
                 config.chroma,
                 feed,
             )
-            .map(|pipeline| GpuParts {
-                pipeline: Arc::new(pipeline),
-                device,
-                context,
-            })
+            .map(|pipeline| GpuParts { pipeline: Arc::new(pipeline), device, context })
             .map_err(|e| e.to_string())
         })
     };
-    // QSV surfaces need a texture array the driver may refuse: the frames are then downloaded
-    // (QSV takes NV12 / P010 from memory), still converted on the GPU.
+    // QSV surfaces need a texture array the driver may refuse: the frames are then downloaded (QSV takes NV12 / P010
+    // from memory), still converted on the GPU.
     let built = build(feed).or_else(|e| {
         if feed == Feed::Qsv {
             tracing::warn!("QSV surfaces unavailable ({e}); downloading the frames");
@@ -410,16 +366,11 @@ fn plan(
     let monitors = vixeeny_platform::monitors()?;
     // The game's monitor, or the one under the cursor.
     let (x, y) = match game {
-        Some(g) => (
-            g.rect.x + (g.rect.width / 2) as i32,
-            g.rect.y + (g.rect.height / 2) as i32,
-        ),
+        Some(g) => (g.rect.x + (g.rect.width / 2) as i32, g.rect.y + (g.rect.height / 2) as i32),
         None => vixeeny_platform::cursor_position()?,
     };
-    let monitor = vixeeny_platform::monitor_at(&monitors, x, y)
-        .or_else(|| monitors.first())
-        .context("no monitor")?
-        .clone();
+    let monitor =
+        vixeeny_platform::monitor_at(&monitors, x, y).or_else(|| monitors.first()).context("no monitor")?.clone();
     let source = match game {
         Some(g) if g.rect.width >= 2 && g.rect.height >= 2 => (g.rect.width, g.rect.height),
         _ => (monitor.rect.width, monitor.rect.height),
@@ -429,11 +380,7 @@ fn plan(
     let profile = &config.video;
     let registry = Registry::builtin().context("codec registry")?;
     let probe = crate::probe::current(false).ok();
-    let ctx = ValidateContext {
-        registry: &registry,
-        source,
-        probe: probe.as_ref(),
-    };
+    let ctx = ValidateContext { registry: &registry, source, probe: probe.as_ref() };
     let issues = validate::validate(profile, &ctx);
     if let Some(issue) = issues.iter().find(|i| i.severity == Severity::Error) {
         anyhow::bail!("the video profile is not valid: {issue:?}");
@@ -508,11 +455,7 @@ fn plan(
         })
         .collect();
     // A recording keeps no replay ring.
-    let storage = if replay {
-        replay_storage(config, &encoder, output_size)
-    } else {
-        replay::Storage::Ram
-    };
+    let storage = if replay { replay_storage(config, &encoder, output_size) } else { replay::Storage::Ram };
     let mut record = RecordConfig {
         options,
         container,
@@ -524,13 +467,9 @@ fn plan(
         hdr,
         peak_nits: monitor.hdr.map_or(1000.0, |h| h.peak_nits),
         sdr_white_nits: monitor.hdr.map_or(203.0, |h| h.sdr_white_nits),
-        split: if replay {
-            Split::Off
-        } else {
-            parse_split(&profile.split.mode)
-        },
-        // Constant frame rate: what every editor and player expects (the variable rate of older
-        // settings is no longer offered).
+        split: if replay { Split::Off } else { parse_split(&profile.split.mode) },
+        // Constant frame rate: what every editor and player expects (the variable rate of older settings is no longer
+        // offered).
         vfr: false,
         // A replay starts on a key frame: one every second keeps the cut within a second.
         keyframe_seconds: if replay { 1.0 } else { 2.0 },
@@ -539,25 +478,18 @@ fn plan(
         gpu: None,
         encoder,
         // The moments after the shortcut are kept as well.
-        replay_seconds: replay.then(|| {
-            replay::clamp_seconds(config.replay.duration_seconds)
-                + config.replay.after_seconds.min(60)
-        }),
+        replay_seconds: replay
+            .then(|| replay::clamp_seconds(config.replay.duration_seconds) + config.replay.after_seconds.min(60)),
         replay_storage: storage,
         files: !replay,
         buffers: Default::default(),
     };
-    // An HDR monitor is captured as it is on the GPU path, which keeps it or tone maps it as
-    // the screenshots are; without it, a recording to SDR leaves the conversion to Windows.
-    let levels = monitor.hdr.map(|h| vixeeny_encode::card_hdr::Levels {
-        sdr_white_nits: h.sdr_white_nits,
-        peak_nits: h.peak_nits,
-    });
-    let gpu = if allow_gpu {
-        try_gpu(&record.encoder, &record, source, levels, made)
-    } else {
-        None
-    };
+    // An HDR monitor is captured as it is on the GPU path, which keeps it or tone maps it as the screenshots are;
+    // without it, a recording to SDR leaves the conversion to Windows.
+    let levels = monitor
+        .hdr
+        .map(|h| vixeeny_encode::card_hdr::Levels { sdr_white_nits: h.sdr_white_nits, peak_nits: h.peak_nits });
+    let gpu = if allow_gpu { try_gpu(&record.encoder, &record, source, levels, made) } else { None };
     let capture_hdr = if gpu.is_some() { levels.is_some() } else { hdr };
     {
         record.gpu = gpu.as_ref().map(|g| Arc::clone(&g.pipeline));
@@ -566,18 +498,12 @@ fn plan(
     let extension = container.extension();
     // The replay's folder is made when the replay starts (not before it is ever used).
     let mut folder = replay
-        .then(|| {
-            vixeeny_common::paths::ready_dir(
-                &config.paths.replays,
-                vixeeny_common::paths::DEFAULT_REPLAYS,
-            )
-        })
+        .then(|| vixeeny_common::paths::ready_dir(&config.paths.replays, vixeeny_common::paths::DEFAULT_REPLAYS))
         .flatten();
     let (namer, save_as): (Namer, Option<SaveNamer>) = if replay {
         let config = config.clone();
         let monitor = monitor.clone();
-        let save: SaveNamer =
-            Box::new(move || output_file(&config, true, &monitor, output_size, extension));
+        let save: SaveNamer = Box::new(move || output_file(&config, true, &monitor, output_size, extension));
         (Box::new(|_| PathBuf::new()), Some(save))
     } else {
         let first = output_file(config, false, &monitor, output_size, extension)?;
@@ -586,10 +512,7 @@ fn plan(
             if part == 0 {
                 return first.clone();
             }
-            let stem = first
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("video");
+            let stem = first.file_stem().and_then(|s| s.to_str()).unwrap_or("video");
             first.with_file_name(format!("{stem}_part{}.{extension}", part + 1))
         });
         (namer, None)
@@ -605,8 +528,7 @@ fn plan(
         gpu,
         audio,
         mic_denoise: profile.audio.mic_noise_reduction,
-        widget: (config.recording_widget.enabled && !replay)
-            .then(|| config.recording_widget.clone()),
+        widget: (config.recording_widget.enabled && !replay).then(|| config.recording_widget.clone()),
         folder,
         notice: config.clone(),
     })
@@ -637,8 +559,7 @@ fn output_file(
             vixeeny_common::ipc::ActionId::RecordToggle,
         )
     };
-    let dir = vixeeny_common::paths::ready_dir(folder, fallback)
-        .context("cannot make the videos folder")?;
+    let dir = vixeeny_common::paths::ready_dir(folder, fallback).context("cannot make the videos folder")?;
     let monitors = vixeeny_platform::monitors()?;
     let now = vixeeny_platform::local_time();
     let snapshot = crate::still::Snapshot {
@@ -656,22 +577,14 @@ fn output_file(
         after_save: None,
     };
     let vars = vixeeny_common::naming::Vars {
-        app: crate::still::app_name(
-            action,
-            &snapshot,
-            &destination,
-            &vixeeny_platform::exe_metadata,
-        ),
+        app: crate::still::app_name(action, &snapshot, &destination, &vixeeny_platform::exe_metadata),
         title: String::new(),
         date: now.date(),
         time: now.time(),
         millis: now.millisecond,
         width: size.0,
         height: size.1,
-        monitor: monitors
-            .iter()
-            .position(|m| m.id == monitor.id)
-            .map_or_else(String::new, |i| (i + 1).to_string()),
+        monitor: monitors.iter().position(|m| m.id == monitor.id).map_or_else(String::new, |i| (i + 1).to_string()),
     };
     Ok(vixeeny_common::naming::output_path(
         destination.dir,
@@ -683,26 +596,18 @@ fn output_file(
     ))
 }
 
-/// Starts a recording on its own thread; fails early (bad profile, no encoder, no capture) so
-/// the caller can tell the user. The GPU path is tried first; if it cannot start, the same
-/// recording starts on the CPU path.
+/// Starts a recording on its own thread; fails early (bad profile, no encoder, no capture) so the caller can tell the
+/// user. The GPU path is tried first; if it cannot start, the same recording starts on the CPU path.
 pub fn start(config: &Config) -> anyhow::Result<Handle> {
     start_session(config, None)
 }
 
-/// Starts the replay buffer for `game`'s window: the same encoder, nothing written until a
-/// save.
-pub fn start_replay(
-    config: &Config,
-    game: &vixeeny_platform::WindowInfo,
-) -> anyhow::Result<Handle> {
+/// Starts the replay buffer for `game`'s window: the same encoder, nothing written until a save.
+pub fn start_replay(config: &Config, game: &vixeeny_platform::WindowInfo) -> anyhow::Result<Handle> {
     start_session(config, Some(game))
 }
 
-fn start_session(
-    config: &Config,
-    game: Option<&vixeeny_platform::WindowInfo>,
-) -> anyhow::Result<Handle> {
+fn start_session(config: &Config, game: Option<&vixeeny_platform::WindowInfo>) -> anyhow::Result<Handle> {
     let replay = game.is_some();
     let started = std::time::Instant::now();
     let first = plan(config, true, replay, game)?;
@@ -718,10 +623,7 @@ fn start_session(
             }
         }
     };
-    tracing::info!(
-        "capturing {:?} after the shortcut reached the app (planned in {planned:?})",
-        started.elapsed()
-    );
+    tracing::info!("capturing {:?} after the shortcut reached the app (planned in {planned:?})", started.elapsed());
     Ok(handle)
 }
 
@@ -733,8 +635,8 @@ struct Watch {
     gpu_lost: Arc<AtomicU64>,
 }
 
-/// The free space is read again each time this much more has been written (64 MB: about 10 s
-/// of a high-quality 1440p recording), not on a clock.
+/// The free space is read again each time this much more has been written (64 MB: about 10 s of a high-quality 1440p
+/// recording), not on a clock.
 const DISK_EVERY_BYTES: u64 = 64 << 20;
 
 /// Tells the widget when the [`Health`] of the recording changes.
@@ -765,17 +667,14 @@ impl Watcher {
         }
     }
 
-    /// The alert, when it changed since the last call. Only what changed is looked at again:
-    /// the frames lost (two counters), the free space once enough more is written.
+    /// The alert, when it changed since the last call. Only what changed is looked at again: the frames lost (two
+    /// counters), the free space once enough more is written.
     fn check(&mut self, recorder: &Recorder, now_ns: i64) -> Option<(Alert, String)> {
         let stats = recorder.stats();
-        let lost = stats.queue_dropped.load(Ordering::Relaxed)
-            + self.watch.gpu_lost.load(Ordering::Relaxed);
+        let lost = stats.queue_dropped.load(Ordering::Relaxed) + self.watch.gpu_lost.load(Ordering::Relaxed);
         let written = stats.written.load(Ordering::Relaxed);
         let disk_due = self.watch.disk_percent > 0
-            && self
-                .measured
-                .is_none_or(|at| written.saturating_sub(at) >= DISK_EVERY_BYTES);
+            && self.measured.is_none_or(|at| written.saturating_sub(at) >= DISK_EVERY_BYTES);
         if self.lost == Some(lost) && !disk_due {
             return None;
         }
@@ -789,11 +688,7 @@ impl Watcher {
         self.health.lost_frames = lost;
         if disk_due {
             self.measured = Some(written);
-            self.health.disk = self
-                .watch
-                .folder
-                .as_deref()
-                .and_then(vixeeny_platform::machine::disk_space);
+            self.health.disk = self.watch.folder.as_deref().and_then(vixeeny_platform::machine::disk_space);
         }
         let alert = self.health.alert(self.watch.disk_percent, self.watch.lang);
         if alert == self.shown {
@@ -809,16 +704,11 @@ impl Watcher {
     /// The frames lost since `since_ns`.
     fn lost_since(&self, since_ns: i64) -> u64 {
         let now = self.lost.unwrap_or(0);
-        let before = self
-            .losses
-            .iter()
-            .rev()
-            .find(|(t, _)| *t <= since_ns)
-            .map_or_else(
-                // Every change came after: what was lost before the first one.
-                || self.losses.front().map_or(now, |_| 0),
-                |(_, n)| *n,
-            );
+        let before = self.losses.iter().rev().find(|(t, _)| *t <= since_ns).map_or_else(
+            // Every change came after: what was lost before the first one.
+            || self.losses.front().map_or(now, |_| 0),
+            |(_, n)| *n,
+        );
         now.saturating_sub(before)
     }
 
@@ -831,8 +721,7 @@ impl Watcher {
 /// Frames the GPU sink may queue for the recording thread.
 const GPU_BACKLOG: usize = 4;
 
-/// The recording's clock where frames arrive (capture times are on the OS clock, the
-/// recording's from its `origin`).
+/// The recording's clock where frames arrive (capture times are on the OS clock, the recording's from its `origin`).
 struct ClockGate {
     pacer: Pacer,
     origin: i64,
@@ -854,11 +743,7 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
     let options: Vec<String> = c.options.iter().map(|(k, v)| format!("{k}={v}")).collect();
     tracing::info!(
         "{} {}x{} at {}/{} fps with {} ({}-bit {:?}{}, {:?}, {}{}): {}",
-        if c.replay_seconds.is_some() {
-            "replay"
-        } else {
-            "recording"
-        },
+        if c.replay_seconds.is_some() { "replay" } else { "recording" },
         c.output_size.0,
         c.output_size.1,
         c.fps.num,
@@ -868,34 +753,23 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
         c.chroma,
         if c.hdr { ", HDR" } else { "" },
         c.container,
-        if plan.gpu.is_some() {
-            "GPU frames"
-        } else {
-            "CPU frames"
-        },
-        if plan.window.is_some() {
-            ", one window"
-        } else {
-            ""
-        },
+        if plan.gpu.is_some() { "GPU frames" } else { "CPU frames" },
+        if plan.window.is_some() { ", one window" } else { "" },
         options.join(" ")
     );
     // The recording's time zero: video and audio timestamps are relative to it.
     let origin = vixeeny_platform::monotonic_ns();
     // Frames the GPU path could not hand over: lost, like those the encoder refuses.
     let gpu_lost = Arc::new(AtomicU64::new(0));
-    // Set once the recording thread reads the frames: the capture starts before the encoder is
-    // open, and what comes in the meantime is not lost from the recording.
+    // Set once the recording thread reads the frames: the capture starts before the encoder is open, and what comes in
+    // the meantime is not lost from the recording.
     let reading = Arc::new(AtomicBool::new(false));
     // The frames the recording's clock would drop are neither read nor converted.
     let pacer = (!plan.config.vfr).then(|| Pacer::new(plan.config.fps));
     let pacing = || {
         pacer.as_ref().map(|pacer| vixeeny_capture::Pacing {
             fps: (plan.config.fps.num, plan.config.fps.den),
-            gate: Arc::new(ClockGate {
-                pacer: pacer.clone(),
-                origin,
-            }),
+            gate: Arc::new(ClockGate { pacer: pacer.clone(), origin }),
         })
     };
     let (stream, gpu_frames) = {
@@ -904,53 +778,32 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
             None => vixeeny_capture::StreamTarget::Monitor(plan.monitor.clone()),
         };
         let (stream, gpu_frames) = match &plan.gpu {
-            None => (
-                vixeeny_capture::VideoStream::start_with(
-                    &target,
-                    plan.cursor,
-                    plan.hdr,
-                    None,
-                    pacing(),
-                )?,
-                None,
-            ),
+            None => (vixeeny_capture::VideoStream::start_with(&target, plan.cursor, plan.hdr, None, pacing())?, None),
             Some(gpu) => {
                 let (tx, rx) = std::sync::mpsc::sync_channel::<(i64, HwFrame)>(GPU_BACKLOG);
                 let pipeline = Arc::clone(&gpu.pipeline);
                 let lost = Arc::clone(&gpu_lost);
                 let reading = Arc::clone(&reading);
                 let crop = plan.config.crop;
-                let sink: vixeeny_capture::TextureSink =
-                    Box::new(move |texture, content, time_ns| {
-                        let (left, top, width, height) = validate::center_crop(content, crop);
-                        let rect = d3d::Rect {
-                            left: left as i32,
-                            top: top as i32,
-                            right: (left + width) as i32,
-                            bottom: (top + height) as i32,
-                        };
-                        // A refused conversion (pool exhausted, GPU busy) is a dropped frame.
-                        let sent = pipeline
-                            .convert(texture, rect)
-                            .is_ok_and(|frame| tx.try_send((time_ns, frame)).is_ok());
-                        if !sent && reading.load(Ordering::Acquire) {
-                            lost.fetch_add(1, Ordering::Relaxed);
-                        }
-                        sent
-                    });
-                let capture = vixeeny_capture::GpuCapture {
-                    device: gpu.device.clone(),
-                    context: gpu.context.clone(),
-                    sink,
-                };
+                let sink: vixeeny_capture::TextureSink = Box::new(move |texture, content, time_ns| {
+                    let (left, top, width, height) = validate::center_crop(content, crop);
+                    let rect = d3d::Rect {
+                        left: left as i32,
+                        top: top as i32,
+                        right: (left + width) as i32,
+                        bottom: (top + height) as i32,
+                    };
+                    // A refused conversion (pool exhausted, GPU busy) is a dropped frame.
+                    let sent = pipeline.convert(texture, rect).is_ok_and(|frame| tx.try_send((time_ns, frame)).is_ok());
+                    if !sent && reading.load(Ordering::Acquire) {
+                        lost.fetch_add(1, Ordering::Relaxed);
+                    }
+                    sent
+                });
+                let capture =
+                    vixeeny_capture::GpuCapture { device: gpu.device.clone(), context: gpu.context.clone(), sink };
                 (
-                    vixeeny_capture::VideoStream::start_with(
-                        &target,
-                        plan.cursor,
-                        plan.hdr,
-                        Some(capture),
-                        pacing(),
-                    )?,
+                    vixeeny_capture::VideoStream::start_with(&target, plan.cursor, plan.hdr, Some(capture), pacing())?,
                     Some(rx),
                 )
             }
@@ -974,8 +827,7 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
         .inspect_err(|e| tracing::warn!("recording widget: {e:#}"))
         .ok()
     });
-    let rig = (!plan.audio.is_empty())
-        .then(|| Rig::start(&plan.audio, origin, plan.notice.clone(), plan.mic_denoise));
+    let rig = (!plan.audio.is_empty()).then(|| Rig::start(&plan.audio, origin, plan.notice.clone(), plan.mic_denoise));
     let state = Arc::new(AtomicU8::new(RECORDING));
     let thread_state = Arc::clone(&state);
     // The GPU parts must outlive the recording (the device the textures live on).
@@ -990,75 +842,61 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
     });
     let notice = plan.notice;
     let keep_alive = KeepAlive { _parts: plan.gpu };
-    let thread = std::thread::Builder::new()
-        .name("recording".into())
-        .spawn(move || {
-            reading.store(true, Ordering::Release);
-            let result = record_loop(
-                &stream,
-                gpu_frames.as_ref(),
-                pacer.as_ref(),
-                recorder,
-                rig,
-                widget,
-                watch,
-                save_as,
-                origin,
-                &rx,
-                &thread_state,
-                &notice,
-            );
-            drop(stream);
-            drop(keep_alive);
-            thread_state.store(IDLE, Ordering::Release);
-            changed();
-            match result {
-                Ok(summary) => {
-                    // The file names stay out of the log at this level: they are the user's.
-                    tracing::info!(
-                        "recording finished: {} frame(s) in {} file(s), {} repeated, {} dropped \
+    let thread = std::thread::Builder::new().name("recording".into()).spawn(move || {
+        reading.store(true, Ordering::Release);
+        let result = record_loop(
+            &stream,
+            gpu_frames.as_ref(),
+            pacer.as_ref(),
+            recorder,
+            rig,
+            widget,
+            watch,
+            save_as,
+            origin,
+            &rx,
+            &thread_state,
+            &notice,
+        );
+        drop(stream);
+        drop(keep_alive);
+        thread_state.store(IDLE, Ordering::Release);
+        changed();
+        match result {
+            Ok(summary) => {
+                // The file names stay out of the log at this level: they are the user's.
+                tracing::info!(
+                    "recording finished: {} frame(s) in {} file(s), {} repeated, {} dropped \
                          (clock), {} dropped (encoder behind), {} lost (GPU path)",
-                        summary.frames,
-                        summary.files.len(),
-                        summary.repeated,
-                        summary.dropped_by_clock,
-                        summary.dropped_by_queue,
-                        lost_on_gpu.load(Ordering::Relaxed)
-                    );
-                    let lost = summary.dropped_by_queue + lost_on_gpu.load(Ordering::Relaxed);
-                    if lost > 0 {
-                        tracing::warn!("{lost} frame(s) lost during the recording");
-                    }
-                    if let Some(file) = summary.files.first() {
-                        let saved = Toast::saved(Saved::Recording, file.clone(), lost);
-                        crate::toast::notify(&notice, &saved);
-                    }
+                    summary.frames,
+                    summary.files.len(),
+                    summary.repeated,
+                    summary.dropped_by_clock,
+                    summary.dropped_by_queue,
+                    lost_on_gpu.load(Ordering::Relaxed)
+                );
+                let lost = summary.dropped_by_queue + lost_on_gpu.load(Ordering::Relaxed);
+                if lost > 0 {
+                    tracing::warn!("{lost} frame(s) lost during the recording");
                 }
-                Err(e) => {
-                    tracing::error!("recording failed: {e:#}");
-                    let text = failure_text(&e, crate::lang(&notice.general.language));
-                    crate::toast::notify(&notice, &Toast::Failed(Failed::Recording, text));
+                if let Some(file) = summary.files.first() {
+                    let saved = Toast::saved(Saved::Recording, file.clone(), lost);
+                    crate::toast::notify(&notice, &saved);
                 }
             }
-        })?;
-    Ok(Handle {
-        ctl,
-        state,
-        thread: Some(thread),
-        reported: RecState::Recording,
-    })
+            Err(e) => {
+                tracing::error!("recording failed: {e:#}");
+                let text = failure_text(&e, crate::lang(&notice.general.language));
+                crate::toast::notify(&notice, &Toast::Failed(Failed::Recording, text));
+            }
+        }
+    })?;
+    Ok(Handle { ctl, state, thread: Some(thread), reported: RecState::Recording })
 }
 
-/// Starts writing the replay; the file is finished (and reported) by a thread of its own, so the
-/// recording goes on, and a second save right after does not wait for the first.
-/// `lost`: the frames lost in the seconds saved.
-fn save_replay(
-    recorder: &Recorder,
-    next_path: &mut SaveNamer,
-    notice: &Config,
-    edit: bool,
-    lost: u64,
-) {
+/// Starts writing the replay; the file is finished (and reported) by a thread of its own, so the recording goes on, and
+/// a second save right after does not wait for the first. `lost`: the frames lost in the seconds saved.
+fn save_replay(recorder: &Recorder, next_path: &mut SaveNamer, notice: &Config, edit: bool, lost: u64) {
     let started = std::time::Instant::now();
     let save = next_path().and_then(|path| Ok(recorder.save_replay(path)?));
     match save {
@@ -1090,10 +928,7 @@ fn save_replay(
                     }
                     Err(e) => {
                         tracing::error!("cannot save the replay: {e}");
-                        let text = failure_text(
-                            &anyhow::anyhow!("{e}"),
-                            crate::lang(&notice.general.language),
-                        );
+                        let text = failure_text(&anyhow::anyhow!("{e}"), crate::lang(&notice.general.language));
                         crate::toast::notify(&notice, &Toast::Failed(Failed::Replay, text));
                     }
                 }
@@ -1125,12 +960,10 @@ fn record_loop(
     let now = || vixeeny_platform::monotonic_ns() - origin;
     let mut watch = watch.map(Watcher::new);
     // What a replay save keeps: its seconds, and those after the shortcut.
-    let kept_ns = i64::from(
-        replay::clamp_seconds(notice.replay.duration_seconds) + notice.replay.after_seconds.min(60),
-    ) * 1_000_000_000;
-    let lost_in_save = |watch: &Option<Watcher>, now: i64| {
-        watch.as_ref().map_or(0, |w| w.lost_since(now - kept_ns))
-    };
+    let kept_ns =
+        i64::from(replay::clamp_seconds(notice.replay.duration_seconds) + notice.replay.after_seconds.min(60))
+            * 1_000_000_000;
+    let lost_in_save = |watch: &Option<Watcher>, now: i64| watch.as_ref().map_or(0, |w| w.lost_since(now - kept_ns));
     // A replay tells about a filling disk once.
     let mut disk_told = false;
     let mut paused = false;
@@ -1139,9 +972,7 @@ fn record_loop(
     let mut paused_ns = 0_i64;
     let mut paused_since = 0_i64;
     let elapsed = |paused: bool, at: i64, paused_ns: i64, paused_since: i64| {
-        Duration::from_nanos(
-            (at - paused_ns - if paused { at - paused_since } else { 0 }).max(0) as u64,
-        )
+        Duration::from_nanos((at - paused_ns - if paused { at - paused_since } else { 0 }).max(0) as u64)
     };
     if let Some(w) = &mut widget {
         w.state(false, Duration::ZERO);
@@ -1156,26 +987,14 @@ fn record_loop(
         {
             save_at = None;
             if let Some(next_path) = &mut save_as {
-                save_replay(
-                    &recorder,
-                    next_path,
-                    notice,
-                    edit,
-                    lost_in_save(&watch, now()),
-                );
+                save_replay(&recorder, next_path, notice, edit, lost_in_save(&watch, now()));
             }
         }
         match ctl.try_recv() {
             Ok(Ctl::Save(edit)) => {
                 if let Some(next_path) = &mut save_as {
                     if after.is_zero() {
-                        save_replay(
-                            &recorder,
-                            next_path,
-                            notice,
-                            edit,
-                            lost_in_save(&watch, now()),
-                        );
+                        save_replay(&recorder, next_path, notice, edit, lost_in_save(&watch, now()));
                     } else if let Some((_, editing)) = &mut save_at {
                         // A second press while it waits only asks for the editor.
                         *editing |= edit;
@@ -1224,13 +1043,7 @@ fn record_loop(
                 if let Some((_, edit)) = save_at.take()
                     && let Some(next_path) = &mut save_as
                 {
-                    save_replay(
-                        &recorder,
-                        next_path,
-                        notice,
-                        edit,
-                        lost_in_save(&watch, now()),
-                    );
+                    save_replay(&recorder, next_path, notice, edit, lost_in_save(&watch, now()));
                 }
                 break;
             }
@@ -1248,9 +1061,8 @@ fn record_loop(
                 disk_told = true;
                 let free = watcher.health.disk.map_or(0, |(free, _)| free);
                 let lang = watcher.watch.lang;
-                let text =
-                    vixeeny_common::i18n::tr(vixeeny_common::i18n::Key::ToastReplayDiskLow, lang)
-                        .replace("{size}", &vixeeny_common::i18n::size_label(free, lang));
+                let text = vixeeny_common::i18n::tr(vixeeny_common::i18n::Key::ToastReplayDiskLow, lang)
+                    .replace("{size}", &vixeeny_common::i18n::size_label(free, lang));
                 crate::toast::notify(notice, &Toast::Failed(Failed::DiskLow, text));
             }
         }
@@ -1286,11 +1098,7 @@ fn record_loop(
                             width: f.width,
                             height: f.height,
                             stride: f.stride,
-                            format: if captured.hdr {
-                                FrameFormat::ScRgbHalf
-                            } else {
-                                FrameFormat::Bgra8
-                            },
+                            format: if captured.hdr { FrameFormat::ScRgbHalf } else { FrameFormat::Bgra8 },
                             data: f.data,
                         },
                     );
@@ -1317,9 +1125,8 @@ fn record_loop(
     }
 }
 
-/// Where the replay keeps its packets: in RAM, or in temporary files (`[replay] storage`).
-/// `auto` keeps it in RAM when it is small next to the installed memory (see
-/// [`replay::fits_in_ram`]), on the disk otherwise.
+/// Where the replay keeps its packets: in RAM, or in temporary files (`[replay] storage`). `auto` keeps it in RAM when
+/// it is small next to the installed memory (see [`replay::fits_in_ram`]), on the disk otherwise.
 fn replay_storage(config: &Config, encoder: &Encoder, size: (u32, u32)) -> replay::Storage {
     let disk = || replay::Storage::Disk(std::env::temp_dir().join("Vixeeny-replay"));
     match config.replay.storage.as_str() {
@@ -1332,13 +1139,8 @@ fn replay_storage(config: &Config, encoder: &Encoder, size: (u32, u32)) -> repla
             );
             let ram = vixeeny_platform::machine::ram_bytes();
             let free = vixeeny_platform::machine::free_ram_bytes();
-            let fits = replay::fits_in_ram(bytes, ram)
-                && free.is_none_or(|free| replay::fits_in_free_ram(bytes, free));
-            tracing::info!(
-                "replay of about {} MB: kept {}",
-                bytes >> 20,
-                if fits { "in RAM" } else { "on the disk" }
-            );
+            let fits = replay::fits_in_ram(bytes, ram) && free.is_none_or(|free| replay::fits_in_free_ram(bytes, free));
+            tracing::info!("replay of about {} MB: kept {}", bytes >> 20, if fits { "in RAM" } else { "on the disk" });
             if fits { replay::Storage::Ram } else { disk() }
         }
     }

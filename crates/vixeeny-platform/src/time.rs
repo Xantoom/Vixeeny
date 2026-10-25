@@ -28,20 +28,13 @@ pub fn utc_offset_minutes() -> i16 {
     let mut tz = TIME_ZONE_INFORMATION::default();
     // SAFETY: `tz` is a valid out-pointer.
     let state = unsafe { GetTimeZoneInformation(&raw mut tz) };
-    let bias = tz.Bias
-        + if state == DAYLIGHT {
-            tz.DaylightBias
-        } else {
-            tz.StandardBias
-        };
+    let bias = tz.Bias + if state == DAYLIGHT { tz.DaylightBias } else { tz.StandardBias };
     (-bias) as i16
 }
 
 /// "Windows 11 24H2 (build 26100.4061)", from the registry (no process started).
 pub fn os_version() -> String {
-    use windows::Win32::System::Registry::{
-        HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RegGetValueW,
-    };
+    use windows::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RegGetValueW};
     use windows::core::{PCWSTR, w};
     const KEY: PCWSTR = w!(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion");
     let text = |name: PCWSTR| -> Option<String> {
@@ -83,15 +76,9 @@ pub fn os_version() -> String {
         .ok()?;
         Some(value)
     };
-    let build: u32 = text(w!("CurrentBuildNumber"))
-        .and_then(|b| b.parse().ok())
-        .unwrap_or(0);
+    let build: u32 = text(w!("CurrentBuildNumber")).and_then(|b| b.parse().ok()).unwrap_or(0);
     // Windows 11 still calls itself Windows 10 in `ProductName`: the build tells them apart.
-    let name = if build >= 22_000 {
-        "Windows 11"
-    } else {
-        "Windows 10"
-    };
+    let name = if build >= 22_000 { "Windows 11" } else { "Windows 10" };
     let release = text(w!("DisplayVersion")).map_or_else(String::new, |v| format!(" {v}"));
     let patch = number(w!("UBR")).map_or_else(String::new, |u| format!(".{u}"));
     format!("{name}{release} (build {build}{patch})")

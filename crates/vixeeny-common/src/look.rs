@@ -14,29 +14,17 @@ pub struct Look {
 
 impl Look {
     pub fn new(dark: bool, accent: Option<[u8; 3]>, animations: bool) -> Self {
-        Self {
-            dark,
-            accent: accent.unwrap_or(DEFAULT_ACCENT),
-            animations,
-        }
+        Self { dark, accent: accent.unwrap_or(DEFAULT_ACCENT), animations }
     }
 
     /// Dark, default accent, animations on (tests, and the places that know nothing better).
     pub const fn dark() -> Self {
-        Self {
-            dark: true,
-            accent: DEFAULT_ACCENT,
-            animations: true,
-        }
+        Self { dark: true, accent: DEFAULT_ACCENT, animations: true }
     }
 
     /// The window background, for the title bar to match.
     pub const fn caption(self) -> [u8; 3] {
-        if self.dark {
-            [0x14, 0x14, 0x16]
-        } else {
-            [0xf6, 0xf6, 0xf7]
-        }
+        if self.dark { [0x14, 0x14, 0x16] } else { [0xf6, 0xf6, 0xf7] }
     }
 }
 

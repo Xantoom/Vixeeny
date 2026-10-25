@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The frozen screen of a zone capture, done on the GPU by the daemon the moment the
-//! shortcut is pressed: every monitor is captured at once (Desktop Duplication, or Windows
-//! Graphics Capture where it cannot), the frame is copied into a texture shared with the app
-//! and shown 1:1 by a borderless top-most window with its own flip-model swap chain (HDR
-//! monitors keep their HDR content: half floats in scRGB). Nothing goes through the CPU. The
-//! app reads the textures, builds its editor windows hidden, and asks the frozen screens to go
-//! once its own windows cover them ([`THAW_MESSAGE`]), so the screen never flickers.
+//! The frozen screen of a zone capture, done on the GPU by the daemon the moment the shortcut is pressed: every monitor
+//! is captured at once (Desktop Duplication, or Windows Graphics Capture where it cannot), the frame is copied into a
+//! texture shared with the app and shown 1:1 by a borderless top-most window with its own flip-model swap chain (HDR
+//! monitors keep their HDR content: half floats in scRGB). Nothing goes through the CPU. The app reads the textures,
+//! builds its editor windows hidden, and asks the frozen screens to go once its own windows cover them
+//! ([`THAW_MESSAGE`]), so the screen never flickers.
 
 use std::cell::RefCell;
 use std::sync::Mutex;
@@ -18,41 +17,33 @@ use vixeeny_platform::{HdrInfo, MonitorInfo, PhysicalRect};
 use windows::Graphics::Capture::{Direct3D11CaptureFramePool, GraphicsCaptureSession};
 use windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;
 use windows::Graphics::DirectX::DirectXPixelFormat;
-use windows::Win32::Foundation::{
-    CloseHandle, HANDLE, HLOCAL, HWND, LPARAM, LRESULT, LUID, LocalFree, WPARAM,
-};
+use windows::Win32::Foundation::{CloseHandle, HANDLE, HLOCAL, HWND, LPARAM, LRESULT, LUID, LocalFree, WPARAM};
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_CPU_ACCESS_READ, D3D11_MAP_READ,
-    D3D11_MAPPED_SUBRESOURCE, D3D11_RESOURCE_MISC_SHARED, D3D11_RESOURCE_MISC_SHARED_NTHANDLE,
-    D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, D3D11_USAGE_STAGING, ID3D11Device, ID3D11Device1,
-    ID3D11DeviceContext, ID3D11Texture2D,
+    D3D11_MAPPED_SUBRESOURCE, D3D11_RESOURCE_MISC_SHARED, D3D11_RESOURCE_MISC_SHARED_NTHANDLE, D3D11_TEXTURE2D_DESC,
+    D3D11_USAGE_DEFAULT, D3D11_USAGE_STAGING, ID3D11Device, ID3D11Device1, ID3D11DeviceContext, ID3D11Texture2D,
 };
-use windows::Win32::Graphics::Dwm::{
-    DWMWA_CLOAK, DWMWA_TRANSITIONS_FORCEDISABLED, DwmFlush, DwmSetWindowAttribute,
-};
+use windows::Win32::Graphics::Dwm::{DWMWA_CLOAK, DWMWA_TRANSITIONS_FORCEDISABLED, DwmFlush, DwmSetWindowAttribute};
 use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_ALPHA_MODE_IGNORE, DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709, DXGI_FORMAT_B8G8R8A8_UNORM,
     DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_SAMPLE_DESC,
 };
 use windows::Win32::Graphics::Dxgi::{
-    CreateDXGIFactory1, DXGI_PRESENT, DXGI_SCALING_NONE, DXGI_SCALING_STRETCH,
-    DXGI_SHARED_RESOURCE_READ, DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_EFFECT_DISCARD,
-    DXGI_SWAP_EFFECT_FLIP_DISCARD, DXGI_USAGE_RENDER_TARGET_OUTPUT, IDXGIAdapter, IDXGIDevice,
-    IDXGIFactory2, IDXGIFactory4, IDXGIResource1, IDXGISwapChain1, IDXGISwapChain3,
+    CreateDXGIFactory1, DXGI_PRESENT, DXGI_SCALING_NONE, DXGI_SCALING_STRETCH, DXGI_SHARED_RESOURCE_READ,
+    DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_EFFECT_DISCARD, DXGI_SWAP_EFFECT_FLIP_DISCARD, DXGI_USAGE_RENDER_TARGET_OUTPUT,
+    IDXGIAdapter, IDXGIDevice, IDXGIFactory2, IDXGIFactory4, IDXGIResource1, IDXGISwapChain1, IDXGISwapChain3,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::WinRT::Direct3D11::IDirect3DDxgiInterfaceAccess;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, IDC_ARROW, LoadCursorW, MA_NOACTIVATEANDEAT,
-    PostMessageW, RegisterClassExW, SW_HIDE, SW_SHOWNOACTIVATE, SetTimer, SetWindowDisplayAffinity,
-    ShowWindow, WDA_EXCLUDEFROMCAPTURE, WM_MOUSEACTIVATE, WM_TIMER, WNDCLASSEXW, WS_EX_NOACTIVATE,
-    WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, IDC_ARROW, LoadCursorW, MA_NOACTIVATEANDEAT, PostMessageW,
+    RegisterClassExW, SW_HIDE, SW_SHOWNOACTIVATE, SetTimer, SetWindowDisplayAffinity, ShowWindow,
+    WDA_EXCLUDEFROMCAPTURE, WM_MOUSEACTIVATE, WM_TIMER, WNDCLASSEXW, WS_EX_NOACTIVATE, WS_EX_NOREDIRECTIONBITMAP,
+    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{BOOL, Interface, w};
 
-use crate::wgc::{
-    FRAME_TIMEOUT, d3d_device, frame_handler, halves_to_f32, monitor_item, os, winrt_device,
-};
+use crate::wgc::{FRAME_TIMEOUT, d3d_device, frame_handler, halves_to_f32, monitor_item, os, winrt_device};
 
 use crate::{CaptureError, CpuFrame, HdrFrame, card_tonemap};
 
@@ -75,9 +66,7 @@ fn luid_value(luid: LUID) -> i64 {
 impl Gpu {
     pub fn new() -> Result<Self, CaptureError> {
         if !GraphicsCaptureSession::IsSupported().map_err(os("IsSupported"))? {
-            return Err(CaptureError::Os(
-                "Windows Graphics Capture is not available".into(),
-            ));
+            return Err(CaptureError::Os("Windows Graphics Capture is not available".into()));
         }
         let (device, context) = d3d_device(None)?;
         let winrt = winrt_device(&device)?;
@@ -89,13 +78,7 @@ impl Gpu {
             let factory: IDXGIFactory2 = adapter.GetParent().map_err(os("DXGI factory"))?;
             (factory, luid_value(desc.AdapterLuid))
         };
-        Ok(Self {
-            device,
-            context,
-            winrt,
-            factory,
-            adapter,
-        })
+        Ok(Self { device, context, winrt, factory, adapter })
     }
 }
 
@@ -140,8 +123,8 @@ pub fn thaw() {
     }
     let any = !screens.is_empty();
     drop(screens);
-    // The driver keeps the memory of the textures and swap chains it freed (over 100 MB for a
-    // 4K screen) for later ones: given back now, at about a millisecond on the next freeze.
+    // The driver keeps the memory of the textures and swap chains it freed (over 100 MB for a 4K screen) for later
+    // ones: given back now, at about a millisecond on the next freeze.
     if any && let Some(device) = MADE_ON.with(|m| m.borrow_mut().take()) {
         crate::trim(&device);
     }
@@ -188,21 +171,10 @@ fn register_class() -> Result<(), CaptureError> {
     Ok(())
 }
 
-fn set_bool_attribute(
-    hwnd: HWND,
-    attribute: windows::Win32::Graphics::Dwm::DWMWINDOWATTRIBUTE,
-    on: bool,
-) {
+fn set_bool_attribute(hwnd: HWND, attribute: windows::Win32::Graphics::Dwm::DWMWINDOWATTRIBUTE, on: bool) {
     let value = BOOL::from(on);
     // SAFETY: `value` is a live BOOL, the size these attributes want.
-    let _ = unsafe {
-        DwmSetWindowAttribute(
-            hwnd,
-            attribute,
-            (&raw const value).cast(),
-            size_of::<BOOL>() as u32,
-        )
-    };
+    let _ = unsafe { DwmSetWindowAttribute(hwnd, attribute, (&raw const value).cast(), size_of::<BOOL>() as u32) };
 }
 
 /// A capture in flight.
@@ -232,18 +204,9 @@ fn start(gpu: &Gpu, monitor: &MonitorInfo, cursor: bool) -> Result<Pending, Capt
     let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(&gpu.winrt, format, 1, size)
         .map_err(os("CreateFreeThreaded"))?;
     let (tx, arrived) = channel();
-    let token = pool
-        .FrameArrived(&frame_handler(tx))
-        .map_err(os("FrameArrived"))?;
-    let session = pool
-        .CreateCaptureSession(&item)
-        .map_err(os("CreateCaptureSession"))?;
-    let pending = Pending {
-        pool,
-        session,
-        token,
-        arrived,
-    };
+    let token = pool.FrameArrived(&frame_handler(tx)).map_err(os("FrameArrived"))?;
+    let session = pool.CreateCaptureSession(&item).map_err(os("CreateCaptureSession"))?;
+    let pending = Pending { pool, session, token, arrived };
     // The cursor and border switches need recent Windows builds; ignore their absence.
     let _ = pending.session.SetIsCursorCaptureEnabled(cursor);
     let _ = pending.session.SetIsBorderRequired(false);
@@ -252,19 +215,12 @@ fn start(gpu: &Gpu, monitor: &MonitorInfo, cursor: bool) -> Result<Pending, Capt
 }
 
 /// Waits for the first frame and copies it into a new shared texture.
-fn finish(
-    gpu: &Gpu,
-    pending: &Pending,
-    deadline: Instant,
-) -> Result<ID3D11Texture2D, CaptureError> {
+fn finish(gpu: &Gpu, pending: &Pending, deadline: Instant) -> Result<ID3D11Texture2D, CaptureError> {
     pending
         .arrived
         .recv_timeout(deadline.saturating_duration_since(Instant::now()))
         .map_err(|_| CaptureError::Timeout)?;
-    let frame = pending
-        .pool
-        .TryGetNextFrame()
-        .map_err(os("TryGetNextFrame"))?;
+    let frame = pending.pool.TryGetNextFrame().map_err(os("TryGetNextFrame"))?;
     let surface = frame.Surface().map_err(os("Surface"))?;
     let access: IDirect3DDxgiInterfaceAccess = surface.cast().map_err(os("surface access"))?;
     // SAFETY: the surface is backed by a D3D11 texture on our device.
@@ -281,21 +237,14 @@ fn shared_copy(gpu: &Gpu, source: &ID3D11Texture2D) -> Result<ID3D11Texture2D, C
     unsafe { source.GetDesc(&mut desc) };
     desc.MipLevels = 1;
     desc.ArraySize = 1;
-    desc.SampleDesc = DXGI_SAMPLE_DESC {
-        Count: 1,
-        Quality: 0,
-    };
+    desc.SampleDesc = DXGI_SAMPLE_DESC { Count: 1, Quality: 0 };
     desc.Usage = D3D11_USAGE_DEFAULT;
     desc.BindFlags = (D3D11_BIND_SHADER_RESOURCE.0 | D3D11_BIND_RENDER_TARGET.0) as u32;
     desc.CPUAccessFlags = 0;
     desc.MiscFlags = SHARED_FLAGS;
     let mut texture = None;
     // SAFETY: a plain texture description; the out-pointer is valid.
-    unsafe {
-        gpu.device
-            .CreateTexture2D(&desc, None, Some(&raw mut texture))
-    }
-    .map_err(os("CreateTexture2D"))?;
+    unsafe { gpu.device.CreateTexture2D(&desc, None, Some(&raw mut texture)) }.map_err(os("CreateTexture2D"))?;
     let texture = texture.ok_or_else(|| CaptureError::Os("no shared texture".into()))?;
     // SAFETY: same device, size and format.
     unsafe { gpu.context.CopyResource(&texture, source) };
@@ -308,14 +257,13 @@ enum Source {
     Captured(Pending),
 }
 
-/// A hidden (cloaked) top-most window over `monitor`, showing `texture` when `show` (otherwise
-/// it only receives [`THAW_MESSAGE`] and the safety timer).
+/// A hidden (cloaked) top-most window over `monitor`, showing `texture` when `show` (otherwise it only receives
+/// [`THAW_MESSAGE`] and the safety timer).
 ///
-/// The window must stay an ordinary window for the compositor. One that covers a monitor
-/// exactly with a flip-model swap chain is taken for a full-screen game: the screen switches to
-/// "independent flip" (a flash, and variable refresh that follows our single frame). So an SDR
-/// screen uses a "blt" swap chain, which the compositor always composes, and the window is one
-/// pixel taller than the monitor when no monitor lies below. HDR content needs the flip model.
+/// The window must stay an ordinary window for the compositor. One that covers a monitor exactly with a flip-model swap
+/// chain is taken for a full-screen game: the screen switches to "independent flip" (a flash, and variable refresh that
+/// follows our single frame). So an SDR screen uses a "blt" swap chain, which the compositor always composes, and the
+/// window is one pixel taller than the monitor when no monitor lies below. HDR content needs the flip model.
 fn show_screen(
     gpu: &Gpu,
     monitor: &MonitorInfo,
@@ -334,11 +282,7 @@ fn show_screen(
     });
     let extra = u32::from(below_is_free);
     let ex_style = WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
-    let ex_style = if hdr {
-        ex_style | WS_EX_NOREDIRECTIONBITMAP
-    } else {
-        ex_style
-    };
+    let ex_style = if hdr { ex_style | WS_EX_NOREDIRECTIONBITMAP } else { ex_style };
     // SAFETY: a registered class and plain arguments.
     let window = unsafe {
         CreateWindowExW(
@@ -352,11 +296,7 @@ fn show_screen(
             (r.height + extra) as i32,
             None,
             None,
-            Some(
-                GetModuleHandleW(None)
-                    .map_err(os("GetModuleHandleW"))?
-                    .into(),
-            ),
+            Some(GetModuleHandleW(None).map_err(os("GetModuleHandleW"))?.into()),
             None,
         )
     }
@@ -365,12 +305,7 @@ fn show_screen(
     set_bool_attribute(window, DWMWA_CLOAK, true);
     // SAFETY: our own window. Kept out of captures, so a capture never sees a frozen screen.
     let _ = unsafe { SetWindowDisplayAffinity(window, WDA_EXCLUDEFROMCAPTURE) };
-    let mut screen = Screen {
-        window,
-        swap_chain: None,
-        _texture: texture.clone(),
-        shared: None,
-    };
+    let mut screen = Screen { window, swap_chain: None, _texture: texture.clone(), shared: None };
     let mut desc = D3D11_TEXTURE2D_DESC::default();
     // SAFETY: `desc` is a valid out-pointer.
     unsafe { texture.GetDesc(&mut desc) };
@@ -404,36 +339,18 @@ fn present(
     let chain_desc = DXGI_SWAP_CHAIN_DESC1 {
         Width: desc.Width,
         Height: desc.Height + extra,
-        Format: if hdr {
-            DXGI_FORMAT_R16G16B16A16_FLOAT
-        } else {
-            DXGI_FORMAT_B8G8R8A8_UNORM
-        },
-        SampleDesc: DXGI_SAMPLE_DESC {
-            Count: 1,
-            Quality: 0,
-        },
+        Format: if hdr { DXGI_FORMAT_R16G16B16A16_FLOAT } else { DXGI_FORMAT_B8G8R8A8_UNORM },
+        SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
         BufferUsage: DXGI_USAGE_RENDER_TARGET_OUTPUT,
         BufferCount: if hdr { 2 } else { 1 },
-        Scaling: if hdr {
-            DXGI_SCALING_NONE
-        } else {
-            DXGI_SCALING_STRETCH
-        },
-        SwapEffect: if hdr {
-            DXGI_SWAP_EFFECT_FLIP_DISCARD
-        } else {
-            DXGI_SWAP_EFFECT_DISCARD
-        },
+        Scaling: if hdr { DXGI_SCALING_NONE } else { DXGI_SCALING_STRETCH },
+        SwapEffect: if hdr { DXGI_SWAP_EFFECT_FLIP_DISCARD } else { DXGI_SWAP_EFFECT_DISCARD },
         AlphaMode: DXGI_ALPHA_MODE_IGNORE,
         ..Default::default()
     };
     // SAFETY: a live device and window; the description outlives the call.
-    let chain = unsafe {
-        gpu.factory
-            .CreateSwapChainForHwnd(&gpu.device, window, &chain_desc, None, None)
-    }
-    .map_err(os("CreateSwapChainForHwnd"))?;
+    let chain = unsafe { gpu.factory.CreateSwapChainForHwnd(&gpu.device, window, &chain_desc, None, None) }
+        .map_err(os("CreateSwapChainForHwnd"))?;
     if hdr {
         // Linear BT.709 floats, 1.0 = 80 nits: what the capture gave, shown as is.
         if let Ok(chain3) = chain.cast::<IDXGISwapChain3>() {
@@ -441,51 +358,39 @@ fn present(
             let _ = unsafe { chain3.SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709) };
         }
     }
-    // SAFETY: the back buffer has the texture's format and holds it (plus the extra row).
-    // Shown (still cloaked) first: a hidden window's frames are dropped.
+    // SAFETY: the back buffer has the texture's format and holds it (plus the extra row). Shown (still cloaked) first:
+    // a hidden window's frames are dropped.
     unsafe {
         let _ = ShowWindow(window, SW_SHOWNOACTIVATE);
         let back: ID3D11Texture2D = chain.GetBuffer(0).map_err(os("GetBuffer"))?;
-        gpu.context
-            .CopySubresourceRegion(&back, 0, 0, 0, 0, texture, 0, None);
-        chain
-            .Present(0, DXGI_PRESENT(0))
-            .ok()
-            .map_err(os("Present"))?;
+        gpu.context.CopySubresourceRegion(&back, 0, 0, 0, 0, texture, 0, None);
+        chain.Present(0, DXGI_PRESENT(0)).ok().map_err(os("Present"))?;
     }
     screen.swap_chain = Some(chain);
     Ok(())
 }
 
-/// Freezes every monitor. Must run on a thread with a message loop (the windows live there).
-/// The screens go on [`thaw`], on [`THAW_MESSAGE`] or after ten seconds.
+/// Freezes every monitor. Must run on a thread with a message loop (the windows live there). The screens go on
+/// [`thaw`], on [`THAW_MESSAGE`] or after ten seconds.
 pub fn freeze(gpu: &Gpu, monitors: &[MonitorInfo]) -> Result<Frozen, CaptureError> {
     take(gpu, monitors, true, false)
 }
 
-/// Captures every monitor for the app without showing anything (a full-screen capture takes
-/// the screen of the moment the shortcut is pressed, however long the app takes to start).
-/// Shared and released as frozen screens are.
+/// Captures every monitor for the app without showing anything (a full-screen capture takes the screen of the moment
+/// the shortcut is pressed, however long the app takes to start). Shared and released as frozen screens are.
 pub fn hold(gpu: &Gpu, monitors: &[MonitorInfo], cursor: bool) -> Result<Frozen, CaptureError> {
     take(gpu, monitors, false, cursor)
 }
 
-fn take(
-    gpu: &Gpu,
-    monitors: &[MonitorInfo],
-    show: bool,
-    cursor: bool,
-) -> Result<Frozen, CaptureError> {
+fn take(gpu: &Gpu, monitors: &[MonitorInfo], show: bool, cursor: bool) -> Result<Frozen, CaptureError> {
     thaw();
     register_class()?;
-    // Duplicated when they can be (without the pointer); every capture starts before any is
-    // waited for: they run side by side.
+    // Duplicated when they can be (without the pointer); every capture starts before any is waited for: they run side
+    // by side.
     let pending = monitors
         .iter()
         .map(|m| {
-            let frame = (!cursor)
-                .then(|| crate::dda::frame(&gpu.device, m, m.hdr.is_some()))
-                .flatten();
+            let frame = (!cursor).then(|| crate::dda::frame(&gpu.device, m, m.hdr.is_some())).flatten();
             match frame {
                 Some(frame) => Ok(Source::Duplicated(frame)),
                 None => start(gpu, m, cursor).map(Source::Captured),
@@ -512,8 +417,8 @@ fn take(
     // SAFETY: plain call: the copies reach the GPU before the app reads them.
     unsafe { gpu.context.Flush() };
     if show {
-        // SAFETY: plain call. Once the compositor has taken the presented frames, the windows
-        // appear all at once with their content.
+        // SAFETY: plain call. Once the compositor has taken the presented frames, the windows appear all at once with
+        // their content.
         let _ = unsafe { DwmFlush() };
         for s in &screens {
             set_bool_attribute(s.window, DWMWA_CLOAK, false);
@@ -525,21 +430,13 @@ fn take(
     }
     ACTIVE.with(|a| *a.borrow_mut() = screens);
     MADE_ON.with(|m| *m.borrow_mut() = Some(gpu.device.clone()));
-    Ok(Frozen {
-        adapter: gpu.adapter,
-        screens: shared,
-    })
+    Ok(Frozen { adapter: gpu.adapter, screens: shared })
 }
 
-/// The rows of a frozen HDR screen (RGBA half floats, `stride` bytes apart, as [`read_with`]
-/// hands them) as scRGB.
+/// The rows of a frozen HDR screen (RGBA half floats, `stride` bytes apart, as [`read_with`] hands them) as scRGB.
 pub fn scrgb(screen: &FrozenScreen, rows: &[u8], stride: usize) -> HdrFrame {
     let (w, h) = (screen.width, screen.height);
-    HdrFrame {
-        width: w,
-        height: h,
-        rgba: halves_to_f32(rows, stride, w as usize, h as usize),
-    }
+    HdrFrame { width: w, height: h, rgba: halves_to_f32(rows, stride, w as usize, h as usize) }
 }
 
 /// The app's device on the daemon's adapter.
@@ -549,8 +446,8 @@ struct Reader {
     context: ID3D11DeviceContext,
 }
 
-// SAFETY: a Direct3D 11 device is free-threaded; the immediate context is used by one thread at
-// a time (made on the warming thread, then used by the thread that reads the screens).
+// SAFETY: a Direct3D 11 device is free-threaded; the immediate context is used by one thread at a time (made on the
+// warming thread, then used by the thread that reads the screens).
 unsafe impl Send for Reader {}
 
 /// The reader, kept for the next captures of the process.
@@ -562,59 +459,43 @@ static WARMING: Mutex<Option<JoinHandle<Result<Reader, CaptureError>>>> = Mutex:
 /// Starts making the device that reads the frozen screens of `frozen`, while the app starts.
 pub fn warm(frozen: &Frozen) {
     let adapter = frozen.adapter;
-    let made = std::thread::Builder::new()
-        .name("frozen-warm".into())
-        .spawn(move || make_reader(adapter));
+    let made = std::thread::Builder::new().name("frozen-warm".into()).spawn(move || make_reader(adapter));
     if let (Ok(handle), Ok(mut warming)) = (made, WARMING.lock()) {
         *warming = Some(handle);
     }
 }
 
 fn reader(adapter: i64) -> Result<(ID3D11Device, ID3D11DeviceContext), CaptureError> {
-    let mut kept = READER
-        .lock()
-        .map_err(|_| CaptureError::Os("reader lock".into()))?;
+    let mut kept = READER.lock().map_err(|_| CaptureError::Os("reader lock".into()))?;
     // SAFETY: plain call.
     let removed = |r: &Reader| unsafe { r.device.GetDeviceRemovedReason() }.is_err();
-    if kept
-        .as_ref()
-        .is_none_or(|r| r.adapter != adapter || removed(r))
-    {
+    if kept.as_ref().is_none_or(|r| r.adapter != adapter || removed(r)) {
         let warming = WARMING.lock().ok().and_then(|mut w| w.take());
         *kept = Some(match warming.map(JoinHandle::join) {
             Some(Ok(Ok(made))) if made.adapter == adapter => made,
             _ => make_reader(adapter)?,
         });
     }
-    let r = kept
-        .as_ref()
-        .ok_or_else(|| CaptureError::Os("no reader".into()))?;
+    let r = kept.as_ref().ok_or_else(|| CaptureError::Os("no reader".into()))?;
     Ok((r.device.clone(), r.context.clone()))
 }
 
-/// Gives back the driver's memory of the device that read the frozen screens, once the editor
-/// that drew with it is gone (see [`crate::trim`]).
+/// Gives back the driver's memory of the device that read the frozen screens, once the editor that drew with it is gone
+/// (see [`crate::trim`]).
 pub fn trim_reader() {
-    if let Some(device) = READER
-        .lock()
-        .ok()
-        .and_then(|r| r.as_ref().map(|r| r.device.clone()))
-    {
+    if let Some(device) = READER.lock().ok().and_then(|r| r.as_ref().map(|r| r.device.clone())) {
         crate::trim(&device);
     }
 }
 
-/// The device that reads the frozen screens of `adapter` (made if needed): the editor draws
-/// with it too, rather than making one more.
+/// The device that reads the frozen screens of `adapter` (made if needed): the editor draws with it too, rather than
+/// making one more.
 pub fn device(adapter: i64) -> Option<ID3D11Device> {
     reader(adapter).ok().map(|(device, _)| device)
 }
 
 fn make_reader(adapter: i64) -> Result<Reader, CaptureError> {
-    let luid = LUID {
-        LowPart: adapter as u32,
-        HighPart: (adapter >> 32) as i32,
-    };
+    let luid = LUID { LowPart: adapter as u32, HighPart: (adapter >> 32) as i32 };
     // SAFETY: plain factory calls.
     let dxgi_adapter: IDXGIAdapter = unsafe {
         let factory: IDXGIFactory4 = CreateDXGIFactory1().map_err(os("CreateDXGIFactory1"))?;
@@ -622,27 +503,21 @@ fn make_reader(adapter: i64) -> Result<Reader, CaptureError> {
     }
     .map_err(os("EnumAdapterByLuid"))?;
     let (device, context) = d3d_device(Some(&dxgi_adapter))?;
-    Ok(Reader {
-        adapter,
-        device,
-        context,
-    })
+    Ok(Reader { adapter, device, context })
 }
 
-/// How the frozen textures are created: shared through a named NT handle, which has an access
-/// control list (a legacy shared handle is a bare number any process can try).
-const SHARED_FLAGS: u32 =
-    (D3D11_RESOURCE_MISC_SHARED.0 | D3D11_RESOURCE_MISC_SHARED_NTHANDLE.0) as u32;
+/// How the frozen textures are created: shared through a named NT handle, which has an access control list (a legacy
+/// shared handle is a bare number any process can try).
+const SHARED_FLAGS: u32 = (D3D11_RESOURCE_MISC_SHARED.0 | D3D11_RESOURCE_MISC_SHARED_NTHANDLE.0) as u32;
 
-/// Only this user and the system may open a frozen screen, and not a process of a lower
-/// integrity level (a sandboxed one).
+/// Only this user and the system may open a frozen screen, and not a process of a lower integrity level (a sandboxed
+/// one).
 const SHARED_SDDL: windows::core::PCWSTR = w!("D:P(A;;GA;;;OW)(A;;GA;;;SY)S:(ML;;NWNRNX;;;ME)");
 
 /// A name no other frozen texture has: this process and a counter.
 fn next_shared_id() -> u64 {
     static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    (u64::from(std::process::id()) << 32)
-        | u64::from(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+    (u64::from(std::process::id()) << 32) | u64::from(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
 }
 
 fn shared_name(id: u64) -> windows::core::HSTRING {
@@ -658,12 +533,7 @@ fn share(texture: &ID3D11Texture2D, id: u64) -> Result<HANDLE, CaptureError> {
     let mut descriptor = PSECURITY_DESCRIPTOR::default();
     // SAFETY: a constant SDDL string; the descriptor is freed below.
     unsafe {
-        ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            SHARED_SDDL,
-            SDDL_REVISION_1,
-            &raw mut descriptor,
-            None,
-        )
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(SHARED_SDDL, SDDL_REVISION_1, &raw mut descriptor, None)
     }
     .map_err(os("security descriptor"))?;
     let attributes = SECURITY_ATTRIBUTES {
@@ -675,11 +545,7 @@ fn share(texture: &ID3D11Texture2D, id: u64) -> Result<HANDLE, CaptureError> {
     let handle = resource.and_then(|resource| {
         // SAFETY: a texture created with `SHARED_FLAGS`; `attributes` outlives the call.
         unsafe {
-            resource.CreateSharedHandle(
-                Some(&raw const attributes),
-                DXGI_SHARED_RESOURCE_READ.0,
-                &shared_name(id),
-            )
+            resource.CreateSharedHandle(Some(&raw const attributes), DXGI_SHARED_RESOURCE_READ.0, &shared_name(id))
         }
         .map_err(os("CreateSharedHandle"))
     });
@@ -705,13 +571,12 @@ pub enum Rows {
     Halves,
 }
 
-/// Reads the shared textures (in the app): `each` gets every screen's rows (`stride` bytes
-/// apart) while they are mapped, so it can convert them straight to where they go. The GPU
-/// work of all screens is queued before the first is waited for.
+/// Reads the shared textures (in the app): `each` gets every screen's rows (`stride` bytes apart) while they are
+/// mapped, so it can convert them straight to where they go. The GPU work of all screens is queued before the first is
+/// waited for.
 ///
-/// An HDR screen for which `sdr` gives its levels is tone-mapped to BGRA on the graphics card;
-/// it comes as half floats too with `halves`, or when that tone mapping failed (and always
-/// after its BGRA rows).
+/// An HDR screen for which `sdr` gives its levels is tone-mapped to BGRA on the graphics card; it comes as half floats
+/// too with `halves`, or when that tone mapping failed (and always after its BGRA rows).
 pub fn read_with(
     frozen: &Frozen,
     sdr: impl Fn(&FrozenScreen) -> Option<HdrInfo>,
@@ -724,9 +589,9 @@ pub fn read_with(
         for screen in &frozen.screens {
             let texture = open_shared(&device, screen.texture)?;
             let whole = PhysicalRect::new(0, 0, screen.width, screen.height);
-            let card = sdr(screen).filter(|_| screen.hdr).and_then(|info| {
-                card_tonemap::stage(&device, &context, &texture, &whole, &info).ok()
-            });
+            let card = sdr(screen)
+                .filter(|_| screen.hdr)
+                .and_then(|info| card_tonemap::stage(&device, &context, &texture, &whole, &info).ok());
             let on_card = card.is_some();
             if let Some(staging) = card {
                 staged.push((screen, Rows::Bgra, staging));
@@ -739,16 +604,11 @@ pub fn read_with(
         for (screen, rows, staging) in staged {
             let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
             // SAFETY: a staging texture with CPU read access; `mapped` is a valid out-pointer.
-            unsafe { context.Map(&staging, 0, D3D11_MAP_READ, 0, Some(&raw mut mapped)) }
-                .map_err(os("Map"))?;
+            unsafe { context.Map(&staging, 0, D3D11_MAP_READ, 0, Some(&raw mut mapped)) }.map_err(os("Map"))?;
             let stride = mapped.RowPitch as usize;
             // SAFETY: a mapped texture exposes `RowPitch * Height` readable bytes until `Unmap`.
-            let data = unsafe {
-                std::slice::from_raw_parts(
-                    mapped.pData.cast::<u8>(),
-                    stride * screen.height as usize,
-                )
-            };
+            let data =
+                unsafe { std::slice::from_raw_parts(mapped.pData.cast::<u8>(), stride * screen.height as usize) };
             each(screen, rows, data, stride);
             // SAFETY: matches the successful Map above.
             unsafe { context.Unmap(&staging, 0) };
@@ -779,8 +639,7 @@ fn stage(
     desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
     let mut staging = None;
     // SAFETY: a staging copy of an existing texture; the out-pointer is valid.
-    unsafe { device.CreateTexture2D(&desc, None, Some(&raw mut staging)) }
-        .map_err(os("CreateTexture2D"))?;
+    unsafe { device.CreateTexture2D(&desc, None, Some(&raw mut staging)) }.map_err(os("CreateTexture2D"))?;
     let staging = staging.ok_or_else(|| CaptureError::Os("no staging texture".into()))?;
     // SAFETY: same device, size and format.
     unsafe { context.CopyResource(&staging, texture) };
@@ -796,9 +655,8 @@ pub fn release(frozen: &Frozen) {
     }
 }
 
-/// Still captures of the screens the daemon held for the app ([`hold`]): a full-screen capture
-/// of the moment of the press. Windows are not held (their capture sees behind what covers
-/// them): asking for one fails.
+/// Still captures of the screens the daemon held for the app ([`hold`]): a full-screen capture of the moment of the
+/// press. Windows are not held (their capture sees behind what covers them): asking for one fails.
 pub struct Held<'a> {
     frozen: &'a Frozen,
 }
@@ -815,20 +673,13 @@ impl<'a> Held<'a> {
             .screens
             .iter()
             .find(|s| (s.x, s.y, s.width, s.height) == (r.x, r.y, r.width, r.height))
-            .map(|s| Frozen {
-                adapter: self.frozen.adapter,
-                screens: vec![*s],
-            })
+            .map(|s| Frozen { adapter: self.frozen.adapter, screens: vec![*s] })
             .ok_or(CaptureError::UnknownMonitor)
     }
 
-    /// `monitor`'s screen as BGRA (tone-mapped on the graphics card when `sdr` gives the levels
-    /// of an HDR one) or, failing that, as scRGB.
-    fn read(
-        &self,
-        monitor: &MonitorInfo,
-        sdr: Option<HdrInfo>,
-    ) -> Result<Result<CpuFrame, HdrFrame>, CaptureError> {
+    /// `monitor`'s screen as BGRA (tone-mapped on the graphics card when `sdr` gives the levels of an HDR one) or,
+    /// failing that, as scRGB.
+    fn read(&self, monitor: &MonitorInfo, sdr: Option<HdrInfo>) -> Result<Result<CpuFrame, HdrFrame>, CaptureError> {
         let one = self.screen(monitor)?;
         let mut out = None;
         read_with(
@@ -837,10 +688,7 @@ impl<'a> Held<'a> {
             false,
             |screen, rows, data, stride| {
                 out = Some(match rows {
-                    Rows::Bgra => {
-                        CpuFrame::from_raw(screen.width, screen.height, stride, data.to_vec())
-                            .map(Ok)
-                    }
+                    Rows::Bgra => CpuFrame::from_raw(screen.width, screen.height, stride, data.to_vec()).map(Ok),
                     Rows::Halves => Ok(Err(scrgb(screen, data, stride))),
                 });
             },
@@ -861,13 +709,8 @@ fn cropped<T>(
 }
 
 impl crate::StillBackend for Held<'_> {
-    fn grab_monitor(
-        &mut self,
-        monitor: &MonitorInfo,
-        _cursor: bool,
-    ) -> Result<CpuFrame, CaptureError> {
-        self.read(monitor, None)?
-            .map_err(|_| CaptureError::Unsupported)
+    fn grab_monitor(&mut self, monitor: &MonitorInfo, _cursor: bool) -> Result<CpuFrame, CaptureError> {
+        self.read(monitor, None)?.map_err(|_| CaptureError::Unsupported)
     }
 
     fn grab_monitor_hdr(
@@ -897,11 +740,7 @@ impl crate::StillBackend for Held<'_> {
         cropped(sdr, area, CpuFrame::crop)
     }
 
-    fn grab_window(
-        &mut self,
-        _window: vixeeny_platform::WindowId,
-        _cursor: bool,
-    ) -> Result<CpuFrame, CaptureError> {
+    fn grab_window(&mut self, _window: vixeeny_platform::WindowId, _cursor: bool) -> Result<CpuFrame, CaptureError> {
         Err(CaptureError::Unsupported)
     }
 }
@@ -910,8 +749,8 @@ impl crate::StillBackend for Held<'_> {
 mod tests {
     use super::*;
 
-    /// Taken by the tests reading through the process's reader: its immediate context is used
-    /// by one thread at a time, as in the app.
+    /// Taken by the tests reading through the process's reader: its immediate context is used by one thread at a time,
+    /// as in the app.
     static READING: Mutex<()> = Mutex::new(());
 
     /// The screens held at a press (nothing shown) are read back whole, as the app saves them.
@@ -936,10 +775,7 @@ mod tests {
             None => held.grab_monitor(monitor, false),
         }
         .unwrap();
-        assert_eq!(
-            (frame.width, frame.height),
-            (monitor.rect.width, monitor.rect.height)
-        );
+        assert_eq!((frame.width, frame.height), (monitor.rect.width, monitor.rect.height));
         thaw();
         assert!(!is_active());
     }
@@ -970,15 +806,7 @@ mod tests {
         let handle = share(&texture, id).unwrap();
         let frozen = Frozen {
             adapter: gpu.adapter,
-            screens: vec![FrozenScreen {
-                x: 0,
-                y: 0,
-                width: w,
-                height: h,
-                texture: id,
-                hdr: false,
-                window: 0,
-            }],
+            screens: vec![FrozenScreen { x: 0, y: 0, width: w, height: h, texture: id, hdr: false, window: 0 }],
         };
         let mut read: Vec<u8> = Vec::new();
         read_with(
@@ -987,9 +815,7 @@ mod tests {
             false,
             |_, kind, rows, stride| {
                 assert_eq!(kind, Rows::Bgra);
-                read.extend(
-                    (0..h as usize).flat_map(|y| &rows[y * stride..y * stride + w as usize * 4]),
-                )
+                read.extend((0..h as usize).flat_map(|y| &rows[y * stride..y * stride + w as usize * 4]))
             },
         )
         .unwrap();
@@ -1009,15 +835,7 @@ mod tests {
         let half = 0x3800u16.to_le_bytes(); // 0.5
         // One pixel, then row padding.
         let rows = [one, half, [0, 0], one, [9, 9], [9, 9], [9, 9], [9, 9]].concat();
-        let screen = FrozenScreen {
-            x: 0,
-            y: 0,
-            width: 1,
-            height: 1,
-            texture: 0,
-            hdr: true,
-            window: 0,
-        };
+        let screen = FrozenScreen { x: 0, y: 0, width: 1, height: 1, texture: 0, hdr: true, window: 0 };
         assert_eq!(scrgb(&screen, &rows, 16).rgba, vec![1.0, 0.5, 0.0, 1.0]);
     }
 }

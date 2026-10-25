@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Replays fast scrolls over long page images and checks the assembled image row by row.
 //!
-//! `cargo run --release -p vixeeny-stitch --example scroll_sim -- <page.bgra>...`: each file
-//! holds its width and height (u32, little endian) then BGRA pixels.
+//! `cargo run --release -p vixeeny-stitch --example scroll_sim -- <page.bgra>...`: each file holds its width and height
+//! (u32, little endian) then BGRA pixels.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -57,11 +57,7 @@ fn frame(page: &Page, o: usize, height: usize, look: Look) -> Frame {
         let thumb = height * height / page.h;
         let top = o * (height - thumb) / (page.h - height).max(1);
         for y in 0..height {
-            let c = if (top..top + thumb).contains(&y) {
-                120
-            } else {
-                235
-            };
+            let c = if (top..top + thumb).contains(&y) { 120 } else { 235 };
             for x in w - SCROLLBAR..w {
                 set(x, y, [c, c, c, 255]);
             }
@@ -80,10 +76,7 @@ fn frame(page: &Page, o: usize, height: usize, look: Look) -> Frame {
 struct Rng(u64);
 impl Rng {
     fn next(&mut self) -> u64 {
-        self.0 = self
-            .0
-            .wrapping_mul(6_364_136_223_846_793_005)
-            .wrapping_add(1_442_695_040_888_963_407);
+        self.0 = self.0.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
         self.0 >> 33
     }
     fn below(&mut self, n: u64) -> u64 {
@@ -91,8 +84,8 @@ impl Rng {
     }
 }
 
-/// Offsets of a scroll: flicks that speed up to `top` rows a frame and slow down, sometimes
-/// back up, sometimes stopping; frames dropped at random.
+/// Offsets of a scroll: flicks that speed up to `top` rows a frame and slow down, sometimes back up, sometimes
+/// stopping; frames dropped at random.
 fn offsets(max: usize, top: usize, back: bool, seed: u64) -> Vec<usize> {
     let mut rng = Rng(seed);
     let mut out = vec![0usize];
@@ -181,28 +174,12 @@ fn main() {
         let bytes = std::fs::read(v[0]).expect("page file");
         let w = u32::from_le_bytes(bytes[0..4].try_into().unwrap()) as usize;
         let h = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
-        let page = Page {
-            w,
-            h,
-            px: bytes[8..].to_vec(),
-        };
+        let page = Page { w, h, px: bytes[8..].to_vec() };
         let on = v[5] == "1";
-        let look = Look {
-            header: if on { 60 } else { 0 },
-            button: on,
-            scrollbar: on,
-            noise: v.get(6) == Some(&"1"),
-        };
+        let look = Look { header: if on { 60 } else { 0 }, button: on, scrollbar: on, noise: v.get(6) == Some(&"1") };
         println!(
             "{}",
-            run(
-                &page,
-                v[1].parse().unwrap(),
-                look,
-                v[2].parse().unwrap(),
-                v[3] == "1",
-                v[4].parse().unwrap()
-            )
+            run(&page, v[1].parse().unwrap(), look, v[2].parse().unwrap(), v[3] == "1", v[4].parse().unwrap())
         );
         return;
     }
@@ -210,47 +187,15 @@ fn main() {
         let bytes = std::fs::read(&path).expect("page file");
         let w = u32::from_le_bytes(bytes[0..4].try_into().unwrap()) as usize;
         let h = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
-        let page = Page {
-            w,
-            h,
-            px: bytes[8..].to_vec(),
-        };
+        let page = Page { w, h, px: bytes[8..].to_vec() };
         println!("{path} ({w}x{h})");
         let height = 900.min(h / 2);
         for (name, look) in [
-            (
-                "plain",
-                Look {
-                    header: 0,
-                    button: false,
-                    scrollbar: false,
-                    noise: false,
-                },
-            ),
-            (
-                "overlays",
-                Look {
-                    header: 60,
-                    button: true,
-                    scrollbar: true,
-                    noise: false,
-                },
-            ),
-            (
-                "noisy",
-                Look {
-                    header: 60,
-                    button: true,
-                    scrollbar: true,
-                    noise: true,
-                },
-            ),
+            ("plain", Look { header: 0, button: false, scrollbar: false, noise: false }),
+            ("overlays", Look { header: 60, button: true, scrollbar: true, noise: false }),
+            ("noisy", Look { header: 60, button: true, scrollbar: true, noise: true }),
         ] {
-            for (top, back) in [
-                (height / 4, false),
-                (height / 2, true),
-                (height * 3 / 4, true),
-            ] {
+            for (top, back) in [(height / 4, false), (height / 2, true), (height * 3 / 4, true)] {
                 for seed in [1, 2] {
                     println!("  {name:<8} {}", run(&page, height, look, top, back, seed));
                 }

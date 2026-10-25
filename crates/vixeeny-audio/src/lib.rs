@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Audio capture and mixing for recordings.
 //!
-//! Every source delivers 48 kHz, 32-bit float samples in 2, 6 or 8 channels (the OS converts the
-//! sample rate; the channel count is the device's own, see [`layout`]), each chunk dated
-//! on the master clock (the OS monotonic clock, nanoseconds, same as video). The [`Mixer`]
-//! places the chunks of one track on a continuous timeline, fills gaps with silence and corrects
-//! clock drift, so the encoder gets gapless audio that stays in sync with the video.
+//! Every source delivers 48 kHz, 32-bit float samples in 2, 6 or 8 channels (the OS converts the sample rate; the
+//! channel count is the device's own, see [`layout`]), each chunk dated on the master clock (the OS monotonic clock,
+//! nanoseconds, same as video). The [`Mixer`] places the chunks of one track on a continuous timeline, fills gaps with
+//! silence and corrects clock drift, so the encoder gets gapless audio that stays in sync with the video.
 
 mod fake;
 mod layout;
@@ -19,13 +18,10 @@ pub use fake::FakeAudioSource;
 pub use layout::{convert as convert_layout, track_channels};
 pub use mixer::{Block, Mixer};
 pub use playback::{Speakers, Wake};
-pub use routing::{
-    CAPTURE_VOLUME, MIC_VOLUME, TrackMember, TrackPlan, assign_channels, plan_tracks,
-};
+pub use routing::{CAPTURE_VOLUME, MIC_VOLUME, TrackMember, TrackPlan, assign_channels, plan_tracks};
 pub use spec::{SourceKind, SourceSpec, parse_sources};
 pub use wasapi::{
-    AppInfo, DeviceInfo, WasapiSource, list_applications, list_microphones, list_outputs,
-    source_channels,
+    AppInfo, DeviceInfo, WasapiSource, list_applications, list_microphones, list_outputs, source_channels,
 };
 
 /// Samples per second, per channel.
@@ -46,11 +42,7 @@ pub struct AudioChunk {
 
 impl AudioChunk {
     pub fn stereo(time_ns: i64, samples: Vec<f32>) -> Self {
-        Self {
-            time_ns,
-            channels: CHANNELS,
-            samples,
-        }
+        Self { time_ns, channels: CHANNELS, samples }
     }
 
     pub fn frames(&self) -> usize {

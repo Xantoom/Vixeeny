@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! AVIF through the FFmpeg Vixeeny ships: libaom encodes (all-intra, tuned for still pictures, as
-//! libavif sets it; SVT-AV1 when this FFmpeg has no libaom), the `avif` muxer writes the file,
-//! dav1d decodes. The colours are described by the file's `nclx` box: sRGB, BT.601 matrix, full
-//! range.
+//! AVIF through the FFmpeg Vixeeny ships: libaom encodes (all-intra, tuned for still pictures, as libavif sets it;
+//! SVT-AV1 when this FFmpeg has no libaom), the `avif` muxer writes the file, dav1d decodes. The colours are described
+//! by the file's `nclx` box: sRGB, BT.601 matrix, full range.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -69,11 +68,7 @@ pub(crate) fn encode(image: &Bgra<'_>, settings: &AvifSettings) -> Result<Vec<u8
     let mut source = frame::Video::new(Pixel::BGRA, image.width, image.height);
     let stride = source.stride(0);
     let row = image.width as usize * 4;
-    let rows = source
-        .data_mut(0)
-        .chunks_mut(stride)
-        .take(image.height as usize)
-        .enumerate();
+    let rows = source.data_mut(0).chunks_mut(stride).take(image.height as usize).enumerate();
     for (y, out) in rows {
         out[..row].copy_from_slice(&image.data[y * image.stride..y * image.stride + row]);
     }
@@ -83,16 +78,12 @@ pub(crate) fn encode(image: &Bgra<'_>, settings: &AvifSettings) -> Result<Vec<u8
     yuv.set_color_space(Space::BT470BG);
     yuv.set_color_range(Range::JPEG);
     scale(&source, &mut yuv)?;
-    let colours = (
-        Space::BT470BG,
-        Primaries::BT709,
-        TransferCharacteristic::IEC61966_2_1,
-    );
+    let colours = (Space::BT470BG, Primaries::BT709, TransferCharacteristic::IEC61966_2_1);
     write(yuv, colours, settings)
 }
 
-/// 10-bit 4:2:0, BT.2020 / PQ, full range. The conversion to YCbCr is done here rather than by
-/// swscale, whose matrix choice follows the frame tags: BT.2020 non-constant luminance.
+/// 10-bit 4:2:0, BT.2020 / PQ, full range. The conversion to YCbCr is done here rather than by swscale, whose matrix
+/// choice follows the frame tags: BT.2020 non-constant luminance.
 pub(crate) fn encode_hdr(image: &Hdr<'_>, settings: &AvifSettings) -> Result<Vec<u8>, ImageError> {
     ffmpeg_next::init().map_err(err("init"))?;
     let (w, h) = (image.width as usize, image.height as usize);
@@ -105,12 +96,7 @@ pub(crate) fn encode_hdr(image: &Hdr<'_>, settings: &AvifSettings) -> Result<Vec
     let luma = yuv.data_mut(0);
     for (y, row) in pq.chunks_exact(w * 3).enumerate() {
         let out = &mut luma[y * y_stride..y * y_stride + w * 2];
-        let pixels = out
-            .as_chunks_mut::<2>()
-            .0
-            .iter_mut()
-            .zip(row.as_chunks::<3>().0)
-            .enumerate();
+        let pixels = out.as_chunks_mut::<2>().0.iter_mut().zip(row.as_chunks::<3>().0).enumerate();
         for (x, (o, px)) in pixels {
             let [r, g, b] = px.map(|c| f32::from(c) / 65535.0);
             let l = 0.2627 * r + 0.6780 * g + 0.0593 * b;
@@ -136,15 +122,8 @@ pub(crate) fn encode_hdr(image: &Hdr<'_>, settings: &AvifSettings) -> Result<Vec
     }
     yuv.set_color_space(Space::BT2020NCL);
     yuv.set_color_range(Range::JPEG);
-    let colours = (
-        Space::BT2020NCL,
-        Primaries::BT2020,
-        TransferCharacteristic::SMPTE2084,
-    );
-    let settings = AvifSettings {
-        depth: 10,
-        ..*settings
-    };
+    let colours = (Space::BT2020NCL, Primaries::BT2020, TransferCharacteristic::SMPTE2084);
+    let settings = AvifSettings { depth: 10, ..*settings };
     let avif = write(yuv, colours, &settings)?;
     // Without them the file is still a correct HDR picture, tone mapped from 10 000 nits.
     Ok(with_light(&avif, &image.light()).unwrap_or(avif))
@@ -165,10 +144,7 @@ fn write(
     yuv.set_pts(Some(0));
     let scratch = Scratch::new();
     let mut octx = format::output_as(scratch.path(), "avif").map_err(err("muxer"))?;
-    let mut ctx = codec::Context::new_with_codec(codec)
-        .encoder()
-        .video()
-        .map_err(err("encoder"))?;
+    let mut ctx = codec::Context::new_with_codec(codec).encoder().video().map_err(err("encoder"))?;
     ctx.set_width(yuv.width());
     ctx.set_height(yuv.height());
     ctx.set_format(yuv.format());
@@ -185,28 +161,20 @@ fn write(
     let quantizer = (((100 - quality) * 63 + 50) / 100).max(1);
     let mut options = ffmpeg_next::Dictionary::new();
     options.set("crf", &quantizer.to_string());
-    // Every core: FFmpeg's encoders take one unless told (libaom three times faster at 4K, the
-    // same file).
+    // Every core: FFmpeg's encoders take one unless told (libaom three times faster at 4K, the same file).
     options.set("threads", "0");
     match av1 {
-        // All-intra, the tune for still pictures (libaom 3.12 and later). Its speeds are slower
-        // than SVT-AV1's: two steps up (2 to 8, FFmpeg's last) keep a 4K capture near a third of
-        // a second at the fastest.
+        // All-intra, the tune for still pictures (libaom 3.12 and later). Its speeds are slower than SVT-AV1's: two
+        // steps up (2 to 8, FFmpeg's last) keep a 4K capture near a third of a second at the fastest.
         Av1::Aom => {
             options.set("usage", "allintra");
             options.set("still-picture", "1");
-            options.set(
-                "cpu-used",
-                &(settings.speed.min(AVIF_MAX_SPEED) + 2).to_string(),
-            );
+            options.set("cpu-used", &(settings.speed.min(AVIF_MAX_SPEED) + 2).to_string());
             options.set("aom-params", "tune=iq");
         }
         // Still-picture mode and the tune for still pictures (IQ).
         Av1::Svt => {
-            options.set(
-                "preset",
-                &(settings.speed.min(AVIF_MAX_SPEED) + 4).to_string(),
-            );
+            options.set("preset", &(settings.speed.min(AVIF_MAX_SPEED) + 4).to_string());
             options.set("svtav1-params", "avif=1:tune=3");
         }
     }
@@ -236,8 +204,8 @@ struct Bmff {
     end: usize,
 }
 
-/// The boxes laid one after another in `data[range]`; `None` if they do not fill it exactly
-/// (or use the 64-bit and to-the-end sizes, which FFmpeg's AVIF never does).
+/// The boxes laid one after another in `data[range]`; `None` if they do not fill it exactly (or use the 64-bit and
+/// to-the-end sizes, which FFmpeg's AVIF never does).
 fn boxes(data: &[u8], range: std::ops::Range<usize>) -> Option<Vec<Bmff>> {
     let mut out = Vec::new();
     let mut at = range.start;
@@ -247,12 +215,7 @@ fn boxes(data: &[u8], range: std::ops::Range<usize>) -> Option<Vec<Bmff>> {
         if size < 8 || at + size > range.end {
             return None;
         }
-        out.push(Bmff {
-            kind,
-            start: at,
-            body: at + 8,
-            end: at + size,
-        });
+        out.push(Bmff { kind, start: at, body: at + 8, end: at + size });
         at += size;
     }
     Some(out)
@@ -266,9 +229,9 @@ fn u16_at(data: &[u8], at: usize) -> Option<u16> {
     Some(u16::from_be_bytes(data.get(at..at + 2)?.try_into().ok()?))
 }
 
-/// The AVIF FFmpeg wrote with `clli` and `mdcv` properties on its picture (its muxer writes them
-/// for MP4 tracks only), so viewers tone map from the picture's light and screen rather than
-/// 10 000 nits; `None` when the file is not laid out as that muxer lays it.
+/// The AVIF FFmpeg wrote with `clli` and `mdcv` properties on its picture (its muxer writes them for MP4 tracks only),
+/// so viewers tone map from the picture's light and screen rather than 10 000 nits; `None` when the file is not laid
+/// out as that muxer lays it.
 fn with_light(avif: &[u8], light: &Light) -> Option<Vec<u8>> {
     let top = boxes(avif, 0..avif.len())?;
     let meta = find(&top, b"meta")?;
@@ -324,20 +287,10 @@ fn with_light(avif: &[u8], light: &Light) -> Option<Vec<u8>> {
     }
     let associations = [first as u8, first as u8 + 1];
 
-    // Where the bytes go, in the order of the file; a byte of the original moves by all that is
-    // put at or before it.
-    let mut inserts = [
-        (ipco.end, properties.as_slice()),
-        (associated, associations.as_slice()),
-    ];
+    // Where the bytes go, in the order of the file; a byte of the original moves by all that is put at or before it.
+    let mut inserts = [(ipco.end, properties.as_slice()), (associated, associations.as_slice())];
     inserts.sort_by_key(|i| i.0);
-    let moved = |p: usize| {
-        p + inserts
-            .iter()
-            .filter(|i| i.0 <= p)
-            .map(|i| i.1.len())
-            .sum::<usize>()
-    };
+    let moved = |p: usize| p + inserts.iter().filter(|i| i.0 <= p).map(|i| i.1.len()).sum::<usize>();
     let mut out = Vec::with_capacity(avif.len() + 46);
     let mut from = 0;
     for (at, bytes) in inserts {
@@ -372,8 +325,7 @@ fn with_light(avif: &[u8], light: &Light) -> Option<Vec<u8>> {
         for _ in 0..extents {
             let offset = u32::from_be_bytes(avif.get(at..at + 4)?.try_into().ok()?) as usize;
             let field = moved(at);
-            out[field..field + 4]
-                .copy_from_slice(&u32::try_from(moved(offset)).ok()?.to_be_bytes());
+            out[field..field + 4].copy_from_slice(&u32::try_from(moved(offset)).ok()?.to_be_bytes());
             at += 8;
         }
     }
@@ -392,20 +344,12 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<Decoded, ImageError> {
     let scratch = Scratch::new();
     std::fs::write(scratch.path(), bytes).map_err(|e| ImageError::Avif(e.to_string()))?;
     let mut input = format::input(scratch.path()).map_err(err("open"))?;
-    let stream = input
-        .streams()
-        .best(media::Type::Video)
-        .ok_or_else(|| ImageError::Avif("no picture".into()))?;
+    let stream = input.streams().best(media::Type::Video).ok_or_else(|| ImageError::Avif("no picture".into()))?;
     let index = stream.index();
     let ctx = codec::Context::from_parameters(stream.parameters()).map_err(err("decoder"))?;
     // dav1d, never the AV1 decoder of FFmpeg itself, which needs the graphics card.
-    let dav1d = decoder::find_by_name("libdav1d")
-        .ok_or_else(|| ImageError::Avif("no dav1d in this FFmpeg".into()))?;
-    let mut decoder = ctx
-        .decoder()
-        .open_as(dav1d)
-        .and_then(|o| o.video())
-        .map_err(err("decoder"))?;
+    let dav1d = decoder::find_by_name("libdav1d").ok_or_else(|| ImageError::Avif("no dav1d in this FFmpeg".into()))?;
+    let mut decoder = ctx.decoder().open_as(dav1d).and_then(|o| o.video()).map_err(err("decoder"))?;
     let mut picture = frame::Video::empty();
     let mut got = false;
     for (s, packet) in input.packets() {
@@ -434,11 +378,7 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<Decoded, ImageError> {
     for line in rgba.data(0).chunks(stride).take(height as usize) {
         out.extend_from_slice(&line[..row]);
     }
-    Ok(Decoded {
-        width,
-        height,
-        rgba: out,
-    })
+    Ok(Decoded { width, height, rgba: out })
 }
 
 /// An HDR (PQ) picture, tone-mapped to SDR.
@@ -464,18 +404,14 @@ fn decode_hdr(picture: &frame::Video) -> Result<Decoded, ImageError> {
     for px in rgba.as_chunks_mut::<4>().0 {
         px.swap(0, 2);
     }
-    Ok(Decoded {
-        width,
-        height,
-        rgba,
-    })
+    Ok(Decoded { width, height, rgba })
 }
 
-/// `src` into `dst` (allocated), with the matrix and range each frame declares. Only those
-/// change: `dst` takes the primaries and transfer of `src`, or swscale would convert them too.
+/// `src` into `dst` (allocated), with the matrix and range each frame declares. Only those change: `dst` takes the
+/// primaries and transfer of `src`, or swscale would convert them too.
 pub(crate) fn scale(src: &frame::Video, dst: &mut frame::Video) -> Result<(), ImageError> {
-    // SAFETY: a fresh context, freed below on every path; both frames are live and allocated,
-    // and swscale only reads `src`.
+    // SAFETY: a fresh context, freed below on every path; both frames are live and allocated, and swscale only reads
+    // `src`.
     unsafe {
         let (from, to) = (src.as_ptr(), dst.as_mut_ptr());
         (*to).color_primaries = (*from).color_primaries;
@@ -502,12 +438,6 @@ pub(crate) fn scale(src: &frame::Video, dst: &mut frame::Video) -> Result<(), Im
 #[cfg(test)]
 pub(crate) fn decode_rgb(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), ImageError> {
     let d = decode(bytes)?;
-    let rgb = d
-        .rgba
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .flat_map(|p| [p[0], p[1], p[2]])
-        .collect();
+    let rgb = d.rgba.as_chunks::<4>().0.iter().flat_map(|p| [p[0], p[1], p[2]]).collect();
     Ok((d.width, d.height, rgb))
 }

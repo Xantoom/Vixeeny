@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! JPEG through jpegli (libjpeg-compatible C API, `jpegli_*` functions). Its libjpeg-style
-//! structures come from the generated bindings; the few functions used are declared here
-//! because the C++ header cannot be fed to bindgen.
+//! JPEG through jpegli (libjpeg-compatible C API, `jpegli_*` functions). Its libjpeg-style structures come from the
+//! generated bindings; the few functions used are declared here because the C++ header cannot be fed to bindgen.
 
 use std::ffi::{c_int, c_uint, c_ulong, c_void};
 use std::ptr;
 
 use crate::native::{
-    J_COLOR_SPACE_JCS_EXT_BGRA as JCS_EXT_BGRA, JPEG_LIB_VERSION, JSAMPARRAY, JSAMPROW,
-    jpeg_compress_struct, jpeg_error_mgr,
+    J_COLOR_SPACE_JCS_EXT_BGRA as JCS_EXT_BGRA, JPEG_LIB_VERSION, JSAMPARRAY, JSAMPROW, jpeg_compress_struct,
+    jpeg_error_mgr,
 };
 use crate::{Bgra, Chroma, ImageError, JpegSettings, icc};
 
@@ -21,19 +20,15 @@ unsafe extern "C" {
     fn jpegli_set_progressive_level(cinfo: *mut jpeg_compress_struct, level: c_int);
     fn jpegli_start_compress(cinfo: *mut jpeg_compress_struct, write_all_tables: c_int);
     fn jpegli_write_icc_profile(cinfo: *mut jpeg_compress_struct, data: *const u8, len: c_uint);
-    fn jpegli_write_scanlines(
-        cinfo: *mut jpeg_compress_struct,
-        rows: JSAMPARRAY,
-        n: c_uint,
-    ) -> c_uint;
+    fn jpegli_write_scanlines(cinfo: *mut jpeg_compress_struct, rows: JSAMPARRAY, n: c_uint) -> c_uint;
     fn jpegli_finish_compress(cinfo: *mut jpeg_compress_struct);
     fn jpegli_destroy_compress(cinfo: *mut jpeg_compress_struct);
     fn free(ptr: *mut c_void);
 }
 
-/// libjpeg reports fatal errors through this callback and expects it not to return. Unwinding
-/// through C++ frames is not an option, so a failure ends the process; inputs are validated
-/// beforehand (size, channels), which keeps this a last resort.
+/// libjpeg reports fatal errors through this callback and expects it not to return. Unwinding through C++ frames is not
+/// an option, so a failure ends the process; inputs are validated beforehand (size, channels), which keeps this a last
+/// resort.
 unsafe extern "C" fn fatal(_: *mut crate::native::jpeg_common_struct) {
     eprintln!("vixeeny: fatal jpegli error");
     std::process::abort();
@@ -41,27 +36,21 @@ unsafe extern "C" fn fatal(_: *mut crate::native::jpeg_common_struct) {
 
 pub(crate) fn encode(image: &Bgra<'_>, settings: &JpegSettings) -> Result<Vec<u8>, ImageError> {
     if image.width > 65_535 || image.height > 65_535 {
-        return Err(ImageError::Jpeg(
-            "JPEG is limited to 65535 pixels per side".into(),
-        ));
+        return Err(ImageError::Jpeg("JPEG is limited to 65535 pixels per side".into()));
     }
     let profile = icc::srgb()?;
     let mut rows: Vec<JSAMPROW> = image.rows().map(|r| r.as_ptr().cast_mut()).collect();
 
-    // SAFETY: `cinfo` and `err` live for the whole block; the libjpeg call sequence is the
-    // documented one (create, destination, parameters, start, scanlines, finish, destroy).
-    // `rows` points into `image`, which outlives the compression; libjpeg only reads them.
+    // SAFETY: `cinfo` and `err` live for the whole block; the libjpeg call sequence is the documented one (create,
+    // destination, parameters, start, scanlines, finish, destroy). `rows` points into `image`, which outlives the
+    // compression; libjpeg only reads them.
     unsafe {
         let mut err = std::mem::MaybeUninit::<jpeg_error_mgr>::zeroed();
         let mut cinfo = std::mem::MaybeUninit::<jpeg_compress_struct>::zeroed();
         let cinfo_ptr = cinfo.as_mut_ptr();
         (*cinfo_ptr).err = jpegli_std_error(err.as_mut_ptr());
         (*err.as_mut_ptr()).error_exit = Some(fatal);
-        jpegli_CreateCompress(
-            cinfo_ptr,
-            JPEG_LIB_VERSION as c_int,
-            size_of::<jpeg_compress_struct>(),
-        );
+        jpegli_CreateCompress(cinfo_ptr, JPEG_LIB_VERSION as c_int, size_of::<jpeg_compress_struct>());
 
         let mut buffer: *mut u8 = ptr::null_mut();
         let mut size: c_ulong = 0;
@@ -74,30 +63,21 @@ pub(crate) fn encode(image: &Bgra<'_>, settings: &JpegSettings) -> Result<Vec<u8
         jpegli_set_defaults(cinfo_ptr);
         jpegli_set_quality(cinfo_ptr, c_int::from(settings.quality.clamp(1, 100)), 1);
         // Luma sampling factors decide the chroma subsampling: 2×2 is 4:2:0, 1×1 is 4:4:4.
-        let luma_factor = if settings.chroma == Chroma::Yuv420 {
-            2
-        } else {
-            1
-        };
+        let luma_factor = if settings.chroma == Chroma::Yuv420 { 2 } else { 1 };
         let comp = (*cinfo_ptr).comp_info;
         (*comp).h_samp_factor = luma_factor;
         (*comp).v_samp_factor = luma_factor;
         if settings.progressive {
             jpegli_set_progressive_level(cinfo_ptr, 2);
         } else {
-            // Huffman tables made for the image rather than the standard ones: 4 % smaller for
-            // a tenth more time.
+            // Huffman tables made for the image rather than the standard ones: 4 % smaller for a tenth more time.
             (*cinfo_ptr).optimize_coding = 1;
         }
         jpegli_start_compress(cinfo_ptr, 1);
         jpegli_write_icc_profile(cinfo_ptr, profile.as_ptr(), profile.len() as c_uint);
         let mut done = 0usize;
         while done < rows.len() {
-            let n = jpegli_write_scanlines(
-                cinfo_ptr,
-                rows.as_mut_ptr().add(done),
-                (rows.len() - done) as c_uint,
-            );
+            let n = jpegli_write_scanlines(cinfo_ptr, rows.as_mut_ptr().add(done), (rows.len() - done) as c_uint);
             if n == 0 {
                 jpegli_destroy_compress(cinfo_ptr);
                 free(buffer.cast());

@@ -24,29 +24,14 @@ impl CpuFrame {
         for px in data.as_chunks_mut::<BYTES_PER_PIXEL>().0 {
             px[3] = 255;
         }
-        Self {
-            width,
-            height,
-            stride,
-            data,
-        }
+        Self { width, height, stride, data }
     }
 
-    pub fn from_raw(
-        width: u32,
-        height: u32,
-        stride: usize,
-        data: Vec<u8>,
-    ) -> Result<Self, CaptureError> {
+    pub fn from_raw(width: u32, height: u32, stride: usize, data: Vec<u8>) -> Result<Self, CaptureError> {
         if stride < width as usize * BYTES_PER_PIXEL || data.len() < stride * height as usize {
             return Err(CaptureError::Os("inconsistent frame dimensions".into()));
         }
-        Ok(Self {
-            width,
-            height,
-            stride,
-            data,
-        })
+        Ok(Self { width, height, stride, data })
     }
 
     pub fn row(&self, y: u32) -> &[u8] {
@@ -56,12 +41,7 @@ impl CpuFrame {
 
     pub fn pixel(&self, x: u32, y: u32) -> [u8; 4] {
         let i = y as usize * self.stride + x as usize * BYTES_PER_PIXEL;
-        [
-            self.data[i],
-            self.data[i + 1],
-            self.data[i + 2],
-            self.data[i + 3],
-        ]
+        [self.data[i], self.data[i + 1], self.data[i + 2], self.data[i + 3]]
     }
 
     /// Copies `rect` (frame coordinates). Errors when it is empty or leaves the frame.
@@ -84,8 +64,7 @@ impl CpuFrame {
     /// Draws `src` with its top-left corner at (`x`, `y`); parts outside `self` are clipped.
     pub fn blit(&mut self, src: &Self, x: i32, y: i32) {
         let dest = PhysicalRect::new(x, y, src.width, src.height);
-        let Some(clip) = PhysicalRect::new(0, 0, self.width, self.height).intersection(&dest)
-        else {
+        let Some(clip) = PhysicalRect::new(0, 0, self.width, self.height).intersection(&dest) else {
             return;
         };
         let row_bytes = clip.width as usize * BYTES_PER_PIXEL;

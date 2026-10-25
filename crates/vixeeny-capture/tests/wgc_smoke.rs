@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Real capture on Windows. CI runners may have no usable display, so an unavailable backend
-//! is reported and skipped; when it works, the frame must match the monitor's physical size.
+//! Real capture on Windows. CI runners may have no usable display, so an unavailable backend is reported and skipped;
+//! when it works, the frame must match the monitor's physical size.
 
 use std::time::Instant;
 
@@ -47,10 +47,7 @@ fn streams_a_window_at_its_size() {
 
     vixeeny_platform::ensure_dpi_aware();
     let windows = vixeeny_platform::top_level_windows().unwrap_or_default();
-    let Some(window) = windows
-        .iter()
-        .find(|w| w.rect.width >= 200 && w.rect.height >= 200)
-    else {
+    let Some(window) = windows.iter().find(|w| w.rect.width >= 200 && w.rect.height >= 200) else {
         vixeeny_common::skip_test("no window");
         return;
     };
@@ -64,12 +61,9 @@ fn streams_a_window_at_its_size() {
     match stream.recv(Duration::from_secs(2)) {
         Ok(Some(captured)) => {
             let (w, h) = (captured.frame.width, captured.frame.height);
-            eprintln!(
-                "window {:?}: {w}x{h} (frame {:?})",
-                window.title, window.rect
-            );
-            // The capture holds the window's frame, which may differ from its visible rectangle
-            // by its invisible borders.
+            eprintln!("window {:?}: {w}x{h} (frame {:?})", window.title, window.rect);
+            // The capture holds the window's frame, which may differ from its visible rectangle by its invisible
+            // borders.
             assert!(w.abs_diff(window.rect.width) <= 32 && h.abs_diff(window.rect.height) <= 32);
         }
         Ok(None) => eprintln!("no frame within 2 s (nothing changed on screen)"),
@@ -90,9 +84,7 @@ fn hdr_screens_are_captured_as_scrgb() {
         }
     };
     let mut capturer = Capturer::new(backend, monitors.clone());
-    let all = capturer
-        .grab_hdr(&CaptureTarget::AllMonitors, false)
-        .unwrap();
+    let all = capturer.grab_hdr(&CaptureTarget::AllMonitors, false).unwrap();
     let Some(all) = all else {
         assert!(monitors.iter().all(|m| m.hdr.is_none()));
         eprintln!("no HDR screen");
@@ -101,37 +93,23 @@ fn hdr_screens_are_captured_as_scrgb() {
     eprintln!("HDR desktop {:?}", all.info);
     assert!(all.frame.rgba.iter().all(|v| v.is_finite()));
     for m in monitors.iter().filter(|m| m.hdr.is_some()) {
-        let one = capturer
-            .grab_hdr(&CaptureTarget::Monitor(m.id), false)
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            (one.frame.width, one.frame.height),
-            (m.rect.width, m.rect.height)
-        );
+        let one = capturer.grab_hdr(&CaptureTarget::Monitor(m.id), false).unwrap().unwrap();
+        assert_eq!((one.frame.width, one.frame.height), (m.rect.width, m.rect.height));
     }
-    let on_hdr = vixeeny_platform::top_level_windows()
-        .unwrap_or_default()
-        .into_iter()
-        .find(|w| {
-            w.rect.width >= 200
-                && vixeeny_platform::monitor_at(&monitors, w.rect.x + 100, w.rect.y + 100)
-                    .is_some_and(|m| m.hdr.is_some())
-        });
+    let on_hdr = vixeeny_platform::top_level_windows().unwrap_or_default().into_iter().find(|w| {
+        w.rect.width >= 200
+            && vixeeny_platform::monitor_at(&monitors, w.rect.x + 100, w.rect.y + 100).is_some_and(|m| m.hdr.is_some())
+    });
     if let Some(window) = on_hdr {
         match capturer.grab_hdr(&CaptureTarget::Window(window.id), false) {
-            Ok(Some(c)) => eprintln!(
-                "HDR window {:?}: {}x{}",
-                window.title, c.frame.width, c.frame.height
-            ),
+            Ok(Some(c)) => eprintln!("HDR window {:?}: {}x{}", window.title, c.frame.width, c.frame.height),
             Ok(None) => eprintln!("window {:?} is mostly on an SDR screen", window.title),
             Err(e) => eprintln!("window capture failed (tolerated): {e}"),
         }
     }
 }
 
-/// A recording's gate sees every frame before it is read: the stream hands over those it
-/// wants, and only those.
+/// A recording's gate sees every frame before it is read: the stream hands over those it wants, and only those.
 #[test]
 fn a_gated_stream_hands_over_only_the_wanted_frames() {
     use std::sync::Arc;
@@ -156,25 +134,13 @@ fn a_gated_stream_hands_over_only_the_wanted_frames() {
     }
 
     vixeeny_platform::ensure_dpi_aware();
-    let Some(monitor) = vixeeny_platform::monitors()
-        .ok()
-        .and_then(|m| m.into_iter().next())
-    else {
+    let Some(monitor) = vixeeny_platform::monitors().ok().and_then(|m| m.into_iter().next()) else {
         vixeeny_common::skip_test("no monitor");
         return;
     };
     let gate = Arc::new(First::default());
-    let pacing = Pacing {
-        fps: (60, 1),
-        gate: Arc::clone(&gate) as Arc<dyn Gate>,
-    };
-    let stream = match VideoStream::start_with(
-        &StreamTarget::Monitor(monitor),
-        false,
-        false,
-        None,
-        Some(pacing),
-    ) {
+    let pacing = Pacing { fps: (60, 1), gate: Arc::clone(&gate) as Arc<dyn Gate> };
+    let stream = match VideoStream::start_with(&StreamTarget::Monitor(monitor), false, false, None, Some(pacing)) {
         Ok(s) => s,
         Err(e) => {
             vixeeny_common::skip_test(&e);
@@ -194,13 +160,7 @@ fn a_gated_stream_hands_over_only_the_wanted_frames() {
         gate.asked.load(Ordering::Relaxed),
         gate.taken.load(Ordering::Relaxed)
     );
-    assert!(
-        gate.asked.load(Ordering::Relaxed) >= 1,
-        "the first frame is asked about"
-    );
+    assert!(gate.asked.load(Ordering::Relaxed) >= 1, "the first frame is asked about");
     assert_eq!(gate.taken.load(Ordering::Relaxed), 1);
-    assert_eq!(
-        received, 1,
-        "the frames the gate did not want were not read"
-    );
+    assert_eq!(received, 1, "the frames the gate did not want were not read");
 }

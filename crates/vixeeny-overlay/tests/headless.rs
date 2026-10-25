@@ -23,31 +23,19 @@ fn at(x: i32, y: i32) -> isize {
 
 fn session() -> Session {
     let (w, h) = (1200, 900);
-    let data = (0..w * h)
-        .flat_map(|i| [(i % 251) as u8, 90, 160, 255])
-        .collect();
+    let data = (0..w * h).flat_map(|i| [(i % 251) as u8, 90, 160, 255]).collect();
     Session::new(RgbaImage::new(w, h, data).expect("image"), Vec::new())
 }
 
 type Log = Rc<RefCell<Vec<(Command, Option<Rect>)>>>;
 
 fn overlay(log: &Log) -> Overlay {
-    let screen = Screen {
-        position: (0, 0),
-        size: (1200, 900),
-        area: Rect::new(0.0, 0.0, 1200.0, 900.0),
-    };
+    let screen = Screen { position: (0, 0), size: (1200, 900), area: Rect::new(0.0, 0.0, 1200.0, 900.0) };
     let log = log.clone();
-    Overlay::on_screens(
-        session(),
-        1.0,
-        &[screen],
-        Look::default(),
-        move |command, s| {
-            log.borrow_mut().push((command, s.zone()));
-            true
-        },
-    )
+    Overlay::on_screens(session(), 1.0, &[screen], Look::default(), move |command, s| {
+        log.borrow_mut().push((command, s.zone()));
+        true
+    })
     .expect("overlay")
     .headless()
 }
@@ -81,10 +69,7 @@ fn the_toolbar_buttons_answer_clicks() {
     probe.pointer_down(vixeeny_editor::Point::new(100.0, 100.0), Default::default());
     probe.pointer_move(vixeeny_editor::Point::new(500.0, 400.0), Default::default());
     probe.pointer_up(vixeeny_editor::Point::new(500.0, 400.0), Default::default());
-    let bar = probe
-        .view()
-        .toolbar
-        .expect("a toolbar once the zone is drawn");
+    let bar = probe.view().toolbar.expect("a toolbar once the zone is drawn");
 
     let log: Log = Rc::default();
     let overlay = overlay(&log);
@@ -133,11 +118,7 @@ fn click(hwnd: u64, x: i32, y: i32) {
 fn click_button(hwnd: u64, k: usize) {
     let bar = bar_place();
     let (bx, by) = layout::button_xy(k, bar.side.upright());
-    click(
-        hwnd,
-        (bar.at.x + bx + 15.0) as i32,
-        (bar.at.y + by + 15.0) as i32,
-    );
+    click(hwnd, (bar.at.x + bx + 15.0) as i32, (bar.at.y + by + 15.0) as i32);
 }
 
 /// Where the style panel opens (its top-left corner), for a panel `height` units tall.
@@ -154,11 +135,7 @@ fn panel_at(height: f32) -> (f32, f32) {
 fn text_is_typed_into_the_zone() {
     let log: Log = Rc::default();
     let shared = Rc::new(RefCell::new(None));
-    let screen = Screen {
-        position: (0, 0),
-        size: (1200, 900),
-        area: Rect::new(0.0, 0.0, 1200.0, 900.0),
-    };
+    let screen = Screen { position: (0, 0), size: (1200, 900), area: Rect::new(0.0, 0.0, 1200.0, 900.0) };
     let (l, out) = (log.clone(), shared.clone());
     let overlay = Overlay::on_screens(session(), 1.0, &[screen], Look::default(), move |c, s| {
         l.borrow_mut().push((c, s.zone()));
@@ -195,11 +172,7 @@ fn text_is_typed_into_the_zone() {
 fn the_style_panel_opens_and_picks_a_colour() {
     let log: Log = Rc::default();
     let colour = Rc::new(RefCell::new(None));
-    let screen = Screen {
-        position: (0, 0),
-        size: (1200, 900),
-        area: Rect::new(0.0, 0.0, 1200.0, 900.0),
-    };
+    let screen = Screen { position: (0, 0), size: (1200, 900), area: Rect::new(0.0, 0.0, 1200.0, 900.0) };
     let (l, out) = (log, colour.clone());
     let overlay = Overlay::on_screens(session(), 1.0, &[screen], Look::default(), move |c, s| {
         l.borrow_mut().push((c, s.zone()));
@@ -213,11 +186,7 @@ fn the_style_panel_opens_and_picks_a_colour() {
     click_button(hwnd, STYLE);
     // The third palette swatch of the panel.
     let (px, py) = panel_at(layout::PanelForm::of(None, false).height());
-    click(
-        hwnd,
-        (px + layout::swatch_x(2) + 12.0) as i32,
-        (py + 22.0) as i32,
-    );
+    click(hwnd, (px + layout::swatch_x(2) + 12.0) as i32, (py + 22.0) as i32);
     post(hwnd, WM_CLOSE, 0, 0);
     overlay.run((10, 10)).expect("ran");
     assert_eq!(*colour.borrow(), Some(vixeeny_editor::Color::PALETTE[2]));
@@ -228,11 +197,7 @@ const WM_MOUSEWHEEL: u32 = 0x020a;
 /// Runs the overlay over [`draw_zone`]'s zone with `input`, then reads the session as it closes.
 fn after<T: 'static>(input: impl FnOnce(u64), read: impl Fn(&Session) -> T + 'static) -> Option<T> {
     let out = Rc::new(RefCell::new(None));
-    let screen = Screen {
-        position: (0, 0),
-        size: (1200, 900),
-        area: Rect::new(0.0, 0.0, 1200.0, 900.0),
-    };
+    let screen = Screen { position: (0, 0), size: (1200, 900), area: Rect::new(0.0, 0.0, 1200.0, 900.0) };
     let o = out.clone();
     let overlay = Overlay::on_screens(session(), 1.0, &[screen], Look::default(), move |_, s| {
         *o.borrow_mut() = Some(read(s));
@@ -323,34 +288,24 @@ fn cloaked(hwnd: u64) -> bool {
 
 #[test]
 fn a_command_that_fails_after_stepping_aside_leaves_the_editor_open() {
-    let screen = Screen {
-        position: (0, 0),
-        size: (1200, 900),
-        area: Rect::new(0.0, 0.0, 1200.0, 900.0),
-    };
+    let screen = Screen { position: (0, 0), size: (1200, 900), area: Rect::new(0.0, 0.0, 1200.0, 900.0) };
     let log: Log = Rc::default();
     let seen = log.clone();
     let window = Rc::new(std::cell::Cell::new(0_u64));
     let handle = window.clone();
     let hidden = Rc::new(std::cell::Cell::new(false));
     let hidden_seen = hidden.clone();
-    let overlay = Overlay::on_screens(
-        session(),
-        1.0,
-        &[screen],
-        Look::default(),
-        move |command, s| {
-            seen.borrow_mut().push((command, s.zone()));
-            if command == Command::Copy {
-                // The picture taken, the editor steps aside; then the command fails.
-                vixeeny_overlay::step_aside();
-                return false;
-            }
-            // A headless editor never comes on screen, even after a failed command.
-            hidden_seen.set(cloaked(handle.get()));
-            true
-        },
-    )
+    let overlay = Overlay::on_screens(session(), 1.0, &[screen], Look::default(), move |command, s| {
+        seen.borrow_mut().push((command, s.zone()));
+        if command == Command::Copy {
+            // The picture taken, the editor steps aside; then the command fails.
+            vixeeny_overlay::step_aside();
+            return false;
+        }
+        // A headless editor never comes on screen, even after a failed command.
+        hidden_seen.set(cloaked(handle.get()));
+        true
+    })
     .expect("overlay")
     .headless();
     let hwnd = overlay.handles()[0];

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Pixel rectangles on the virtual desktop. Origin may be negative (monitors left of or above
-//! the primary one).
+//! Pixel rectangles on the virtual desktop. Origin may be negative (monitors left of or above the primary one).
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PhysicalRect {
@@ -12,12 +11,7 @@ pub struct PhysicalRect {
 
 impl PhysicalRect {
     pub const fn new(x: i32, y: i32, width: u32, height: u32) -> Self {
-        Self {
-            x,
-            y,
-            width,
-            height,
-        }
+        Self { x, y, width, height }
     }
 
     /// Exclusive right edge.
@@ -78,12 +72,8 @@ impl PhysicalRect {
 
     /// Squared distance from the point to the rectangle (0 inside).
     pub fn distance2(&self, x: i32, y: i32) -> u64 {
-        let dx = (i64::from(self.x) - i64::from(x))
-            .max(i64::from(x) - (self.right() - 1))
-            .max(0);
-        let dy = (i64::from(self.y) - i64::from(y))
-            .max(i64::from(y) - (self.bottom() - 1))
-            .max(0);
+        let dx = (i64::from(self.x) - i64::from(x)).max(i64::from(x) - (self.right() - 1)).max(0);
+        let dy = (i64::from(self.y) - i64::from(y)).max(i64::from(y) - (self.bottom() - 1)).max(0);
         (dx * dx + dy * dy) as u64
     }
 
@@ -103,9 +93,7 @@ fn clamp_i32(v: i64) -> i32 {
 }
 
 /// Bounding box of all rectangles (the virtual desktop), `None` for an empty list.
-pub fn virtual_bounds<'a>(
-    rects: impl IntoIterator<Item = &'a PhysicalRect>,
-) -> Option<PhysicalRect> {
+pub fn virtual_bounds<'a>(rects: impl IntoIterator<Item = &'a PhysicalRect>) -> Option<PhysicalRect> {
     rects.into_iter().copied().reduce(|a, b| a.union(&b))
 }
 
@@ -122,9 +110,6 @@ mod tests {
         assert_eq!(all, PhysicalRect::new(-1920, 0, 4480, 1440));
         assert!(left.contains(-1, 0));
         assert!(!left.contains(0, 0));
-        assert_eq!(
-            main.relative_to(&all),
-            PhysicalRect::new(1920, 0, 2560, 1440)
-        );
+        assert_eq!(main.relative_to(&all), PhysicalRect::new(1920, 0, 2560, 1440));
     }
 }

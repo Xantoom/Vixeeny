@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Which encoders the video page offers: the ones of the codec registry that exist on this
-//! platform and, for the hardware ones, that the GPU driver reports.
+//! Which encoders the video page offers: the ones of the codec registry that exist on this platform and, for the
+//! hardware ones, that the GPU driver reports.
 
 use std::sync::LazyLock;
 
@@ -19,9 +19,9 @@ pub struct EncoderInfo {
     pub hardware: bool,
     /// The maker of a hardware encoder's chip (`NVIDIA`, `AMD`, `Intel`; empty for software).
     pub vendor: &'static str,
-    /// Lower is better: for the hardware ones the codec (AV1, HEVC, H.264), then the vendor
-    /// (the order `pick_auto` uses); for the software ones the registry's order (x264 first:
-    /// an AV1 encoder on the processor cannot keep up with a game in real time).
+    /// Lower is better: for the hardware ones the codec (AV1, HEVC, H.264), then the vendor (the order `pick_auto`
+    /// uses); for the software ones the registry's order (x264 first: an AV1 encoder on the processor cannot keep up
+    /// with a game in real time).
     rank: (u8, u8),
 }
 
@@ -29,8 +29,8 @@ pub fn registry() -> Option<&'static Registry> {
     REGISTRY.as_ref()
 }
 
-/// The encoders, hardware before software, each kind in the order of the codecs (H.264, HEVC,
-/// VP9, AV1), then of the vendors.
+/// The encoders, hardware before software, each kind in the order of the codecs (H.264, HEVC, VP9, AV1), then of the
+/// vendors.
 pub fn all() -> Vec<EncoderInfo> {
     let Some(registry) = registry() else {
         return Vec::new();
@@ -46,11 +46,7 @@ pub fn all() -> Vec<EncoderInfo> {
         .enumerate()
         .map(|(i, e)| {
             let hardware = e.kind == Kind::Hardware;
-            let rank = if hardware {
-                (e.family.preference(), e.vendor.preference())
-            } else {
-                (0, i as u8)
-            };
+            let rank = if hardware { (e.family.preference(), e.vendor.preference()) } else { (0, i as u8) };
             let info = EncoderInfo {
                 id: e.id.clone(),
                 name: e.display_name.clone(),
@@ -78,34 +74,23 @@ fn usable(env: &Env, info: &EncoderInfo) -> bool {
 
 /// The encoders of one kind that are usable on this computer, best first.
 pub fn choices(env: &Env, hardware: bool) -> Vec<&EncoderInfo> {
-    env.encoders
-        .iter()
-        .filter(|e| e.hardware == hardware && usable(env, e))
-        .collect()
+    env.encoders.iter().filter(|e| e.hardware == hardware && usable(env, e)).collect()
 }
 
-/// The best usable encoder of one kind (the one recommended), among those that take the main
-/// screen's pictures when one does (H.264 stops at 4096 wide on NVIDIA and AMD).
+/// The best usable encoder of one kind (the one recommended), among those that take the main screen's pictures when one
+/// does (H.264 stops at 4096 wide on NVIDIA and AMD).
 pub fn best(env: &Env, hardware: bool) -> Option<&EncoderInfo> {
     let screen = crate::pages::main_screen(env);
-    let fits = |e: &EncoderInfo| {
-        env.probe
-            .as_ref()
-            .is_none_or(|p| !e.hardware || p.fits(&e.id, screen))
-    };
-    choices(env, hardware)
-        .into_iter()
-        .min_by_key(|e| (!fits(e), e.rank))
+    let fits = |e: &EncoderInfo| env.probe.as_ref().is_none_or(|p| !e.hardware || p.fits(&e.id, screen));
+    choices(env, hardware).into_iter().min_by_key(|e| (!fits(e), e.rank))
 }
 
-/// Whether this computer may have a hardware encoder: one was found, or they are still being
-/// looked for.
+/// Whether this computer may have a hardware encoder: one was found, or they are still being looked for.
 pub fn hardware_possible(env: &Env) -> bool {
     (env.detecting && env.probe.is_none()) || !choices(env, true).is_empty()
 }
 
-/// Whether a profile records with a hardware encoder: the software ones are used when this
-/// computer has none.
+/// Whether a profile records with a hardware encoder: the software ones are used when this computer has none.
 pub fn uses_hardware(env: &Env, profile: &Video) -> bool {
     profile.encoder_kind != "software" && hardware_possible(env)
 }
@@ -113,10 +98,7 @@ pub fn uses_hardware(env: &Env, profile: &Video) -> bool {
 /// The encoder a profile uses: its own when it is listed for its kind, else the best one.
 pub fn resolved<'a>(env: &'a Env, profile: &Video) -> Option<&'a EncoderInfo> {
     let hardware = uses_hardware(env, profile);
-    choices(env, hardware)
-        .into_iter()
-        .find(|e| e.id == profile.encoder)
-        .or_else(|| best(env, hardware))
+    choices(env, hardware).into_iter().find(|e| e.id == profile.encoder).or_else(|| best(env, hardware))
 }
 
 pub fn spec(id: &str) -> Option<&'static Encoder> {
@@ -136,18 +118,9 @@ pub fn param_label(key: &str, lang: Lang) -> String {
         "keyint" => ("Key-frame interval", "Intervalle d'images clés"),
         "bframes" => ("B-frames", "Images B"),
         "lookahead" => ("Look-ahead", "Anticipation"),
-        "spatial-aq" => (
-            "Spatial adaptive quantization",
-            "Quantification adaptative spatiale",
-        ),
-        "temporal-aq" => (
-            "Temporal adaptive quantization",
-            "Quantification adaptative temporelle",
-        ),
-        "vbaq" => (
-            "Variance-based adaptive quantization",
-            "Quantification adaptative (VBAQ)",
-        ),
+        "spatial-aq" => ("Spatial adaptive quantization", "Quantification adaptative spatiale"),
+        "temporal-aq" => ("Temporal adaptive quantization", "Quantification adaptative temporelle"),
+        "vbaq" => ("Variance-based adaptive quantization", "Quantification adaptative (VBAQ)"),
         "preanalysis" => ("Pre-analysis", "Pré-analyse"),
         "preencode" => ("Pre-encoding", "Pré-encodage"),
         "motion-boost" => ("High-motion boost", "Renfort des mouvements rapides"),
@@ -193,14 +166,8 @@ pub fn value_label(key: &str, value: &str, lang: Lang) -> String {
         ("tune", "psnr") => ("PSNR", "PSNR"),
         ("tune", "ssim") => ("SSIM", "SSIM"),
         ("multipass", "disabled") => ("Off", "Désactivé"),
-        ("multipass", "qres") => (
-            "Quarter resolution (faster)",
-            "Quart de résolution (plus rapide)",
-        ),
-        ("multipass", "fullres") => (
-            "Full resolution (more precise)",
-            "Pleine résolution (plus précis)",
-        ),
+        ("multipass", "qres") => ("Quarter resolution (faster)", "Quart de résolution (plus rapide)"),
+        ("multipass", "fullres") => ("Full resolution (more precise)", "Pleine résolution (plus précis)"),
         ("quality", "speed") => ("Speed", "Vitesse"),
         ("quality", "balanced") => ("Balanced", "Équilibré"),
         ("quality", "quality") => ("Quality", "Qualité"),

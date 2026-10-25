@@ -1,31 +1,28 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The editor over the frozen screens: one window per monitor, all showing the same session.
-//! Input goes to the [`Session`]; after each input the visuals follow its [`View`] and one
-//! commit hands the changes to the compositor. Nothing is drawn while nothing changes.
+//! The editor over the frozen screens: one window per monitor, all showing the same session. Input goes to the
+//! [`Session`]; after each input the visuals follow its [`View`] and one commit hands the changes to the compositor.
+//! Nothing is drawn while nothing changes.
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use vixeeny_editor::{
-    BarSide, Color, Command, CursorHint, Key, KeyInput, Modifiers, Point, Rect, Session, Tool, View,
-};
+use vixeeny_editor::{BarSide, Color, Command, CursorHint, Key, KeyInput, Modifiers, Point, Rect, Session, Tool, View};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Direct3D11::ID3D11Device;
 use windows::Win32::Graphics::Dwm::DwmFlush;
 use windows::Win32::Graphics::Gdi::ValidateRect;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetKeyState, ReleaseCapture, SetCapture, SetFocus, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent,
-    VK_BACK, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_LEFT, VK_MENU, VK_NEXT,
-    VK_PRIOR, VK_RETURN, VK_RIGHT, VK_SHIFT, VK_SPACE, VK_UP,
+    GetKeyState, ReleaseCapture, SetCapture, SetFocus, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent, VK_BACK,
+    VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_LEFT, VK_MENU, VK_NEXT, VK_PRIOR, VK_RETURN,
+    VK_RIGHT, VK_SHIFT, VK_SPACE, VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    DestroyWindow, DispatchMessageW, GetMessageW, KillTimer, MSG, SW_HIDE, SW_SHOW,
-    SW_SHOWNOACTIVATE, SetCursor, SetForegroundWindow, SetTimer, ShowWindow, TranslateMessage,
-    WM_APP, WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_DPICHANGED, WM_ERASEBKGND, WM_KEYDOWN,
-    WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_PAINT,
-    WM_RBUTTONDOWN, WM_SETCURSOR, WM_SYSKEYDOWN, WM_TIMER,
+    DestroyWindow, DispatchMessageW, GetMessageW, KillTimer, MSG, SW_HIDE, SW_SHOW, SW_SHOWNOACTIVATE, SetCursor,
+    SetForegroundWindow, SetTimer, ShowWindow, TranslateMessage, WM_APP, WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE,
+    WM_DPICHANGED, WM_ERASEBKGND, WM_KEYDOWN, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
+    WM_MOUSEWHEEL, WM_PAINT, WM_RBUTTONDOWN, WM_SETCURSOR, WM_SYSKEYDOWN, WM_TIMER,
 };
 
 use crate::drawing::{Drawing, ScreenPart};
@@ -61,9 +58,9 @@ const WM_LIVE: u32 = WM_APP + 0x20;
 pub trait Screens {
     /// A picture of every screen, the editor's windows hidden (or left out).
     fn grab(&self) -> Option<vixeeny_editor::RgbaImage>;
-    /// Follows `area` (whole-image pixels: x, y, width, height) of the screens, the editor's
-    /// windows left out, calling [`Wake::wake`] each time a new picture of it waits in
-    /// [`Screens::take`]. The pictures stay on `device`, the editor's. `None`: stops.
+    /// Follows `area` (whole-image pixels: x, y, width, height) of the screens, the editor's windows left out, calling
+    /// [`Wake::wake`] each time a new picture of it waits in [`Screens::take`]. The pictures stay on `device`, the
+    /// editor's. `None`: stops.
     fn watch(&self, area: Option<(u32, u32, u32, u32)>, wake: Wake, device: &ID3D11Device);
     /// The newest pictures of the area followed.
     fn take(&self) -> Vec<ScreenPart>;
@@ -93,8 +90,8 @@ const CARET_BLINK_MS: u32 = 530;
 /// The size ring stays this long after the wheel last turned.
 const BRUSH_TIMER: usize = 3;
 const BRUSH_MS: u32 = 700;
-/// Live pictures of the screens are shown at most once per this (60 a second): one that
-/// comes sooner waits for the rest of it.
+/// Live pictures of the screens are shown at most once per this (60 a second): one that comes sooner waits for the rest
+/// of it.
 const LIVE_TIMER: usize = 4;
 /// A tooltip's surface size and its bubble's (see [`paint::tip_size`]).
 type TipSize = ((u32, u32), (f32, f32));
@@ -239,14 +236,9 @@ impl Shared {
         let Some(other) = other.and_then(|o| tips.get(o as usize)) else {
             return Some(text.clone());
         };
-        let right = tips
-            .get(Tip::RightClick as usize)
-            .map_or("", String::as_str);
+        let right = tips.get(Tip::RightClick as usize).map_or("", String::as_str);
         let mut chars = other.chars();
-        let other: String = chars
-            .next()
-            .map(|c| c.to_lowercase().chain(chars).collect())
-            .unwrap_or_default();
+        let other: String = chars.next().map(|c| c.to_lowercase().chain(chars).collect()).unwrap_or_default();
         Some(format!("{text} · {right}{other}"))
     }
 
@@ -293,27 +285,22 @@ impl Shared {
         }
     }
 
-    /// Where the bar itself (not its shadow) is in `pane`, window pixels, and on which side of
-    /// the zone; `None` when the pane does not show it.
+    /// Where the bar itself (not its shadow) is in `pane`, window pixels, and on which side of the zone; `None` when
+    /// the pane does not show it.
     fn bar_in(&self, pane: &Pane, view: &View, scroll: f32) -> Option<(f32, f32, BarSide)> {
         let place = view.toolbar?;
         let u = self.u;
         let (x, y, side) = if self.scrolling.get() {
             // The zone is the whole long image: keep the bar in view, top right.
             let w = layout::BAR_W * u;
-            (
-                (pane.size.0 as f32 - w - 16.0 * u).max(0.0),
-                16.0 * u,
-                BarSide::Inside,
-            )
+            ((pane.size.0 as f32 - w - 16.0 * u).max(0.0), 16.0 * u, BarSide::Inside)
         } else {
             let (x, y) = pane.to_window(place.at.x, place.at.y, scroll);
             (x, y, place.side)
         };
         let (w, h) = layout::bar_size(side.upright());
         let (w, h) = (w * u, h * u);
-        let visible =
-            x < pane.size.0 as f32 && x + w > 0.0 && y < pane.size.1 as f32 && y + h > 0.0;
+        let visible = x < pane.size.0 as f32 && x + w > 0.0 && y < pane.size.1 as f32 && y + h > 0.0;
         visible.then_some((x, y, side))
     }
 
@@ -327,11 +314,7 @@ impl Shared {
         let height = PanelForm::of(view.tool, ui.picker).height();
         let (pw, ph) = (pane.size.0 as f32, pane.size.1 as f32);
         // The room before and after the bar, across it.
-        let room = if upright {
-            (bx / u, (pw - bx) / u - BAR_H)
-        } else {
-            (by / u, (ph - by) / u - BAR_H)
-        };
+        let room = if upright { (bx / u, (pw - bx) / u - BAR_H) } else { (by / u, (ph - by) / u - BAR_H) };
         let before_first = matches!(side, BarSide::Above | BarSide::Left);
         let (dx, dy) = layout::panel_offset(upright, before_first, room, height);
         let x = (bx + dx * u).clamp(0.0, (pw - layout::PANEL_W * u).max(0.0));
@@ -370,8 +353,7 @@ impl Shared {
         Ok(size)
     }
 
-    /// The sizes of the tooltip showing `text` (see [`paint::tip_size`]), measured when the
-    /// text changes.
+    /// The sizes of the tooltip showing `text` (see [`paint::tip_size`]), measured when the text changes.
     fn tip_size(&self, text: &str) -> windows::core::Result<TipSize> {
         let mut cached = self.tip_size.borrow_mut();
         if let Some((was, size)) = cached.as_ref()
@@ -525,12 +507,7 @@ impl Shared {
         match &view.size_label {
             Some((text, at)) if zone.is_some_and(|z| pane.sees(z, 40.0 * u)) => {
                 let size = self.label_size(text)?;
-                pane.label.show(
-                    gfx,
-                    text,
-                    || Ok(size),
-                    |c| paint::size_label(c, t, u, text, size),
-                )?;
+                pane.label.show(gfx, text, || Ok(size), |c| paint::size_label(c, t, u, text, size))?;
                 pane.label.move_to(at.x.round(), at.y.round())?;
             }
             _ => pane.label.hide()?,
@@ -563,12 +540,7 @@ impl Shared {
         // The text field.
         match (view.text_input, Self::field_look(view, ui)) {
             (Some(at), Some(look)) => {
-                pane.field.show(
-                    gfx,
-                    &look,
-                    || paint::field_size(gfx, &look),
-                    |c| paint::field(c, &look),
-                )?;
+                pane.field.show(gfx, &look, || paint::field_size(gfx, &look), |c| paint::field(c, &look))?;
                 pane.field.move_to(at.x.round(), at.y.round())?;
             }
             _ => pane.field.hide()?,
@@ -601,10 +573,7 @@ impl Shared {
         if self.scrolling.get() && image_h > view_h {
             let h = (24.0 * u).max(view_h * view_h / image_h);
             let y = scroll / image_h * view_h;
-            scene::place(
-                &pane.scrollbar,
-                (pane.size.0 as f32 - 6.0 * u, y, 4.0 * u, h),
-            )?;
+            scene::place(&pane.scrollbar, (pane.size.0 as f32 - 6.0 * u, y, 4.0 * u, h))?;
         } else {
             scene::place(&pane.scrollbar, (0.0, 0.0, 0.0, 0.0))?;
         }
@@ -621,30 +590,18 @@ impl Shared {
                     || Ok(paint::bar_surface(u, upright)),
                     |c| paint::toolbar(c, t, u, &look),
                 )?;
-                if pane
-                    .toolbar
-                    .move_to((bx - margin).round(), (by - margin).round())?
-                {
+                if pane.toolbar.move_to((bx - margin).round(), (by - margin).round())? {
                     pane.toolbar.appear(gfx, 6.0 * u, 0.18, t.animations)?;
                 }
                 // Inside the zone, the bar steps aside while an annotation is drawn.
                 let faded = side == BarSide::Inside && view.drawing;
-                pane.toolbar
-                    .fade(gfx, if faded { FADED } else { 1.0 }, t.animations)?;
-                let tip = ui
-                    .tip
-                    .filter(|_| !faded)
-                    .and_then(|k| Some((k, self.tip_text(k, &ui.picks, view.live)?)));
+                pane.toolbar.fade(gfx, if faded { FADED } else { 1.0 }, t.animations)?;
+                let tip = ui.tip.filter(|_| !faded).and_then(|k| Some((k, self.tip_text(k, &ui.picks, view.live)?)));
                 match tip {
                     Some((k, text)) if !text.is_empty() => {
                         let ((w, h), bubble) = self.tip_size(&text)?;
                         let look = TipLook { button: k, text };
-                        pane.tip.show(
-                            gfx,
-                            &look,
-                            || Ok((w, h)),
-                            |c| paint::tip(c, t, u, &look.text, bubble),
-                        )?;
+                        pane.tip.show(gfx, &look, || Ok((w, h)), |c| paint::tip(c, t, u, &look.text, bubble))?;
                         let (x, y) = layout::button_xy(k, upright);
                         let (cx, cy) = (bx + (x + BUTTON / 2.0) * u, by + (y + BUTTON / 2.0) * u);
                         let gap = (BUTTON / 2.0 + 14.0) * u;
@@ -653,18 +610,12 @@ impl Shared {
                         let right = cx + gap;
                         let left = cx - gap - bubble.0;
                         let (left, top) = match side {
-                            BarSide::Right if right + bubble.0 <= pw || left < 0.0 => {
-                                (right, cy - bubble.1 / 2.0)
-                            }
-                            BarSide::Left if left >= 0.0 || right + bubble.0 > pw => {
-                                (left, cy - bubble.1 / 2.0)
-                            }
+                            BarSide::Right if right + bubble.0 <= pw || left < 0.0 => (right, cy - bubble.1 / 2.0),
+                            BarSide::Left if left >= 0.0 || right + bubble.0 > pw => (left, cy - bubble.1 / 2.0),
                             BarSide::Right => (left, cy - bubble.1 / 2.0),
                             BarSide::Left => (right, cy - bubble.1 / 2.0),
                             // Above the bar, unless the screen's top edge is in the way.
-                            BarSide::Above if by >= 48.0 * u => {
-                                (cx - bubble.0 / 2.0, cy - gap - bubble.1)
-                            }
+                            BarSide::Above if by >= 48.0 * u => (cx - bubble.0 / 2.0, cy - gap - bubble.1),
                             _ => (cx - bubble.0 / 2.0, cy + gap),
                         };
                         let left = left.clamp(0.0, (pw - bubble.0).max(0.0));
@@ -682,23 +633,10 @@ impl Shared {
         match self.panel_in(pane, view, ui) {
             Some((px, py)) => {
                 let look = Self::panel_look(view, ui);
-                pane.panel.show(
-                    gfx,
-                    &look,
-                    || Ok(paint::panel_surface(u)),
-                    |c| paint::panel(c, t, u, &look),
-                )?;
+                pane.panel.show(gfx, &look, || Ok(paint::panel_surface(u)), |c| paint::panel(c, t, u, &look))?;
                 let above = py < self.bar_in(pane, view, scroll).map_or(0.0, |b| b.1);
-                if pane
-                    .panel
-                    .move_to((px - margin).round(), (py - margin).round())?
-                {
-                    pane.panel.appear(
-                        gfx,
-                        if above { 4.0 * u } else { -4.0 * u },
-                        0.1,
-                        t.animations,
-                    )?;
+                if pane.panel.move_to((px - margin).round(), (py - margin).round())? {
+                    pane.panel.appear(gfx, if above { 4.0 * u } else { -4.0 * u }, 0.1, t.animations)?;
                 }
             }
             None => pane.panel.hide()?,
@@ -710,13 +648,9 @@ impl Shared {
     fn update_pointer(&self, cursor: CursorHint) {
         let mut ui = self.ui.borrow_mut();
         let shape = match (ui.press, ui.hover) {
-            (Some(Press::Button(_) | Press::Panel(_)), _) | (None, Some(Hover::Button(_))) => {
-                Pointer::Hand
-            }
+            (Some(Press::Button(_) | Press::Panel(_)), _) | (None, Some(Hover::Button(_))) => Pointer::Hand,
             (None, Some(Hover::Panel(hit))) if hit != PanelHit::Background => Pointer::Hand,
-            (Some(Press::Picking(_)), _) | (None, Some(Hover::Bar | Hover::Panel(_))) => {
-                Pointer::Arrow
-            }
+            (Some(Press::Picking(_)), _) | (None, Some(Hover::Bar | Hover::Panel(_))) => Pointer::Arrow,
             _ => Pointer::Zone(cursor),
         };
         if ui.pointer != Some(shape) && ui.pointer_pane.is_some() {
@@ -770,11 +704,7 @@ impl Shared {
             WM_DPICHANGED => return Some(LRESULT(0)),
             WM_SETCURSOR if low_word(lparam.0) == 1 => {
                 // HTCLIENT: the shape follows the editor.
-                let shape = self
-                    .ui
-                    .borrow()
-                    .pointer
-                    .unwrap_or(Pointer::Zone(CursorHint::Crosshair));
+                let shape = self.ui.borrow().pointer.unwrap_or(Pointer::Zone(CursorHint::Crosshair));
                 // SAFETY: plain call with a system cursor.
                 unsafe { SetCursor(Some(window::cursor(shape))) };
                 return Some(LRESULT(1));
@@ -787,8 +717,8 @@ impl Shared {
                 self.run_command(Command::Close);
                 return Some(LRESULT(0));
             }
-            // Another window took the mouse (Alt+Tab, the Start menu…) in the middle of a press:
-            // its release will not come here.
+            // Another window took the mouse (Alt+Tab, the Start menu…) in the middle of a press: its release will not
+            // come here.
             WM_CAPTURECHANGED => {
                 self.lost_mouse();
                 return Some(LRESULT(0));
@@ -874,9 +804,7 @@ impl Shared {
                 let scroll = self.ui.borrow().scroll;
                 let (ix, iy) = pane.to_image(x, y, scroll);
                 let shift = key_down(VK_SHIFT);
-                self.session
-                    .borrow_mut()
-                    .pointer_move(Point::new(ix, iy), Modifiers { shift });
+                self.session.borrow_mut().pointer_move(Point::new(ix, iy), Modifiers { shift });
             }
             None => {
                 let hover = self.hit(pane, x, y);
@@ -904,8 +832,7 @@ impl Shared {
                     session.pointer_move(Point::new(ix, iy), Modifiers { shift });
                     moved = session.hover_state() != before || session.in_gesture();
                 }
-                // A hover that changes nothing on screen costs nothing (the size ring follows
-                // the pointer).
+                // A hover that changes nothing on screen costs nothing (the size ring follows the pointer).
                 if !changed && !moved && !self.ui.borrow().brush {
                     let cursor = self.session.borrow().cursor_hint();
                     self.update_pointer(cursor);
@@ -946,9 +873,7 @@ impl Shared {
                 let (ix, iy) = pane.to_image(x, y, ui.scroll);
                 drop(ui);
                 let shift = key_down(VK_SHIFT);
-                self.session
-                    .borrow_mut()
-                    .pointer_down(Point::new(ix, iy), Modifiers { shift });
+                self.session.borrow_mut().pointer_down(Point::new(ix, iy), Modifiers { shift });
                 self.refresh();
                 return;
             }
@@ -990,10 +915,7 @@ impl Shared {
                 let scroll = self.ui.borrow().scroll;
                 let (ix, iy) = pane.to_image(x, y, scroll);
                 let shift = key_down(VK_SHIFT);
-                let command = self
-                    .session
-                    .borrow_mut()
-                    .pointer_up(Point::new(ix, iy), Modifiers { shift });
+                let command = self.session.borrow_mut().pointer_up(Point::new(ix, iy), Modifiers { shift });
                 if let Some(command) = command
                     && self.run_command(command)
                 {
@@ -1073,11 +995,7 @@ impl Shared {
             PanelHit::OwnColour => {
                 ui.picker = !ui.picker;
                 let c = view.color;
-                ui.hsv = rgb_to_hsv(
-                    f32::from(c.r) / 255.0,
-                    f32::from(c.g) / 255.0,
-                    f32::from(c.b) / 255.0,
-                );
+                ui.hsv = rgb_to_hsv(f32::from(c.r) / 255.0, f32::from(c.g) / 255.0, f32::from(c.b) / 255.0);
             }
             PanelHit::Eyedropper => {
                 session.choose_tool(Some(Tool::Eyedropper));
@@ -1096,9 +1014,7 @@ impl Shared {
         };
         let (lx, ly) = ((x - px) / self.u, (y - py) / self.u);
         if hit == PanelHit::Size {
-            self.session
-                .borrow_mut()
-                .set_width(layout::size_at(lx, view.max_width));
+            self.session.borrow_mut().set_width(layout::size_at(lx, view.max_width));
             return;
         }
         let mut ui = self.ui.borrow_mut();
@@ -1116,15 +1032,11 @@ impl Shared {
         self.session.borrow_mut().set_color(color_of_hsv(h, s, v));
     }
 
-    /// The wheel turned by `delta` (120 a notch) over pane `i`: the tool in hand draws larger
-    /// or smaller, and a ring shows the size for a moment.
+    /// The wheel turned by `delta` (120 a notch) over pane `i`: the tool in hand draws larger or smaller, and a ring
+    /// shows the size for a moment.
     fn wheel(&self, i: usize, delta: f32) {
         let steps = (delta / 120.0).round() as i32;
-        let steps = if steps == 0 {
-            delta.signum() as i32
-        } else {
-            steps
-        };
+        let steps = if steps == 0 { delta.signum() as i32 } else { steps };
         let mut session = self.session.borrow_mut();
         if steps == 0 || session.brush().is_none() {
             return;
@@ -1211,14 +1123,8 @@ impl Shared {
     fn edit_key(&self, vk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY, ctrl: bool) {
         let mut ui = self.ui.borrow_mut();
         let caret = ui.caret;
-        let prev = ui.text[..caret]
-            .chars()
-            .next_back()
-            .map_or(caret, |c| caret - c.len_utf8());
-        let next = ui.text[caret..]
-            .chars()
-            .next()
-            .map_or(caret, |c| caret + c.len_utf8());
+        let prev = ui.text[..caret].chars().next_back().map_or(caret, |c| caret - c.len_utf8());
+        let next = ui.text[caret..].chars().next().map_or(caret, |c| caret + c.len_utf8());
         match vk {
             VK_ESCAPE => {
                 drop(ui);
@@ -1302,10 +1208,7 @@ impl Shared {
                 // SAFETY: plain call on a window of this thread.
                 let _ = unsafe { KillTimer(Some(self.panes[i].hwnd), TIP_TIMER) };
                 let mut ui = self.ui.borrow_mut();
-                if ui.press.is_none()
-                    && ui.tip_pending.is_some()
-                    && ui.hover == ui.tip_pending.map(Hover::Button)
-                {
+                if ui.press.is_none() && ui.tip_pending.is_some() && ui.hover == ui.tip_pending.map(Hover::Button) {
                     ui.tip = ui.tip_pending.take();
                     drop(ui);
                     self.refresh();
@@ -1397,9 +1300,7 @@ impl Shared {
             {
                 tracing::warn!("live screens not shown: {e}");
             }
-            let same = |k: &ScreenPart| {
-                (k.x, k.y, k.width, k.height) == (part.x, part.y, part.width, part.height)
-            };
+            let same = |k: &ScreenPart| (k.x, k.y, k.width, k.height) == (part.x, part.y, part.width, part.height);
             match kept.iter_mut().find(|k| same(k)) {
                 Some(k) => *k = part,
                 None => kept.push(part),
@@ -1427,8 +1328,7 @@ impl Shared {
         self.session.borrow_mut().set_live(live);
     }
 
-    /// Takes a fresh picture of the screens, the windows hidden meanwhile when they are not
-    /// left out of captures.
+    /// Takes a fresh picture of the screens, the windows hidden meanwhile when they are not left out of captures.
     fn thaw(&self) {
         let screens = self.screens.borrow();
         let Some(screens) = screens.as_ref() else {
@@ -1471,10 +1371,7 @@ impl Shared {
         if self.busy.replace(true) {
             return false;
         }
-        let exports = matches!(
-            command,
-            Command::Copy | Command::CopyText | Command::Save | Command::SaveAs
-        );
+        let exports = matches!(command, Command::Copy | Command::CopyText | Command::Save | Command::SaveAs);
         if exports && self.session.borrow().is_live() {
             self.thaw();
         }
@@ -1521,26 +1418,21 @@ impl Shared {
 }
 
 /// Shows in `pane` its part of the screens' picture.
-fn upload_frozen(
-    gfx: &Gfx,
-    pane: &Pane,
-    base: &vixeeny_editor::RgbaImage,
-) -> windows::core::Result<()> {
+fn upload_frozen(gfx: &Gfx, pane: &Pane, base: &vixeeny_editor::RgbaImage) -> windows::core::Result<()> {
     let (ax, ay, aw, ah) = pane.area_px();
     let x0 = (ax.max(0.0) as u32).min(base.width);
     let y0 = (ay.max(0.0) as u32).min(base.height);
     let x1 = ((ax + aw).max(0.0) as u32).min(base.width);
     let y1 = ((ay + ah).max(0.0) as u32).min(base.height);
     if x1 > x0 && y1 > y0 {
-        pane.frozen
-            .set(gfx, base, (x0, y0, x1 - x0, y1 - y0), x0 as f32, y0 as f32)?;
+        pane.frozen.set(gfx, base, (x0, y0, x1 - x0, y1 - y0), x0 as f32, y0 as f32)?;
     }
     Ok(())
 }
 
-/// The editor over the frozen screens: one window per monitor, all showing the same session.
-/// A window per monitor (rather than one over the whole desktop) keeps every window on a single
-/// monitor, so Windows never rescales it when the monitors' DPI differ.
+/// The editor over the frozen screens: one window per monitor, all showing the same session. A window per monitor
+/// (rather than one over the whole desktop) keeps every window on a single monitor, so Windows never rescales it when
+/// the monitors' DPI differ.
 pub struct Overlay {
     shared: Rc<Shared>,
     first_frame: Option<FirstFrame>,
@@ -1549,8 +1441,8 @@ pub struct Overlay {
 }
 
 impl Overlay {
-    /// A window per screen. `on_command` is called when the user asks to copy, save, run OCR or
-    /// close; the host does the work (it has the clipboard and the file system).
+    /// A window per screen. `on_command` is called when the user asks to copy, save, run OCR or close; the host does
+    /// the work (it has the clipboard and the file system).
     pub fn on_screens(
         mut session: Session,
         ui_scale: f32,
@@ -1564,9 +1456,7 @@ impl Overlay {
         let theme = Theme::new(look);
         let handle_side = paint::handle_side(u);
         let handle = gfx.surface(handle_side, handle_side)?;
-        gfx.draw(&handle, handle_side, handle_side, |c| {
-            paint::handle(c, &theme, u)
-        })?;
+        gfx.draw(&handle, handle_side, handle_side, |c| paint::handle(c, &theme, u))?;
         let solids = Solids {
             black: gfx::solid(&gfx, Rgba([0.0, 0.0, 0.0, 1.0]))?,
             accent: gfx::solid(&gfx, theme.accent)?,
@@ -1590,11 +1480,7 @@ impl Overlay {
             u,
             solids,
             session: RefCell::new(session),
-            ui: RefCell::new(Ui {
-                hsv: (0.0, 1.0, 1.0),
-                tracking: vec![false; screens.len()],
-                ..Ui::default()
-            }),
+            ui: RefCell::new(Ui { hsv: (0.0, 1.0, 1.0), tracking: vec![false; screens.len()], ..Ui::default() }),
             panes,
             handler: Box::new(on_command),
             tips: RefCell::default(),
@@ -1607,10 +1493,7 @@ impl Overlay {
             live_shown: Cell::new(None),
             live_deferred: Cell::new(false),
             drawing: RefCell::default(),
-            wake: Wake {
-                hwnd: first_hwnd,
-                pending: Arc::default(),
-            },
+            wake: Wake { hwnd: first_hwnd, pending: Arc::default() },
             scrolling: Cell::new(false),
             busy: Cell::new(false),
             visible: Cell::new(false),
@@ -1620,11 +1503,7 @@ impl Overlay {
         });
         CURRENT.with(|c| *c.borrow_mut() = Some(Rc::downgrade(&shared)));
         shared.refresh();
-        Ok(Self {
-            shared,
-            first_frame: None,
-            headless: false,
-        })
+        Ok(Self { shared, first_frame: None, headless: false })
     }
 
     /// What each toolbar button does, said on hover (in the order of [`layout::BUTTONS`]).
@@ -1632,8 +1511,8 @@ impl Overlay {
         *self.shared.tips.borrow_mut() = tips.to_vec();
     }
 
-    /// Lets the user show the screens live, from `screens`: a fresh picture of them is
-    /// exported, and the blurred or pixelated parts follow them.
+    /// Lets the user show the screens live, from `screens`: a fresh picture of them is exported, and the blurred or
+    /// pixelated parts follow them.
     pub fn set_screens(&self, screens: impl Screens + 'static) {
         *self.shared.screens.borrow_mut() = Some(Box::new(screens));
         self.shared.refresh();
@@ -1662,8 +1541,7 @@ impl Overlay {
         self.shared.panes.iter().map(|p| p.hwnd.0 as u64).collect()
     }
 
-    /// Shows every window and runs until the overlay closes. The window under the cursor gets
-    /// the keyboard.
+    /// Shows every window and runs until the overlay closes. The window under the cursor gets the keyboard.
     pub fn run(mut self, cursor: (i32, i32)) -> Result<(), OverlayError> {
         let shared = self.shared.clone();
         let under_cursor = shared.panes.iter().position(|p| {
@@ -1673,8 +1551,7 @@ impl Overlay {
                 && cursor.1 < p.position.1 + p.size.1 as i32
         });
         shared.ui.borrow_mut().pointer_pane = under_cursor;
-        // SAFETY: plain call; everything built so far reaches the compositor before the windows
-        // appear.
+        // SAFETY: plain call; everything built so far reaches the compositor before the windows appear.
         unsafe { shared.gfx.dcomp.WaitForCommitCompletion()? };
         if !self.headless {
             let front = under_cursor.unwrap_or(0);
@@ -1707,8 +1584,7 @@ impl Overlay {
             // SAFETY: plain property calls with an animation of the same device.
             unsafe {
                 if shared.theme.animations {
-                    p.veil_effect
-                        .SetOpacity(&scene::ease_out(&shared.gfx, 0.0, dim, 0.16)?)?;
+                    p.veil_effect.SetOpacity(&scene::ease_out(&shared.gfx, 0.0, dim, 0.16)?)?;
                 } else {
                     p.veil_effect.SetOpacity2(dim)?;
                 }
@@ -1736,17 +1612,17 @@ impl Overlay {
     }
 }
 
-/// Called by a command handler once it holds what it needs from the session (the exported
-/// picture, the file chosen): the editor's windows leave the screen at once while the command
-/// goes on (encoding, writing, the clipboard), and come back if it fails.
+/// Called by a command handler once it holds what it needs from the session (the exported picture, the file chosen):
+/// the editor's windows leave the screen at once while the command goes on (encoding, writing, the clipboard), and come
+/// back if it fails.
 pub fn step_aside() {
     if let Some(shared) = CURRENT.with(|c| c.borrow().as_ref().and_then(Weak::upgrade)) {
         shared.step_aside();
     }
 }
 
-/// Closes the editor whose window is `hwnd` as Escape would, from any thread (its shortcut
-/// pressed again). Nothing happens while a command runs.
+/// Closes the editor whose window is `hwnd` as Escape would, from any thread (its shortcut pressed again). Nothing
+/// happens while a command runs.
 pub fn close(hwnd: u64) {
     // SAFETY: plain call; a window that is gone makes it fail, which changes nothing.
     let _ = unsafe {

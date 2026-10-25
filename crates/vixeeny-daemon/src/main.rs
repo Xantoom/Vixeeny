@@ -25,10 +25,9 @@ fn main() {
     }
 }
 
-/// An update from a version before 0.20 may have left that version's daemon running (it answers
-/// under another name, see [`Endpoint::older_user`]): it is asked to stop, as an update does, so
-/// that this one gets the shortcuts. A recording it makes is finished first; it is waited for
-/// half a minute at most.
+/// An update from a version before 0.20 may have left that version's daemon running (it answers under another name, see
+/// [`Endpoint::older_user`]): it is asked to stop, as an update does, so that this one gets the shortcuts. A recording
+/// it makes is finished first; it is waited for half a minute at most.
 fn stop_older_daemon() {
     let Some(older) = Endpoint::older_user() else {
         return;
@@ -45,17 +44,14 @@ fn stop_older_daemon() {
     let (ended, end) = std::sync::mpsc::channel();
     if vixeeny_platform::on_process_exit(pid, move || {
         let _ = ended.send(());
-    }) && end
-        .recv_timeout(std::time::Duration::from_secs(30))
-        .is_err()
+    }) && end.recv_timeout(std::time::Duration::from_secs(30)).is_err()
     {
         tracing::warn!("the daemon of an older version is still running");
     }
 }
 
-/// An install in Program Files whose user gave Vixeeny the administrator's rights, started
-/// without them (the Start menu, the start of the session): its task starts it again with them,
-/// and this one ends. `true` when it did.
+/// An install in Program Files whose user gave Vixeeny the administrator's rights, started without them (the Start
+/// menu, the start of the session): its task starts it again with them, and this one ends. `true` when it did.
 fn start_elevated(endpoint: &Endpoint) -> bool {
     use vixeeny_platform::elevation::{self, Rights};
     if elevation::rights() != Rights::Limited {
@@ -107,8 +103,8 @@ fn real_main() -> anyhow::Result<()> {
 
     let config_path = vixeeny_common::paths::config_file();
     let config = match &config_path {
-        // The very first start: starting with Windows is what the installer was told (the
-        // portable version, which has no installer, does not).
+        // The very first start: starting with Windows is what the installer was told (the portable version, which has
+        // no installer, does not).
         Some(path) if !path.exists() => {
             let mut config = Config::default();
             config.general.autostart = vixeeny_daemon::autostart::registered();
@@ -124,10 +120,5 @@ fn real_main() -> anyhow::Result<()> {
         None => Config::default(),
     };
     vixeeny_daemon::supervisor::warm_probe();
-    platform::run(Startup {
-        config,
-        config_path,
-        listener,
-        link: AppLink::default(),
-    })
+    platform::run(Startup { config, config_path, listener, link: AppLink::default() })
 }

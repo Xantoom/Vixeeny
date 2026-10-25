@@ -24,8 +24,8 @@ pub const MIGRATIONS: &[Migration] = &[
     v8_new_defaults,
 ];
 
-/// 0.9 → 1.0: MP4 recordings are fragmented (a recording cut short still plays), and the cursor
-/// is left out of videos unless asked for again.
+/// 0.9 → 1.0: MP4 recordings are fragmented (a recording cut short still plays), and the cursor is left out of videos
+/// unless asked for again.
 fn v1_fragmented_mp4(table: &mut toml::Table) {
     let Some(profiles) = table.get_mut("profiles").and_then(|p| p.as_table_mut()) else {
         return;
@@ -34,10 +34,7 @@ fn v1_fragmented_mp4(table: &mut toml::Table) {
         let Some(profile) = profile.as_table_mut() else {
             continue;
         };
-        if matches!(
-            profile.get("container").and_then(|c| c.as_str()),
-            Some("mp4" | "mp4_hybrid")
-        ) {
+        if matches!(profile.get("container").and_then(|c| c.as_str()), Some("mp4" | "mp4_hybrid")) {
             profile.insert("container".into(), "mp4_fragmented".into());
         }
         profile.insert("show_cursor".into(), false.into());
@@ -50,16 +47,9 @@ fn v2_single_profile(table: &mut toml::Table) {
         Some(toml::Value::Table(profiles)) => profiles,
         _ => toml::Table::new(),
     };
-    let name = table
-        .get("video")
-        .and_then(|v| v.get("profile"))
-        .and_then(|p| p.as_str())
-        .unwrap_or("default")
-        .to_owned();
-    match profiles
-        .remove(&name)
-        .or_else(|| profiles.remove("default"))
-    {
+    let name =
+        table.get("video").and_then(|v| v.get("profile")).and_then(|p| p.as_str()).unwrap_or("default").to_owned();
+    match profiles.remove(&name).or_else(|| profiles.remove("default")) {
         Some(profile) => table.insert("video".into(), profile),
         None => table.remove("video"),
     };
@@ -68,8 +58,8 @@ fn v2_single_profile(table: &mut toml::Table) {
     }
 }
 
-/// 0.9.12: images, videos and replays are named each their own way. The one template becomes
-/// that of the three (the "name after the game" switch is gone: `{app}` always is the game).
+/// 0.9.12: images, videos and replays are named each their own way. The one template becomes that of the three (the
+/// "name after the game" switch is gone: `{app}` always is the game).
 fn v3_naming_per_kind(table: &mut toml::Table) {
     let Some(paths) = table.get_mut("paths").and_then(|p| p.as_table_mut()) else {
         return;
@@ -90,10 +80,7 @@ fn v3_naming_per_kind(table: &mut toml::Table) {
 
 /// 1.0: the widget's "hide when idle" switch becomes the second of three ways to show it.
 fn v4_widget_display(table: &mut toml::Table) {
-    let Some(widget) = table
-        .get_mut("recording_widget")
-        .and_then(|w| w.as_table_mut())
-    else {
+    let Some(widget) = table.get_mut("recording_widget").and_then(|w| w.as_table_mut()) else {
         return;
     };
     if widget.remove("auto_hide").and_then(|v| v.as_bool()) == Some(true) {
@@ -114,36 +101,25 @@ fn v5_two_shortcuts(table: &mut toml::Table) {
 /// The scrolling capture's own shortcut.
 const SCROLLING_SHORTCUT: &str = "Ctrl+PrintScreen";
 
-/// 1.0: the scrolling capture has a shortcut of its own, unless the user has one for it or
-/// gave that one to another action.
+/// 1.0: the scrolling capture has a shortcut of its own, unless the user has one for it or gave that one to another
+/// action.
 fn v6_scrolling_shortcut(table: &mut toml::Table) {
     let Some(hotkeys) = table.get_mut("hotkeys").and_then(|h| h.as_table_mut()) else {
         return;
     };
-    let taken = hotkeys
-        .values()
-        .filter_map(|v| v.as_array())
-        .flatten()
-        .any(|v| {
-            v.as_str().is_some_and(|text| {
-                crate::hotkey::Hotkey::parse(text).ok()
-                    == crate::hotkey::Hotkey::parse(SCROLLING_SHORTCUT).ok()
-            })
-        });
-    let empty = hotkeys
-        .get("capture_scrolling")
-        .and_then(|v| v.as_array())
-        .is_none_or(Vec::is_empty);
+    let taken = hotkeys.values().filter_map(|v| v.as_array()).flatten().any(|v| {
+        v.as_str().is_some_and(|text| {
+            crate::hotkey::Hotkey::parse(text).ok() == crate::hotkey::Hotkey::parse(SCROLLING_SHORTCUT).ok()
+        })
+    });
+    let empty = hotkeys.get("capture_scrolling").and_then(|v| v.as_array()).is_none_or(Vec::is_empty);
     if empty && !taken {
-        hotkeys.insert(
-            "capture_scrolling".into(),
-            toml::Value::Array(vec![SCROLLING_SHORTCUT.into()]),
-        );
+        hotkeys.insert("capture_scrolling".into(), toml::Value::Array(vec![SCROLLING_SHORTCUT.into()]));
     }
 }
 
-/// The shortcuts that were the defaults before 1.0 and the ones that replace them: Ctrl+Shift
-/// with a letter is taken by browsers and editors (reload, command palette, save as).
+/// The shortcuts that were the defaults before 1.0 and the ones that replace them: Ctrl+Shift with a letter is taken by
+/// browsers and editors (reload, command palette, save as).
 const MOVED_SHORTCUTS: [(&str, &str, &str); 5] = [
     ("record_toggle", "Ctrl+Shift+R", "Ctrl+Shift+F9"),
     ("record_pause", "Ctrl+Shift+P", "Ctrl+Shift+F10"),
@@ -152,22 +128,18 @@ const MOVED_SHORTCUTS: [(&str, &str, &str); 5] = [
     ("overlay_toggle", "Ctrl+Shift+O", "Ctrl+Shift+F8"),
 ];
 
-/// 1.0: an action still on its former default shortcut moves to the new one, unless the user
-/// gave that one to an action.
+/// 1.0: an action still on its former default shortcut moves to the new one, unless the user gave that one to an
+/// action.
 fn v7_free_shortcuts(table: &mut toml::Table) {
     if let Some(hotkeys) = table.get_mut("hotkeys").and_then(|h| h.as_table_mut()) {
         move_shortcuts(hotkeys, &MOVED_SHORTCUTS);
     }
 }
 
-/// The shortcuts that were the defaults before 1.0 and the ones that replace them: the screen
-/// and the scrolling capture swap theirs, and the other ones drop Shift.
+/// The shortcuts that were the defaults before 1.0 and the ones that replace them: the screen and the scrolling capture
+/// swap theirs, and the other ones drop Shift.
 const MOVED_SHORTCUTS_V8: [(&str, &str, &str); 7] = [
-    (
-        "capture_fullscreen",
-        "Shift+PrintScreen",
-        "Ctrl+PrintScreen",
-    ),
+    ("capture_fullscreen", "Shift+PrintScreen", "Ctrl+PrintScreen"),
     ("capture_scrolling", "Ctrl+PrintScreen", "Shift+PrintScreen"),
     ("record_toggle", "Ctrl+Shift+F9", "Ctrl+F9"),
     ("record_pause", "Ctrl+Shift+F10", "Ctrl+F10"),
@@ -180,16 +152,11 @@ const MOVED_SHORTCUTS_V8: [(&str, &str, &str); 7] = [
 const MOVED_FOLDERS: [(&str, &str, &str); 3] = [
     ("images", "{pictures}/Vixeeny", crate::paths::DEFAULT_IMAGES),
     ("videos", "{videos}/Vixeeny", crate::paths::DEFAULT_VIDEOS),
-    (
-        "replays",
-        "{videos}/Vixeeny/Replays",
-        crate::paths::DEFAULT_REPLAYS,
-    ),
+    ("replays", "{videos}/Vixeeny/Replays", crate::paths::DEFAULT_REPLAYS),
 ];
 
-/// 1.0: what is still on a former default moves to the new one. The shortcuts (unless the
-/// new one is held by an action that keeps it), the folders, and MP4: hybrid rather than
-/// fragmented, as some editors read fragmented files badly.
+/// 1.0: what is still on a former default moves to the new one. The shortcuts (unless the new one is held by an action
+/// that keeps it), the folders, and MP4: hybrid rather than fragmented, as some editors read fragmented files badly.
 fn v8_new_defaults(table: &mut toml::Table) {
     if let Some(hotkeys) = table.get_mut("hotkeys").and_then(|h| h.as_table_mut()) {
         move_shortcuts(hotkeys, &MOVED_SHORTCUTS_V8);
@@ -202,17 +169,14 @@ fn v8_new_defaults(table: &mut toml::Table) {
         }
     }
     if let Some(video) = table.get_mut("video").and_then(|v| v.as_table_mut())
-        && matches!(
-            video.get("container").and_then(|c| c.as_str()),
-            Some("mp4_fragmented" | "fmp4")
-        )
+        && matches!(video.get("container").and_then(|c| c.as_str()), Some("mp4_fragmented" | "fmp4"))
     {
         video.insert("container".into(), "mp4_hybrid".into());
     }
 }
 
-/// Moves each action still on `old` to `new`, all at once (two actions may swap theirs). A move
-/// whose `new` is held by a shortcut that stays where it is does not happen.
+/// Moves each action still on `old` to `new`, all at once (two actions may swap theirs). A move whose `new` is held by
+/// a shortcut that stays where it is does not happen.
 fn move_shortcuts(hotkeys: &mut toml::Table, moves: &[(&str, &str, &str)]) {
     use crate::hotkey::Hotkey;
     let parse = |text: &str| Hotkey::parse(text).ok();
@@ -220,35 +184,24 @@ fn move_shortcuts(hotkeys: &mut toml::Table, moves: &[(&str, &str, &str)]) {
         hotkeys
             .get(action)
             .and_then(|v| v.as_array())
-            .is_some_and(|list| {
-                list.iter()
-                    .any(|v| v.as_str().is_some_and(|t| parse(t) == *key))
-            })
+            .is_some_and(|list| list.iter().any(|v| v.as_str().is_some_and(|t| parse(t) == *key)))
     };
     // The moves that can happen: dropped one by one until each lands on a free shortcut.
-    let mut moving: Vec<&(&str, &str, &str)> = moves
-        .iter()
-        .filter(|(action, old, _)| holds(hotkeys, action, &parse(old)))
-        .collect();
+    let mut moving: Vec<&(&str, &str, &str)> =
+        moves.iter().filter(|(action, old, _)| holds(hotkeys, action, &parse(old))).collect();
     loop {
-        let staying =
-            |hotkeys: &toml::Table, moving: &[&(&str, &str, &str)], key: &Option<Hotkey>| {
-                hotkeys.iter().any(|(action, list)| {
-                    list.as_array().is_some_and(|list| {
-                        list.iter().any(|v| {
-                            v.as_str().is_some_and(|t| {
-                                parse(t) == *key
-                                    && !moving
-                                        .iter()
-                                        .any(|(a, old, _)| a == action && parse(old) == *key)
-                            })
+        let staying = |hotkeys: &toml::Table, moving: &[&(&str, &str, &str)], key: &Option<Hotkey>| {
+            hotkeys.iter().any(|(action, list)| {
+                list.as_array().is_some_and(|list| {
+                    list.iter().any(|v| {
+                        v.as_str().is_some_and(|t| {
+                            parse(t) == *key && !moving.iter().any(|(a, old, _)| a == action && parse(old) == *key)
                         })
                     })
                 })
-            };
-        let blocked = moving
-            .iter()
-            .position(|(_, _, new)| staying(hotkeys, &moving, &parse(new)));
+            })
+        };
+        let blocked = moving.iter().position(|(_, _, new)| staying(hotkeys, &moving, &parse(new)));
         match blocked {
             Some(i) => {
                 moving.remove(i);
@@ -271,10 +224,7 @@ fn move_shortcuts(hotkeys: &mut toml::Table, moves: &[(&str, &str, &str)]) {
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     #[error("cannot read or write {path}: {source}")]
-    Io {
-        path: String,
-        source: std::io::Error,
-    },
+    Io { path: String, source: std::io::Error },
     #[error("invalid config: {0}")]
     Parse(#[from] toml::de::Error),
     #[error("cannot serialise config: {0}")]
@@ -432,16 +382,14 @@ impl Default for Paths {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Naming {
-    /// `{app}`, `{date}`, `{time}`... are replaced. `{app}` of a capture that is not of a
-    /// single window is the full-screen application (a game), else `Desktop`.
+    /// `{app}`, `{date}`, `{time}`... are replaced. `{app}` of a capture that is not of a single window is the
+    /// full-screen application (a game), else `Desktop`.
     pub template: String,
 }
 
 impl Default for Naming {
     fn default() -> Self {
-        Self {
-            template: "{app}_{date}_{time}".into(),
-        }
+        Self { template: "{app}_{date}_{time}".into() }
     }
 }
 
@@ -463,11 +411,7 @@ pub struct PerAppSubfolder {
 
 impl Default for PerAppSubfolder {
     fn default() -> Self {
-        Self {
-            images: true,
-            videos: true,
-            replays: true,
-        }
+        Self { images: true, videos: true, replays: true }
     }
 }
 
@@ -478,15 +422,14 @@ pub struct Image {
     pub show_cursor: bool,
     pub hdr: String,
     pub copy_to_clipboard: bool,
-    /// What a window capture is set on, with a margin and a shadow: `none`, `wallpaper` (the
-    /// desktop's, blurred), `colour` or `gradient`. `blur` (from before 0.21) reads as
-    /// `wallpaper`.
+    /// What a window capture is set on, with a margin and a shadow: `none`, `wallpaper` (the desktop's, blurred),
+    /// `colour` or `gradient`. `blur` (from before 0.21) reads as `wallpaper`.
     pub window_backdrop: String,
-    /// The `colour` one: `#rrggbb`, or `accent` (Windows'); one of [`BACKDROP_COLOURS`] by its
-    /// name, from before, reads as its colour.
+    /// The `colour` one: `#rrggbb`, or `accent` (Windows'); one of [`BACKDROP_COLOURS`] by its name, from before, reads
+    /// as its colour.
     pub backdrop_colour: String,
-    /// The `gradient` one: `#rrggbb,#rrggbb`, from the top left to the bottom right; one of
-    /// [`BACKDROP_GRADIENTS`] by its name, from before, reads as its colours.
+    /// The `gradient` one: `#rrggbb,#rrggbb`, from the top left to the bottom right; one of [`BACKDROP_GRADIENTS`] by
+    /// its name, from before, reads as its colours.
     pub backdrop_gradient: String,
     pub png: Png,
     pub jpeg: Jpeg,
@@ -525,10 +468,7 @@ pub struct Png {
 
 impl Default for Png {
     fn default() -> Self {
-        Self {
-            compression: "default".into(),
-            optimize: 0,
-        }
+        Self { compression: "default".into(), optimize: 0 }
     }
 }
 
@@ -556,11 +496,7 @@ pub struct Webp {
 
 impl Default for Webp {
     fn default() -> Self {
-        Self {
-            lossless: true,
-            quality: 90,
-            effort: 4,
-        }
+        Self { lossless: true, quality: 90, effort: 4 }
     }
 }
 
@@ -576,11 +512,7 @@ pub struct Jxl {
 
 impl Default for Jxl {
     fn default() -> Self {
-        Self {
-            lossless: true,
-            quality: 90,
-            effort: 7,
-        }
+        Self { lossless: true, quality: 90, effort: 7 }
     }
 }
 
@@ -598,11 +530,7 @@ pub const AVIF_MAX_SPEED: u8 = 6;
 
 impl Default for Avif {
     fn default() -> Self {
-        Self {
-            quality: 80,
-            depth: 10,
-            speed: 6,
-        }
+        Self { quality: 80, depth: 10, speed: 6 }
     }
 }
 
@@ -612,8 +540,7 @@ impl Default for Avif {
 pub struct Video {
     /// `hardware` or `software`: which family of encoders the settings list.
     pub encoder_kind: String,
-    /// An encoder id of the codec registry. `auto` (older files) = the best detected hardware
-    /// encoder, else libx264.
+    /// An encoder id of the codec registry. `auto` (older files) = the best detected hardware encoder, else libx264.
     pub encoder: String,
     pub container: String,
     pub resolution: String,
@@ -623,8 +550,7 @@ pub struct Video {
     pub chroma: String,
     pub hdr: String,
     pub mode: String,
-    /// `quality` (for editing and keeping), `balanced`, `small` (compact files, for sharing) or
-    /// `custom` (`params`).
+    /// `quality` (for editing and keeping), `balanced`, `small` (compact files, for sharing) or `custom` (`params`).
     pub preset: String,
     /// The encoder options of the `custom` preset, by the registry's parameter key.
     pub params: BTreeMap<String, String>,
@@ -673,20 +599,18 @@ impl Default for Split {
 #[serde(default)]
 pub struct Audio {
     pub routing: String,
-    /// What is recorded besides the microphone: `system`, `target` (the program in the
-    /// foreground when the recording starts), `output`, `programs` or `none`. `sources` holds
-    /// the matching sources.
+    /// What is recorded besides the microphone: `system`, `target` (the program in the foreground when the recording
+    /// starts), `output`, `programs` or `none`. `sources` holds the matching sources.
     pub capture: String,
     pub sources: Vec<String>,
-    /// The sources of the other modes (an output device, the programs ticked), back when their
-    /// mode is chosen again.
+    /// The sources of the other modes (an output device, the programs ticked), back when their mode is chosen again.
     pub set_aside: Vec<String>,
     /// `auto` = Opus beside AV1 (and VP9, and in WebM), else AAC.
     pub codec: String,
     pub bitrate_kbps: u32,
     pub vbr: bool,
-    /// `mono`, `stereo` or `surround`: 5.1 and 7.1 sources are kept so, up to 7.1 (Matroska with
-    /// Opus, FLAC or PCM; stereo elsewhere). `5.1` and `7.1`, from before, read as `surround`.
+    /// `mono`, `stereo` or `surround`: 5.1 and 7.1 sources are kept so, up to 7.1 (Matroska with Opus, FLAC or PCM;
+    /// stereo elsewhere). `5.1` and `7.1`, from before, read as `surround`.
     pub channels: String,
     /// Remove steady background noise from microphone sources (FFmpeg `afftdn`).
     pub mic_noise_reduction: bool,
@@ -746,12 +670,8 @@ impl Image {
 
     /// The ends of the gradient a window capture is set on.
     pub fn backdrop_gradient(&self) -> ([u8; 3], [u8; 3]) {
-        let preset = |id: &str| {
-            BACKDROP_GRADIENTS
-                .iter()
-                .find(|(name, ..)| *name == id)
-                .map(|(_, from, to)| (*from, *to))
-        };
+        let preset =
+            |id: &str| BACKDROP_GRADIENTS.iter().find(|(name, ..)| *name == id).map(|(_, from, to)| (*from, *to));
         preset(&self.backdrop_gradient)
             .or_else(|| {
                 let (from, to) = self.backdrop_gradient.split_once(',')?;
@@ -794,17 +714,16 @@ impl Default for Audio {
 #[serde(default)]
 pub struct RecordingWidget {
     pub enabled: bool,
-    /// `top_left`, `top_center`, `top_right`, `bottom_left`, `bottom_center`, `bottom_right`, or
-    /// `custom`: at [`RecordingWidget::custom`].
+    /// `top_left`, `top_center`, `top_right`, `bottom_left`, `bottom_center`, `bottom_right`, or `custom`: at
+    /// [`RecordingWidget::custom`].
     pub corner: String,
-    /// The custom place: how far across the free room of the screen the widget is, from its
-    /// left and top edges (0 to 1). Set in the settings.
+    /// The custom place: how far across the free room of the screen the widget is, from its left and top edges (0 to
+    /// 1). Set in the settings.
     pub custom: (f32, f32),
-    /// `always`, `fade` (it fades after 3 s and comes back under the pointer) or `alerts` (it
-    /// only shows while something goes wrong).
+    /// `always`, `fade` (it fades after 3 s and comes back under the pointer) or `alerts` (it only shows while
+    /// something goes wrong).
     pub display: String,
-    /// The widget warns when the free space of the videos' disk falls under this share of it,
-    /// in percent (0: never).
+    /// The widget warns when the free space of the videos' disk falls under this share of it, in percent (0: never).
     pub disk_alert_percent: u8,
 }
 
@@ -823,17 +742,15 @@ impl Default for RecordingWidget {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Replay {
-    /// The replay runs during every full-screen game: it starts with the game and stops when
-    /// the game closes.
+    /// The replay runs during every full-screen game: it starts with the game and stops when the game closes.
     #[serde(alias = "enabled_on_start")]
     pub enabled: bool,
     pub duration_seconds: u32,
-    /// How long the replay goes on recording after its shortcut, the end of the moment
-    /// included (0: it stops at the press).
+    /// How long the replay goes on recording after its shortcut, the end of the moment included (0: it stops at the
+    /// press).
     pub after_seconds: u32,
     pub storage: String,
-    /// The notification when a game starts: `both` (replay on or off), `on` (only when it
-    /// runs) or `none`.
+    /// The notification when a game starts: `both` (replay on or off), `on` (only when it runs) or `none`.
     pub notify: String,
     /// Programs that are games even without a sign of it (executable names, lower case).
     pub always: Vec<String>,
@@ -865,10 +782,7 @@ pub struct Overlay {
 
 impl Default for Overlay {
     fn default() -> Self {
-        Self {
-            enabled: true,
-            edge: "right".into(),
-        }
+        Self { enabled: true, edge: "right".into() }
     }
 }
 
@@ -883,49 +797,32 @@ pub struct Scrolling {
 
 impl Default for Scrolling {
     fn default() -> Self {
-        Self {
-            max_height: 30_000,
-            annotate: true,
-        }
+        Self { max_height: 30_000, annotate: true }
     }
 }
 
 /// Upgrades `table` to `current` by applying `migrations` in order.
-pub fn migrate_with(
-    table: &mut toml::Table,
-    current: u32,
-    migrations: &[Migration],
-) -> Result<(), ConfigError> {
+pub fn migrate_with(table: &mut toml::Table, current: u32, migrations: &[Migration]) -> Result<(), ConfigError> {
     let found = match table.get("schema_version") {
         None => 1,
-        Some(v) => v
-            .as_integer()
-            .and_then(|n| u32::try_from(n).ok())
-            .filter(|n| *n >= 1)
-            .ok_or(ConfigError::BadVersion)?,
+        Some(v) => {
+            v.as_integer().and_then(|n| u32::try_from(n).ok()).filter(|n| *n >= 1).ok_or(ConfigError::BadVersion)?
+        }
     };
     if found > current {
-        return Err(ConfigError::TooNew {
-            found,
-            supported: current,
-        });
+        return Err(ConfigError::TooNew { found, supported: current });
     }
     for version in found..current {
-        let step = migrations
-            .get(version as usize - 1)
-            .ok_or(ConfigError::BadVersion)?;
+        let step = migrations.get(version as usize - 1).ok_or(ConfigError::BadVersion)?;
         step(table);
-        table.insert(
-            "schema_version".into(),
-            toml::Value::Integer(i64::from(version) + 1),
-        );
+        table.insert("schema_version".into(), toml::Value::Integer(i64::from(version) + 1));
     }
     Ok(())
 }
 
 impl Config {
-    /// Parses and migrates a config document. Unknown keys are ignored, missing keys default,
-    /// and a value that cannot be read takes its default without the others.
+    /// Parses and migrates a config document. Unknown keys are ignored, missing keys default, and a value that cannot
+    /// be read takes its default without the others.
     pub fn from_toml(text: &str) -> Result<Self, ConfigError> {
         Self::parse(text).map(|(config, _)| config)
     }
@@ -949,9 +846,8 @@ impl Config {
         Ok(toml::to_string_pretty(self)?)
     }
 
-    /// Loads `path`; a missing file yields the defaults (nothing is written). A file that cannot
-    /// be read in full is first copied to `config.toml.bak`, so that what it held survives the
-    /// next save.
+    /// Loads `path`; a missing file yields the defaults (nothing is written). A file that cannot be read in full is
+    /// first copied to `config.toml.bak`, so that what it held survives the next save.
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
         match std::fs::read_to_string(path) {
             Ok(text) => {
@@ -962,19 +858,13 @@ impl Config {
                 parsed.map(|(config, _)| config)
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
-            Err(source) => Err(ConfigError::Io {
-                path: path.display().to_string(),
-                source,
-            }),
+            Err(source) => Err(ConfigError::Io { path: path.display().to_string(), source }),
         }
     }
 
     /// Atomically writes the config (temporary file + rename).
     pub fn save(&self, path: &Path) -> Result<(), ConfigError> {
-        let io = |source| ConfigError::Io {
-            path: path.display().to_string(),
-            source,
-        };
+        let io = |source| ConfigError::Io { path: path.display().to_string(), source };
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).map_err(io)?;
         }
@@ -984,13 +874,12 @@ impl Config {
     }
 }
 
-/// Puts into `kept` (at `path`) every value of `source` that reads, one by one; a table that
-/// does not is gone through value by value.
+/// Puts into `kept` (at `path`) every value of `source` that reads, one by one; a table that does not is gone through
+/// value by value.
 fn salvage(kept: &mut toml::Table, path: &mut Vec<String>, source: toml::Table) {
     /// The table at `path` (kept before its values are).
     fn at<'a>(kept: &'a mut toml::Table, path: &[String]) -> Option<&'a mut toml::Table> {
-        path.iter()
-            .try_fold(kept, |table, key| table.get_mut(key)?.as_table_mut())
+        path.iter().try_fold(kept, |table, key| table.get_mut(key)?.as_table_mut())
     }
     let reads = |kept: &toml::Table| kept.clone().try_into::<Config>().is_ok();
     for (key, value) in source {
@@ -1020,8 +909,8 @@ fn salvage(kept: &mut toml::Table, path: &mut Vec<String>, source: toml::Table) 
     }
 }
 
-/// Three-way merge: what `ours` changed from `base`, applied over `theirs` (the file as another
-/// program left it since `base` was read). A setting both changed keeps `ours`.
+/// Three-way merge: what `ours` changed from `base`, applied over `theirs` (the file as another program left it since
+/// `base` was read). A setting both changed keeps `ours`.
 pub fn merge(base: &Config, ours: &Config, theirs: &Config) -> Config {
     fn value(c: &Config) -> Option<toml::Value> {
         toml::Value::try_from(c).ok()
@@ -1087,10 +976,7 @@ mod tests {
         assert_eq!(merged.recording_widget.custom, (0.3, 0.7));
         // Both changed the same setting: ours wins.
         ours.recording_widget.corner = "bottom_right".into();
-        assert_eq!(
-            merge(&base, &ours, &theirs).recording_widget.corner,
-            "bottom_right"
-        );
+        assert_eq!(merge(&base, &ours, &theirs).recording_widget.corner, "bottom_right");
         // Nothing changed on our side: theirs as it is.
         assert_eq!(merge(&base, &base, &theirs), theirs);
     }
@@ -1102,10 +988,7 @@ mod tests {
         assert_eq!(Config::from_toml("").unwrap(), Config::default());
         let cfg = Config::from_toml("[general]\nautostart = false\n").unwrap();
         // A setting of older versions, gone since: left aside.
-        assert_eq!(
-            Config::from_toml("[general]\nsounds = true\n").unwrap(),
-            Config::default()
-        );
+        assert_eq!(Config::from_toml("[general]\nsounds = true\n").unwrap(), Config::default());
         assert!(!cfg.general.autostart);
         assert_eq!(cfg.general.app_idle_exit_seconds, 30);
         assert_eq!(cfg.hotkeys, Hotkeys::default());
@@ -1126,10 +1009,7 @@ mod tests {
         assert_eq!(cfg.hotkeys.record_toggle, defaults.hotkeys.record_toggle);
         assert_eq!(cfg.image.format, "png");
         assert_eq!(cfg.image.jpeg, defaults.image.jpeg);
-        assert_eq!(
-            cfg.replay.duration_seconds,
-            defaults.replay.duration_seconds
-        );
+        assert_eq!(cfg.replay.duration_seconds, defaults.replay.duration_seconds);
     }
 
     #[test]
@@ -1154,10 +1034,7 @@ mod tests {
         let err = Config::from_toml("schema_version = 99\n").unwrap_err();
         assert!(matches!(err, ConfigError::TooNew { found: 99, .. }));
         for text in ["schema_version = 0\n", "schema_version = \"x\"\n"] {
-            assert!(matches!(
-                Config::from_toml(text),
-                Err(ConfigError::BadVersion)
-            ));
+            assert!(matches!(Config::from_toml(text), Err(ConfigError::BadVersion)));
         }
     }
 
@@ -1181,8 +1058,7 @@ mod tests {
         assert_eq!(cfg.video.fps, 120);
         assert_eq!(cfg.replay.duration_seconds, 60);
         // A missing profile falls back to `default`, then to the defaults.
-        let text =
-            "schema_version = 2\n[video]\nprofile = \"Gone\"\n[profiles.default]\nfps = 30\n";
+        let text = "schema_version = 2\n[video]\nprofile = \"Gone\"\n[profiles.default]\nfps = 30\n";
         assert_eq!(Config::from_toml(text).unwrap().video.fps, 30);
         let text = "schema_version = 2\n[video]\nprofile = \"Gone\"\n";
         assert_eq!(Config::from_toml(text).unwrap().video, Video::default());
@@ -1191,15 +1067,9 @@ mod tests {
     #[test]
     fn the_widget_that_hid_when_idle_now_fades() {
         let text = "schema_version = 4\n[recording_widget]\nauto_hide = true\n";
-        assert_eq!(
-            Config::from_toml(text).unwrap().recording_widget.display,
-            "fade"
-        );
+        assert_eq!(Config::from_toml(text).unwrap().recording_widget.display, "fade");
         let text = "schema_version = 4\n[recording_widget]\nauto_hide = false\n";
-        assert_eq!(
-            Config::from_toml(text).unwrap().recording_widget.display,
-            "always"
-        );
+        assert_eq!(Config::from_toml(text).unwrap().recording_widget.display, "always");
     }
 
     #[test]
@@ -1207,11 +1077,7 @@ mod tests {
         let text = "schema_version = 3\n[paths]\nfilename_template = \"{app}-{date}\"\n\
                     use_foreground_app = false\n";
         let cfg = Config::from_toml(text).unwrap();
-        for naming in [
-            &cfg.paths.naming.images,
-            &cfg.paths.naming.videos,
-            &cfg.paths.naming.replays,
-        ] {
+        for naming in [&cfg.paths.naming.images, &cfg.paths.naming.videos, &cfg.paths.naming.replays] {
             assert_eq!(naming.template, "{app}-{date}");
         }
         // Without them, the defaults.
@@ -1221,20 +1087,16 @@ mod tests {
 
     #[test]
     fn a_third_shortcut_is_dropped() {
-        let cfg = Config::from_toml(
-            "schema_version = 5\n[hotkeys]\nopen_settings = [\"Ctrl+1\", \"Ctrl+2\", \"Ctrl+3\"]\n",
-        )
-        .unwrap();
+        let cfg =
+            Config::from_toml("schema_version = 5\n[hotkeys]\nopen_settings = [\"Ctrl+1\", \"Ctrl+2\", \"Ctrl+3\"]\n")
+                .unwrap();
         assert_eq!(cfg.hotkeys.open_settings, ["Ctrl+1", "Ctrl+2"]);
     }
 
     #[test]
     fn the_scrolling_capture_gets_its_shortcut_when_free() {
-        let read = |hotkeys: &str| {
-            Config::from_toml(&format!("schema_version = 6\n[hotkeys]\n{hotkeys}"))
-                .unwrap()
-                .hotkeys
-        };
+        let read =
+            |hotkeys: &str| Config::from_toml(&format!("schema_version = 6\n[hotkeys]\n{hotkeys}")).unwrap().hotkeys;
         // Given its shortcut, then moved to the one of 1.0.
         let h = read("capture_scrolling = []\n");
         assert_eq!(h.capture_scrolling, ["Shift+PrintScreen"]);
@@ -1246,11 +1108,8 @@ mod tests {
 
     #[test]
     fn the_former_default_shortcuts_move_off_ctrl_shift_letters() {
-        let read = |hotkeys: &str| {
-            Config::from_toml(&format!("schema_version = 7\n[hotkeys]\n{hotkeys}"))
-                .unwrap()
-                .hotkeys
-        };
+        let read =
+            |hotkeys: &str| Config::from_toml(&format!("schema_version = 7\n[hotkeys]\n{hotkeys}")).unwrap().hotkeys;
         let h = read(
             "record_toggle = [\"Ctrl+Shift+R\", \"F9\"]\nrecord_pause = [\"Shift+Ctrl+P\"]\n\
              replay_save = [\"Alt+S\"]\n",
@@ -1285,8 +1144,8 @@ mod tests {
         assert_eq!(cfg.paths.videos, "D:\\Clips");
         assert_eq!(cfg.paths.replays, crate::paths::DEFAULT_REPLAYS);
         assert_eq!(cfg.video.container, "mp4_hybrid");
-        // A new one held by an action that keeps it: that move does not happen, nor the one
-        // that would land on the shortcut left in place.
+        // A new one held by an action that keeps it: that move does not happen, nor the one that would land on the
+        // shortcut left in place.
         let cfg = read(
             "[hotkeys]\ncapture_fullscreen = [\"Shift+PrintScreen\"]\n\
              capture_scrolling = [\"Ctrl+PrintScreen\"]\nopen_settings = [\"Ctrl+PrintScreen\", \"Ctrl+F9\"]\n\
