@@ -20,13 +20,13 @@ do not use the same placeholders.
 1. Add the language to `enum Lang`, to `Lang::from_tag` (the primary tag, e.g. `"de"`) and to
    the `language` row in `crates/vixeeny-settings`. The installer has its own texts, in
    `packaging/windows/vixeeny.iss` (`[Languages]`, `[Messages]`, `[CustomMessages]`).
-2. The compiler then points at every `(Key, Lang)` arm of `tr()` that is missing: add one per key.
-   Nothing can be forgotten, the `match` is exhaustive.
+2. Give the `keys!` macro one more `$text:literal` and the `match` of `tr()` one more arm, then
+   add the text of the new language to every key: an entry with a text missing does not compile.
 3. Dates and numbers follow the language through the OS; no extra work.
 4. Run `cargo test -p vixeeny-common -p vixeeny-ui` and look at the screenshots
    (`VIXEENY_SCREENSHOTS=/tmp/shots cargo test -p vixeeny-ui`) — long words can overflow a button.
 
 ## Adding a key (developers)
 
-Add the variant to `enum Key` with a doc comment listing its placeholders, one arm per language in
-`tr()`, and the variant to `Key::ALL`. The test fails when `Key::ALL` is out of date.
+Add one line to `keys! { … }`: `Name => "English text", "Texte français";`. The enum, `Key::ALL`
+and `tr()` are made from it.

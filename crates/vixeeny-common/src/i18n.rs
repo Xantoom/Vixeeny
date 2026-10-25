@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Minimal translations for the daemon, which links neither Slint nor gettext.
-//! The app and settings UI use Slint's `@tr()`; only the tray menu and notifications of the
-//! daemon go through this table. French and English are shipped.
+//! Every text the user sees, in English and French: the daemon reads this table too, without
+//! Slint or gettext.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lang {
@@ -9,702 +8,381 @@ pub enum Lang {
     Fr,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Key {
-    TrayTooltip,
-    TrayTooltipRecording,
-    MenuSettings,
-    MenuQuit,
-    AppCrashed,
-    HotkeysUnavailable,
-    ScrollTitle,
-    ScrollIntro,
-    ScrollFinish,
-    ScrollCancel,
-    OvlImage,
-    OvlRegion,
-    OvlWindow,
-    OvlScreen,
-    OvlAllMonitors,
-    OvlScrolling,
-    OvlVideo,
-    OvlRecord,
-    OvlStopRecording,
-    OvlReplayStart,
-    OvlReplayStop,
-    OvlReplaySave,
-    OvlSettings,
-    /// `{height}`
-    ScrollCapturing,
-    /// `{height}`
-    ScrollTruncated,
-    SecGeneral,
-    SecShortcuts,
-    SecVideo,
-    SecAudio,
-    SecAbout,
-    SetLanguage,
-    SetLangAuto,
-    SetTheme,
-    SetThemeSystem,
-    SetThemeLight,
-    SetThemeDark,
-    SetAutostart,
-    SetNotifications,
-    SetOverlayEdge,
-    SetEdgeLeft,
-    SetEdgeRight,
-    SetEdgeTop,
-    SetEdgeBottom,
-    SetImageFormat,
-    SetShowCursor,
-    SetCopyClipboard,
-    SetAvifDepth,
-    SetEncoder,
-    SetContainer,
-    SetResolution,
-    SetFps,
-    SetChroma,
-    SetPreset,
-    SetSplit,
-    SetSplitOff,
-    SetSplitSize,
-    SetSplitDuration,
-    SetSplitSizeMb,
-    SetSplitMinutes,
-    SetWidget,
-    SetWidgetCorner,
-    SetCornerTl,
-    SetCornerTr,
-    SetCornerBl,
-    SetCornerBr,
-    SetAudioRouting,
-    SetRouteEach,
-    SetRouteMix,
-    SetRouteAdvanced,
-    SetAudioCodec,
-    SetAudioBitrate,
-    SetAudioVbr,
-    SetAudioDenoise,
-    SetHdrEnable,
-    SetEncoderKind,
-    SetKindHardware,
-    SetKindSoftware,
-    SetPresetBest,
-    SetPresetLight,
-    SetPresetCustom,
-    SetDetecting,
-    SetNoHardware,
-    SrcMic,
-    SrcAbsent,
-    UiPressKeys,
-    UiKeysHelp,
-    SetReplayStart,
-    SetReplayDuration,
-    SetTemplate,
-    SetCheckNow,
-    SetProblems,
-    UiGithub,
-    UiLogs,
-    ActCaptureRegion,
-    ActCaptureWindow,
-    ActCaptureFullscreen,
-    ActCaptureAll,
-    ActCaptureScrolling,
-    ActRecordToggle,
-    ActRecordPause,
-    ActReplayToggle,
-    ActReplaySave,
-    ActOverlay,
-    ActSettings,
-    ShortcutConflict,
-    ShortcutDuplicate,
-    AboutLicense,
-    ToastImageSaved,
-    ToastRecordingSaved,
-    ToastReplaySaved,
-    ToastOpenFolder,
-    ToastOpenSettings,
-    ToastCaptureFailed,
-    ToastRecordingFailed,
-    ToastReplayFailed,
-    ToastDiskFull,
-    ToastAccessDenied,
-    UpdateAvailable,
-    UpdateNow,
-    UpdateUpToDate,
-    UpdateFound,
-    UpdateChecking,
-    UpdateCheckFailed,
-    UpdateInstalling,
-    ToastAudioLost,
-    SetReplayStorage,
-    SetStorageRam,
-    SetStorageDisk,
-    UpdateDownloading,
-    UpdateReady,
-    UpdateReadyHint,
-    UpdateRestart,
-    UpdateView,
-    UpdateNever,
-    SetAutoUpdate,
-    OptAuto,
-    OptFlac,
-    OptPcm16,
-    OptPcm24,
-    AboutTagline,
-    UiRetry,
-    UpdateCheckFailedShort,
-    UpdateFailedShort,
-    SetMicOn,
-    SetMicDevice,
-    SrcNoPrograms,
-    SecReplay,
-    TipMove,
-    TipPen,
-    TipHighlight,
-    TipLine,
-    TipArrow,
-    TipRectangle,
-    TipEllipse,
-    TipText,
-    TipCounter,
-    TipBlur,
-    TipPixelate,
-    TipStyle,
-    TipUndo,
-    TipCopy,
-    TipSave,
-    TipClose,
-    SecOverlay,
-    SecImage,
-    SecUpdates,
-    SetFolder,
-    SetSubfolder,
-    UiChange,
-    UiShow,
-    UiRemove,
-    UiAddShortcut,
-    SetQuality,
-    SetPngCompression,
-    OptPngFast,
-    OptPngDefault,
-    OptPngHigh,
-    SetPngOptimize,
-    OptOff,
-    SetLossless,
-    SetEffort,
-    SetAvifSpeed,
-    UiNoShortcut,
-    OptRecommended,
-    OptVbr,
-    OptCbr,
-    OptStereo,
-    SetAudioChannels,
-    SetSurroundHint,
-    UiLicenses,
-    PcCpu,
-    PcCores,
-    PcRam,
-    PcGpu,
-    PcIgpu,
-    SetCapture,
-    CapSystem,
-    CapTarget,
-    CapOutput,
-    CapPrograms,
-    CapNone,
-    SetAudioOutput,
-    SrcClosed,
-    ReplayEstimate,
-    ReplayEstimateRam,
-    ReplayEstimateDisk,
-    SetAspect,
-    OptAspectScreen,
-    OptAspectCrop,
-    SetExpert,
-    SrcOutputs,
-    SrcInputs,
-    PcScreenN,
-    PcPrimary,
-    PcDriveN,
-    PcFree,
-    OptGroupCompressed,
-    OptGroupLossless,
-    SetMicVolume,
-    SetCaptureVolume,
-    SetReplayAfter,
-    OptReplayAfterNone,
-    OptReplayAfter,
-    UiSearch,
-    UiSearchNone,
-    UiSearchTitle,
-    ShortcutTaken,
-    ShortcutWindows,
-    UiReport,
-    AboutReportReady,
-    SetDiskAlert,
-    OptDiskAlertOff,
-    OptDiskAlert,
-    WidgetFramesLost,
-    WidgetDiskLow,
-    ToastMenuOpen,
-    ToastMenuReveal,
-    ToastMenuClose,
-    SetCornerTc,
-    SetCornerBc,
-    SetCornerCustom,
-    SetWidgetDisplay,
-    OptDisplayAlways,
-    OptDisplayFade,
-    OptDisplayAlerts,
-    ToastDiskLow,
-    ToastReplayDiskLow,
-    SetWidgetPlaceHint,
-    UpdateChecked,
-    PcLocalDisk,
-    ActReplayEdit,
-    ToastReplayOn,
-    ToastReplayOff,
-    SetReplayNotify,
-    OptNotifyBoth,
-    OptNotifyOn,
-    OptNotifyNone,
-    HdrGames,
-    OptGameAuto,
-    OptGameAlways,
-    OptGameNever,
-    CutSave,
-    CutSaveAs,
-    CutCancel,
-    CutLossless,
-    CutReencode,
-    CutPlay,
-    CutPause,
-    CutPrevious,
-    CutNext,
-    CutMute,
-    CutClose,
-    TipCopyText,
-    ToastTextCopied,
-    ToastNoText,
-    ToastOcrFailed,
-    ToastOcrNoLanguage,
-    ToastOcrLanguages,
-    CutAnimated,
-    ToastMenuEdit,
-    SetWindowBackdrop,
-    OptBackdropNone,
-    OptBackdropBlur,
-    OptBackdropColour,
-    TipLive,
-    TipFreeze,
-    TipRedo,
-    TipClear,
-    TipRightClick,
-    UpdateInstalled,
-    GrpSideBar,
-    GrpWidget,
-    GrpLocation,
-    GrpEncoding,
-    GrpCapture,
-    GrpPicture,
-    GrpFile,
-    GrpPcSound,
-    GrpMic,
-    GrpTracks,
-    GrpThisPc,
-    UnitFrames,
-    UnitMinutes,
-    UnitMb,
-    ShortcutModifierOnly,
-    ShortcutUnknownKey,
-    ShortcutNeedsModifier,
-    SetOverlayOn,
-    UiReset,
-    UiCancel,
-    UiResetPageTitle,
-    UiResetPageBody,
-    UiResetAll,
-    UiResetAllHint,
-    UiResetAllTitle,
-    UiResetAllBody,
-    GrpReset,
-    GrpWindowCapture,
-    OptBackdropGradient,
-    SetBackdropColour,
-    SetBackdropGradient,
-    OptColourAccent,
-    OptColourWhite,
-    OptColourGrey,
-    OptColourBlack,
-    OptColourBlue,
-    OptColourPurple,
-    OptColourGreen,
-    OptColourOrange,
-    OptColourPink,
-    OptGradientDusk,
-    OptGradientSunset,
-    OptGradientOcean,
-    OptGradientForest,
-    OptGradientNight,
-    SetPresetBalanced,
-    SetFolderUnreachable,
-    SetAdmin,
-    SetAdminGrant,
-    SetAdminGranted,
-    SetAdminHint,
-    SetAdminHintMove,
-    SetAdminDownloading,
+/// Declares every [`Key`] with its English and French text: the enum, [`Key::ALL`] and [`tr`].
+macro_rules! keys {
+    ($($key:ident => $en:literal, $fr:literal;)*) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub enum Key {
+            $($key,)*
+        }
+
+        impl Key {
+            pub const ALL: &'static [Self] = &[$(Self::$key,)*];
+        }
+
+        pub fn tr(key: Key, lang: Lang) -> &'static str {
+            match (key, lang) {
+                $((Key::$key, Lang::En) => $en, (Key::$key, Lang::Fr) => $fr,)*
+            }
+        }
+    };
 }
 
-impl Key {
-    /// Every key, for the completeness test; adding a key without listing it here fails it.
-    pub const ALL: &'static [Self] = &[
-        Self::TrayTooltip,
-        Self::TrayTooltipRecording,
-        Self::MenuSettings,
-        Self::MenuQuit,
-        Self::AppCrashed,
-        Self::HotkeysUnavailable,
-        Self::ScrollTitle,
-        Self::ScrollIntro,
-        Self::ScrollFinish,
-        Self::ScrollCancel,
-        Self::OvlImage,
-        Self::OvlRegion,
-        Self::OvlWindow,
-        Self::OvlScreen,
-        Self::OvlAllMonitors,
-        Self::OvlScrolling,
-        Self::OvlVideo,
-        Self::OvlRecord,
-        Self::OvlStopRecording,
-        Self::OvlReplayStart,
-        Self::OvlReplayStop,
-        Self::OvlReplaySave,
-        Self::OvlSettings,
-        Self::ScrollCapturing,
-        Self::ScrollTruncated,
-        Self::SecGeneral,
-        Self::SecShortcuts,
-        Self::SecVideo,
-        Self::SecAudio,
-        Self::SecAbout,
-        Self::SetLanguage,
-        Self::SetLangAuto,
-        Self::SetTheme,
-        Self::SetThemeSystem,
-        Self::SetThemeLight,
-        Self::SetThemeDark,
-        Self::SetAutostart,
-        Self::SetNotifications,
-        Self::SetOverlayEdge,
-        Self::SetEdgeLeft,
-        Self::SetEdgeRight,
-        Self::SetEdgeTop,
-        Self::SetEdgeBottom,
-        Self::SetImageFormat,
-        Self::SetShowCursor,
-        Self::SetCopyClipboard,
-        Self::SetAvifDepth,
-        Self::SetEncoder,
-        Self::SetContainer,
-        Self::SetResolution,
-        Self::SetFps,
-        Self::SetChroma,
-        Self::SetPreset,
-        Self::SetSplit,
-        Self::SetSplitOff,
-        Self::SetSplitSize,
-        Self::SetSplitDuration,
-        Self::SetSplitSizeMb,
-        Self::SetSplitMinutes,
-        Self::SetWidget,
-        Self::SetWidgetCorner,
-        Self::SetCornerTl,
-        Self::SetCornerTr,
-        Self::SetCornerBl,
-        Self::SetCornerBr,
-        Self::SetAudioRouting,
-        Self::SetRouteEach,
-        Self::SetRouteMix,
-        Self::SetRouteAdvanced,
-        Self::SetAudioCodec,
-        Self::SetAudioBitrate,
-        Self::SetAudioVbr,
-        Self::SetAudioDenoise,
-        Self::SetHdrEnable,
-        Self::SetEncoderKind,
-        Self::SetKindHardware,
-        Self::SetKindSoftware,
-        Self::SetPresetBest,
-        Self::SetPresetLight,
-        Self::SetPresetCustom,
-        Self::SetDetecting,
-        Self::SetNoHardware,
-        Self::SrcMic,
-        Self::SrcAbsent,
-        Self::UiPressKeys,
-        Self::UiKeysHelp,
-        Self::SetReplayStart,
-        Self::SetReplayDuration,
-        Self::SetTemplate,
-        Self::SetCheckNow,
-        Self::SetProblems,
-        Self::UiGithub,
-        Self::UiLogs,
-        Self::ActCaptureRegion,
-        Self::ActCaptureWindow,
-        Self::ActCaptureFullscreen,
-        Self::ActCaptureAll,
-        Self::ActCaptureScrolling,
-        Self::ActRecordToggle,
-        Self::ActRecordPause,
-        Self::ActReplayToggle,
-        Self::ActReplaySave,
-        Self::ActOverlay,
-        Self::ActSettings,
-        Self::ShortcutConflict,
-        Self::ShortcutDuplicate,
-        Self::AboutLicense,
-        Self::ToastImageSaved,
-        Self::ToastRecordingSaved,
-        Self::ToastReplaySaved,
-        Self::ToastOpenFolder,
-        Self::ToastOpenSettings,
-        Self::ToastCaptureFailed,
-        Self::ToastRecordingFailed,
-        Self::ToastReplayFailed,
-        Self::ToastDiskFull,
-        Self::ToastAccessDenied,
-        Self::UpdateAvailable,
-        Self::UpdateNow,
-        Self::UpdateUpToDate,
-        Self::UpdateFound,
-        Self::UpdateChecking,
-        Self::UpdateCheckFailed,
-        Self::UpdateInstalling,
-        Self::ToastAudioLost,
-        Self::SetReplayStorage,
-        Self::SetStorageRam,
-        Self::SetStorageDisk,
-        Self::UpdateDownloading,
-        Self::UpdateReady,
-        Self::UpdateReadyHint,
-        Self::UpdateRestart,
-        Self::UpdateView,
-        Self::UpdateNever,
-        Self::SetAutoUpdate,
-        Self::OptAuto,
-        Self::OptFlac,
-        Self::OptPcm16,
-        Self::OptPcm24,
-        Self::AboutTagline,
-        Self::UiRetry,
-        Self::UpdateCheckFailedShort,
-        Self::UpdateFailedShort,
-        Self::SetMicOn,
-        Self::SetMicDevice,
-        Self::SrcNoPrograms,
-        Self::SecReplay,
-        Self::TipMove,
-        Self::TipPen,
-        Self::TipHighlight,
-        Self::TipLine,
-        Self::TipArrow,
-        Self::TipRectangle,
-        Self::TipEllipse,
-        Self::TipText,
-        Self::TipCounter,
-        Self::TipBlur,
-        Self::TipPixelate,
-        Self::TipStyle,
-        Self::TipUndo,
-        Self::TipCopy,
-        Self::TipSave,
-        Self::TipClose,
-        Self::SecOverlay,
-        Self::SecImage,
-        Self::SecUpdates,
-        Self::SetFolder,
-        Self::SetSubfolder,
-        Self::UiChange,
-        Self::UiShow,
-        Self::UiRemove,
-        Self::UiAddShortcut,
-        Self::SetQuality,
-        Self::SetPngCompression,
-        Self::OptPngFast,
-        Self::OptPngDefault,
-        Self::OptPngHigh,
-        Self::SetPngOptimize,
-        Self::OptOff,
-        Self::SetLossless,
-        Self::SetEffort,
-        Self::SetAvifSpeed,
-        Self::UiNoShortcut,
-        Self::OptRecommended,
-        Self::OptVbr,
-        Self::OptCbr,
-        Self::OptStereo,
-        Self::SetAudioChannels,
-        Self::SetSurroundHint,
-        Self::UiLicenses,
-        Self::PcCpu,
-        Self::PcCores,
-        Self::PcRam,
-        Self::PcGpu,
-        Self::PcIgpu,
-        Self::SetCapture,
-        Self::CapSystem,
-        Self::CapTarget,
-        Self::CapOutput,
-        Self::CapPrograms,
-        Self::CapNone,
-        Self::SetAudioOutput,
-        Self::SrcClosed,
-        Self::ReplayEstimate,
-        Self::ReplayEstimateRam,
-        Self::ReplayEstimateDisk,
-        Self::SetAspect,
-        Self::OptAspectScreen,
-        Self::OptAspectCrop,
-        Self::SetExpert,
-        Self::SrcOutputs,
-        Self::SrcInputs,
-        Self::PcScreenN,
-        Self::PcPrimary,
-        Self::PcDriveN,
-        Self::PcFree,
-        Self::OptGroupCompressed,
-        Self::OptGroupLossless,
-        Self::SetMicVolume,
-        Self::SetCaptureVolume,
-        Self::SetReplayAfter,
-        Self::OptReplayAfterNone,
-        Self::OptReplayAfter,
-        Self::UiSearch,
-        Self::UiSearchNone,
-        Self::UiSearchTitle,
-        Self::ShortcutTaken,
-        Self::ShortcutWindows,
-        Self::UiReport,
-        Self::AboutReportReady,
-        Self::SetDiskAlert,
-        Self::OptDiskAlertOff,
-        Self::OptDiskAlert,
-        Self::WidgetFramesLost,
-        Self::WidgetDiskLow,
-        Self::ToastMenuOpen,
-        Self::ToastMenuReveal,
-        Self::ToastMenuClose,
-        Self::SetCornerTc,
-        Self::SetCornerBc,
-        Self::SetCornerCustom,
-        Self::SetWidgetDisplay,
-        Self::OptDisplayAlways,
-        Self::OptDisplayFade,
-        Self::OptDisplayAlerts,
-        Self::ToastDiskLow,
-        Self::ToastReplayDiskLow,
-        Self::SetWidgetPlaceHint,
-        Self::UpdateChecked,
-        Self::PcLocalDisk,
-        Self::ActReplayEdit,
-        Self::ToastReplayOn,
-        Self::ToastReplayOff,
-        Self::SetReplayNotify,
-        Self::OptNotifyBoth,
-        Self::OptNotifyOn,
-        Self::OptNotifyNone,
-        Self::HdrGames,
-        Self::OptGameAuto,
-        Self::OptGameAlways,
-        Self::OptGameNever,
-        Self::CutSave,
-        Self::CutSaveAs,
-        Self::CutCancel,
-        Self::CutLossless,
-        Self::CutReencode,
-        Self::CutPlay,
-        Self::CutPause,
-        Self::CutPrevious,
-        Self::CutNext,
-        Self::CutMute,
-        Self::CutClose,
-        Self::TipCopyText,
-        Self::ToastTextCopied,
-        Self::ToastNoText,
-        Self::ToastOcrFailed,
-        Self::ToastOcrNoLanguage,
-        Self::ToastOcrLanguages,
-        Self::CutAnimated,
-        Self::ToastMenuEdit,
-        Self::SetWindowBackdrop,
-        Self::OptBackdropNone,
-        Self::OptBackdropBlur,
-        Self::OptBackdropColour,
-        Self::TipLive,
-        Self::TipFreeze,
-        Self::TipRedo,
-        Self::TipClear,
-        Self::TipRightClick,
-        Self::UpdateInstalled,
-        Self::GrpSideBar,
-        Self::GrpWidget,
-        Self::GrpLocation,
-        Self::GrpEncoding,
-        Self::GrpCapture,
-        Self::GrpPicture,
-        Self::GrpFile,
-        Self::GrpPcSound,
-        Self::GrpMic,
-        Self::GrpTracks,
-        Self::GrpThisPc,
-        Self::UnitFrames,
-        Self::UnitMinutes,
-        Self::UnitMb,
-        Self::ShortcutModifierOnly,
-        Self::ShortcutUnknownKey,
-        Self::ShortcutNeedsModifier,
-        Self::SetOverlayOn,
-        Self::UiReset,
-        Self::UiCancel,
-        Self::UiResetPageTitle,
-        Self::UiResetPageBody,
-        Self::UiResetAll,
-        Self::UiResetAllHint,
-        Self::UiResetAllTitle,
-        Self::UiResetAllBody,
-        Self::GrpReset,
-        Self::GrpWindowCapture,
-        Self::OptBackdropGradient,
-        Self::SetBackdropColour,
-        Self::SetBackdropGradient,
-        Self::OptColourAccent,
-        Self::OptColourWhite,
-        Self::OptColourGrey,
-        Self::OptColourBlack,
-        Self::OptColourBlue,
-        Self::OptColourPurple,
-        Self::OptColourGreen,
-        Self::OptColourOrange,
-        Self::OptColourPink,
-        Self::OptGradientDusk,
-        Self::OptGradientSunset,
-        Self::OptGradientOcean,
-        Self::OptGradientForest,
-        Self::OptGradientNight,
-        Self::SetPresetBalanced,
-        Self::SetFolderUnreachable,
-        Self::SetAdmin,
-        Self::SetAdminGrant,
-        Self::SetAdminGranted,
-        Self::SetAdminHint,
-        Self::SetAdminHintMove,
-        Self::SetAdminDownloading,
-    ];
+keys! {
+    TrayTooltip => "Vixeeny", "Vixeeny";
+    TrayTooltipRecording => "Vixeeny — recording", "Vixeeny — enregistrement";
+    MenuSettings => "Settings", "Paramètres";
+    MenuQuit => "Quit", "Quitter";
+    AppCrashed => "Vixeeny stopped unexpectedly", "Vixeeny s'est arrêté de façon inattendue";
+    HotkeysUnavailable => "Some shortcuts are unavailable: see Settings → Shortcuts.",
+        "Des raccourcis sont indisponibles : voir Paramètres → Raccourcis.";
+    ScrollTitle => "Scrolling capture", "Capture défilante";
+    ScrollIntro => "Scroll the content, then Enter or Finish.", "Faites défiler, puis Entrée ou Terminer.";
+    ScrollFinish => "Finish", "Terminer";
+    ScrollCancel => "Cancel", "Annuler";
+    OvlImage => "Screenshot", "Capture d'image";
+    OvlRegion => "Region", "Zone";
+    OvlWindow => "Window", "Fenêtre";
+    OvlScreen => "Screen", "Écran";
+    OvlAllMonitors => "All screens", "Tous les écrans";
+    OvlScrolling => "Scrolling capture", "Capture défilante";
+    OvlVideo => "Video", "Vidéo";
+    OvlRecord => "Record", "Enregistrer";
+    OvlStopRecording => "Stop recording", "Arrêter l'enregistrement";
+    OvlReplayStart => "Start replay buffer", "Activer le replay";
+    OvlReplayStop => "Stop replay buffer", "Désactiver le replay";
+    OvlReplaySave => "Save replay", "Sauvegarder le replay";
+    OvlSettings => "Settings", "Paramètres";
+    ScrollCapturing => "Capturing… {height} px (Enter to finish)", "Capture… {height} px (Entrée pour terminer)";
+    ScrollTruncated => "Height limit reached ({height} px)", "Hauteur maximale atteinte ({height} px)";
+    SecGeneral => "General", "Général";
+    SecShortcuts => "Shortcuts", "Raccourcis";
+    SecVideo => "Video", "Vidéo";
+    SecAudio => "Sound", "Son";
+    SecAbout => "About", "À propos";
+    SetLanguage => "Language", "Langue";
+    SetLangAuto => "Automatic", "Automatique";
+    SetTheme => "Theme", "Thème";
+    SetThemeSystem => "Follow the system", "Suivre le système";
+    SetThemeLight => "Light", "Clair";
+    SetThemeDark => "Dark", "Sombre";
+    SetAutostart => "Start with Windows", "Démarrage avec Windows";
+    SetNotifications => "Notifications", "Notifications";
+    SetOverlayEdge => "Screen edge", "Bord de l'écran";
+    SetEdgeLeft => "Left", "Gauche";
+    SetEdgeRight => "Right", "Droite";
+    SetEdgeTop => "Top", "Haut";
+    SetEdgeBottom => "Bottom", "Bas";
+    SetImageFormat => "Format", "Format";
+    SetShowCursor => "Include the cursor", "Inclure le curseur";
+    SetCopyClipboard => "Copy to the clipboard", "Copier dans le presse-papiers";
+    SetAvifDepth => "Colour depth", "Profondeur de couleur";
+    SetEncoder => "Encoder", "Encodeur";
+    SetContainer => "Container", "Conteneur";
+    SetResolution => "Resolution", "Résolution";
+    SetFps => "Frame rate", "Fréquence d'images";
+    SetChroma => "Chroma", "Chroma";
+    SetPreset => "Profile", "Profil";
+    SetSplit => "File splitting", "Découpage du fichier";
+    SetSplitOff => "Never", "Jamais";
+    SetSplitSize => "By size", "Par taille";
+    SetSplitDuration => "By duration", "Par durée";
+    SetSplitSizeMb => "Size of each part", "Taille de chaque partie";
+    SetSplitMinutes => "Length of each part", "Durée de chaque partie";
+    SetWidget => "Show the widget", "Afficher le widget";
+    SetWidgetCorner => "Position", "Position";
+    SetCornerTl => "Top left", "Haut gauche";
+    SetCornerTr => "Top right", "Haut droite";
+    SetCornerBl => "Bottom left", "Bas gauche";
+    SetCornerBr => "Bottom right", "Bas droite";
+    SetAudioRouting => "Audio tracks", "Pistes audio";
+    SetRouteEach => "One track per source", "Une piste par source";
+    SetRouteMix => "Everything on one track", "Tout sur une piste";
+    SetRouteAdvanced => "Advanced (settings file)", "Avancé (fichier de réglages)";
+    SetAudioCodec => "Codec", "Codec";
+    SetAudioBitrate => "Bitrate", "Débit";
+    SetAudioVbr => "Bitrate mode", "Mode de débit";
+    SetAudioDenoise => "Noise reduction", "Réduction de bruit";
+    SetHdrEnable => "HDR", "HDR";
+    SetEncoderKind => "Encoder type", "Type d'encodeur";
+    SetKindHardware => "Hardware (GPU)", "Matériel (GPU)";
+    SetKindSoftware => "Software (CPU)", "Logiciel (CPU)";
+    SetPresetBest => "Quality", "Qualité";
+    SetPresetLight => "Compact", "Compact";
+    SetPresetCustom => "Custom", "Personnalisé";
+    SetDetecting => "Detecting the encoders of this PC…", "Détection des encodeurs de ce PC…";
+    SetNoHardware => "No hardware encoder found: the processor encodes.",
+        "Aucun encodeur matériel trouvé : le processeur encode.";
+    SrcMic => "Windows default", "Par défaut (Windows)";
+    SrcAbsent => "absent", "absent";
+    UiPressKeys => "Press keys…", "Appuyez…";
+    UiKeysHelp => "Hold the keys, then release. Esc cancels.", "Maintenez les touches, puis relâchez. Échap annule.";
+    SetReplayStart => "Replay", "Replay";
+    SetReplayDuration => "Duration", "Durée";
+    SetTemplate => "File name template", "Modèle de nom de fichier";
+    SetCheckNow => "Check now", "Vérifier maintenant";
+    SetProblems => "Problems with these settings", "Problèmes avec ces réglages";
+    UiGithub => "GitHub page", "Page GitHub";
+    UiLogs => "Open the logs folder", "Ouvrir le dossier des logs";
+    ActCaptureRegion => "Capture a region", "Capturer une zone";
+    ActCaptureWindow => "Capture a window", "Capturer une fenêtre";
+    ActCaptureFullscreen => "Capture the screen", "Capturer l'écran";
+    ActCaptureAll => "Capture all screens", "Capturer tous les écrans";
+    ActCaptureScrolling => "Scrolling capture", "Capture défilante";
+    ActRecordToggle => "Start / stop recording", "Démarrer / arrêter l'enregistrement";
+    ActRecordPause => "Pause / resume recording", "Pause / reprise de l'enregistrement";
+    ActReplayToggle => "Turn the replay on / off", "Activer / désactiver le replay";
+    ActReplaySave => "Save the replay", "Sauvegarder le replay";
+    ActOverlay => "Open the side bar", "Ouvrir la barre latérale";
+    ActSettings => "Open the settings", "Ouvrir les paramètres";
+    ShortcutConflict => "Already used for “{action}”", "Déjà utilisé pour « {action} »";
+    ShortcutDuplicate => "Already in this list", "Déjà dans cette liste";
+    AboutLicense => "Licence: GNU GPL v3 or later", "Licence : GNU GPL v3 ou ultérieure";
+    ToastImageSaved => "Image saved", "Image enregistrée";
+    ToastRecordingSaved => "Recording saved", "Enregistrement terminé";
+    ToastReplaySaved => "Replay saved", "Replay enregistré";
+    ToastOpenFolder => "Open folder", "Ouvrir le dossier";
+    ToastOpenSettings => "Open settings", "Ouvrir les paramètres";
+    ToastCaptureFailed => "Capture failed", "Échec de la capture";
+    ToastRecordingFailed => "Recording failed", "Échec de l'enregistrement";
+    ToastReplayFailed => "Replay not saved", "Replay non enregistré";
+    ToastDiskFull => "The disk is full: free some space or pick another folder.",
+        "Le disque est plein : libérez de la place ou choisissez un autre dossier.";
+    ToastAccessDenied => "Access denied: pick a folder you can write to.",
+        "Accès refusé : choisissez un dossier où vous pouvez écrire.";
+    UpdateAvailable => "Vixeeny {version} is available. Open the settings to update.",
+        "Vixeeny {version} est disponible. Ouvrez les paramètres pour mettre à jour.";
+    UpdateNow => "Download and install", "Télécharger et installer";
+    UpdateUpToDate => "Vixeeny {version} is up to date", "Vixeeny {version} est à jour";
+    UpdateFound => "Version {version} is available", "La version {version} est disponible";
+    UpdateChecking => "Checking…", "Vérification…";
+    UpdateCheckFailed => "Check failed: no network, or GitHub unreachable.",
+        "Vérification impossible : pas de réseau, ou GitHub injoignable.";
+    UpdateInstalling => "Restarting…", "Redémarrage…";
+    ToastAudioLost => "Audio source lost: its track stays silent until it returns.",
+        "Source audio perdue : sa piste reste muette jusqu'à son retour.";
+    SetReplayStorage => "Replay storage", "Stockage du replay";
+    SetStorageRam => "Memory (RAM)", "Mémoire (RAM)";
+    SetStorageDisk => "Temporary files on disk", "Fichiers temporaires sur le disque";
+    UpdateDownloading => "Downloading version {version}…", "Téléchargement de la version {version}…";
+    UpdateReady => "Version {version} is ready", "La version {version} est prête";
+    UpdateReadyHint => "It installs at the next start of Vixeeny.",
+        "Elle s'installera au prochain démarrage de Vixeeny.";
+    UpdateRestart => "Restart", "Redémarrer";
+    UpdateView => "View", "Voir";
+    UpdateNever => "Never checked", "Jamais vérifié";
+    SetAutoUpdate => "Automatic updates", "Mises à jour automatiques";
+    OptAuto => "Automatic", "Automatique";
+    OptFlac => "FLAC (lossless)", "FLAC (sans perte)";
+    OptPcm16 => "PCM 16-bit", "PCM 16 bits";
+    OptPcm24 => "PCM 24-bit", "PCM 24 bits";
+    AboutTagline => "Screenshots and screen recording for Windows.", "Captures et enregistrement d'écran pour Windows.";
+    UiRetry => "Try again", "Réessayer";
+    UpdateCheckFailedShort => "Update check failed", "Vérification des mises à jour impossible";
+    UpdateFailedShort => "Update failed", "Échec de la mise à jour";
+    SetMicOn => "Record the microphone", "Enregistrer le micro";
+    SetMicDevice => "Device", "Périphérique";
+    SrcNoPrograms => "No program is playing sound.", "Aucun programme ne joue de son.";
+    SecReplay => "Replay", "Replay";
+    TipMove => "Move the zone or an annotation", "Déplacer la zone ou une annotation";
+    TipPen => "Pen", "Crayon";
+    TipHighlight => "Highlighter", "Surligneur";
+    TipLine => "Line", "Ligne";
+    TipArrow => "Arrow", "Flèche";
+    TipRectangle => "Rectangle", "Rectangle";
+    TipEllipse => "Ellipse", "Ellipse";
+    TipText => "Text", "Texte";
+    TipCounter => "Numbered marker", "Marqueur numéroté";
+    TipBlur => "Blur", "Flouter";
+    TipPixelate => "Pixelate", "Pixeliser";
+    TipStyle => "Colour and size (wheel: size)", "Couleur et taille (molette : taille)";
+    TipUndo => "Undo (Ctrl+Z)", "Annuler (Ctrl+Z)";
+    TipCopy => "Copy (Ctrl+C)", "Copier (Ctrl+C)";
+    TipSave => "Save (Ctrl+S) · Save as: Ctrl+Shift+S", "Enregistrer (Ctrl+S) · Enregistrer sous : Ctrl+Maj+S";
+    TipClose => "Close (Esc)", "Fermer (Échap)";
+    SecOverlay => "Overlay", "Overlay";
+    SecImage => "Image", "Image";
+    SecUpdates => "Updates", "Mise à jour";
+    SetFolder => "Folder", "Dossier";
+    SetSubfolder => "Subfolder per application", "Sous-dossier par application";
+    UiChange => "Change", "Modifier";
+    UiShow => "Open", "Ouvrir";
+    UiRemove => "Remove", "Retirer";
+    UiAddShortcut => "Add a shortcut", "Ajouter un raccourci";
+    SetQuality => "Quality", "Qualité";
+    SetPngCompression => "Compression", "Compression";
+    OptPngFast => "Fast", "Rapide";
+    OptPngDefault => "Normal", "Normale";
+    OptPngHigh => "Maximum", "Maximale";
+    SetPngOptimize => "oxipng optimisation", "Optimisation oxipng";
+    OptOff => "Off", "Désactivée";
+    SetLossless => "Lossless", "Sans perte";
+    SetEffort => "Compression effort", "Effort de compression";
+    SetAvifSpeed => "Encoding speed", "Vitesse d'encodage";
+    UiNoShortcut => "None", "Aucun";
+    OptRecommended => "recommended", "recommandé";
+    OptVbr => "Variable bitrate", "Débit variable";
+    OptCbr => "Constant bitrate", "Débit constant";
+    OptStereo => "Stereo", "Stéréo";
+    SetAudioChannels => "Channels", "Canaux";
+    SetSurroundHint => "5.1 and 7.1 need MKV with Opus, FLAC or PCM: recorded in stereo here.",
+        "Le 5.1 et le 7.1 demandent le MKV avec Opus, FLAC ou PCM : enregistré en stéréo ici.";
+    UiLicenses => "Third-party licences", "Licences tierces";
+    PcCpu => "Processor", "Processeur";
+    PcCores => "{cores} cores, {threads} threads", "{cores} cœurs, {threads} threads";
+    PcRam => "Memory (RAM)", "Mémoire vive";
+    PcGpu => "Graphics card", "Carte graphique";
+    PcIgpu => "Integrated graphics", "Graphiques intégrés";
+    SetCapture => "Audio source", "Source audio";
+    CapSystem => "All the PC sound", "Tout le son du PC";
+    CapTarget => "Only the recorded program", "Seulement le programme enregistré";
+    CapOutput => "One audio device", "Un appareil audio précis";
+    CapPrograms => "Chosen programs", "Programmes choisis";
+    CapNone => "None (microphone only)", "Aucun (micro seulement)";
+    SetAudioOutput => "Audio device", "Périphérique audio";
+    SrcClosed => "closed", "fermé";
+    ReplayEstimate => "About {size}", "Environ {size}";
+    ReplayEstimateRam => "About {size}, in RAM", "Environ {size}, en RAM";
+    ReplayEstimateDisk => "About {size}, on the disk (too big for the RAM)",
+        "Environ {size}, sur le disque (trop gros pour la RAM)";
+    SetAspect => "Aspect ratio", "Format d'image (ratio)";
+    OptAspectScreen => "The screen's ({ratio})", "Celui de l'écran ({ratio})";
+    OptAspectCrop => "{ratio}, cropped in the middle", "{ratio}, recadré au centre";
+    SetExpert => "Expert settings", "Paramètres experts";
+    SrcOutputs => "Outputs", "Sorties";
+    SrcInputs => "Inputs", "Entrées";
+    PcScreenN => "Screen {n}", "Écran {n}";
+    PcPrimary => "main", "principal";
+    PcFree => "{free} free of {total}", "{free} libres sur {total}";
+    OptGroupCompressed => "Compressed", "Compressés";
+    OptGroupLossless => "Lossless, heavy", "Sans perte, lourds";
+    SetMicVolume => "Volume", "Volume";
+    SetCaptureVolume => "Volume", "Volume";
+    SetReplayAfter => "Extend after the shortcut", "Prolonger après le raccourci";
+    OptReplayAfterNone => "No", "Non";
+    OptReplayAfter => "+{s} s", "+{s} s";
+    UiSearch => "Search a setting", "Rechercher un réglage";
+    UiSearchNone => "No setting matches “{query}”.", "Aucun réglage ne correspond à « {query} ».";
+    UiSearchTitle => "Search", "Recherche";
+    ShortcutTaken => "Already used by another program", "Déjà utilisé par un autre logiciel";
+    ShortcutWindows => "Reserved by Windows", "Réservé par Windows";
+    UiReport => "Report a problem", "Signaler un problème";
+    AboutReportReady => "Report ready, without personal data. Drop the selected file into the GitHub page.",
+        "Rapport prêt, sans données personnelles. Glissez le fichier sélectionné dans la page GitHub.";
+    SetDiskAlert => "Low disk space alert", "Alerte d'espace disque";
+    OptDiskAlertOff => "Never", "Jamais";
+    OptDiskAlert => "Below {pct} % free", "Sous {pct} % libres";
+    WidgetFramesLost => "{n} frame(s) lost: the encoder cannot keep up",
+        "{n} image(s) perdue(s) : l'encodeur ne suit pas";
+    WidgetDiskLow => "Disk almost full: {size} free", "Disque presque plein : {size} libres";
+    ToastMenuOpen => "Open the image", "Ouvrir l'image";
+    ToastMenuReveal => "Show in File Explorer", "Afficher dans l'Explorateur de fichiers";
+    ToastMenuClose => "Close", "Fermer";
+    SetCornerTc => "Top centre", "Haut centre";
+    SetCornerBc => "Bottom centre", "Bas centre";
+    SetCornerCustom => "Custom", "Personnalisée";
+    SetWidgetDisplay => "Visibility", "Visibilité";
+    OptDisplayAlways => "Always", "Toujours";
+    OptDisplayFade => "Fades after 3 s", "S'estompe après 3 s";
+    OptDisplayAlerts => "Only when something goes wrong", "Seulement en cas de problème";
+    ToastDiskLow => "Disk almost full", "Disque presque plein";
+    ToastReplayDiskLow => "{size} free on the replays disk: the next replays may fail.",
+        "{size} libres sur le disque des replays : les prochains peuvent échouer.";
+    SetWidgetPlaceHint => "Click anywhere on the screen for a place of your own.",
+        "Cliquez n'importe où sur l'écran pour une position personnalisée.";
+    UpdateChecked => "Last checked: {when}", "Dernière vérification : {when}";
+    PcLocalDisk => "Local Disk", "Disque local";
+    ActReplayEdit => "Save and edit the replay", "Sauvegarder et éditer le replay";
+    ToastReplayOn => "Replay on", "Replay activé";
+    ToastReplayOff => "Replay off", "Replay désactivé";
+    SetReplayNotify => "Notification when a game starts", "Notification au lancement d'un jeu";
+    OptNotifyBoth => "Always", "Toujours";
+    OptNotifyOn => "When the replay is on", "Si le replay est actif";
+    OptNotifyNone => "Never", "Jamais";
+    HdrGames => "Games", "Jeux";
+    OptGameAuto => "Detect automatically", "Détecter automatiquement";
+    OptGameAlways => "Always record", "Toujours enregistrer";
+    OptGameNever => "Never record", "Ne jamais enregistrer";
+    CutSave => "Save", "Enregistrer";
+    CutSaveAs => "Save as…", "Enregistrer sous…";
+    CutCancel => "Cancel", "Annuler";
+    CutLossless => "Starts on a key frame: copied as is, instant and lossless",
+        "Début sur une image clé : copie directe, instantanée et sans perte";
+    CutReencode => "Does not start on a key frame: the video is re-encoded",
+        "Début hors image clé : la vidéo est réencodée";
+    CutPlay => "Play (Space)", "Lecture (Espace)";
+    CutPause => "Pause (Space)", "Pause (Espace)";
+    CutPrevious => "Previous frame (←)", "Image précédente (←)";
+    CutNext => "Next frame (→)", "Image suivante (→)";
+    CutMute => "Sound (M)", "Son (M)";
+    CutClose => "Close (Esc)", "Fermer (Échap)";
+    TipCopyText => "Copy the text (Ctrl+Shift+C)", "Copier le texte (Ctrl+Maj+C)";
+    ToastTextCopied => "Text copied", "Texte copié";
+    ToastNoText => "No text found", "Aucun texte trouvé";
+    ToastOcrFailed => "Text could not be read", "Lecture du texte impossible";
+    ToastOcrNoLanguage =>
+        "Windows has no language with text recognition: add one in Time & language → Language & region.",
+        "Windows n'a aucune langue avec la reconnaissance de texte : ajoutez-en une dans Heure et langue → Langue et région.";
+    ToastOcrLanguages => "Languages", "Langues";
+    CutAnimated => "animated", "animé";
+    ToastMenuEdit => "Edit the image", "Modifier l'image";
+    SetWindowBackdrop => "Background", "Fond";
+    OptBackdropNone => "None", "Aucun";
+    OptBackdropBlur => "Wallpaper, blurred", "Fond d'écran, flouté";
+    OptBackdropColour => "Plain colour", "Couleur unie";
+    TipLive => "Show the screens live (Space)", "Voir l'écran en direct (Espace)";
+    TipFreeze => "Freeze the screens (Space)", "Figer l'écran (Espace)";
+    TipRedo => "Redo (Ctrl+Y)", "Rétablir (Ctrl+Y)";
+    TipClear => "Clear everything", "Tout effacer";
+    TipRightClick => "Right-click: ", "Clic droit : ";
+    UpdateInstalled => "Installed version: {version}", "Version installée : {version}";
+    GrpSideBar => "Side bar", "Barre latérale";
+    GrpWidget => "Recording widget", "Widget d'enregistrement";
+    GrpLocation => "Location", "Emplacement";
+    GrpEncoding => "Encoding", "Encodage";
+    GrpCapture => "Capture", "Capture";
+    GrpPicture => "Picture", "Image";
+    GrpFile => "File", "Fichier";
+    GrpPcSound => "Computer sound", "Son du PC";
+    GrpMic => "Microphone", "Micro";
+    GrpTracks => "Tracks and format", "Pistes et format";
+    GrpThisPc => "This PC", "Ce PC";
+    UnitFrames => "frames", "images";
+    UnitMinutes => "min", "min";
+    UnitMb => "MB", "Mo";
+    ShortcutModifierOnly => "Add a key to the modifiers", "Ajoutez une touche aux modificateurs";
+    ShortcutUnknownKey => "Unknown key: {key}", "Touche inconnue : {key}";
+    ShortcutNeedsModifier => "{key} needs CTRL, ALT, SHIFT or WIN", "{key} demande CTRL, ALT, SHIFT ou WIN";
+    SetOverlayOn => "Turn on the side bar", "Activer la barre latérale";
+    UiReset => "Reset", "Réinitialiser";
+    UiCancel => "Cancel", "Annuler";
+    UiResetPageTitle => "Reset the \"{page}\" page?", "Réinitialiser la page « {page} » ?";
+    UiResetPageBody => "Its settings go back to their default values. The other pages do not change.",
+        "Ses paramètres reprennent leur valeur par défaut. Les autres pages ne changent pas.";
+    UiResetAll => "Reset all settings", "Réinitialiser tous les paramètres";
+    UiResetAllHint => "Every page goes back to its default values.",
+        "Toutes les pages reprennent leurs valeurs par défaut.";
+    UiResetAllTitle => "Reset all settings?", "Réinitialiser tous les paramètres ?";
+    UiResetAllBody => "Every setting, on every page, goes back to its default value.",
+        "Tous les paramètres, sur toutes les pages, reprennent leur valeur par défaut.";
+    GrpReset => "Reset", "Réinitialisation";
+    GrpWindowCapture => "Window capture", "Capture de fenêtre";
+    OptBackdropGradient => "Gradient", "Dégradé";
+    SetBackdropColour => "Colour", "Couleur";
+    SetBackdropGradient => "Gradient", "Dégradé";
+    SetPresetBalanced => "Balanced", "Équilibré";
+    SetFolderUnreachable => "This folder cannot be reached: files go to the default folder.",
+        "Dossier inaccessible : les fichiers vont dans le dossier par défaut.";
+    SetAdmin => "Administrator rights", "Droits administrateur";
+    SetAdminGrant => "Grant", "Accorder";
+    SetAdminGranted => "Granted", "Accordés";
+    SetAdminHint =>
+        "Shortcuts and captures also work in programs started as administrator, games often. Windows asks once.",
+        "Les raccourcis et les captures fonctionnent aussi dans les programmes lancés en administrateur, souvent des jeux. Windows le demande une fois.";
+    SetAdminHintMove =>
+        "Shortcuts and captures also work in programs started as administrator, games often. Vixeeny is installed again in Program Files, where only administrators can change its files; your settings stay. Windows asks once.",
+        "Les raccourcis et les captures fonctionnent aussi dans les programmes lancés en administrateur, souvent des jeux. Vixeeny est réinstallé dans Program Files, où seuls les administrateurs peuvent modifier ses fichiers ; vos paramètres restent. Windows le demande une fois.";
+    SetAdminDownloading => "Downloading the installer… {percent} %", "Téléchargement de l'installateur… {percent} %";
 }
 
 impl Lang {
@@ -751,780 +429,9 @@ pub fn size_label(bytes: u64, lang: Lang) -> String {
     }
 }
 
-pub fn tr(key: Key, lang: Lang) -> &'static str {
-    match (key, lang) {
-        (Key::TrayTooltip, _) => "Vixeeny",
-        (Key::TrayTooltipRecording, Lang::En) => "Vixeeny — recording",
-        (Key::TrayTooltipRecording, Lang::Fr) => "Vixeeny — enregistrement",
-        (Key::MenuSettings, Lang::En) => "Settings",
-        (Key::MenuSettings, Lang::Fr) => "Paramètres",
-        (Key::MenuQuit, Lang::En) => "Quit",
-        (Key::MenuQuit, Lang::Fr) => "Quitter",
-        (Key::AppCrashed, Lang::En) => "Vixeeny stopped unexpectedly",
-        (Key::AppCrashed, Lang::Fr) => "Vixeeny s'est arrêté de façon inattendue",
-        (Key::HotkeysUnavailable, Lang::En) => {
-            "Some shortcuts are unavailable: see Settings → Shortcuts."
-        }
-        (Key::HotkeysUnavailable, Lang::Fr) => {
-            "Des raccourcis sont indisponibles : voir Paramètres → Raccourcis."
-        }
-        (Key::ScrollTitle, Lang::En) => "Scrolling capture",
-        (Key::ScrollTitle, Lang::Fr) => "Capture défilante",
-        (Key::ScrollIntro, Lang::En) => "Scroll the content, then Enter or Finish.",
-        (Key::ScrollIntro, Lang::Fr) => "Faites défiler, puis Entrée ou Terminer.",
-        (Key::ScrollFinish, Lang::En) => "Finish",
-        (Key::ScrollFinish, Lang::Fr) => "Terminer",
-        (Key::ScrollCancel, Lang::En) => "Cancel",
-        (Key::ScrollCancel, Lang::Fr) => "Annuler",
-        (Key::OvlImage, Lang::En) => "Screenshot",
-        (Key::OvlImage, Lang::Fr) => "Capture d'image",
-        (Key::OvlRegion, Lang::En) => "Region",
-        (Key::OvlRegion, Lang::Fr) => "Zone",
-        (Key::OvlWindow, Lang::En) => "Window",
-        (Key::OvlWindow, Lang::Fr) => "Fenêtre",
-        (Key::OvlScreen, Lang::En) => "Screen",
-        (Key::OvlScreen, Lang::Fr) => "Écran",
-        (Key::OvlAllMonitors, Lang::En) => "All screens",
-        (Key::OvlAllMonitors, Lang::Fr) => "Tous les écrans",
-        (Key::OvlScrolling, Lang::En) => "Scrolling capture",
-        (Key::OvlScrolling, Lang::Fr) => "Capture défilante",
-        (Key::OvlVideo, Lang::En) => "Video",
-        (Key::OvlVideo, Lang::Fr) => "Vidéo",
-        (Key::OvlRecord, Lang::En) => "Record",
-        (Key::OvlRecord, Lang::Fr) => "Enregistrer",
-        (Key::OvlStopRecording, Lang::En) => "Stop recording",
-        (Key::OvlStopRecording, Lang::Fr) => "Arrêter l'enregistrement",
-        (Key::OvlReplayStart, Lang::En) => "Start replay buffer",
-        (Key::OvlReplayStart, Lang::Fr) => "Activer le replay",
-        (Key::OvlReplayStop, Lang::En) => "Stop replay buffer",
-        (Key::OvlReplayStop, Lang::Fr) => "Désactiver le replay",
-        (Key::OvlReplaySave, Lang::En) => "Save replay",
-        (Key::OvlReplaySave, Lang::Fr) => "Sauvegarder le replay",
-        (Key::OvlSettings, Lang::En) => "Settings",
-        (Key::OvlSettings, Lang::Fr) => "Paramètres",
-        (Key::ScrollCapturing, Lang::En) => "Capturing… {height} px (Enter to finish)",
-        (Key::ScrollCapturing, Lang::Fr) => "Capture… {height} px (Entrée pour terminer)",
-        (Key::ScrollTruncated, Lang::En) => "Height limit reached ({height} px)",
-        (Key::ScrollTruncated, Lang::Fr) => "Hauteur maximale atteinte ({height} px)",
-        (Key::SecGeneral, Lang::En) => "General",
-        (Key::SecGeneral, Lang::Fr) => "Général",
-        (Key::SecShortcuts, Lang::En) => "Shortcuts",
-        (Key::SecShortcuts, Lang::Fr) => "Raccourcis",
-        (Key::SecVideo, Lang::En) => "Video",
-        (Key::SecVideo, Lang::Fr) => "Vidéo",
-        (Key::SecAudio, Lang::En) => "Sound",
-        (Key::SecAudio, Lang::Fr) => "Son",
-        (Key::SecAbout, Lang::En) => "About",
-        (Key::SecAbout, Lang::Fr) => "À propos",
-        (Key::SetLanguage, Lang::En) => "Language",
-        (Key::SetLanguage, Lang::Fr) => "Langue",
-        (Key::SetLangAuto, Lang::En) => "Automatic",
-        (Key::SetLangAuto, Lang::Fr) => "Automatique",
-        (Key::SetTheme, Lang::En) => "Theme",
-        (Key::SetTheme, Lang::Fr) => "Thème",
-        (Key::SetThemeSystem, Lang::En) => "Follow the system",
-        (Key::SetThemeSystem, Lang::Fr) => "Suivre le système",
-        (Key::SetThemeLight, Lang::En) => "Light",
-        (Key::SetThemeLight, Lang::Fr) => "Clair",
-        (Key::SetThemeDark, Lang::En) => "Dark",
-        (Key::SetThemeDark, Lang::Fr) => "Sombre",
-        (Key::SetAutostart, Lang::En) => "Start with Windows",
-        (Key::SetAutostart, Lang::Fr) => "Démarrage avec Windows",
-        (Key::SetNotifications, Lang::En) => "Notifications",
-        (Key::SetNotifications, Lang::Fr) => "Notifications",
-        (Key::SetOverlayEdge, Lang::En) => "Screen edge",
-        (Key::SetOverlayEdge, Lang::Fr) => "Bord de l'écran",
-        (Key::SetEdgeLeft, Lang::En) => "Left",
-        (Key::SetEdgeLeft, Lang::Fr) => "Gauche",
-        (Key::SetEdgeRight, Lang::En) => "Right",
-        (Key::SetEdgeRight, Lang::Fr) => "Droite",
-        (Key::SetEdgeTop, Lang::En) => "Top",
-        (Key::SetEdgeTop, Lang::Fr) => "Haut",
-        (Key::SetEdgeBottom, Lang::En) => "Bottom",
-        (Key::SetEdgeBottom, Lang::Fr) => "Bas",
-        (Key::SetImageFormat, Lang::En) => "Format",
-        (Key::SetImageFormat, Lang::Fr) => "Format",
-        (Key::SetShowCursor, Lang::En) => "Include the cursor",
-        (Key::SetShowCursor, Lang::Fr) => "Inclure le curseur",
-        (Key::SetCopyClipboard, Lang::En) => "Copy to the clipboard",
-        (Key::SetCopyClipboard, Lang::Fr) => "Copier dans le presse-papiers",
-        (Key::SetAvifDepth, Lang::En) => "Colour depth",
-        (Key::SetAvifDepth, Lang::Fr) => "Profondeur de couleur",
-        (Key::SetEncoder, Lang::En) => "Encoder",
-        (Key::SetEncoder, Lang::Fr) => "Encodeur",
-        (Key::SetContainer, Lang::En) => "Container",
-        (Key::SetContainer, Lang::Fr) => "Conteneur",
-        (Key::SetResolution, Lang::En) => "Resolution",
-        (Key::SetResolution, Lang::Fr) => "Résolution",
-        (Key::SetFps, Lang::En) => "Frame rate",
-        (Key::SetFps, Lang::Fr) => "Fréquence d'images",
-        (Key::SetChroma, Lang::En) => "Chroma",
-        (Key::SetChroma, Lang::Fr) => "Chroma",
-        (Key::SetPreset, Lang::En) => "Profile",
-        (Key::SetPreset, Lang::Fr) => "Profil",
-        (Key::SetSplit, Lang::En) => "File splitting",
-        (Key::SetSplit, Lang::Fr) => "Découpage du fichier",
-        (Key::SetSplitOff, Lang::En) => "Never",
-        (Key::SetSplitOff, Lang::Fr) => "Jamais",
-        (Key::SetSplitSize, Lang::En) => "By size",
-        (Key::SetSplitSize, Lang::Fr) => "Par taille",
-        (Key::SetSplitDuration, Lang::En) => "By duration",
-        (Key::SetSplitDuration, Lang::Fr) => "Par durée",
-        (Key::SetSplitSizeMb, Lang::En) => "Size of each part",
-        (Key::SetSplitSizeMb, Lang::Fr) => "Taille de chaque partie",
-        (Key::SetSplitMinutes, Lang::En) => "Length of each part",
-        (Key::SetSplitMinutes, Lang::Fr) => "Durée de chaque partie",
-        (Key::SetWidget, Lang::En) => "Show the widget",
-        (Key::SetWidget, Lang::Fr) => "Afficher le widget",
-        (Key::SetWidgetCorner, Lang::En) => "Position",
-        (Key::SetWidgetCorner, Lang::Fr) => "Position",
-        (Key::SetCornerTl, Lang::En) => "Top left",
-        (Key::SetCornerTl, Lang::Fr) => "Haut gauche",
-        (Key::SetCornerTr, Lang::En) => "Top right",
-        (Key::SetCornerTr, Lang::Fr) => "Haut droite",
-        (Key::SetCornerBl, Lang::En) => "Bottom left",
-        (Key::SetCornerBl, Lang::Fr) => "Bas gauche",
-        (Key::SetCornerBr, Lang::En) => "Bottom right",
-        (Key::SetCornerBr, Lang::Fr) => "Bas droite",
-        (Key::SetAudioRouting, Lang::En) => "Audio tracks",
-        (Key::SetAudioRouting, Lang::Fr) => "Pistes audio",
-        (Key::SetRouteEach, Lang::En) => "One track per source",
-        (Key::SetRouteEach, Lang::Fr) => "Une piste par source",
-        (Key::SetRouteMix, Lang::En) => "Everything on one track",
-        (Key::SetRouteMix, Lang::Fr) => "Tout sur une piste",
-        (Key::SetRouteAdvanced, Lang::En) => "Advanced (settings file)",
-        (Key::SetRouteAdvanced, Lang::Fr) => "Avancé (fichier de réglages)",
-        (Key::SetAudioCodec, Lang::En) => "Codec",
-        (Key::SetAudioCodec, Lang::Fr) => "Codec",
-        (Key::SetAudioBitrate, Lang::En) => "Bitrate",
-        (Key::SetAudioBitrate, Lang::Fr) => "Débit",
-        (Key::SetAudioVbr, Lang::En) => "Bitrate mode",
-        (Key::SetAudioVbr, Lang::Fr) => "Mode de débit",
-        (Key::SetAudioDenoise, Lang::En) => "Noise reduction",
-        (Key::SetAudioDenoise, Lang::Fr) => "Réduction de bruit",
-        (Key::SetHdrEnable, Lang::En) => "HDR",
-        (Key::SetHdrEnable, Lang::Fr) => "HDR",
-        (Key::SetEncoderKind, Lang::En) => "Encoder type",
-        (Key::SetEncoderKind, Lang::Fr) => "Type d'encodeur",
-        (Key::SetKindHardware, Lang::En) => "Hardware (GPU)",
-        (Key::SetKindHardware, Lang::Fr) => "Matériel (GPU)",
-        (Key::SetKindSoftware, Lang::En) => "Software (CPU)",
-        (Key::SetKindSoftware, Lang::Fr) => "Logiciel (CPU)",
-        (Key::SetPresetBest, Lang::En) => "Quality",
-        (Key::SetPresetBest, Lang::Fr) => "Qualité",
-        (Key::SetPresetLight, Lang::En) => "Compact",
-        (Key::SetPresetLight, Lang::Fr) => "Compact",
-        (Key::SetPresetCustom, Lang::En) => "Custom",
-        (Key::SetPresetCustom, Lang::Fr) => "Personnalisé",
-        (Key::SetDetecting, Lang::En) => "Detecting the encoders of this PC…",
-        (Key::SetDetecting, Lang::Fr) => "Détection des encodeurs de ce PC…",
-        (Key::SetNoHardware, Lang::En) => "No hardware encoder found: the processor encodes.",
-        (Key::SetNoHardware, Lang::Fr) => "Aucun encodeur matériel trouvé : le processeur encode.",
-        (Key::SrcMic, Lang::En) => "Windows default",
-        (Key::SrcMic, Lang::Fr) => "Par défaut (Windows)",
-        (Key::SrcAbsent, Lang::En) => "absent",
-        (Key::SrcAbsent, Lang::Fr) => "absent",
-        (Key::UiPressKeys, Lang::En) => "Press keys…",
-        (Key::UiPressKeys, Lang::Fr) => "Appuyez…",
-        (Key::UiKeysHelp, Lang::En) => "Hold the keys, then release. Esc cancels.",
-        (Key::UiKeysHelp, Lang::Fr) => "Maintenez les touches, puis relâchez. Échap annule.",
-        (Key::SetReplayStart, Lang::En) => "Replay",
-        (Key::SetReplayStart, Lang::Fr) => "Replay",
-        (Key::SetReplayDuration, Lang::En) => "Duration",
-        (Key::SetReplayDuration, Lang::Fr) => "Durée",
-        (Key::SetTemplate, Lang::En) => "File name template",
-        (Key::SetTemplate, Lang::Fr) => "Modèle de nom de fichier",
-        (Key::SetCheckNow, Lang::En) => "Check now",
-        (Key::SetCheckNow, Lang::Fr) => "Vérifier maintenant",
-        (Key::SetProblems, Lang::En) => "Problems with these settings",
-        (Key::SetProblems, Lang::Fr) => "Problèmes avec ces réglages",
-        (Key::UiGithub, Lang::En) => "GitHub page",
-        (Key::UiGithub, Lang::Fr) => "Page GitHub",
-        (Key::UiLogs, Lang::En) => "Open the logs folder",
-        (Key::UiLogs, Lang::Fr) => "Ouvrir le dossier des logs",
-        (Key::ActCaptureRegion, Lang::En) => "Capture a region",
-        (Key::ActCaptureRegion, Lang::Fr) => "Capturer une zone",
-        (Key::ActCaptureWindow, Lang::En) => "Capture a window",
-        (Key::ActCaptureWindow, Lang::Fr) => "Capturer une fenêtre",
-        (Key::ActCaptureFullscreen, Lang::En) => "Capture the screen",
-        (Key::ActCaptureFullscreen, Lang::Fr) => "Capturer l'écran",
-        (Key::ActCaptureAll, Lang::En) => "Capture all screens",
-        (Key::ActCaptureAll, Lang::Fr) => "Capturer tous les écrans",
-        (Key::ActCaptureScrolling, Lang::En) => "Scrolling capture",
-        (Key::ActCaptureScrolling, Lang::Fr) => "Capture défilante",
-        (Key::ActRecordToggle, Lang::En) => "Start / stop recording",
-        (Key::ActRecordToggle, Lang::Fr) => "Démarrer / arrêter l'enregistrement",
-        (Key::ActRecordPause, Lang::En) => "Pause / resume recording",
-        (Key::ActRecordPause, Lang::Fr) => "Pause / reprise de l'enregistrement",
-        (Key::ActReplayToggle, Lang::En) => "Turn the replay on / off",
-        (Key::ActReplayToggle, Lang::Fr) => "Activer / désactiver le replay",
-        (Key::ActReplaySave, Lang::En) => "Save the replay",
-        (Key::ActReplaySave, Lang::Fr) => "Sauvegarder le replay",
-        (Key::ActOverlay, Lang::En) => "Open the side bar",
-        (Key::ActOverlay, Lang::Fr) => "Ouvrir la barre latérale",
-        (Key::ActSettings, Lang::En) => "Open the settings",
-        (Key::ActSettings, Lang::Fr) => "Ouvrir les paramètres",
-        (Key::ShortcutConflict, Lang::En) => "Already used for “{action}”",
-        (Key::ShortcutConflict, Lang::Fr) => "Déjà utilisé pour « {action} »",
-        (Key::ShortcutDuplicate, Lang::En) => "Already in this list",
-        (Key::ShortcutDuplicate, Lang::Fr) => "Déjà dans cette liste",
-        (Key::AboutLicense, Lang::En) => "Licence: GNU GPL v3 or later",
-        (Key::AboutLicense, Lang::Fr) => "Licence : GNU GPL v3 ou ultérieure",
-        (Key::ToastImageSaved, Lang::En) => "Image saved",
-        (Key::ToastImageSaved, Lang::Fr) => "Image enregistrée",
-        (Key::ToastRecordingSaved, Lang::En) => "Recording saved",
-        (Key::ToastRecordingSaved, Lang::Fr) => "Enregistrement terminé",
-        (Key::ToastReplaySaved, Lang::En) => "Replay saved",
-        (Key::ToastReplaySaved, Lang::Fr) => "Replay enregistré",
-        (Key::ToastOpenFolder, Lang::En) => "Open folder",
-        (Key::ToastOpenFolder, Lang::Fr) => "Ouvrir le dossier",
-        (Key::ToastOpenSettings, Lang::En) => "Open settings",
-        (Key::ToastOpenSettings, Lang::Fr) => "Ouvrir les paramètres",
-        (Key::ToastCaptureFailed, Lang::En) => "Capture failed",
-        (Key::ToastCaptureFailed, Lang::Fr) => "Échec de la capture",
-        (Key::ToastRecordingFailed, Lang::En) => "Recording failed",
-        (Key::ToastRecordingFailed, Lang::Fr) => "Échec de l'enregistrement",
-        (Key::ToastReplayFailed, Lang::En) => "Replay not saved",
-        (Key::ToastReplayFailed, Lang::Fr) => "Replay non enregistré",
-        (Key::ToastDiskFull, Lang::En) => {
-            "The disk is full: free some space or pick another folder."
-        }
-        (Key::ToastDiskFull, Lang::Fr) => {
-            "Le disque est plein : libérez de la place ou choisissez un autre dossier."
-        }
-        (Key::ToastAccessDenied, Lang::En) => "Access denied: pick a folder you can write to.",
-        (Key::ToastAccessDenied, Lang::Fr) => {
-            "Accès refusé : choisissez un dossier où vous pouvez écrire."
-        }
-        (Key::UpdateAvailable, Lang::En) => {
-            "Vixeeny {version} is available. Open the settings to update."
-        }
-        (Key::UpdateAvailable, Lang::Fr) => {
-            "Vixeeny {version} est disponible. Ouvrez les paramètres pour mettre à jour."
-        }
-        (Key::UpdateNow, Lang::En) => "Download and install",
-        (Key::UpdateNow, Lang::Fr) => "Télécharger et installer",
-        (Key::UpdateUpToDate, Lang::En) => "Vixeeny {version} is up to date",
-        (Key::UpdateUpToDate, Lang::Fr) => "Vixeeny {version} est à jour",
-        (Key::UpdateFound, Lang::En) => "Version {version} is available",
-        (Key::UpdateFound, Lang::Fr) => "La version {version} est disponible",
-        (Key::UpdateChecking, Lang::En) => "Checking…",
-        (Key::UpdateChecking, Lang::Fr) => "Vérification…",
-        (Key::UpdateCheckFailed, Lang::En) => "Check failed: no network, or GitHub unreachable.",
-        (Key::UpdateCheckFailed, Lang::Fr) => {
-            "Vérification impossible : pas de réseau, ou GitHub injoignable."
-        }
-        (Key::UpdateInstalling, Lang::En) => "Restarting…",
-        (Key::UpdateInstalling, Lang::Fr) => "Redémarrage…",
-        (Key::ToastAudioLost, Lang::En) => {
-            "Audio source lost: its track stays silent until it returns."
-        }
-        (Key::ToastAudioLost, Lang::Fr) => {
-            "Source audio perdue : sa piste reste muette jusqu'à son retour."
-        }
-        (Key::SetReplayStorage, Lang::En) => "Replay storage",
-        (Key::SetReplayStorage, Lang::Fr) => "Stockage du replay",
-        (Key::SetStorageRam, Lang::En) => "Memory (RAM)",
-        (Key::SetStorageRam, Lang::Fr) => "Mémoire (RAM)",
-        (Key::SetStorageDisk, Lang::En) => "Temporary files on disk",
-        (Key::SetStorageDisk, Lang::Fr) => "Fichiers temporaires sur le disque",
-        (Key::UpdateDownloading, Lang::En) => "Downloading version {version}…",
-        (Key::UpdateDownloading, Lang::Fr) => "Téléchargement de la version {version}…",
-        (Key::UpdateReady, Lang::En) => "Version {version} is ready",
-        (Key::UpdateReady, Lang::Fr) => "La version {version} est prête",
-        (Key::UpdateReadyHint, Lang::En) => "It installs at the next start of Vixeeny.",
-        (Key::UpdateReadyHint, Lang::Fr) => "Elle s'installera au prochain démarrage de Vixeeny.",
-        (Key::UpdateRestart, Lang::En) => "Restart",
-        (Key::UpdateRestart, Lang::Fr) => "Redémarrer",
-        (Key::UpdateView, Lang::En) => "View",
-        (Key::UpdateView, Lang::Fr) => "Voir",
-        (Key::UpdateNever, Lang::En) => "Never checked",
-        (Key::UpdateNever, Lang::Fr) => "Jamais vérifié",
-        (Key::SetAutoUpdate, Lang::En) => "Automatic updates",
-        (Key::SetAutoUpdate, Lang::Fr) => "Mises à jour automatiques",
-        (Key::OptAuto, Lang::En) => "Automatic",
-        (Key::OptAuto, Lang::Fr) => "Automatique",
-        (Key::OptFlac, Lang::En) => "FLAC (lossless)",
-        (Key::OptFlac, Lang::Fr) => "FLAC (sans perte)",
-        (Key::OptPcm16, Lang::En) => "PCM 16-bit",
-        (Key::OptPcm16, Lang::Fr) => "PCM 16 bits",
-        (Key::OptPcm24, Lang::En) => "PCM 24-bit",
-        (Key::OptPcm24, Lang::Fr) => "PCM 24 bits",
-        (Key::AboutTagline, Lang::En) => "Screenshots and screen recording for Windows.",
-        (Key::AboutTagline, Lang::Fr) => "Captures et enregistrement d'écran pour Windows.",
-        (Key::UiRetry, Lang::En) => "Try again",
-        (Key::UiRetry, Lang::Fr) => "Réessayer",
-        (Key::UpdateCheckFailedShort, Lang::En) => "Update check failed",
-        (Key::UpdateCheckFailedShort, Lang::Fr) => "Vérification des mises à jour impossible",
-        (Key::UpdateFailedShort, Lang::En) => "Update failed",
-        (Key::UpdateFailedShort, Lang::Fr) => "Échec de la mise à jour",
-        (Key::SetMicOn, Lang::En) => "Record the microphone",
-        (Key::SetMicOn, Lang::Fr) => "Enregistrer le micro",
-        (Key::SetMicDevice, Lang::En) => "Device",
-        (Key::SetMicDevice, Lang::Fr) => "Périphérique",
-        (Key::SrcNoPrograms, Lang::En) => "No program is playing sound.",
-        (Key::SrcNoPrograms, Lang::Fr) => "Aucun programme ne joue de son.",
-        (Key::SecReplay, Lang::En) => "Replay",
-        (Key::SecReplay, Lang::Fr) => "Replay",
-        (Key::TipMove, Lang::En) => "Move the zone or an annotation",
-        (Key::TipMove, Lang::Fr) => "Déplacer la zone ou une annotation",
-        (Key::TipPen, Lang::En) => "Pen",
-        (Key::TipPen, Lang::Fr) => "Crayon",
-        (Key::TipHighlight, Lang::En) => "Highlighter",
-        (Key::TipHighlight, Lang::Fr) => "Surligneur",
-        (Key::TipLine, Lang::En) => "Line",
-        (Key::TipLine, Lang::Fr) => "Ligne",
-        (Key::TipArrow, Lang::En) => "Arrow",
-        (Key::TipArrow, Lang::Fr) => "Flèche",
-        (Key::TipRectangle, Lang::En) => "Rectangle",
-        (Key::TipRectangle, Lang::Fr) => "Rectangle",
-        (Key::TipEllipse, Lang::En) => "Ellipse",
-        (Key::TipEllipse, Lang::Fr) => "Ellipse",
-        (Key::TipText, Lang::En) => "Text",
-        (Key::TipText, Lang::Fr) => "Texte",
-        (Key::TipCounter, Lang::En) => "Numbered marker",
-        (Key::TipCounter, Lang::Fr) => "Marqueur numéroté",
-        (Key::TipBlur, Lang::En) => "Blur",
-        (Key::TipBlur, Lang::Fr) => "Flouter",
-        (Key::TipPixelate, Lang::En) => "Pixelate",
-        (Key::TipPixelate, Lang::Fr) => "Pixeliser",
-        (Key::TipStyle, Lang::En) => "Colour and size (wheel: size)",
-        (Key::TipStyle, Lang::Fr) => "Couleur et taille (molette : taille)",
-        (Key::TipUndo, Lang::En) => "Undo (Ctrl+Z)",
-        (Key::TipUndo, Lang::Fr) => "Annuler (Ctrl+Z)",
-        (Key::TipCopy, Lang::En) => "Copy (Ctrl+C)",
-        (Key::TipCopy, Lang::Fr) => "Copier (Ctrl+C)",
-        (Key::TipSave, Lang::En) => "Save (Ctrl+S) · Save as: Ctrl+Shift+S",
-        (Key::TipSave, Lang::Fr) => "Enregistrer (Ctrl+S) · Enregistrer sous : Ctrl+Maj+S",
-        (Key::TipClose, Lang::En) => "Close (Esc)",
-        (Key::TipClose, Lang::Fr) => "Fermer (Échap)",
-        (Key::SecOverlay, Lang::En) => "Overlay",
-        (Key::SecOverlay, Lang::Fr) => "Overlay",
-        (Key::SecImage, Lang::En) => "Image",
-        (Key::SecImage, Lang::Fr) => "Image",
-        (Key::SecUpdates, Lang::En) => "Updates",
-        (Key::SecUpdates, Lang::Fr) => "Mise à jour",
-        (Key::SetFolder, Lang::En) => "Folder",
-        (Key::SetFolder, Lang::Fr) => "Dossier",
-        (Key::SetSubfolder, Lang::En) => "Subfolder per application",
-        (Key::SetSubfolder, Lang::Fr) => "Sous-dossier par application",
-        (Key::UiChange, Lang::En) => "Change",
-        (Key::UiChange, Lang::Fr) => "Modifier",
-        (Key::UiShow, Lang::En) => "Open",
-        (Key::UiShow, Lang::Fr) => "Ouvrir",
-        (Key::UiRemove, Lang::En) => "Remove",
-        (Key::UiRemove, Lang::Fr) => "Retirer",
-        (Key::UiAddShortcut, Lang::En) => "Add a shortcut",
-        (Key::UiAddShortcut, Lang::Fr) => "Ajouter un raccourci",
-        (Key::SetQuality, Lang::En) => "Quality",
-        (Key::SetQuality, Lang::Fr) => "Qualité",
-        (Key::SetPngCompression, Lang::En) => "Compression",
-        (Key::SetPngCompression, Lang::Fr) => "Compression",
-        (Key::OptPngFast, Lang::En) => "Fast",
-        (Key::OptPngFast, Lang::Fr) => "Rapide",
-        (Key::OptPngDefault, Lang::En) => "Normal",
-        (Key::OptPngDefault, Lang::Fr) => "Normale",
-        (Key::OptPngHigh, Lang::En) => "Maximum",
-        (Key::OptPngHigh, Lang::Fr) => "Maximale",
-        (Key::SetPngOptimize, Lang::En) => "oxipng optimisation",
-        (Key::SetPngOptimize, Lang::Fr) => "Optimisation oxipng",
-        (Key::OptOff, Lang::En) => "Off",
-        (Key::OptOff, Lang::Fr) => "Désactivée",
-        (Key::SetLossless, Lang::En) => "Lossless",
-        (Key::SetLossless, Lang::Fr) => "Sans perte",
-        (Key::SetEffort, Lang::En) => "Compression effort",
-        (Key::SetEffort, Lang::Fr) => "Effort de compression",
-        (Key::SetAvifSpeed, Lang::En) => "Encoding speed",
-        (Key::SetAvifSpeed, Lang::Fr) => "Vitesse d'encodage",
-        (Key::UiNoShortcut, Lang::En) => "None",
-        (Key::UiNoShortcut, Lang::Fr) => "Aucun",
-        (Key::OptRecommended, Lang::En) => "recommended",
-        (Key::OptRecommended, Lang::Fr) => "recommandé",
-        (Key::OptVbr, Lang::En) => "Variable bitrate",
-        (Key::OptVbr, Lang::Fr) => "Débit variable",
-        (Key::OptCbr, Lang::En) => "Constant bitrate",
-        (Key::OptCbr, Lang::Fr) => "Débit constant",
-        (Key::OptStereo, Lang::En) => "Stereo",
-        (Key::OptStereo, Lang::Fr) => "Stéréo",
-        (Key::SetAudioChannels, Lang::En) => "Channels",
-        (Key::SetAudioChannels, Lang::Fr) => "Canaux",
-        (Key::SetSurroundHint, Lang::En) => {
-            "5.1 and 7.1 need MKV with Opus, FLAC or PCM: recorded in stereo here."
-        }
-        (Key::SetSurroundHint, Lang::Fr) => {
-            "Le 5.1 et le 7.1 demandent le MKV avec Opus, FLAC ou PCM : enregistré en stéréo ici."
-        }
-        (Key::UiLicenses, Lang::En) => "Third-party licences",
-        (Key::UiLicenses, Lang::Fr) => "Licences tierces",
-        (Key::PcCpu, Lang::En) => "Processor",
-        (Key::PcCpu, Lang::Fr) => "Processeur",
-        (Key::PcCores, Lang::En) => "{cores} cores, {threads} threads",
-        (Key::PcCores, Lang::Fr) => "{cores} cœurs, {threads} threads",
-        (Key::PcRam, Lang::En) => "Memory (RAM)",
-        (Key::PcRam, Lang::Fr) => "Mémoire vive",
-        (Key::PcGpu, Lang::En) => "Graphics card",
-        (Key::PcGpu, Lang::Fr) => "Carte graphique",
-        (Key::PcIgpu, Lang::En) => "Integrated graphics",
-        (Key::PcIgpu, Lang::Fr) => "Graphiques intégrés",
-        (Key::SetCapture, Lang::En) => "Audio source",
-        (Key::SetCapture, Lang::Fr) => "Source audio",
-        (Key::CapSystem, Lang::En) => "All the PC sound",
-        (Key::CapSystem, Lang::Fr) => "Tout le son du PC",
-        (Key::CapTarget, Lang::En) => "Only the recorded program",
-        (Key::CapTarget, Lang::Fr) => "Seulement le programme enregistré",
-        (Key::CapOutput, Lang::En) => "One audio device",
-        (Key::CapOutput, Lang::Fr) => "Un appareil audio précis",
-        (Key::CapPrograms, Lang::En) => "Chosen programs",
-        (Key::CapPrograms, Lang::Fr) => "Programmes choisis",
-        (Key::CapNone, Lang::En) => "None (microphone only)",
-        (Key::CapNone, Lang::Fr) => "Aucun (micro seulement)",
-        (Key::SetAudioOutput, Lang::En) => "Audio device",
-        (Key::SetAudioOutput, Lang::Fr) => "Périphérique audio",
-        (Key::SrcClosed, Lang::En) => "closed",
-        (Key::SrcClosed, Lang::Fr) => "fermé",
-        (Key::ReplayEstimate, Lang::En) => "About {size}",
-        (Key::ReplayEstimate, Lang::Fr) => "Environ {size}",
-        (Key::ReplayEstimateRam, Lang::En) => "About {size}, in RAM",
-        (Key::ReplayEstimateRam, Lang::Fr) => "Environ {size}, en RAM",
-        (Key::ReplayEstimateDisk, Lang::En) => "About {size}, on the disk (too big for the RAM)",
-        (Key::ReplayEstimateDisk, Lang::Fr) => {
-            "Environ {size}, sur le disque (trop gros pour la RAM)"
-        }
-        (Key::SetAspect, Lang::En) => "Aspect ratio",
-        (Key::SetAspect, Lang::Fr) => "Format d'image (ratio)",
-        (Key::OptAspectScreen, Lang::En) => "The screen's ({ratio})",
-        (Key::OptAspectScreen, Lang::Fr) => "Celui de l'écran ({ratio})",
-        (Key::OptAspectCrop, Lang::En) => "{ratio}, cropped in the middle",
-        (Key::OptAspectCrop, Lang::Fr) => "{ratio}, recadré au centre",
-        (Key::SetExpert, Lang::En) => "Expert settings",
-        (Key::SetExpert, Lang::Fr) => "Paramètres experts",
-        (Key::SrcOutputs, Lang::En) => "Outputs",
-        (Key::SrcOutputs, Lang::Fr) => "Sorties",
-        (Key::SrcInputs, Lang::En) => "Inputs",
-        (Key::SrcInputs, Lang::Fr) => "Entrées",
-        (Key::PcScreenN, Lang::En) => "Screen {n}",
-        (Key::PcScreenN, Lang::Fr) => "Écran {n}",
-        (Key::PcPrimary, Lang::En) => "main",
-        (Key::PcPrimary, Lang::Fr) => "principal",
-        (Key::PcDriveN, Lang::En) => "Drive {letter}",
-        (Key::PcDriveN, Lang::Fr) => "Disque {letter}",
-        (Key::PcFree, Lang::En) => "{free} free of {total}",
-        (Key::PcFree, Lang::Fr) => "{free} libres sur {total}",
-        (Key::OptGroupCompressed, Lang::En) => "Compressed",
-        (Key::OptGroupCompressed, Lang::Fr) => "Compressés",
-        (Key::OptGroupLossless, Lang::En) => "Lossless, heavy",
-        (Key::OptGroupLossless, Lang::Fr) => "Sans perte, lourds",
-        (Key::SetMicVolume, Lang::En) => "Volume",
-        (Key::SetMicVolume, Lang::Fr) => "Volume",
-        (Key::SetCaptureVolume, Lang::En) => "Volume",
-        (Key::SetCaptureVolume, Lang::Fr) => "Volume",
-        (Key::SetReplayAfter, Lang::En) => "Extend after the shortcut",
-        (Key::SetReplayAfter, Lang::Fr) => "Prolonger après le raccourci",
-        (Key::OptReplayAfterNone, Lang::En) => "No",
-        (Key::OptReplayAfterNone, Lang::Fr) => "Non",
-        (Key::OptReplayAfter, Lang::En) => "+{s} s",
-        (Key::OptReplayAfter, Lang::Fr) => "+{s} s",
-        (Key::UiSearch, Lang::En) => "Search a setting",
-        (Key::UiSearch, Lang::Fr) => "Rechercher un réglage",
-        (Key::UiSearchNone, Lang::En) => "No setting matches “{query}”.",
-        (Key::UiSearchNone, Lang::Fr) => "Aucun réglage ne correspond à « {query} ».",
-        (Key::UiSearchTitle, Lang::En) => "Search",
-        (Key::UiSearchTitle, Lang::Fr) => "Recherche",
-        (Key::ShortcutTaken, Lang::En) => "Already used by another program",
-        (Key::ShortcutTaken, Lang::Fr) => "Déjà utilisé par un autre logiciel",
-        (Key::ShortcutWindows, Lang::En) => "Reserved by Windows",
-        (Key::ShortcutWindows, Lang::Fr) => "Réservé par Windows",
-        (Key::UiReport, Lang::En) => "Report a problem",
-        (Key::UiReport, Lang::Fr) => "Signaler un problème",
-        (Key::AboutReportReady, Lang::En) => {
-            "Report ready, without personal data. Drop the selected file into the GitHub page."
-        }
-        (Key::AboutReportReady, Lang::Fr) => {
-            "Rapport prêt, sans données personnelles. Glissez le fichier sélectionné dans la page GitHub."
-        }
-        (Key::SetDiskAlert, Lang::En) => "Low disk space alert",
-        (Key::SetDiskAlert, Lang::Fr) => "Alerte d'espace disque",
-        (Key::OptDiskAlertOff, Lang::En) => "Never",
-        (Key::OptDiskAlertOff, Lang::Fr) => "Jamais",
-        (Key::OptDiskAlert, Lang::En) => "Below {pct} % free",
-        (Key::OptDiskAlert, Lang::Fr) => "Sous {pct} % libres",
-        (Key::WidgetFramesLost, Lang::En) => "{n} frame(s) lost: the encoder cannot keep up",
-        (Key::WidgetFramesLost, Lang::Fr) => "{n} image(s) perdue(s) : l'encodeur ne suit pas",
-        (Key::WidgetDiskLow, Lang::En) => "Disk almost full: {size} free",
-        (Key::WidgetDiskLow, Lang::Fr) => "Disque presque plein : {size} libres",
-        (Key::ToastMenuOpen, Lang::En) => "Open the image",
-        (Key::ToastMenuOpen, Lang::Fr) => "Ouvrir l'image",
-        (Key::ToastMenuReveal, Lang::En) => "Show in File Explorer",
-        (Key::ToastMenuReveal, Lang::Fr) => "Afficher dans l'Explorateur de fichiers",
-        (Key::ToastMenuClose, Lang::En) => "Close",
-        (Key::ToastMenuClose, Lang::Fr) => "Fermer",
-        (Key::SetCornerTc, Lang::En) => "Top centre",
-        (Key::SetCornerTc, Lang::Fr) => "Haut centre",
-        (Key::SetCornerBc, Lang::En) => "Bottom centre",
-        (Key::SetCornerBc, Lang::Fr) => "Bas centre",
-        (Key::SetCornerCustom, Lang::En) => "Custom",
-        (Key::SetCornerCustom, Lang::Fr) => "Personnalisée",
-        (Key::SetWidgetDisplay, Lang::En) => "Visibility",
-        (Key::SetWidgetDisplay, Lang::Fr) => "Visibilité",
-        (Key::OptDisplayAlways, Lang::En) => "Always",
-        (Key::OptDisplayAlways, Lang::Fr) => "Toujours",
-        (Key::OptDisplayFade, Lang::En) => "Fades after 3 s",
-        (Key::OptDisplayFade, Lang::Fr) => "S'estompe après 3 s",
-        (Key::OptDisplayAlerts, Lang::En) => "Only when something goes wrong",
-        (Key::OptDisplayAlerts, Lang::Fr) => "Seulement en cas de problème",
-        (Key::ToastDiskLow, Lang::En) => "Disk almost full",
-        (Key::ToastDiskLow, Lang::Fr) => "Disque presque plein",
-        (Key::ToastReplayDiskLow, Lang::En) => {
-            "{size} free on the replays disk: the next replays may fail."
-        }
-        (Key::ToastReplayDiskLow, Lang::Fr) => {
-            "{size} libres sur le disque des replays : les prochains peuvent échouer."
-        }
-        (Key::SetWidgetPlaceHint, Lang::En) => {
-            "Click anywhere on the screen for a place of your own."
-        }
-        (Key::SetWidgetPlaceHint, Lang::Fr) => {
-            "Cliquez n'importe où sur l'écran pour une position personnalisée."
-        }
-        (Key::UpdateChecked, Lang::En) => "Last checked: {when}",
-        (Key::UpdateChecked, Lang::Fr) => "Dernière vérification : {when}",
-        (Key::PcLocalDisk, Lang::En) => "Local Disk",
-        (Key::PcLocalDisk, Lang::Fr) => "Disque local",
-        (Key::ActReplayEdit, Lang::En) => "Save and edit the replay",
-        (Key::ActReplayEdit, Lang::Fr) => "Sauvegarder et éditer le replay",
-        (Key::ToastReplayOn, Lang::En) => "Replay on",
-        (Key::ToastReplayOn, Lang::Fr) => "Replay activé",
-        (Key::ToastReplayOff, Lang::En) => "Replay off",
-        (Key::ToastReplayOff, Lang::Fr) => "Replay désactivé",
-        (Key::SetReplayNotify, Lang::En) => "Notification when a game starts",
-        (Key::SetReplayNotify, Lang::Fr) => "Notification au lancement d'un jeu",
-        (Key::OptNotifyBoth, Lang::En) => "Always",
-        (Key::OptNotifyBoth, Lang::Fr) => "Toujours",
-        (Key::OptNotifyOn, Lang::En) => "When the replay is on",
-        (Key::OptNotifyOn, Lang::Fr) => "Si le replay est actif",
-        (Key::OptNotifyNone, Lang::En) => "Never",
-        (Key::OptNotifyNone, Lang::Fr) => "Jamais",
-        (Key::HdrGames, Lang::En) => "Games",
-        (Key::HdrGames, Lang::Fr) => "Jeux",
-        (Key::OptGameAuto, Lang::En) => "Detect automatically",
-        (Key::OptGameAuto, Lang::Fr) => "Détecter automatiquement",
-        (Key::OptGameAlways, Lang::En) => "Always record",
-        (Key::OptGameAlways, Lang::Fr) => "Toujours enregistrer",
-        (Key::OptGameNever, Lang::En) => "Never record",
-        (Key::OptGameNever, Lang::Fr) => "Ne jamais enregistrer",
-        (Key::CutSave, Lang::En) => "Save",
-        (Key::CutSave, Lang::Fr) => "Enregistrer",
-        (Key::CutSaveAs, Lang::En) => "Save as…",
-        (Key::CutSaveAs, Lang::Fr) => "Enregistrer sous…",
-        (Key::CutCancel, Lang::En) => "Cancel",
-        (Key::CutCancel, Lang::Fr) => "Annuler",
-        (Key::CutLossless, Lang::En) => "Starts on a key frame: copied as is, instant and lossless",
-        (Key::CutLossless, Lang::Fr) => {
-            "Début sur une image clé : copie directe, instantanée et sans perte"
-        }
-        (Key::CutReencode, Lang::En) => "Does not start on a key frame: the video is re-encoded",
-        (Key::CutReencode, Lang::Fr) => "Début hors image clé : la vidéo est réencodée",
-        (Key::CutPlay, Lang::En) => "Play (Space)",
-        (Key::CutPlay, Lang::Fr) => "Lecture (Espace)",
-        (Key::CutPause, Lang::En) => "Pause (Space)",
-        (Key::CutPause, Lang::Fr) => "Pause (Espace)",
-        (Key::CutPrevious, Lang::En) => "Previous frame (←)",
-        (Key::CutPrevious, Lang::Fr) => "Image précédente (←)",
-        (Key::CutNext, Lang::En) => "Next frame (→)",
-        (Key::CutNext, Lang::Fr) => "Image suivante (→)",
-        (Key::CutMute, Lang::En) => "Sound (M)",
-        (Key::CutMute, Lang::Fr) => "Son (M)",
-        (Key::CutClose, Lang::En) => "Close (Esc)",
-        (Key::CutClose, Lang::Fr) => "Fermer (Échap)",
-        (Key::TipCopyText, Lang::En) => "Copy the text (Ctrl+Shift+C)",
-        (Key::TipCopyText, Lang::Fr) => "Copier le texte (Ctrl+Maj+C)",
-        (Key::ToastTextCopied, Lang::En) => "Text copied",
-        (Key::ToastTextCopied, Lang::Fr) => "Texte copié",
-        (Key::ToastNoText, Lang::En) => "No text found",
-        (Key::ToastNoText, Lang::Fr) => "Aucun texte trouvé",
-        (Key::ToastOcrFailed, Lang::En) => "Text could not be read",
-        (Key::ToastOcrFailed, Lang::Fr) => "Lecture du texte impossible",
-        (Key::ToastOcrNoLanguage, Lang::En) => {
-            "Windows has no language with text recognition: add one in Time & language → Language & region."
-        }
-        (Key::ToastOcrNoLanguage, Lang::Fr) => {
-            "Windows n'a aucune langue avec la reconnaissance de texte : ajoutez-en une dans Heure et langue → Langue et région."
-        }
-        (Key::ToastOcrLanguages, Lang::En) => "Languages",
-        (Key::ToastOcrLanguages, Lang::Fr) => "Langues",
-        (Key::CutAnimated, Lang::En) => "animated",
-        (Key::CutAnimated, Lang::Fr) => "animé",
-        (Key::ToastMenuEdit, Lang::En) => "Edit the image",
-        (Key::ToastMenuEdit, Lang::Fr) => "Modifier l'image",
-        (Key::SetWindowBackdrop, Lang::En) => "Background",
-        (Key::SetWindowBackdrop, Lang::Fr) => "Fond",
-        (Key::OptBackdropNone, Lang::En) => "None",
-        (Key::OptBackdropNone, Lang::Fr) => "Aucun",
-        (Key::OptBackdropBlur, Lang::En) => "Wallpaper, blurred",
-        (Key::OptBackdropBlur, Lang::Fr) => "Fond d'écran, flouté",
-        (Key::OptBackdropColour, Lang::En) => "Plain colour",
-        (Key::OptBackdropColour, Lang::Fr) => "Couleur unie",
-        (Key::TipLive, Lang::En) => "Show the screens live (Space)",
-        (Key::TipLive, Lang::Fr) => "Voir l'écran en direct (Espace)",
-        (Key::TipFreeze, Lang::En) => "Freeze the screens (Space)",
-        (Key::TipFreeze, Lang::Fr) => "Figer l'écran (Espace)",
-        (Key::TipRedo, Lang::En) => "Redo (Ctrl+Y)",
-        (Key::TipRedo, Lang::Fr) => "Rétablir (Ctrl+Y)",
-        (Key::TipClear, Lang::En) => "Clear everything",
-        (Key::TipClear, Lang::Fr) => "Tout effacer",
-        (Key::TipRightClick, Lang::En) => "Right-click: ",
-        (Key::TipRightClick, Lang::Fr) => "Clic droit : ",
-        (Key::UpdateInstalled, Lang::En) => "Installed version: {version}",
-        (Key::UpdateInstalled, Lang::Fr) => "Version installée : {version}",
-        (Key::GrpSideBar, Lang::En) => "Side bar",
-        (Key::GrpSideBar, Lang::Fr) => "Barre latérale",
-        (Key::GrpWidget, Lang::En) => "Recording widget",
-        (Key::GrpWidget, Lang::Fr) => "Widget d'enregistrement",
-        (Key::GrpLocation, Lang::En) => "Location",
-        (Key::GrpLocation, Lang::Fr) => "Emplacement",
-        (Key::GrpEncoding, Lang::En) => "Encoding",
-        (Key::GrpEncoding, Lang::Fr) => "Encodage",
-        (Key::GrpCapture, Lang::En) => "Capture",
-        (Key::GrpCapture, Lang::Fr) => "Capture",
-        (Key::GrpPicture, Lang::En) => "Picture",
-        (Key::GrpPicture, Lang::Fr) => "Image",
-        (Key::GrpFile, Lang::En) => "File",
-        (Key::GrpFile, Lang::Fr) => "Fichier",
-        (Key::GrpPcSound, Lang::En) => "Computer sound",
-        (Key::GrpPcSound, Lang::Fr) => "Son du PC",
-        (Key::GrpMic, Lang::En) => "Microphone",
-        (Key::GrpMic, Lang::Fr) => "Micro",
-        (Key::GrpTracks, Lang::En) => "Tracks and format",
-        (Key::GrpTracks, Lang::Fr) => "Pistes et format",
-        (Key::GrpThisPc, Lang::En) => "This PC",
-        (Key::GrpThisPc, Lang::Fr) => "Ce PC",
-        (Key::UnitFrames, Lang::En) => "frames",
-        (Key::UnitFrames, Lang::Fr) => "images",
-        (Key::UnitMinutes, Lang::En) => "min",
-        (Key::UnitMinutes, Lang::Fr) => "min",
-        (Key::UnitMb, Lang::En) => "MB",
-        (Key::UnitMb, Lang::Fr) => "Mo",
-        (Key::ShortcutModifierOnly, Lang::En) => "Add a key to the modifiers",
-        (Key::ShortcutModifierOnly, Lang::Fr) => "Ajoutez une touche aux modificateurs",
-        (Key::ShortcutUnknownKey, Lang::En) => "Unknown key: {key}",
-        (Key::ShortcutUnknownKey, Lang::Fr) => "Touche inconnue : {key}",
-        (Key::ShortcutNeedsModifier, Lang::En) => "{key} needs CTRL, ALT, SHIFT or WIN",
-        (Key::ShortcutNeedsModifier, Lang::Fr) => "{key} demande CTRL, ALT, SHIFT ou WIN",
-        (Key::SetOverlayOn, Lang::En) => "Turn on the side bar",
-        (Key::SetOverlayOn, Lang::Fr) => "Activer la barre latérale",
-        (Key::UiReset, Lang::En) => "Reset",
-        (Key::UiReset, Lang::Fr) => "Réinitialiser",
-        (Key::UiCancel, Lang::En) => "Cancel",
-        (Key::UiCancel, Lang::Fr) => "Annuler",
-        (Key::UiResetPageTitle, Lang::En) => "Reset the \"{page}\" page?",
-        (Key::UiResetPageTitle, Lang::Fr) => "Réinitialiser la page « {page} » ?",
-        (Key::UiResetPageBody, Lang::En) => {
-            "Its settings go back to their default values. The other pages do not change."
-        }
-        (Key::UiResetPageBody, Lang::Fr) => {
-            "Ses paramètres reprennent leur valeur par défaut. Les autres pages ne changent pas."
-        }
-        (Key::UiResetAll, Lang::En) => "Reset all settings",
-        (Key::UiResetAll, Lang::Fr) => "Réinitialiser tous les paramètres",
-        (Key::UiResetAllHint, Lang::En) => "Every page goes back to its default values.",
-        (Key::UiResetAllHint, Lang::Fr) => "Toutes les pages reprennent leurs valeurs par défaut.",
-        (Key::UiResetAllTitle, Lang::En) => "Reset all settings?",
-        (Key::UiResetAllTitle, Lang::Fr) => "Réinitialiser tous les paramètres ?",
-        (Key::UiResetAllBody, Lang::En) => {
-            "Every setting, on every page, goes back to its default value."
-        }
-        (Key::UiResetAllBody, Lang::Fr) => {
-            "Tous les paramètres, sur toutes les pages, reprennent leur valeur par défaut."
-        }
-        (Key::GrpReset, Lang::En) => "Reset",
-        (Key::GrpReset, Lang::Fr) => "Réinitialisation",
-        (Key::GrpWindowCapture, Lang::En) => "Window capture",
-        (Key::GrpWindowCapture, Lang::Fr) => "Capture de fenêtre",
-        (Key::OptBackdropGradient, Lang::En) => "Gradient",
-        (Key::OptBackdropGradient, Lang::Fr) => "Dégradé",
-        (Key::SetBackdropColour, Lang::En) => "Colour",
-        (Key::SetBackdropColour, Lang::Fr) => "Couleur",
-        (Key::SetBackdropGradient, Lang::En) => "Gradient",
-        (Key::SetBackdropGradient, Lang::Fr) => "Dégradé",
-        (Key::OptColourAccent, Lang::En) => "Windows accent",
-        (Key::OptColourAccent, Lang::Fr) => "Accentuation de Windows",
-        (Key::OptColourWhite, Lang::En) => "White",
-        (Key::OptColourWhite, Lang::Fr) => "Blanc",
-        (Key::OptColourGrey, Lang::En) => "Grey",
-        (Key::OptColourGrey, Lang::Fr) => "Gris",
-        (Key::OptColourBlack, Lang::En) => "Black",
-        (Key::OptColourBlack, Lang::Fr) => "Noir",
-        (Key::OptColourBlue, Lang::En) => "Blue",
-        (Key::OptColourBlue, Lang::Fr) => "Bleu",
-        (Key::OptColourPurple, Lang::En) => "Purple",
-        (Key::OptColourPurple, Lang::Fr) => "Violet",
-        (Key::OptColourGreen, Lang::En) => "Green",
-        (Key::OptColourGreen, Lang::Fr) => "Vert",
-        (Key::OptColourOrange, Lang::En) => "Orange",
-        (Key::OptColourOrange, Lang::Fr) => "Orange",
-        (Key::OptColourPink, Lang::En) => "Pink",
-        (Key::OptColourPink, Lang::Fr) => "Rose",
-        (Key::OptGradientDusk, Lang::En) => "Dusk",
-        (Key::OptGradientDusk, Lang::Fr) => "Crépuscule",
-        (Key::OptGradientSunset, Lang::En) => "Sunset",
-        (Key::OptGradientSunset, Lang::Fr) => "Coucher de soleil",
-        (Key::OptGradientOcean, Lang::En) => "Ocean",
-        (Key::OptGradientOcean, Lang::Fr) => "Océan",
-        (Key::OptGradientForest, Lang::En) => "Forest",
-        (Key::OptGradientForest, Lang::Fr) => "Forêt",
-        (Key::OptGradientNight, Lang::En) => "Night",
-        (Key::OptGradientNight, Lang::Fr) => "Nuit",
-        (Key::SetPresetBalanced, Lang::En) => "Balanced",
-        (Key::SetPresetBalanced, Lang::Fr) => "Équilibré",
-        (Key::SetFolderUnreachable, Lang::En) => {
-            "This folder cannot be reached: files go to the default folder."
-        }
-        (Key::SetFolderUnreachable, Lang::Fr) => {
-            "Dossier inaccessible : les fichiers vont dans le dossier par défaut."
-        }
-        (Key::SetAdmin, Lang::En) => "Administrator rights",
-        (Key::SetAdmin, Lang::Fr) => "Droits administrateur",
-        (Key::SetAdminGrant, Lang::En) => "Grant",
-        (Key::SetAdminGrant, Lang::Fr) => "Accorder",
-        (Key::SetAdminGranted, Lang::En) => "Granted",
-        (Key::SetAdminGranted, Lang::Fr) => "Accordés",
-        (Key::SetAdminHint, Lang::En) => {
-            "Shortcuts and captures also work in programs started as administrator, games often. Windows asks once."
-        }
-        (Key::SetAdminHint, Lang::Fr) => {
-            "Les raccourcis et les captures fonctionnent aussi dans les programmes lancés en administrateur, souvent des jeux. Windows le demande une fois."
-        }
-        (Key::SetAdminHintMove, Lang::En) => {
-            "Shortcuts and captures also work in programs started as administrator, games often. Vixeeny is installed again in Program Files, where only administrators can change its files; your settings stay. Windows asks once."
-        }
-        (Key::SetAdminHintMove, Lang::Fr) => {
-            "Les raccourcis et les captures fonctionnent aussi dans les programmes lancés en administrateur, souvent des jeux. Vixeeny est réinstallé dans Program Files, où seuls les administrateurs peuvent modifier ses fichiers ; vos paramètres restent. Windows le demande une fois."
-        }
-        (Key::SetAdminDownloading, Lang::En) => "Downloading the installer… {percent} %",
-        (Key::SetAdminDownloading, Lang::Fr) => "Téléchargement de l'installateur… {percent} %",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The keys declared in the source of this file (so a key missing from `Key::ALL` is caught).
-    fn declared_keys() -> usize {
-        let source = include_str!("i18n.rs");
-        let start = source.find("pub enum Key {").unwrap_or_default();
-        let body = &source[start..];
-        let end = body.find("\n}\n").unwrap_or(body.len());
-        body[..end]
-            .lines()
-            .filter(|l| {
-                l.starts_with("    ")
-                    && !l.starts_with("     ")
-                    && !l.trim_start().starts_with("//")
-                    && l.trim_end().ends_with(',')
-            })
-            .count()
-    }
 
     fn placeholders(text: &str) -> Vec<&str> {
         let mut found: Vec<&str> = text
@@ -1537,12 +444,7 @@ mod tests {
     }
 
     #[test]
-    fn every_key_is_listed_and_translated_the_same_way_in_every_language() {
-        assert_eq!(
-            Key::ALL.len(),
-            declared_keys(),
-            "a key is missing from Key::ALL"
-        );
+    fn every_key_is_translated_the_same_way_in_every_language() {
         for key in Key::ALL {
             let (en, fr) = (tr(*key, Lang::En), tr(*key, Lang::Fr));
             assert!(!en.trim().is_empty(), "{key:?} has no English text");
