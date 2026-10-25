@@ -143,6 +143,16 @@ jobs:
         with:
           name: vixeeny-windows-unsigned
           path: dist
+      # Built from crates.io once per version; the cache of this branch is written only by its
+      # own workflows.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: rsign
+        with:
+          path: ~/.cargo/bin/rsign
+          key: rsign2-0.6.7-${{ runner.os }}
+      - name: Install rsign2
+        if: steps.rsign.outputs.cache-hit != 'true'
+        run: cargo install rsign2 --version 0.6.7 --locked
       # The release holds the installer and the portable archive, which updates install too;
       # their signatures go in the notes, in comments the page does not show (the updater reads
       # them there: the installer's for the move to Program Files).
@@ -157,7 +167,6 @@ jobs:
             if [ "$RELEASE" = true ]; then echo "::error::No MINISIGN_KEY secret: a release cannot be signed."; exit 1; fi
             echo "::warning::No MINISIGN_KEY secret: the files are not signed."; exit 0
           fi
-          cargo install rsign2 --version 0.6.7 --locked
           key="$RUNNER_TEMP/minisign.key"
           printf '%s\n' "$MINISIGN_KEY" > "$key"
           sign() {
