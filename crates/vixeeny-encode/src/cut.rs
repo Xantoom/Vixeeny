@@ -144,13 +144,7 @@ impl Clip {
         let time_base = stream.time_base();
         let rate = stream.avg_frame_rate();
         let params = stream.parameters();
-        let codec = match params.id() {
-            codec::Id::H264 => "h264".to_owned(),
-            codec::Id::HEVC => "hevc".to_owned(),
-            codec::Id::AV1 => "av1".to_owned(),
-            codec::Id::VP9 => "vp9".to_owned(),
-            other => format!("{other:?}").to_lowercase(),
-        };
+        let codec = params.id().name().to_owned();
         // SAFETY: the parameters belong to the stream, alive while `input` is.
         let (width, height, hdr, deep, hdr10) = unsafe {
             let p = &*params.as_ptr();
@@ -221,6 +215,11 @@ impl Clip {
         f64::from(self.rate.1) / f64::from(self.rate.0)
     }
 
+    /// Frames per second, rounded: 59.94 counts as 60.
+    pub fn fps(&self) -> u32 {
+        (1.0 / self.frame_seconds().max(1e-3)).round().max(1.0) as u32
+    }
+
     /// The length of the clip, its last frame included.
     pub fn duration(&self) -> f64 {
         self.time(self.frames.len().saturating_sub(1)) + self.frame_seconds()
@@ -285,7 +284,7 @@ impl Scaler {
         Ok(Self { ctx, tone, deep: None })
     }
 
-    /// Bicubic rather than bilinear: a picture made smaller for good, not for a glance.
+    /// Bicubic: sharper than bilinear when the copy is made smaller.
     fn smooth(self, on: bool) -> Self {
         if on {
             // SAFETY: a live context not used yet; NUL-terminated option name.
@@ -996,6 +995,15 @@ impl Reencode {
         Self { encoder, options, depth, size: None, fps: None, sound_kbps: None }
     }
 
+    /// The same encoder for a copy at `size` and `fps` (left out when they are the clip's), its tracks mixed into one
+    /// AAC track at `sound_kbps`.
+    pub fn reshaped(mut self, clip: &Clip, size: (u32, u32), fps: u32, sound_kbps: Option<u32>) -> Self {
+        self.size = (size != (clip.width & !1, clip.height & !1)).then_some(size);
+        self.fps = (fps < clip.fps()).then_some(fps);
+        self.sound_kbps = sound_kbps;
+        self
+    }
+
     /// Whether the copy differs from the clip whatever the part: it is encoded again even when it could be copied.
     pub fn reshapes(&self) -> bool {
         self.size.is_some() || self.fps.is_some() || self.sound_kbps.is_some()
@@ -1033,9 +1041,9 @@ pub fn export(
 
 /// The frame rate a copy is written at: the clip's, or fewer frames.
 fn out_rate(clip: &Clip, reencode: &Reencode) -> Rational {
-    let clip_fps = f64::from(clip.rate.0) / f64::from(clip.rate.1.max(1));
+    // Compared rounded: 60 asked of a 59.94 clip keeps its own rate rather than dropping a frame now and then.
     match reencode.fps {
-        Some(fps) if f64::from(fps) < clip_fps - 0.5 => Rational(fps as i32, 1),
+        Some(fps) if fps < clip.fps() => Rational(fps as i32, 1),
         _ => clip.rate,
     }
 }
@@ -1130,6 +1138,10 @@ impl VideoOut {
         sent
     }
 }
+
+/// Seconds the sound of a copy is encoded ahead of its video: the muxer interleaves the two without waiting for the
+/// sound.
+const SOUND_AHEAD: f64 = 0.5;
 
 /// The sound of a copy, encoded again as the video goes.
 struct SoundOut {
@@ -1361,7 +1373,7 @@ fn write_cut(
                             write_encoded(out, &mut octx)?;
                         }
                         if let Some(sound) = &mut sound_out {
-                            sound.pump(seconds(pts - start_pts, clip.time_base) + 0.5, &mut octx, &out_tb)?;
+                            sound.pump(seconds(pts - start_pts, clip.time_base) + SOUND_AHEAD, &mut octx, &out_tb)?;
                         }
                         done += 1;
                         progress(done as f32 / total);

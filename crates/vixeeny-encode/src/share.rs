@@ -9,7 +9,7 @@
 use crate::registry::Family;
 
 /// A network a copy is made for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Network {
     Discord,
     X,
@@ -42,8 +42,6 @@ impl Network {
     pub const fn also(self) -> &'static str {
         match self {
             Self::X => "twitter",
-            Self::YouTube => "shorts",
-            Self::Instagram => "reels",
             _ => "",
         }
     }
@@ -78,20 +76,18 @@ impl Target {
     const fn seconds(self, seconds: u32) -> Self {
         Self { max_seconds: Some(seconds), ..self }
     }
-
-    /// The codec every one of them plays as it is sent.
-    pub const fn codec(&self) -> Family {
-        Family::H264
-    }
 }
+
+/// The codec every network plays as it is sent.
+pub const CODEC: Family = Family::H264;
 
 /// Every network, the most used to share a moment of a game first, and each one's plans from the free one up.
 ///
 /// Discord: 20 MB free (since August 2026), 50 MB with Nitro Basic, 1 GB with Nitro (since October 2026); it keeps the
 /// file as it is: 720p, at 30 FPS on the free plan so that more of the moment fits. X: 2 min 20 s without Premium,
 /// where it plays 720p; with Premium, 1080p under two hours. Bluesky: 10 minutes, 300 MB, played at 720p at most.
-/// Reddit: 15 minutes, 1 GB. Instagram: Reels of 3 minutes reach everyone. Threads: 5 minutes, 1 GB. TikTok: 10
-/// minutes. Telegram: 2 GB.
+/// Reddit: 15 minutes, 1 GB. Instagram: the sources say 3 or 15 minutes; 3 is kept. Threads: 5 minutes, 1 GB. TikTok:
+/// 10 minutes. Telegram: 2 GB.
 pub const TARGETS: [Target; 12] = [
     Target::new("discord", Network::Discord, "Discord", 720, 30).mb(20),
     Target::new("discord_nitro_basic", Network::Discord, "Discord Nitro Basic", 720, 60).mb(50),

@@ -220,7 +220,7 @@ pub fn reencoders(config: &Config, clip: &vixeeny_encode::cut::Clip) -> Vec<Reen
     let chosen = choose_encoder(&registry, profile, probe.as_ref(), size).ok();
     let software =
         chosen.and_then(|chosen| registry.encoders().find(|e| e.family == chosen.family && e.kind == Kind::Software));
-    let fps = (1.0 / clip.frame_seconds().max(1e-3)).round() as u32;
+    let fps = clip.fps();
     let preset = PresetName::from_setting(&profile.preset).unwrap_or(PresetName::Balanced);
     let mut out: Vec<Reencode> = Vec::new();
     for encoder in chosen.into_iter().chain(software) {
@@ -276,7 +276,6 @@ pub fn share_reencoders(clip: &vixeeny_encode::cut::Clip, reshape: &Reshape) -> 
             .min_by_key(|e| e.vendor.preference())
     });
     let software = registry.encoders().find(|e| e.family == reshape.family && e.kind == Kind::Software);
-    let clip_fps = (1.0 / clip.frame_seconds().max(1e-3)).round() as u32;
     let mut out = Vec::new();
     for encoder in hardware.into_iter().chain(software) {
         let tools = probe.as_ref().and_then(|p| p.tools(&encoder.id));
@@ -293,11 +292,12 @@ pub fn share_reencoders(clip: &vixeeny_encode::cut::Clip, reshape: &Reshape) -> 
         if let Some(kbps) = reshape.cap_kbps {
             encoder.cap_rate(&mut options, kbps);
         }
-        let mut reencode = Reencode::new(encoder.clone(), options.into_iter().collect(), depth);
-        reencode.size = (size != (clip.width & !1, clip.height & !1)).then_some(size);
-        reencode.fps = (reshape.fps < clip_fps).then_some(reshape.fps);
-        reencode.sound_kbps = reshape.sound_kbps;
-        out.push(reencode);
+        out.push(Reencode::new(encoder.clone(), options.into_iter().collect(), depth).reshaped(
+            clip,
+            size,
+            reshape.fps,
+            reshape.sound_kbps,
+        ));
     }
     out
 }

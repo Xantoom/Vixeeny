@@ -23,6 +23,7 @@ use std::time::Duration;
 
 use vixeeny_platform::PhysicalRect;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows::Win32::Graphics::Direct2D::Common::D2D_RECT_F;
 use windows::Win32::Graphics::Direct2D::ID2D1Bitmap1;
 use windows::Win32::Graphics::DirectComposition::{IDCompositionSurface, IDCompositionVisual2};
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, ReleaseCapture, SetCapture, VK_CONTROL, VK_SHIFT};
@@ -1377,7 +1378,7 @@ impl Inner {
 }
 
 /// A card of the window: a soft shadow, the flyout's colour, a hairline border.
-fn card(c: &Canvas<'_>, t: &Theme, u: f32, r: windows::Win32::Graphics::Direct2D::Common::D2D_RECT_F) -> Result<()> {
+fn card(c: &Canvas<'_>, t: &Theme, u: f32, r: D2D_RECT_F) -> Result<()> {
     c.shadow(r, CARD_RADIUS * u, 10.0 * u, 2.0 * u, Rgba::hex(0x000000, 0x30))?;
     c.fill_round(r, CARD_RADIUS * u, t.flyout)?;
     c.stroke_round(r, CARD_RADIUS * u, 1.0, t.stroke_strong)
@@ -2331,7 +2332,7 @@ mod tests {
                 .expect("bottom");
             let mut whole: Vec<u8> = [top, video, bottom].concat();
             assert_eq!(whole.len(), (w * h * 4) as usize);
-            // The list of networks open, searched, over the video.
+            // The list of networks open over the video.
             if let Some(kind) = menu {
                 let choice = ExportChoice { preset: "discord".into(), codec: "h264".into(), height: 720, fps: 30 };
                 let items = preset_items(&o, &choice, &texts.custom, "");

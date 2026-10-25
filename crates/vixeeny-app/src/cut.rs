@@ -78,11 +78,6 @@ fn texts(lang: Lang, path: &Path) -> CutterTexts {
     }
 }
 
-/// The clip's frames per second, whole.
-fn clip_fps(clip: &Clip) -> u32 {
-    (1.0 / clip.frame_seconds().max(1e-3)).round().max(1.0) as u32
-}
-
 fn codec_label(id: &str) -> String {
     match id {
         "h264" => "H.264".into(),
@@ -146,7 +141,7 @@ fn codecs(clip: &Clip) -> Vec<Choice> {
 
 /// What the export row offers for `clip`: the clip as it is, then every network, each one's values at most the clip's.
 fn export_options(clip: &Clip, lang: Lang) -> ExportOptions {
-    let (height, fps) = (clip.height & !1, clip_fps(clip));
+    let (height, fps) = (clip.height & !1, clip.fps());
     let heights: Vec<u32> =
         std::iter::once(height).chain([2160, 1440, 1080, 720, 480].into_iter().filter(|&h| h < height)).collect();
     let rates: Vec<u32> = std::iter::once(fps).chain([120, 60, 30].into_iter().filter(|&f| f < fps)).collect();
@@ -175,7 +170,7 @@ fn export_options(clip: &Clip, lang: Lang) -> ExportOptions {
             brand: t.network.id().into(),
             keywords: t.network.also().into(),
             detail: detail.join(" · "),
-            codec: t.codec().name().into(),
+            codec: share::CODEC.name().into(),
             height: at_most(&heights, t.height),
             fps: at_most(&rates, t.fps),
         });
@@ -189,8 +184,11 @@ fn restored(options: &ExportOptions, saved: &config::Editor) -> ExportChoice {
     let of = |p: &Preset| ExportChoice { preset: p.id.clone(), codec: p.codec.clone(), height: p.height, fps: p.fps };
     let original = options.presets.first().map(of).unwrap_or_default();
     if saved.export == CUSTOM {
-        let codec =
-            if options.codecs.iter().any(|c| c.id == saved.codec) { saved.codec.clone() } else { "h264".into() };
+        let codec = if options.codecs.iter().any(|c| c.id == saved.codec) {
+            saved.codec.clone()
+        } else {
+            Family::H264.name().into()
+        };
         let height = if saved.height == 0 { original.height } else { at_most(&options.heights, saved.height) };
         let fps = if saved.fps == 0 { original.fps } else { at_most(&options.fps, saved.fps) };
         return ExportChoice { preset: CUSTOM.into(), codec, height, fps };
@@ -200,7 +198,7 @@ fn restored(options: &ExportOptions, saved: &config::Editor) -> ExportChoice {
 
 /// What a copy of `seconds` of `clip` is written as; `None`: the clip as it is (copied when it can be).
 fn reshape(clip: &Clip, choice: &ExportChoice, seconds: f64) -> Option<Reshape> {
-    let (height, fps) = (clip.height & !1, clip_fps(clip));
+    let (height, fps) = (clip.height & !1, clip.fps());
     let network = share::target(&choice.preset);
     let same = choice.codec == clip.codec && choice.height >= height && choice.fps >= fps;
     if network.is_none() && (choice.preset == ORIGINAL || same) {
@@ -218,7 +216,7 @@ fn reshape(clip: &Clip, choice: &ExportChoice, seconds: f64) -> Option<Reshape> 
 /// The longest part the network chosen takes, at the size and rate of the copy.
 fn limit(clip: &Clip, choice: &ExportChoice) -> Option<f64> {
     let target = share::target(&choice.preset)?;
-    share::max_seconds(target, share::scaled((clip.width, clip.height), choice.height), choice.fps.min(clip_fps(clip)))
+    share::max_seconds(target, share::scaled((clip.width, clip.height), choice.height), choice.fps.min(clip.fps()))
 }
 
 /// `--cut <file>`.
@@ -725,7 +723,7 @@ impl Host {
 
     /// Keeps `choice` for the next part.
     fn remember(&mut self, choice: &ExportChoice) {
-        let (height, fps) = (self.clip.height & !1, clip_fps(&self.clip));
+        let (height, fps) = (self.clip.height & !1, self.clip.fps());
         let editor = config::Editor {
             export: choice.preset.clone(),
             codec: choice.codec.clone(),
