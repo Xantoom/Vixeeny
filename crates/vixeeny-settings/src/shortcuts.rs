@@ -16,8 +16,8 @@ pub enum Refusal {
     Conflict(ActionId),
 }
 
-fn list_mut(hotkeys: &mut Hotkeys, action: ActionId) -> &mut Vec<String> {
-    match action {
+fn list_mut(hotkeys: &mut Hotkeys, action: ActionId) -> Option<&mut Vec<String>> {
+    Some(match action {
         ActionId::CaptureRegion => &mut hotkeys.capture_region,
         ActionId::CaptureWindow => &mut hotkeys.capture_window,
         ActionId::CaptureFullscreen => &mut hotkeys.capture_fullscreen,
@@ -25,13 +25,13 @@ fn list_mut(hotkeys: &mut Hotkeys, action: ActionId) -> &mut Vec<String> {
         ActionId::CaptureScrolling => &mut hotkeys.capture_scrolling,
         ActionId::RecordToggle => &mut hotkeys.record_toggle,
         ActionId::RecordPause => &mut hotkeys.record_pause,
-        // Watching for games has no shortcut of its own (never listed).
-        ActionId::ReplayToggle | ActionId::ReplayWatch => &mut hotkeys.replay_toggle,
+        ActionId::ReplayToggle => &mut hotkeys.replay_toggle,
         ActionId::ReplaySave => &mut hotkeys.replay_save,
         ActionId::ReplayEdit => &mut hotkeys.replay_edit,
         ActionId::OverlayToggle => &mut hotkeys.overlay_toggle,
-        ActionId::OpenSettings => &mut hotkeys.open_settings,
-    }
+        // Watching for games and the settings (the tray icon opens them) have no shortcut.
+        ActionId::ReplayWatch | ActionId::OpenSettings => return None,
+    })
 }
 
 /// The table: every action with its [`MAX_PER_ACTION`] slots (empty text = free slot).
@@ -74,7 +74,9 @@ pub fn set(config: &mut Config, action: ActionId, slot: usize, text: &str) -> Re
         }
         *target = hotkey.in_order(text);
     }
-    *list_mut(&mut config.hotkeys, action) = slots.into_iter().filter(|s| !s.is_empty()).collect();
+    if let Some(list) = list_mut(&mut config.hotkeys, action) {
+        *list = slots.into_iter().filter(|s| !s.is_empty()).collect();
+    }
     Ok(())
 }
 
@@ -127,7 +129,9 @@ mod tests {
     fn the_table_has_two_slots_per_action_with_the_defaults_filled_in() {
         let config = Config::default();
         let table = table(&config);
-        assert_eq!(table.len(), 12);
+        // Every action but the settings (the tray icon opens them) and the watch for games.
+        assert_eq!(table.len(), 11);
+        assert!(!table.iter().any(|(a, _)| *a == ActionId::OpenSettings));
         let save = table.iter().find(|(a, _)| *a == ActionId::ReplaySave).unwrap();
         assert_eq!(save.1, ["Ctrl+F11".to_owned(), String::new()]);
     }

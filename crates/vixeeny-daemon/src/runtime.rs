@@ -693,13 +693,13 @@ mod tests {
         let hk = FakeHotkeys::default();
         let applied = hk.applied.clone();
         let mut config = Config::default();
-        config.hotkeys.open_settings = vec!["Ctrl+F9".into()]; // conflicts with record
+        config.hotkeys.overlay_toggle = vec!["Ctrl+F9".into()]; // conflicts with record
         let spawner = FakeSpawner { fail: false, spawned: Arc::default() };
         let mut rt = Runtime::new(config, None, None, tray, Box::new(hk), spawner, AppLink::default(), events, rx);
         rt.apply_config();
         let applied = applied.lock().unwrap();
         assert!(applied.contains(&(ActionId::RecordToggle, "Ctrl+F9".into())));
-        assert!(!applied.iter().any(|(a, _)| *a == ActionId::OpenSettings));
+        assert!(!applied.iter().any(|(a, _)| *a == ActionId::OverlayToggle));
         assert!(log.lock().unwrap().iter().any(|l| l.starts_with("notify")));
     }
 
@@ -738,7 +738,7 @@ mod tests {
         assert_eq!(rt.config, config);
 
         // A shortcut changed: they are registered again.
-        config.hotkeys.open_settings = vec!["Ctrl+Alt+O".into()];
+        config.hotkeys.overlay_toggle = vec!["Ctrl+Alt+O".into()];
         config.save(&path).unwrap();
         rt.reload_config();
         assert!(!applied.lock().unwrap().is_empty());

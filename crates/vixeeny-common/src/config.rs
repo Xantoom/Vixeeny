@@ -430,12 +430,11 @@ pub struct Hotkeys {
     pub replay_save: Vec<String>,
     pub replay_edit: Vec<String>,
     pub overlay_toggle: Vec<String>,
-    pub open_settings: Vec<String>,
 }
 
 impl Hotkeys {
     /// Every action with the shortcuts configured for it, in [`ActionId::ALL`] order.
-    pub fn bindings(&self) -> [(ActionId, &[String]); 12] {
+    pub fn bindings(&self) -> [(ActionId, &[String]); 11] {
         [
             (ActionId::CaptureRegion, &self.capture_region),
             (ActionId::CaptureWindow, &self.capture_window),
@@ -448,7 +447,6 @@ impl Hotkeys {
             (ActionId::ReplaySave, &self.replay_save),
             (ActionId::ReplayEdit, &self.replay_edit),
             (ActionId::OverlayToggle, &self.overlay_toggle),
-            (ActionId::OpenSettings, &self.open_settings),
         ]
     }
 }
@@ -469,7 +467,6 @@ impl Default for Hotkeys {
             replay_save: one("Ctrl+F11"),
             replay_edit: one("Ctrl+F12"),
             overlay_toggle: one("Ctrl+F8"),
-            open_settings: Vec::new(),
         }
     }
 }
@@ -1350,9 +1347,9 @@ mod tests {
     #[test]
     fn a_third_shortcut_is_dropped() {
         let cfg =
-            Config::from_toml("schema_version = 5\n[hotkeys]\nopen_settings = [\"Ctrl+1\", \"Ctrl+2\", \"Ctrl+3\"]\n")
+            Config::from_toml("schema_version = 5\n[hotkeys]\nreplay_save = [\"Ctrl+1\", \"Ctrl+2\", \"Ctrl+3\"]\n")
                 .unwrap();
-        assert_eq!(cfg.hotkeys.open_settings, ["Ctrl+1", "Ctrl+2"]);
+        assert_eq!(cfg.hotkeys.replay_save, ["Ctrl+1", "Ctrl+2"]);
     }
 
     #[test]

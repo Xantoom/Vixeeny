@@ -294,23 +294,23 @@ mod tests {
     #[test]
     fn at_most_two_per_action() {
         let mut k = Hotkeys::default();
-        k.open_settings = ["Ctrl+1", "Ctrl+2", "Ctrl+3"].map(String::from).into();
+        k.overlay_toggle = ["Ctrl+1", "Ctrl+2", "Ctrl+3"].map(String::from).into();
         let r = resolve(&k);
-        let count = r.bindings.iter().filter(|(a, _)| *a == ActionId::OpenSettings).count();
+        let count = r.bindings.iter().filter(|(a, _)| *a == ActionId::OverlayToggle).count();
         assert_eq!(count, 2);
         assert_eq!(
             r.problems,
-            vec![Problem { action: ActionId::OpenSettings, text: "Ctrl+3".into(), kind: ProblemKind::TooMany }]
+            vec![Problem { action: ActionId::OverlayToggle, text: "Ctrl+3".into(), kind: ProblemKind::TooMany }]
         );
     }
 
     #[test]
     fn conflicts_block_the_later_action() {
         let mut k = Hotkeys::default();
-        k.open_settings = vec!["control+f9".into(), "Ctrl+F9".into()];
+        k.overlay_toggle = vec!["control+f9".into(), "Ctrl+F9".into()];
         let r = resolve(&k);
         assert!(r.bindings.contains(&(ActionId::RecordToggle, p("Ctrl+F9"))));
-        assert!(!r.bindings.iter().any(|(a, _)| *a == ActionId::OpenSettings));
+        assert!(!r.bindings.iter().any(|(a, _)| *a == ActionId::OverlayToggle));
         assert_eq!(r.problems.len(), 2);
         assert!(r.problems.iter().all(|x| x.kind == ProblemKind::Conflict(ActionId::RecordToggle)));
     }
