@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Direct image captures: full screen under the cursor, active window, all
-//! monitors. Written in the configured format in the images folder. The editor flow (`capture-region`) is M7.
+//! monitors. Written in the configured format in the images folder.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

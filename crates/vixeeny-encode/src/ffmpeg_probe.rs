@@ -36,14 +36,8 @@ impl Prober for FfmpegProber {
         encoder::find_by_name(&encoder.ffmpeg_encoder).is_some()
     }
 
-    #[cfg(windows)]
     fn driver_caps(&self, adapter: &Adapter) -> Result<Vec<DriverCaps>, String> {
         crate::driver_caps::query(adapter)
-    }
-
-    #[cfg(not(windows))]
-    fn driver_caps(&self, _adapter: &Adapter) -> Result<Vec<DriverCaps>, String> {
-        Err("no capability query on this system".into())
     }
 }
 
@@ -91,7 +85,7 @@ fn find_option(
 
 /// Compares the registry with the encoders of the linked FFmpeg (`ffmpeg -h encoder=…`): every
 /// option, enum value, preset option and pixel format must exist. Software encoders must be
-/// built in; hardware ones must be when `require_hardware` (the Windows build ships them all),
+/// built in; hardware ones must be when `require_hardware` (the build ships them all),
 /// otherwise they are skipped when absent.
 pub fn verify(registry: &Registry, require_hardware: bool) -> Vec<Mismatch> {
     let _ = ffmpeg_next::init();

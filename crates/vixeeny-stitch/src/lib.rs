@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! vixeeny-stitch — assembles a long image from frames captured while the user scrolls
-//!. Pure code, no OS: tested on synthetic sequences.
+//! Assembles a long image from frames captured while the user scrolls. Pure code, no OS: tested
+//! on synthetic sequences.
 //!
 //! Method: every row gets a signature (the mean colour of 32 bands of columns). A new frame
 //! is placed where its rows' signatures agree with those of the image already assembled,

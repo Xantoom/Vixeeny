@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Daemon ↔ app IPC: `postcard` messages with a 4-byte little-endian length prefix
-//! over a local socket (named pipe on Windows, Unix socket elsewhere).
+//! over a named pipe.
 //!
 //! The daemon owns the listener. Binding it is also the single-instance lock: if another
 //! daemon already answers on the endpoint, [`bind`] reports [`BindError::AlreadyRunning`].

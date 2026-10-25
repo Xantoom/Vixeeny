@@ -399,7 +399,6 @@ pub fn download_setup(progress: &mut dyn FnMut(u64, u64)) -> anyhow::Result<Setu
     let held = {
         let mut options = std::fs::OpenOptions::new();
         options.read(true);
-        #[cfg(windows)]
         std::os::windows::fs::OpenOptionsExt::share_mode(&mut options, 1); // FILE_SHARE_READ
         options.open(&path)?
     };
@@ -438,7 +437,6 @@ pub fn tell_daemon(request: ControlRequest) -> std::io::Result<()> {
 fn lock(dir: &Path) -> Option<std::fs::File> {
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create(true).truncate(false);
-    #[cfg(windows)]
     std::os::windows::fs::OpenOptionsExt::share_mode(&mut options, 0);
     options.open(dir.join(LOCK)).ok()
 }

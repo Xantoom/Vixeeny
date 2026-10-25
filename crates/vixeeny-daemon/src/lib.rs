@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! vixeeny-daemon — see README.md.
+//! The always-on daemon: tray, shortcuts, IPC, autostart and the frozen screens of a zone
+//! capture. It links neither Slint nor FFmpeg.
 //!
 //! The daemon sleeps in the OS message loop. Everything that can wake it (tray clicks, IPC
 //! clients, child-process exit) is turned into an [`core::Event`] and handed to the pure state

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! vixeeny-common — see README.md.
+//! What the programs share: the settings file, the IPC messages, shortcuts, texts, paths, file
+//! names, logs, time, colour maths and the look of the windows.
 
 pub mod buffers;
 pub mod colour;

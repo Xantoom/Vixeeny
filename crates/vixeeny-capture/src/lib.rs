@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! vixeeny-capture — screen capture: single images (`grab`). The streaming side
-//! (`start`/`stop` with a `FrameSink`) arrives with the video milestones.
+//! Screen capture: still images of monitors, windows and regions, and the frame streams of
+//! recordings (`wgc_stream`).
 //!
 //! [`Capturer`] holds the target logic (regions, all monitors, DPI) and is tested with
 //! [`FakeBackend`]; the OS only supplies whole-monitor and whole-window frames through

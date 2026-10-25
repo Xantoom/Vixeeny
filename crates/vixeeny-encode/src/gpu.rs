@@ -73,7 +73,6 @@ pub struct GpuPipeline {
     feed: Feed,
     /// [`Feed::Qsv`]: the QSV frame context derived from `frames`.
     qsv: *mut ffi::AVBufferRef,
-    #[cfg(windows)]
     imp: windows_impl::Parts,
 }
 
@@ -149,10 +148,8 @@ impl Drop for GpuPipeline {
     }
 }
 
-#[cfg(windows)]
 pub use windows_impl::Source;
 
-#[cfg(windows)]
 mod windows_impl {
     use super::{Feed, GpuPipeline, HwFrame};
     use crate::card_hdr::{CardHdr, Levels};

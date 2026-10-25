@@ -79,7 +79,6 @@ fn checks(app: &std::path::Path, config_path: Option<&std::path::Path>, wakes: &
 }
 
 /// Has Windows report each wake from sleep to the checking thread.
-#[cfg(windows)]
 fn on_wake() {
     use windows::Win32::Foundation::HANDLE;
     use windows::Win32::System::Power::{
@@ -117,6 +116,3 @@ fn on_wake() {
         tracing::warn!("no wake-from-sleep notifications: the update check runs at start only");
     }
 }
-
-#[cfg(not(windows))]
-fn on_wake() {}

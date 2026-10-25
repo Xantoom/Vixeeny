@@ -4,7 +4,6 @@
 //! this machine has one) and the decoded file holds the BT.709 limited-range values of that
 //! colour, like the CPU path.
 //! Needs the native build: `cargo xtask build-native ffmpeg`.
-#![cfg(windows)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod common;

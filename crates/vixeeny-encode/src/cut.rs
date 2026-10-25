@@ -643,7 +643,6 @@ pub struct Pictures {
     scaler: Scaler,
     /// Scales the frames of the card on the card; `None` once it failed (the processor
     /// scales them then).
-    #[cfg(windows)]
     card: Option<crate::card_scale::CardScaler>,
     /// Frames before this one are decoded but not handed out (after a seek).
     from: usize,
@@ -688,7 +687,6 @@ impl Pictures {
             hardware,
             input,
             scaler: Scaler::new(ToneMap::of(clip))?,
-            #[cfg(windows)]
             card: Some(crate::card_scale::CardScaler::new()),
             from: 0,
             eof: false,
@@ -713,10 +711,7 @@ impl Pictures {
     /// Whether the graphics card also scales what it decodes (only the pictures shown come
     /// back to memory).
     pub fn scaled_on_card(&self) -> bool {
-        #[cfg(windows)]
-        return self.hardware && self.card.is_some();
-        #[cfg(not(windows))]
-        false
+        self.hardware && self.card.is_some()
     }
 
     /// The card failed (a codec or profile it has not): the processor takes over, from the
@@ -830,7 +825,6 @@ impl Pictures {
                 self.scaler.run(&self.decoded, size, bgra)?,
             )));
         }
-        #[cfg(windows)]
         let bgra = match self.on_card(size, bgra) {
             Ok(picture) => return Ok(Next::Frame((i, picture))),
             Err(bgra) => bgra,
@@ -840,7 +834,6 @@ impl Pictures {
     }
 
     /// The frame of the card scaled on the card; `bgra` back when the card cannot.
-    #[cfg(windows)]
     fn on_card(&mut self, size: (u32, u32), mut bgra: Vec<u8>) -> Result<Picture, Vec<u8>> {
         let Some(card) = self.card.as_mut() else {
             return Err(bgra);

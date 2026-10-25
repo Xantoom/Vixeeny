@@ -11,9 +11,8 @@ use vixeeny_encode::registry::{Chroma, Registry};
 #[test]
 fn the_registry_matches_ffmpeg() {
     let registry = Registry::builtin().unwrap();
-    // The Windows FFmpeg build ships every hardware encoder (compiled in, GPU or not).
-    let require_hardware = cfg!(windows);
-    let mismatches = verify(&registry, require_hardware);
+    // The FFmpeg build ships every hardware encoder (compiled in, GPU or not).
+    let mismatches = verify(&registry, true);
     for m in &mismatches {
         eprintln!("{}: {}", m.encoder, m.what);
     }

@@ -155,27 +155,8 @@ const MOVED_SHORTCUTS: [(&str, &str, &str); 5] = [
 /// 1.0: an action still on its former default shortcut moves to the new one, unless the user
 /// gave that one to an action.
 fn v7_free_shortcuts(table: &mut toml::Table) {
-    let Some(hotkeys) = table.get_mut("hotkeys").and_then(|h| h.as_table_mut()) else {
-        return;
-    };
-    let parse = |text: &str| crate::hotkey::Hotkey::parse(text).ok();
-    for (action, old, new) in MOVED_SHORTCUTS {
-        let taken = hotkeys
-            .values()
-            .filter_map(|v| v.as_array())
-            .flatten()
-            .any(|v| v.as_str().is_some_and(|text| parse(text) == parse(new)));
-        if taken {
-            continue;
-        }
-        let Some(list) = hotkeys.get_mut(action).and_then(|v| v.as_array_mut()) else {
-            continue;
-        };
-        for entry in list.iter_mut() {
-            if entry.as_str().is_some_and(|text| parse(text) == parse(old)) {
-                *entry = new.into();
-            }
-        }
+    if let Some(hotkeys) = table.get_mut("hotkeys").and_then(|h| h.as_table_mut()) {
+        move_shortcuts(hotkeys, &MOVED_SHORTCUTS);
     }
 }
 

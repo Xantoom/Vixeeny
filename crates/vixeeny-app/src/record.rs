@@ -1110,7 +1110,7 @@ fn save_replay(
 #[allow(clippy::too_many_arguments)]
 fn record_loop(
     stream: &Video,
-    #[cfg(windows)] gpu_frames: Option<&std::sync::mpsc::Receiver<(i64, HwFrame)>>,
+    gpu_frames: Option<&std::sync::mpsc::Receiver<(i64, HwFrame)>>,
     pacer: Option<&Pacer>,
     recorder: Recorder,
     mut rig: Option<Rig>,

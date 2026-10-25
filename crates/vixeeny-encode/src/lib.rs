@@ -1,17 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! vixeeny-encode — the codec registry, profile validation, hardware probing and, in
-//! later milestones, the video pipeline. See README.md.
+//! Video and audio encoding: the codec registry, profile validation, hardware probing, the
+//! recorder, the replay ring and cutting.
 
-#[cfg(windows)]
 pub mod card_hdr;
-#[cfg(windows)]
 mod card_scale;
 pub mod clock;
 mod convert;
 pub mod cut;
-#[cfg(windows)]
 pub mod d3d_convert;
-#[cfg(windows)]
 pub mod driver_caps;
 pub mod hdr;
 pub mod probe;
