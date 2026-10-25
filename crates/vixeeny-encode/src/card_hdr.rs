@@ -14,8 +14,7 @@
 use std::sync::{Mutex, OnceLock};
 
 use windows::Win32::Foundation::RECT;
-use windows::Win32::Graphics::Direct3D::Fxc::{D3DCOMPILE_OPTIMIZATION_LEVEL3, D3DCompile};
-use windows::Win32::Graphics::Direct3D::{D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST, ID3DBlob};
+use windows::Win32::Graphics::Direct3D::D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_BIND_CONSTANT_BUFFER, D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE,
     D3D11_BIND_UNORDERED_ACCESS, D3D11_BOX, D3D11_BUFFER_DESC, D3D11_COMPARISON_NEVER,
@@ -28,10 +27,11 @@ use windows::Win32::Graphics::Direct3D11::{
     ID3D11UnorderedAccessView, ID3D11VertexShader,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
-    DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_R16_UNORM, DXGI_FORMAT_R16G16_UNORM,
-    DXGI_SAMPLE_DESC,
+    DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_R16_UNORM, DXGI_FORMAT_R16G16_UNORM,
 };
-use windows::core::{Interface, PCSTR, s};
+use windows::core::{Interface, s};
+
+use vixeeny_platform::d3d::{self, compile};
 
 /// The levels of the recorded monitor.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -117,42 +117,6 @@ fn err(what: &str, e: impl std::fmt::Display) -> String {
     format!("{what}: {e}")
 }
 
-fn blob_bytes(blob: &ID3DBlob) -> &[u8] {
-    // SAFETY: a blob exposes `GetBufferSize` bytes at `GetBufferPointer` while alive.
-    unsafe { std::slice::from_raw_parts(blob.GetBufferPointer().cast(), blob.GetBufferSize()) }
-}
-
-fn compile(source: &str, entry: PCSTR, target: PCSTR) -> Result<Vec<u8>, String> {
-    let mut code = None;
-    let mut errors = None;
-    // SAFETY: the source is a live string of the given length; out-pointers are valid.
-    let compiled = unsafe {
-        D3DCompile(
-            source.as_ptr().cast(),
-            source.len(),
-            s!("hdr"),
-            None,
-            None,
-            entry,
-            target,
-            D3DCOMPILE_OPTIMIZATION_LEVEL3,
-            0,
-            &raw mut code,
-            Some(&raw mut errors),
-        )
-    };
-    match (compiled, code) {
-        (Ok(()), Some(code)) => Ok(blob_bytes(&code).to_vec()),
-        (result, _) => Err(format!(
-            "D3DCompile: {} {}",
-            result.err().map(|e| e.to_string()).unwrap_or_default(),
-            errors
-                .map(|e| String::from_utf8_lossy(blob_bytes(&e)).into_owned())
-                .unwrap_or_default()
-        )),
-    }
-}
-
 struct Code {
     peak: Vec<u8>,
     follow: Vec<u8>,
@@ -179,34 +143,6 @@ fn code() -> Result<&'static Code, String> {
     })
     .as_ref()
     .map_err(Clone::clone)
-}
-
-/// A texture of `size` in `format`, for `bind`.
-fn new_texture(
-    device: &ID3D11Device,
-    (width, height): (u32, u32),
-    format: DXGI_FORMAT,
-    bind: u32,
-) -> Result<ID3D11Texture2D, String> {
-    let desc = D3D11_TEXTURE2D_DESC {
-        Width: width,
-        Height: height,
-        MipLevels: 1,
-        ArraySize: 1,
-        Format: format,
-        SampleDesc: DXGI_SAMPLE_DESC {
-            Count: 1,
-            Quality: 0,
-        },
-        Usage: D3D11_USAGE_DEFAULT,
-        BindFlags: bind,
-        ..Default::default()
-    };
-    let mut out = None;
-    // SAFETY: `desc` describes a plain texture; the out-pointer is valid.
-    unsafe { device.CreateTexture2D(&raw const desc, None, Some(&raw mut out)) }
-        .map_err(|e| err("CreateTexture2D", e))?;
-    out.ok_or_else(|| "no texture".to_owned())
 }
 
 /// A one-element structured buffer of 4-byte values, with a view for the compute shaders and,
@@ -371,11 +307,13 @@ impl CardHdr {
         let mut frames = self.frames.lock().map_err(|_| "lock poisoned")?;
         let (input, size) = self.input(&mut frames, texture, rect)?;
         if frames.sdr.as_ref().is_none_or(|(_, _, s)| *s != size) {
-            let made = new_texture(
+            let made = d3d::texture(
                 &self.device,
                 size,
                 DXGI_FORMAT_B8G8R8A8_UNORM,
                 (D3D11_BIND_RENDER_TARGET.0 | D3D11_BIND_SHADER_RESOURCE.0) as u32,
+                0,
+                None,
             )?;
             let mut view = None;
             // SAFETY: a render target view of a texture of this device.
@@ -486,11 +424,13 @@ impl CardHdr {
             let mut desc = D3D11_TEXTURE2D_DESC::default();
             // SAFETY: `desc` is a valid out-pointer.
             unsafe { texture.GetDesc(&raw mut desc) };
-            let made = new_texture(
+            let made = d3d::texture(
                 &self.device,
                 size,
                 desc.Format,
                 D3D11_BIND_SHADER_RESOURCE.0 as u32,
+                0,
+                None,
             )?;
             let mut view = None;
             // SAFETY: a shader resource view of a texture of this device.
@@ -595,8 +535,7 @@ mod tests {
     use super::*;
     use vixeeny_common::colour;
     use windows::Win32::Graphics::Direct3D11::{
-        D3D11_CPU_ACCESS_READ, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE, D3D11_SUBRESOURCE_DATA,
-        D3D11_USAGE_STAGING,
+        D3D11_CPU_ACCESS_READ, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE, D3D11_USAGE_STAGING,
     };
     use windows::Win32::Graphics::Dxgi::Common::{
         DXGI_FORMAT_P010, DXGI_FORMAT_R16G16B16A16_FLOAT,
@@ -625,32 +564,16 @@ mod tests {
                 [r, g, b, 1.0].map(vixeeny_common::half::from_f32)
             })
             .collect();
-        let desc = D3D11_TEXTURE2D_DESC {
-            Width: w,
-            Height: h,
-            MipLevels: 1,
-            ArraySize: 1,
-            Format: DXGI_FORMAT_R16G16B16A16_FLOAT,
-            SampleDesc: DXGI_SAMPLE_DESC {
-                Count: 1,
-                Quality: 0,
-            },
-            Usage: D3D11_USAGE_DEFAULT,
-            BindFlags: D3D11_BIND_RENDER_TARGET.0 as u32,
-            ..Default::default()
-        };
-        let data = D3D11_SUBRESOURCE_DATA {
-            pSysMem: halves.as_ptr().cast(),
-            SysMemPitch: w * 8,
-            SysMemSlicePitch: 0,
-        };
-        let mut out = None;
-        // SAFETY: `halves` outlives the call and holds `h` rows of `w * 8` bytes.
-        unsafe {
-            device.CreateTexture2D(&raw const desc, Some(&raw const data), Some(&raw mut out))
-        }
-        .unwrap();
-        out.unwrap()
+        let bytes: Vec<u8> = halves.iter().flat_map(|v| v.to_le_bytes()).collect();
+        d3d::texture(
+            device,
+            (w, h),
+            DXGI_FORMAT_R16G16B16A16_FLOAT,
+            D3D11_BIND_RENDER_TARGET.0 as u32,
+            0,
+            Some((&bytes, w * 8)),
+        )
+        .unwrap()
     }
 
     /// The bytes of `texture` (`rows` rows of its pitch, planes one after the other).
@@ -716,11 +639,13 @@ mod tests {
                 [0.0, 0.0, 0.0],
             ] {
                 let source = frame(&device, (80, 60), |_, _| rgb);
-                let dst = new_texture(
+                let dst = d3d::texture(
                     &device,
                     out,
                     DXGI_FORMAT_P010,
                     D3D11_BIND_RENDER_TARGET.0 as u32,
+                    0,
+                    None,
                 )
                 .unwrap();
                 let rect = RECT {

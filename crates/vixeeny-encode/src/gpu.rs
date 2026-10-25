@@ -163,13 +163,12 @@ mod windows_impl {
     use ffmpeg_next::ffi;
     use windows::Win32::Foundation::RECT;
     use windows::Win32::Graphics::Direct3D11::{
-        D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_TEXTURE2D_DESC,
-        D3D11_USAGE_DEFAULT, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
+        D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, ID3D11Device, ID3D11DeviceContext,
+        ID3D11Texture2D,
     };
     use windows::Win32::Graphics::Dxgi::Common::{
         DXGI_FORMAT_AYUV, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_NV12, DXGI_FORMAT_P010,
         DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_Y210, DXGI_FORMAT_Y410, DXGI_FORMAT_YUY2,
-        DXGI_SAMPLE_DESC,
     };
     use windows::core::Interface;
 
@@ -359,29 +358,14 @@ mod windows_impl {
             };
 
             // Self-test: one blank source texture through the whole conversion.
-            let desc = D3D11_TEXTURE2D_DESC {
-                Width: source.size.0,
-                Height: source.size.1,
-                MipLevels: 1,
-                ArraySize: 1,
-                Format: if source.hdr.is_some() {
-                    DXGI_FORMAT_R16G16B16A16_FLOAT
-                } else {
-                    DXGI_FORMAT_B8G8R8A8_UNORM
-                },
-                SampleDesc: DXGI_SAMPLE_DESC {
-                    Count: 1,
-                    Quality: 0,
-                },
-                Usage: D3D11_USAGE_DEFAULT,
-                BindFlags: (D3D11_BIND_SHADER_RESOURCE.0 | D3D11_BIND_RENDER_TARGET.0) as u32,
-                ..Default::default()
+            let format = if source.hdr.is_some() {
+                DXGI_FORMAT_R16G16B16A16_FLOAT
+            } else {
+                DXGI_FORMAT_B8G8R8A8_UNORM
             };
-            let mut blank = None;
-            // SAFETY: `desc` is a valid description; the out-pointer is valid.
-            unsafe { device.CreateTexture2D(&raw const desc, None, Some(&raw mut blank)) }
+            let bind = (D3D11_BIND_SHADER_RESOURCE.0 | D3D11_BIND_RENDER_TARGET.0) as u32;
+            let blank = vixeeny_platform::d3d::texture(device, source.size, format, bind, 0, None)
                 .map_err(|e| cfg_err("test texture", e))?;
-            let blank = blank.ok_or_else(|| cfg_err("test texture", "none created"))?;
             let rect = RECT {
                 left: 0,
                 top: 0,

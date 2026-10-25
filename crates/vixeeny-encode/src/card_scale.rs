@@ -7,8 +7,7 @@
 use ffmpeg_next::ffi;
 use windows::Win32::Foundation::RECT;
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11_BIND_RENDER_TARGET, D3D11_CPU_ACCESS_READ, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE,
-    D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, D3D11_USAGE_STAGING, ID3D11Device,
+    D3D11_BIND_RENDER_TARGET, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE, ID3D11Device,
     ID3D11DeviceContext, ID3D11Texture2D,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
@@ -16,9 +15,11 @@ use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_COLOR_SPACE_TYPE, DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P601,
     DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P709, DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P601,
     DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709, DXGI_COLOR_SPACE_YCBCR_STUDIO_G2084_LEFT_P2020,
-    DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_R10G10B10A2_UNORM, DXGI_SAMPLE_DESC,
+    DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_R10G10B10A2_UNORM,
 };
 use windows::core::Interface;
+
+use vixeeny_platform::d3d::texture;
 
 use crate::cut::ToneMap;
 use crate::d3d_convert::VideoConverter;
@@ -50,46 +51,6 @@ fn space_of(frame: &ffi::AVFrame, hdr: bool) -> DXGI_COLOR_SPACE_TYPE {
         (true, false) => DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P709,
         (true, true) => DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P601,
     }
-}
-
-fn texture(
-    device: &ID3D11Device,
-    (w, h): (u32, u32),
-    format: DXGI_FORMAT,
-    staging: bool,
-) -> Result<ID3D11Texture2D, String> {
-    let desc = D3D11_TEXTURE2D_DESC {
-        Width: w,
-        Height: h,
-        MipLevels: 1,
-        ArraySize: 1,
-        Format: format,
-        SampleDesc: DXGI_SAMPLE_DESC {
-            Count: 1,
-            Quality: 0,
-        },
-        Usage: if staging {
-            D3D11_USAGE_STAGING
-        } else {
-            D3D11_USAGE_DEFAULT
-        },
-        BindFlags: if staging {
-            0
-        } else {
-            D3D11_BIND_RENDER_TARGET.0 as u32
-        },
-        CPUAccessFlags: if staging {
-            D3D11_CPU_ACCESS_READ.0 as u32
-        } else {
-            0
-        },
-        MiscFlags: 0,
-    };
-    let mut out = None;
-    // SAFETY: `desc` describes a plain texture; the out-pointer is valid.
-    unsafe { device.CreateTexture2D(&desc, None, Some(&raw mut out)) }
-        .map_err(|e| err("CreateTexture2D", e))?;
-    out.ok_or_else(|| "no texture".into())
 }
 
 /// Holds FFmpeg's lock of the device context while alive (the decoder uses it too).
@@ -174,8 +135,9 @@ impl CardScaler {
                     (60, 1),
                     (made.2, out_space),
                 )?;
-                let target = texture(&device, size, format, false)?;
-                let staging = texture(&device, size, format, true)?;
+                let bind = D3D11_BIND_RENDER_TARGET.0 as u32;
+                let target = texture(&device, size, format, bind, 0, None)?;
+                let staging = texture(&device, size, format, 0, 0, None)?;
                 self.converter = Some((made, converter, target, staging));
             }
             let Some((_, converter, target, staging)) = &self.converter else {

@@ -22,10 +22,10 @@ use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TY
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAP_READ,
     D3D11_MAPPED_SUBRESOURCE, D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION, D3D11_SDK_VERSION,
-    D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING, D3D11CreateDevice,
-    ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
+    D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING, D3D11CreateDevice, ID3D11Device,
+    ID3D11DeviceContext, ID3D11Texture2D,
 };
-use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC};
+use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::Graphics::Dxgi::{IDXGIAdapter, IDXGIDevice};
 use windows::Win32::Graphics::Gdi::{HMONITOR, MONITOR_DEFAULTTONULL, MonitorFromWindow};
 use windows::Win32::System::WinRT::Direct3D11::{
@@ -93,43 +93,19 @@ impl WgcBackend {
             .iter()
             .map(|m| self.start_monitor(m, false, format))
             .collect::<Result<Vec<_>, _>>()?;
-        let desc = D3D11_TEXTURE2D_DESC {
-            Width: bounds.width,
-            Height: bounds.height,
-            MipLevels: 1,
-            ArraySize: 1,
-            Format: DXGI_FORMAT_B8G8R8A8_UNORM,
-            SampleDesc: DXGI_SAMPLE_DESC {
-                Count: 1,
-                Quality: 0,
-            },
-            Usage: D3D11_USAGE_STAGING,
-            BindFlags: 0,
-            CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
-            MiscFlags: 0,
-        };
         // What no monitor covers is black, as on an assembled frame.
         let covered: u64 = monitors.iter().map(|m| m.rect.area()).sum();
         let black = (covered < bounds.area())
             .then(|| vec![0u8; bounds.width as usize * bounds.height as usize * 4]);
-        let init = black.as_ref().map(|b| D3D11_SUBRESOURCE_DATA {
-            pSysMem: b.as_ptr().cast(),
-            SysMemPitch: bounds.width * 4,
-            SysMemSlicePitch: 0,
-        });
-        let mut staging = None;
-        // SAFETY: `desc` describes a staging texture; `init` points at `black`, which outlives
-        // the call; the out-pointer is valid.
-        unsafe {
-            self.device.CreateTexture2D(
-                &desc,
-                init.as_ref().map(|i| &raw const *i),
-                Some(&raw mut staging),
-            )
-        }
-        .map_err(os("CreateTexture2D"))?;
-        drop(black);
-        let staging = staging.ok_or_else(|| CaptureError::Os("no staging texture".into()))?;
+        let staging = vixeeny_platform::d3d::texture(
+            &self.device,
+            (bounds.width, bounds.height),
+            DXGI_FORMAT_B8G8R8A8_UNORM,
+            0,
+            0,
+            black.as_deref().map(|b| (b, bounds.width * 4)),
+        )
+        .map_err(CaptureError::Os)?;
         for (m, started) in monitors.iter().zip(started) {
             let at = m.rect.relative_to(&bounds);
             started.finish(|texture| {

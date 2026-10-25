@@ -17,6 +17,7 @@ tracing.workspace = true
 rayon.workspace = true
 toml.workspace = true
 vixeeny-common = { path = "../vixeeny-common" }
+vixeeny-platform = { path = "../vixeeny-platform" }
 # Prebuilt shared FFmpeg (FFMPEG_DIR); its DLLs must be next to the executable.
 ffmpeg-next = { workspace = true, features = ["software-resampling", "filter"] }
 # The D3D11 video processor that converts captured frames on the GPU, and the encoder

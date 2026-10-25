@@ -19,10 +19,9 @@ use vixeeny_encode::recorder::{
 };
 use vixeeny_encode::registry::{Chroma, PresetName, Registry};
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_SUBRESOURCE_DATA,
-    D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, ID3D11Texture2D,
+    D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, ID3D11Texture2D,
 };
-use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC};
+use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 
 const W: u32 = 320;
 const H: u32 = 180;
@@ -41,30 +40,9 @@ fn scratch(name: &str) -> PathBuf {
 
 fn texture(device: &Device) -> ID3D11Texture2D {
     let pixels: Vec<u8> = COLOUR.repeat((W * H) as usize);
-    let desc = D3D11_TEXTURE2D_DESC {
-        Width: W,
-        Height: H,
-        MipLevels: 1,
-        ArraySize: 1,
-        Format: DXGI_FORMAT_B8G8R8A8_UNORM,
-        SampleDesc: DXGI_SAMPLE_DESC {
-            Count: 1,
-            Quality: 0,
-        },
-        Usage: D3D11_USAGE_DEFAULT,
-        BindFlags: (D3D11_BIND_SHADER_RESOURCE.0 | D3D11_BIND_RENDER_TARGET.0) as u32,
-        ..Default::default()
-    };
-    let data = D3D11_SUBRESOURCE_DATA {
-        pSysMem: pixels.as_ptr().cast(),
-        SysMemPitch: W * 4,
-        SysMemSlicePitch: 0,
-    };
-    let mut out = None;
-    // SAFETY: valid descriptions; `pixels` outlives the call.
-    unsafe { device.CreateTexture2D(&raw const desc, Some(&raw const data), Some(&raw mut out)) }
-        .unwrap();
-    out.unwrap()
+    let bind = (D3D11_BIND_SHADER_RESOURCE.0 | D3D11_BIND_RENDER_TARGET.0) as u32;
+    let format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    vixeeny_platform::d3d::texture(device, (W, H), format, bind, 0, Some((&pixels, W * 4))).unwrap()
 }
 
 fn config(
@@ -419,30 +397,10 @@ fn hdr_texture(device: &Device, rgb: [f32; 3]) -> ID3D11Texture2D {
     let pixels: Vec<u16> = [r, g, b, 1.0]
         .map(vixeeny_common::half::from_f32)
         .repeat((W * H) as usize);
-    let desc = D3D11_TEXTURE2D_DESC {
-        Width: W,
-        Height: H,
-        MipLevels: 1,
-        ArraySize: 1,
-        Format: windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_R16G16B16A16_FLOAT,
-        SampleDesc: DXGI_SAMPLE_DESC {
-            Count: 1,
-            Quality: 0,
-        },
-        Usage: D3D11_USAGE_DEFAULT,
-        BindFlags: (D3D11_BIND_SHADER_RESOURCE.0 | D3D11_BIND_RENDER_TARGET.0) as u32,
-        ..Default::default()
-    };
-    let data = D3D11_SUBRESOURCE_DATA {
-        pSysMem: pixels.as_ptr().cast(),
-        SysMemPitch: W * 8,
-        SysMemSlicePitch: 0,
-    };
-    let mut out = None;
-    // SAFETY: valid descriptions; `pixels` outlives the call.
-    unsafe { device.CreateTexture2D(&raw const desc, Some(&raw const data), Some(&raw mut out)) }
-        .unwrap();
-    out.unwrap()
+    let bytes: Vec<u8> = pixels.iter().flat_map(|v| v.to_le_bytes()).collect();
+    let bind = (D3D11_BIND_SHADER_RESOURCE.0 | D3D11_BIND_RENDER_TARGET.0) as u32;
+    let format = windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_R16G16B16A16_FLOAT;
+    vixeeny_platform::d3d::texture(device, (W, H), format, bind, 0, Some((&bytes, W * 8))).unwrap()
 }
 
 /// Records 10 frames of a solid HDR colour through the GPU path of `id`, kept as HDR or tone

@@ -8,17 +8,16 @@ use std::cell::RefCell;
 use std::sync::OnceLock;
 
 use vixeeny_platform::{HdrInfo, PhysicalRect};
-use windows::Win32::Graphics::Direct3D::Fxc::{D3DCOMPILE_OPTIMIZATION_LEVEL3, D3DCompile};
-use windows::Win32::Graphics::Direct3D::ID3DBlob;
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_BIND_CONSTANT_BUFFER, D3D11_BIND_SHADER_RESOURCE, D3D11_BIND_UNORDERED_ACCESS, D3D11_BOX,
-    D3D11_BUFFER_DESC, D3D11_CPU_ACCESS_READ, D3D11_RESOURCE_MISC_BUFFER_STRUCTURED,
-    D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, D3D11_USAGE_STAGING, ID3D11Buffer,
-    ID3D11ComputeShader, ID3D11Device, ID3D11DeviceContext, ID3D11ShaderResourceView,
-    ID3D11Texture2D, ID3D11UnorderedAccessView,
+    D3D11_BUFFER_DESC, D3D11_RESOURCE_MISC_BUFFER_STRUCTURED, D3D11_TEXTURE2D_DESC,
+    D3D11_USAGE_DEFAULT, ID3D11Buffer, ID3D11ComputeShader, ID3D11Device, ID3D11DeviceContext,
+    ID3D11ShaderResourceView, ID3D11Texture2D, ID3D11UnorderedAccessView,
 };
-use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT, DXGI_FORMAT_R32_UINT, DXGI_SAMPLE_DESC};
+use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_R32_UINT;
 use windows::core::s;
+
+use vixeeny_platform::d3d::{compile, texture};
 
 use crate::CaptureError;
 use crate::wgc::os;
@@ -66,46 +65,14 @@ fn bytecode() -> Result<&'static Code, CaptureError> {
     static CODE: OnceLock<Result<Code, String>> = OnceLock::new();
     CODE.get_or_init(|| {
         let source = format!("{}{SHADER}", vixeeny_common::colour::HLSL);
-        Ok((compile(&source, s!("peak"))?, compile(&source, s!("main"))?))
+        let cs = s!("cs_5_0");
+        Ok((
+            compile(&source, s!("peak"), cs)?,
+            compile(&source, s!("main"), cs)?,
+        ))
     })
     .as_ref()
     .map_err(|e| CaptureError::Os(e.clone()))
-}
-
-fn blob_bytes(blob: &ID3DBlob) -> &[u8] {
-    // SAFETY: a blob exposes `GetBufferSize` bytes at `GetBufferPointer` while alive.
-    unsafe { std::slice::from_raw_parts(blob.GetBufferPointer().cast(), blob.GetBufferSize()) }
-}
-
-fn compile(source: &str, entry: windows::core::PCSTR) -> Result<Vec<u8>, String> {
-    let mut code = None;
-    let mut errors = None;
-    // SAFETY: the source is a live string of the given length; out-pointers are valid.
-    let compiled = unsafe {
-        D3DCompile(
-            source.as_ptr().cast(),
-            source.len(),
-            s!("tonemap"),
-            None,
-            None,
-            entry,
-            s!("cs_5_0"),
-            D3DCOMPILE_OPTIMIZATION_LEVEL3,
-            0,
-            &raw mut code,
-            Some(&raw mut errors),
-        )
-    };
-    match (compiled, code) {
-        (Ok(()), Some(code)) => Ok(blob_bytes(&code).to_vec()),
-        (result, _) => Err(format!(
-            "D3DCompile: {} {}",
-            result.err().map(|e| e.to_string()).unwrap_or_default(),
-            errors
-                .map(|e| String::from_utf8_lossy(blob_bytes(&e)).into_owned())
-                .unwrap_or_default()
-        )),
-    }
 }
 
 /// Compiles the shader in the background, so that the first HDR capture does not wait for it.
@@ -128,43 +95,6 @@ struct CardToneMap {
 thread_local! {
     /// The shader of the last device used on this thread.
     static CARD: RefCell<Option<CardToneMap>> = const { RefCell::new(None) };
-}
-
-fn texture(
-    device: &ID3D11Device,
-    (width, height): (u32, u32),
-    format: DXGI_FORMAT,
-    bind: u32,
-) -> Result<ID3D11Texture2D, CaptureError> {
-    let staging = bind == 0;
-    let desc = D3D11_TEXTURE2D_DESC {
-        Width: width,
-        Height: height,
-        MipLevels: 1,
-        ArraySize: 1,
-        Format: format,
-        SampleDesc: DXGI_SAMPLE_DESC {
-            Count: 1,
-            Quality: 0,
-        },
-        Usage: if staging {
-            D3D11_USAGE_STAGING
-        } else {
-            D3D11_USAGE_DEFAULT
-        },
-        BindFlags: bind,
-        CPUAccessFlags: if staging {
-            D3D11_CPU_ACCESS_READ.0 as u32
-        } else {
-            0
-        },
-        MiscFlags: 0,
-    };
-    let mut out = None;
-    // SAFETY: `desc` describes a plain texture; the out-pointer is valid.
-    unsafe { device.CreateTexture2D(&desc, None, Some(&raw mut out)) }
-        .map_err(os("CreateTexture2D"))?;
-    out.ok_or_else(|| CaptureError::Os("no texture".into()))
 }
 
 impl CardToneMap {
@@ -253,14 +183,21 @@ pub(crate) fn stage(
         size,
         desc.Format,
         D3D11_BIND_SHADER_RESOURCE.0 as u32,
-    )?;
+        0,
+        None,
+    )
+    .map_err(CaptureError::Os)?;
     let output = texture(
         device,
         size,
         DXGI_FORMAT_R32_UINT,
         D3D11_BIND_UNORDERED_ACCESS.0 as u32,
-    )?;
-    let staging = texture(device, size, DXGI_FORMAT_R32_UINT, 0)?;
+        0,
+        None,
+    )
+    .map_err(CaptureError::Os)?;
+    let staging =
+        texture(device, size, DXGI_FORMAT_R32_UINT, 0, 0, None).map_err(CaptureError::Os)?;
     let mut view: Option<ID3D11ShaderResourceView> = None;
     let mut target: Option<ID3D11UnorderedAccessView> = None;
     // SAFETY: views of textures of this device, with their own formats.
@@ -371,7 +308,10 @@ mod tests {
             (w, h),
             DXGI_FORMAT_R16G16B16A16_FLOAT,
             D3D11_BIND_SHADER_RESOURCE.0 as u32,
+            0,
+            None,
         )
+        .map_err(CaptureError::Os)
         .unwrap();
         // SAFETY: `halves` holds `h` rows of `w * 8` bytes; same device.
         unsafe { context.UpdateSubresource(&source, 0, None, halves.as_ptr().cast(), w * 8, 0) };

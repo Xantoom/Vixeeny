@@ -627,42 +627,21 @@ fn live_only_what_is_drawn_covers_the_screens() {
 fn live_pictures_are_copied_in_on_the_graphics_card() {
     use crate::drawing::{Drawing, ScreenPart};
     use vixeeny_editor::{Annotation, Point, Style};
-    use windows::Win32::Graphics::Direct3D11::{
-        D3D11_BIND_SHADER_RESOURCE, D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE2D_DESC,
-        D3D11_USAGE_DEFAULT,
-    };
-    use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC};
+    use windows::Win32::Graphics::Direct3D11::D3D11_BIND_SHADER_RESOURCE;
+    use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
     let gfx = Gfx::new().expect("graphics devices");
     let (w, h) = (100, 60);
     // A monitor's picture, all one colour (BGRA).
     let (tw, th) = (50u32, 40u32);
     let pixels: Vec<u8> = [10u8, 200, 30, 255].repeat((tw * th) as usize);
-    let desc = D3D11_TEXTURE2D_DESC {
-        Width: tw,
-        Height: th,
-        MipLevels: 1,
-        ArraySize: 1,
-        Format: DXGI_FORMAT_B8G8R8A8_UNORM,
-        SampleDesc: DXGI_SAMPLE_DESC {
-            Count: 1,
-            Quality: 0,
-        },
-        Usage: D3D11_USAGE_DEFAULT,
-        BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as u32,
-        ..Default::default()
-    };
-    let data = D3D11_SUBRESOURCE_DATA {
-        pSysMem: pixels.as_ptr().cast(),
-        SysMemPitch: tw * 4,
-        SysMemSlicePitch: 0,
-    };
-    let mut texture = None;
-    // SAFETY: `data` holds the texture's rows; the out-pointer is valid.
-    unsafe {
-        gfx.d3d
-            .CreateTexture2D(&desc, Some(&raw const data), Some(&raw mut texture))
-    }
-    .expect("texture");
+    let texture = vixeeny_platform::d3d::texture(
+        &gfx.d3d,
+        (tw, th),
+        DXGI_FORMAT_B8G8R8A8_UNORM,
+        D3D11_BIND_SHADER_RESOURCE.0 as u32,
+        0,
+        Some((&pixels, tw * 4)),
+    );
     let part = ScreenPart {
         x: 20,
         y: 10,

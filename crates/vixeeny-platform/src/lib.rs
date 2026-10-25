@@ -6,6 +6,7 @@
 
 pub mod clipboard;
 pub mod crash;
+pub mod d3d;
 pub mod elevation;
 pub mod games;
 mod geometry;

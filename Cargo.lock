@@ -5512,6 +5512,7 @@ dependencies = [
  "tracing",
  "vixeeny-audio",
  "vixeeny-common",
+ "vixeeny-platform",
  "windows",
 ]
 

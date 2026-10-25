@@ -909,7 +909,6 @@ impl crate::StillBackend for Held<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use windows::Win32::Graphics::Direct3D11::D3D11_SUBRESOURCE_DATA;
 
     /// Taken by the tests reading through the process's reader: its immediate context is used
     /// by one thread at a time, as in the app.
@@ -955,35 +954,18 @@ mod tests {
         };
         let (w, h) = (3u32, 2u32);
         let pixels: Vec<u8> = (0..w * h * 4).map(|i| i as u8).collect();
-        let desc = D3D11_TEXTURE2D_DESC {
-            Width: w,
-            Height: h,
-            MipLevels: 1,
-            ArraySize: 1,
-            Format: DXGI_FORMAT_B8G8R8A8_UNORM,
-            SampleDesc: DXGI_SAMPLE_DESC {
-                Count: 1,
-                Quality: 0,
-            },
-            Usage: D3D11_USAGE_DEFAULT,
-            BindFlags: (D3D11_BIND_SHADER_RESOURCE.0 | D3D11_BIND_RENDER_TARGET.0) as u32,
-            CPUAccessFlags: 0,
-            MiscFlags: SHARED_FLAGS,
-        };
-        let init = D3D11_SUBRESOURCE_DATA {
-            pSysMem: pixels.as_ptr().cast(),
-            SysMemPitch: w * 4,
-            SysMemSlicePitch: 0,
-        };
-        let mut texture = None;
-        // SAFETY: `init` points at `pixels`, which outlives the call; out-pointer is valid.
-        unsafe {
-            gpu.device
-                .CreateTexture2D(&desc, Some(&init), Some(&raw mut texture))
-                .unwrap();
-            gpu.context.Flush();
-        }
-        let texture = texture.unwrap();
+        let bind = (D3D11_BIND_SHADER_RESOURCE.0 | D3D11_BIND_RENDER_TARGET.0) as u32;
+        let texture = vixeeny_platform::d3d::texture(
+            &gpu.device,
+            (w, h),
+            DXGI_FORMAT_B8G8R8A8_UNORM,
+            bind,
+            SHARED_FLAGS,
+            Some((&pixels, w * 4)),
+        )
+        .unwrap();
+        // SAFETY: the context of the device that made the texture.
+        unsafe { gpu.context.Flush() };
         let id = next_shared_id();
         let handle = share(&texture, id).unwrap();
         let frozen = Frozen {
