@@ -704,9 +704,15 @@ fn video_settings(env: &Env, config: &Config, replay: bool) -> Vec<Row> {
         },
         |c, v| {
             let profile = &mut c.video;
-            profile.encoder_kind = v;
-            // The best encoder of the new kind, resolved when it is read.
-            profile.encoder = "auto".into();
+            if profile.encoder_kind == v {
+                return;
+            }
+            // The encoder of the kind left waits for it; the new kind finds its own again, else its best one (`auto`,
+            // resolved when it is read).
+            let left = std::mem::replace(&mut profile.encoder_kind, v);
+            let mine = profile.encoder_by_kind.remove(&profile.encoder_kind).unwrap_or_else(|| "auto".into());
+            let theirs = std::mem::replace(&mut profile.encoder, mine);
+            profile.encoder_by_kind.insert(left, theirs);
         },
     );
     rows.push(if no_hardware { crate::greyed(crate::warned(kind, t(Key::SetNoHardware))) } else { kind });
@@ -773,8 +779,10 @@ fn video_settings(env: &Env, config: &Config, replay: bool) -> Vec<Row> {
             let Value::Text(v) = v else {
                 return Err(Invalid);
             };
-            // Set by hand from where the preset left: the same picture to start from.
+            // The first time set by hand: from where the preset left, the same picture to start from. After that, the
+            // settings made by hand are kept.
             if v == "custom"
+                && c.video.params.is_empty()
                 && let Some(left) = PresetName::from_setting(&c.video.preset)
                 && matches!(c.video.preset.as_str(), "quality" | "balanced" | "small")
                 && let Some(spec) = encoder.as_deref().and_then(encoders::spec)

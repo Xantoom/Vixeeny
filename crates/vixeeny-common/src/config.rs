@@ -652,6 +652,8 @@ pub struct Video {
     pub encoder_kind: String,
     /// An encoder id of the codec registry. `auto` (older files) = the best detected hardware encoder, else libx264.
     pub encoder: String,
+    /// The encoder chosen for the other kind, by kind: back when that kind is chosen again.
+    pub encoder_by_kind: BTreeMap<String, String>,
     pub container: String,
     pub resolution: String,
     /// `source` (the screen's) or `W:H`: the middle of the screen with that ratio.
@@ -676,6 +678,7 @@ impl Default for Video {
         Self {
             encoder_kind: "hardware".into(),
             encoder: "auto".into(),
+            encoder_by_kind: BTreeMap::new(),
             container: "mp4_hybrid".into(),
             resolution: "source".into(),
             aspect: "source".into(),

@@ -1249,22 +1249,39 @@ mod tests {
     }
 
     #[test]
-    fn the_custom_preset_starts_from_the_one_left() {
+    fn the_custom_preset_starts_from_the_one_left_then_keeps_its_settings() {
         let mut c = Config::default();
         c.video.preset = "quality".into();
-        c.video.params.insert("rc.quality".into(), "40".into());
         let env = with_nvenc();
         let video = rows(Section::Video, &env, &c);
         row(&video, "preset").apply(&mut c, Value::Text("custom".into())).unwrap();
         assert_eq!(c.video.preset, "custom");
-        // NVENC's best quality: CQ 19, not the 40 left from before nor the scale's 23.
+        // NVENC's best quality: CQ 19, not the scale's 23.
         assert_eq!(c.video.params["rc.quality"], "19");
         assert_eq!(c.video.params["multipass"], "qres");
-        // Back and forth within custom keeps what was set by hand.
+        // Set by hand, then another preset and back: what was set by hand is kept.
         c.video.params.insert("rc.quality".into(), "21".into());
         let video = rows(Section::Video, &env, &c);
+        row(&video, "preset").apply(&mut c, Value::Text("small".into())).unwrap();
         row(&video, "preset").apply(&mut c, Value::Text("custom".into())).unwrap();
         assert_eq!(c.video.params["rc.quality"], "21");
+    }
+
+    #[test]
+    fn each_kind_of_encoder_keeps_the_one_chosen() {
+        let mut c = Config::default();
+        let env = with_nvenc();
+        let kind = |c: &mut Config, v: &str| {
+            row(&rows(Section::Video, &env, c), "encoder_kind").apply(c, Value::Text(v.into())).unwrap();
+        };
+        c.video.encoder = "nvenc_h264".into();
+        kind(&mut c, "software");
+        assert_eq!(c.video.encoder, "auto");
+        row(&rows(Section::Video, &env, &c), "encoder").apply(&mut c, Value::Text("libx265".into())).unwrap();
+        kind(&mut c, "hardware");
+        assert_eq!(c.video.encoder, "nvenc_h264");
+        kind(&mut c, "software");
+        assert_eq!(c.video.encoder, "libx265");
     }
 
     #[test]
