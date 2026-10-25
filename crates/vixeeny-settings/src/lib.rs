@@ -31,13 +31,15 @@ pub enum Section {
     /// The replay buffer.
     Replay,
     Shortcuts,
+    /// Which notifications are shown.
+    Notifications,
     Updates,
     /// Version, system, links.
     About,
 }
 
 impl Section {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::General,
         Self::Overlay,
         Self::Image,
@@ -45,6 +47,7 @@ impl Section {
         Self::Audio,
         Self::Replay,
         Self::Shortcuts,
+        Self::Notifications,
         Self::Updates,
         Self::About,
     ];
@@ -58,6 +61,7 @@ impl Section {
             Self::Audio => Key::SecAudio,
             Self::Replay => Key::SecReplay,
             Self::Shortcuts => Key::SecShortcuts,
+            Self::Notifications => Key::SecNotifications,
             Self::Updates => Key::SecUpdates,
             Self::About => Key::SecAbout,
         }
@@ -448,7 +452,12 @@ fn row(id: impl Into<String>, label: String, kind: Kind, get: Get, set: Set) -> 
     }
 }
 
-fn toggle(id: &str, label: String, get: impl Fn(&Config) -> bool + 'static, set: fn(&mut Config, bool)) -> Row {
+fn toggle(
+    id: &str,
+    label: String,
+    get: impl Fn(&Config) -> bool + 'static,
+    set: impl Fn(&mut Config, bool) + 'static,
+) -> Row {
     row(
         id,
         label,
@@ -468,8 +477,8 @@ fn number(
     id: &str,
     label: String,
     (min, max, step): (i64, i64, i64),
-    get: fn(&Config) -> i64,
-    set: fn(&mut Config, i64),
+    get: impl Fn(&Config) -> i64 + 'static,
+    set: impl Fn(&mut Config, i64) + 'static,
 ) -> Row {
     row(
         id,
@@ -490,8 +499,8 @@ fn slider(
     id: &str,
     label: String,
     (min, max, step): (i64, i64, i64),
-    get: fn(&Config) -> i64,
-    set: fn(&mut Config, i64),
+    get: impl Fn(&Config) -> i64 + 'static,
+    set: impl Fn(&mut Config, i64) + 'static,
 ) -> Row {
     let mut r = number(id, label, (min, max, step), get, set);
     r.kind = Kind::Slider { min, max, step };
@@ -503,7 +512,7 @@ fn text_like(
     id: &str,
     label: String,
     get: impl Fn(&Config) -> String + 'static,
-    set: fn(&mut Config, String),
+    set: impl Fn(&mut Config, String) + 'static,
 ) -> Row {
     row(
         id,
@@ -525,7 +534,7 @@ fn choice(
     label: String,
     options: Vec<Opt>,
     get: impl Fn(&Config) -> String + 'static,
-    set: fn(&mut Config, String),
+    set: impl Fn(&mut Config, String) + 'static,
 ) -> Row {
     text_like(Kind::Choice(options), id, label, get, set)
 }
@@ -601,6 +610,7 @@ pub fn rows(section: Section, env: &Env, config: &Config) -> Vec<Row> {
         Section::Video => pages::video(env, config),
         Section::Audio => pages::audio(env, config),
         Section::Replay => pages::replay(env, config),
+        Section::Notifications => pages::notifications(env, config),
         Section::Updates => pages::updates(env, config),
         Section::Shortcuts | Section::About => Vec::new(),
     };
@@ -622,7 +632,6 @@ pub fn reset(section: Section, config: &mut Config) {
             g.language = new.general.language;
             g.theme = new.general.theme;
             g.autostart = new.general.autostart;
-            g.notifications = new.general.notifications;
         }
         Section::Overlay => {
             config.overlay = new.overlay;
@@ -642,6 +651,7 @@ pub fn reset(section: Section, config: &mut Config) {
             config.paths.videos = new.paths.videos;
             config.paths.naming.videos = new.paths.naming.videos;
             config.paths.per_app_subfolder.videos = new.paths.per_app_subfolder.videos;
+            config.disk_alert.recordings = new.disk_alert.recordings;
         }
         Section::Audio => {
             // What other modes had chosen stays at hand.
@@ -654,11 +664,14 @@ pub fn reset(section: Section, config: &mut Config) {
             config.paths.replays = new.paths.replays;
             config.paths.naming.replays = new.paths.naming.replays;
             config.paths.per_app_subfolder.replays = new.paths.per_app_subfolder.replays;
+            config.disk_alert.replays = new.disk_alert.replays;
         }
         Section::Shortcuts => config.hotkeys = new.hotkeys,
+        Section::Notifications => config.notifications = new.notifications,
         Section::Updates => {
             config.general.auto_update = new.general.auto_update;
             config.general.check_updates = new.general.check_updates;
+            config.general.whats_new = new.general.whats_new;
         }
         Section::About => {}
     }
@@ -716,6 +729,7 @@ pub fn matches(query: &str, text: &str) -> bool {
 pub fn search(query: &str, env: &Env, config: &Config) -> Vec<Found> {
     let mut env = env.clone();
     env.open.insert("expert_video".into());
+    env.open.insert(format!("{}expert_video", pages::REPLAY_PREFIX));
     Section::ALL
         .into_iter()
         .flat_map(|section| {
@@ -726,6 +740,15 @@ pub fn search(query: &str, env: &Env, config: &Config) -> Vec<Found> {
                 .map(move |r| Found { section, id: r.id, label: r.label })
         })
         .collect()
+}
+
+/// Things wrong with the replay's own video settings, for the user to read (empty when fine or when it records with the
+/// videos').
+pub fn replay_problems(config: &Config, source: (u32, u32), lang: Lang) -> Vec<String> {
+    if !config.replay.enabled || config.replay.same_as_video {
+        return Vec::new();
+    }
+    video_problems(&pages::replay_view(config), source, lang)
 }
 
 /// Things wrong with the current video settings, for the user to read (empty when fine).
@@ -922,10 +945,28 @@ mod tests {
     fn one_switch_checks_and_installs_updates() {
         let mut c = Config::default();
         let updates = rows(Section::Updates, &env(), &c);
-        assert_eq!(updates.len(), 1);
+        assert_eq!(updates.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["auto_update", "whats_new"]);
         assert!(matches!(row(&updates, "auto_update").value(&c), Value::Bool(true)));
         row(&updates, "auto_update").apply(&mut c, Value::Bool(false)).unwrap();
         assert!(!c.general.check_updates && !c.general.auto_update);
+        assert_eq!(row(&updates, "whats_new").value(&c), Value::Bool(true));
+    }
+
+    #[test]
+    fn the_notifications_have_one_switch_that_keeps_the_others() {
+        let mut c = Config::default();
+        let page = rows(Section::Notifications, &env(), &c);
+        row(&page, "notify_image").apply(&mut c, Value::Bool(false)).unwrap();
+        row(&page, "notify_game").apply(&mut c, Value::Text("on".into())).unwrap();
+        // Off: only the switch, and what was set stays for when it is on again.
+        row(&page, "notifications").apply(&mut c, Value::Bool(false)).unwrap();
+        let off = rows(Section::Notifications, &env(), &c);
+        assert_eq!(off.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["notifications"]);
+        assert!(!c.notifications.image_saved && c.notifications.game_start == "on");
+        assert!(!c.notifications.game_start(true));
+        row(&off, "notifications").apply(&mut c, Value::Bool(true)).unwrap();
+        assert!(!c.notifications.image_saved && c.notifications.game_start(true));
+        assert!(differs(Section::Notifications, &c) && !differs(Section::General, &c));
     }
 
     #[test]
@@ -972,10 +1013,13 @@ mod tests {
         amount.apply(&mut c, Value::Int(4096)).unwrap();
         assert_eq!(c.video.split.mode, "size:4096");
         kind.apply(&mut c, Value::Text("duration".into())).unwrap();
-        assert_eq!(c.video.split.mode, "duration:4096");
+        assert_eq!(c.video.split.mode, "duration:10");
         assert_eq!(kind.value(&c), Value::Text("duration".into()));
         kind.apply(&mut c, Value::Text("off".into())).unwrap();
         assert_eq!(c.video.split.mode, "off");
+        // Each kind finds its amount again.
+        kind.apply(&mut c, Value::Text("size".into())).unwrap();
+        assert_eq!(c.video.split.mode, "size:4096");
     }
 
     #[test]
@@ -997,7 +1041,7 @@ mod tests {
         row(&image, "template:images").apply(&mut c, Value::Text("{app}-{time}".into())).unwrap();
         row(&video, "template:videos").apply(&mut c, Value::Text(" ".into())).unwrap();
         assert_eq!(c.paths.naming.images.template, "{app}-{time}");
-        assert_eq!(c.paths.naming.videos.template, "{app}_{date}_{time}");
+        assert_eq!(c.paths.naming.videos.template, "{app} {date} {time}");
         let replay = rows(Section::Replay, &env(), &c);
         assert!(replay.iter().any(|r| r.id == "template:replays"));
         let general = rows(Section::General, &env(), &c);
@@ -1043,14 +1087,74 @@ mod tests {
         assert_eq!(off.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["replay_enabled"]);
         c.replay.enabled = true;
         let replay = rows(Section::Replay, &env(), &c);
+        // Where its files go comes right under its switch, as on the video page.
+        assert_eq!(replay[1].id, "h_folder");
         let duration = row(&replay, "replay_duration");
-        duration.apply(&mut c, Value::Text("1800".into())).unwrap();
-        assert_eq!(c.replay.duration_seconds, 1800);
-        // An older duration shows as the closest one offered.
-        c.replay.duration_seconds = 45;
-        assert_eq!(duration.value(&c), Value::Text("30".into()));
+        assert_eq!(duration.value(&c), Value::Int(30));
+        duration.apply(&mut c, Value::Int(90)).unwrap();
+        assert_eq!(c.replay.duration_seconds, 60);
+        // The amount stays in the new unit.
+        row(&replay, "replay_unit").apply(&mut c, Value::Text("minutes".into())).unwrap();
+        assert_eq!(c.replay.duration_seconds, 3600);
+        let replay = rows(Section::Replay, &env(), &c);
+        row(&replay, "replay_duration").apply(&mut c, Value::Int(5)).unwrap();
+        assert_eq!(c.replay.duration_seconds, 300);
+        assert_eq!(row(&replay, "replay_duration").unit, "min");
         row(&replay, "replay_storage").apply(&mut c, Value::Text("disk".into())).unwrap();
         assert_eq!(c.replay.storage, "disk");
+        // No game open: said in the list.
+        let open = env().with_open(["games".to_owned()].into());
+        assert!(rows(Section::Replay, &open, &c).iter().any(|r| r.id == "no_games"));
+    }
+
+    #[test]
+    fn the_disk_alerts_are_a_switch_and_a_share_each() {
+        let mut c = Config::default();
+        c.replay.enabled = true;
+        let video = rows(Section::Video, &env(), &c);
+        row(&video, "disk_alert_percent:videos").apply(&mut c, Value::Int(150)).unwrap();
+        assert_eq!(c.disk_alert.recordings.threshold(), 99);
+        row(&video, "disk_alert:videos").apply(&mut c, Value::Bool(false)).unwrap();
+        assert!(!has(Section::Video, &c, "disk_alert_percent:videos"));
+        assert_eq!(c.disk_alert.recordings.threshold(), 0);
+        // Kept for when it is on again; the replay's is its own.
+        assert_eq!(c.disk_alert.recordings.percent, 99);
+        assert_eq!(c.disk_alert.replays.threshold(), 5);
+        assert!(has(Section::Replay, &c, "disk_alert_percent:replays"));
+        assert!(!has(Section::General, &c, "disk_alert:videos"));
+    }
+
+    #[test]
+    fn the_replay_has_video_settings_of_its_own() {
+        let mut c = Config::default();
+        c.replay.enabled = true;
+        c.video.fps = 30;
+        let replay = rows(Section::Replay, &with_nvenc(), &c);
+        // Its own: read and written apart from the videos'.
+        let fps = row(&replay, "replay:fps");
+        assert_eq!(fps.value(&c), Value::Text("60".into()));
+        fps.apply(&mut c, Value::Text("30".into())).unwrap();
+        assert_eq!(c.replay.video.fps, 30);
+        row(&replay, "replay:encoder_kind").apply(&mut c, Value::Text("software".into())).unwrap();
+        assert_eq!((c.replay.video.encoder_kind.as_str(), c.video.encoder_kind.as_str()), ("software", "hardware"));
+        // A replay is not cut into parts; its sound is the videos'.
+        assert!(!replay.iter().any(|r| r.id == "replay:split"));
+        c.video.audio.bitrate_kbps = 320;
+        assert_eq!(c.replay_video().audio.bitrate_kbps, 320);
+        assert!(c.replay.video.audio == vixeeny_common::config::Audio::default());
+        // The same as the videos: none of them, and what was set stays.
+        row(&replay, "replay_same_video").apply(&mut c, Value::Bool(true)).unwrap();
+        assert!(!has(Section::Replay, &c, "replay:fps"));
+        assert_eq!(c.replay_video().fps, 30);
+        assert_eq!(c.replay.video.encoder_kind, "software");
+        // Its expanders are its own.
+        c.replay.same_as_video = false;
+        c.replay.video.preset = "custom".into();
+        let opened = env().with_open(["replay:expert_video".to_owned()].into());
+        let replay = rows(Section::Replay, &opened, &c);
+        assert!(replay.iter().any(|r| r.id == "replay:chroma"));
+        assert!(!rows(Section::Video, &opened, &c).iter().any(|r| r.id == "chroma"));
+        assert!(row(&replay, "replay:encoder").info.starts_with("AV1"));
     }
 
     fn with_nvenc() -> Env {
@@ -1305,9 +1409,11 @@ mod tests {
         c.video.audio.sources.push("app:game.exe".into());
         let audio = rows(Section::Audio, &e, &c);
         assert_eq!(row(&audio, "src:app:game.exe").label, "game.exe (closed)");
-        // Off removes the microphone, whichever it was.
+        // Off removes the microphone, whichever it was; on again, it is back.
         row(&audio, "mic_on").apply(&mut c, Value::Bool(false)).unwrap();
         assert_eq!(c.video.audio.sources, ["app:spotify.exe", "app:game.exe"]);
+        row(&audio, "mic_on").apply(&mut c, Value::Bool(true)).unwrap();
+        assert_eq!(c.video.audio.sources, ["app:spotify.exe", "app:game.exe", "mic:{in-1}"]);
         // Older settings without the field: read from their sources.
         let mut old = Config::default();
         old.video.audio.sources = vec!["mic".into()];
@@ -1364,9 +1470,17 @@ mod tests {
         c.replay.enabled = true;
         let replay = rows(Section::Replay, &env(), &c);
         let after = row(&replay, "replay_after");
-        assert_eq!(after.value(&c), Value::Text("0".into()));
-        after.apply(&mut c, Value::Text("10".into())).unwrap();
-        assert_eq!(c.replay.after_seconds, 10);
+        assert_eq!(after.value(&c), Value::Bool(false));
+        assert!(!has_in(&replay, "replay_after_seconds"));
+        after.apply(&mut c, Value::Bool(true)).unwrap();
+        let replay = rows(Section::Replay, &env(), &c);
+        row(&replay, "replay_after_seconds").apply(&mut c, Value::Int(12)).unwrap();
+        assert_eq!(c.replay.after(), 12);
+        // Off, then on again: the seconds are kept.
+        row(&replay, "replay_after").apply(&mut c, Value::Bool(false)).unwrap();
+        assert_eq!(c.replay.after(), 0);
+        row(&replay, "replay_after").apply(&mut c, Value::Bool(true)).unwrap();
+        assert_eq!(c.replay.after(), 12);
         assert_eq!(row(&rows(Section::Overlay, &env(), &c), "overlay_edge").picker, Picker::Edge);
     }
 

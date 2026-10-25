@@ -517,7 +517,7 @@ mod tests {
         let first = run_with(ActionId::CaptureFullscreen, &snap, &dir, tpl, false, true, &names, &no_metadata);
         let second = run_with(ActionId::CaptureFullscreen, &snap, &dir, tpl, false, true, &names, &no_metadata);
         assert_eq!(first.file_name().unwrap(), "Desktop_2026-10-01_17-12-00.png");
-        assert_eq!(second.file_name().unwrap(), "Desktop_2026-10-01_17-12-00_2.png");
+        assert_eq!(second.file_name().unwrap(), "Desktop_2026-10-01_17-12-00 (2).png");
         let decoder = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(&first).unwrap()));
         let reader = decoder.read_info().unwrap();
         assert_eq!((reader.info().width, reader.info().height), (160, 100));

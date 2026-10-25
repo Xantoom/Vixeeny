@@ -40,6 +40,12 @@ pub struct State {
     /// The version whose install failed: not downloaded and installed again by itself.
     #[serde(default)]
     pub failed: Option<String>,
+    /// The release of the version running, once known (for what changed in it).
+    #[serde(default)]
+    pub installed: Option<Release>,
+    /// The version that ran last: another one now means Vixeeny was updated.
+    #[serde(default)]
+    pub last_run: Option<String>,
 }
 
 impl State {
@@ -59,6 +65,26 @@ impl State {
     /// The release to offer, if it is newer than `current`.
     pub fn newer_than(&self, current: &str) -> Option<&Release> {
         self.available.as_ref().filter(|r| crate::release::is_newer(current, &r.version))
+    }
+
+    /// What changed in `version`, when its release is known.
+    pub fn notes_of(&self, version: &str) -> Option<&str> {
+        [&self.available, &self.installed]
+            .into_iter()
+            .flatten()
+            .find(|r| r.version == version && !r.notes.is_empty())
+            .map(|r| r.notes.as_str())
+    }
+
+    /// Records that `current` runs; `true` when it was updated to since the last run. With no run recorded (a version
+    /// from before this record), the update is the one this file offered.
+    pub fn arrived(&mut self, current: &str) -> bool {
+        let updated = match &self.last_run {
+            Some(last) => last != current,
+            None => self.available.as_ref().is_some_and(|r| r.version == current),
+        };
+        self.last_run = Some(current.to_owned());
+        updated
     }
 
     /// A check is due every 12 hours.
@@ -82,11 +108,14 @@ mod tests {
                 version: "1.0.0".into(),
                 assets: Vec::new(),
                 signatures: [("a.zip".to_owned(), "sig".to_owned())].into(),
+                notes: "- Things".into(),
             }),
             notified: Some("1.0.0".into()),
             ready: Some("1.0.0".into()),
             error: Some("boom".into()),
             failed: Some("0.9.0".into()),
+            installed: None,
+            last_run: Some("0.9.0".into()),
         };
         state.save(&path).unwrap();
         assert_eq!(State::load(&path), state);
@@ -99,11 +128,27 @@ mod tests {
 
     #[test]
     fn an_offer_older_than_the_running_version_is_dropped() {
-        let release = Release { version: "0.5.0".into(), assets: Vec::new(), signatures: Default::default() };
+        let release = Release { version: "0.5.0".into(), assets: Vec::new(), ..Release::default() };
         let state = State { available: Some(release), ..State::default() };
         assert!(state.newer_than("0.4.0").is_some());
         assert!(state.newer_than("0.5.0").is_none());
         assert!(state.newer_than("0.6.0").is_none());
+    }
+
+    #[test]
+    fn an_update_is_noticed_once_at_the_first_run_of_the_new_version() {
+        let release = Release { version: "1.1.0".into(), notes: "- New".into(), ..Release::default() };
+        // A first install: nothing to tell.
+        let mut state = State::default();
+        assert!(!state.arrived("1.0.0"));
+        assert!(!state.arrived("1.0.0"));
+        assert!(state.arrived("1.1.0"));
+        assert!(!state.arrived("1.1.0"));
+        // From a version that kept no record: the release this file offered.
+        let mut state = State { available: Some(release), ..State::default() };
+        assert!(state.arrived("1.1.0"));
+        assert_eq!(state.notes_of("1.1.0"), Some("- New"));
+        assert_eq!(state.notes_of("1.0.0"), None);
     }
 
     #[test]

@@ -4,7 +4,8 @@
 //! Vixeeny (or by the Restart button of the settings); otherwise the user is told once.
 //!
 //! `vixeeny-app --update pending`: run by the daemon as it starts; undoes an install cut short, or installs a
-//! downloaded version (the daemon stops, the new one starts).
+//! downloaded version (the daemon stops, the new one starts), or else tells what changed when this version is new since
+//! the last start (see `whats_new`).
 //!
 //! `vixeeny-app --update install [--settings]`: installs the downloaded version (the Restart button of the settings),
 //! then shows the settings again.
@@ -56,7 +57,12 @@ fn pending() -> anyhow::Result<()> {
             tracing::info!("installing {version}, downloaded before");
             client::install(None)
         }
-        None => Ok(()),
+        // Nothing to install: this version runs, perhaps for the first time.
+        None => {
+            let config = vixeeny_common::paths::config_file().and_then(|p| Config::load(&p).ok()).unwrap_or_default();
+            crate::whats_new::on_start(&config);
+            Ok(())
+        }
     }
 }
 

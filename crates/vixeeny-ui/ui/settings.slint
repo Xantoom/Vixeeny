@@ -622,7 +622,7 @@ component CaptionButton inherits Rectangle {
 export component SettingsWindow inherits Window {
     in property <UiTexts> t;
     in property <[string]> section-titles;
-    // 0 general, 1 overlay, 2 image, 3 video, 4 sound, 5 replay, 6 shortcuts, 7 updates, 8 about
+    // 0 general, 1 overlay, 2 image, 3 video, 4 sound, 5 replay, 6 shortcuts, 7 notifications, 8 updates, 9 about
     in-out property <int> section: 0;
     in property <[SettingGroup]> groups;
     // The about page: this computer.
@@ -666,6 +666,11 @@ export component SettingsWindow inherits Window {
     in property <string> update-detail;
     in property <float> update-progress: 0;
     in property <string> update-action;
+    // What changed in the version offered (or this one), under a heading that folds it.
+    in property <string> update-notes-title;
+    in property <string> update-notes;
+    property <bool> notes-open: false;
+    public function toggle-notes() { root.notes-open = !root.notes-open; }
     // The page holds a setting changed from how it comes (its reset button works), and the question its reset asks.
     in property <bool> page-changed;
     in property <string> reset-page-title;
@@ -711,7 +716,7 @@ export component SettingsWindow inherits Window {
     default-font-family: Theme.font;
 
     property <bool> searching: root.search-text != "";
-    property <bool> is-rows: root.section != 6 && root.section != 8 && !root.searching;
+    property <bool> is-rows: root.section != 6 && root.section != 9 && !root.searching;
     // The first tab and the title of the page share this line.
     property <length> top: 52px;
     property <length> tab-h: 38px;
@@ -726,7 +731,8 @@ export component SettingsWindow inherits Window {
             : i == 4 ? Icons.speaker
             : i == 5 ? Icons.history
             : i == 6 ? Icons.keyboard
-            : i == 7 ? Icons.download
+            : i == 7 ? Icons.alert
+            : i == 8 ? Icons.download
             : Icons.info;
     }
     function go(i: int) {
@@ -830,7 +836,7 @@ export component SettingsWindow inherits Window {
                     overflow: elide;
                 }
             }
-            pill := TouchArea { mouse-cursor: pointer; clicked => { root.go(7); } }
+            pill := TouchArea { mouse-cursor: pointer; clicked => { root.go(8); } }
         }
     }
 
@@ -862,7 +868,7 @@ export component SettingsWindow inherits Window {
         }
         // Back to how the page comes, at the end of the title's line: only once changed.
         reset := IconButton {
-            visible: root.section != 8 && !root.searching;
+            visible: root.section != 9 && !root.searching;
             x: 24px + page.column - self.width;
             y: page-title.y + (page-title.height - self.height) / 2;
             icon: Icons.arrow-reset;
@@ -898,7 +904,7 @@ export component SettingsWindow inherits Window {
                     text: root.notice;
                 }
                 // Where the update stands, and what to do about it.
-                if root.section == 7 : Group {
+                if root.section == 8 : Group {
                     GroupRow {
                         title: root.update-title;
                         description: root.update-detail;
@@ -917,6 +923,30 @@ export component SettingsWindow inherits Window {
                                 root.page-action(root.update-state == 2 ? "update-download"
                                     : root.update-state == 4 ? "update-restart" : "update-check", "");
                             }
+                        }
+                    }
+                    // The list of changes, folded under its heading.
+                    if root.update-notes != "" : GroupRow {
+                        title: root.update-notes-title;
+                        glyph: Icons.document;
+                        clickable: true;
+                        clicked => { root.toggle-notes(); }
+                        Icon {
+                            data: root.notes-open ? Glyphs.chevron-up : Icons.chevron-down;
+                            tint: Theme.text-2;
+                            size: 14px;
+                        }
+                    }
+                    if root.update-notes != "" && root.notes-open : Card {
+                        height: notes.preferred-height + 32px;
+                        notes := Text {
+                            x: 52px;
+                            y: 16px;
+                            width: parent.width - 52px - 20px;
+                            text: root.update-notes;
+                            color: Theme.text;
+                            font-size: 13px;
+                            wrap: word-wrap;
                         }
                     }
                 }
@@ -1038,7 +1068,7 @@ export component SettingsWindow inherits Window {
             }
 
             // ---- about: who we are, this machine, the links
-            if root.section == 8 && !root.searching : Page {
+            if root.section == 9 && !root.searching : Page {
                 width: parent.width - 8px;
                 height: parent.height;
                 column: page.column;

@@ -55,6 +55,9 @@ pub struct UpdateView {
     pub progress: f32,
     /// The label of the button (empty: none).
     pub action: String,
+    /// The heading of the list of changes, and the list (empty: none to show).
+    pub notes_title: String,
+    pub notes: String,
 }
 
 fn show_update(w: &SettingsWindow, view: &UpdateView) {
@@ -63,6 +66,8 @@ fn show_update(w: &SettingsWindow, view: &UpdateView) {
     w.set_update_detail(view.detail.as_str().into());
     w.set_update_progress(view.progress);
     w.set_update_action(view.action.as_str().into());
+    w.set_update_notes_title(view.notes_title.as_str().into());
+    w.set_update_notes(view.notes.as_str().into());
 }
 
 /// A key press while a shortcut is being recorded.
@@ -1023,10 +1028,10 @@ impl SettingsPanel {
         self.window.set_pc_gpus(pc_tiles(&overview.gpus));
         self.window.set_pc_screens(pc_tiles(&overview.screens));
         self.window.set_pc_disks(pc_tiles(&overview.disks));
-        let notice = if section == Section::Video {
-            video_problems(&config, (1920, 1080), env.lang).join("\n")
-        } else {
-            String::new()
+        let notice = match section {
+            Section::Video => video_problems(&config, (1920, 1080), env.lang).join("\n"),
+            Section::Replay => vixeeny_settings::replay_problems(&config, (1920, 1080), env.lang).join("\n"),
+            _ => String::new(),
         };
         let heading =
             if notice.is_empty() { String::new() } else { format!("{}\n{notice}", tr(Key::SetProblems, env.lang)) };
@@ -1293,8 +1298,13 @@ impl SettingsPanel {
         // A folded setting: its section opens.
         let shown = || state.rows.borrow().iter().any(|r| r.id == found.id);
         self.select_section(found.section);
-        if found.section == Section::Video && !found.id.is_empty() && !shown() {
-            state.open.borrow_mut().insert("expert_video".into());
+        let expert = match found.section {
+            Section::Video => Some("expert_video"),
+            Section::Replay => Some("replay:expert_video"),
+            _ => None,
+        };
+        if let Some(expert) = expert.filter(|_| !found.id.is_empty() && !shown()) {
+            state.open.borrow_mut().insert(expert.into());
             self.rebuild_env();
             self.refresh();
         }

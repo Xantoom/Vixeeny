@@ -16,7 +16,7 @@ use crate::supervisor::Spawner;
 
 /// The daemon watches for games: to have the app run the replay with them, or tell that it is off.
 fn watches_games(config: &Config) -> bool {
-    config.replay.enabled || config.replay.notify == "both"
+    config.replay.enabled || config.notifications.game_start(false)
 }
 
 /// Finds games in the foreground.
@@ -352,6 +352,11 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
             Effect::Notify(key) => {
                 let text = tr(key, self.lang);
                 tracing::warn!("notification: {text}");
+                // Both are failures (a crash, shortcuts taken): their switch on the notifications page.
+                let wanted = &self.config.notifications;
+                if !(wanted.enabled && wanted.failures) {
+                    return Flow::Continue;
+                }
                 self.tray.notify(text);
                 // A crash is told on a card whose click prepares a report.
                 if key == Key::AppCrashed {
@@ -525,7 +530,7 @@ mod tests {
         {
             let mut config = Config::default();
             config.replay.enabled = enabled;
-            config.replay.notify = notify.into();
+            config.notifications.game_start = notify.into();
             let (rt, events, _, spawned) = runtime(false, config);
             let game = Arc::new(Mutex::new(false));
             let mut rt = rt.with_games(Box::new(FakeGames(game.clone())));

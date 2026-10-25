@@ -24,6 +24,7 @@ mod sysinfo;
 mod thumbnail;
 mod toast;
 mod update;
+mod whats_new;
 mod widget;
 mod widget_math;
 
@@ -157,10 +158,9 @@ fn direct_capture(
     let (format, settings) = image_output(config);
     // The notification's thumbnail is made from the picture saved, not from the file.
     let thumb = std::sync::Mutex::new(None);
+    let card = config.notifications.enabled && config.notifications.image_saved;
     let after = |image: &vixeeny_image::Bgra<'_>, encoded: Option<&[u8]>| {
-        if config.general.notifications
-            && let Ok(mut slot) = thumb.lock()
-        {
+        if card && let Ok(mut slot) = thumb.lock() {
             *slot = Some(thumbnail::scaled(image, 640));
         }
         if config.image.copy_to_clipboard
@@ -169,10 +169,8 @@ fn direct_capture(
             tracing::warn!("clipboard: {e:#}");
         }
     };
-    let destination = still::Destination {
-        after_save: (config.image.copy_to_clipboard || config.general.notifications).then_some(&after),
-        ..destination
-    };
+    let destination =
+        still::Destination { after_save: (config.image.copy_to_clipboard || card).then_some(&after), ..destination };
     // Asked once the window is captured.
     let backdrop = window_backdrop_kind(config)
         .then_some(|| window_backdrop(config).unwrap_or(vixeeny_image::backdrop::Backdrop::Blur));
@@ -374,7 +372,7 @@ impl<W: std::io::Write> Actions<'_, W> {
             next = run_action(action, None, self.config, self.recording);
         }
         BUSY.store(false, Ordering::Release);
-        self.recording.report(self.send)
+        self.recording.report(self.send, self.config)
     }
 }
 
@@ -458,6 +456,10 @@ impl Recording {
             self.replay = None;
             self.replay_game = None;
         }
+        // A recording runs: the replay waits for its end (see `handle`).
+        if self.handle.is_some() {
+            return;
+        }
         if let Some((pid, exe)) = &self.replay_game {
             let never = config.replay.never.contains(exe);
             if !config.replay.enabled || never || !vixeeny_platform::process_alive(*pid) {
@@ -478,7 +480,7 @@ impl Recording {
             return;
         };
         if !config.replay.enabled {
-            if config.replay.notify == "both" && self.first_time(&game, false) {
+            if config.notifications.game_start(false) && self.first_time(&game, false) {
                 announce(config, false, &game);
             }
             return;
@@ -487,7 +489,7 @@ impl Recording {
         if self.replay.is_some() || declined {
             return;
         }
-        if self.start_replay(config, &game) && config.replay.notify != "none" && self.first_time(&game, true) {
+        if self.start_replay(config, &game) && config.notifications.game_start(true) && self.first_time(&game, true) {
             announce(config, true, &game);
         }
     }
@@ -551,14 +553,14 @@ impl Recording {
                     let game = self.replay_game.take();
                     self.declined = game.as_ref().map(|(pid, _)| *pid);
                     self.stop_replay();
-                    if config.replay.notify != "none"
+                    if config.notifications.game_start(false)
                         && let Some(window) = vixeeny_platform::foreground_window().ok().flatten()
                         && game.is_some_and(|(pid, _)| pid == window.pid)
                     {
                         announce(config, false, &window);
                     }
                 } else if let Some(game) = self.games.game_in_front(game_lists(config)) {
-                    if self.start_replay(config, &game) && config.replay.notify != "none" {
+                    if self.start_replay(config, &game) && config.notifications.game_start(true) {
                         announce(config, true, &game);
                     }
                 } else {
@@ -578,21 +580,32 @@ impl Recording {
         }
         match (action, &self.handle) {
             (ActionId::RecordToggle, Some(handle)) => handle.stop(),
-            (ActionId::RecordToggle, None) => match record::start(config) {
-                Ok(handle) => self.handle = Some(handle),
-                Err(e) => {
-                    tracing::error!("cannot start the recording: {e:#}");
-                    let text = toast::failure_text(&e, lang(&config.general.language));
-                    toast::notify(config, &toast::Toast::Failed(toast::Failed::Recording, text));
+            (ActionId::RecordToggle, None) => {
+                // The replay stops while a recording runs (one capture and one encoder at a time): its buffer goes with
+                // it, and it starts again once the recording ends.
+                if self.replay.is_some() {
+                    tracing::info!("a recording starts: replay stopped until it ends");
+                    self.replay_game = None;
+                    self.stop_replay();
                 }
-            },
+                match record::start(config) {
+                    Ok(handle) => self.handle = Some(handle),
+                    Err(e) => {
+                        tracing::error!("cannot start the recording: {e:#}");
+                        let text = toast::failure_text(&e, lang(&config.general.language));
+                        toast::notify(config, &toast::Toast::Failed(toast::Failed::Recording, text));
+                        self.watch(config);
+                    }
+                }
+            }
             (_, Some(handle)) => handle.pause_toggle(),
             (_, None) => {}
         }
     }
 
-    /// Tells the daemon (tray icon) when the state changed, and forgets a finished recording.
-    fn report(&mut self, send: &mut impl std::io::Write) -> anyhow::Result<()> {
+    /// Tells the daemon (tray icon) when the state changed, and forgets a finished recording: the replay starts again
+    /// then, with the game in front.
+    fn report(&mut self, send: &mut impl std::io::Write, config: &Config) -> anyhow::Result<()> {
         let Some(handle) = self.handle.as_mut() else {
             return Ok(());
         };
@@ -603,6 +616,7 @@ impl Recording {
         }
         if finished {
             self.handle = None;
+            self.watch(config);
         }
         Ok(())
     }
@@ -661,6 +675,8 @@ fn run() -> anyhow::Result<()> {
         Some("--edit") => return region::run_edit(&args[1..]),
         // The daily update check, and the installation (see `update`).
         Some("--update") => return update::run_child(&args[1..]),
+        // What changed, at the first start after an update (see `whats_new`).
+        Some("--whats-new") => return whats_new::run_child(),
         // The administrator's rights (see `admin`).
         Some("--admin") => return admin::run_child(&args[1..]),
         Some("--system-info") => {
@@ -775,11 +791,11 @@ fn run() -> anyhow::Result<()> {
             Ok(Wake::Daemon(DaemonToApp::RunAction { action, frozen })) => {
                 idle_from = std::time::Instant::now();
                 Actions { config: &mut config, recording: &mut recording, send: &mut send }.run(action, frozen)?;
-                recording.report(&mut send)?;
+                recording.report(&mut send, &config)?;
             }
             Ok(Wake::Look) => recording.watch(&config),
             Ok(Wake::Recording) => {
-                recording.report(&mut send)?;
+                recording.report(&mut send, &config)?;
                 if recording.replay.as_ref().is_some_and(record::Handle::finished) {
                     recording.watch(&config);
                 }

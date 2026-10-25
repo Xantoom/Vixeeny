@@ -178,13 +178,33 @@ pub fn notify(config: &Config, toast: &Toast) {
 
 /// [`notify`] with the thumbnail of the capture, made from the picture in memory.
 pub fn notify_with(config: &Config, toast: &Toast, thumb: Option<Thumb>) {
-    // The general switch is about captures; a game starting has its own (`replay.notify`).
-    if !config.general.notifications && !matches!(toast, Toast::Replay(..)) {
+    if !shown(config, toast) {
         return;
     }
     if let Err(e) = send_to_host(&encode(toast, thumb.as_ref())) {
         tracing::warn!("cannot show the notification: {e}");
     }
+}
+
+/// Whether the user wants the card for `toast` (the notifications page).
+fn shown(config: &Config, toast: &Toast) -> bool {
+    let n = &config.notifications;
+    n.enabled
+        && match toast {
+            Toast::Saved(kind, _) | Toast::Lossy(kind, ..) => match kind {
+                Saved::Image => n.image_saved,
+                Saved::Recording => n.recording_saved,
+                Saved::Replay => n.replay_saved,
+            },
+            // The disk alert has its own switch, on the replay page.
+            Toast::Failed(Failed::DiskLow, _) => true,
+            // Asked for: a zone read, no text in it.
+            Toast::Failed(Failed::NoText, _) => n.text_copied,
+            Toast::Failed(..) => n.failures,
+            Toast::TextCopied(_) => n.text_copied,
+            Toast::Update(_) => n.updates,
+            Toast::Replay(on, ..) => n.game_start(*on),
+        }
 }
 
 /// The card's line, then the thumbnail's pixels when there is one (its size ends the line).
@@ -529,6 +549,23 @@ Merci"
         let bad = encode(&toast, Some(&Thumb { width: 2, height: 3, data: vec![0; 5] }));
         assert_eq!(bad, encode_line(&toast.to_args()).into_bytes());
         assert_eq!(decode_line("saved-image\tx\t5000x2"), None);
+    }
+
+    #[test]
+    fn each_card_follows_its_switch() {
+        let mut config = Config::default();
+        let image = Toast::Saved(Saved::Image, PathBuf::from("a.png"));
+        let failed = Toast::Failed(Failed::Recording, String::new());
+        assert!(shown(&config, &image) && shown(&config, &failed));
+        config.notifications.image_saved = false;
+        assert!(!shown(&config, &image) && shown(&config, &failed));
+        assert!(shown(&config, &Toast::Lossy(Saved::Recording, PathBuf::from("a.mp4"), 3)));
+        config.notifications.game_start = "on".into();
+        assert!(shown(&config, &Toast::Replay(true, PathBuf::new(), String::new())));
+        assert!(!shown(&config, &Toast::Replay(false, PathBuf::new(), String::new())));
+        // Off: none at all.
+        config.notifications.enabled = false;
+        assert!(!shown(&config, &failed) && !shown(&config, &Toast::Failed(Failed::DiskLow, String::new())));
     }
 
     #[test]

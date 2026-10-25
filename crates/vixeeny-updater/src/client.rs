@@ -185,9 +185,29 @@ pub fn check() -> anyhow::Result<Option<Release>> {
     };
     let mut state = State::load(&path);
     state.checked_at = now();
+    // The release of the version running: kept for what changed in it.
+    let running = |r: &Release| r.version == CURRENT;
+    if let Some(release) = release.iter().chain(&state.available).find(|r| running(r)) {
+        state.installed = Some(release.clone());
+    }
     state.available = release.filter(|r| is_newer(CURRENT, &r.version));
     state.save(&path)?;
     Ok(state.available)
+}
+
+/// What changed in `version`, as written in its release (Markdown).
+pub fn notes(version: &str) -> anyhow::Result<String> {
+    let json = get(&agent(), &crate::release::tag_url(REPOSITORY, version), 4 << 20)?;
+    let release = Release::parse(std::str::from_utf8(&json)?)?.context("no such release")?;
+    // Kept for the next time.
+    if let Ok(path) = state_path() {
+        let mut state = State::load(&path);
+        if release.version == CURRENT {
+            state.installed = Some(release.clone());
+            let _ = state.save(&path);
+        }
+    }
+    Ok(release.notes)
 }
 
 /// The version that is downloaded, verified and ready to be installed, if any.

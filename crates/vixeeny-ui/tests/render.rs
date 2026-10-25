@@ -117,16 +117,16 @@ fn settings_apply_immediately() {
     settings_render(&panel, "9-settings-general");
     let w = panel.window();
     let groups = w.get_groups();
-    w.invoke_row_toggled("notifications".into(), false);
+    w.invoke_row_toggled("autostart".into(), false);
     // The page keeps its rows (and their controls, which then animate): only the row changed.
     assert!(w.get_groups() == groups, "the rows were rebuilt");
     w.invoke_row_chosen("theme".into(), 2); // system, light, dark
     assert_eq!(seen.borrow().len(), 2, "one notification per change");
     let c = panel.config();
-    assert!(!c.general.notifications);
+    assert!(!c.general.autostart);
     assert_eq!(c.general.theme, "dark");
     // The same value again is not a change.
-    w.invoke_row_toggled("notifications".into(), false);
+    w.invoke_row_toggled("autostart".into(), false);
     assert_eq!(seen.borrow().len(), 2);
     panel.select_section(Section::Overlay);
     w.invoke_row_chosen("overlay_edge".into(), 0); // left, right, top, bottom
@@ -308,7 +308,10 @@ fn the_search_leads_to_the_setting() {
     settings_render(&panel, "9-settings-search");
     // Both shortcuts that save the replay, the plain one first.
     let labels: Vec<String> = w.get_search_hits().iter().map(|h| h.label.to_string()).collect();
-    assert_eq!(labels, ["Save the replay", "Save and edit the replay"]);
+    let shortcuts: Vec<&String> = labels.iter().filter(|l| l.ends_with("the replay")).collect();
+    assert_eq!(shortcuts, ["Save the replay", "Save and edit the replay"]);
+    // And its notification.
+    assert!(labels.contains(&"Replay saved".to_owned()), "{labels:?}");
     // A folded expert setting: its section opens, the row is outlined.
     w.set_search_text(Default::default());
     panel.select_section(Section::Video);
@@ -463,6 +466,12 @@ fn every_page_of_the_settings_renders() {
     panel.window().invoke_row_toggled("mic_on".into(), true);
     panel.set_mic_level(0.62);
     settings_render_at(&panel, "9-page-audio-mic", (1040, 1100));
+    // The replay on: where it goes, what it keeps, what it records with, the games (none open).
+    panel.select_section(Section::Replay);
+    panel.window().invoke_row_toggled("replay_enabled".into(), true);
+    panel.window().invoke_row_toggled("replay_after".into(), true);
+    panel.window().invoke_row_toggled("games".into(), true);
+    settings_render_at(&panel, "9-page-replay-on", (1040, 2400));
     // The smallest window: nothing overlaps.
     panel.select_section(Section::General);
     settings_render_at(&panel, "9-page-smallest", (960, 640));
@@ -501,6 +510,7 @@ fn the_updates_and_about_pages_show_what_the_host_gives_them() {
         detail: "12.4 MB of 31.0 MB".into(),
         progress: 0.4,
         action: String::new(),
+        ..Default::default()
     });
     settings_render(&panel, "9-settings-about");
     panel.select_section(Section::Updates);
@@ -511,7 +521,11 @@ fn the_updates_and_about_pages_show_what_the_host_gives_them() {
         detail: "It installs at the next start of Vixeeny.".into(),
         progress: 1.0,
         action: "Restart".into(),
+        notes_title: "What's new in 1.3.0".into(),
+        notes: "Fixes\n• A window capture keeps its bottom rows.\n• Settings are saved whole.".into(),
     });
+    // The list of changes, unfolded.
+    panel.window().invoke_toggle_notes();
     settings_render(&panel, "9-settings-updates-ready");
     // Up to date: the card is green.
     panel.set_update(&settings_panel::UpdateView {
@@ -520,6 +534,7 @@ fn the_updates_and_about_pages_show_what_the_host_gives_them() {
         detail: "Last checked: 2026-10-11, 14:32".into(),
         progress: 0.0,
         action: "Check now".into(),
+        ..Default::default()
     });
     settings_render(&panel, "9-settings-updates-current");
 }

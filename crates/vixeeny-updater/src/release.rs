@@ -23,7 +23,7 @@ pub struct Asset {
 }
 
 /// A published release.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Release {
     /// `1.2.3`, without the `v` of the tag.
     pub version: String,
@@ -31,6 +31,9 @@ pub struct Release {
     /// The signatures in the notes, by the name of the file signed.
     #[serde(default)]
     pub signatures: BTreeMap<String, String>,
+    /// What changed, as the release page shows it (Markdown, without the signatures).
+    #[serde(default)]
+    pub notes: String,
 }
 
 #[derive(Deserialize)]
@@ -84,6 +87,69 @@ pub fn signatures(notes: &str) -> BTreeMap<String, String> {
     found
 }
 
+/// The notes as the release page shows them: without the comments (the signatures).
+pub fn shown_notes(body: &str) -> String {
+    let mut out = String::new();
+    let mut rest = body;
+    while let Some(start) = rest.find("<!--") {
+        out.push_str(&rest[..start]);
+        rest = rest[start..].split_once("-->").map_or("", |(_, after)| after);
+    }
+    out.push_str(rest);
+    out.trim().to_owned()
+}
+
+/// Markdown notes as plain text to read: headings without their marks, list items behind a bullet, the emphasis and the
+/// links' targets dropped.
+pub fn plain_notes(notes: &str) -> String {
+    let lines: Vec<String> = notes
+        .lines()
+        .map(|line| {
+            let line = line.trim_end();
+            let indent = line.len() - line.trim_start().len();
+            let text = line.trim_start();
+            let text = if let Some(item) = text.strip_prefix("- ").or_else(|| text.strip_prefix("* ")) {
+                format!("{}• {item}", " ".repeat(indent))
+            } else {
+                text.trim_start_matches('#').trim_start().to_owned()
+            };
+            let mut plain = String::with_capacity(text.len());
+            let mut chars = text.chars().peekable();
+            while let Some(c) = chars.next() {
+                match c {
+                    '*' | '`' => {}
+                    // `[text](url)`: the text.
+                    ']' if chars.peek() == Some(&'(') => {
+                        for c in chars.by_ref() {
+                            if c == ')' {
+                                break;
+                            }
+                        }
+                    }
+                    '[' => {}
+                    c => plain.push(c),
+                }
+            }
+            plain
+        })
+        .collect();
+    // No more than one empty line in a row.
+    let mut out: Vec<String> = Vec::new();
+    for line in lines {
+        if line.is_empty() && out.last().is_none_or(String::is_empty) {
+            continue;
+        }
+        out.push(line);
+    }
+    out.join("\n").trim().to_owned()
+}
+
+/// Where the release of `version` is asked for.
+pub fn tag_url(repository: &str, version: &str) -> String {
+    let path = repository.trim_end_matches('/').trim_start_matches("https://github.com/");
+    format!("https://api.github.com/repos/{path}/releases/tags/v{}", version.trim_start_matches(['v', 'V']))
+}
+
 /// The comment holding `signature` (the text of a `.minisig` file) of the file `name`.
 pub fn signature_comment(name: &str, signature: &str) -> String {
     format!("{SIGNATURE_OPENING}{name}\n{}\n-->", signature.trim())
@@ -99,6 +165,7 @@ impl Release {
         Ok(Some(Self {
             version: api.tag_name.trim_start_matches(['v', 'V']).to_owned(),
             signatures: api.body.as_deref().map(signatures).unwrap_or_default(),
+            notes: api.body.as_deref().map(shown_notes).unwrap_or_default(),
             assets: api
                 .assets
                 .into_iter()
@@ -200,6 +267,16 @@ mod tests {
         let pre = json.replace("\"prerelease\":false", "\"prerelease\":true");
         assert_eq!(Release::parse(&pre).ok(), Some(None));
         assert!(Release::parse("nonsense").is_err());
+    }
+
+    #[test]
+    fn the_notes_are_kept_without_the_signatures_and_read_as_plain_text() {
+        let release = Release::parse(&json("0.6.0", "0.6.0")).ok().flatten().expect("none");
+        assert_eq!(release.notes, "## What's new\n- Things");
+        let notes = "## Fixes\n\n\n- A **window** capture, see [the page](https://x).\n  - `Nested`\n";
+        assert_eq!(plain_notes(notes), "Fixes\n\n• A window capture, see the page.\n  • Nested");
+        assert_eq!(shown_notes("a<!-- x -->b<!-- open"), "ab");
+        assert!(tag_url("https://github.com/Xantoom/Vixeeny", "1.2.0").ends_with("/releases/tags/v1.2.0"));
     }
 
     #[test]

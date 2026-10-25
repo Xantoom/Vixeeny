@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The rows of each page of the settings window.
 
-use vixeeny_common::config::{Config, Naming, TARGET_SOURCE};
+use vixeeny_common::config::{Config, DiskAlert, Naming, TARGET_SOURCE};
 use vixeeny_common::i18n::Key;
 use vixeeny_encode::registry::{
     BITRATE_RANGE, DEFAULT_BITRATE, DEFAULT_MAXRATE, Family, ParamType, PresetName, RateMode, rate_keys,
@@ -26,6 +26,15 @@ fn split_join(kind: &str, amount: i64) -> String {
     match kind {
         "size" | "duration" => format!("{kind}:{}", amount.max(1)),
         _ => "off".into(),
+    }
+}
+
+/// Keeps the amount of the split's kind in its own field.
+fn remember_split(split: &mut vixeeny_common::config::Split) {
+    match split_parts(&split.mode) {
+        ("size", n) if n > 0 => split.size_mb = u32::try_from(n).unwrap_or(u32::MAX),
+        ("duration", n) if n > 0 => split.minutes = u32::try_from(n).unwrap_or(u32::MAX),
+        _ => {}
     }
 }
 
@@ -72,14 +81,6 @@ pub fn general(env: &Env) -> Vec<Row> {
             |c, v| c.general.theme = v,
         ),
         toggle("autostart", t(Key::SetAutostart), |c| c.general.autostart, |c, v| c.general.autostart = v),
-        toggle(
-            "notifications",
-            t(Key::SetNotifications),
-            |c| c.general.notifications,
-            |c, v| c.general.notifications = v,
-        ),
-        // The widget's warning sign, and a notification during a replay.
-        disk_alert(env),
     ];
     if let Some(admin) = admin(env) {
         rows.push(admin);
@@ -214,28 +215,34 @@ fn set_widget_place(c: &mut Config, value: String) {
     widget.corner = corner;
 }
 
-/// The free space under which the widget warns, in percent of the videos' disk.
-fn disk_alert(env: &Env) -> Row {
-    let mut options = vec![opt("0", env.t(Key::OptDiskAlertOff))];
-    for pct in DISK_ALERTS {
-        let label = env.t(Key::OptDiskAlert).replace("{pct}", &pct.to_string());
-        options.push(opt(&pct.to_string(), label));
-    }
-    choice(
-        "disk_alert",
+/// The alert when the free space of the disk the files go to runs low: a switch, then the share under which it warns.
+/// `get` and `alert` reach the alert of the recordings or of the replay.
+fn disk_alert_rows(
+    env: &Env,
+    kind: &str,
+    get: fn(&Config) -> &DiskAlert,
+    alert: fn(&mut Config) -> &mut DiskAlert,
+    on: bool,
+) -> Vec<Row> {
+    let mut rows = vec![toggle(
+        &format!("disk_alert:{kind}"),
         env.t(Key::SetDiskAlert),
-        options,
-        |c| {
-            let pct = c.recording_widget.disk_alert_percent;
-            // A value from an older list: the nearest offered one.
-            if pct == 0 {
-                "0".into()
-            } else {
-                DISK_ALERTS.into_iter().min_by_key(|p| p.abs_diff(pct)).unwrap_or(5).to_string()
-            }
-        },
-        |c, v| c.recording_widget.disk_alert_percent = v.parse().unwrap_or(0),
-    )
+        move |c| get(c).enabled,
+        move |c, v| alert(c).enabled = v,
+    )];
+    if on {
+        rows.push(nested(counted(
+            number(
+                &format!("disk_alert_percent:{kind}"),
+                env.t(Key::SetDiskAlertPercent),
+                (1, 99, 1),
+                move |c| i64::from(get(c).percent.clamp(1, 99)),
+                move |c, v| alert(c).percent = v as u8,
+            ),
+            "%",
+        )));
+    }
+    rows
 }
 
 /// A folder row, with a warning sign when the folder cannot be reached (a drive unplugged, a file in its place): the
@@ -247,9 +254,6 @@ fn folder_row(env: &Env, row: Row, setting: &str) -> Row {
         crate::warned(row, env.t(Key::SetFolderUnreachable))
     }
 }
-
-/// The thresholds offered for the disk alert, in percent.
-const DISK_ALERTS: [u8; 6] = [1, 2, 5, 10, 15, 20];
 
 /// Screenshots: where they go, their format, what they show.
 pub fn image(env: &Env, config: &Config) -> Vec<Row> {
@@ -587,13 +591,6 @@ fn custom_rows(env: &Env, config: &Config, encoder: &str) -> (Vec<Row>, Vec<Row>
 /// when they are set by hand.
 pub fn video(env: &Env, config: &Config) -> Vec<Row> {
     let t = |k| env.t(k);
-    let profile = &config.video;
-    // No hardware encoder on this computer: the software ones are used whatever the setting.
-    let no_hardware = !encoders::hardware_possible(env);
-    let hardware = encoders::uses_hardware(env, profile);
-    let list = encoders::choices(env, hardware);
-    let current = encoders::resolved(env, profile).map(|e| e.id.clone());
-
     let mut rows = vec![
         header("h_location", t(Key::GrpLocation)),
         folder_row(
@@ -609,6 +606,29 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
         ),
     ];
     rows.extend(naming_rows(env, "videos", |c| &c.paths.naming.videos, |c| &mut c.paths.naming.videos));
+    rows.extend(video_settings(env, config, false));
+    // The widget's warning sign.
+    rows.extend(disk_alert_rows(
+        env,
+        "videos",
+        |c| &c.disk_alert.recordings,
+        |c| &mut c.disk_alert.recordings,
+        config.disk_alert.recordings.enabled,
+    ));
+    rows
+}
+
+/// The picture, the encoder and the file of the videos (`config.video`). The replay's are these rows over its own
+/// settings (see [`replay_video_rows`]), without the cut into parts: a replay is short.
+fn video_settings(env: &Env, config: &Config, replay: bool) -> Vec<Row> {
+    let t = |k| env.t(k);
+    let profile = &config.video;
+    // No hardware encoder on this computer: the software ones are used whatever the setting.
+    let no_hardware = !encoders::hardware_possible(env);
+    let hardware = encoders::uses_hardware(env, profile);
+    let list = encoders::choices(env, hardware);
+    let current = encoders::resolved(env, profile).map(|e| e.id.clone());
+    let mut rows = Vec::new();
 
     // ---- the picture
     rows.push(header("h_video", t(Key::GrpPicture)));
@@ -807,6 +827,9 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
         },
         |c, v| c.video.container = v,
     ));
+    if replay {
+        return rows;
+    }
     rows.push(choice(
         "split",
         t(Key::SetSplit),
@@ -817,15 +840,11 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
         ],
         |c| split_parts(&c.video.split.mode).0.to_owned(),
         |c, v| {
-            let amount = split_parts(&c.video.split.mode).1;
-            let amount = if amount > 0 {
-                amount
-            } else if v == "size" {
-                2_048
-            } else {
-                10
-            };
-            c.video.split.mode = split_join(&v, amount);
+            let split = &mut c.video.split;
+            // The amount of the kind left is kept for when it is chosen again.
+            remember_split(split);
+            let amount = if v == "size" { split.size_mb } else { split.minutes };
+            split.mode = split_join(&v, i64::from(amount));
         },
     ));
     let mode = &config.video.split.mode;
@@ -843,8 +862,10 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
                 (1, 1_000_000, 1),
                 |c| split_parts(&c.video.split.mode).1,
                 |c, v| {
-                    let kind = split_parts(&c.video.split.mode).0.to_owned();
-                    c.video.split.mode = split_join(&kind, v);
+                    let split = &mut c.video.split;
+                    let kind = split_parts(&split.mode).0.to_owned();
+                    split.mode = split_join(&kind, v);
+                    remember_split(split);
                 },
             ),
             t(unit),
@@ -1133,11 +1154,17 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
         Box::new(|c| Value::Bool(c.video.audio.sources.iter().any(|s| is_mic(s)))),
         Box::new(|c, v| match v {
             Value::Bool(on) => {
-                let sources = &mut c.video.audio.sources;
+                let audio = &mut c.video.audio;
                 if !on {
-                    sources.retain(|s| !is_mic(s));
-                } else if !sources.iter().any(|s| is_mic(s)) {
-                    sources.push("mic".into());
+                    // The microphone chosen waits aside for when it is on again.
+                    if let Some(mic) = audio.sources.iter().find(|s| is_mic(s)).cloned() {
+                        audio.set_aside.retain(|s| !is_mic(s));
+                        audio.set_aside.push(mic);
+                    }
+                    audio.sources.retain(|s| !is_mic(s));
+                } else if !audio.sources.iter().any(|s| is_mic(s)) {
+                    let mic = audio.set_aside.iter().position(|s| is_mic(s)).map(|i| audio.set_aside.remove(i));
+                    audio.sources.push(mic.unwrap_or_else(|| "mic".into()));
                 }
                 Ok(())
             }
@@ -1259,54 +1286,10 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
     rows
 }
 
-/// The replay buffer: the last moments, kept to be saved on demand.
+/// The replay buffer: the last moments, kept to be saved on demand. Its switch, where its files go (as on the video
+/// page), how much it keeps, then what it records with and for which games.
 pub fn replay(env: &Env, config: &Config) -> Vec<Row> {
     let t = |k| env.t(k);
-    let storage = choice(
-        "replay_storage",
-        t(Key::SetReplayStorage),
-        vec![advised("auto", t(Key::OptAuto)), opt("ram", t(Key::SetStorageRam)), opt("disk", t(Key::SetStorageDisk))],
-        |c| c.replay.storage.clone(),
-        |c, v| c.replay.storage = v,
-    );
-    let mut storage = storage;
-    storage.detail = replay_estimate(env, config).unwrap_or_default();
-    let duration = choice(
-        "replay_duration",
-        t(Key::SetReplayDuration),
-        REPLAY_DURATIONS
-            .iter()
-            .map(|s| {
-                let label = if *s < 60 { format!("{s} s") } else { format!("{} min", s / 60) };
-                opt(&s.to_string(), label)
-            })
-            .collect(),
-        |c| {
-            let s = c.replay.duration_seconds;
-            REPLAY_DURATIONS.iter().min_by_key(|d| d.abs_diff(s)).unwrap_or(&30).to_string()
-        },
-        |c, v| c.replay.duration_seconds = v.parse().unwrap_or(30),
-    );
-    let after = choice(
-        "replay_after",
-        t(Key::SetReplayAfter),
-        REPLAY_AFTER
-            .iter()
-            .map(|s| {
-                let label = if *s == 0 {
-                    t(Key::OptReplayAfterNone)
-                } else {
-                    t(Key::OptReplayAfter).replace("{s}", &s.to_string())
-                };
-                opt(&s.to_string(), label)
-            })
-            .collect(),
-        |c| {
-            let s = c.replay.after_seconds;
-            REPLAY_AFTER.iter().min_by_key(|d| d.abs_diff(s)).unwrap_or(&0).to_string()
-        },
-        |c, v| c.replay.after_seconds = v.parse().unwrap_or(0),
-    );
     let enabled = toggle("replay_enabled", t(Key::SetReplayStart), |c| c.replay.enabled, |c, v| c.replay.enabled = v);
     // The rest only matters while the replay runs.
     if !config.replay.enabled {
@@ -1314,23 +1297,6 @@ pub fn replay(env: &Env, config: &Config) -> Vec<Row> {
     }
     let mut rows = vec![
         enabled,
-        duration,
-        after,
-        storage,
-        choice(
-            "replay_notify",
-            t(Key::SetReplayNotify),
-            vec![
-                opt("both", t(Key::OptNotifyBoth)),
-                opt("on", t(Key::OptNotifyOn)),
-                opt("none", t(Key::OptNotifyNone)),
-            ],
-            |c| c.replay.notify.clone(),
-            |c, v| c.replay.notify = v,
-        ),
-    ];
-    rows.extend(game_rows(env, config));
-    rows.extend([
         header("h_folder", t(Key::GrpLocation)),
         folder_row(
             env,
@@ -1343,9 +1309,131 @@ pub fn replay(env: &Env, config: &Config) -> Vec<Row> {
             |c| c.paths.per_app_subfolder.replays,
             |c, v| c.paths.per_app_subfolder.replays = v,
         ),
-    ]);
+    ];
     rows.extend(naming_rows(env, "replays", |c| &c.paths.naming.replays, |c| &mut c.paths.naming.replays));
+
+    // ---- what it keeps
+    rows.push(header("h_replay", t(Key::GrpReplay)));
+    rows.push(choice(
+        "replay_unit",
+        t(Key::SetReplayUnit),
+        vec![opt("seconds", t(Key::OptSeconds)), opt("minutes", t(Key::OptMinutes))],
+        |c| if in_minutes(c) { "minutes" } else { "seconds" }.to_owned(),
+        |c, v| {
+            // The amount stays, in the new unit.
+            let amount = replay_amount(c);
+            c.replay.duration_unit = v;
+            c.replay.duration_seconds = amount * if in_minutes(c) { 60 } else { 1 };
+        },
+    ));
+    rows.push(nested(counted(
+        number(
+            "replay_duration",
+            t(Key::SetReplayDuration),
+            (1, 60, 1),
+            |c| i64::from(replay_amount(c)),
+            |c, v| c.replay.duration_seconds = v as u32 * if in_minutes(c) { 60 } else { 1 },
+        ),
+        t(if in_minutes(config) { Key::UnitMinutes } else { Key::UnitSeconds }),
+    )));
+    rows.push(toggle(
+        "replay_after",
+        t(Key::SetReplayAfter),
+        |c| c.replay.after_enabled,
+        |c, v| c.replay.after_enabled = v,
+    ));
+    if config.replay.after_enabled {
+        rows.push(nested(counted(
+            number(
+                "replay_after_seconds",
+                t(Key::SetReplayAfterSeconds),
+                (1, 60, 1),
+                |c| i64::from(c.replay.after_seconds.clamp(1, 60)),
+                |c, v| c.replay.after_seconds = v as u32,
+            ),
+            t(Key::UnitSeconds),
+        )));
+    }
+    let mut storage = choice(
+        "replay_storage",
+        t(Key::SetReplayStorage),
+        vec![advised("auto", t(Key::OptAuto)), opt("ram", t(Key::SetStorageRam)), opt("disk", t(Key::SetStorageDisk))],
+        |c| c.replay.storage.clone(),
+        |c, v| c.replay.storage = v,
+    );
+    storage.detail = replay_estimate(env, config).unwrap_or_default();
+    rows.push(storage);
+    // A notification while it runs.
+    rows.extend(disk_alert_rows(
+        env,
+        "replays",
+        |c| &c.disk_alert.replays,
+        |c| &mut c.disk_alert.replays,
+        config.disk_alert.replays.enabled,
+    ));
+
+    // ---- what it records with
+    rows.push(header("h_replay_video", t(Key::GrpReplayVideo)));
+    rows.push(toggle(
+        "replay_same_video",
+        t(Key::SetSameAsVideo),
+        |c| c.replay.same_as_video,
+        |c, v| c.replay.same_as_video = v,
+    ));
+    if !config.replay.same_as_video {
+        rows.extend(replay_video_rows(env, config));
+    }
+    rows.extend(game_rows(env, config));
     rows
+}
+
+/// The replay's duration is set in minutes.
+fn in_minutes(c: &Config) -> bool {
+    c.replay.duration_unit == "minutes"
+}
+
+/// The replay's duration in its unit, 1 to 60.
+fn replay_amount(c: &Config) -> u32 {
+    let seconds = c.replay.duration_seconds;
+    let amount = if in_minutes(c) { (seconds + 30) / 60 } else { seconds };
+    amount.clamp(1, 60)
+}
+
+/// What the replay's rows are prefixed with, beside those of the videos they repeat.
+pub(crate) const REPLAY_PREFIX: &str = "replay:";
+
+/// The settings as the replay's video rows see them: its own video settings in the place of the videos'.
+pub(crate) fn replay_view(config: &Config) -> Config {
+    let mut view = config.clone();
+    view.video = config.replay_video();
+    view
+}
+
+/// The picture, encoder and file rows of the video page, over the replay's own video settings: each reads and writes
+/// [`replay_view`], its id prefixed with [`REPLAY_PREFIX`] (its expanders too).
+fn replay_video_rows(env: &Env, config: &Config) -> Vec<Row> {
+    let mut inner = env.clone();
+    inner.open = env.open.iter().filter_map(|id| id.strip_prefix(REPLAY_PREFIX)).map(str::to_owned).collect();
+    video_settings(&inner, &replay_view(config), true)
+        .into_iter()
+        .map(|mut row| {
+            row.id = format!("{REPLAY_PREFIX}{}", row.id);
+            let (get, set) = (row.get, row.set);
+            row.get = Box::new(move |c| get(&replay_view(c)));
+            row.set = Box::new(move |c, v| {
+                let mut view = replay_view(c);
+                set(&mut view, v)?;
+                // The sound and the cut into parts stay the videos'.
+                let audio = std::mem::take(&mut c.replay.video.audio);
+                let split = std::mem::take(&mut c.replay.video.split);
+                c.replay.video = view.video;
+                c.replay.video.audio = audio;
+                c.replay.video.split = split;
+                Ok(())
+            });
+            row
+        })
+        .collect()
 }
 
 /// What a window capture is set on, and its colour or gradient.
@@ -1433,6 +1521,10 @@ fn game_rows(env: &Env, config: &Config) -> Vec<Row> {
         .map(|p| (p.id.to_lowercase(), p.name.clone(), p.icon.clone()))
         .filter(|(id, ..)| env.audio.games.contains(id))
         .collect();
+    // Nothing open now: said, rather than an empty list.
+    if programs.is_empty() {
+        rows.push(nested(info("no_games", t(Key::GameNoneOpen), String::new())));
+    }
     for exe in config.replay.always.iter().chain(&config.replay.never) {
         if !programs.iter().any(|(id, ..)| id == exe) {
             programs.push((exe.clone(), exe.trim_end_matches(".exe").to_owned(), None));
@@ -1481,16 +1573,11 @@ fn game_rows(env: &Env, config: &Config) -> Vec<Row> {
     rows
 }
 
-/// How long a replay can go on after its shortcut, in seconds.
-const REPLAY_AFTER: [u32; 5] = [0, 5, 10, 15, 30];
-
-/// The durations a replay can keep, in seconds.
-const REPLAY_DURATIONS: [u32; 9] = [15, 30, 60, 120, 300, 600, 900, 1200, 1800];
-
 /// How big the replay will be with the video settings, and where `auto` keeps it. `None` while the encoder is not
 /// known.
 fn replay_estimate(env: &Env, config: &Config) -> Option<String> {
-    let encoder = encoders::resolved(env, &config.video).and_then(|e| encoders::spec(&e.id))?;
+    let video = config.replay_video();
+    let encoder = encoders::resolved(env, &video).and_then(|e| encoders::spec(&e.id))?;
     // The largest screen (a recording is of one screen).
     let screen = env
         .machine
@@ -1499,11 +1586,11 @@ fn replay_estimate(env: &Env, config: &Config) -> Option<String> {
         .map(|s| (s.width, s.height))
         .max_by_key(|(w, h)| u64::from(*w) * u64::from(*h))
         .unwrap_or((1920, 1080));
-    let (_, _, cw, ch) = validate::center_crop(screen, validate::aspect(&config.video.aspect));
-    let size = validate::output_size(&config.video.resolution, (cw, ch)).unwrap_or((cw, ch));
+    let (_, _, cw, ch) = validate::center_crop(screen, validate::aspect(&video.aspect));
+    let size = validate::output_size(&video.resolution, (cw, ch)).unwrap_or((cw, ch));
     let bytes = replay::expected_bytes(
-        replay::profile_kbps(&config.video, encoder, size),
-        config.replay.duration_seconds + config.replay.after_seconds,
+        replay::profile_kbps(&video, encoder, size),
+        config.replay.duration_seconds + config.replay.after(),
     );
     let key = match config.replay.storage.as_str() {
         "ram" | "disk" => Key::ReplayEstimate,
@@ -1516,13 +1603,84 @@ fn replay_estimate(env: &Env, config: &Config) -> Option<String> {
 /// The settings of the updates page (the state of the update is drawn by the page). One switch: checking and installing
 /// go together (a check every 12 hours, the download in the background, the installation at the next start).
 pub fn updates(env: &Env, _config: &Config) -> Vec<Row> {
-    vec![toggle(
-        "auto_update",
-        env.t(Key::SetAutoUpdate),
-        |c| c.general.check_updates && c.general.auto_update,
-        |c, v| {
-            c.general.check_updates = v;
-            c.general.auto_update = v;
-        },
-    )]
+    vec![
+        toggle(
+            "auto_update",
+            env.t(Key::SetAutoUpdate),
+            |c| c.general.check_updates && c.general.auto_update,
+            |c, v| {
+                c.general.check_updates = v;
+                c.general.auto_update = v;
+            },
+        ),
+        toggle("whats_new", env.t(Key::SetWhatsNew), |c| c.general.whats_new, |c, v| c.general.whats_new = v),
+    ]
+}
+
+/// Which notifications are shown: a switch for them all, then one per kind, by what they are about. Off, the kinds keep
+/// their setting.
+pub fn notifications(env: &Env, config: &Config) -> Vec<Row> {
+    let t = |k| env.t(k);
+    let mut rows = vec![toggle(
+        "notifications",
+        t(Key::SetNotifications),
+        |c| c.notifications.enabled,
+        |c, v| c.notifications.enabled = v,
+    )];
+    if !config.notifications.enabled {
+        return rows;
+    }
+    rows.extend([
+        header("h_notify_captures", t(Key::GrpNotifyCaptures)),
+        toggle(
+            "notify_image",
+            t(Key::SetNotifyImage),
+            |c| c.notifications.image_saved,
+            |c, v| c.notifications.image_saved = v,
+        ),
+        toggle(
+            "notify_text",
+            t(Key::SetNotifyText),
+            |c| c.notifications.text_copied,
+            |c, v| c.notifications.text_copied = v,
+        ),
+        header("h_notify_videos", t(Key::GrpNotifyVideos)),
+        toggle(
+            "notify_recording",
+            t(Key::SetNotifyRecording),
+            |c| c.notifications.recording_saved,
+            |c, v| c.notifications.recording_saved = v,
+        ),
+        toggle(
+            "notify_replay",
+            t(Key::SetNotifyReplay),
+            |c| c.notifications.replay_saved,
+            |c, v| c.notifications.replay_saved = v,
+        ),
+        choice(
+            "notify_game",
+            t(Key::SetReplayNotify),
+            vec![
+                opt("both", t(Key::OptNotifyBoth)),
+                opt("on", t(Key::OptNotifyOn)),
+                opt("none", t(Key::OptNotifyNone)),
+            ],
+            |c| c.notifications.game_start.clone(),
+            |c, v| c.notifications.game_start = v,
+        ),
+        header("h_notify_vixeeny", "Vixeeny".to_owned()),
+        toggle(
+            "notify_failures",
+            t(Key::SetNotifyFailures),
+            |c| c.notifications.failures,
+            |c, v| c.notifications.failures = v,
+        ),
+        toggle(
+            "notify_updates",
+            t(Key::SetNotifyUpdates),
+            |c| c.notifications.updates,
+            |c, v| c.notifications.updates = v,
+        ),
+    ]);
+    rows
 }

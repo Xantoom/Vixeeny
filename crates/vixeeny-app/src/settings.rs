@@ -112,7 +112,7 @@ pub fn save(config: &Config) {
 static TELLING: Mutex<Option<std::thread::JoinHandle<()>>> = Mutex::new(None);
 
 /// Waits until the daemon has been told about the last save (before the process ends).
-fn finish_saving() {
+pub fn finish_saving() {
     let telling = TELLING.lock().ok().and_then(|mut t| t.take());
     if let Some(telling) = telling {
         let _ = telling.join();
@@ -127,6 +127,17 @@ fn update_state() -> UpdateState {
 fn update_view(lang: Lang) -> UpdateView {
     let state = update_state();
     let current = env!("CARGO_PKG_VERSION");
+    // What changed in the version offered, else in this one.
+    let offered = state.newer_than(current).map_or(current, |r| r.version.as_str());
+    let (notes_title, notes) = state.notes_of(offered).map_or_else(Default::default, |notes| {
+        (tr(Key::UpdateNotes, lang).replace("{version}", offered), vixeeny_updater::release::plain_notes(notes))
+    });
+    let view = update_card(&state, current, lang);
+    UpdateView { notes_title, notes, ..view }
+}
+
+/// The card of [`update_view`], without the list of changes.
+fn update_card(state: &UpdateState, current: &str, lang: Lang) -> UpdateView {
     if let Some(version) = client::ready() {
         return UpdateView {
             stage: UpdateStage::Ready,
@@ -134,6 +145,7 @@ fn update_view(lang: Lang) -> UpdateView {
             detail: tr(Key::UpdateReadyHint, lang).into(),
             progress: 1.0,
             action: tr(Key::UpdateRestart, lang).into(),
+            ..UpdateView::default()
         };
     }
     // An error only matters while its version is still to be installed (a newer Vixeeny, installed since, by hand for
@@ -145,6 +157,7 @@ fn update_view(lang: Lang) -> UpdateView {
             detail: error.clone(),
             progress: 0.0,
             action: tr(Key::UiRetry, lang).into(),
+            ..UpdateView::default()
         };
     }
     match state.newer_than(current) {
@@ -154,6 +167,7 @@ fn update_view(lang: Lang) -> UpdateView {
             detail: tr(Key::UpdateInstalled, lang).replace("{version}", current),
             progress: 0.0,
             action: tr(Key::UpdateNow, lang).into(),
+            ..UpdateView::default()
         },
         None => UpdateView {
             stage: UpdateStage::Idle,
@@ -165,6 +179,7 @@ fn update_view(lang: Lang) -> UpdateView {
             },
             progress: 0.0,
             action: tr(Key::SetCheckNow, lang).into(),
+            ..UpdateView::default()
         },
     }
 }
@@ -196,6 +211,7 @@ fn check_for_update(handle: PanelHandle, lang: Lang) {
                 detail: tr(Key::UpdateCheckFailed, lang).into(),
                 progress: 0.0,
                 action: tr(Key::UiRetry, lang).into(),
+                ..UpdateView::default()
             });
         }
     });
@@ -290,6 +306,7 @@ fn download_update(handle: PanelHandle, lang: Lang) {
                     detail: format!("{} / {}", megabytes(done), megabytes(total)),
                     progress: done as f32 / total.max(1) as f32,
                     action: String::new(),
+                    ..UpdateView::default()
                 });
             }
         });

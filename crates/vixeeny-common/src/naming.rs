@@ -149,7 +149,7 @@ pub fn expand_template(template: &str, vars: &Vars, counter: u32) -> String {
 }
 
 /// Where a capture is written: `<dir>[/<app>]/<name>.<ext>`. A free file name is found with `exists`: with `{counter}`
-/// in the template the counter is incremented, otherwise `_2`, `_3`… is appended.
+/// in the template the counter is incremented, otherwise ` (2)`, ` (3)`… is appended, as Windows does.
 pub fn output_path(
     dir: &Path,
     per_app_subfolder: bool,
@@ -162,7 +162,7 @@ pub fn output_path(
     let has_counter = template.contains("{counter}");
     for n in 1u32.. {
         let stem = expand_template(template, vars, n);
-        let name = if has_counter || n == 1 { stem } else { format!("{stem}_{n}") };
+        let name = if has_counter || n == 1 { stem } else { format!("{stem} ({n})") };
         let path = dir.join(format!("{name}.{ext}"));
         if !exists(&path) {
             return path;
@@ -279,7 +279,8 @@ mod tests {
 
     #[test]
     fn default_template() {
-        assert_eq!(expand_template("{app}_{date}_{time}", &vars(), 1), "Wuthering Waves_2026-10-01_17-12-00");
+        let template = crate::config::Naming::default().template;
+        assert_eq!(expand_template(&template, &vars(), 1), "Wuthering Waves 2026-10-01 17-12-00");
     }
 
     #[test]
@@ -300,10 +301,10 @@ mod tests {
     fn output_path_with_subfolder_and_collisions() {
         let dir = Path::new("pics");
         let taken: Vec<PathBuf> =
-            vec![Path::new("pics").join("Wuthering Waves").join("Wuthering Waves_2026-10-01_17-12-00.png")];
+            vec![Path::new("pics").join("Wuthering Waves").join("Wuthering Waves 2026-10-01 17-12-00.png")];
         let exists = |p: &Path| taken.iter().any(|t| t == p);
-        let p = output_path(dir, true, "{app}_{date}_{time}", &vars(), "png", exists);
-        assert_eq!(p, Path::new("pics").join("Wuthering Waves").join("Wuthering Waves_2026-10-01_17-12-00_2.png"));
+        let p = output_path(dir, true, "{app} {date} {time}", &vars(), "png", exists);
+        assert_eq!(p, Path::new("pics").join("Wuthering Waves").join("Wuthering Waves 2026-10-01 17-12-00 (2).png"));
         let flat = output_path(dir, false, "{app}_{date}_{time}", &vars(), "png", |_| false);
         assert_eq!(flat, Path::new("pics").join("Wuthering Waves_2026-10-01_17-12-00.png"));
     }

@@ -10,6 +10,10 @@ use crate::encoders;
 
 /// The info of the row `id`, in the language of `env` (`None`: nothing to add).
 pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
+    // The replay's video rows say what the videos' do, about the replay's own settings.
+    if let Some(id) = id.strip_prefix(crate::pages::REPLAY_PREFIX) {
+        return info(id, env, &crate::pages::replay_view(config));
+    }
     let fr = env.lang == Lang::Fr;
     let pick = |en: &str, f: &str| Some(if fr { f } else { en }.to_owned());
     // The encoder's own options are `p:<key>`.
@@ -199,8 +203,24 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
             "Garde en mémoire les dernières minutes de jeu.\nLe raccourci les enregistre en vidéo.\nFonctionne seulement pendant un jeu en plein écran.",
         ),
         "replay_after" => pick(
-            "Seconds recorded after the shortcut is pressed.",
-            "Secondes enregistrées après l'appui sur le raccourci.",
+            "Keeps recording for a few seconds after the shortcut is pressed: the end of the moment is in the replay.",
+            "Continue d'enregistrer quelques secondes après l'appui sur le raccourci : la fin du moment est dans le replay.",
+        ),
+        "replay_same_video" => pick(
+            "Records the replay with the settings of the Video page.\nOff: the replay has its own, set below.",
+            "Enregistre le replay avec les réglages de la page Vidéo.\nDésactivé : le replay a les siens, réglés ci-dessous.",
+        ),
+        "disk_alert:videos" => pick(
+            "A warning sign on the recording widget when the disk of the videos is almost full.",
+            "Un signe d'alerte sur le widget d'enregistrement quand le disque des vidéos est presque plein.",
+        ),
+        "disk_alert:replays" => pick(
+            "A notification while the replay runs when the disk of the replays is almost full.",
+            "Une notification pendant le replay quand le disque des replays est presque plein.",
+        ),
+        "whats_new" => pick(
+            "At the first start after an update, a window lists what changed.",
+            "Au premier démarrage après une mise à jour, une fenêtre présente les nouveautés.",
         ),
         "replay_storage" => pick(
             "Memory: uses RAM, nothing is written to the disk.\nDisk: writes to the disk continuously, little RAM used.\nAuto: chosen from the length and the PC's memory.",

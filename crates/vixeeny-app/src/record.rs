@@ -396,8 +396,9 @@ fn plan(
         _ => (monitor.rect.width, monitor.rect.height),
     };
 
-    // The replay records with the video settings, like a recording.
-    let profile = &config.video;
+    // The replay records with its own video settings, or the videos' (see `Config::replay_video`).
+    let replay_video = replay.then(|| config.replay_video());
+    let profile = replay_video.as_ref().unwrap_or(&config.video);
     let registry = Registry::builtin().context("codec registry")?;
     let probe = crate::probe::current(false).ok();
     let ctx = ValidateContext { registry: &registry, source, probe: probe.as_ref() };
@@ -498,8 +499,7 @@ fn plan(
         gpu: None,
         encoder,
         // The moments after the shortcut are kept as well.
-        replay_seconds: replay
-            .then(|| replay::clamp_seconds(config.replay.duration_seconds) + config.replay.after_seconds.min(60)),
+        replay_seconds: replay.then(|| replay::clamp_seconds(config.replay.duration_seconds) + config.replay.after()),
         replay_storage: storage,
         files: !replay,
         buffers: Default::default(),
@@ -856,7 +856,11 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
     // The widget's warning sign, or a notification for a replay (it has no widget).
     let watch = (plan.widget.is_some() || save_as.is_some()).then(|| Watch {
         folder: plan.folder.clone(),
-        disk_percent: plan.notice.recording_widget.disk_alert_percent,
+        disk_percent: if save_as.is_some() {
+            plan.notice.disk_alert.replays.threshold()
+        } else {
+            plan.notice.disk_alert.recordings.threshold()
+        },
         lang: crate::lang(&plan.notice.general.language),
         gpu_lost,
     });
@@ -980,8 +984,7 @@ fn record_loop(
     let mut watch = watch.map(Watcher::new);
     // What a replay save keeps: its seconds, and those after the shortcut.
     let kept_ns =
-        i64::from(replay::clamp_seconds(notice.replay.duration_seconds) + notice.replay.after_seconds.min(60))
-            * 1_000_000_000;
+        i64::from(replay::clamp_seconds(notice.replay.duration_seconds) + notice.replay.after()) * 1_000_000_000;
     let lost_in_save = |watch: &Option<Watcher>, now: i64| watch.as_ref().map_or(0, |w| w.lost_since(now - kept_ns));
     // A replay tells about a filling disk once.
     let mut disk_told = false;
@@ -997,7 +1000,7 @@ fn record_loop(
         w.state(false, Duration::ZERO);
     }
     // A replay can go on for a few seconds after its shortcut: the save waits until then.
-    let after = Duration::from_secs(u64::from(notice.replay.after_seconds));
+    let after = Duration::from_secs(u64::from(notice.replay.after()));
     // When the waiting save is written, and whether it is then edited.
     let mut save_at: Option<(std::time::Instant, bool)> = None;
     loop {
@@ -1153,8 +1156,8 @@ fn replay_storage(config: &Config, encoder: &Encoder, size: (u32, u32)) -> repla
         "disk" => disk(),
         _ => {
             let bytes = replay::expected_bytes(
-                replay::profile_kbps(&config.video, encoder, size),
-                config.replay.duration_seconds + config.replay.after_seconds,
+                replay::profile_kbps(&config.replay_video(), encoder, size),
+                config.replay.duration_seconds + config.replay.after(),
             );
             let ram = vixeeny_platform::machine::ram_bytes();
             let free = vixeeny_platform::machine::free_ram_bytes();

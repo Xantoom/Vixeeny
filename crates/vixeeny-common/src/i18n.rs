@@ -201,7 +201,7 @@ keys! {
     TipClose => "Close (Esc)", "Fermer (Échap)";
     SecOverlay => "Overlay", "Overlay";
     SecImage => "Image", "Image";
-    SecUpdates => "Updates", "Mise à jour";
+    SecUpdates => "Updates", "Mises à jour";
     SetFolder => "Folder", "Dossier";
     SetSubfolder => "Subfolder per application", "Sous-dossier par application";
     UiChange => "Change", "Modifier";
@@ -258,8 +258,6 @@ keys! {
     SetMicVolume => "Volume", "Volume";
     SetCaptureVolume => "Volume", "Volume";
     SetReplayAfter => "Extend after the shortcut", "Prolonger après le raccourci";
-    OptReplayAfterNone => "No", "Non";
-    OptReplayAfter => "+{s} s", "+{s} s";
     UiSearch => "Search a setting", "Rechercher un réglage";
     UiSearchNone => "No setting matches “{query}”.", "Aucun réglage ne correspond à « {query} ».";
     UiSearchTitle => "Search", "Recherche";
@@ -269,8 +267,6 @@ keys! {
     AboutReportReady => "Report ready, without personal data. Drop the selected file into the GitHub page.",
         "Rapport prêt, sans données personnelles. Glissez le fichier sélectionné dans la page GitHub.";
     SetDiskAlert => "Low disk space alert", "Alerte d'espace disque";
-    OptDiskAlertOff => "Never", "Jamais";
-    OptDiskAlert => "Below {pct} % free", "Sous {pct} % libres";
     WidgetFramesLost => "{n} frame(s) lost: the encoder cannot keep up",
         "{n} image(s) perdue(s) : l'encodeur ne suit pas";
     WidgetDiskLow => "Disk almost full: {size} free", "Disque presque plein : {size} libres";
@@ -294,7 +290,7 @@ keys! {
     ActReplayEdit => "Save and edit the replay", "Sauvegarder et éditer le replay";
     ToastReplayOn => "Replay on", "Replay activé";
     ToastReplayOff => "Replay off", "Replay désactivé";
-    SetReplayNotify => "Notification when a game starts", "Notification au lancement d'un jeu";
+    SetReplayNotify => "A game starts", "Lancement d'un jeu";
     OptNotifyBoth => "Always", "Toujours";
     OptNotifyOn => "When the replay is on", "Si le replay est actif";
     OptNotifyNone => "Never", "Jamais";
@@ -382,6 +378,31 @@ keys! {
         "Shortcuts and captures also work in programs started as administrator, games often. Vixeeny is installed again in Program Files, where only administrators can change its files; your settings stay. Windows asks once.",
         "Les raccourcis et les captures fonctionnent aussi dans les programmes lancés en administrateur, souvent des jeux. Vixeeny est réinstallé dans Program Files, où seuls les administrateurs peuvent modifier ses fichiers ; vos paramètres restent. Windows le demande une fois.";
     SetAdminDownloading => "Downloading the installer… {percent} %", "Téléchargement de l'installateur… {percent} %";
+    SecNotifications => "Notifications", "Notifications";
+    GrpNotifyCaptures => "Screenshots", "Captures d'écran";
+    GrpNotifyVideos => "Videos", "Vidéos";
+    SetNotifyImage => "Screenshot saved", "Capture enregistrée";
+    SetNotifyText => "Text copied from a zone", "Texte copié depuis une zone";
+    SetNotifyRecording => "Recording saved", "Enregistrement terminé";
+    SetNotifyReplay => "Replay saved", "Replay enregistré";
+    SetNotifyFailures => "Errors", "Erreurs";
+    SetNotifyUpdates => "New version available", "Nouvelle version disponible";
+    SetDiskAlertPercent => "Free space below", "Espace libre sous";
+    GrpReplay => "Recording", "Enregistrement";
+    SetReplayUnit => "Unit", "Unité";
+    OptSeconds => "Seconds", "Secondes";
+    OptMinutes => "Minutes", "Minutes";
+    UnitSeconds => "s", "s";
+    SetReplayAfterSeconds => "Seconds after the shortcut", "Secondes après le raccourci";
+    GrpReplayVideo => "Video settings", "Paramètres vidéo";
+    SetSameAsVideo => "Same settings as Video", "Mêmes paramètres que Vidéo";
+    GameNoneOpen => "No game is open right now", "Aucun jeu n'est ouvert actuellement";
+    SetWhatsNew => "Show what's new after an update", "Afficher les nouveautés après une mise à jour";
+    UpdateNotes => "What's new in {version}", "Nouveautés de la version {version}";
+    WhatsNewTitle => "Vixeeny has been updated to {version}", "Vixeeny a été mis à jour en version {version}";
+    WhatsNewLoading => "Loading the list of changes…", "Chargement de la liste des changements…";
+    WhatsNewFailed => "The list of changes could not be loaded.", "La liste des changements n'a pas pu être chargée.";
+    UiOk => "OK", "OK";
 }
 
 impl Lang {

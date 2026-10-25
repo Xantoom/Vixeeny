@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::ipc::ActionId;
 
 /// Schema version written by this build. Bump it and add a migration to [`MIGRATIONS`].
-pub const SCHEMA_VERSION: u32 = 9;
+pub const SCHEMA_VERSION: u32 = 10;
 
 /// `MIGRATIONS[n]` upgrades a table from schema `n + 1` to `n + 2`.
 pub type Migration = fn(&mut toml::Table);
@@ -22,6 +22,7 @@ pub const MIGRATIONS: &[Migration] = &[
     v6_scrolling_shortcut,
     v7_free_shortcuts,
     v8_new_defaults,
+    v9_settings_of_their_own,
 ];
 
 /// 0.9 → 1.0: MP4 recordings are fragmented (a recording cut short still plays), and the cursor is left out of videos
@@ -175,6 +176,97 @@ fn v8_new_defaults(table: &mut toml::Table) {
     }
 }
 
+/// The file name template that was the default before 1.0.
+const OLD_TEMPLATE: &str = "{app}_{date}_{time}";
+
+/// The shortcuts given to the actions that had none.
+const NEW_SHORTCUTS: [(&str, &str); 2] = [("capture_all_monitors", "Ctrl+F7"), ("replay_toggle", "Ctrl+Shift+F11")];
+
+/// 1.0: the notifications get a table of their own, the disk alert one per kind of video, the replay its own video
+/// settings (those of the videos so far) and switches for what a number turned off. Files still on the former default
+/// name join the new one, and the actions without a shortcut get theirs when it is free.
+fn v9_settings_of_their_own(table: &mut toml::Table) {
+    let general = table.get_mut("general").and_then(|g| g.as_table_mut());
+    let notifications = general.and_then(|g| g.remove("notifications")).and_then(|v| v.as_bool()).unwrap_or(true);
+    let replay_video = table.get("video").cloned();
+    let mut replay = match table.remove("replay") {
+        Some(toml::Value::Table(replay)) => replay,
+        _ => toml::Table::new(),
+    };
+    let game_start = replay.remove("notify").and_then(|v| v.as_str().map(str::to_owned));
+    // Before, the general switch left the game cards alone: they stay as they were.
+    let mut cards = toml::Table::new();
+    if let Some(game_start) = &game_start {
+        cards.insert("game_start".into(), game_start.as_str().into());
+    }
+    if !notifications {
+        if game_start.as_deref() == Some("none") {
+            cards.insert("enabled".into(), false.into());
+        } else {
+            for kind in ["image_saved", "text_copied", "recording_saved", "replay_saved", "failures", "updates"] {
+                cards.insert(kind.into(), false.into());
+            }
+        }
+    }
+    table.insert("notifications".into(), cards.into());
+    // The minutes of a duration of whole minutes, else the seconds (up to a minute).
+    if let Some(seconds) = replay.get("duration_seconds").and_then(toml::Value::as_integer).filter(|s| *s > 0) {
+        let (amount, unit) = if seconds > 60 { ((seconds + 30) / 60, "minutes") } else { (seconds, "seconds") };
+        replay.insert("duration_seconds".into(), (amount.clamp(1, 60) * if unit == "minutes" { 60 } else { 1 }).into());
+        replay.insert("duration_unit".into(), unit.into());
+    }
+    if let Some(after) = replay.get("after_seconds").and_then(toml::Value::as_integer).filter(|s| *s >= 0) {
+        replay.insert("after_enabled".into(), (after > 0).into());
+        replay.insert("after_seconds".into(), if after > 0 { after.min(60) } else { 5 }.into());
+    }
+    if let Some(mut video) = replay_video.and_then(|v| match v {
+        toml::Value::Table(video) => Some(video),
+        _ => None,
+    }) {
+        // The sound and the cut into parts are the videos' alone.
+        video.remove("audio");
+        video.remove("split");
+        replay.insert("video".into(), video.into());
+    }
+    table.insert("replay".into(), replay.into());
+    let percent = table
+        .get_mut("recording_widget")
+        .and_then(|w| w.as_table_mut())
+        .and_then(|w| w.remove("disk_alert_percent"))
+        .and_then(|v| v.as_integer());
+    if let Some(percent) = percent {
+        let mut alert = toml::Table::new();
+        alert.insert("enabled".into(), (percent > 0).into());
+        alert.insert("percent".into(), if percent > 0 { percent.min(99) } else { 5 }.into());
+        let mut alerts = toml::Table::new();
+        alerts.insert("recordings".into(), alert.clone().into());
+        alerts.insert("replays".into(), alert.into());
+        table.insert("disk_alert".into(), alerts.into());
+    }
+    if let Some(naming) = table.get_mut("paths").and_then(|p| p.get_mut("naming")).and_then(|n| n.as_table_mut()) {
+        for (_, kind) in naming.iter_mut() {
+            if let Some(kind) = kind.as_table_mut()
+                && kind.get("template").and_then(|t| t.as_str()) == Some(OLD_TEMPLATE)
+            {
+                kind.insert("template".into(), Naming::default().template.into());
+            }
+        }
+    }
+    if let Some(hotkeys) = table.get_mut("hotkeys").and_then(|h| h.as_table_mut()) {
+        for (action, shortcut) in NEW_SHORTCUTS {
+            let taken = hotkeys.values().filter_map(|v| v.as_array()).flatten().any(|v| {
+                v.as_str().is_some_and(|text| {
+                    crate::hotkey::Hotkey::parse(text).ok() == crate::hotkey::Hotkey::parse(shortcut).ok()
+                })
+            });
+            let empty = hotkeys.get(action).and_then(|v| v.as_array()).is_none_or(Vec::is_empty);
+            if empty && !taken {
+                hotkeys.insert(action.into(), toml::Value::Array(vec![shortcut.into()]));
+            }
+        }
+    }
+}
+
 /// Moves each action still on `old` to `new`, all at once (two actions may swap theirs). A move whose `new` is held by
 /// a shortcut that stays where it is does not happen.
 fn move_shortcuts(hotkeys: &mut toml::Table, moves: &[(&str, &str, &str)]) {
@@ -248,6 +340,8 @@ pub struct Config {
     pub replay: Replay,
     pub overlay: Overlay,
     pub scrolling: Scrolling,
+    pub notifications: Notifications,
+    pub disk_alert: DiskAlerts,
 }
 
 impl Default for Config {
@@ -263,7 +357,20 @@ impl Default for Config {
             replay: Replay::default(),
             overlay: Overlay::default(),
             scrolling: Scrolling::default(),
+            notifications: Notifications::default(),
+            disk_alert: DiskAlerts::default(),
         }
+    }
+}
+
+impl Config {
+    /// What the replay records with: its own video settings, or those of the videos. The sound is always that of the
+    /// videos (the sound page).
+    pub fn replay_video(&self) -> Video {
+        let mut video = if self.replay.same_as_video { self.video.clone() } else { self.replay.video.clone() };
+        video.audio.clone_from(&self.video.audio);
+        video.split = Split::default();
+        video
     }
 }
 
@@ -276,10 +383,11 @@ pub struct General {
     pub autostart: bool,
     /// Seconds of inactivity before the app exits; 0 = exit immediately.
     pub app_idle_exit_seconds: u32,
-    pub notifications: bool,
     pub check_updates: bool,
     /// New versions are downloaded and installed in the background, without asking.
     pub auto_update: bool,
+    /// A window tells what changed at the first start after an update.
+    pub whats_new: bool,
 }
 
 impl Default for General {
@@ -289,9 +397,9 @@ impl Default for General {
             theme: "system".into(),
             autostart: true,
             app_idle_exit_seconds: 30,
-            notifications: true,
             check_updates: true,
             auto_update: true,
+            whats_new: true,
         }
     }
 }
@@ -340,11 +448,12 @@ impl Default for Hotkeys {
             capture_region: one("PrintScreen"),
             capture_window: one("Alt+PrintScreen"),
             capture_fullscreen: one("Ctrl+PrintScreen"),
-            capture_all_monitors: Vec::new(),
+            capture_all_monitors: one(NEW_SHORTCUTS[0].1),
             capture_scrolling: one("Shift+PrintScreen"),
             record_toggle: one("Ctrl+F9"),
             record_pause: one("Ctrl+F10"),
-            replay_toggle: Vec::new(),
+            // Three keys: turning the replay off by mistake would lose the moment to keep.
+            replay_toggle: one(NEW_SHORTCUTS[1].1),
             replay_save: one("Ctrl+F11"),
             replay_edit: one("Ctrl+F12"),
             overlay_toggle: one("Ctrl+F8"),
@@ -389,7 +498,8 @@ pub struct Naming {
 
 impl Default for Naming {
     fn default() -> Self {
-        Self { template: "{app}_{date}_{time}".into() }
+        // Spaces, as Windows names its own captures: readable, and kept by the places files are shared to.
+        Self { template: "{app} {date} {time}".into() }
     }
 }
 
@@ -586,12 +696,16 @@ impl Default for Video {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Split {
+    /// `off`, `size:<MB>` or `duration:<minutes>`.
     pub mode: String,
+    /// The amounts of each kind, kept while another kind (or none) is chosen.
+    pub size_mb: u32,
+    pub minutes: u32,
 }
 
 impl Default for Split {
     fn default() -> Self {
-        Self { mode: "off".into() }
+        Self { mode: "off".into(), size_mb: 2_048, minutes: 10 }
     }
 }
 
@@ -723,19 +837,11 @@ pub struct RecordingWidget {
     /// `always`, `fade` (it fades after 3 s and comes back under the pointer) or `alerts` (it only shows while
     /// something goes wrong).
     pub display: String,
-    /// The widget warns when the free space of the videos' disk falls under this share of it, in percent (0: never).
-    pub disk_alert_percent: u8,
 }
 
 impl Default for RecordingWidget {
     fn default() -> Self {
-        Self {
-            enabled: true,
-            corner: "top_left".into(),
-            custom: (0.5, 0.0),
-            display: "always".into(),
-            disk_alert_percent: 5,
-        }
+        Self { enabled: true, corner: "top_left".into(), custom: (0.5, 0.0), display: "always".into() }
     }
 }
 
@@ -746,12 +852,16 @@ pub struct Replay {
     #[serde(alias = "enabled_on_start")]
     pub enabled: bool,
     pub duration_seconds: u32,
-    /// How long the replay goes on recording after its shortcut, the end of the moment included (0: it stops at the
-    /// press).
+    /// How the duration is set: `seconds` or `minutes` (1 to 60 of them).
+    pub duration_unit: String,
+    /// The replay goes on recording for [`Replay::after_seconds`] after its shortcut, the end of the moment included.
+    pub after_enabled: bool,
     pub after_seconds: u32,
     pub storage: String,
-    /// The notification when a game starts: `both` (replay on or off), `on` (only when it runs) or `none`.
-    pub notify: String,
+    /// The replay records with the video settings rather than [`Replay::video`].
+    pub same_as_video: bool,
+    /// The replay's own video settings (its sound is the videos': see [`Config::replay_video`]).
+    pub video: Video,
     /// Programs that are games even without a sign of it (executable names, lower case).
     pub always: Vec<String>,
     /// Programs that are never games, whatever the signs (executable names, lower case).
@@ -763,13 +873,93 @@ impl Default for Replay {
         Self {
             enabled: false,
             duration_seconds: 30,
-            after_seconds: 0,
+            duration_unit: "seconds".into(),
+            after_enabled: false,
+            after_seconds: 5,
             storage: "auto".into(),
-            notify: "both".into(),
+            same_as_video: false,
+            video: Video::default(),
             always: Vec::new(),
             never: Vec::new(),
         }
     }
+}
+
+impl Replay {
+    /// The seconds recorded after the shortcut (0: the replay stops at the press).
+    pub fn after(&self) -> u32 {
+        if self.after_enabled { self.after_seconds.clamp(1, 60) } else { 0 }
+    }
+}
+
+/// Which notifications are shown. Off, none is; the others keep their setting.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Notifications {
+    pub enabled: bool,
+    pub image_saved: bool,
+    /// The text read in a zone is on the clipboard.
+    pub text_copied: bool,
+    pub recording_saved: bool,
+    pub replay_saved: bool,
+    /// When a game starts: `both` (replay on or off), `on` (only when it runs) or `none`.
+    pub game_start: String,
+    /// A capture, a recording or a replay failed, a sound source went away, Vixeeny stopped unexpectedly.
+    pub failures: bool,
+    /// A new version can be installed.
+    pub updates: bool,
+}
+
+impl Default for Notifications {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            image_saved: true,
+            text_copied: true,
+            recording_saved: true,
+            replay_saved: true,
+            game_start: "both".into(),
+            failures: true,
+            updates: true,
+        }
+    }
+}
+
+impl Notifications {
+    /// The card when a game starts, the replay on (`true`) or off.
+    pub fn game_start(&self, on: bool) -> bool {
+        self.enabled && matches!((self.game_start.as_str(), on), ("both", _) | ("on", true))
+    }
+}
+
+/// A warning when the free space of the disk the files go to falls under a share of it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DiskAlert {
+    pub enabled: bool,
+    /// 1 to 99.
+    pub percent: u8,
+}
+
+impl Default for DiskAlert {
+    fn default() -> Self {
+        Self { enabled: true, percent: 5 }
+    }
+}
+
+impl DiskAlert {
+    /// The share under which it warns, in percent (0: never).
+    pub fn threshold(&self) -> u8 {
+        if self.enabled { self.percent.clamp(1, 99) } else { 0 }
+    }
+}
+
+/// The disk alerts: the recording widget's warning sign, and a notification during a replay.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DiskAlerts {
+    pub recordings: DiskAlert,
+    pub replays: DiskAlert,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1002,7 +1192,9 @@ mod tests {
         let cfg = Config::from_toml(text).unwrap();
         let defaults = Config::default();
         assert_eq!(cfg.general.autostart, defaults.general.autostart);
-        assert!(!cfg.general.notifications);
+        // The general switch of then: every card but the games'.
+        assert!(!cfg.notifications.image_saved && !cfg.notifications.failures);
+        assert!(cfg.notifications.enabled && cfg.notifications.game_start(true));
         assert_eq!(cfg.hotkeys.capture_region, ["F8"]);
         assert_eq!(cfg.hotkeys.record_toggle, defaults.hotkeys.record_toggle);
         assert_eq!(cfg.image.format, "png");
@@ -1019,7 +1211,7 @@ mod tests {
         std::fs::write(&path, "[hotkeys]\ncapture_region = [\"F8\"]\n").unwrap();
         Config::load(&path).unwrap();
         assert!(!backup.exists());
-        for text in ["[general]\nnotifications = 3\n", "not toml ["] {
+        for text in ["[general]\nautostart = 3\n", "not toml ["] {
             std::fs::write(&path, text).unwrap();
             let _ = Config::load(&path);
             assert_eq!(std::fs::read_to_string(&backup).unwrap(), text);
@@ -1152,6 +1344,43 @@ mod tests {
         assert_eq!(cfg.hotkeys.capture_fullscreen, ["Shift+PrintScreen"]);
         assert_eq!(cfg.hotkeys.capture_scrolling, ["Ctrl+PrintScreen"]);
         assert_eq!(cfg.hotkeys.record_toggle, ["Ctrl+Shift+F9"]);
+    }
+
+    #[test]
+    fn the_settings_of_before_1_0_find_their_new_places() {
+        let read = |text: &str| Config::from_toml(&format!("schema_version = 9\n{text}")).unwrap();
+        let cfg = read(
+            "[general]\nnotifications = false\n\
+             [video]\nfps = 120\n[video.audio]\nbitrate_kbps = 320\n\
+             [replay]\nnotify = \"on\"\nduration_seconds = 300\nafter_seconds = 10\n\
+             [recording_widget]\ndisk_alert_percent = 0\n\
+             [paths.naming.images]\ntemplate = \"{app}_{date}_{time}\"\n\
+             [paths.naming.videos]\ntemplate = \"{app}-{date}\"\n\
+             [hotkeys]\nopen_settings = [\"Ctrl+F7\"]\ncapture_all_monitors = []\nreplay_toggle = []\n",
+        );
+        let n = &cfg.notifications;
+        assert!(n.enabled && !n.image_saved && !n.updates);
+        assert!(n.game_start(true) && !n.game_start(false));
+        // Five minutes, and ten seconds after the shortcut.
+        assert_eq!((cfg.replay.duration_seconds, cfg.replay.duration_unit.as_str()), (300, "minutes"));
+        assert_eq!(cfg.replay.after(), 10);
+        // The replay keeps recording as it did: with the video settings, as its own.
+        assert!(!cfg.replay.same_as_video);
+        assert_eq!(cfg.replay.video.fps, 120);
+        assert_eq!(cfg.replay_video().audio.bitrate_kbps, 320);
+        // The alert was off: off, its share ready for when it is on again.
+        assert_eq!(cfg.disk_alert.recordings, DiskAlert { enabled: false, percent: 5 });
+        assert_eq!(cfg.disk_alert.replays.threshold(), 0);
+        assert_eq!(cfg.paths.naming.images.template, "{app} {date} {time}");
+        assert_eq!(cfg.paths.naming.videos.template, "{app}-{date}");
+        // The shortcuts given when free.
+        assert!(cfg.hotkeys.capture_all_monitors.is_empty());
+        assert_eq!(cfg.hotkeys.replay_toggle, ["Ctrl+Shift+F11"]);
+        // Every card off then, the games' too.
+        let cfg = read("[general]\nnotifications = false\n[replay]\nnotify = \"none\"\nafter_seconds = 0\n");
+        assert!(!cfg.notifications.enabled && cfg.notifications.image_saved);
+        assert!(!cfg.replay.after_enabled && cfg.replay.after_seconds == 5);
+        assert_eq!(read("").notifications, Notifications::default());
     }
 
     #[test]
