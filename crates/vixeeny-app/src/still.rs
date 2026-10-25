@@ -100,9 +100,9 @@ pub struct Destination<'a> {
     pub after_save: Option<&'a AfterSave<'a>>,
 }
 
-/// What [`Destination::after_save`] calls: the image, and the file's bytes when they are it. It may be called from
-/// another thread, while the file is written.
-pub type AfterSave<'a> = dyn Fn(&Bgra<'_>, Option<&[u8]>) + Sync + 'a;
+/// What [`Destination::after_save`] calls: the image, the file's bytes when they are it, and the file's name (without
+/// the folder or the extension). It may be called from another thread, while the file is written.
+pub type AfterSave<'a> = dyn Fn(&Bgra<'_>, Option<&[u8]>, &str) + Sync + 'a;
 
 /// Display name of the application a capture is attributed to.
 pub(crate) fn app_name(
@@ -275,7 +275,7 @@ pub fn save_image(
     let bytes = vixeeny_image::encode(output.format, image, output.settings)?;
     let path = write_named(action, snap, dest, output.format, metadata, (image.width, image.height), &bytes)?;
     if let Some(after) = dest.after_save {
-        after(image, Some(&bytes));
+        after(image, Some(&bytes), &stem_of(&path));
     }
     Ok(path)
 }
@@ -294,13 +294,14 @@ pub fn save_hdr(
     // An Ultra HDR JPEG is a JPEG of the SDR rendering (with a gain map): the clipboard takes the file as it is. Other
     // HDR files are not the SDR rendering: it is encoded on its own, side by side with the file.
     let reuse = output.format == ImageFormat::Jpeg;
+    let stem = file_stem(action, snap, dest, metadata, size);
     std::thread::scope(|scope| {
         let sdr = dest.after_save.map(|after| {
-            let image = &image;
+            let (image, stem) = (&image, &stem);
             scope.spawn(move || {
                 let sdr = image.to_sdr();
                 if !reuse {
-                    after(&Bgra::new(size.0, size.1, size.0 as usize * 4, &sdr), None);
+                    after(&Bgra::new(size.0, size.1, size.0 as usize * 4, &sdr), None, stem);
                 }
                 sdr
             })
@@ -309,7 +310,7 @@ pub fn save_hdr(
         let path = write_named(action, snap, dest, output.format, metadata, size, &bytes)?;
         let sdr = sdr.and_then(|done| done.join().ok());
         if let (true, Some(after), Some(sdr)) = (reuse, dest.after_save, sdr) {
-            after(&Bgra::new(size.0, size.1, size.0 as usize * 4, &sdr), Some(&bytes));
+            after(&Bgra::new(size.0, size.1, size.0 as usize * 4, &sdr), Some(&bytes), &stem_of(&path));
         }
         Ok(path)
     })
@@ -323,6 +324,21 @@ pub fn hdr_image(capture: &HdrCapture) -> Hdr<'_> {
         sdr_white_nits: capture.info.sdr_white_nits,
         peak_nits: capture.info.peak_nits,
     }
+}
+
+/// The name a capture of `size` is saved under, without the folder or the extension (nor the ` (2)` of a name taken).
+pub fn file_stem(
+    action: ActionId,
+    snap: &Snapshot,
+    dest: &Destination<'_>,
+    metadata: &dyn Fn(&str) -> ExeMetadata,
+    size: (u32, u32),
+) -> String {
+    naming::expand_template(dest.template, &template_vars(action, snap, dest, metadata, size), 1)
+}
+
+fn stem_of(path: &Path) -> String {
+    path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
 fn write_named(
@@ -596,7 +612,7 @@ mod tests {
         let copied = std::sync::Mutex::new(None);
         // The file's bytes, when the clipboard can take them as they are.
         let encoded = std::sync::Mutex::new(None);
-        let copy = |image: &Bgra<'_>, bytes: Option<&[u8]>| {
+        let copy = |image: &Bgra<'_>, bytes: Option<&[u8]>, _: &str| {
             *copied.lock().unwrap() = Some((image.width, image.data[0]));
             *encoded.lock().unwrap() = bytes.map(<[u8]>::to_vec);
         };

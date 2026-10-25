@@ -25,9 +25,21 @@ fn to_bgra(img: &RgbaImage) -> Vec<u8> {
     out
 }
 
-fn copy_to_clipboard(config: &Config, img: &RgbaImage) -> anyhow::Result<()> {
+/// Copies the editor's picture under the name it would be saved under.
+fn copy_to_clipboard(config: &Config, snap: &Snapshot, action: ActionId, img: &RgbaImage) -> anyhow::Result<()> {
+    let now = vixeeny_platform::local_time();
+    let dest = Destination {
+        dir: std::path::Path::new(""),
+        template: &config.paths.naming.images.template,
+        per_app_subfolder: false,
+        use_foreground_app: true,
+        app_names: &config.paths.app_names,
+        now: &now,
+        after_save: None,
+    };
+    let name = still::file_stem(action, snap, &dest, &vixeeny_platform::exe_metadata, (img.width, img.height));
     let bgra = to_bgra(img);
-    copy_bgra(config, &Bgra::new(img.width, img.height, img.width as usize * 4, &bgra), None)
+    copy_bgra(config, &Bgra::new(img.width, img.height, img.width as usize * 4, &bgra), None, &name)
 }
 
 pub use crate::clipboard::copy_bgra;
@@ -91,7 +103,7 @@ pub fn output_command(
             let img = session.export()?;
             // The picture is in hand: the editor goes while it is encoded.
             vixeeny_overlay::step_aside();
-            Some(match copy_to_clipboard(config, &img) {
+            Some(match copy_to_clipboard(config, snapshot, action, &img) {
                 Ok(()) => true,
                 Err(e) => {
                     tracing::error!("clipboard: {e:#}");
@@ -166,9 +178,9 @@ pub fn save_bgra(
 ) -> anyhow::Result<PathBuf> {
     let (default_format, settings) = crate::image_output(config);
     // Once saved, the image goes to the clipboard as well when the settings say so.
-    let copy = |image: &Bgra<'_>, encoded: Option<&[u8]>| {
+    let copy = |image: &Bgra<'_>, encoded: Option<&[u8]>, name: &str| {
         if config.image.copy_to_clipboard
-            && let Err(e) = copy_bgra(config, image, encoded)
+            && let Err(e) = copy_bgra(config, image, encoded, name)
         {
             tracing::warn!("clipboard: {e:#}");
         }
@@ -187,9 +199,10 @@ pub fn save_bgra(
         // The file is the clipboard's image when it is in the format of the settings; else the clipboard's is encoded
         // side by side with it.
         let same = hdr.is_none() && format == default_format;
+        let name = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
         return std::thread::scope(|scope| {
             if !same {
-                scope.spawn(|| copy(bitmap, None));
+                scope.spawn(|| copy(bitmap, None, &name));
             }
             let bytes = match hdr {
                 Some(hdr) => vixeeny_image::encode_hdr(format, &still::hdr_image(hdr), &settings)?,
@@ -197,7 +210,7 @@ pub fn save_bgra(
             };
             still::write_atomic(&path, &bytes)?;
             if same {
-                copy(bitmap, Some(&bytes));
+                copy(bitmap, Some(&bytes), &name);
             }
             Ok(path)
         });
