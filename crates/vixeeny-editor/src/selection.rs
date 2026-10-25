@@ -324,6 +324,49 @@ pub fn place_toolbar(zone: &Rect, size: (f32, f32), screen: impl Fn(Point) -> Re
     place(lying(&s), y, BarSide::Inside)
 }
 
+impl BarPlace {
+    /// What the bar of `size` (lying) covers once placed.
+    pub fn rect(&self, (w, h): (f32, f32)) -> Rect {
+        let (w, h) = if self.side.upright() { (h, w) } else { (w, h) };
+        Rect::new(self.at.x, self.at.y, w, h)
+    }
+}
+
+/// Places the zone's size label of `size` (its top-left corner): above the zone at its left, else at its right, else
+/// below it at its left, then at its right, else inside the zone at its top left, top right or bottom left. A place
+/// only counts when the whole label is on the monitor `screen` gives for it and clear of `bar` (the toolbar, when it
+/// shows) by `gap`. None of them: inside at the top left.
+pub fn place_label(
+    zone: &Rect,
+    size: (f32, f32),
+    bar: Option<Rect>,
+    screen: impl Fn(Point) -> Rect,
+    gap: f32,
+) -> Point {
+    let (w, h) = size;
+    let (left, right) = (zone.x, zone.right() - w);
+    let (above, below) = (zone.y - gap - h, zone.bottom() + gap);
+    let (inside_l, inside_r) = (zone.x + 2.0 * gap, zone.right() - 2.0 * gap - w);
+    let (inside_t, inside_b) = (zone.y + 2.0 * gap, zone.bottom() - 2.0 * gap - h);
+    let places = [
+        (left, above),
+        (right, above),
+        (left, below),
+        (right, below),
+        (inside_l, inside_t),
+        (inside_r, inside_t),
+        (inside_l, inside_b),
+    ];
+    let fits = |&(x, y): &(f32, f32)| {
+        let label = Rect::new(x, y, w, h);
+        let s = screen(Point::new(x, y));
+        let on_screen = x >= s.x && y >= s.y && label.right() <= s.right() && label.bottom() <= s.bottom();
+        on_screen && bar.is_none_or(|b| b.inflate(gap).intersect(&label).is_none())
+    };
+    let (x, y) = places.into_iter().find(fits).unwrap_or((inside_l, inside_t));
+    Point::new(x, y)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -552,5 +595,29 @@ mod tests {
         let screen = |q: Point| if q.y < 600.0 { upper } else { lower };
         let b = place_toolbar(&Rect::new(100.0, 20.0, 400.0, 1000.0), (300.0, 40.0), screen, 8.0);
         assert_eq!((b.at.y, b.side), (1028.0, BarSide::Below));
+    }
+
+    #[test]
+    fn the_size_label_keeps_clear_of_the_toolbar() {
+        let screen = Rect::new(0.0, 0.0, 1000.0, 600.0);
+        let label = (90.0, 24.0);
+        let at = |zone: Rect, bar: Option<Rect>| {
+            let p = place_label(&zone, label, bar, |_| screen, 2.0);
+            (p.x, p.y)
+        };
+        // Alone: above at the left; below when the zone touches the top of the screen, inside when it fills it.
+        assert_eq!(at(Rect::new(100.0, 100.0, 400.0, 300.0), None), (100.0, 74.0));
+        assert_eq!(at(Rect::new(100.0, 10.0, 400.0, 300.0), None), (100.0, 312.0));
+        assert_eq!(at(Rect::new(100.0, 10.0, 400.0, 590.0), None), (104.0, 14.0));
+        // The toolbar above over its left (it slid to stay on the screen): above at the right.
+        let bar = Some(Rect::new(0.0, 46.0, 300.0, 46.0));
+        assert_eq!(at(Rect::new(100.0, 100.0, 400.0, 300.0), bar), (410.0, 74.0));
+        // A toolbar across the whole top: below.
+        let bar = Some(Rect::new(0.0, 46.0, 1000.0, 46.0));
+        assert_eq!(at(Rect::new(100.0, 100.0, 400.0, 300.0), bar), (100.0, 402.0));
+        // The whole screen, the toolbar inside at its top left: inside, at the top right.
+        let zone = Rect::new(0.0, 0.0, 1000.0, 600.0);
+        let bar = Some(Rect::new(0.0, 8.0, 651.0, 46.0));
+        assert_eq!(at(zone, bar), (906.0, 4.0));
     }
 }

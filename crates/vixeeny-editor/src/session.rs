@@ -10,7 +10,7 @@ use crate::editor::{Editor, Modifiers, Outcome, Tool};
 use crate::geometry::{Point, Rect};
 use crate::model::{Annotation, AnnotationId, Color};
 use crate::render::{RgbaImage, render_region};
-use crate::selection::{BarPlace, CursorHint, Selection, place_toolbar};
+use crate::selection::{BarPlace, CursorHint, Selection, place_label, place_toolbar};
 
 /// The drawing area of the layers grows by blocks of this many pixels (see [`View::layers_area`]).
 pub const LAYER_BLOCK: u32 = 128;
@@ -28,6 +28,10 @@ pub const DEFAULT_WIDTH: f32 = 4.0;
 pub const MAX_WIDTH: f32 = 40.0;
 /// Space around the toolbar.
 const GAP: f32 = 8.0;
+/// Size of the size label at its widest (`9999 × 9999`), in image pixels at 100 %: the UI's is no larger.
+pub const LABEL_SIZE: (f32, f32) = (96.0, 24.0);
+/// Space between the size label and the zone.
+const LABEL_GAP: f32 = 2.0;
 
 /// What the user asked the host to do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -616,24 +620,25 @@ impl Session {
         let layers_area = self.layers_area(&layers);
         let settled = self.selection.is_settled();
         let settings = &self.editor.settings;
+        let bar_size = (TOOLBAR_SIZE.0 * self.ui_scale, TOOLBAR_SIZE.1 * self.ui_scale);
+        let toolbar =
+            zone.filter(|_| settled).map(|z| place_toolbar(&z, bar_size, |p| self.screen_at(p), GAP * self.ui_scale));
         View {
             selection: zone,
             settled,
             hover_window: self.selection.hover_window,
             size_label: zone.map(|z| {
                 let text = format!("{} × {}", z.w.round() as u32, z.h.round() as u32);
-                let label = 26.0 * self.ui_scale;
-                let y = if z.y >= label { z.y - label } else { z.y + 4.0 };
-                (text, Point::new(z.x, y))
-            }),
-            toolbar: zone.filter(|_| settled).map(|z| {
-                place_toolbar(
+                let at = place_label(
                     &z,
-                    (TOOLBAR_SIZE.0 * self.ui_scale, TOOLBAR_SIZE.1 * self.ui_scale),
+                    (LABEL_SIZE.0 * self.ui_scale, LABEL_SIZE.1 * self.ui_scale),
+                    toolbar.map(|b| b.rect(bar_size)),
                     |p| self.screen_at(p),
-                    GAP * self.ui_scale,
-                )
+                    LABEL_GAP * self.ui_scale,
+                );
+                (text, at)
             }),
+            toolbar,
             drawing: self.target == Some(Target::Editor) && self.editor.preview().is_some(),
             selected: self.selected(),
             brush: self.brush(),

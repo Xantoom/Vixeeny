@@ -543,3 +543,14 @@ fn a_drawing_made_anew_is_never_taken_for_the_one_before() {
     after.update(&gfx, &layers, false).expect("drawn");
     assert_ne!(before.version, after.version);
 }
+
+/// The editor keeps the size label clear of the toolbar with a size of its own: the label drawn is never larger.
+#[test]
+fn the_size_label_fits_the_size_the_editor_places() {
+    let gfx = Gfx::new().expect("graphics devices");
+    let (w, h) = vixeeny_editor::session::LABEL_SIZE;
+    for u in [1.0, 1.5, 2.0] {
+        let (lw, lh) = paint::label_size(&gfx, u, "9999 × 9999").unwrap();
+        assert!(lw as f32 <= w * u && lh as f32 <= h * u, "{lw} × {lh} at {u}");
+    }
+}
