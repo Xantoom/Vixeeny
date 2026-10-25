@@ -109,7 +109,7 @@ fn number(bgra: &[u8]) -> usize {
 fn reencode() -> Reencode {
     let registry = Registry::builtin().unwrap();
     let RecordConfig { encoder, options, .. } = common::config(&registry, "libx264", PresetName::Performance);
-    Reencode { encoder, options, depth: 8 }
+    Reencode::new(encoder, options, 8)
 }
 
 #[test]
@@ -290,7 +290,7 @@ fn an_hdr_part_keeps_the_hdr10_metadata_of_the_recording() {
     let encoder = registry.get("libx265").unwrap().clone();
     let options =
         encoder.presets.get(PresetName::Performance).iter().map(|(k, v)| (k.clone(), v.to_ffmpeg())).collect();
-    let reencode = Reencode { encoder, options, depth: 10 };
+    let reencode = Reencode::new(encoder, options, 10);
     let never = AtomicBool::new(false);
     let encoded = dir.join("encoded.mp4");
     export(&clip, (10, 40), &encoded, Some(&reencode), &|_| {}, &never).unwrap();
@@ -349,4 +349,38 @@ fn a_part_from_a_key_frame_is_copied_and_another_one_encoded_again() {
     assert!(export(&clip, (10, 40), &cancelled, Some(&reencode()), &|_| {}, &stop).is_err());
     assert!(!cancelled.exists());
     assert!(!cancelled.with_extension("part.tmp").exists());
+}
+
+#[test]
+fn a_copy_for_a_network_is_smaller_with_fewer_frames_and_one_sound() {
+    let dir = scratch("share");
+    let clip = Clip::open(&recording(&dir, 3)).unwrap();
+    let never = AtomicBool::new(false);
+    let mut reencode = reencode();
+    reencode.size = Some((160, 90));
+    reencode.fps = Some(15);
+    reencode.sound_kbps = Some(160);
+    // From a key frame, yet encoded again: the copy differs from the clip.
+    let shared = dir.join("shared.mp4");
+    export(&clip, (30, 89), &shared, Some(&reencode), &|_| {}, &never).unwrap();
+    let part = Clip::open(&shared).unwrap();
+    assert_eq!((part.width, part.height), (160, 90));
+    assert_eq!(part.frames.len(), 30);
+    assert_eq!(part.audio_tracks, 1);
+    assert_eq!(part.codec, "h264");
+    assert!((part.duration() - 2.0).abs() < 0.1, "{}", part.duration());
+    let mut pictures = Pictures::open(&part).unwrap();
+    pictures.seek(0).unwrap();
+    let (_, first) = pictures.read((32, 18)).unwrap().unwrap();
+    assert!(number(&first.bgra).abs_diff(30) <= 1, "first frame shows {}", number(&first.bgra));
+    pictures.seek(1).unwrap();
+    let (_, second) = pictures.read((32, 18)).unwrap().unwrap();
+    assert!(number(&second.bgra).abs_diff(32) <= 1, "second frame shows {}", number(&second.bgra));
+    let mut sound = Sound::open(&part).unwrap().unwrap();
+    let mut total = 0;
+    while let Some(block) = sound.read().unwrap() {
+        total += block.len() / 2;
+    }
+    let seconds = total as f64 / 48_000.0;
+    assert!((seconds - 2.0).abs() < 0.1, "{seconds} s");
 }

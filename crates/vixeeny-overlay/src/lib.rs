@@ -3,6 +3,7 @@
 //! notifications and the recording widget.
 
 pub mod backdrop;
+pub mod brands;
 pub mod cutter;
 mod drawing;
 pub mod gfx;

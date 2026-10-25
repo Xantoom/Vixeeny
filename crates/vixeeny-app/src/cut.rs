@@ -14,11 +14,18 @@ use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
-use vixeeny_common::config::Config;
+use vixeeny_common::config::{self, Config};
 use vixeeny_common::i18n::{Key, Lang, tr};
 use vixeeny_encode::cut::{Clip, Next, Picture, Pictures, Reencode, Sound};
+use vixeeny_encode::registry::{Chroma, Family, Kind, Registry};
+use vixeeny_encode::share;
 use vixeeny_image::anim::AnimFormat;
-use vixeeny_overlay::cutter::{Cutter, CutterEvent, CutterHost, CutterTexts, Frames, Waker};
+use vixeeny_overlay::cutter::{
+    CUSTOM, Choice, Cutter, CutterEvent, CutterHost, CutterTexts, ExportChoice, ExportOptions, Frames, ORIGINAL,
+    Preset, Waker,
+};
+
+use crate::record::Reshape;
 
 use crate::toast::{Failed, Saved, Toast};
 
@@ -62,8 +69,156 @@ fn texts(lang: Lang, path: &Path) -> CutterTexts {
         previous: t(Key::CutPrevious),
         next: t(Key::CutNext),
         mute: t(Key::CutMute),
+        minimise: t(Key::CutMinimise),
         close: t(Key::CutClose),
+        custom: t(Key::CutCustom),
+        search: t(Key::CutSearch),
+        no_match: t(Key::CutNoMatch),
+        max: t(Key::CutMax),
     }
+}
+
+/// The clip's frames per second, whole.
+fn clip_fps(clip: &Clip) -> u32 {
+    (1.0 / clip.frame_seconds().max(1e-3)).round().max(1.0) as u32
+}
+
+fn codec_label(id: &str) -> String {
+    match id {
+        "h264" => "H.264".into(),
+        "hevc" => "HEVC".into(),
+        "av1" => "AV1".into(),
+        "vp9" => "VP9".into(),
+        other => other.to_uppercase(),
+    }
+}
+
+/// A network's size limit as it is read: megabytes, gigabytes from a thousand of them (10⁹ bytes, as the networks
+/// count).
+fn mb_label(mb: u32, lang: Lang) -> String {
+    if mb < 1_000 {
+        return format!("{mb} {}", tr(Key::UnitMb, lang));
+    }
+    let gb = f64::from(mb) / 1_000.0;
+    let gb = if gb.fract() == 0.0 { format!("{gb:.0}") } else { format!("{gb:.1}") };
+    let gb = if lang == Lang::Fr { gb.replace('.', ",") } else { gb };
+    format!("{gb} {}", tr(Key::UnitGb, lang))
+}
+
+/// A network's length limit as it is read: `2 min 20 s`, `10 min`, `2 h`.
+fn length_label(seconds: u32, lang: Lang) -> String {
+    let (h, m, s) = (seconds / 3_600, seconds / 60 % 60, seconds % 60);
+    let mut parts = Vec::new();
+    if h > 0 {
+        parts.push(format!("{h} h"));
+    }
+    if m > 0 {
+        parts.push(format!("{m} {}", tr(Key::UnitMinutes, lang)));
+    }
+    if s > 0 {
+        parts.push(format!("{s} {}", tr(Key::UnitSeconds, lang)));
+    }
+    parts.join(" ")
+}
+
+/// The highest of `offered` (highest first) that is at most `wanted`; the lowest when none is.
+fn at_most(offered: &[u32], wanted: u32) -> u32 {
+    offered.iter().copied().find(|&v| v <= wanted).or_else(|| offered.last().copied()).unwrap_or(wanted)
+}
+
+/// The codecs a copy can be written in: H.264 always (the processor writes it when the graphics card cannot), HEVC and
+/// AV1 when the graphics card writes them, and the clip's own.
+fn codecs(clip: &Clip) -> Vec<Choice> {
+    let probe = crate::probe::cached();
+    let registry = Registry::builtin().ok();
+    let on_card = |family: Family| match (&probe, &registry) {
+        (Some(p), Some(r)) => r
+            .encoders()
+            .any(|e| e.kind == Kind::Hardware && e.family == family && p.supports(&e.id, 8, Chroma::C420, false)),
+        _ => false,
+    };
+    [Family::H264, Family::Hevc, Family::Av1]
+        .into_iter()
+        .filter(|&f| f == Family::H264 || f.name() == clip.codec || on_card(f))
+        .map(|f| Choice { id: f.name().into(), label: codec_label(f.name()) })
+        .collect()
+}
+
+/// What the export row offers for `clip`: the clip as it is, then every network, each one's values at most the clip's.
+fn export_options(clip: &Clip, lang: Lang) -> ExportOptions {
+    let (height, fps) = (clip.height & !1, clip_fps(clip));
+    let heights: Vec<u32> =
+        std::iter::once(height).chain([2160, 1440, 1080, 720, 480].into_iter().filter(|&h| h < height)).collect();
+    let rates: Vec<u32> = std::iter::once(fps).chain([120, 60, 30].into_iter().filter(|&f| f < fps)).collect();
+    let mut presets = vec![Preset {
+        id: ORIGINAL.into(),
+        name: tr(Key::CutOriginal, lang).into(),
+        brand: String::new(),
+        keywords: String::new(),
+        detail: format!("{height}p{fps} · {}", codec_label(&clip.codec)),
+        codec: clip.codec.clone(),
+        height,
+        fps,
+    }];
+    for t in &share::TARGETS {
+        let mut detail: Vec<String> = Vec::new();
+        if let Some(seconds) = t.max_seconds {
+            detail.push(length_label(seconds, lang));
+        }
+        if let Some(mb) = t.max_mb {
+            detail.push(mb_label(mb, lang));
+        }
+        detail.push(format!("{}p{}", t.height, t.fps));
+        presets.push(Preset {
+            id: t.id.into(),
+            name: t.name.into(),
+            brand: t.network.id().into(),
+            keywords: t.network.also().into(),
+            detail: detail.join(" · "),
+            codec: t.codec().name().into(),
+            height: at_most(&heights, t.height),
+            fps: at_most(&rates, t.fps),
+        });
+    }
+    ExportOptions { presets, codecs: codecs(clip), heights, fps: rates }
+}
+
+/// The choice the editor saved last, for this clip: a network's values for it, or values of the user's own brought
+/// within what it offers.
+fn restored(options: &ExportOptions, saved: &config::Editor) -> ExportChoice {
+    let of = |p: &Preset| ExportChoice { preset: p.id.clone(), codec: p.codec.clone(), height: p.height, fps: p.fps };
+    let original = options.presets.first().map(of).unwrap_or_default();
+    if saved.export == CUSTOM {
+        let codec =
+            if options.codecs.iter().any(|c| c.id == saved.codec) { saved.codec.clone() } else { "h264".into() };
+        let height = if saved.height == 0 { original.height } else { at_most(&options.heights, saved.height) };
+        let fps = if saved.fps == 0 { original.fps } else { at_most(&options.fps, saved.fps) };
+        return ExportChoice { preset: CUSTOM.into(), codec, height, fps };
+    }
+    options.presets.iter().find(|p| p.id == saved.export).map_or(original, of)
+}
+
+/// What a copy of `seconds` of `clip` is written as; `None`: the clip as it is (copied when it can be).
+fn reshape(clip: &Clip, choice: &ExportChoice, seconds: f64) -> Option<Reshape> {
+    let (height, fps) = (clip.height & !1, clip_fps(clip));
+    let network = share::target(&choice.preset);
+    let same = choice.codec == clip.codec && choice.height >= height && choice.fps >= fps;
+    if network.is_none() && (choice.preset == ORIGINAL || same) {
+        return None;
+    }
+    Some(Reshape {
+        family: Family::from_name(&choice.codec).unwrap_or(Family::H264),
+        size: share::scaled((clip.width, clip.height), choice.height),
+        fps: choice.fps.min(fps),
+        cap_kbps: network.and_then(|t| share::video_kbps(t, seconds)),
+        sound_kbps: network.map(|_| share::AUDIO_KBPS),
+    })
+}
+
+/// The longest part the network chosen takes, at the size and rate of the copy.
+fn limit(clip: &Clip, choice: &ExportChoice) -> Option<f64> {
+    let target = share::target(&choice.preset)?;
+    share::max_seconds(target, share::scaled((clip.width, clip.height), choice.height), choice.fps.min(clip_fps(clip)))
 }
 
 /// `--cut <file>`.
@@ -97,6 +252,11 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     let geometry = vixeeny_overlay::cutter::placement(monitor.work, u, frames.aspect);
     let cutter = Cutter::new(geometry, monitor.dpi, vixeeny_ui::theme::default_look(), frames, texts(lang, &path))
         .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    let options = export_options(&clip, lang);
+    let choice = restored(&options, &config.editor);
+    cutter.set_export(options, choice.clone());
+    cutter.set_limit(limit(&clip, &choice));
 
     let waker = cutter.waker();
     let _ = give_waker.send(waker.clone());
@@ -549,6 +709,51 @@ struct Playing {
 }
 
 impl Host {
+    /// Whether the part is written as it is: from a key frame, nothing about it changed.
+    fn lossless(&self, cutter: &Cutter) -> bool {
+        let s = cutter.state();
+        self.clip.lossless(s.from, s.to) && reshape(&self.clip, &cutter.export_choice(), 0.0).is_none()
+    }
+
+    /// The extension of a copy: MP4 for a network (what each one plays), else the clip's.
+    fn extension(&self, cutter: &Cutter) -> String {
+        if share::target(&cutter.export_choice().preset).is_some() {
+            return "mp4".into();
+        }
+        self.clip.path.extension().map_or_else(|| "mp4".to_owned(), |e| e.to_string_lossy().into_owned())
+    }
+
+    /// Keeps `choice` for the next part.
+    fn remember(&mut self, choice: &ExportChoice) {
+        let (height, fps) = (self.clip.height & !1, clip_fps(&self.clip));
+        let editor = config::Editor {
+            export: choice.preset.clone(),
+            codec: choice.codec.clone(),
+            height: if choice.height >= height { 0 } else { choice.height },
+            fps: if choice.fps >= fps { 0 } else { choice.fps },
+        };
+        if self.config.editor == editor {
+            return;
+        }
+        self.config.editor = editor.clone();
+        let Some(path) = vixeeny_common::paths::config_file() else {
+            return;
+        };
+        // Read again: the settings may have changed since the editor opened.
+        let mut config = match Config::load(&path) {
+            Ok(config) => config,
+            Err(_) if !path.exists() => self.config.clone(),
+            Err(e) => {
+                tracing::warn!("video editor: the settings are not kept: {e}");
+                return;
+            }
+        };
+        config.editor = editor;
+        if let Err(e) = config.save(&path) {
+            tracing::warn!("video editor: the settings are not kept: {e}");
+        }
+    }
+
     fn play(&mut self, cutter: &Cutter) {
         let s = cutter.state();
         // Up to the end of the part kept, or of the clip from beyond it.
@@ -603,12 +808,15 @@ impl Host {
         let (mail, waker) = (self.tx.clone(), self.waker.clone());
         let (stop, share) = (cancel.clone(), progress.clone());
         let range = (s.from, s.to);
+        let seconds = self.clip.time(s.to) + self.clip.frame_seconds() - self.clip.time(s.from);
+        let reshape = reshape(&self.clip, &cutter.export_choice(), seconds).filter(|_| anim_format(&dest).is_none());
         let spawned = std::thread::Builder::new().name("cut-export".into()).spawn(move || {
             // The encoders are looked up here, not on the window's thread.
-            let reencoders = if clip.lossless(range.0, range.1) || anim_format(&dest).is_some() {
-                Vec::new()
-            } else {
-                crate::record::reencoders(&config, &clip)
+            let reencoders = match &reshape {
+                _ if anim_format(&dest).is_some() => Vec::new(),
+                Some(reshape) => crate::record::share_reencoders(&clip, reshape),
+                None if clip.lossless(range.0, range.1) => Vec::new(),
+                None => crate::record::reencoders(&config, &clip),
             };
             // The bar moves by whole pixels: the window is woken every half percent.
             let told = std::cell::Cell::new(0.0_f32);
@@ -624,7 +832,7 @@ impl Host {
                     let settings = crate::image_output(&config).1;
                     write_animation(&clip, range, &dest, format, &settings, &tell, &stop)
                 }
-                None => write(&clip, range, &dest, &reencoders, &tell, &stop),
+                None => write(&clip, range, &dest, &reencoders, reshape.is_none(), &tell, &stop),
             };
             let _ = mail.send(Mail::Written(result.map(|()| dest)));
             waker.wake();
@@ -639,7 +847,7 @@ impl Host {
     }
 
     fn save_as(&mut self, cutter: &Cutter) {
-        let ext = self.clip.path.extension().map_or_else(|| "mp4".to_owned(), |e| e.to_string_lossy().into_owned());
+        let ext = self.extension(cutter);
         let mut dialog = rfd::FileDialog::new()
             .set_title(tr(Key::CutSaveAs, self.lang).trim_end_matches('…'))
             .add_filter(ext.to_uppercase(), &[ext.as_str()]);
@@ -650,7 +858,7 @@ impl Host {
             let label = if format == AnimFormat::Gif { name } else { format!("{name} ({animated})") };
             dialog = dialog.add_filter(label, &[format.extension()]);
         }
-        let suggested = cut_name(&self.clip.path);
+        let suggested = cut_name(&self.clip.path, &ext);
         if let Some(dir) = suggested.parent() {
             dialog = dialog.set_directory(dir);
         }
@@ -719,17 +927,18 @@ impl Host {
 
 const CANCELLED: &str = "cancelled";
 
-/// Writes the part, trying the encoders in turn when it must be encoded again.
+/// Writes the part, copied when `copy` lets it and it can be, else trying the encoders in turn.
 fn write(
     clip: &Clip,
     range: (usize, usize),
     dest: &Path,
     reencoders: &[Reencode],
+    copy: bool,
     progress: &dyn Fn(f32),
     cancel: &AtomicBool,
 ) -> Result<(), String> {
     use vixeeny_encode::cut::export;
-    if clip.lossless(range.0, range.1) {
+    if copy && clip.lossless(range.0, range.1) {
         return export(clip, range, dest, None, progress, cancel).map_err(|e| e.to_string());
     }
     let mut last = String::from("no encoder available");
@@ -809,9 +1018,9 @@ fn write_animation(
 }
 
 /// `<name>-cut.<ext>` beside `original`, numbered when it is taken.
-fn cut_name(original: &Path) -> PathBuf {
+fn cut_name(original: &Path, ext: &str) -> PathBuf {
     let stem = original.file_stem().map_or_else(|| "replay".to_owned(), |s| s.to_string_lossy().into_owned());
-    let ext = original.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+    let ext = format!(".{ext}");
     (1..)
         .map(|n| {
             let suffix = if n == 1 { "-cut".to_owned() } else { format!("-cut-{n}") };
@@ -832,14 +1041,20 @@ impl CutterHost for Host {
             }
             CutterEvent::Play => self.play(cutter),
             CutterEvent::Pause => self.pause(cutter),
-            CutterEvent::Range(from, to) => cutter.set_lossless(self.clip.lossless(from, to)),
+            CutterEvent::Range(..) => cutter.set_lossless(self.lossless(cutter)),
+            CutterEvent::Export => {
+                let choice = cutter.export_choice();
+                cutter.set_limit(limit(&self.clip, &choice));
+                cutter.set_lossless(self.lossless(cutter));
+                self.remember(&choice);
+            }
             CutterEvent::Volume(volume, muted) => {
                 if let Some(sound) = &self.sound {
                     sound.send(SoundAsk::Volume(if muted { 0.0 } else { volume }));
                 }
             }
             CutterEvent::Save => {
-                let dest = cut_name(&self.clip.path);
+                let dest = cut_name(&self.clip.path, &self.extension(cutter));
                 self.save(cutter, dest);
             }
             CutterEvent::SaveAs => self.save_as(cutter),
@@ -997,14 +1212,86 @@ mod tests {
     }
 
     #[test]
+    fn limits_read_as_the_networks_write_them() {
+        assert_eq!(mb_label(20, Lang::Fr), "20 Mo");
+        assert_eq!(mb_label(1_000, Lang::Fr), "1 Go");
+        assert_eq!(mb_label(2_500, Lang::Fr), "2,5 Go");
+        assert_eq!(mb_label(16_000, Lang::En), "16 GB");
+        assert_eq!(length_label(140, Lang::En), "2 min 20 s");
+        assert_eq!(length_label(600, Lang::Fr), "10 min");
+        assert_eq!(length_label(7_200, Lang::En), "2 h");
+        assert_eq!(at_most(&[1440, 1080, 720, 480], 1080), 1080);
+        assert_eq!(at_most(&[900, 720, 480], 1080), 900);
+        assert_eq!(at_most(&[60, 30], 24), 30);
+    }
+
+    #[test]
+    fn a_network_sets_the_copy_and_the_last_choice_comes_back() {
+        let dir = std::env::temp_dir().join(format!("vixeeny-cut-share-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let clip = match Clip::open(&recording(&dir)) {
+            Ok(clip) => clip,
+            Err(e) => {
+                vixeeny_common::skip_test(format!("no FFmpeg: {e}"));
+                return;
+            }
+        };
+        let options = export_options(&clip, Lang::Fr);
+        assert_eq!(options.presets.len(), 1 + share::TARGETS.len());
+        assert_eq!(options.presets[0].id, ORIGINAL);
+        assert_eq!(options.presets[0].detail, "180p30 · H.264");
+        assert_eq!((options.heights.as_slice(), options.fps.as_slice()), ([180].as_slice(), [30].as_slice()));
+        assert_eq!(options.codecs[0].id, "h264");
+        let preset = |id: &str| options.presets.iter().find(|p| p.id == id).unwrap();
+        // Never above the clip.
+        assert_eq!((preset("discord").height, preset("discord").fps), (180, 30));
+        assert_eq!(preset("discord").detail, "20 Mo · 720p30");
+        assert_eq!(preset("discord_nitro").detail, "1 Go · 1080p60");
+        assert_eq!(preset("x").detail, "2 min 20 s · 512 Mo · 720p60");
+        assert_eq!(preset("x").keywords, "twitter");
+        assert_eq!(preset("youtube").detail, "1080p60");
+
+        // The last choice: a network, values of the user's own, or the clip as it is.
+        let saved = |export: &str, codec: &str, height: u32, fps: u32| config::Editor {
+            export: export.into(),
+            codec: codec.into(),
+            height,
+            fps,
+        };
+        assert_eq!(restored(&options, &saved("discord", "", 0, 0)).preset, "discord");
+        let custom = restored(&options, &saved(CUSTOM, "vp9", 720, 60));
+        assert_eq!(
+            (custom.preset.as_str(), custom.codec.as_str(), custom.height, custom.fps),
+            (CUSTOM, "h264", 180, 30)
+        );
+        assert_eq!(restored(&options, &saved("myspace", "", 0, 0)).preset, ORIGINAL);
+
+        // The clip as it is, or the same values: copied; a network: encoded again, sized and with one sound.
+        let original = restored(&options, &config::Editor::default());
+        assert_eq!(reshape(&clip, &original, 10.0), None);
+        assert_eq!(reshape(&clip, &ExportChoice { preset: CUSTOM.into(), ..original.clone() }, 10.0), None);
+        assert_eq!(limit(&clip, &original), None);
+        let discord = restored(&options, &saved("discord", "", 0, 0));
+        let r = reshape(&clip, &discord, 10.0).unwrap();
+        assert_eq!((r.family, r.size, r.fps, r.sound_kbps), (Family::H264, (320, 180), 30, Some(share::AUDIO_KBPS)));
+        assert!(r.cap_kbps.is_some_and(|k| k > 10_000));
+        // 20 MB at 180p: well over two minutes.
+        assert!(limit(&clip, &discord).is_some_and(|s| s > 120.0));
+        assert_eq!(limit(&clip, &restored(&options, &saved("x", "", 0, 0))), Some(140.0));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn a_cut_is_named_after_its_replay_and_never_overwrites_one() {
         let dir = std::env::temp_dir().join(format!("vixeeny-cut-name-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap_or_default();
         let original = dir.join("Replay 2026-10-15.mp4");
-        assert_eq!(cut_name(&original), dir.join("Replay 2026-10-15-cut.mp4"));
+        assert_eq!(cut_name(&original, "mp4"), dir.join("Replay 2026-10-15-cut.mp4"));
         std::fs::write(dir.join("Replay 2026-10-15-cut.mp4"), b"").unwrap_or_default();
-        assert_eq!(cut_name(&original), dir.join("Replay 2026-10-15-cut-2.mp4"));
+        assert_eq!(cut_name(&original, "mp4"), dir.join("Replay 2026-10-15-cut-2.mp4"));
+        assert_eq!(cut_name(&original, "mkv"), dir.join("Replay 2026-10-15-cut.mkv"));
         let _ = std::fs::remove_dir_all(dir);
     }
 }

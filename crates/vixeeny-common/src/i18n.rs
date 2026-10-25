@@ -300,8 +300,8 @@ keys! {
     CutCancel => "Cancel", "Annuler";
     CutLossless => "Starts on a key frame: copied as is, instant and lossless",
         "Début sur une image clé : copie directe, instantanée et sans perte";
-    CutReencode => "Does not start on a key frame: the video is re-encoded",
-        "Début hors image clé : la vidéo est réencodée";
+    CutReencode => "Re-encoded: the part does not start on a key frame, or its format changes",
+        "Réencodée : la partie ne commence pas sur une image clé, ou son format change";
     CutPlay => "Play (Space)", "Lecture (Espace)";
     CutPause => "Pause (Space)", "Pause (Espace)";
     CutPrevious => "Previous frame (←)", "Image précédente (←)";
@@ -406,6 +406,13 @@ keys! {
     SecRecording => "Recording", "Enregistrement";
     SetReplayNoHardware => "The replay needs a hardware encoder (graphics card or processor graphics): none was found.",
         "Le replay a besoin d'un encodeur matériel (carte graphique ou graphique du processeur) : aucun n'a été trouvé.";
+    CutMinimise => "Minimise", "Réduire";
+    CutOriginal => "Original", "Original";
+    CutCustom => "Custom", "Personnalisé";
+    CutSearch => "Search", "Rechercher";
+    CutNoMatch => "No result", "Aucun résultat";
+    CutMax => "max", "max";
+    UnitGb => "GB", "Go";
 }
 
 impl Lang {

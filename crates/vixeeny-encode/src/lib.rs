@@ -21,6 +21,7 @@ pub mod ffmpeg_probe;
 pub mod gpu;
 pub mod recorder;
 pub mod replay;
+pub mod share;
 pub mod thumbnail;
 
 /// FFmpeg bindings, built against the pinned prebuilt FFmpeg of `native/versions.toml`.

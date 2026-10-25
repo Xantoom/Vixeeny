@@ -242,7 +242,62 @@ pub fn reencoders(config: &Config, clip: &vixeeny_encode::cut::Clip) -> Vec<Reen
         );
         let depth = if clip.deep && encoder.supports_format(10, Chroma::C420) { 10 } else { 8 };
         encoder.fit_depth(&mut options, depth);
-        out.push(Reencode { encoder: encoder.clone(), options: options.into_iter().collect(), depth });
+        out.push(Reencode::new(encoder.clone(), options.into_iter().collect(), depth));
+    }
+    out
+}
+
+/// What a copy of a part is written as, when it is not the clip as it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Reshape {
+    pub family: Family,
+    /// The picture's size, even (the clip's when it is not made smaller).
+    pub size: (u32, u32),
+    pub fps: u32,
+    /// The video's ceiling, kbit/s, for a file that must stay under a size.
+    pub cap_kbps: Option<u32>,
+    /// Every track mixed into one AAC track at this bitrate.
+    pub sound_kbps: Option<u32>,
+}
+
+/// The encoders that can write a copy of `clip` as `reshape` says, best first: the graphics card's of that codec, then
+/// the processor's. The balanced profile: a copy is made once and kept.
+pub fn share_reencoders(clip: &vixeeny_encode::cut::Clip, reshape: &Reshape) -> Vec<Reencode> {
+    let Ok(registry) = Registry::builtin() else {
+        return Vec::new();
+    };
+    let probe = crate::probe::current(false).ok();
+    let size = reshape.size;
+    let hardware = probe.as_ref().and_then(|p| {
+        registry
+            .encoders()
+            .filter(|e| e.kind == Kind::Hardware && e.family == reshape.family)
+            .filter(|e| p.supports(&e.id, 8, Chroma::C420, false) && p.fits(&e.id, size))
+            .min_by_key(|e| e.vendor.preference())
+    });
+    let software = registry.encoders().find(|e| e.family == reshape.family && e.kind == Kind::Software);
+    let clip_fps = (1.0 / clip.frame_seconds().max(1e-3)).round() as u32;
+    let mut out = Vec::new();
+    for encoder in hardware.into_iter().chain(software) {
+        let tools = probe.as_ref().and_then(|p| p.tools(&encoder.id));
+        let mut options = encoder.preset_options(PresetName::Balanced, size, reshape.fps.max(1), tools);
+        let pixel_rate = u64::from(size.0) * u64::from(size.1) * u64::from(reshape.fps.max(1));
+        encoder.fit_tools(&mut options, tools, true, pixel_rate);
+        // H.264 is shared in 8 bits: what every player reads.
+        let depth = if reshape.family != Family::H264 && clip.deep && encoder.supports_format(10, Chroma::C420) {
+            10
+        } else {
+            8
+        };
+        encoder.fit_depth(&mut options, depth);
+        if let Some(kbps) = reshape.cap_kbps {
+            encoder.cap_rate(&mut options, kbps);
+        }
+        let mut reencode = Reencode::new(encoder.clone(), options.into_iter().collect(), depth);
+        reencode.size = (size != (clip.width & !1, clip.height & !1)).then_some(size);
+        reencode.fps = (reshape.fps < clip_fps).then_some(reshape.fps);
+        reencode.sound_kbps = reshape.sound_kbps;
+        out.push(reencode);
     }
     out
 }

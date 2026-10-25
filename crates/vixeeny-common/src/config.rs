@@ -344,6 +344,7 @@ pub struct Config {
     pub video: Video,
     pub recording_widget: RecordingWidget,
     pub replay: Replay,
+    pub editor: Editor,
     pub overlay: Overlay,
     pub scrolling: Scrolling,
     pub notifications: Notifications,
@@ -361,6 +362,7 @@ impl Default for Config {
             video: Video::default(),
             recording_widget: RecordingWidget::default(),
             replay: Replay::default(),
+            editor: Editor::default(),
             overlay: Overlay::default(),
             scrolling: Scrolling::default(),
             notifications: Notifications::default(),
@@ -920,6 +922,27 @@ pub struct RecordingWidget {
 impl Default for RecordingWidget {
     fn default() -> Self {
         Self { enabled: true, corner: "top_left".into(), custom: (0.5, 0.0), display: "always".into() }
+    }
+}
+
+/// What the editor saved a part with last: kept for the next one.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Editor {
+    /// `original` (the clip as it is), `custom` (the three below), or a network the copy is made for
+    /// (`vixeeny_encode::share`'s ids), which sets them.
+    pub export: String,
+    /// `h264`, `hevc` or `av1`.
+    pub codec: String,
+    /// The picture's height; 0: the clip's.
+    pub height: u32,
+    /// Frames per second; 0: the clip's.
+    pub fps: u32,
+}
+
+impl Default for Editor {
+    fn default() -> Self {
+        Self { export: "original".into(), codec: "h264".into(), height: 0, fps: 0 }
     }
 }
 

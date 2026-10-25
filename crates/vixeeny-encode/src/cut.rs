@@ -48,6 +48,9 @@ pub struct Clip {
     /// Every frame, in presentation order.
     pub frames: Vec<Frame>,
     pub audio_tracks: usize,
+    /// The video's codec: `h264`, `hevc`, `av1`, `vp9` ([`Family::name`](crate::registry::Family::name)), or FFmpeg's
+    /// name of another one.
+    pub codec: String,
     /// BT.2020 / PQ (HDR10).
     pub hdr: bool,
     /// More than 8 bits per component.
@@ -141,6 +144,13 @@ impl Clip {
         let time_base = stream.time_base();
         let rate = stream.avg_frame_rate();
         let params = stream.parameters();
+        let codec = match params.id() {
+            codec::Id::H264 => "h264".to_owned(),
+            codec::Id::HEVC => "hevc".to_owned(),
+            codec::Id::AV1 => "av1".to_owned(),
+            codec::Id::VP9 => "vp9".to_owned(),
+            other => format!("{other:?}").to_lowercase(),
+        };
         // SAFETY: the parameters belong to the stream, alive while `input` is.
         let (width, height, hdr, deep, hdr10) = unsafe {
             let p = &*params.as_ptr();
@@ -178,6 +188,7 @@ impl Clip {
             time_base,
             frames,
             audio_tracks,
+            codec,
             hdr,
             deep,
             hdr10,
@@ -272,6 +283,22 @@ impl Scaler {
             ffi::av_opt_set_int(ctx.cast(), c"sws_flags".as_ptr(), i64::from(ffi::SwsFlags::SWS_BILINEAR as u32), 0);
         }
         Ok(Self { ctx, tone, deep: None })
+    }
+
+    /// Bicubic rather than bilinear: a picture made smaller for good, not for a glance.
+    fn smooth(self, on: bool) -> Self {
+        if on {
+            // SAFETY: a live context not used yet; NUL-terminated option name.
+            unsafe {
+                ffi::av_opt_set_int(
+                    self.ctx.cast(),
+                    c"sws_flags".as_ptr(),
+                    i64::from(ffi::SwsFlags::SWS_BICUBIC as u32),
+                    0,
+                );
+            }
+        }
+        self
     }
 
     /// Scales `src` into `dst`, whose buffers are already there (a frame of the size and format wanted): the scaler
@@ -948,18 +975,36 @@ impl Sound {
     }
 }
 
-/// The encoder that writes a part which does not start on a key frame.
+/// The encoder that writes a part which does not start on a key frame, or a copy made for somewhere else.
 #[derive(Debug, Clone)]
 pub struct Reencode {
     pub encoder: Encoder,
     /// Its FFmpeg options (the video settings' preset).
     pub options: Vec<(String, String)>,
     pub depth: u8,
+    /// The picture's size, even (`None`: the clip's).
+    pub size: Option<(u32, u32)>,
+    /// Frames per second, fewer than the clip's: the frames between are left out (`None`: the clip's).
+    pub fps: Option<u32>,
+    /// The sound encoded again, every track mixed into one AAC track at this bitrate (`None`: copied).
+    pub sound_kbps: Option<u32>,
 }
 
-/// Writes frames `from..=to` of `clip` to `dest`: the packets as they are when [`Clip::lossless`], else the video
-/// encoded again by `reencode`. The audio is copied. `progress` hears the share done (0 to 1); `cancel` stops it (the
-/// file is removed).
+impl Reencode {
+    /// The settings' encoder for a part, as the clip is.
+    pub fn new(encoder: Encoder, options: Vec<(String, String)>, depth: u8) -> Self {
+        Self { encoder, options, depth, size: None, fps: None, sound_kbps: None }
+    }
+
+    /// Whether the copy differs from the clip whatever the part: it is encoded again even when it could be copied.
+    pub fn reshapes(&self) -> bool {
+        self.size.is_some() || self.fps.is_some() || self.sound_kbps.is_some()
+    }
+}
+
+/// Writes frames `from..=to` of `clip` to `dest`: the packets as they are when [`Clip::lossless`] and `reencode` does
+/// not [reshape](Reencode::reshapes) the clip, else the video encoded again by `reencode`. The audio is copied, unless
+/// `reencode` encodes it again. `progress` hears the share done (0 to 1); `cancel` stops it (the file is removed).
 pub fn export(
     clip: &Clip,
     (from, to): (usize, usize),
@@ -971,7 +1016,7 @@ pub fn export(
     if from > to || to >= clip.frames.len() {
         return Err(RecordError::Config("empty cut".into()));
     }
-    let lossless = clip.lossless(from, to);
+    let lossless = clip.lossless(from, to) && reencode.is_none_or(|r| !r.reshapes());
     if !lossless && reencode.is_none() {
         return Err(RecordError::Config("this cut needs an encoder".into()));
     }
@@ -983,6 +1028,15 @@ pub fn export(
             let _ = std::fs::remove_file(&tmp);
             Err(e)
         }
+    }
+}
+
+/// The frame rate a copy is written at: the clip's, or fewer frames.
+fn out_rate(clip: &Clip, reencode: &Reencode) -> Rational {
+    let clip_fps = f64::from(clip.rate.0) / f64::from(clip.rate.1.max(1));
+    match reencode.fps {
+        Some(fps) if f64::from(fps) < clip_fps - 0.5 => Rational(fps as i32, 1),
+        _ => clip.rate,
     }
 }
 
@@ -1005,14 +1059,16 @@ fn open_encoder(
     let pix = crate::recorder::pixel_format(&reencode.encoder, reencode.depth, Chroma::C420)?;
     let codec = encoder::find_by_name(&reencode.encoder.ffmpeg_encoder)
         .ok_or_else(|| RecordError::Config(format!("{} is not built in", reencode.encoder.ffmpeg_encoder)))?;
-    let gop = (f64::from(clip.rate.0) / f64::from(clip.rate.1)).round() * 2.0;
+    let rate = out_rate(clip, reencode);
+    let gop = (f64::from(rate.0) / f64::from(rate.1)).round() * 2.0;
+    let (width, height) = reencode.size.unwrap_or((clip.width & !1, clip.height & !1));
     let encoder = crate::recorder::open_video(&reencode.options, |options| {
         let mut ctx = codec::context::Context::new_with_codec(codec).encoder().video()?;
-        ctx.set_width(clip.width & !1);
-        ctx.set_height(clip.height & !1);
+        ctx.set_width(width);
+        ctx.set_height(height);
         ctx.set_format(pix);
         ctx.set_time_base(clip.time_base);
-        ctx.set_frame_rate(Some(clip.rate));
+        ctx.set_frame_rate(Some(rate));
         ctx.set_gop(gop.max(1.0) as u32);
         ctx.set_color_range(color::Range::MPEG);
         if clip.hdr {
@@ -1038,7 +1094,7 @@ fn open_encoder(
     Ok((
         VideoOut {
             encoder,
-            scaler: Scaler::new(None)?,
+            scaler: Scaler::new(None)?.smooth(reencode.size.is_some()),
             frame: None,
             pix,
             time_base: clip.time_base,
@@ -1072,6 +1128,59 @@ impl VideoOut {
         let sent = scaled.and_then(|()| Ok(self.encoder.send_frame(&out)?));
         self.frame = Some(out);
         sent
+    }
+}
+
+/// The sound of a copy, encoded again as the video goes.
+struct SoundOut {
+    sound: Sound,
+    encoder: crate::audio::AudioEncoder,
+    stream: usize,
+    /// Samples (per channel) still to write: the part's length.
+    left: usize,
+    written: usize,
+}
+
+impl SoundOut {
+    /// Encodes the sound up to `seconds` of the part.
+    fn pump(
+        &mut self,
+        seconds: f64,
+        octx: &mut format::context::Output,
+        out_tb: &[Rational],
+    ) -> Result<(), RecordError> {
+        while self.left > 0 && (self.written as f64) < seconds * f64::from(SOUND_RATE) {
+            let Some(mut samples) = self.sound.read()? else {
+                self.left = 0;
+                break;
+            };
+            let frames = (samples.len() / SOUND_CHANNELS).min(self.left);
+            samples.truncate(frames * SOUND_CHANNELS);
+            self.left -= frames;
+            self.written += frames;
+            let packets = self.encoder.push(&samples)?;
+            self.write(packets, octx, out_tb)?;
+        }
+        Ok(())
+    }
+
+    fn finish(&mut self, octx: &mut format::context::Output, out_tb: &[Rational]) -> Result<(), RecordError> {
+        let packets = self.encoder.finish()?;
+        self.write(packets, octx, out_tb)
+    }
+
+    fn write(
+        &self,
+        packets: Vec<Packet>,
+        octx: &mut format::context::Output,
+        out_tb: &[Rational],
+    ) -> Result<(), RecordError> {
+        for mut packet in packets {
+            packet.rescale_ts(Rational(1, SOUND_RATE as i32), out_tb[self.stream]);
+            packet.set_stream(self.stream);
+            packet.write_interleaved(octx)?;
+        }
+        Ok(())
     }
 }
 
@@ -1122,7 +1231,7 @@ fn write_cut(
                     map[index] = Some(stream.index());
                 }
             }
-        } else if s.parameters().medium() == media::Type::Audio {
+        } else if s.parameters().medium() == media::Type::Audio && reencode.is_none_or(|r| r.sound_kbps.is_none()) {
             let mut stream = octx.add_stream(encoder::find(codec::Id::None))?;
             stream.set_parameters(s.parameters());
             // SAFETY: as above.
@@ -1131,6 +1240,27 @@ fn write_cut(
             map[index] = Some(stream.index());
         }
     }
+    // The sound encoded again: every track mixed, from the first frame kept.
+    let mut sound_out = match reencode.and_then(|r| r.sound_kbps) {
+        Some(kbps) if clip.audio_tracks > 0 => {
+            let mut sound = Sound::open(clip)?.ok_or_else(|| RecordError::Config("no sound".into()))?;
+            sound.seek(clip.time(from))?;
+            let config = crate::audio::AudioTrackConfig {
+                title: String::new(),
+                codec: crate::audio::AudioCodec::Aac,
+                bitrate_kbps: kbps,
+                vbr: false,
+                channels: SOUND_CHANNELS,
+            };
+            let encoder = crate::audio::AudioEncoder::open(&config, global)?;
+            let mut stream = octx.add_stream(encoder.codec)?;
+            stream.set_parameters(&encoder.encoder);
+            stream.set_time_base(Rational(1, SOUND_RATE as i32));
+            let samples = ((end_s - start_s) * f64::from(SOUND_RATE)).round() as usize;
+            Some(SoundOut { sound, encoder, stream: stream.index(), left: samples, written: 0 })
+        }
+        _ => None,
+    };
     octx.set_metadata(input.metadata().to_owned());
     let mut header = Dictionary::new();
     if muxer == "mp4" || muxer == "mov" {
@@ -1165,9 +1295,25 @@ fn write_cut(
 
     // One frame, in the encoder's time base: a packet without a duration would end the file one frame early (the MP4
     // edit list leaves the last frame out).
-    let frame_ticks = (i64::from(clip.time_base.1) * i64::from(clip.rate.1)
-        / (i64::from(clip.time_base.0.max(1)) * i64::from(clip.rate.0.max(1))))
+    let rate = reencode.map_or(clip.rate, |r| out_rate(clip, r));
+    let frame_ticks = (i64::from(clip.time_base.1) * i64::from(rate.1)
+        / (i64::from(clip.time_base.0.max(1)) * i64::from(rate.0.max(1))))
     .max(1);
+    // Fewer frames a second: a frame is kept when it starts a new one of the copy's.
+    let fewer = rate != clip.rate;
+    let out_fps = f64::from(rate.0) / f64::from(rate.1.max(1));
+    let mut last_slot: Option<i64> = None;
+    let mut keeps = |pts: i64| {
+        if !fewer {
+            return true;
+        }
+        let slot = (seconds(pts - start_pts, clip.time_base) * out_fps + 1e-6).floor() as i64;
+        let new = last_slot.is_none_or(|last| slot > last);
+        if new {
+            last_slot = Some(slot);
+        }
+        new
+    };
     let mut write_encoded = |out: &mut VideoOut, octx: &mut format::context::Output| {
         while out.encoder.receive_packet(&mut encoded).is_ok() {
             if encoded.duration() <= 0 {
@@ -1181,6 +1327,8 @@ fn write_cut(
     };
 
     let mut video_done = false;
+    // Without a sound copied as it is, nothing is left to read once the video is done.
+    let copies_sound = map.iter().enumerate().any(|(i, m)| i != clip.video && m.is_some());
     for (s, mut packet) in input.packets() {
         if cancel.load(Ordering::Relaxed) {
             return Err(RecordError::Config("cancelled".into()));
@@ -1193,7 +1341,10 @@ fn write_cut(
             let this = decode_index;
             decode_index += 1;
             if video_done {
-                continue;
+                if copies_sound {
+                    continue;
+                }
+                break;
             }
             match (&mut decoder, &mut video_out) {
                 (Some(dec), Some(out)) => {
@@ -1205,8 +1356,13 @@ fn write_cut(
                         if pts < start_pts || pts > end_pts {
                             continue;
                         }
-                        out.send(&decoded, pts - start_pts)?;
-                        write_encoded(out, &mut octx)?;
+                        if keeps(pts) {
+                            out.send(&decoded, pts - start_pts)?;
+                            write_encoded(out, &mut octx)?;
+                        }
+                        if let Some(sound) = &mut sound_out {
+                            sound.pump(seconds(pts - start_pts, clip.time_base) + 0.5, &mut octx, &out_tb)?;
+                        }
                         done += 1;
                         progress(done as f32 / total);
                     }
@@ -1257,6 +1413,7 @@ fn write_cut(
         while dec.receive_frame(&mut decoded).is_ok() {
             if let Some(pts) = decoded.timestamp().or(decoded.pts())
                 && (start_pts..=end_pts).contains(&pts)
+                && keeps(pts)
             {
                 out.send(&decoded, pts - start_pts)?;
                 write_encoded(out, &mut octx)?;
@@ -1264,6 +1421,10 @@ fn write_cut(
         }
         out.encoder.send_eof()?;
         write_encoded(out, &mut octx)?;
+    }
+    if let Some(sound) = &mut sound_out {
+        sound.pump(f64::MAX, &mut octx, &out_tb)?;
+        sound.finish(&mut octx, &out_tb)?;
     }
     octx.write_trailer()?;
     progress(1.0);
@@ -1330,6 +1491,7 @@ mod tests {
             time_base: Rational(1, 60),
             frames: frames.iter().map(|&(pts, key, decode)| Frame { pts, key, decode }).collect(),
             audio_tracks: 0,
+            codec: "h264".into(),
             hdr: false,
             deep: false,
             hdr10: None,
