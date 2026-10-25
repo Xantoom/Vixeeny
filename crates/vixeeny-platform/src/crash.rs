@@ -2,7 +2,8 @@
 //! What a crash leaves behind. A fault in native code (a library, the graphics driver) never reaches the panic hook:
 //! the last-chance exception filter writes, without allocating, a note (`<date>_<time>_<program>.txt`: the exception,
 //! the module and offset it happened at, the thread) and a minidump beside it in the crashes folder, then lets Windows
-//! end the process as it would have. [`prune`] keeps the newest [`KEEP`] crashes.
+//! end the process as it would have. A corrupted heap never reaches that filter either (Windows ends the process
+//! straight away): it is caught as it is raised. [`prune`] keeps the newest [`KEEP`] crashes.
 
 use std::fmt::Write as _;
 use std::path::Path;
@@ -14,8 +15,8 @@ use windows::Win32::Storage::FileSystem::{
     CREATE_ALWAYS, CreateDirectoryW, CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, WriteFile,
 };
 use windows::Win32::System::Diagnostics::Debug::{
-    EXCEPTION_POINTERS, MINIDUMP_EXCEPTION_INFORMATION, MiniDumpNormal, MiniDumpWithThreadInfo, MiniDumpWriteDump,
-    SetUnhandledExceptionFilter,
+    AddVectoredExceptionHandler, EXCEPTION_POINTERS, MINIDUMP_EXCEPTION_INFORMATION, MiniDumpNormal,
+    MiniDumpWithThreadInfo, MiniDumpWriteDump, RtlCaptureStackBackTrace, SetUnhandledExceptionFilter,
 };
 use windows::Win32::System::LibraryLoader::{
     GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, GetModuleFileNameW,
@@ -56,9 +57,30 @@ pub fn catch(dir: &Path, exe: &str, program: &str) {
     }
     let program = if exe.ends_with(program) { exe.to_owned() } else { format!("{exe}-{program}") };
     if TARGET.set(Target { dir, program }).is_ok() {
-        // SAFETY: the filter only reads `TARGET`, set above for the life of the process.
-        unsafe { SetUnhandledExceptionFilter(Some(filter)) };
+        // SAFETY: the filters only read `TARGET`, set above for the life of the process.
+        unsafe {
+            SetUnhandledExceptionFilter(Some(filter));
+            AddVectoredExceptionHandler(1, Some(heap_corruption));
+        }
     }
+}
+
+/// Return addresses written in a note.
+const STACK_FRAMES: usize = 32;
+
+/// `STATUS_HEAP_CORRUPTION`.
+const HEAP_CORRUPTION: u32 = 0xc000_0374;
+
+/// Sees every exception first, and only writes the files for a corrupted heap: the others may still be handled, and
+/// reach [`filter`] when they are not.
+unsafe extern "system" fn heap_corruption(info: *mut EXCEPTION_POINTERS) -> i32 {
+    // SAFETY: Windows hands the handler valid exception pointers.
+    let code = unsafe { info.as_ref().and_then(|i| i.ExceptionRecord.as_ref()) }.map(|r| r.ExceptionCode.0 as u32);
+    if code == Some(HEAP_CORRUPTION) {
+        // SAFETY: the same pointers, as the last-chance filter gets them.
+        unsafe { filter(info) };
+    }
+    CONTINUE_SEARCH
 }
 
 /// Has Windows start this program again after it crashes or hangs (once it ran for a minute: a crash at start does not
@@ -99,7 +121,7 @@ pub fn describe_exit(code: u32) -> Option<&'static str> {
         0xc000_0005 => "access violation",
         0xc000_0409 => "fast fail (a panic, or a corrupted stack)",
         0xc000_00fd => "stack overflow",
-        0xc000_0374 => "heap corruption",
+        HEAP_CORRUPTION => "heap corruption",
         0xc000_001d => "illegal instruction",
         0xc000_0135 => "a DLL was not found",
         0xc000_0142 => "a DLL failed to start",
@@ -222,7 +244,7 @@ unsafe extern "system" fn filter(info: *const EXCEPTION_POINTERS) -> i32 {
     let mut module = Text::<128>::new();
     let offset = module_of(address, &mut module);
 
-    let mut note = Text::<1024>::new();
+    let mut note = Text::<4096>::new();
     let _ = writeln!(
         note,
         "Vixeeny {} ({}) crashed: exception 0x{code:08x} ({}) at {}+0x{offset:x}",
@@ -246,6 +268,15 @@ unsafe extern "system" fn filter(info: *const EXCEPTION_POINTERS) -> i32 {
     // SAFETY: plain call.
     let thread = unsafe { GetCurrentThreadId() };
     let _ = writeln!(note, "thread {thread}");
+    // Who called whom down to the crash: the module tells the driver, FFmpeg or Vixeeny apart, without the minidump.
+    let mut frames = [std::ptr::null_mut(); STACK_FRAMES];
+    // SAFETY: as many frames as the buffer holds are written.
+    let captured = unsafe { RtlCaptureStackBackTrace(0, &mut frames, None) };
+    for &frame in &frames[..usize::from(captured)] {
+        let mut module = Text::<128>::new();
+        let offset = module_of(frame as usize, &mut module);
+        let _ = writeln!(note, "  {}+0x{offset:x}", std::str::from_utf8(module.as_bytes()).unwrap_or("?"));
+    }
 
     let mut path = [0u16; 600];
     // SAFETY: the folder's path, zero-terminated; an existing folder is fine.
@@ -281,8 +312,34 @@ unsafe extern "system" fn filter(info: *const EXCEPTION_POINTERS) -> i32 {
 mod tests {
     use super::*;
 
-    /// Set in the child process this test starts: it crashes there.
+    /// Set in the child process a test starts: it crashes there, into this folder.
     const CRASH_INTO: &str = "VIXEENY_TEST_CRASH_INTO";
+
+    /// Runs `test` again in a child process with [`CRASH_INTO`] set: its exit code, the note it left and the size of
+    /// its minidump (checked to be one).
+    fn crash_in_child(test: &str) -> (u32, String, u64) {
+        let dir = std::env::temp_dir().join(format!("vixeeny-crash-test-{}-{test}", std::process::id()));
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &format!("crash::tests::{test}")])
+            .env(CRASH_INTO, &dir)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        let code = status.code().unwrap() as u32;
+        let files: Vec<String> = std::fs::read_dir(&dir)
+            .map(|d| d.map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect())
+            .unwrap_or_default();
+        let note = files.iter().find(|n| n.ends_with("_vixeeny-test-crash.txt"));
+        let note = note.unwrap_or_else(|| panic!("no note after exit code 0x{code:08x}: {files:?}"));
+        let text = std::fs::read_to_string(dir.join(note)).unwrap();
+        let dump = dir.join(note.replace(".txt", ".dmp"));
+        let size = std::fs::metadata(&dump).unwrap().len();
+        // "MDMP".
+        assert_eq!(&std::fs::read(&dump).unwrap()[..4], b"MDMP");
+        std::fs::remove_dir_all(&dir).unwrap();
+        (code, text, size)
+    }
 
     #[test]
     fn a_crash_leaves_a_note_and_a_minidump() {
@@ -292,30 +349,38 @@ mod tests {
             unsafe { std::ptr::null_mut::<u8>().add(16).write_volatile(1) };
             return;
         }
-        let dir = std::env::temp_dir().join(format!("vixeeny-crash-test-{}", std::process::id()));
-        let status = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "crash::tests::a_crash_leaves_a_note_and_a_minidump"])
-            .env(CRASH_INTO, &dir)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .unwrap();
-        let code = status.code().unwrap() as u32;
+        let (code, text, size) = crash_in_child("a_crash_leaves_a_note_and_a_minidump");
         assert_eq!(code, 0xc000_0005);
         assert_eq!(describe_exit(code), Some("access violation"));
-        let files: Vec<String> =
-            std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
-        let note = files.iter().find(|n| n.ends_with("_vixeeny-test-crash.txt")).unwrap();
-        let text = std::fs::read_to_string(dir.join(note)).unwrap();
         assert!(text.contains("exception 0xc0000005 (access violation) at "), "{text}");
         assert!(text.contains(".exe+0x"), "{text}");
         assert!(text.contains("while writing 0x10"), "{text}");
-        let dump = dir.join(note.replace(".txt", ".dmp"));
-        let size = std::fs::metadata(&dump).unwrap().len();
-        // "MDMP", and a dump worth reading.
-        assert_eq!(&std::fs::read(&dump).unwrap()[..4], b"MDMP");
+        // A dump worth reading.
         assert!(size > 10_000, "{size}");
-        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Windows ends a process whose heap is corrupted without asking the last-chance filter: the note is written all
+    /// the same.
+    #[test]
+    fn a_corrupted_heap_leaves_a_note_and_a_minidump() {
+        if let Some(dir) = std::env::var_os(CRASH_INTO) {
+            use windows::Win32::System::Memory::{HEAP_FLAGS, HeapAlloc, HeapCreate, HeapFree};
+            catch(Path::new(&dir), "vixeeny-test", "crash");
+            // SAFETY: none: the point is the block freed twice.
+            unsafe {
+                let heap = HeapCreate(HEAP_FLAGS(0), 0, 0).unwrap();
+                let block = HeapAlloc(heap, HEAP_FLAGS(0), 64);
+                let _ = HeapFree(heap, HEAP_FLAGS(0), Some(block));
+                let _ = HeapFree(heap, HEAP_FLAGS(0), Some(block));
+            }
+            return;
+        }
+        let (code, text, _) = crash_in_child("a_corrupted_heap_leaves_a_note_and_a_minidump");
+        assert_eq!(code, 0xc000_0374);
+        assert!(text.contains("exception 0xc0000374 (heap corruption) at "), "{text}");
+        // The stack goes down to the block freed twice.
+        assert!(text.contains("  ntdll.dll+0x"), "{text}");
+        assert!(text.contains("  vixeeny_platform-"), "{text}");
     }
 
     #[test]
