@@ -527,6 +527,14 @@ fn the_updates_and_about_pages_show_what_the_host_gives_them() {
             (2, 0, "Video and Sound are now one Recording page, with three profiles on every page."),
             (2, 1, "Quality, Balanced and Performance."),
             (1, 0, "Fixes"),
+            // Long enough to take several lines: the notes are as high as their lines.
+            (
+                2,
+                0,
+                "The replay now shows a game's own web pages (shop, news, events, account) when they open over the \
+                 game. Other programs over the game still stay out of the replay, and the buffer goes on through the \
+                 change.",
+            ),
             (2, 0, "A window capture keeps its bottom rows."),
             (2, 0, "Settings are saved whole."),
         ]

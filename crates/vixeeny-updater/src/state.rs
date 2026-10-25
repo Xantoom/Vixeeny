@@ -84,6 +84,10 @@ impl State {
             None => self.available.as_ref().is_some_and(|r| r.version == current),
         };
         self.last_run = Some(current.to_owned());
+        // The release offered is the one now running: kept for what changed in it, past the next check.
+        if let Some(release) = self.available.as_ref().filter(|r| r.version == current) {
+            self.installed = Some(release.clone());
+        }
         updated
     }
 

@@ -90,6 +90,43 @@ global Glyphs {
     out property <string> chevron-up: "M15.35 12.85A0.5 0.5 0 0 1 14.65 12.85L10 8.21L5.35 12.85A0.5 0.5 0 0 1 4.65 12.15L9.65 7.15A0.5 0.5 0 0 1 10.35 7.15L15.35 12.15A0.5 0.5 0 0 1 15.35 12.85Z";
 }
 
+// Release notes folded under their row, in the card of the rows above it: they unfold in place.
+component NotesFold inherits VerticalLayout {
+    in property <string> title;
+    in property <[NoteLine]> lines;
+    in property <bool> open;
+    in property <bool> animated;
+    callback clicked();
+
+    GroupRow {
+        title: root.title;
+        glyph: Icons.sparkle;
+        framed: false;
+        divider: true;
+        clickable: true;
+        clicked => { root.clicked(); }
+        Icon {
+            data: root.open ? Glyphs.chevron-up : Icons.chevron-down;
+            tint: Theme.text-2;
+            size: 14px;
+        }
+    }
+    Rectangle {
+        clip: true;
+        height: root.open ? notes.preferred-height + 20px : 0px;
+        animate height { duration: root.animated ? Theme.t-normal : 0ms; easing: cubic-bezier(0.2, 0, 0, 1); }
+        notes := Notes {
+            x: 52px;
+            y: 2px;
+            width: parent.width - 52px - 20px;
+            height: self.preferred-height;
+            lines: root.lines;
+            opacity: root.open ? 1 : 0;
+            animate opacity { duration: root.animated ? Theme.t-normal : 0ms; }
+        }
+    }
+}
+
 // A scrolling page: its content in a column 24px from the left.
 component Page inherits ScrollArea {
     in property <length> column;
@@ -923,31 +960,9 @@ export component SettingsWindow inherits Window {
                             }
                         }
                     }
-                    // The list of changes, folded under its heading.
-                    if root.update-notes.length > 0 : GroupRow {
-                        title: root.update-notes-title;
-                        glyph: Icons.document;
-                        clickable: true;
-                        clicked => { root.toggle-notes(); }
-                        Icon {
-                            data: root.notes-open ? Glyphs.chevron-up : Icons.chevron-down;
-                            tint: Theme.text-2;
-                            size: 14px;
-                        }
-                    }
-                    if root.update-notes.length > 0 && root.notes-open : Card {
-                        height: notes.preferred-height + 36px;
-                        notes := Notes {
-                            x: 52px;
-                            y: 18px;
-                            width: parent.width - 52px - 20px;
-                            height: self.preferred-height;
-                            lines: root.update-notes;
-                        }
-                    }
                 }
                 // A group: its title, then its rows in one card.
-                for g in root.groups : VerticalLayout {
+                for g[gi] in root.groups : VerticalLayout {
                     spacing: 8px;
                     if g.title != "" : Text {
                         text: g.title;
@@ -960,7 +975,8 @@ export component SettingsWindow inherits Window {
                         clip: true;
                         VerticalLayout {
                     for r[i] in g.rows : SettingLine {
-                        divider: i > 0;
+                        // A setting that belongs to the one above is joined to it by its own line.
+                        divider: i > 0 && !r.nested;
                         nested-next: r.nested && g.rows[i + 1].nested;
                         entry: r;
                         t: root.t;
@@ -978,6 +994,14 @@ export component SettingsWindow inherits Window {
                         code(i, s) => { root.row-code(r.id, i, s); }
                         browse => { root.row-browse(r.id); }
                         action(a) => { root.row-action(r.id, a); }
+                    }
+                    // What changed in this version, unfolding under the updates' settings.
+                    if root.section == 7 && gi == root.groups.length - 1 && root.update-notes.length > 0 : NotesFold {
+                        title: root.update-notes-title;
+                        lines: root.update-notes;
+                        open: root.notes-open;
+                        animated: root.animated;
+                        clicked => { root.toggle-notes(); }
                     }
                         }
                     }

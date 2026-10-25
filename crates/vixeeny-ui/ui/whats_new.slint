@@ -16,6 +16,8 @@ export component WhatsNewWindow inherits Window {
 
     title: "Vixeeny";
     icon: Theme.app-icon;
+    // Over the other windows: it would be lost behind them otherwise.
+    always-on-top: true;
     min-width: 420px;
     preferred-width: 560px;
     preferred-height: 520px;

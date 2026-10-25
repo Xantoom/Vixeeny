@@ -127,9 +127,8 @@ fn update_state() -> UpdateState {
 fn update_view(lang: Lang) -> UpdateView {
     let state = update_state();
     let current = env!("CARGO_PKG_VERSION");
-    // What changed in the version offered, else in this one.
-    let offered = state.newer_than(current).map_or(current, |r| r.version.as_str());
-    let (notes_title, notes) = state.notes_of(offered).map_or_else(Default::default, |notes| {
+    // What changed in this version, kept when it was downloaded (or when the window after the update asked for it).
+    let (notes_title, notes) = state.notes_of(current).map_or_else(Default::default, |notes| {
         (tr(Key::UpdateNotes, lang).to_owned(), crate::whats_new::ui_notes(notes))
     });
     let view = update_card(&state, current, lang);

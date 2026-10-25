@@ -1223,21 +1223,23 @@ export component Notes inherits VerticalLayout {
             font-size: 13px;
             wrap: word-wrap;
         }
-        if l.kind == 2 : HorizontalLayout {
-            padding-left: l.level * 18px;
-            spacing: 10px;
+        // Not a horizontal layout: its text would be measured on one line, and the notes would not be as high as they
+        // are.
+        if l.kind == 2 : Rectangle {
+            height: item.preferred-height;
             Rectangle {
+                x: l.level * 18px;
+                y: 7px;
                 width: 5px;
-                Rectangle {
-                    y: 7px;
-                    width: 5px;
-                    height: 5px;
-                    border-radius: 2.5px;
-                    background: l.level == 0 ? Theme.accent : Theme.text-3;
-                }
+                height: 5px;
+                border-radius: 2.5px;
+                background: l.level == 0 ? Theme.accent : Theme.text-3;
             }
-            Text {
-                horizontal-stretch: 1;
+            item := Text {
+                x: l.level * 18px + 15px;
+                y: 0px;
+                width: parent.width - self.x;
+                height: self.preferred-height;
                 text: l.text;
                 color: Theme.text;
                 font-size: 13px;
