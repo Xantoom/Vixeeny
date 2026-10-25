@@ -76,14 +76,16 @@ const PAD: f32 = 14.0;
 const PAD_LEFT: f32 = 18.0;
 const THUMB: f32 = 76.0;
 const ICON: f32 = 24.0;
-const LIFETIME_MS: u32 = 7000;
+const LIFETIME_MS: u32 = 5500;
 /// A picture-only card goes sooner: it only says "done".
-const PICTURE_LIFETIME_MS: u32 = 3000;
+const PICTURE_LIFETIME_MS: u32 = 2000;
 /// The largest picture-only card, logical pixels.
 const PICTURE_MAX: (f32, f32) = (320.0, 200.0);
 /// Lines of the body at most: a longer message is cut (the logs hold all of it).
 const BODY_LINES: u32 = 4;
 const ENTER: f64 = 0.26;
+/// The card going by itself or closed: it slides back out the way it came in, and fades.
+const LEAVE: f64 = 0.22;
 
 /// What is under the pointer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -290,6 +292,8 @@ pub fn paint_card(
 type Done = Box<dyn FnOnce(Option<ToastEvent>)>;
 
 const LIFETIME_TIMER: usize = 1;
+/// The end of the card's way out.
+const LEAVE_TIMER: usize = 2;
 
 struct Card {
     content: ToastContent,
@@ -301,6 +305,9 @@ struct Card {
     look: Cell<CardLook>,
     press: Cell<Option<CardTarget>>,
     done: RefCell<Option<Done>>,
+    animate: bool,
+    /// On its way out: what `done` learns once it is gone.
+    leaving: Cell<Option<Option<ToastEvent>>>,
 }
 
 impl Card {
@@ -332,6 +339,23 @@ impl Card {
                 let _ = KillTimer(Some(self.popup.hwnd), LIFETIME_TIMER);
             }
         }
+    }
+
+    /// Slides the card out to the side it came from while it fades; `false` when it cannot (no animations): it goes at
+    /// once then.
+    fn slide_out(&self, gfx: &Gfx) -> Result<bool> {
+        let Some(effect) = self.piece.effect.as_ref().filter(|_| self.animate) else {
+            return Ok(false);
+        };
+        let width = self.layout.size.0 as f32;
+        // SAFETY: plain property and timer calls, with animations of the same device, on a window of this thread.
+        unsafe {
+            self.piece.visual.SetOffsetX(&scene::ease_in(gfx, 0.0, width, LEAVE)?)?;
+            effect.SetOpacity(&scene::ease_in(gfx, 1.0, 0.0, LEAVE)?)?;
+            gfx.dcomp.Commit()?;
+            SetTimer(Some(self.popup.hwnd), LEAVE_TIMER, (LEAVE * 1000.0) as u32, None);
+        }
+        Ok(true)
     }
 }
 
@@ -375,18 +399,40 @@ impl Shared {
         result
     }
 
+    /// The card `id` goes by itself or is closed: out of the screen first, then [`Shared::finish`].
+    fn leave(&self, id: u64, card: &Card, event: Option<ToastEvent>) {
+        card.set_timer(false);
+        card.leaving.set(Some(event));
+        match card.slide_out(&self.gfx) {
+            Ok(true) => {}
+            Ok(false) => self.finish(id, event),
+            Err(e) => {
+                tracing::warn!("notification: {e}");
+                self.finish(id, event);
+            }
+        }
+    }
+
     fn handle(&self, id: u64, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
         if let Some(r) = popup::passive(msg) {
             return Some(r);
         }
         let card = self.current.borrow().as_ref().filter(|(shown, _)| *shown == id).map(|(_, c)| c.clone())?;
+        // On its way out: nothing more to do with it but let it go.
+        if let Some(event) = card.leaving.get() {
+            if msg == WM_TIMER && wparam.0 == LEAVE_TIMER {
+                // SAFETY: plain timer call on a window of this thread.
+                let _ = unsafe { KillTimer(Some(card.popup.hwnd), LEAVE_TIMER) };
+                self.finish(id, event);
+            }
+            return (msg == WM_TIMER).then_some(LRESULT(0));
+        }
         let gfx = &self.gfx;
         let (x, y) = popup::point(lparam);
         let mut look = card.look.get();
         match msg {
             WM_TIMER if wparam.0 == LIFETIME_TIMER => {
-                card.set_timer(false);
-                self.finish(id, None);
+                self.leave(id, &card, None);
                 return Some(LRESULT(0));
             }
             WM_SETCURSOR if (lparam.0 & 0xffff) == 1 => {
@@ -447,6 +493,10 @@ impl Shared {
                 // SAFETY: plain call.
                 let _ = unsafe { ReleaseCapture() };
                 let at = card.layout.at(x, y, look.hovered);
+                if pressed == Some(at) && at == CardTarget::Close {
+                    self.leave(id, &card, None);
+                    return Some(LRESULT(0));
+                }
                 if pressed == Some(at) {
                     let event = match at {
                         CardTarget::Card => Some(Some(ToastEvent::Activated)),
@@ -532,6 +582,8 @@ impl Toasts {
             look: Cell::new(CardLook { hovered: false, hover: None, held: None }),
             press: Cell::new(None),
             done: RefCell::new(Some(Box::new(done))),
+            animate,
+            leaving: Cell::new(None),
         });
         let id = shared.count.get() + 1;
         shared.count.set(id);
