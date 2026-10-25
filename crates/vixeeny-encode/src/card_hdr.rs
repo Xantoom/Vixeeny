@@ -28,7 +28,7 @@ use windows::Win32::Graphics::Dxgi::Common::{
 };
 use windows::core::{Interface, s};
 
-use vixeeny_platform::d3d::{self, compile};
+use vixeeny_platform::d3d::{self, D3dError, compile};
 
 /// The levels of the recorded monitor.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -110,10 +110,6 @@ float2 to_chroma(float4 pos : SV_Position) : SV_Target {
 }
 ";
 
-fn err(what: &str, e: impl std::fmt::Display) -> String {
-    format!("{what}: {e}")
-}
-
 struct Code {
     peak: Vec<u8>,
     follow: Vec<u8>,
@@ -124,8 +120,8 @@ struct Code {
 }
 
 /// The compiled shaders, made once per process.
-fn code() -> Result<&'static Code, String> {
-    static CODE: OnceLock<Result<Code, String>> = OnceLock::new();
+fn code() -> Result<&'static Code, D3dError> {
+    static CODE: OnceLock<Result<Code, D3dError>> = OnceLock::new();
     CODE.get_or_init(|| {
         let source = format!("{}{SHADERS}", vixeeny_common::colour::HLSL);
         let (cs, vs, ps) = (s!("cs_5_0"), s!("vs_5_0"), s!("ps_5_0"));
@@ -147,7 +143,7 @@ fn code() -> Result<&'static Code, String> {
 fn cell(
     device: &ID3D11Device,
     read: bool,
-) -> Result<(ID3D11UnorderedAccessView, Option<ID3D11ShaderResourceView>), String> {
+) -> Result<(ID3D11UnorderedAccessView, Option<ID3D11ShaderResourceView>), D3dError> {
     let desc = D3D11_BUFFER_DESC {
         ByteWidth: 4,
         Usage: D3D11_USAGE_DEFAULT,
@@ -160,18 +156,18 @@ fn cell(
     let (mut uav, mut srv) = (None, None);
     // SAFETY: a one-element structured buffer and views of all of it; valid out-pointers.
     unsafe {
-        device.CreateBuffer(&raw const desc, None, Some(&raw mut buffer)).map_err(|e| err("CreateBuffer", e))?;
-        let buffer = buffer.ok_or("no buffer")?;
+        device.CreateBuffer(&raw const desc, None, Some(&raw mut buffer)).map_err(d3d::call("CreateBuffer"))?;
+        let buffer = buffer.ok_or(D3dError::Missing("no buffer"))?;
         device
             .CreateUnorderedAccessView(&buffer, None, Some(&raw mut uav))
-            .map_err(|e| err("CreateUnorderedAccessView", e))?;
+            .map_err(d3d::call("CreateUnorderedAccessView"))?;
         if read {
             device
                 .CreateShaderResourceView(&buffer, None, Some(&raw mut srv))
-                .map_err(|e| err("CreateShaderResourceView", e))?;
+                .map_err(d3d::call("CreateShaderResourceView"))?;
         }
     }
-    Ok((uav.ok_or("no view")?, srv))
+    Ok((uav.ok_or(D3dError::Missing("no view"))?, srv))
 }
 
 /// What changes from frame to frame: the copy of the frame the shaders read, and the targets.
@@ -215,7 +211,12 @@ unsafe impl Sync for CardHdr {}
 
 impl CardHdr {
     /// The shaders on `device`, for a monitor of `levels` recorded at `fps` frames a second.
-    pub fn new(device: &ID3D11Device, context: &ID3D11DeviceContext, levels: Levels, fps: f64) -> Result<Self, String> {
+    pub fn new(
+        device: &ID3D11Device,
+        context: &ID3D11DeviceContext,
+        levels: Levels,
+        fps: f64,
+    ) -> Result<Self, D3dError> {
         let code = code()?;
         let (mut peak, mut follow, mut corner) = (None, None, None);
         let (mut to_sdr, mut to_luma, mut to_chroma) = (None, None, None);
@@ -237,7 +238,7 @@ impl CardHdr {
         };
         // SAFETY: bytecode compiled for these stages; valid descriptions and out-pointers.
         unsafe {
-            let shader = |e| err("shader", e);
+            let shader = d3d::call("shader");
             device.CreateComputeShader(&code.peak, None, Some(&raw mut peak)).map_err(shader)?;
             device.CreateComputeShader(&code.follow, None, Some(&raw mut follow)).map_err(shader)?;
             device.CreateVertexShader(&code.corner, None, Some(&raw mut corner)).map_err(shader)?;
@@ -246,14 +247,14 @@ impl CardHdr {
             device.CreatePixelShader(&code.to_chroma, None, Some(&raw mut to_chroma)).map_err(shader)?;
             device
                 .CreateSamplerState(&raw const sampling, Some(&raw mut sampler))
-                .map_err(|e| err("CreateSamplerState", e))?;
+                .map_err(d3d::call("CreateSamplerState"))?;
             device
                 .CreateBuffer(&raw const constants, None, Some(&raw mut params))
-                .map_err(|e| err("CreateBuffer", e))?;
+                .map_err(d3d::call("CreateBuffer"))?;
         }
         let (brightest, _) = cell(device, false)?;
         let (state, read) = cell(device, true)?;
-        let missing = || "shader missing".to_owned();
+        let missing = || D3dError::Missing("shader missing");
         Ok(Self {
             device: device.clone(),
             context: context.clone(),
@@ -274,8 +275,8 @@ impl CardHdr {
     }
 
     /// The `rect` part of `texture` (scRGB) tone mapped to SDR: a BGRA texture of its size, valid until the next call.
-    pub fn to_sdr(&self, texture: &ID3D11Texture2D, rect: RECT) -> Result<ID3D11Texture2D, String> {
-        let mut frames = self.frames.lock().map_err(|_| "lock poisoned")?;
+    pub fn to_sdr(&self, texture: &ID3D11Texture2D, rect: RECT) -> Result<ID3D11Texture2D, D3dError> {
+        let mut frames = self.frames.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let (input, size) = self.input(&mut frames, texture, rect)?;
         if frames.sdr.as_ref().is_none_or(|(_, _, s)| *s != size) {
             let made = d3d::texture(
@@ -289,11 +290,11 @@ impl CardHdr {
             let mut view = None;
             // SAFETY: a render target view of a texture of this device.
             unsafe { self.device.CreateRenderTargetView(&made, None, Some(&raw mut view)) }
-                .map_err(|e| err("CreateRenderTargetView", e))?;
-            frames.sdr = Some((made, view.ok_or("no view")?, size));
+                .map_err(d3d::call("CreateRenderTargetView"))?;
+            frames.sdr = Some((made, view.ok_or(D3dError::Missing("no view"))?, size));
         }
         let Some((sdr, target, _)) = frames.sdr.clone() else {
-            return Err("no SDR texture".into());
+            return Err(D3dError::Missing("no SDR texture"));
         };
         self.set_params(size, size);
         // SAFETY: every resource belongs to this device; views are unbound once used.
@@ -325,14 +326,14 @@ impl CardHdr {
         dst: &ID3D11Texture2D,
         slice: u32,
         out: (u32, u32),
-    ) -> Result<(), String> {
-        let mut frames = self.frames.lock().map_err(|_| "lock poisoned")?;
+    ) -> Result<(), D3dError> {
+        let mut frames = self.frames.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let (input, size) = self.input(&mut frames, texture, rect)?;
         let key = (dst.as_raw() as usize, slice);
         let planes = match frames.planes.iter().find(|(k, _)| *k == key) {
             Some((_, planes)) => planes.clone(),
             None => {
-                let view = |format| -> Result<ID3D11RenderTargetView, String> {
+                let view = |format| -> Result<ID3D11RenderTargetView, D3dError> {
                     // The view's format picks the plane: R16 the luma, R16G16 the chroma.
                     let desc = D3D11_RENDER_TARGET_VIEW_DESC {
                         Format: format,
@@ -344,8 +345,8 @@ impl CardHdr {
                     let mut view = None;
                     // SAFETY: a plane view of a P010 texture of this device.
                     unsafe { self.device.CreateRenderTargetView(dst, Some(&raw const desc), Some(&raw mut view)) }
-                        .map_err(|e| err("plane view", e))?;
-                    view.ok_or_else(|| "no plane view".to_owned())
+                        .map_err(d3d::call("plane view"))?;
+                    view.ok_or(D3dError::Missing("no plane view"))
                 };
                 let planes = [view(DXGI_FORMAT_R16_UNORM)?, view(DXGI_FORMAT_R16G16_UNORM)?];
                 if frames.planes.len() >= KEPT_PLANES {
@@ -370,7 +371,7 @@ impl CardHdr {
         frames: &mut Frames,
         texture: &ID3D11Texture2D,
         rect: RECT,
-    ) -> Result<(ID3D11ShaderResourceView, (u32, u32)), String> {
+    ) -> Result<(ID3D11ShaderResourceView, (u32, u32)), D3dError> {
         let size = ((rect.right - rect.left).max(1) as u32, (rect.bottom - rect.top).max(1) as u32);
         if frames.input.as_ref().is_none_or(|(_, _, s)| *s != size) {
             let mut desc = D3D11_TEXTURE2D_DESC::default();
@@ -380,11 +381,11 @@ impl CardHdr {
             let mut view = None;
             // SAFETY: a shader resource view of a texture of this device.
             unsafe { self.device.CreateShaderResourceView(&made, None, Some(&raw mut view)) }
-                .map_err(|e| err("CreateShaderResourceView", e))?;
-            frames.input = Some((made, view.ok_or("no view")?, size));
+                .map_err(d3d::call("CreateShaderResourceView"))?;
+            frames.input = Some((made, view.ok_or(D3dError::Missing("no view"))?, size));
         }
         let Some((input, view, _)) = frames.input.as_ref() else {
-            return Err("no input".into());
+            return Err(D3dError::Missing("no input"));
         };
         let from = D3D11_BOX {
             left: rect.left.max(0) as u32,

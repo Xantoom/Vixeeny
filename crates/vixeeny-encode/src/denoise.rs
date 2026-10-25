@@ -91,7 +91,7 @@ mod tests {
 
     #[test]
     fn steady_noise_is_reduced_and_the_tone_survives() {
-        let mut denoiser = Denoiser::new(24.0, -45.0).unwrap_or_else(|e| panic!("graph: {e}"));
+        let mut denoiser = Denoiser::new(24.0, -45.0).expect("graph");
         // Two seconds of noise let the filter learn it; 10 ms blocks like a capture callback.
         let noise = signal(96_000, false);
         let mut quiet = Vec::new();

@@ -423,7 +423,7 @@ mod tests {
         ExeMetadata::default()
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments, reason = "the parts of one capture, made by its caller")]
     fn run_with(
         action: ActionId,
         snap: &Snapshot,

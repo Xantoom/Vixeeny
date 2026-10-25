@@ -60,6 +60,8 @@ pub enum CaptureError {
     Unsupported,
     #[error("{0}")]
     Os(String),
+    #[error(transparent)]
+    D3d(#[from] vixeeny_platform::d3d::D3dError),
 }
 
 /// A monitor as it shows: scRGB for an HDR one, 8-bit for the others.

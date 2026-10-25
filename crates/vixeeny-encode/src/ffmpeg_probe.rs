@@ -36,7 +36,7 @@ impl Prober for FfmpegProber {
         encoder::find_by_name(&encoder.ffmpeg_encoder).is_some()
     }
 
-    fn driver_caps(&self, adapter: &Adapter) -> Result<Vec<DriverCaps>, String> {
+    fn driver_caps(&self, adapter: &Adapter) -> Result<Vec<DriverCaps>, crate::driver_caps::CapsError> {
         crate::driver_caps::query(adapter)
     }
 }

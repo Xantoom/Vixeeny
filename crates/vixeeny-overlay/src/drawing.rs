@@ -652,7 +652,7 @@ impl Drawing {
             Annotation::Ellipse { rect, style, filled } => {
                 let r = rect_f(rect);
                 let e = D2D1_ELLIPSE {
-                    point: v2((r.left + r.right) / 2.0, (r.top + r.bottom) / 2.0),
+                    point: v2(f32::midpoint(r.left, r.right), f32::midpoint(r.top, r.bottom)),
                     radiusX: (r.right - r.left) / 2.0,
                     radiusY: (r.bottom - r.top) / 2.0,
                 };

@@ -151,6 +151,7 @@ mod windows_impl {
     use crate::recorder::RecordError;
     use crate::registry::Chroma;
     use ffmpeg_next::ffi;
+    use vixeeny_platform::d3d::D3dError;
     use windows::Win32::Foundation::RECT;
     use windows::Win32::Graphics::Direct3D11::{
         D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
@@ -189,12 +190,16 @@ mod windows_impl {
         RecordError::Config(format!("GPU path: {what}: {detail}"))
     }
 
+    fn gpu_err(what: &'static str) -> impl Fn(D3dError) -> RecordError + Copy {
+        move |source| RecordError::Gpu { what, source }
+    }
+
     impl GpuPipeline {
         /// Builds the video processor, the FFmpeg D3D11 device and frame pool on `device` (and their QSV view for
         /// [`Feed::Qsv`]), and converts one blank frame as a self-test. `ten_bit`: P010 instead of NV12 (always for an
         /// HDR output). `chroma` other than 4:2:0 gives packed frames (YUY2 / Y210, AYUV / Y410), for
         /// [`Feed::Download`] only.
-        #[allow(clippy::too_many_arguments)]
+        #[expect(clippy::too_many_arguments, reason = "the recording plan, given as it is")]
         pub fn new(
             device: &ID3D11Device,
             context: &ID3D11DeviceContext,
@@ -218,11 +223,11 @@ mod windows_impl {
                     (fps.num, fps.den),
                     Conversion { hdr_source: false, hdr_output: false },
                 )
-                .map_err(|e| cfg_err("video processor", e))
+                .map_err(gpu_err("video processor"))
             };
             let shaders = |levels| {
                 let rate = f64::from(fps.num) / f64::from(fps.den.max(1));
-                CardHdr::new(device, context, levels, rate).map_err(|e| cfg_err("HDR shaders", e))
+                CardHdr::new(device, context, levels, rate).map_err(gpu_err("HDR shaders"))
             };
             let stage = match source.hdr {
                 None => Stage::Processor(processor()?),
@@ -328,7 +333,7 @@ mod windows_impl {
             let format = if source.hdr.is_some() { DXGI_FORMAT_R16G16B16A16_FLOAT } else { DXGI_FORMAT_B8G8R8A8_UNORM };
             let bind = (D3D11_BIND_SHADER_RESOURCE.0 | D3D11_BIND_RENDER_TARGET.0) as u32;
             let blank = vixeeny_platform::d3d::texture(device, source.size, format, bind, 0, None)
-                .map_err(|e| cfg_err("test texture", e))?;
+                .map_err(gpu_err("test texture"))?;
             let rect = RECT { left: 0, top: 0, right: source.size.0 as i32, bottom: source.size.1 as i32 };
             let test = pipeline.convert(&blank, rect)?;
             match feed {
@@ -367,7 +372,7 @@ mod windows_impl {
                     }),
                     Stage::Pq(shaders) => shaders.to_pq(texture, rect, dst, slice, self.imp.out),
                 }
-                .map_err(|e| cfg_err("conversion", e))?;
+                .map_err(gpu_err("conversion"))?;
                 // The encoder reads the texture on its own thread: make the GPU work visible.
                 self.imp.context.Flush();
                 Ok(hw)

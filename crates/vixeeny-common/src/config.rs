@@ -862,15 +862,13 @@ impl Config {
         }
     }
 
-    /// Atomically writes the config (temporary file + rename).
+    /// Writes the config whole or not at all ([`crate::paths::write_atomic`]).
     pub fn save(&self, path: &Path) -> Result<(), ConfigError> {
         let io = |source| ConfigError::Io { path: path.display().to_string(), source };
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).map_err(io)?;
         }
-        let tmp = path.with_extension("toml.tmp");
-        std::fs::write(&tmp, self.to_toml()?).map_err(io)?;
-        std::fs::rename(&tmp, path).map_err(io)
+        crate::paths::write_atomic(path, self.to_toml()?.as_bytes()).map_err(io)
     }
 }
 

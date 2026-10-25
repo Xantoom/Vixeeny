@@ -18,7 +18,7 @@ use windows::Win32::Graphics::Dxgi::Common::{
 };
 use windows::core::Interface;
 
-use vixeeny_platform::d3d::texture;
+use vixeeny_platform::d3d::{D3dError, call, texture};
 
 use crate::cut::ToneMap;
 use crate::d3d_convert::VideoConverter;
@@ -28,10 +28,6 @@ type Made = ((u32, u32), (u32, u32), DXGI_COLOR_SPACE_TYPE);
 
 pub struct CardScaler {
     converter: Option<(Made, VideoConverter, ID3D11Texture2D, ID3D11Texture2D)>,
-}
-
-fn err(what: &str, e: impl std::fmt::Display) -> String {
-    format!("{what}: {e}")
 }
 
 /// The colour space of a decoded frame (what the video processor reads).
@@ -86,7 +82,7 @@ impl CardScaler {
         size: (u32, u32),
         bgra: &mut [u8],
         tone: Option<&ToneMap>,
-    ) -> Result<(), String> {
+    ) -> Result<(), D3dError> {
         // SAFETY: per the contract, the frame and its contexts are FFmpeg's, alive for the call; the device context's
         // lock is held while it is used.
         unsafe {
@@ -94,10 +90,13 @@ impl CardScaler {
             let frames = (*f.hw_frames_ctx).data.cast::<ffi::AVHWFramesContext>();
             let device_ctx = (*frames).device_ctx;
             let d3d = &*(*device_ctx).hwctx.cast::<ffi::AVD3D11VADeviceContext>();
-            let device = ID3D11Device::from_raw_borrowed(&d3d.device.cast()).ok_or("no device")?.clone();
-            let context =
-                ID3D11DeviceContext::from_raw_borrowed(&d3d.device_context.cast()).ok_or("no device context")?.clone();
-            let source = ID3D11Texture2D::from_raw_borrowed(&f.data[0].cast()).ok_or("no texture")?.clone();
+            let device =
+                ID3D11Device::from_raw_borrowed(&d3d.device.cast()).ok_or(D3dError::Missing("no device"))?.clone();
+            let context = ID3D11DeviceContext::from_raw_borrowed(&d3d.device_context.cast())
+                .ok_or(D3dError::Missing("no device context"))?
+                .clone();
+            let source =
+                ID3D11Texture2D::from_raw_borrowed(&f.data[0].cast()).ok_or(D3dError::Missing("no texture"))?.clone();
             let slice = f.data[1] as usize as u32;
             let src = (f.width.max(1) as u32, f.height.max(1) as u32);
             let hdr = tone.is_some();
@@ -118,13 +117,13 @@ impl CardScaler {
                 self.converter = Some((made, converter, target, staging));
             }
             let Some((_, converter, target, staging)) = &self.converter else {
-                return Err("no converter".into());
+                return Err(D3dError::Missing("no converter"));
             };
             let whole = RECT { left: 0, top: 0, right: src.0 as i32, bottom: src.1 as i32 };
             converter.convert_slice(&source, slice, whole, target, 0)?;
             context.CopyResource(staging, target);
             let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-            context.Map(staging, 0, D3D11_MAP_READ, 0, Some(&raw mut mapped)).map_err(|e| err("Map", e))?;
+            context.Map(staging, 0, D3D11_MAP_READ, 0, Some(&raw mut mapped)).map_err(call("Map"))?;
             let (w, h) = (size.0 as usize, size.1 as usize);
             let stride = mapped.RowPitch as usize;
             let rows = std::slice::from_raw_parts(mapped.pData.cast::<u8>(), stride * h);

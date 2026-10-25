@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! With the `native-codecs` feature: find the natively built libjxl / jpegli / libultrahdr through pkg-config (static)
 //! and generate their bindings.
-#![allow(clippy::expect_used)]
+#![allow(clippy::expect_used, reason = "a build script stops the build on failure")]
 
 fn main() {
     #[cfg(feature = "native-codecs")]

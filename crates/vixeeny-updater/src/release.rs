@@ -169,9 +169,9 @@ mod tests {
 
     #[test]
     fn the_portable_archive_is_found_with_its_signature_from_the_notes() {
-        let release = Release::parse(&json("0.6.0", "0.6.0")).unwrap_or_default().unwrap_or_else(|| panic!("none"));
+        let release = Release::parse(&json("0.6.0", "0.6.0")).unwrap_or_default().expect("none");
         assert_eq!(release.version, "0.6.0");
-        let files = release.files("windows-x64").unwrap_or_else(|| panic!("no files"));
+        let files = release.files("windows-x64").expect("no files");
         assert_eq!(files.archive.url, "https://x/p.zip");
         assert_eq!(files.signature, SIGNATURE);
         assert!(release.files("windows-arm64").is_none());
@@ -185,9 +185,9 @@ mod tests {
         let release = Release::parse(&json("0.6.0", "0.6.0")).ok().flatten();
         // Only the archive is signed in these notes.
         assert!(release.as_ref().is_some_and(|r| r.setup().is_none()));
-        let mut release = release.unwrap_or_else(|| panic!("none"));
+        let mut release = release.expect("none");
         release.signatures.insert(setup_name("0.6.0"), SIGNATURE.to_owned());
-        let (setup, signature) = release.setup().unwrap_or_else(|| panic!("no installer"));
+        let (setup, signature) = release.setup().expect("no installer");
         assert_eq!(setup.url, "https://x/s.exe");
         assert_eq!(signature, SIGNATURE);
     }

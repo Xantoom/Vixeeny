@@ -38,6 +38,7 @@ winresource = "0.1.34"
 unsafe_op_in_unsafe_fn = "deny"
 
 [workspace.lints.clippy]
+allow_attributes_without_reason = "warn"
 unwrap_used = "warn"
 expect_used = "warn"
 undocumented_unsafe_blocks = "deny"

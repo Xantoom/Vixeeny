@@ -2,7 +2,7 @@
 //! Cutting a recording to the frame: the list of frames, the preview's pictures and sound, and the two ways of writing
 //! a part (packets copied from a key frame, or the video encoded again). Needs the native build:
 //! `cargo xtask build-native ffmpeg`.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, reason = "test helpers fail the test")]
 
 mod common;
 

@@ -99,7 +99,8 @@ fn problems<'a>(logs: impl Iterator<Item = &'a str>) -> String {
         return "(none)\n".to_owned();
     }
     let mut list: Vec<_> = seen.into_values().collect();
-    list.sort_by(|a, b| b.1.cmp(a.1));
+    // Most recent first; the wording settles a tie, so the order does not depend on the map.
+    list.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.2.cmp(b.2)));
     let mut out = String::new();
     for (count, stamp, line) in list.iter().take(MAX_PROBLEMS) {
         let _ = writeln!(out, "{count:>4} x, last {stamp}: {line}");

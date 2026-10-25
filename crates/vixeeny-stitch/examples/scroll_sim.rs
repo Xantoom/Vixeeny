@@ -4,7 +4,7 @@
 //! `cargo run --release -p vixeeny-stitch --example scroll_sim -- <page.bgra>...`: each file holds its width and height
 //! (u32, little endian) then BGRA pixels.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, reason = "a developer tool: any failure ends it")]
 
 use std::time::{Duration, Instant};
 

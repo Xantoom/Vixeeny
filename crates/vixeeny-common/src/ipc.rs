@@ -238,8 +238,10 @@ pub enum BindError {
 /// Writes one framed message.
 pub fn write_msg<W: Write, T: Serialize>(w: &mut W, msg: &T) -> Result<(), IpcError> {
     let payload = postcard::to_stdvec(msg)?;
-    let len =
-        u32::try_from(payload.len()).ok().filter(|n| *n <= MAX_MESSAGE_BYTES).ok_or(IpcError::TooLarge(u32::MAX))?;
+    let len = u32::try_from(payload.len()).unwrap_or(u32::MAX);
+    if len > MAX_MESSAGE_BYTES {
+        return Err(IpcError::TooLarge(len));
+    }
     w.write_all(&len.to_le_bytes())?;
     w.write_all(&payload)?;
     w.flush()?;

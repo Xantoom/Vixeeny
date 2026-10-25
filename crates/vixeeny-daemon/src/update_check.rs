@@ -5,8 +5,8 @@
 //! the app install a version downloaded before (`--update pending`).
 
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use vixeeny_common::config::Config;
@@ -15,7 +15,7 @@ use vixeeny_common::config::Config;
 const SETTLE: Duration = Duration::from_secs(90);
 
 /// Tells the checking thread that the computer woke up.
-static WOKE: OnceLock<Mutex<Sender<()>>> = OnceLock::new();
+static WOKE: OnceLock<Sender<()>> = OnceLock::new();
 
 fn app_next_to_daemon() -> Option<PathBuf> {
     let path = std::env::current_exe().ok()?.with_file_name("vixeeny-app.exe");
@@ -28,7 +28,7 @@ pub fn spawn(config_path: Option<PathBuf>) {
         return;
     };
     let (woke, wakes) = channel();
-    let _ = WOKE.set(Mutex::new(woke));
+    let _ = WOKE.set(woke);
     let result = std::thread::Builder::new()
         .name("update-check".into())
         .stack_size(128 * 1024)
@@ -73,7 +73,7 @@ fn on_wake() {
     use windows::Win32::UI::WindowsAndMessaging::{DEVICE_NOTIFY_CALLBACK, PBT_APMRESUMEAUTOMATIC};
     unsafe extern "system" fn woke(_: *const std::ffi::c_void, kind: u32, _: *const std::ffi::c_void) -> u32 {
         if kind == PBT_APMRESUMEAUTOMATIC
-            && let Some(Ok(woke)) = WOKE.get().map(Mutex::lock)
+            && let Some(woke) = WOKE.get()
         {
             let _ = woke.send(());
         }

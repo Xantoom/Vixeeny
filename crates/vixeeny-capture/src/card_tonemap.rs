@@ -16,7 +16,7 @@ use windows::Win32::Graphics::Direct3D11::{
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_R32_UINT;
 use windows::core::s;
 
-use vixeeny_platform::d3d::{compile, texture};
+use vixeeny_platform::d3d::{D3dError, compile, texture};
 
 use crate::CaptureError;
 use crate::wgc::os;
@@ -61,14 +61,14 @@ type Code = (Vec<u8>, Vec<u8>);
 
 /// The compiled shaders, made once per process.
 fn bytecode() -> Result<&'static Code, CaptureError> {
-    static CODE: OnceLock<Result<Code, String>> = OnceLock::new();
+    static CODE: OnceLock<Result<Code, D3dError>> = OnceLock::new();
     CODE.get_or_init(|| {
         let source = format!("{}{SHADER}", vixeeny_common::colour::HLSL);
         let cs = s!("cs_5_0");
         Ok((compile(&source, s!("peak"), cs)?, compile(&source, s!("main"), cs)?))
     })
     .as_ref()
-    .map_err(|e| CaptureError::Os(e.clone()))
+    .map_err(|e| CaptureError::D3d(e.clone()))
 }
 
 /// Compiles the shader in the background, so that the first HDR capture does not wait for it.
@@ -167,11 +167,9 @@ pub(crate) fn stage(
     unsafe { source.GetDesc(&mut desc) };
     // The source may not be readable by shaders (a capture frame, a shared texture): its area is copied first, a cheap
     // copy on the card.
-    let input =
-        texture(device, size, desc.Format, D3D11_BIND_SHADER_RESOURCE.0 as u32, 0, None).map_err(CaptureError::Os)?;
-    let output = texture(device, size, DXGI_FORMAT_R32_UINT, D3D11_BIND_UNORDERED_ACCESS.0 as u32, 0, None)
-        .map_err(CaptureError::Os)?;
-    let staging = texture(device, size, DXGI_FORMAT_R32_UINT, 0, 0, None).map_err(CaptureError::Os)?;
+    let input = texture(device, size, desc.Format, D3D11_BIND_SHADER_RESOURCE.0 as u32, 0, None)?;
+    let output = texture(device, size, DXGI_FORMAT_R32_UINT, D3D11_BIND_UNORDERED_ACCESS.0 as u32, 0, None)?;
+    let staging = texture(device, size, DXGI_FORMAT_R32_UINT, 0, 0, None)?;
     let mut view: Option<ID3D11ShaderResourceView> = None;
     let mut target: Option<ID3D11UnorderedAccessView> = None;
     // SAFETY: views of textures of this device, with their own formats.
@@ -268,7 +266,6 @@ mod tests {
         let exact: Vec<f32> = halves.iter().map(|&v| vixeeny_common::half::to_f32(v)).collect();
         let source =
             texture(device, (w, h), DXGI_FORMAT_R16G16B16A16_FLOAT, D3D11_BIND_SHADER_RESOURCE.0 as u32, 0, None)
-                .map_err(CaptureError::Os)
                 .unwrap();
         // SAFETY: `halves` holds `h` rows of `w * 8` bytes; same device.
         unsafe { context.UpdateSubresource(&source, 0, None, halves.as_ptr().cast(), w * 8, 0) };

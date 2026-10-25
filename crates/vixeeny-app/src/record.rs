@@ -68,6 +68,26 @@ pub fn saving() -> bool {
     *saves() > 0
 }
 
+/// One replay file being written, counted from its making to its drop.
+struct Saving;
+
+impl Saving {
+    fn start() -> Self {
+        *saves() += 1;
+        Self
+    }
+}
+
+impl Drop for Saving {
+    fn drop(&mut self) {
+        {
+            let mut count = saves();
+            *count = count.saturating_sub(1);
+        }
+        SAVING.1.notify_all();
+    }
+}
+
 /// Waits, when dropped, until the replay files being written are complete: the last thing the app does before it ends.
 pub struct SavesDone;
 
@@ -284,7 +304,7 @@ unsafe impl Send for KeepAlive {}
 
 /// The D3D11 device of the encoder's GPU, made on a thread of its own while the rest of the recording is planned: it
 /// takes longer than all the rest (110 to 160 ms).
-struct MadeDevice(Result<(d3d::Device, d3d::DeviceContext), String>);
+struct MadeDevice(Result<(d3d::Device, d3d::DeviceContext), vixeeny_platform::d3d::D3dError>);
 
 // SAFETY: a D3D11 device is free-threaded (and multithread protected): made on one thread, it is used on another.
 unsafe impl Send for MadeDevice {}
@@ -321,6 +341,7 @@ fn try_gpu(
     let made = std::cell::Cell::new(made.and_then(|thread| thread.join().ok()).map(|m| m.0));
     let build = |feed: Feed| {
         let device = made.take().unwrap_or_else(|| d3d::create_device(vendor));
+        let device = device.map_err(|source| vixeeny_encode::recorder::RecordError::Gpu { what: "device", source });
         device.and_then(|(device, context)| {
             GpuPipeline::new(
                 &device,
@@ -334,7 +355,6 @@ fn try_gpu(
                 feed,
             )
             .map(|pipeline| GpuParts { pipeline: Arc::new(pipeline), device, context })
-            .map_err(|e| e.to_string())
         })
     };
     // QSV surfaces need a texture array the driver may refuse: the frames are then downloaded (QSV takes NV12 / P010
@@ -903,15 +923,11 @@ fn save_replay(recorder: &Recorder, next_path: &mut SaveNamer, notice: &Config, 
         Ok(save) => {
             let seconds = save.seconds;
             let notice = notice.clone();
-            *saves() += 1;
-            std::thread::spawn(move || {
+            let saving = Saving::start();
+            let spawned = std::thread::Builder::new().name("replay-save".into()).spawn(move || {
                 let written = save.wait();
                 // The file is complete: the app may end from now on (it is told to look again).
-                {
-                    let mut count = saves();
-                    *count = count.saturating_sub(1);
-                }
-                SAVING.1.notify_all();
+                drop(saving);
                 changed();
                 match written {
                     Ok(path) => {
@@ -933,6 +949,9 @@ fn save_replay(recorder: &Recorder, next_path: &mut SaveNamer, notice: &Config, 
                     }
                 }
             });
+            if let Err(e) = spawned {
+                tracing::error!("cannot follow the replay being saved: {e}");
+            }
         }
         Err(e) => {
             tracing::error!("cannot save the replay: {e:#}");
@@ -942,7 +961,7 @@ fn save_replay(recorder: &Recorder, next_path: &mut SaveNamer, notice: &Config, 
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, reason = "the parts of one recording, made by its caller")]
 fn record_loop(
     stream: &Video,
     gpu_frames: Option<&std::sync::mpsc::Receiver<(i64, HwFrame)>>,
@@ -1171,12 +1190,11 @@ mod tests {
     #[test]
     fn the_app_ends_only_once_the_replay_files_are_written() {
         let started = std::time::Instant::now();
-        *super::saves() += 1;
+        let saving = super::Saving::start();
         assert!(super::saving());
-        let writer = std::thread::spawn(|| {
+        let writer = std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(200));
-            *super::saves() -= 1;
-            super::SAVING.1.notify_all();
+            drop(saving);
         });
         drop(super::SavesDone);
         assert!(started.elapsed() >= std::time::Duration::from_millis(200));

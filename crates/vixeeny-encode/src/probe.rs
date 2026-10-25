@@ -175,7 +175,7 @@ pub trait Prober {
     fn built_in(&self, encoder: &Encoder) -> bool;
     /// The encoders of `adapter`'s GPU as its driver describes them, one entry per codec. `Err` when the driver cannot
     /// be asked.
-    fn driver_caps(&self, adapter: &Adapter) -> Result<Vec<DriverCaps>, String>;
+    fn driver_caps(&self, adapter: &Adapter) -> Result<Vec<DriverCaps>, crate::driver_caps::CapsError>;
 }
 
 /// The GPUs an encoder can run on.
@@ -239,7 +239,7 @@ pub const PROBE_REVISION: u32 = 6;
 pub fn probe(registry: &Registry, prober: &dyn Prober, version: &str) -> ProbeResult {
     let adapters = prober.adapters();
     // One question per GPU, whatever the number of its encoders.
-    let described: Vec<Result<Vec<DriverCaps>, String>> = adapters
+    let described: Vec<Result<Vec<DriverCaps>, crate::driver_caps::CapsError>> = adapters
         .iter()
         .map(|a| {
             if a.software || a.vendor == Vendor::None {
@@ -353,9 +353,7 @@ pub fn save_cache(path: &Path, result: &ProbeResult) -> Result<(), ProbeError> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| ProbeError::Cache(e.to_string()))?;
     }
-    let tmp = path.with_extension("toml.tmp");
-    std::fs::write(&tmp, to_toml(result)?).map_err(|e| ProbeError::Cache(e.to_string()))?;
-    std::fs::rename(&tmp, path).map_err(|e| ProbeError::Cache(e.to_string()))
+    vixeeny_common::paths::write_atomic(path, to_toml(result)?.as_bytes()).map_err(|e| ProbeError::Cache(e.to_string()))
 }
 
 /// The cache when it is current, else a fresh probe (`run`) which is then cached. `adapters` are the GPUs present now.

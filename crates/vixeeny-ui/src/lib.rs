@@ -8,7 +8,8 @@
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::undocumented_unsafe_blocks,
-    unsafe_op_in_unsafe_fn
+    unsafe_op_in_unsafe_fn,
+    reason = "code generated from the .slint files"
 )]
 mod generated {
     slint::include_modules!();

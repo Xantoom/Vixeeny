@@ -144,9 +144,13 @@ impl Clip {
         // SAFETY: the parameters belong to the stream, alive while `input` is.
         let (width, height, hdr, deep, hdr10) = unsafe {
             let p = &*params.as_ptr();
-            let deep = ffi::av_pix_fmt_desc_get(std::mem::transmute::<i32, ffi::AVPixelFormat>(p.format))
-                .as_ref()
-                .is_some_and(|d| d.comp[0].depth > 8);
+            // `AVPixelFormat` holds every value from NONE to NB, and no other.
+            let known = (ffi::AVPixelFormat::AV_PIX_FMT_NONE as i32..ffi::AVPixelFormat::AV_PIX_FMT_NB as i32)
+                .contains(&p.format);
+            let deep = known
+                && ffi::av_pix_fmt_desc_get(std::mem::transmute::<i32, ffi::AVPixelFormat>(p.format))
+                    .as_ref()
+                    .is_some_and(|d| d.comp[0].depth > 8);
             let hdr = p.color_trc == ffi::AVColorTransferCharacteristic::AVCOL_TRC_SMPTE2084;
             (p.width.max(0) as u32, p.height.max(0) as u32, hdr, deep, hdr.then(|| Hdr10::of_stream(p)))
         };

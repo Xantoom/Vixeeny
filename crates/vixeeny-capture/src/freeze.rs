@@ -466,7 +466,7 @@ pub fn warm(frozen: &Frozen) {
 }
 
 fn reader(adapter: i64) -> Result<(ID3D11Device, ID3D11DeviceContext), CaptureError> {
-    let mut kept = READER.lock().map_err(|_| CaptureError::Os("reader lock".into()))?;
+    let mut kept = READER.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     // SAFETY: plain call.
     let removed = |r: &Reader| unsafe { r.device.GetDeviceRemovedReason() }.is_err();
     if kept.as_ref().is_none_or(|r| r.adapter != adapter || removed(r)) {

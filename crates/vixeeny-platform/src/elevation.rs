@@ -81,21 +81,22 @@ impl Token {
 
     /// The account, as text (`S-1-5-21-…`).
     fn user_sid(&self) -> Result<String> {
-        let failed = || PlatformError::Os("cannot read this process's account".into());
+        let failed = |e: windows::core::Error| PlatformError::Os(format!("cannot read this process's account: {e}"));
         let mut size = 0_u32;
         // SAFETY: asks for the size only.
         let _ = unsafe { GetTokenInformation(self.0, TokenUser, None, 0, &raw mut size) };
         let mut buffer = vec![0_u64; (size as usize).div_ceil(8)];
         // SAFETY: `buffer` holds `size` bytes, aligned for a `TOKEN_USER`.
         unsafe { GetTokenInformation(self.0, TokenUser, Some(buffer.as_mut_ptr().cast()), size, &raw mut size) }
-            .map_err(|_| failed())?;
+            .map_err(failed)?;
         // SAFETY: filled by the call above.
         let sid = unsafe { (*buffer.as_ptr().cast::<TOKEN_USER>()).User.Sid };
         let mut text = PWSTR::null();
         // SAFETY: a valid SID; `text` is freed below.
-        unsafe { ConvertSidToStringSidW(sid, &raw mut text) }.map_err(|_| failed())?;
+        unsafe { ConvertSidToStringSidW(sid, &raw mut text) }.map_err(failed)?;
         // SAFETY: a terminated string from the call above.
-        let result = unsafe { text.to_string() }.map_err(|_| failed());
+        let result = unsafe { text.to_string() }
+            .map_err(|e| PlatformError::Os(format!("cannot read this process's account: {e}")));
         // SAFETY: allocated by `ConvertSidToStringSidW`, freed once.
         let _ = unsafe { LocalFree(Some(HLOCAL(text.0.cast()))) };
         result

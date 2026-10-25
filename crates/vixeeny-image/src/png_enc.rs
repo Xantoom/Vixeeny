@@ -222,7 +222,7 @@ fn apply(kind: u8, cur: &[u8], up: Option<&[u8]>, bpp: usize, out: &mut [u8]) {
         3 => {
             for i in 0..cur.len() {
                 let a = if i >= bpp { u16::from(cur[i - bpp]) } else { 0 };
-                out[i] = cur[i].wrapping_sub(((a + u16::from(up_at(i))) / 2) as u8);
+                out[i] = cur[i].wrapping_sub(u16::midpoint(a, u16::from(up_at(i))) as u8);
             }
         }
         _ => {

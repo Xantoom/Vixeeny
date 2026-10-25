@@ -208,9 +208,9 @@ mod tests {
     fn put(root: &Path, name: &str, text: &str) {
         let path = root.join(name);
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).unwrap_or_else(|e| panic!("{e}"));
+            std::fs::create_dir_all(parent).unwrap();
         }
-        std::fs::write(path, text).unwrap_or_else(|e| panic!("{e}"));
+        std::fs::write(path, text).unwrap();
     }
 
     fn read(root: &Path, name: &str) -> Option<String> {
@@ -218,7 +218,7 @@ mod tests {
     }
 
     fn setup() -> (tempfile::TempDir, PathBuf, PathBuf, PathBuf) {
-        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
+        let dir = tempfile::tempdir().unwrap();
         let (staged, target, backup) = (dir.path().join("staged"), dir.path().join("app"), dir.path().join("backup"));
         put(&target, "vixeeny-daemon.exe", "old daemon");
         put(&target, "portable.flag", "");
@@ -230,7 +230,7 @@ mod tests {
     #[test]
     fn the_new_files_replace_the_old_ones_and_user_files_stay() {
         let (_dir, staged, target, backup) = setup();
-        let journal = install(&staged, &target, &backup).unwrap_or_else(|e| panic!("{e}"));
+        let journal = install(&staged, &target, &backup).unwrap();
         assert_eq!(read(&target, "vixeeny-daemon.exe").as_deref(), Some("new daemon"));
         assert_eq!(read(&target, "licenses/THIRD-PARTY.txt").as_deref(), Some("new licences"));
         assert!(target.join("portable.flag").exists());
@@ -242,8 +242,8 @@ mod tests {
     #[test]
     fn a_rollback_brings_the_previous_version_back() {
         let (_dir, staged, target, backup) = setup();
-        install(&staged, &target, &backup).unwrap_or_else(|e| panic!("{e}"));
-        rollback(&target, &backup).unwrap_or_else(|e| panic!("{e}"));
+        install(&staged, &target, &backup).unwrap();
+        rollback(&target, &backup).unwrap();
         assert_eq!(read(&target, "vixeeny-daemon.exe").as_deref(), Some("old daemon"));
         assert_eq!(read(&target, "licenses/THIRD-PARTY.txt"), None);
         assert!(!backup.exists());
@@ -268,12 +268,12 @@ mod tests {
         put(&target, "user.txt", "yours");
         put(&target, MANIFEST, "vixeeny-daemon.exe\nold.dll\n../outside.txt\n");
         put(&staged, MANIFEST, "vixeeny-daemon.exe\nlicenses/THIRD-PARTY.txt\n");
-        let journal = install(&staged, &target, &backup).unwrap_or_else(|e| panic!("{e}"));
+        let journal = install(&staged, &target, &backup).unwrap();
         assert_eq!(journal.removed, [PathBuf::from("old.dll")]);
         assert_eq!(read(&target, "old.dll"), None);
         assert_eq!(read(&target, "user.txt").as_deref(), Some("yours"));
         assert!(target.join("portable.flag").exists());
-        rollback(&target, &backup).unwrap_or_else(|e| panic!("{e}"));
+        rollback(&target, &backup).unwrap();
         assert_eq!(read(&target, "old.dll").as_deref(), Some("old library"));
         assert_eq!(read(&target, MANIFEST).as_deref(), Some("vixeeny-daemon.exe\nold.dll\n../outside.txt\n"));
     }
@@ -283,15 +283,14 @@ mod tests {
         let (_dir, staged, target, backup) = setup();
         put(&target, "old.dll", "old library");
         put(&staged, MANIFEST, "vixeeny-daemon.exe\n");
-        let journal = install(&staged, &target, &backup).unwrap_or_else(|e| panic!("{e}"));
+        let journal = install(&staged, &target, &backup).unwrap();
         assert!(journal.removed.is_empty());
         assert!(target.join("old.dll").exists());
     }
 
     #[test]
     fn a_journal_of_an_older_version_still_reads() {
-        let journal: Journal =
-            serde_json::from_str(r#"{"replaced":["a.exe"],"added":[]}"#).unwrap_or_else(|e| panic!("{e}"));
+        let journal: Journal = serde_json::from_str(r#"{"replaced":["a.exe"],"added":[]}"#).unwrap();
         assert!(journal.removed.is_empty());
     }
 
@@ -301,13 +300,12 @@ mod tests {
         put(&target, "old.dll", "old library");
         put(&target, MANIFEST, "vixeeny-daemon.exe\nold.dll\n");
         put(&staged, MANIFEST, "vixeeny-daemon.exe\nlicenses/THIRD-PARTY.txt\n");
-        install(&staged, &target, &backup).unwrap_or_else(|e| panic!("{e}"));
+        install(&staged, &target, &backup).unwrap();
         assert!(unconfirmed(&backup));
         // As if the power went off before the daemon reached the backup: it never moved.
-        std::fs::remove_file(target.join("vixeeny-daemon.exe")).unwrap_or_else(|e| panic!("{e}"));
-        std::fs::rename(backup.join("vixeeny-daemon.exe"), target.join("vixeeny-daemon.exe"))
-            .unwrap_or_else(|e| panic!("{e}"));
-        rollback(&target, &backup).unwrap_or_else(|e| panic!("{e}"));
+        std::fs::remove_file(target.join("vixeeny-daemon.exe")).unwrap();
+        std::fs::rename(backup.join("vixeeny-daemon.exe"), target.join("vixeeny-daemon.exe")).unwrap();
+        rollback(&target, &backup).unwrap();
         assert_eq!(read(&target, "vixeeny-daemon.exe").as_deref(), Some("old daemon"));
         assert_eq!(read(&target, "old.dll").as_deref(), Some("old library"));
         assert_eq!(read(&target, MANIFEST).as_deref(), Some("vixeeny-daemon.exe\nold.dll\n"));
@@ -320,28 +318,28 @@ mod tests {
     #[test]
     fn a_recent_journal_of_an_older_update_is_told_apart() {
         let (_dir, staged, target, backup) = setup();
-        install(&staged, &target, &backup).unwrap_or_else(|e| panic!("{e}"));
+        install(&staged, &target, &backup).unwrap();
         let hour = std::time::Duration::from_secs(3600);
         assert!(!older_and_recent(&backup, hour), "written under the lock");
         // The journal as an older version wrote it: no `locked` field.
         let journal = std::fs::read_to_string(backup.join(JOURNAL)).unwrap_or_default();
         let older = journal.replace(",\"locked\":true", "");
         assert_ne!(older, journal);
-        std::fs::write(backup.join(JOURNAL), older).unwrap_or_else(|e| panic!("{e}"));
+        std::fs::write(backup.join(JOURNAL), older).unwrap();
         assert!(older_and_recent(&backup, hour));
         assert!(!older_and_recent(&backup, std::time::Duration::ZERO), "old enough");
-        commit(&backup).unwrap_or_else(|e| panic!("{e}"));
+        commit(&backup).unwrap();
         assert!(!older_and_recent(&backup, hour), "no journal");
     }
 
     #[test]
     fn commit_forgets_the_backup() {
         let (_dir, staged, target, backup) = setup();
-        install(&staged, &target, &backup).unwrap_or_else(|e| panic!("{e}"));
-        commit(&backup).unwrap_or_else(|e| panic!("{e}"));
+        install(&staged, &target, &backup).unwrap();
+        commit(&backup).unwrap();
         assert!(!unconfirmed(&backup));
         assert!(!backup.exists());
-        commit(&backup).unwrap_or_else(|e| panic!("{e}"));
+        commit(&backup).unwrap();
     }
 
     #[test]
@@ -351,18 +349,18 @@ mod tests {
             {
                 let mut zip = zip::ZipWriter::new(io::Cursor::new(&mut out));
                 let options = zip::write::SimpleFileOptions::default();
-                zip.start_file(name, options).unwrap_or_else(|e| panic!("{e}"));
-                zip.write_all(b"data").unwrap_or_else(|e| panic!("{e}"));
-                zip.finish().unwrap_or_else(|e| panic!("{e}"));
+                zip.start_file(name, options).unwrap();
+                zip.write_all(b"data").unwrap();
+                zip.finish().unwrap();
             }
             out
         };
-        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
-        extract(io::Cursor::new(build("bin/a.exe")), dir.path()).unwrap_or_else(|e| panic!("{e}"));
+        let dir = tempfile::tempdir().unwrap();
+        extract(io::Cursor::new(build("bin/a.exe")), dir.path()).unwrap();
         assert_eq!(read(dir.path(), "bin/a.exe").as_deref(), Some("data"));
         assert!(extract(io::Cursor::new(build("../evil.exe")), dir.path()).is_err());
         // The portable archive's flag does not make an installed copy portable.
-        extract(io::Cursor::new(build(PORTABLE_FLAG)), dir.path()).unwrap_or_else(|e| panic!("{e}"));
+        extract(io::Cursor::new(build(PORTABLE_FLAG)), dir.path()).unwrap();
         assert!(!dir.path().join(PORTABLE_FLAG).exists());
     }
 }

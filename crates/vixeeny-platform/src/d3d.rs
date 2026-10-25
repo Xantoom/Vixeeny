@@ -10,13 +10,36 @@ use windows::Win32::Graphics::Direct3D11::{
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT, DXGI_SAMPLE_DESC};
 use windows::core::{PCSTR, s};
 
+/// A Direct3D step that failed.
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum D3dError {
+    /// `call` returned an error.
+    #[error("{call}: {source}")]
+    Call {
+        call: &'static str,
+        #[source]
+        source: windows::core::Error,
+    },
+    /// The call succeeded without what it makes (no object), or what it was given was wrong.
+    #[error("{0}")]
+    Missing(&'static str),
+    /// A shader that does not compile, with the compiler's messages.
+    #[error("D3DCompile: {0}")]
+    Compile(String),
+}
+
+/// Turns the error of `call` into a [`D3dError`], for `map_err`.
+pub fn call(call: &'static str) -> impl Fn(windows::core::Error) -> D3dError + Copy {
+    move |source| D3dError::Call { call, source }
+}
+
 fn blob_bytes(blob: &ID3DBlob) -> &[u8] {
     // SAFETY: a blob exposes `GetBufferSize` bytes at `GetBufferPointer` while alive.
     unsafe { std::slice::from_raw_parts(blob.GetBufferPointer().cast(), blob.GetBufferSize()) }
 }
 
 /// The bytecode of the function `entry` of the HLSL `source`, for `target` (`cs_5_0`…).
-pub fn compile(source: &str, entry: PCSTR, target: PCSTR) -> Result<Vec<u8>, String> {
+pub fn compile(source: &str, entry: PCSTR, target: PCSTR) -> Result<Vec<u8>, D3dError> {
     let mut code = None;
     let mut errors = None;
     // SAFETY: the source is a live string of the given length; out-pointers are valid.
@@ -37,11 +60,11 @@ pub fn compile(source: &str, entry: PCSTR, target: PCSTR) -> Result<Vec<u8>, Str
     };
     match (compiled, code) {
         (Ok(()), Some(code)) => Ok(blob_bytes(&code).to_vec()),
-        (result, _) => Err(format!(
-            "D3DCompile: {} {}",
+        (result, _) => Err(D3dError::Compile(format!(
+            "{} {}",
             result.err().map(|e| e.to_string()).unwrap_or_default(),
             errors.map(|e| String::from_utf8_lossy(blob_bytes(&e)).into_owned()).unwrap_or_default()
-        )),
+        ))),
     }
 }
 
@@ -54,7 +77,7 @@ pub fn texture(
     bind: u32,
     misc: u32,
     init: Option<(&[u8], u32)>,
-) -> Result<ID3D11Texture2D, String> {
+) -> Result<ID3D11Texture2D, D3dError> {
     let staging = bind == 0;
     let desc = D3D11_TEXTURE2D_DESC {
         Width: width,
@@ -69,7 +92,7 @@ pub fn texture(
         MiscFlags: misc,
     };
     if init.is_some_and(|(bytes, pitch)| bytes.len() < pitch as usize * height as usize) {
-        return Err("CreateTexture2D: too few bytes".into());
+        return Err(D3dError::Missing("CreateTexture2D: too few bytes"));
     }
     let init = init.map(|(bytes, pitch)| D3D11_SUBRESOURCE_DATA {
         pSysMem: bytes.as_ptr().cast(),
@@ -80,6 +103,6 @@ pub fn texture(
     // SAFETY: `desc` describes a plain texture; `init` points at `height` rows of `pitch` bytes, which outlive the
     // call; the out-pointer is valid.
     unsafe { device.CreateTexture2D(&raw const desc, init.as_ref().map(|i| i as *const _), Some(&raw mut out)) }
-        .map_err(|e| format!("CreateTexture2D: {e}"))?;
-    out.ok_or_else(|| "CreateTexture2D: no texture".into())
+        .map_err(call("CreateTexture2D"))?;
+    out.ok_or(D3dError::Missing("CreateTexture2D: no texture"))
 }

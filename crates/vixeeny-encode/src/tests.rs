@@ -12,7 +12,7 @@ use crate::registry::{Chroma, Container, Encoder, Family, Registry, Vendor};
 use crate::validate::{Context, IssueKind, Severity, output_size, pick_auto, validate};
 
 fn registry() -> Registry {
-    Registry::builtin().unwrap_or_else(|e| panic!("{e}"))
+    Registry::builtin().unwrap()
 }
 
 #[test]
@@ -279,8 +279,8 @@ fn validation_agrees_with_the_data_exhaustively() {
                         hdr: hdr.into(),
                         ..Video::default()
                     };
-                    let c = Container::from_setting(container).unwrap_or_else(|| panic!());
-                    let ch = Chroma::from_setting(chroma).unwrap_or_else(|| panic!());
+                    let c = Container::from_setting(container).unwrap();
+                    let ch = Chroma::from_setting(chroma).unwrap();
                     let depth = crate::validate::depth(e, ch, hdr == "keep_hdr", None);
                     let want = e.containers.contains(&c)
                         && e.supports_format(depth, ch)
@@ -323,9 +323,9 @@ impl Prober for Fake {
         true
     }
 
-    fn driver_caps(&self, adapter: &Adapter) -> Result<Vec<DriverCaps>, String> {
+    fn driver_caps(&self, adapter: &Adapter) -> Result<Vec<DriverCaps>, crate::driver_caps::CapsError> {
         if self.old_drivers {
-            return Err("too old".into());
+            return Err(crate::driver_caps::CapsError::Runtime("too old".into()));
         }
         let caps = |family, ten_bit, chroma: &[Chroma], max| DriverCaps {
             family,
@@ -372,16 +372,16 @@ fn find<'a>(r: &'a ProbeResult, id: &str, adapter: Option<u32>) -> Option<&'a En
 /// What both ways of probing must find on `multi_gpu`.
 fn check_multi_gpu(result: &ProbeResult) {
     // NVIDIA: both cards listed, with their own capabilities.
-    let new = find(result, "nvenc_hevc", Some(0)).unwrap_or_else(|| panic!("RTX missing"));
+    let new = find(result, "nvenc_hevc", Some(0)).expect("RTX missing");
     assert!(new.formats.iter().any(|f| f.depth == 10 && f.chroma == Chroma::C420 && f.uhd && f.hdr));
     assert!(find(result, "nvenc_hevc", Some(1)).is_none(), "old card cannot do HEVC");
-    let old = find(result, "nvenc_h264", Some(1)).unwrap_or_else(|| panic!("GTX missing"));
+    let old = find(result, "nvenc_h264", Some(1)).expect("GTX missing");
     assert!(old.formats.iter().all(|f| !f.uhd));
     assert!(find(result, "nvenc_av1", Some(1)).is_none());
     assert!(find(result, "nvenc_av1", Some(0)).is_some());
 
     // Intel: only the iGPU, no HDR.
-    let qsv = find(result, "qsv_hevc", Some(0)).unwrap_or_else(|| panic!("iGPU missing"));
+    let qsv = find(result, "qsv_hevc", Some(0)).expect("iGPU missing");
     assert!(qsv.formats.iter().all(|f| !f.hdr));
     // AMD: no AMD adapter, so no AMF entry at all.
     assert!(result.encoders.iter().all(|e| !e.id.starts_with("amf_")));
@@ -456,8 +456,8 @@ fn availability_drives_validation() {
 #[test]
 fn results_round_trip_through_toml_and_the_cache_key_tracks_drivers() {
     let result = probe(&registry(), &multi_gpu(), "0.1");
-    let text = to_toml(&result).unwrap_or_else(|e| panic!("{e}"));
-    assert_eq!(from_toml(&text).unwrap_or_else(|e| panic!("{e}")), result);
+    let text = to_toml(&result).unwrap();
+    assert_eq!(from_toml(&text).unwrap(), result);
 
     let a = multi_gpu().adapters;
     let key = cache_key(&a, "0.1");
@@ -486,18 +486,18 @@ fn the_cache_is_reused_until_the_key_changes() {
         *runs.borrow_mut() += 1;
         Ok(probe(&registry(), &multi_gpu(), "0.1"))
     };
-    let first = cached_or_probe(&path, &adapters, "0.1", run).unwrap_or_else(|e| panic!("{e}"));
-    let second = cached_or_probe(&path, &adapters, "0.1", run).unwrap_or_else(|e| panic!("{e}"));
+    let first = cached_or_probe(&path, &adapters, "0.1", run).unwrap();
+    let second = cached_or_probe(&path, &adapters, "0.1", run).unwrap();
     assert_eq!(*runs.borrow(), 1, "second call is served by the cache");
     assert_eq!(first, second);
     // A driver update invalidates it.
     let mut updated = adapters;
     updated[0].driver_version = "99".into();
-    cached_or_probe(&path, &updated, "0.1", run).unwrap_or_else(|e| panic!("{e}"));
+    cached_or_probe(&path, &updated, "0.1", run).unwrap();
     assert_eq!(*runs.borrow(), 2);
     // A corrupt file is ignored.
-    std::fs::write(&path, "garbage {{{").unwrap_or_else(|e| panic!("{e}"));
-    cached_or_probe(&path, &updated, "0.1", run).unwrap_or_else(|e| panic!("{e}"));
+    std::fs::write(&path, "garbage {{{").unwrap();
+    cached_or_probe(&path, &updated, "0.1", run).unwrap();
     assert_eq!(*runs.borrow(), 3);
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -514,10 +514,10 @@ fn the_probe_identity_does_not_follow_the_app_version() {
 fn a_probe_that_hangs_or_crashes_is_contained() {
     use crate::probe::{ProbeError, run_child};
     let dir = scratch("child");
-    std::fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("{e}"));
+    std::fs::create_dir_all(&dir).unwrap();
     let script = |name: &str, body: &str| {
         let path = dir.join(format!("{name}.cmd"));
-        std::fs::write(&path, format!("@echo off\r\n{body}\r\n")).unwrap_or_else(|e| panic!("{e}"));
+        std::fs::write(&path, format!("@echo off\r\n{body}\r\n")).unwrap();
         path
     };
     let hang = script("hang", "ping -n 30 127.0.0.1 >nul");
@@ -529,7 +529,7 @@ fn a_probe_that_hangs_or_crashes_is_contained() {
     let junk = script("junk", "echo not toml {{{");
     assert!(matches!(run_child(&junk, std::time::Duration::from_secs(10)), Err(ProbeError::Output(_))));
     let fine = script("fine", "echo key = \"k\"");
-    let ok = run_child(&fine, std::time::Duration::from_secs(10)).unwrap_or_else(|e| panic!("{e}"));
+    let ok = run_child(&fine, std::time::Duration::from_secs(10)).unwrap();
     assert_eq!(ok.key, "k");
     assert!(matches!(
         run_child(std::path::Path::new("C:\\nonexistent\\vixeeny.exe"), std::time::Duration::from_secs(1)),

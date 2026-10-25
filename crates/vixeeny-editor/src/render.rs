@@ -116,7 +116,7 @@ pub fn smooth(points: &[Point]) -> Option<(Point, Vec<Segment>)> {
             let mut s: Vec<Segment> = (1..n - 1)
                 .map(|i| {
                     let (c, next) = (points[i], points[i + 1]);
-                    Segment::Quad(c, Point::new((c.x + next.x) / 2.0, (c.y + next.y) / 2.0))
+                    Segment::Quad(c, Point::new(f32::midpoint(c.x, next.x), f32::midpoint(c.y, next.y)))
                 })
                 .collect();
             s.push(Segment::Line(points[n - 1]));

@@ -3,7 +3,7 @@
 //! download it with its progress, verify it, then swap the files and restart Vixeeny. Windows lets a running program be
 //! renamed, so the files are replaced while everything runs; only the daemon is restarted.
 
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -221,20 +221,21 @@ pub fn download(progress: &mut dyn FnMut(u64, u64)) -> anyhow::Result<String> {
         }
     }
     fetch(&agent, &files.archive.url, &mut Part::open(&part)?, 600 << 20, files.archive.size, progress)?;
-    // Nothing is unpacked before the checks pass; a file that fails them is downloaded anew.
-    let checked = verify::check(
-        std::io::BufReader::new(std::fs::File::open(&part)?),
-        &files.archive.name,
-        files.signature,
-        verify::PUBLIC_KEY,
-    );
+    // Nothing is unpacked before the checks pass; a file that fails them is downloaded anew. The file is held read only
+    // from the check to the unpacking, so what is unpacked is what was checked.
+    let mut held = read_only(&part)?;
+    let checked =
+        verify::check(std::io::BufReader::new(&held), &files.archive.name, files.signature, verify::PUBLIC_KEY);
     if let Err(e) = checked {
+        drop(held);
         let _ = std::fs::remove_file(&part);
         return Err(e.into());
     }
     let staged = install_dir()?.join(STAGED);
     let _ = std::fs::remove_dir_all(&staged);
-    swap::extract(std::io::BufReader::new(std::fs::File::open(&part)?), &staged)?;
+    held.seek(SeekFrom::Start(0))?;
+    swap::extract(std::io::BufReader::new(&held), &staged)?;
+    drop(held);
     anyhow::ensure!(staged.join(DAEMON).exists(), "the archive does not have the expected layout");
     let _ = std::fs::remove_dir_all(&folder);
     state.ready = Some(release.version.clone());
@@ -329,6 +330,14 @@ pub struct Setup {
     _held: std::fs::File,
 }
 
+/// `path` opened for reading, which no one may write or delete while it is held.
+fn read_only(path: &Path) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    std::os::windows::fs::OpenOptionsExt::share_mode(&mut options, 1); // FILE_SHARE_READ
+    options.open(path)
+}
+
 /// Downloads the installer of the latest version and checks its signature (to install Vixeeny in Program Files).
 /// `progress(done, total)` is called as the bytes arrive.
 pub fn download_setup(progress: &mut dyn FnMut(u64, u64)) -> anyhow::Result<Setup> {
@@ -343,12 +352,7 @@ pub fn download_setup(progress: &mut dyn FnMut(u64, u64)) -> anyhow::Result<Setu
     let path = folder.join(&setup.name);
     fetch(&agent, &setup.url, &mut Part::open(&path)?, 300 << 20, setup.size, progress)?;
     // Read only from now on, by everyone (Windows starts it all the same).
-    let held = {
-        let mut options = std::fs::OpenOptions::new();
-        options.read(true);
-        std::os::windows::fs::OpenOptionsExt::share_mode(&mut options, 1); // FILE_SHARE_READ
-        options.open(&path)?
-    };
+    let held = read_only(&path)?;
     let checked = verify::check(std::io::BufReader::new(&held), &setup.name, signature, verify::PUBLIC_KEY);
     if let Err(e) = checked {
         drop(held);

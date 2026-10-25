@@ -2,7 +2,7 @@
 //! The recording pipeline end to end with synthetic frames and a simulated clock: crash-safe hybrid MP4, pause, every
 //! software encoder × every allowed container gives a readable file, constant frame rate, scaling, splitting. Needs the
 //! native build: `cargo xtask build-native ffmpeg`.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, reason = "test helpers fail the test")]
 
 mod common;
 

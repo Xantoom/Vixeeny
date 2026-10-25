@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The overlay driven by posted messages, its windows cloaked (nothing shows on screen).
-#![allow(clippy::expect_used)]
+#![allow(clippy::expect_used, reason = "test helpers fail the test")]
 
 use std::cell::RefCell;
 use std::rc::Rc;

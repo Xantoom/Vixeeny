@@ -83,8 +83,7 @@ impl WgcBackend {
             0,
             0,
             black.as_deref().map(|b| (b, bounds.width * 4)),
-        )
-        .map_err(CaptureError::Os)?;
+        )?;
         for (m, started) in monitors.iter().zip(started) {
             let at = m.rect.relative_to(&bounds);
             started.finish(|texture| {

@@ -52,7 +52,7 @@ fn settings_panel() -> (settings_panel::SettingsPanel, Rc<std::cell::RefCell<Vec
         "1.2.3",
         crate::theme::Look::dark(),
     )
-    .unwrap_or_else(|e| panic!("{e}"));
+    .unwrap();
     let seen = Rc::new(RefCell::new(Vec::new()));
     let sink = seen.clone();
     panel.on_change(move |c| sink.borrow_mut().push(c.clone()));
@@ -70,7 +70,7 @@ fn settings_render_at(
 ) -> SharedPixelBuffer<Rgb8Pixel> {
     let window = WINDOW.with(Rc::clone);
     window.set_size(PhysicalSize::new(w, h));
-    panel.window().show().unwrap_or_else(|e| panic!("{e}"));
+    panel.window().show().unwrap();
     let mut buffer = SharedPixelBuffer::<Rgb8Pixel>::new(w, h);
     // Twice: wrapped texts settle their height on the second layout.
     for _ in 0..2 {
@@ -356,7 +356,7 @@ fn a_refused_shortcut_says_why_in_the_users_language() {
         "1.2.3",
         crate::theme::Look::dark(),
     )
-    .unwrap_or_else(|e| panic!("{e}"));
+    .unwrap();
     panel.select_section(Section::Shortcuts);
     let w = panel.window();
     // A letter alone types text: refused, the key by its name.

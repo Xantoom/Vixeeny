@@ -52,13 +52,8 @@ impl State {
             std::fs::create_dir_all(dir)?;
         }
         let text = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
-        // Written whole, then put in place: the check in the background and the settings window write it, and a reader
-        // never finds it half written. One temporary file per process, so two writers do not mix theirs.
-        let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
-        std::fs::write(&tmp, text)?;
-        std::fs::rename(&tmp, path).inspect_err(|_| {
-            let _ = std::fs::remove_file(&tmp);
-        })
+        // The check in the background and the settings window both write it: a reader never finds it half written.
+        vixeeny_common::paths::write_atomic(path, text.as_bytes())
     }
 
     /// The release to offer, if it is newer than `current`.
@@ -78,7 +73,7 @@ mod tests {
 
     #[test]
     fn the_state_round_trips_and_a_missing_file_is_empty() {
-        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
+        let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("update.json");
         assert_eq!(State::load(&path), State::default());
         let state = State {
@@ -93,12 +88,12 @@ mod tests {
             error: Some("boom".into()),
             failed: Some("0.9.0".into()),
         };
-        state.save(&path).unwrap_or_else(|e| panic!("{e}"));
+        state.save(&path).unwrap();
         assert_eq!(State::load(&path), state);
         // Saved in place: nothing else is left in the folder.
         let files = std::fs::read_dir(dir.path()).map_or(0, Iterator::count);
         assert_eq!(files, 1);
-        std::fs::write(&path, "{broken").unwrap_or_else(|e| panic!("{e}"));
+        std::fs::write(&path, "{broken").unwrap();
         assert_eq!(State::load(&path), State::default());
     }
 

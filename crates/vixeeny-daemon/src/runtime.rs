@@ -122,7 +122,7 @@ pub struct Runtime<T: Tray, S: Spawner> {
 }
 
 impl<T: Tray, S: Spawner> Runtime<T, S> {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments, reason = "one call site, which hands over every part of the daemon")]
     pub fn new(
         config: Config,
         config_path: Option<PathBuf>,
@@ -428,7 +428,6 @@ fn write_taken(failures: &[(Hotkey, String)]) {
 }
 
 #[cfg(test)]
-#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
     use std::io;

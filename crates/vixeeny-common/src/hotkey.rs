@@ -240,7 +240,7 @@ pub fn resolve(hotkeys: &Hotkeys) -> Resolution {
 }
 
 #[cfg(test)]
-#[allow(clippy::field_reassign_with_default)]
+#[expect(clippy::field_reassign_with_default, reason = "each test changes one setting of the defaults")]
 mod tests {
     use super::*;
 

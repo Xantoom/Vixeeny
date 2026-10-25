@@ -440,7 +440,7 @@ impl Inner {
         unsafe { GetWindowRect(self.popup.hwnd, &mut bar)? };
         let (ax, _, aw, _) = part(WidgetTarget::Alert);
         let anchor = bar.left + ((MARGIN + ax + aw / 2.0) * u) as i32;
-        let centre = POINT { x: (bar.left + bar.right) / 2, y: (bar.top + bar.bottom) / 2 };
+        let centre = POINT { x: i32::midpoint(bar.left, bar.right), y: i32::midpoint(bar.top, bar.bottom) };
         let work = popup::work_area_at(centre).unwrap_or(bar);
         let (x, y) = tip_origin(bar, anchor, tip.size, work);
         // Never in the video either.

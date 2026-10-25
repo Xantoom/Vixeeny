@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! OS directories. `VIXEENY_CONFIG_DIR` / `VIXEENY_LOG_DIR` override them (tests, benchmarks, portable installs).
 
-use std::path::PathBuf;
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
 
 use directories::{ProjectDirs, UserDirs};
 
@@ -118,9 +119,37 @@ pub fn display_dir(template: &str) -> String {
         .replace('/', "\\")
 }
 
+/// Writes `bytes` to `path` whole or not at all: a temporary file of this process beside it, flushed to the disk, then
+/// renamed over it. A power cut leaves the old file or the new one, never an empty one; two processes writing at once
+/// do not mix their files.
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut name = path.as_os_str().to_owned();
+    name.push(format!(".{}.tmp", std::process::id()));
+    let tmp = PathBuf::from(name);
+    let written = std::fs::File::create(&tmp).and_then(|mut file| {
+        file.write_all(bytes)?;
+        file.sync_all()
+    });
+    written.and_then(|()| std::fs::rename(&tmp, path)).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_atomic_write_replaces_the_file_and_leaves_no_temporary_one() {
+        let dir = std::env::temp_dir().join(format!("vixeeny-atomic-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.toml");
+        write_atomic(&path, b"old").unwrap();
+        write_atomic(&path, b"new").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"new");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn folders_are_shown_without_placeholders_or_forward_slashes() {

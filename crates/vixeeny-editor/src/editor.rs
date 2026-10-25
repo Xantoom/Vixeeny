@@ -360,7 +360,7 @@ mod tests {
 
     fn drag(ed: &mut Editor, from: Point, to: Point, mods: Modifiers) {
         ed.pointer_down(from, mods, None);
-        ed.pointer_move(p((from.x + to.x) / 2.0, (from.y + to.y) / 2.0), mods);
+        ed.pointer_move(p(f32::midpoint(from.x, to.x), f32::midpoint(from.y, to.y)), mods);
         ed.pointer_up(to, mods);
     }
 

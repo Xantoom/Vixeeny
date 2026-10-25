@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! A short visible run of the overlay in a small window: draws a zone, captures the screen, closes itself after a few
 //! seconds. `cargo run --example smoke -- <out.png>`.
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+#![allow(clippy::expect_used, clippy::unwrap_used, reason = "a developer tool: any failure ends it")]
 
 use vixeeny_capture::{CaptureOptions, CaptureTarget, Capturer, WgcBackend};
 use vixeeny_editor::{Rect, RgbaImage, Session};

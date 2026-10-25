@@ -21,7 +21,7 @@ fn session() -> Session {
 
 fn drag(s: &mut Session, a: Point, b: Point) {
     s.pointer_down(a, NO);
-    s.pointer_move(p((a.x + b.x) / 2.0, (a.y + b.y) / 2.0), NO);
+    s.pointer_move(p(f32::midpoint(a.x, b.x), f32::midpoint(a.y, b.y)), NO);
     s.pointer_up(b, NO);
 }
 

@@ -36,6 +36,13 @@ pub enum RecordError {
     Io(String),
     #[error("the recording thread stopped unexpectedly")]
     Worker,
+    /// A Direct3D step of the GPU path.
+    #[error("GPU path: {what}: {source}")]
+    Gpu {
+        what: &'static str,
+        #[source]
+        source: vixeeny_platform::d3d::D3dError,
+    },
 }
 
 impl From<ffmpeg_next::Error> for RecordError {

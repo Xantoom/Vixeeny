@@ -7,8 +7,8 @@ pub const PUBLIC_KEY: &str = include_str!("../../../packaging/minisign.pub");
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum VerifyError {
-    #[error("no signing key is configured in this build")]
-    NoKey,
+    #[error("no signing key is configured in this build ({0})")]
+    NoKey(String),
     #[error("the signature is invalid: {0}")]
     Signature(String),
     #[error("cannot read the file: {0}")]
@@ -27,7 +27,7 @@ fn key(public_key: &str) -> Result<minisign_verify::PublicKey, VerifyError> {
     } else {
         minisign_verify::PublicKey::from_base64(text)
     }
-    .map_err(|_| VerifyError::NoKey)
+    .map_err(|e| VerifyError::NoKey(e.to_string()))
 }
 
 /// The file a signature was made for: the `file:` field of its trusted comment (signed with the file), without the
@@ -88,12 +88,12 @@ soBvvaiVI9xsDNkzPMKTpYZDzJvz9R8zHbDwKmHxi+xxKBomLYpy53BUnmOnqiMEjHLD80o0IcHmStrv
     #[test]
     fn the_folder_it_was_signed_in_does_not_matter() {
         let sig = SIG.replace("file:", r"file:D:\a\dist\");
-        let signature = minisign_verify::Signature::decode(&sig).unwrap_or_else(|e| panic!("{e}"));
+        let signature = minisign_verify::Signature::decode(&sig).unwrap();
         assert_eq!(signed_name(&signature), Some(NAME));
     }
 
     #[test]
     fn the_placeholder_key_accepts_nothing() {
-        assert_eq!(check_bytes(b"test", NAME, "unconfigured"), Err(VerifyError::NoKey));
+        assert!(matches!(check_bytes(b"test", NAME, "unconfigured"), Err(VerifyError::NoKey(_))));
     }
 }

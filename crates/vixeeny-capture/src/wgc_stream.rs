@@ -167,8 +167,8 @@ impl Shared {
         if w == 0 || h == 0 {
             return Err(CaptureError::InvalidRegion);
         }
-        let context = self.context.lock().map_err(|_| CaptureError::Os("capture lock poisoned".into()))?;
-        let mut cache = self.staging.lock().map_err(|_| CaptureError::Os("capture lock poisoned".into()))?;
+        let context = self.context.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut cache = self.staging.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if cache.as_ref().is_none_or(|(_, size)| *size != (w, h)) {
             let mut desc = D3D11_TEXTURE2D_DESC::default();
             // SAFETY: `desc` is a valid out-pointer.

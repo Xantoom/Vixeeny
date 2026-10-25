@@ -22,9 +22,29 @@ use windows::core::{GUID, Interface, PCSTR, PCWSTR, s};
 use crate::probe::{Adapter, DriverCaps, Tools};
 use crate::registry::{Chroma, Family, Vendor};
 
+/// Why a driver cannot be asked what it encodes.
+#[derive(Debug, thiserror::Error)]
+pub enum CapsError {
+    /// A system call failed (`what`: the call, or the library loaded).
+    #[error("{what}: {source}")]
+    Os {
+        what: String,
+        #[source]
+        source: windows::core::Error,
+    },
+    /// The runtime is there but refuses, or lacks a function.
+    #[error("{0}")]
+    Runtime(String),
+}
+
+fn os(what: impl Into<String>) -> impl FnOnce(windows::core::Error) -> CapsError {
+    let what = what.into();
+    move |source| CapsError::Os { what, source }
+}
+
 /// The encoders of `adapter`'s GPU, one entry per codec it can encode. `Err` when the driver cannot be asked (no
 /// runtime, or one too old to describe itself).
-pub fn query(adapter: &Adapter) -> Result<Vec<DriverCaps>, String> {
+pub fn query(adapter: &Adapter) -> Result<Vec<DriverCaps>, CapsError> {
     match adapter.vendor {
         Vendor::Nvidia => nvenc::query(adapter),
         Vendor::Amd => amf::query(adapter),
@@ -39,7 +59,7 @@ fn wide(text: &str) -> Vec<u16> {
 
 /// Loads a driver library: a bare name from the system folder only (where the drivers put them), never from the current
 /// folder or the `PATH`; a full path from there, with what it needs from its own folder.
-fn load(name: &str) -> Result<HMODULE, String> {
+fn load(name: &str) -> Result<HMODULE, CapsError> {
     let name16 = wide(name);
     let flags = if name.contains('\\') {
         LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32
@@ -48,26 +68,26 @@ fn load(name: &str) -> Result<HMODULE, String> {
     };
     // SAFETY: a NUL-terminated name; the module stays loaded for the life of the process (the probe is a short-lived
     // child).
-    unsafe { LoadLibraryExW(PCWSTR(name16.as_ptr()), None, flags) }.map_err(|e| format!("{name}: {e}"))
+    unsafe { LoadLibraryExW(PCWSTR(name16.as_ptr()), None, flags) }.map_err(os(name))
 }
 
 /// The address of `name` in `module`, as the function type `F`.
 ///
 /// # Safety
 /// `F` must be the function pointer type of that export.
-unsafe fn symbol<F>(module: HMODULE, name: PCSTR) -> Result<F, String> {
+unsafe fn symbol<F>(module: HMODULE, name: PCSTR) -> Result<F, CapsError> {
     // SAFETY: the module is loaded and `name` is NUL terminated.
     let found = unsafe { GetProcAddress(module, name) }
         // SAFETY: `name` is a NUL-terminated literal.
-        .ok_or_else(|| format!("no {}", unsafe { name.display() }))?;
+        .ok_or_else(|| CapsError::Runtime(format!("no {}", unsafe { name.display() })))?;
     // SAFETY: the caller names the right type; both are plain function pointers.
     Ok(unsafe { std::mem::transmute_copy(&found) })
 }
 
 /// A D3D11 device on the `index`-th GPU of `vendor_id` (the order of DXGI, like [`Adapter::index`]).
-fn device(adapter: &Adapter) -> Result<ID3D11Device, String> {
+fn device(adapter: &Adapter) -> Result<ID3D11Device, CapsError> {
     // SAFETY: plain DXGI enumeration; every call is checked.
-    let factory: IDXGIFactory1 = unsafe { CreateDXGIFactory1() }.map_err(|e| format!("DXGI factory: {e}"))?;
+    let factory: IDXGIFactory1 = unsafe { CreateDXGIFactory1() }.map_err(os("DXGI factory"))?;
     let gpu: IDXGIAdapter = (0..)
         // SAFETY: `factory` is live; the index runs until the enumeration reports the end.
         .map_while(|i| unsafe { factory.EnumAdapters1(i) }.ok())
@@ -77,7 +97,7 @@ fn device(adapter: &Adapter) -> Result<ID3D11Device, String> {
         })
         .nth(adapter.index as usize)
         .and_then(|a| a.cast().ok())
-        .ok_or_else(|| format!("{} is gone", adapter.name))?;
+        .ok_or_else(|| CapsError::Runtime(format!("{} is gone", adapter.name)))?;
     let mut device = None;
     // SAFETY: out-pointer is valid; the adapter outlives the call.
     unsafe {
@@ -93,8 +113,8 @@ fn device(adapter: &Adapter) -> Result<ID3D11Device, String> {
             None,
         )
     }
-    .map_err(|e| format!("D3D11 device: {e}"))?;
-    device.ok_or_else(|| "no D3D11 device".into())
+    .map_err(os("D3D11 device"))?;
+    device.ok_or_else(|| CapsError::Runtime("no D3D11 device".into()))
 }
 
 fn caps(family: Family, ten_bit: bool, chroma: Vec<Chroma>, max: (u32, u32)) -> DriverCaps {
@@ -102,7 +122,7 @@ fn caps(family: Family, ten_bit: bool, chroma: Vec<Chroma>, max: (u32, u32)) -> 
 }
 
 mod nvenc {
-    use super::{Adapter, DriverCaps, GUID, Interface, Tools, c_void, caps, device, load, s, symbol};
+    use super::{Adapter, CapsError, DriverCaps, GUID, Interface, Tools, c_void, caps, device, load, s, symbol};
     use crate::probe::NvencGeneration;
     use crate::registry::{Chroma, Family};
 
@@ -178,7 +198,7 @@ mod nvenc {
     type Caps = unsafe extern "system" fn(*mut c_void, GUID, *mut CapsParam, *mut i32) -> i32;
     type Destroy = unsafe extern "system" fn(*mut c_void) -> i32;
 
-    pub fn query(adapter: &Adapter) -> Result<Vec<DriverCaps>, String> {
+    pub fn query(adapter: &Adapter) -> Result<Vec<DriverCaps>, CapsError> {
         let module = load("nvEncodeAPI64.dll")?;
         // SAFETY: the exports of nvEncodeAPI64.dll, with their documented signatures.
         let (max_version, create): (MaxVersion, CreateInstance) = unsafe {
@@ -193,11 +213,11 @@ mod nvenc {
         let mut list = FunctionList { version: struct_version(2), reserved: 0, entries: [std::ptr::null(); 320] };
         // SAFETY: `list` is a zeroed function list with its version set.
         if unsafe { create(&raw mut list) } != 0 {
-            return Err("NvEncodeAPICreateInstance failed".into());
+            return Err(CapsError::Runtime("NvEncodeAPICreateInstance failed".into()));
         }
-        let entry = |i: usize| -> Result<*const c_void, String> {
+        let entry = |i: usize| -> Result<*const c_void, CapsError> {
             let f = list.entries[i];
-            if f.is_null() { Err(format!("NVENC entry {i} missing")) } else { Ok(f) }
+            if f.is_null() { Err(CapsError::Runtime(format!("NVENC entry {i} missing"))) } else { Ok(f) }
         };
         // SAFETY: the entries hold the documented function types at these positions.
         let (open, count, guids, get_caps, destroy): (OpenSession, GuidCount, Guids, Caps, Destroy) = unsafe {
@@ -301,7 +321,7 @@ mod nvenc {
 }
 
 mod amf {
-    use super::{Adapter, DriverCaps, Interface, c_void, caps, device, load, s, symbol, wide};
+    use super::{Adapter, CapsError, DriverCaps, Interface, c_void, caps, device, load, s, symbol, wide};
     use crate::probe::{NvencGeneration, Tools};
     use crate::registry::{Chroma, Family};
 
@@ -424,7 +444,7 @@ mod amf {
     type QueryVersion = unsafe extern "C" fn(*mut u64) -> i32;
     type Init = unsafe extern "C" fn(u64, *mut *mut Object) -> i32;
 
-    pub fn query(adapter: &Adapter) -> Result<Vec<DriverCaps>, String> {
+    pub fn query(adapter: &Adapter) -> Result<Vec<DriverCaps>, CapsError> {
         let module = load("amfrt64.dll")?;
         // SAFETY: the exports of amfrt64.dll, with their documented signatures.
         let (version, init): (QueryVersion, Init) =
@@ -437,7 +457,7 @@ mod amf {
             || unsafe { init(runtime, &raw mut factory) } != 0
             || factory.is_null()
         {
-            return Err("AMFInit failed".into());
+            return Err(CapsError::Runtime("AMFInit failed".into()));
         }
         let device = device(adapter)?;
         let mut context = std::ptr::null_mut();
@@ -449,7 +469,7 @@ mod amf {
             )
         };
         if context.is_null() {
-            return Err("AMF context failed".into());
+            return Err(CapsError::Runtime("AMF context failed".into()));
         }
         let context = Owned(context);
         // SAFETY: InitDX11 on a live context with a live device.
@@ -659,7 +679,7 @@ mod amf {
 }
 
 mod vpl {
-    use super::{Adapter, DriverCaps, HMODULE, c_void, caps, load, s, symbol, wide};
+    use super::{Adapter, CapsError, DriverCaps, HMODULE, c_void, caps, load, s, symbol, wide};
     use crate::probe::{NOT_DESCRIBED, NvencGeneration, Tools};
     use crate::registry::{Chroma, Family};
 
@@ -730,7 +750,7 @@ mod vpl {
 
     /// The oneVPL runtime of the Intel driver: in its DriverStore folder (what the oneVPL dispatcher looks up), else on
     /// the search path.
-    fn runtime(adapter: &Adapter) -> Result<HMODULE, String> {
+    fn runtime(adapter: &Adapter) -> Result<HMODULE, CapsError> {
         driver_store(adapter.device_id)
             .and_then(|dir| load(&format!("{dir}\\libmfx64-gen.dll")).ok())
             .map_or_else(|| load("libmfx64-gen.dll"), Ok)
@@ -791,7 +811,7 @@ mod vpl {
     }
     use windows::core::PCWSTR;
 
-    pub fn query(adapter: &Adapter) -> Result<Vec<DriverCaps>, String> {
+    pub fn query(adapter: &Adapter) -> Result<Vec<DriverCaps>, CapsError> {
         let module = runtime(adapter)?;
         // SAFETY: the exports of the oneVPL runtime, with their documented signatures. A Media SDK runtime (before
         // oneVPL) has neither: the caller falls back.
@@ -802,7 +822,7 @@ mod vpl {
         // SAFETY: a valid out-pointer; the array is released below.
         let list = unsafe { query(MFX_IMPLCAPS_IMPLDESCSTRUCTURE, &raw mut n) };
         if list.is_null() {
-            return Err("MFXQueryImplsDescription failed".into());
+            return Err(CapsError::Runtime("MFXQueryImplsDescription failed".into()));
         }
         // SAFETY: `list` holds `n` descriptions, alive until released.
         let descriptions: Vec<*const u8> = unsafe { std::slice::from_raw_parts(list, n as usize) }.to_vec();

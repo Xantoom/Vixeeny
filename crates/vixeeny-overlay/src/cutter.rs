@@ -814,7 +814,7 @@ fn paint_playhead(c: &Canvas<'_>, t: &Theme, u: f32, (x, y): (f32, f32)) -> Resu
     c.fill_circle(cx, y + 5.0 * u, 5.0 * u, t.text)
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, reason = "the painting state of one frame, read once")]
 fn paint_bottom(
     c: &Canvas<'_>,
     t: &Theme,
@@ -855,8 +855,8 @@ fn paint_bottom(
     let play = at(l.part(Target::Play));
     let fill = if look.hover == Target::Play { t.accent.brighter(0.08) } else { t.accent };
     c.fill_circle(
-        (play.left + play.right) / 2.0,
-        (play.top + play.bottom) / 2.0,
+        f32::midpoint(play.left, play.right),
+        f32::midpoint(play.top, play.bottom),
         (play.right - play.left) / 2.0,
         fill,
     )?;
@@ -876,7 +876,7 @@ fn paint_bottom(
         if silent { t.text_2 } else { t.text },
     )?;
     let track = at(l.part(Target::Volume));
-    let cy = (track.top + track.bottom) / 2.0;
+    let cy = f32::midpoint(track.top, track.bottom);
     let level = if s.muted { 0.0 } else { s.volume };
     let kx = track.left + (track.right - track.left) * level;
     c.fill_round(rect(track.left, cy - 2.0 * u, track.right - track.left, 4.0 * u), 2.0 * u, t.control_stroke)?;
@@ -914,8 +914,8 @@ fn paint_bottom(
         let r = rect(hx * u, (hy - top) * u, hw * u, hh * u);
         let colour = if look.hover == target || look.held == Some(target) { t.accent.brighter(0.1) } else { t.accent };
         c.fill_round(r, 4.0 * u, colour)?;
-        let gx = (r.left + r.right) / 2.0;
-        let gy = (r.top + r.bottom) / 2.0;
+        let gx = f32::midpoint(r.left, r.right);
+        let gy = f32::midpoint(r.top, r.bottom);
         c.fill_rect(rect(gx - 0.75 * u, gy - 7.0 * u, 1.5 * u, 14.0 * u), Rgba::hex(0xffffff, 0xcc))?;
     }
     // Key frames under the strip, where they can be told apart.
@@ -933,13 +933,19 @@ fn paint_bottom(
     let sign = at(l.part(Target::Sign));
     let i = 20.0 * u;
     let (data, colour) = if s.lossless { (icons::FLASH, t.accent) } else { (icons::SYNC, t.text_2) };
-    c.icon(data, (sign.left + sign.right) / 2.0 - i / 2.0, (sign.top + sign.bottom) / 2.0 - i / 2.0, i, colour)?;
+    c.icon(
+        data,
+        f32::midpoint(sign.left, sign.right) - i / 2.0,
+        f32::midpoint(sign.top, sign.bottom) - i / 2.0,
+        i,
+        colour,
+    )?;
     let kept = format_time(frames.time(s.to) - frames.time(s.from) + 1.0 / frames.rate.max(1.0));
     match s.progress {
         Some(p) => {
             let (bx, _, _, _) = l.part(Target::SaveAs);
             let w = (bx - PAD - 48.0 - 16.0).max(0.0) * u;
-            let r = rect(sign.right + 12.0 * u, (sign.top + sign.bottom) / 2.0 - 3.0 * u, w, 6.0 * u);
+            let r = rect(sign.right + 12.0 * u, f32::midpoint(sign.top, sign.bottom) - 3.0 * u, w, 6.0 * u);
             c.fill_round(r, 3.0 * u, t.control_stroke)?;
             c.fill_round(rect(r.left, r.top, (r.right - r.left) * p.clamp(0.0, 1.0), 6.0 * u), 3.0 * u, t.accent)?;
         }
@@ -948,7 +954,7 @@ fn paint_bottom(
             c.text_layout(
                 &text.layout,
                 sign.right + 10.0 * u,
-                (sign.top + sign.bottom) / 2.0 - text.height / 2.0,
+                f32::midpoint(sign.top, sign.bottom) - text.height / 2.0,
                 t.text,
             )?;
         }

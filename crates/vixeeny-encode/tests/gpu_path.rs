@@ -3,7 +3,7 @@
 //! encoder (downloaded for a software encoder, as it is for NVENC when this machine has one) and the decoded file holds
 //! the BT.709 limited-range values of that colour, like the CPU path. Needs the native build:
 //! `cargo xtask build-native ffmpeg`.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, reason = "test helpers fail the test")]
 
 mod common;
 

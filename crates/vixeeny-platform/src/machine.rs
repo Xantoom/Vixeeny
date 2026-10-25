@@ -574,7 +574,7 @@ mod tests {
     fn this_computer_has_a_processor_memory_and_a_screen() {
         let m = super::machine();
         println!("{m:#?}");
-        let cpu = m.cpu.unwrap_or_else(|| panic!("no processor"));
+        let cpu = m.cpu.expect("no processor");
         assert!(!cpu.name.is_empty() && cpu.cores >= 1 && cpu.threads >= cpu.cores);
         assert!(m.ram_bytes > 0);
     }

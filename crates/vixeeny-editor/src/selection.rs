@@ -341,7 +341,7 @@ mod tests {
 
     fn draw(s: &mut Selection, a: Point, b: Point) {
         s.pointer_down(a);
-        s.pointer_move(p((a.x + b.x) / 2.0, (a.y + b.y) / 2.0));
+        s.pointer_move(p(f32::midpoint(a.x, b.x), f32::midpoint(a.y, b.y)));
         s.pointer_up(b);
     }
 
