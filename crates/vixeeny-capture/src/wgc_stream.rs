@@ -154,8 +154,7 @@ unsafe impl Sync for Shared {}
 
 impl Shared {
     /// Copies `texture` (its `content` part, cropped to the region) into a CPU frame.
-    fn read(&self, texture: &ID3D11Texture2D, content: SizeInt32) -> Result<CpuFrame, CaptureError> {
-        let (cw, ch) = (content.Width.max(1) as u32, content.Height.max(1) as u32);
+    fn read(&self, texture: &ID3D11Texture2D, (cw, ch): (u32, u32)) -> Result<CpuFrame, CaptureError> {
         let (x, y, w, h) = match self.region {
             Some(r) => {
                 let x = r.x.max(0) as u32;
@@ -437,66 +436,116 @@ fn frame_handler(
         }
         let Some(frame) = newest else { return Ok(()) };
         let content = frame.ContentSize()?;
-        // A window that was resized needs a pool of the new size.
-        if let Ok(mut last) = shared.last_size.lock()
-            && (last.Width, last.Height) != (content.Width, content.Height)
-        {
+        // A window that was resized needs a pool of the new size, made once this frame (of the old size) is handed
+        // over.
+        let resized = shared.last_size.lock().is_ok_and(|mut last| {
+            let changed = (last.Width, last.Height) != (content.Width, content.Height);
             *last = content;
+            changed
+        });
+        let delivered = deliver(&shared, &tx, frame, content);
+        if resized {
             let _ = pool.Recreate(&shared.winrt_device, pixel_format(shared.hdr), 2, content);
         }
-        let time_ns = frame.SystemRelativeTime()?.Duration.saturating_mul(100);
-        // A frame the recording would drop is neither read nor converted.
-        if let Some(gate) = &shared.gate
-            && !gate.wanted(time_ns)
-        {
-            return Ok(());
-        }
-        let surface = frame.Surface()?;
-        let access: IDirect3DDxgiInterfaceAccess = surface.cast()?;
-        // SAFETY: the surface is backed by a D3D11 texture on our device.
-        let texture: ID3D11Texture2D = unsafe { access.GetInterface() }?;
-        if let Some(held) = &shared.held {
-            let frame = HeldFrame {
-                texture,
-                content: (content.Width.max(1) as u32, content.Height.max(1) as u32),
-                time_ns,
-                frame,
-            };
-            // The frame waiting before goes back to the pool.
-            let old = held.lock().ok().and_then(|mut slot| slot.replace(frame));
-            drop(old);
-            if let Some(notify) = &shared.notify {
-                notify();
-            }
-            return Ok(());
-        }
-        if let Some(sink) = &shared.sink {
-            if let Ok(mut sink) = sink.lock()
-                && sink(&texture, (content.Width.max(1) as u32, content.Height.max(1) as u32), time_ns)
-                && let Some(gate) = &shared.gate
-            {
-                gate.taken(time_ns);
-            }
-            return Ok(());
-        }
-        let result = shared.read(&texture, content).map(|frame| CapturedFrame { hdr: shared.hdr, time_ns, frame });
-        // A full queue drops the frame: the consumer is behind.
-        let read = result.is_ok();
-        if tx.try_send(result).is_ok() {
-            if read && let Some(gate) = &shared.gate {
-                gate.taken(time_ns);
-            }
-            if let Some(notify) = &shared.notify {
-                notify();
-            }
-        }
-        Ok(())
+        delivered
     })
+}
+
+/// Hands `frame` over: held, to the sink, or read into RAM and queued.
+fn deliver(
+    shared: &Shared,
+    tx: &SyncSender<Result<CapturedFrame, CaptureError>>,
+    frame: Direct3D11CaptureFrame,
+    content: SizeInt32,
+) -> windows::core::Result<()> {
+    let time_ns = frame.SystemRelativeTime()?.Duration.saturating_mul(100);
+    // A frame the recording would drop is neither read nor converted.
+    if let Some(gate) = &shared.gate
+        && !gate.wanted(time_ns)
+    {
+        return Ok(());
+    }
+    let surface = frame.Surface()?;
+    let access: IDirect3DDxgiInterfaceAccess = surface.cast()?;
+    // SAFETY: the surface is backed by a D3D11 texture on our device.
+    let texture: ID3D11Texture2D = unsafe { access.GetInterface() }?;
+    let content = within(&texture, content);
+    if let Some(held) = &shared.held {
+        let frame = HeldFrame { texture, content, time_ns, frame };
+        // The frame waiting before goes back to the pool.
+        let old = held.lock().ok().and_then(|mut slot| slot.replace(frame));
+        drop(old);
+        if let Some(notify) = &shared.notify {
+            notify();
+        }
+        return Ok(());
+    }
+    if let Some(sink) = &shared.sink {
+        if let Ok(mut sink) = sink.lock()
+            && sink(&texture, content, time_ns)
+            && let Some(gate) = &shared.gate
+        {
+            gate.taken(time_ns);
+        }
+        return Ok(());
+    }
+    let result = shared.read(&texture, content).map(|frame| CapturedFrame { hdr: shared.hdr, time_ns, frame });
+    // A full queue drops the frame: the consumer is behind.
+    let read = result.is_ok();
+    if tx.try_send(result).is_ok() {
+        if read && let Some(gate) = &shared.gate {
+            gate.taken(time_ns);
+        }
+        if let Some(notify) = &shared.notify {
+            notify();
+        }
+    }
+    Ok(())
+}
+
+/// The part of `texture` that holds the picture: `content`, within the texture. A window that grew reports its new size
+/// while its frames still come in the textures of the old one, until the pool is made again.
+fn within(texture: &ID3D11Texture2D, content: SizeInt32) -> (u32, u32) {
+    let mut desc = D3D11_TEXTURE2D_DESC::default();
+    // SAFETY: `desc` is a valid out-pointer.
+    unsafe { texture.GetDesc(&mut desc) };
+    let fit = |size: i32, limit: u32| (size.max(1) as u32).min(limit.max(1));
+    (fit(content.Width, desc.Width), fit(content.Height, desc.Height))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A window that grew reports more than the texture its frame still comes in: only the texture's pixels are used.
+    #[test]
+    fn the_content_of_a_frame_stays_within_its_texture() {
+        let mut device = None;
+        // SAFETY: the out-pointer is valid; default adapter, no feature-level list.
+        let made = unsafe {
+            D3D11CreateDevice(
+                None,
+                D3D_DRIVER_TYPE_HARDWARE,
+                HMODULE::default(),
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                None,
+                D3D11_SDK_VERSION,
+                Some(&raw mut device),
+                None,
+                None,
+            )
+        };
+        let (Ok(()), Some(device)) = (made, device) else {
+            vixeeny_common::skip_test("no graphics card");
+            return;
+        };
+        let format = windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
+        let texture = vixeeny_platform::d3d::texture(&device, (640, 360), format, 0, 0, None).expect("texture");
+        let size = |w, h| SizeInt32 { Width: w, Height: h };
+        assert_eq!(within(&texture, size(2560, 1440)), (640, 360), "grown");
+        assert_eq!(within(&texture, size(320, 1440)), (320, 360), "taller only");
+        assert_eq!(within(&texture, size(0, -5)), (1, 1), "minimised");
+    }
 
     /// The editor's live view: the newest frame waits on the graphics card, on the device given, the size of the
     /// monitor, and is replaced rather than queued.
