@@ -13,14 +13,13 @@ use windows::Win32::Graphics::Direct2D::Common::{
 use windows::Win32::Graphics::Direct2D::{
     CLSID_D2D1ColorManagement, CLSID_D2D1Scale, CLSID_D2D1Shadow,
     D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_BITMAP_BRUSH_PROPERTIES1, D2D1_BITMAP_OPTIONS,
-    D2D1_BITMAP_OPTIONS_CANNOT_DRAW, D2D1_BITMAP_OPTIONS_CPU_READ, D2D1_BITMAP_OPTIONS_NONE,
-    D2D1_BITMAP_OPTIONS_TARGET, D2D1_BITMAP_PROPERTIES1, D2D1_BUFFER_PRECISION_32BPC_FLOAT,
-    D2D1_COLOR_SPACE, D2D1_COLOR_SPACE_SCRGB, D2D1_COLOR_SPACE_SRGB,
-    D2D1_COLORMANAGEMENT_PROP_DESTINATION_COLOR_CONTEXT, D2D1_COLORMANAGEMENT_PROP_QUALITY,
-    D2D1_COLORMANAGEMENT_PROP_SOURCE_COLOR_CONTEXT, D2D1_COLORMANAGEMENT_QUALITY_BEST,
-    D2D1_DEVICE_CONTEXT_OPTIONS_NONE, D2D1_EXTEND_MODE_CLAMP, D2D1_FACTORY_TYPE_SINGLE_THREADED,
-    D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC, D2D1_INTERPOLATION_MODE_LINEAR,
-    D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR, D2D1_MAP_OPTIONS_READ,
+    D2D1_BITMAP_OPTIONS_NONE, D2D1_BITMAP_OPTIONS_TARGET, D2D1_BITMAP_PROPERTIES1,
+    D2D1_BUFFER_PRECISION_32BPC_FLOAT, D2D1_COLOR_SPACE, D2D1_COLOR_SPACE_SCRGB,
+    D2D1_COLOR_SPACE_SRGB, D2D1_COLORMANAGEMENT_PROP_DESTINATION_COLOR_CONTEXT,
+    D2D1_COLORMANAGEMENT_PROP_QUALITY, D2D1_COLORMANAGEMENT_PROP_SOURCE_COLOR_CONTEXT,
+    D2D1_COLORMANAGEMENT_QUALITY_BEST, D2D1_DEVICE_CONTEXT_OPTIONS_NONE, D2D1_EXTEND_MODE_CLAMP,
+    D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC,
+    D2D1_INTERPOLATION_MODE_LINEAR, D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
     D2D1_PROPERTY_TYPE_COLOR_CONTEXT, D2D1_PROPERTY_TYPE_FLOAT, D2D1_PROPERTY_TYPE_VECTOR2,
     D2D1_PROPERTY_TYPE_VECTOR4, D2D1_ROUNDED_RECT, D2D1_SCALE_INTERPOLATION_MODE_LINEAR,
     D2D1_SCALE_PROP_BORDER_MODE, D2D1_SCALE_PROP_CENTER_POINT, D2D1_SCALE_PROP_INTERPOLATION_MODE,
@@ -191,42 +190,6 @@ fn convert(
         D2D1_COLORMANAGEMENT_QUALITY_BEST.0,
     )?;
     output(&e)
-}
-
-/// The bytes of `bitmap` (`bytes` per pixel), rows packed.
-fn read(
-    dc: &ID2D1DeviceContext,
-    bitmap: &ID2D1Bitmap1,
-    (w, h): (u32, u32),
-    format: DXGI_FORMAT,
-    bytes: usize,
-) -> Result<Vec<u8>> {
-    let size = D2D_SIZE_U {
-        width: w,
-        height: h,
-    };
-    let options = D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW;
-    // SAFETY: the mapped memory is read within `Map`/`Unmap`, row by row within `pitch × h`.
-    unsafe {
-        let copy = dc.CreateBitmap(
-            size,
-            None,
-            0,
-            &props(format, D2D1_ALPHA_MODE_PREMULTIPLIED, options),
-        )?;
-        copy.CopyFromBitmap(None, bitmap, None)?;
-        let mapped = copy.Map(D2D1_MAP_OPTIONS_READ)?;
-        let row = w as usize * bytes;
-        let mut out = Vec::with_capacity(row * h as usize);
-        for y in 0..h as usize {
-            out.extend_from_slice(std::slice::from_raw_parts(
-                mapped.bits.add(y * mapped.pitch as usize),
-                row,
-            ));
-        }
-        copy.Unmap()?;
-        Ok(out)
-    }
 }
 
 /// A Direct2D context on `d3d` (made with BGRA support).
@@ -469,7 +432,7 @@ pub fn set_on_card(
         Ok(())
     })?;
     if hdr {
-        let bytes = read(&dc, &composed, size, float, 16)?;
+        let bytes = crate::gfx::read_back(&composed, size, 16)?;
         return Ok(Set::Hdr(
             bytes
                 .as_chunks::<4>()
@@ -499,13 +462,7 @@ pub fn set_on_card(
         }
         Ok(())
     })?;
-    Ok(Set::Sdr(read(
-        &dc,
-        &out,
-        size,
-        DXGI_FORMAT_B8G8R8A8_UNORM,
-        4,
-    )?))
+    Ok(Set::Sdr(crate::gfx::read_back(&out, size, 4)?))
 }
 
 #[cfg(test)]

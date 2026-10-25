@@ -15,23 +15,25 @@ use windows::Win32::Graphics::Direct2D::Common::{
     D2D1_PIXEL_FORMAT,
 };
 use windows::Win32::Graphics::Direct2D::{
-    CLSID_D2D1Shadow, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
-    D2D1_BITMAP_OPTIONS_CPU_READ, D2D1_BITMAP_OPTIONS_NONE, D2D1_BITMAP_OPTIONS_TARGET,
-    D2D1_BITMAP_PROPERTIES1, D2D1_DEVICE_CONTEXT_OPTIONS_NONE, D2D1_DRAW_TEXT_OPTIONS_NONE,
-    D2D1_ELLIPSE, D2D1_EXTEND_MODE_CLAMP, D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_GAMMA_2_2,
-    D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC, D2D1_INTERPOLATION_MODE_LINEAR,
-    D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR, D2D1_LAYER_OPTIONS1_NONE, D2D1_LAYER_PARAMETERS1,
-    D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES, D2D1_MAP_OPTIONS_READ, D2D1_PROPERTY_TYPE_FLOAT,
-    D2D1_PROPERTY_TYPE_VECTOR4, D2D1_ROUNDED_RECT, D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION,
-    D2D1_SHADOW_PROP_COLOR, D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, D2D1CreateFactory, ID2D1Bitmap1,
-    ID2D1Brush, ID2D1Device, ID2D1DeviceContext, ID2D1Factory1, ID2D1Geometry, ID2D1Image,
-    ID2D1Layer, ID2D1PathGeometry, ID2D1RenderTarget, ID2D1SolidColorBrush,
+    CLSID_D2D1Shadow, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_BITMAP_OPTIONS_NONE,
+    D2D1_BITMAP_OPTIONS_TARGET, D2D1_BITMAP_PROPERTIES1, D2D1_DEVICE_CONTEXT_OPTIONS_NONE,
+    D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_ELLIPSE, D2D1_EXTEND_MODE_CLAMP,
+    D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_GAMMA_2_2, D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC,
+    D2D1_INTERPOLATION_MODE_LINEAR, D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
+    D2D1_LAYER_OPTIONS1_NONE, D2D1_LAYER_PARAMETERS1, D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES,
+    D2D1_PROPERTY_TYPE_FLOAT, D2D1_PROPERTY_TYPE_VECTOR4, D2D1_ROUNDED_RECT,
+    D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION, D2D1_SHADOW_PROP_COLOR,
+    D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, D2D1CreateFactory, ID2D1Bitmap1, ID2D1Brush, ID2D1Device,
+    ID2D1DeviceContext, ID2D1Factory1, ID2D1Geometry, ID2D1Image, ID2D1Layer, ID2D1PathGeometry,
+    ID2D1RenderTarget, ID2D1SolidColorBrush,
 };
 use windows::Win32::Graphics::Direct3D::{
     D3D_DRIVER_TYPE, D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP,
 };
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION, D3D11CreateDevice, ID3D11Device,
+    D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAP_READ,
+    D3D11_MAPPED_SUBRESOURCE, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
+    D3D11CreateDevice, ID3D11Device, ID3D11Texture2D,
 };
 use windows::Win32::Graphics::DirectComposition::{
     DCompositionCreateDevice2, IDCompositionDesktopDevice, IDCompositionSurface,
@@ -665,25 +667,48 @@ impl Gfx {
             dc.EndDraw(None, None)?;
             dc.SetTarget(None::<&ID2D1Image>);
             drawn?;
-            let read = dc.CreateBitmap(
-                size,
-                None,
-                0,
-                &props(D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW),
-            )?;
-            read.CopyFromBitmap(None, &target, None)?;
-            let mapped = read.Map(D2D1_MAP_OPTIONS_READ)?;
-            let mut out = Vec::with_capacity(w as usize * h as usize * 4);
-            for row in 0..h as usize {
-                let line = std::slice::from_raw_parts(
-                    mapped.bits.add(row * mapped.pitch as usize),
-                    w as usize * 4,
-                );
-                out.extend_from_slice(line);
-            }
-            read.Unmap()?;
-            Ok(out)
+            read_back(&target, (w, h), 4)
         }
+    }
+}
+
+/// The pixels of `bitmap` (`bytes` per pixel), rows packed. Read through Direct3D, whose `Map`
+/// waits for the copy: Direct2D's could hand over rows the copy had not written yet (seen on
+/// the software renderer under load).
+pub(crate) fn read_back(
+    bitmap: &ID2D1Bitmap1,
+    (w, h): (u32, u32),
+    bytes: usize,
+) -> Result<Vec<u8>> {
+    // SAFETY: a staging copy of the bitmap's own texture, on its device; the mapped memory is
+    // read within `Map`/`Unmap`, row by row within `RowPitch × h`.
+    unsafe {
+        let texture: ID3D11Texture2D = bitmap.GetSurface()?.cast()?;
+        let device = texture.GetDevice()?;
+        let context = device.GetImmediateContext()?;
+        let mut desc = D3D11_TEXTURE2D_DESC::default();
+        texture.GetDesc(&mut desc);
+        desc.Usage = D3D11_USAGE_STAGING;
+        desc.BindFlags = 0;
+        desc.MiscFlags = 0;
+        desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
+        let mut staging = None;
+        device.CreateTexture2D(&desc, None, Some(&raw mut staging))?;
+        let staging = staging
+            .ok_or_else(|| windows::core::Error::from(windows::Win32::Foundation::E_FAIL))?;
+        context.CopyResource(&staging, &texture);
+        let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+        context.Map(&staging, 0, D3D11_MAP_READ, 0, Some(&raw mut mapped))?;
+        let row = w as usize * bytes;
+        let mut out = Vec::with_capacity(row * h as usize);
+        for y in 0..h as usize {
+            out.extend_from_slice(std::slice::from_raw_parts(
+                mapped.pData.cast::<u8>().add(y * mapped.RowPitch as usize),
+                row,
+            ));
+        }
+        context.Unmap(&staging, 0);
+        Ok(out)
     }
 }
 
