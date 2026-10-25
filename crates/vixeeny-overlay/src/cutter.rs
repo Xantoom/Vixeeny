@@ -19,12 +19,15 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use vixeeny_platform::PhysicalRect;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows::Win32::Graphics::Direct2D::Common::D2D_RECT_F;
 use windows::Win32::Graphics::Direct2D::ID2D1Bitmap1;
-use windows::Win32::Graphics::DirectComposition::{IDCompositionSurface, IDCompositionVisual2};
+use windows::Win32::Graphics::DirectComposition::{
+    IDCompositionEffectGroup, IDCompositionRectangleClip, IDCompositionSurface, IDCompositionVisual2,
+};
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, ReleaseCapture, SetCapture, VK_CONTROL, VK_SHIFT};
 use windows::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, GetWindowRect, HTCAPTION, HTCLIENT, MSG, MWMO_INPUTAVAILABLE, MsgWaitForMultipleObjectsEx,
@@ -37,7 +40,7 @@ use windows::core::Result;
 use crate::gfx::{Align, Canvas, Gfx, rect};
 use crate::icons;
 use crate::popup::{self, Popup};
-use crate::scene::{self, Piece};
+use crate::scene::{self, Glow, Piece};
 use crate::side::Box2;
 use crate::theme::{Look, Rgba, Theme};
 use crate::window::Pointer;
@@ -84,6 +87,17 @@ const SHADOW: f32 = 16.0;
 const SNAP: f32 = 8.0;
 /// The narrowest window: the export row in one line.
 const MIN_W: f32 = 940.0;
+
+// The motions, seconds.
+/// The window coming, from a little lower.
+const OPEN: f64 = 0.18;
+/// A list coming out of its button, a tooltip coming or going to another button, a row of a list lit after another.
+const LIST_IN: f64 = 0.1;
+const TIP_MOVE: f64 = 0.1;
+const ROW_MOVE: f64 = 0.1;
+/// The playhead going where the strip was clicked.
+const GLIDE: f64 = 0.12;
+const THUMB_IN: f64 = 0.2;
 
 /// What a copy is made as: the clip as it is.
 pub const ORIGINAL: &str = "original";
@@ -631,7 +645,6 @@ struct BottomLook {
     state: CutState,
     hover: Target,
     held: Option<Target>,
-    thumbs: usize,
     /// `None`: nothing to choose (no options given).
     export: Option<ExportLook>,
     menu: Option<MenuKind>,
@@ -660,7 +673,30 @@ struct MenuLook {
     first: usize,
     total: usize,
     selected: Option<usize>,
-    hover: Option<usize>,
+}
+
+/// What a lit part shows: the band it is in, drawn as hovered or held.
+#[derive(Debug, Clone, PartialEq)]
+enum GlowLook {
+    Title(TitleLook),
+    Bottom(BottomLook),
+}
+
+/// The parts lit under the pointer (the others do not change under it).
+const fn lights(target: Target, busy: bool) -> bool {
+    match target {
+        Target::Minimise
+        | Target::Close
+        | Target::Previous
+        | Target::Play
+        | Target::Next
+        | Target::Mute
+        | Target::From
+        | Target::To
+        | Target::SaveAs => true,
+        Target::Preset | Target::Codec | Target::Height | Target::Fps | Target::Save => !busy,
+        _ => false,
+    }
 }
 
 /// A press being dragged.
@@ -701,8 +737,22 @@ struct Inner {
     layout: Layout,
     frames: Frames,
     texts: CutterTexts,
+    /// The window's content, to fade it in.
+    fade: IDCompositionEffectGroup,
     title: Piece<TitleLook>,
     bottom: Piece<BottomLook>,
+    /// The part under the pointer, and what it showed lit (hovered, held), for [`Inner::flash`].
+    glow: Glow<Target, GlowLook>,
+    lit: Cell<(Target, Option<Target>)>,
+    /// The export row as it was, fading out over what it becomes (writing starts or ends).
+    flash: Piece<BottomLook>,
+    /// The share written, its end moved by a clip; and the move it makes now: when it started, from, to, how long.
+    fill: Piece<()>,
+    fill_clip: IDCompositionRectangleClip,
+    fill_move: Cell<Option<(Instant, f32, f32, f64)>>,
+    /// Play and pause, one fading into the other.
+    play_icon: Piece<()>,
+    pause_icon: Piece<()>,
     tip: Piece<String>,
     /// The size of the tooltip last measured, for its text.
     tip_size: RefCell<Option<(String, TipSize)>>,
@@ -710,10 +760,19 @@ struct Inner {
     clock: Piece<usize>,
     playhead: Piece<()>,
     list: Piece<MenuLook>,
+    list_open: Cell<bool>,
+    /// The light of the row under the pointer or the arrows, in the list; the first row shown when it was lit.
+    row: Piece<()>,
+    row_first: Cell<Option<usize>>,
+    /// The playhead goes to its next place gliding (a click on the strip, Home, End).
+    glide: Cell<bool>,
     video: IDCompositionVisual2,
     video_surface: RefCell<Option<(IDCompositionSurface, (u32, u32))>>,
     frame: RefCell<Option<(ID2D1Bitmap1, (u32, u32))>>,
-    thumbs: RefCell<Vec<Option<ID2D1Bitmap1>>>,
+    /// Under the bottom bands, seen through the strip: its background and the thumbnails, each fading in.
+    under: IDCompositionVisual2,
+    _under_back: IDCompositionVisual2,
+    thumbs: RefCell<Vec<Option<Piece<()>>>>,
     state: Cell<CutState>,
     options: RefCell<ExportOptions>,
     choice: RefCell<ExportChoice>,
@@ -1055,8 +1114,14 @@ impl Inner {
             0x25 => self.step(if shift() { -second } else { -1 }),
             0x27 => self.step(if shift() { second } else { 1 }),
             // Home, End: the start and the end of the part.
-            0x24 => self.seek(s.from),
-            0x23 => self.seek(s.to),
+            0x24 => {
+                self.glide.set(true);
+                self.seek(s.from);
+            }
+            0x23 => {
+                self.glide.set(true);
+                self.seek(s.to);
+            }
             // I, O: the part starts or ends at the playhead.
             0x49 => self.set_state(|s| s.from = s.position.min(s.to)),
             0x4f => self.set_state(|s| s.to = s.position.max(s.from)),
@@ -1171,7 +1236,10 @@ impl Inner {
                 }
                 self.press.set(Some(at));
                 let drag = match at {
-                    Target::Strip => Some(Drag::Playhead),
+                    Target::Strip => {
+                        self.glide.set(true);
+                        Some(Drag::Playhead)
+                    }
                     Target::From if !self.busy() => Some(Drag::From),
                     Target::To if !self.busy() => Some(Drag::To),
                     Target::Volume => Some(Drag::Volume),
@@ -1245,7 +1313,6 @@ impl Inner {
             first: menu.scroll,
             total: items.len(),
             items: items.into_iter().skip(menu.scroll).take(m.rows).collect(),
-            hover: menu.hover,
         };
         Some((look, (m.r.0 - SHADOW, m.r.1 - SHADOW)))
     }
@@ -1253,12 +1320,15 @@ impl Inner {
     fn draw(&self) -> Result<()> {
         let u = self.u;
         let layout = self.layout;
+        let gfx = &self.gfx;
+        let motion = self.theme.animations;
         let hover = self.hover.get();
         let held = self.press.get().filter(|p| *p == hover);
         let w = (layout.w * u).round() as u32;
-        let title = TitleLook { hover, held };
+        // The bands are drawn as nothing is under the pointer: what is lit is a layer of its own ([`Inner::light`]).
+        let title = TitleLook { hover: Target::None, held: None };
         self.title.show(
-            &self.gfx,
+            gfx,
             &title,
             || Ok((w, (TITLE_H * u).ceil() as u32)),
             |c| paint_title(c, &self.theme, u, &layout, &self.texts.title, &title),
@@ -1268,44 +1338,60 @@ impl Inner {
         // whole bands.
         let look = BottomLook {
             state: CutState { position: 0, ..state },
-            hover,
-            held,
-            thumbs: self.thumbs.borrow().iter().filter(|t| t.is_some()).count(),
+            hover: Target::None,
+            held: None,
             export: self.export_look(),
             menu: self.menu.borrow().as_ref().map(|m| m.kind),
             limit: self.limit.get(),
         };
-        let thumbs = self.thumbs.borrow();
+        let before = self.bottom.look.borrow().clone();
+        if let Some(before) = before.filter(|b| b.state.progress.is_some() != state.progress.is_some()) {
+            self.flash(before)?;
+        }
         self.bottom.show(
-            &self.gfx,
+            gfx,
             &look,
             || Ok((w, (BOTTOM_H * u).ceil() as u32)),
-            |c| paint_bottom(c, &self.theme, u, &layout, &self.frames, &self.texts, &look, &thumbs),
+            |c| paint_bottom(c, &self.theme, u, &layout, &self.frames, &self.texts, &look),
         )?;
-        drop(thumbs);
+        self.show_fill(state.progress)?;
+        self.light(hover, held, &look)?;
+        self.play_icon.fade(gfx, if state.playing { 0.0 } else { 1.0 }, motion)?;
+        self.pause_icon.fade(gfx, if state.playing { 1.0 } else { 0.0 }, motion)?;
         self.clock.show(
-            &self.gfx,
+            gfx,
             &state.position,
             || Ok(clock_size(u)),
             |c| paint_clock(c, &self.theme, u, &self.frames, state.position, (0.0, 0.0)),
         )?;
         let (cx, cy) = clock_at(&layout);
         self.clock.move_to((cx * u).round(), (cy * u).round())?;
-        self.playhead.show(
-            &self.gfx,
-            &(),
-            || Ok(playhead_size(u)),
-            |c| paint_playhead(c, &self.theme, u, (0.0, 0.0)),
-        )?;
+        self.playhead.show(gfx, &(), || Ok(playhead_size(u)), |c| paint_playhead(c, &self.theme, u, (0.0, 0.0)))?;
         let (px, py) = playhead_at(&layout, &self.frames, state.position);
-        self.playhead.move_to((px * u).round(), (py * u).round())?;
+        let (px, py) = ((px * u).round(), (py * u).round());
+        if self.glide.take() {
+            self.playhead.glide_to(gfx, px, py, GLIDE, motion)?;
+        } else {
+            self.playhead.move_to(px, py)?;
+        }
         match self.menu_look() {
             Some((look, (mx, my))) => {
                 let size = (((look.w + 2.0 * SHADOW) * u).ceil() as u32, ((look.h + 2.0 * SHADOW) * u).ceil() as u32);
-                self.list.show(&self.gfx, &look, || Ok(size), |c| paint_menu(c, &self.theme, u, &look))?;
+                self.list.show(gfx, &look, || Ok(size), |c| paint_menu(c, &self.theme, u, &look))?;
                 self.list.move_to((mx * u).round(), (my * u).round())?;
+                let opening = !self.list_open.replace(true);
+                if opening {
+                    // Out of its button, under it.
+                    self.list.appear(gfx, 4.0 * u, LIST_IN, motion)?;
+                    self.row_first.set(None);
+                }
+                self.light_row(&look)?;
             }
-            None => self.list.hide()?,
+            None => {
+                if self.list_open.replace(false) {
+                    self.list.fade(gfx, 0.0, motion)?;
+                }
+            }
         }
         // The tooltip of what is under the pointer, above it.
         match self.tip_text(hover).filter(|_| self.drag.get().is_none()) {
@@ -1316,29 +1402,199 @@ impl Inner {
                 let (size, bubble) = match cached {
                     Some(m) => m,
                     None => {
-                        let m = crate::paint::tip_size(&self.gfx, u, &text)?;
+                        let m = crate::paint::tip_size(gfx, u, &text)?;
                         *self.tip_size.borrow_mut() = Some((text.clone(), m));
                         m
                     }
                 };
-                self.tip.show(
-                    &self.gfx,
-                    &text,
-                    || Ok(size),
-                    |c| crate::paint::tip(c, &self.theme, u, &text, bubble),
-                )?;
+                self.tip.show(gfx, &text, || Ok(size), |c| crate::paint::tip(c, &self.theme, u, &text, bubble))?;
                 let (bx, by, bw, bh) = layout.part(hover);
                 let m = crate::paint::TIP_MARGIN * u;
                 let tx =
                     ((bx + bw / 2.0) * u - size.0 as f32 / 2.0).clamp(0.0, (layout.w * u - size.0 as f32).max(0.0));
                 // Under the title's buttons, above the others.
                 let ty = if by < TITLE_H { (by + bh) * u - m + 4.0 * u } else { by * u - bubble.1 - m - 4.0 * u };
-                self.tip.move_to(tx.round(), ty.round())?;
+                if self.tip.glide_to(gfx, tx.round(), ty.round(), TIP_MOVE, motion)? {
+                    self.tip.appear(gfx, 0.0, TIP_MOVE, motion)?;
+                }
             }
             None => self.tip.hide()?,
         }
         // SAFETY: plain call.
-        unsafe { self.gfx.dcomp.Commit() }
+        unsafe { gfx.dcomp.Commit() }
+    }
+
+    /// The pixels of the window covering the logical box `(x, y, w, h)` and a pixel around it: where, how big.
+    fn px_box(&self, (x, y, w, h): Box2) -> (f32, f32, u32, u32) {
+        let u = self.u;
+        let (gx, gy) = (((x - 1.0) * u).floor(), ((y - 1.0) * u).floor());
+        (gx, gy, (((x + w + 1.0) * u).ceil() - gx) as u32, (((y + h + 1.0) * u).ceil() - gy) as u32)
+    }
+
+    /// Where the bottom bands' surface is, window pixels.
+    fn bottom_y(&self) -> f32 {
+        (self.layout.bottom * self.u).round()
+    }
+
+    /// Lights the part under the pointer: it drawn again hovered or held, over the bands, fading in and out.
+    fn light(&self, hover: Target, held: Option<Target>, bottom: &BottomLook) -> Result<()> {
+        let u = self.u;
+        let l = &self.layout;
+        let motion = self.theme.animations;
+        if !lights(hover, bottom.state.progress.is_some()) {
+            self.lit.set((Target::None, None));
+            return self.glow.set(&self.gfx, None, || Ok((1, 1)), |_| Ok(()), motion);
+        }
+        self.lit.set((hover, held));
+        let part = match hover {
+            Target::From | Target::To => l.handle(&self.frames, &bottom.state, hover),
+            _ => l.part(hover),
+        };
+        let (gx, gy, sw, sh) = self.px_box(part);
+        let (look, origin) = if part.1 < TITLE_H {
+            (GlowLook::Title(TitleLook { hover, held }), 0.0)
+        } else {
+            (GlowLook::Bottom(BottomLook { hover, held, ..bottom.clone() }), self.bottom_y())
+        };
+        let clip = rect(0.0, 0.0, sw as f32, sh as f32);
+        self.glow.set(
+            &self.gfx,
+            Some((hover, &look, (gx, gy))),
+            || Ok((sw, sh)),
+            |c| {
+                c.part(clip, (-gx, origin - gy), |c| match &look {
+                    GlowLook::Title(t) => paint_title(c, &self.theme, u, l, &self.texts.title, t),
+                    GlowLook::Bottom(b) => paint_bottom(c, &self.theme, u, l, &self.frames, &self.texts, b),
+                })
+            },
+            motion,
+        )
+    }
+
+    /// The export row as `before` showed it (and what was lit in it), over what it becomes, fading out.
+    fn flash(&self, before: BottomLook) -> Result<()> {
+        let l = &self.layout;
+        let u = self.u;
+        let (lit, held) = self.lit.get();
+        let old = BottomLook { hover: lit, held, ..before };
+        let (gx, gy, sw, sh) = self.px_box((PAD + 1.0, l.export() + 1.0, l.w - 2.0 * PAD - 2.0, EXPORT_H - 2.0));
+        let origin = self.bottom_y();
+        let clip = rect(0.0, 0.0, sw as f32, sh as f32);
+        self.flash.show(
+            &self.gfx,
+            &old,
+            || Ok((sw, sh)),
+            |c| {
+                c.part(clip, (-gx, origin - gy), |c| {
+                    paint_bottom(c, &self.theme, u, l, &self.frames, &self.texts, &old)?;
+                    match old.state.progress {
+                        Some(p) => {
+                            let r = progress_rect(l, u);
+                            c.fill_round(
+                                rect(r.left, r.top, (r.right - r.left) * p.clamp(0.0, 1.0), r.bottom - r.top),
+                                3.0 * u,
+                                self.theme.accent,
+                            )
+                        }
+                        None => Ok(()),
+                    }
+                })
+            },
+        )?;
+        self.flash.move_to(gx, gy)?;
+        self.flash.fade(&self.gfx, 1.0, false)?;
+        self.flash.fade(&self.gfx, 0.0, self.theme.animations)
+    }
+
+    /// The share written (`None`: not writing), its end going on at the pace the shares come.
+    fn show_fill(&self, progress: Option<f32>) -> Result<()> {
+        let Some(p) = progress else {
+            self.fill_move.set(None);
+            return self.fill.hide();
+        };
+        let u = self.u;
+        let r = progress_rect(&self.layout, u);
+        let origin = self.bottom_y();
+        let (gx, gy) = (r.left.floor(), (origin + r.top).floor());
+        let (lx, ly) = (r.left - gx, origin + r.top - gy);
+        let (bw, bh) = (r.right - r.left, r.bottom - r.top);
+        let size = ((lx + bw).ceil() as u32 + 1, (ly + bh).ceil() as u32 + 1);
+        self.fill.show(
+            &self.gfx,
+            &(),
+            || Ok(size),
+            |c| c.fill_round(rect(lx, ly, bw, bh), 3.0 * u, self.theme.accent),
+        )?;
+        let shown = !self.fill.move_to(gx, gy)?;
+        let to = lx + bw * p.clamp(0.0, 1.0);
+        let now = Instant::now();
+        let clip = &self.fill_clip;
+        match self.fill_move.get() {
+            Some((_, _, target, _)) if target == to => {}
+            Some((start, from, target, seconds)) if shown && self.theme.animations => {
+                let since = now.duration_since(start).as_secs_f64();
+                let at = from + (target - from) * (since / seconds).min(1.0) as f32;
+                // As long as the last share took: the bar moves on evenly until the next.
+                let seconds = since.clamp(0.05, 0.5);
+                // SAFETY: plain property call with an animation of the same device.
+                unsafe { clip.SetRight(&scene::linear(&self.gfx, at, to, seconds)?)? };
+                self.fill_move.set(Some((now, at, to, seconds)));
+            }
+            _ => {
+                // SAFETY: plain property calls.
+                unsafe {
+                    clip.SetTop2(ly)?;
+                    clip.SetBottom2(ly + bh)?;
+                    clip.SetRight2(to)?;
+                }
+                self.fill_move.set(Some((now, to, to, 0.05)));
+            }
+        }
+        Ok(())
+    }
+
+    /// Lights the row of the open list under the pointer or the arrows, gliding from the row lit before.
+    fn light_row(&self, look: &MenuLook) -> Result<()> {
+        let u = self.u;
+        let hover = self.menu.borrow().as_ref().and_then(|m| m.hover);
+        let Some(k) = hover.and_then(|h| h.checked_sub(look.first)).filter(|k| *k < look.items.len()) else {
+            return self.row.hide();
+        };
+        let (rw, rh) = ((look.w - 8.0) * u, ITEM_H * u);
+        self.row.show(
+            &self.gfx,
+            &(),
+            || Ok((rw.ceil() as u32, rh.ceil() as u32)),
+            |c| c.fill_round(rect(0.0, 0.0, rw, rh), 4.0 * u, self.theme.subtle_hover),
+        )?;
+        let (x, y) = ((SHADOW + 4.0) * u, (SHADOW + MENU_PAD + look.search_h + k as f32 * ITEM_H) * u);
+        // A list scrolled moves its rows at once: the light goes with them.
+        let glide = self.row_first.replace(Some(look.first)) == Some(look.first);
+        let motion = glide && self.theme.animations;
+        if self.row.glide_to(&self.gfx, x.round(), y.round(), ROW_MOVE, motion)? {
+            self.row.appear(&self.gfx, 0.0, ROW_MOVE, motion)?;
+        }
+        Ok(())
+    }
+
+    /// Puts thumbnail `slot` of `n` (`w`×`h` BGRA pixels) under the strip, fading in.
+    fn set_thumbnail(&self, slot: usize, n: usize, (w, h): (u32, u32), bgra: &[u8]) -> Result<()> {
+        let u = self.u;
+        let bitmap = self.gfx.bgra_bitmap(w, h, bgra)?;
+        let piece = Piece::new(&self.gfx, true)?;
+        piece.show(&self.gfx, &(), || Ok((w, h)), |c| c.picture(&bitmap, rect(0.0, 0.0, w as f32, h as f32)))?;
+        scene::add(&self.under, &piece.visual)?;
+        let (x, y, sw, _) = self.layout.part(Target::Strip);
+        let x = (x + sw / n as f32 * slot as f32) * u;
+        piece.move_to(x.round(), ((y - self.layout.bottom) * u).round())?;
+        piece.appear(&self.gfx, 0.0, THUMB_IN, self.theme.animations)?;
+        let mut thumbs = self.thumbs.borrow_mut();
+        thumbs.resize_with(n, || None);
+        if let Some(old) = thumbs.get_mut(slot).and_then(|t| t.replace(piece)) {
+            // SAFETY: a child of this visual.
+            unsafe { self.under.RemoveVisual(&old.visual)? };
+        }
+        Ok(())
     }
 
     /// Draws `bgra` (`w`×`h`) in the video's card.
@@ -1486,7 +1742,8 @@ fn paint_playhead(c: &Canvas<'_>, t: &Theme, u: f32, (x, y): (f32, f32)) -> Resu
     c.fill_circle(cx, y + 5.0 * u, 5.0 * u, t.text)
 }
 
-#[expect(clippy::too_many_arguments, reason = "the painting state of one frame, read once")]
+/// The bottom bands: the strip left transparent for the thumbnails under it, the play button empty for its icons over
+/// it.
 fn paint_bottom(
     c: &Canvas<'_>,
     t: &Theme,
@@ -1495,7 +1752,6 @@ fn paint_bottom(
     frames: &Frames,
     texts: &CutterTexts,
     look: &BottomLook,
-    thumbs: &[Option<ID2D1Bitmap1>],
 ) -> Result<()> {
     let s = look.state;
     let top = l.bottom;
@@ -1530,7 +1786,6 @@ fn paint_bottom(
     back(Target::Next, 6.0)?;
     icon_in(icons::NEXT, Target::Next, 18.0, t.text)?;
     back(Target::Play, 6.0)?;
-    icon_in(if s.playing { icons::PAUSE_FILLED } else { icons::PLAY_FILLED }, Target::Play, 18.0, t.text)?;
 
     back(Target::Mute, 6.0)?;
     let silent = s.muted || s.volume == 0.0;
@@ -1567,17 +1822,8 @@ fn paint_bottom(
     // ---- the timeline: thumbnails, the part kept between its handles, the key frames
     let strip = at(l.part(Target::Strip));
     let (sw, sh) = (strip.right - strip.left, strip.bottom - strip.top);
-    c.fill_round(strip, 6.0 * u, t.bg_deep)?;
+    c.punch_round(strip, 6.0 * u)?;
     c.push_round_clip(strip, 6.0 * u)?;
-    if !thumbs.is_empty() {
-        let slot = sw / thumbs.len() as f32;
-        for (i, thumb) in thumbs.iter().enumerate() {
-            if let Some(bitmap) = thumb {
-                let x = strip.left + slot * i as f32;
-                c.picture(bitmap, rect(x, strip.top, slot.ceil() + 1.0, sh))?;
-            }
-        }
-    }
     let x_from = l.x_of(frames, frames.time(s.from)) * u;
     let x_to = l.x_of(frames, frames.time(s.to) + frames.frame()) * u;
     let veil = Rgba::hex(0x000000, 0x99);
@@ -1611,14 +1857,8 @@ fn paint_bottom(
     // ---- the export: what the copy is made as (the bar of the writing in its place), save as, save
     let busy = s.progress.is_some();
     match (s.progress, &look.export) {
-        (Some(p), _) => {
-            let from = at(l.part(Target::Preset));
-            let until = at(l.part(Target::SaveAs));
-            let mid = f32::midpoint(from.top, from.bottom);
-            let r = rect(from.left, mid - 3.0 * u, (until.left - 16.0 * u - from.left).max(0.0), 6.0 * u);
-            c.fill_round(r, 3.0 * u, t.control_stroke)?;
-            c.fill_round(rect(r.left, r.top, (r.right - r.left) * p.clamp(0.0, 1.0), 6.0 * u), 3.0 * u, t.accent)?;
-        }
+        // The share written is a layer of its own, over the track.
+        (Some(_), _) => c.fill_round(progress_rect(l, u), 3.0 * u, t.control_stroke)?,
         (None, Some(export)) => {
             // The preset as a button; the values it sets quieter, framed only under the pointer.
             let dropdown = |target: Target, mark: &Mark, label: &str| -> Result<()> {
@@ -1686,6 +1926,23 @@ fn paint_bottom(
     c.text(&texts.save, r, 14.0 * u, colour, Align::Centre)
 }
 
+/// The bar of the writing in the place of the export's lists, pixels of the bottom bands' surface.
+fn progress_rect(l: &Layout, u: f32) -> D2D_RECT_F {
+    let (fx, fy, _, fh) = l.part(Target::Preset);
+    let (sx, ..) = l.part(Target::SaveAs);
+    let mid = fy + fh / 2.0 - l.bottom;
+    rect(fx * u, (mid - 3.0) * u, ((sx - 16.0 - fx) * u).max(0.0), 6.0 * u)
+}
+
+/// Where the icon of the play button goes, window pixels, and the size of its surface: a pixel around it.
+fn play_icon_at(l: &Layout, u: f32) -> ((f32, f32), (f32, f32), u32) {
+    let (x, y, w, h) = l.part(Target::Play);
+    let (cx, cy) = ((x + w / 2.0) * u, (y + h / 2.0) * u);
+    let i = 18.0 * u;
+    let (gx, gy) = ((cx - i / 2.0).floor() - 1.0, (cy - i / 2.0).floor() - 1.0);
+    ((gx, gy), (cx - i / 2.0 - gx, cy - i / 2.0 - gy), (i.ceil() + 3.0) as u32)
+}
+
 /// An open list, its surface's room for the shadow around it: the search field, then the rows, the chosen one marked as
 /// Windows 11 marks it.
 fn paint_menu(c: &Canvas<'_>, t: &Theme, u: f32, look: &MenuLook) -> Result<()> {
@@ -1731,9 +1988,8 @@ fn paint_menu(c: &Canvas<'_>, t: &Theme, u: f32, look: &MenuLook) -> Result<()> 
         if k > 0 && look.items[k - 1].group != item.group {
             c.fill_rect(rect(row.left + 8.0 * u, row.top, row.right - row.left - 16.0 * u, 1.0), t.divider)?;
         }
-        if look.hover == Some(i) {
-            c.fill_round(row, 4.0 * u, t.subtle_hover)?;
-        } else if look.selected == Some(i) {
+        // The row under the pointer is lit by a layer of its own.
+        if look.selected == Some(i) {
             c.fill_round(row, 4.0 * u, t.selected)?;
         }
         if look.selected == Some(i) {
@@ -1783,36 +2039,101 @@ impl Cutter {
         let u = dpi.max(48) as f32 / 96.0;
         let popup = Popup::new_window(&gfx, geometry, &texts.title)?;
         let layout = Layout::new(geometry.width as f32 / u, geometry.height as f32 / u, frames.aspect);
+        let theme = Theme::new(look);
+        let root = &popup.root;
+        // SAFETY: plain creation and property calls; the content comes in when the window is shown.
+        let fade = unsafe {
+            let e = gfx.dcomp.CreateEffectGroup()?;
+            if theme.animations {
+                e.SetOpacity2(0.0)?;
+            }
+            root.SetEffect(&e)?;
+            e
+        };
+        let bottom_y = (layout.bottom * u).round();
         let video = scene::visual(&gfx)?;
+        scene::add(root, &video)?;
+        // Under the bands, seen through the strip.
+        let under = scene::visual(&gfx)?;
+        scene::add(root, &under)?;
+        scene::set_offset(&under, 0.0, bottom_y)?;
+        let under_back = scene::solid_visual(&gfx, &crate::gfx::solid(&gfx, theme.bg_deep)?)?;
+        scene::add(&under, &under_back)?;
+        let (sx, sy, sw, sh) = layout.part(Target::Strip);
+        scene::place(&under_back, (sx * u, (sy - layout.bottom) * u, sw * u, sh * u))?;
         let title = Piece::new(&gfx, false)?;
         let bottom = Piece::new(&gfx, false)?;
-        let tip = Piece::new(&gfx, false)?;
-        let clock = Piece::new(&gfx, false)?;
-        let playhead = Piece::new(&gfx, false)?;
-        let list = Piece::new(&gfx, false)?;
-        for v in [&video, &title.visual, &bottom.visual, &playhead.visual, &clock.visual, &list.visual, &tip.visual] {
-            scene::add(&popup.root, v)?;
+        let fill = Piece::new(&gfx, false)?;
+        for v in [&title.visual, &bottom.visual, &fill.visual] {
+            scene::add(root, v)?;
         }
+        // SAFETY: plain creation and property calls; the clip's ends are set with the bar.
+        let fill_clip = unsafe {
+            let clip = gfx.dcomp.CreateRectangleClip()?;
+            clip.SetTopRightRadiusX2(3.0 * u)?;
+            clip.SetTopRightRadiusY2(3.0 * u)?;
+            clip.SetBottomRightRadiusX2(3.0 * u)?;
+            clip.SetBottomRightRadiusY2(3.0 * u)?;
+            fill.visual.SetClip(&clip)?;
+            clip
+        };
+        let glow = Glow::new(&gfx, root)?;
+        let flash = Piece::new(&gfx, true)?;
+        let play_icon = Piece::new(&gfx, true)?;
+        let pause_icon = Piece::new(&gfx, true)?;
+        let playhead = Piece::new(&gfx, false)?;
+        let clock = Piece::new(&gfx, false)?;
+        let list = Piece::new(&gfx, true)?;
+        let tip = Piece::new(&gfx, true)?;
+        for v in [&flash.visual, &play_icon.visual, &pause_icon.visual, &playhead.visual, &clock.visual] {
+            scene::add(root, v)?;
+        }
+        for v in [&list.visual, &tip.visual] {
+            scene::add(root, v)?;
+        }
+        let row = Piece::new(&gfx, true)?;
+        scene::add(&list.visual, &row.visual)?;
         title.move_to(0.0, 0.0)?;
-        bottom.move_to(0.0, (layout.bottom * u).round())?;
+        bottom.move_to(0.0, bottom_y)?;
+        let ((ix, iy), (dx, dy), size) = play_icon_at(&layout, u);
+        for (piece, data) in [(&play_icon, icons::PLAY_FILLED), (&pause_icon, icons::PAUSE_FILLED)] {
+            piece.show(&gfx, &(), || Ok((size, size)), |c| c.icon(data, dx, dy, 18.0 * u, theme.text))?;
+            piece.move_to(ix, iy)?;
+        }
+        pause_icon.fade(&gfx, 0.0, false)?;
         let last = frames.len().saturating_sub(1);
         let inner = Rc::new(Inner {
-            theme: Theme::new(look),
+            theme,
             gfx,
             u,
             popup,
             layout,
             texts,
+            fade,
             title,
             bottom,
+            glow,
+            lit: Cell::new((Target::None, None)),
+            flash,
+            fill,
+            fill_clip,
+            fill_move: Cell::new(None),
+            play_icon,
+            pause_icon,
             tip,
             tip_size: RefCell::default(),
             clock,
             playhead,
             list,
+            list_open: Cell::new(false),
+            row,
+            row_first: Cell::new(None),
+            glide: Cell::new(false),
             video,
             video_surface: RefCell::default(),
             frame: RefCell::default(),
+            under,
+            _under_back: under_back,
             thumbs: RefCell::default(),
             state: Cell::new(CutState {
                 position: 0,
@@ -1866,15 +2187,10 @@ impl Cutter {
 
     pub fn set_thumbnail(&self, slot: usize, w: u32, h: u32, bgra: &[u8]) {
         let (n, _) = self.thumbnail_slots();
-        match self.inner.gfx.bgra_bitmap(w, h, bgra) {
-            Ok(bitmap) => {
-                let mut thumbs = self.inner.thumbs.borrow_mut();
-                thumbs.resize(n, None);
-                if let Some(t) = thumbs.get_mut(slot) {
-                    *t = Some(bitmap);
-                }
-            }
-            Err(e) => tracing::warn!("video editor: {e}"),
+        if slot < n
+            && let Err(e) = self.inner.set_thumbnail(slot, n, (w, h), bgra)
+        {
+            tracing::warn!("video editor: {e}");
         }
         self.inner.refresh();
     }
@@ -1974,6 +2290,15 @@ impl Cutter {
         }
         inner.refresh();
         inner.popup.show(&inner.gfx)?;
+        if inner.theme.animations {
+            let gfx = &inner.gfx;
+            // SAFETY: plain property calls with animations of the same device.
+            unsafe {
+                inner.fade.SetOpacity(&scene::ease_out(gfx, 0.0, 1.0, OPEN)?)?;
+                inner.popup.root.SetOffsetY(&scene::ease_out(gfx, 8.0 * inner.u, 0.0, OPEN)?)?;
+                gfx.dcomp.Commit()?;
+            }
+        }
         let mut msg = MSG::default();
         while !inner.closed.get() {
             let events: Vec<CutterEvent> = inner.events.borrow_mut().drain(..).collect();
@@ -2292,7 +2617,6 @@ mod tests {
         for (name, dark, progress, lossless) in [("dark", true, None, true), ("light", false, Some(0.4), false)] {
             let t = Theme::new(Look { dark, ..Look::default() });
             let bitmap = gfx.bgra_bitmap(pw, ph, &picture).expect("bitmap");
-            let thumbs: Vec<Option<ID2D1Bitmap1>> = (0..12).map(|_| Some(bitmap.clone())).collect();
             let mut state = state(frames.len());
             state.from = 240;
             state.to = 1380;
@@ -2307,15 +2631,8 @@ mod tests {
                 fps: 30,
             };
             let menu = dark.then_some(MenuKind::Preset);
-            let look = BottomLook {
-                state,
-                hover: Target::Save,
-                held: None,
-                thumbs: 12,
-                export: Some(export),
-                menu,
-                limit: Some(46.1),
-            };
+            let look =
+                BottomLook { state, hover: Target::Save, held: None, export: Some(export), menu, limit: Some(46.1) };
             let title = TitleLook { hover: Target::None, held: None };
             let th = (TITLE_H * u).ceil() as u32;
             let bh = (BOTTOM_H * u).ceil() as u32;
@@ -2323,15 +2640,40 @@ mod tests {
             let top = gfx.render(w, th, |c| paint_title(c, &t, u, &l, &texts.title, &title)).expect("title");
             let video =
                 gfx.render(w, vh, |c| paint_video(c, &t, u, &l, Some(&bitmap), (w as f32, vh as f32))).expect("video");
+            // The thumbnails under the bands, seen through the strip.
+            let (sx, sy, sw, sh) = l.part(Target::Strip);
+            let under = gfx
+                .render(w, bh, |c| {
+                    let strip = rect(sx * u, (sy - l.bottom) * u, sw * u, sh * u);
+                    c.fill_rect(strip, t.bg_deep)?;
+                    let slot = sw * u / 12.0;
+                    for i in 0..12 {
+                        c.picture(&bitmap, rect(strip.left + slot * i as f32, strip.top, slot.ceil(), sh * u))?;
+                    }
+                    Ok(())
+                })
+                .expect("under");
             let bottom = gfx
                 .render(w, bh, |c| {
-                    paint_bottom(c, &t, u, &l, &frames, &texts, &look, &thumbs)?;
+                    paint_bottom(c, &t, u, &l, &frames, &texts, &look)?;
                     let (cx, cy) = clock_at(&l);
                     paint_clock(c, &t, u, &frames, state.position, (cx * u, (cy - l.bottom) * u))?;
+                    let ((ix, iy), (dx, dy), _) = play_icon_at(&l, u);
+                    c.icon(icons::PLAY_FILLED, ix + dx, iy - l.bottom * u + dy, 18.0 * u, t.text)?;
                     let (px, py) = playhead_at(&l, &frames, state.position);
                     paint_playhead(c, &t, u, (px * u, (py - l.bottom) * u))
                 })
                 .expect("bottom");
+            let bottom: Vec<u8> = bottom
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .zip(under.as_chunks::<4>().0)
+                .flat_map(|(b, d)| {
+                    let a = f32::from(b[3]) / 255.0;
+                    [0, 1, 2, 3].map(|k| (f32::from(b[k]) + f32::from(d[k]) * (1.0 - a)).round().min(255.0) as u8)
+                })
+                .collect();
             let mut whole: Vec<u8> = [top, video, bottom].concat();
             assert_eq!(whole.len(), (w * h * 4) as usize);
             // The list of networks open over the video.
@@ -2347,7 +2689,6 @@ mod tests {
                     placeholder: texts.search.clone(),
                     no_match: texts.no_match.clone(),
                     selected: Some(1),
-                    hover: Some(4),
                     first: 0,
                     total: items.len(),
                     items: items.into_iter().take(m.rows).collect(),

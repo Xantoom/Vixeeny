@@ -29,7 +29,7 @@ use crate::drawing::{Drawing, ScreenPart};
 use crate::gfx::{self, Gfx};
 use crate::layout::{self, BAR_H, BUTTON, Button, PanelForm, PanelHit, Picks, SHADOW, Tip};
 use crate::paint::{self, BarLook, FieldLook, PanelLook};
-use crate::scene::{self, Pane, Solids, TipLook};
+use crate::scene::{self, Glow, Pane, Solids, TipLook};
 use crate::theme::{Look, Rgba, Theme, hsv_to_rgb, rgb_to_hsv};
 use crate::window::{self, Pointer};
 
@@ -582,7 +582,9 @@ impl Shared {
         let margin = SHADOW * u;
         match self.bar_in(pane, view, scroll) {
             Some((bx, by, side)) => {
-                let look = self.bar_look(view, ui, side);
+                let lit = self.bar_look(view, ui, side);
+                // The button under the pointer is lit by a layer of its own: the bar is not drawn again for it.
+                let look = BarLook { hover: None, ..lit.clone() };
                 let upright = side.upright();
                 pane.toolbar.show(
                     gfx,
@@ -593,6 +595,11 @@ impl Shared {
                 if pane.toolbar.move_to((bx - margin).round(), (by - margin).round())? {
                     pane.toolbar.appear(gfx, 6.0 * u, 0.18, t.animations)?;
                 }
+                let at = lit.hover.filter(|k| paint::bar_lights(&lit, *k)).map(|k| {
+                    let (x, y) = layout::button_xy(k, upright);
+                    (k, paint::glow_at(u, (margin + x * u, margin + y * u)))
+                });
+                Self::light(gfx, t, u, &pane.bar_glow, at)?;
                 // Inside the zone, the bar steps aside while an annotation is drawn.
                 let faded = side == BarSide::Inside && view.drawing;
                 pane.toolbar.fade(gfx, if faded { FADED } else { 1.0 }, t.animations)?;
@@ -620,19 +627,32 @@ impl Shared {
                         };
                         let left = left.clamp(0.0, (pw - bubble.0).max(0.0));
                         let m = paint::TIP_MARGIN * u;
-                        pane.tip.move_to((left - m).round(), (top - m).round())?;
+                        if pane.tip.glide_to(gfx, (left - m).round(), (top - m).round(), 0.1, t.animations)? {
+                            pane.tip.appear(gfx, 0.0, 0.1, t.animations)?;
+                        }
                     }
                     _ => pane.tip.hide()?,
                 }
             }
             None => {
                 pane.toolbar.hide()?;
+                Self::light(gfx, t, u, &pane.bar_glow, None)?;
                 pane.tip.hide()?;
             }
         }
         match self.panel_in(pane, view, ui) {
             Some((px, py)) => {
-                let look = Self::panel_look(view, ui);
+                let lit = Self::panel_look(view, ui);
+                let at = match lit.hover {
+                    Some(PanelHit::Eyedropper) if !lit.eyedropper => Some(layout::EYEDROPPER),
+                    Some(PanelHit::Fill) if lit.form.fill => Some(layout::FILL),
+                    _ => None,
+                };
+                let at =
+                    at.zip(lit.hover).map(|((x, y), hit)| (hit, paint::glow_at(u, (margin + x * u, margin + y * u))));
+                // Only the size's knob changes under the pointer; the buttons are lit by a layer of their own.
+                let look = PanelLook { hover: lit.hover.filter(|h| *h == PanelHit::Size), ..lit };
+                Self::light(gfx, t, u, &pane.panel_glow, at)?;
                 pane.panel.show(gfx, &look, || Ok(paint::panel_surface(u)), |c| paint::panel(c, t, u, &look))?;
                 let above = py < self.bar_in(pane, view, scroll).map_or(0.0, |b| b.1);
                 if pane.panel.move_to((px - margin).round(), (py - margin).round())? {
@@ -642,6 +662,21 @@ impl Shared {
             None => pane.panel.hide()?,
         }
         Ok(())
+    }
+
+    /// Lights the button of `glow` at `at` (its key, and [`paint::glow_at`]), or none.
+    fn light<K: Copy + PartialEq>(
+        gfx: &Gfx,
+        t: &Theme,
+        u: f32,
+        glow: &Glow<K, ()>,
+        at: Option<(K, paint::GlowAt)>,
+    ) -> windows::core::Result<()> {
+        let (lit, (offset, size)) = match at {
+            Some((k, at)) => (Some((k, &(), at.place)), (at.offset, at.size)),
+            None => (None, ((0.0, 0.0), (1, 1))),
+        };
+        glow.set(gfx, lit, || Ok(size), |c| paint::glow(c, t, u, offset), t.animations)
     }
 
     /// The pointer's shape where it is.

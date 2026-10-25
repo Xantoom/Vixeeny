@@ -116,23 +116,7 @@ pub fn toolbar(c: &Canvas<'_>, t: &Theme, u: f32, look: &BarLook) -> Result<()> 
     for (k, spec) in layout::buttons().enumerate() {
         let (x, y) = layout::button_xy(k, look.upright);
         let at = (ox + x * u, oy + y * u);
-        let b = ButtonLook {
-            active: match spec.button {
-                Button::Tool(kit) => Kit::of(look.tool) == Some(kit),
-                Button::Live => look.live,
-                Button::Style => look.style_open,
-                _ => false,
-            },
-            enabled: match spec.button {
-                Button::Live => look.can_live,
-                Button::Undo => look.can_undo,
-                Button::Redo => look.can_redo,
-                Button::Clear => look.can_clear,
-                _ => true,
-            },
-            hover: look.hover == Some(k),
-            pressed: look.pressed == Some(k),
-        };
+        let b = button_look(look, k, spec.button);
         let icon = match spec.button {
             Button::Tool(kit) => layout::tool_icon(look.picks.tool(kit)),
             Button::Style => {
@@ -157,6 +141,55 @@ pub fn toolbar(c: &Canvas<'_>, t: &Theme, u: f32, look: &BarLook) -> Result<()> 
         icon_button(c, t, u, at, icon, &b)?;
     }
     Ok(())
+}
+
+fn button_look(look: &BarLook, k: usize, button: Button) -> ButtonLook {
+    ButtonLook {
+        active: match button {
+            Button::Tool(kit) => Kit::of(look.tool) == Some(kit),
+            Button::Live => look.live,
+            Button::Style => look.style_open,
+            _ => false,
+        },
+        enabled: match button {
+            Button::Live => look.can_live,
+            Button::Undo => look.can_undo,
+            Button::Redo => look.can_redo,
+            Button::Clear => look.can_clear,
+            _ => true,
+        },
+        hover: look.hover == Some(k),
+        pressed: look.pressed == Some(k),
+    }
+}
+
+/// Toolbar button `k` lights under the pointer: it can be used, and is neither the one in hand nor pressed.
+pub fn bar_lights(look: &BarLook, k: usize) -> bool {
+    layout::buttons().nth(k).is_some_and(|spec| {
+        let b = button_look(look, k, spec.button);
+        b.enabled && !b.active && !b.pressed
+    })
+}
+
+/// The light of a button under the pointer, its top left at `(x, y)`: a layer of its own over the piece, fading in and
+/// out.
+pub fn glow(c: &Canvas<'_>, t: &Theme, u: f32, (x, y): (f32, f32)) -> Result<()> {
+    c.fill_round(rect(x, y, BUTTON * u, BUTTON * u), 6.0 * u, t.subtle_hover)
+}
+
+/// The surface of a [`glow`]: where it goes (pixels of its parent), where the light is drawn in it, and its size.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GlowAt {
+    pub place: (f32, f32),
+    pub offset: (f32, f32),
+    pub size: (u32, u32),
+}
+
+/// The surface of a [`glow`] at `(x, y)`, pixels of its parent.
+pub fn glow_at(u: f32, (x, y): (f32, f32)) -> GlowAt {
+    let (gx, gy) = (x.floor(), y.floor());
+    let side = (BUTTON * u).ceil() as u32 + 1;
+    GlowAt { place: (gx, gy), offset: (x - gx, y - gy), size: (side, side) }
 }
 
 /// Room around a tip for its shadow.

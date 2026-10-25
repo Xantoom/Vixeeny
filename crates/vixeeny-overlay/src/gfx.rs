@@ -14,15 +14,16 @@ use windows::Win32::Graphics::Direct2D::Common::{
     D2D1_FIGURE_END_CLOSED, D2D1_FIGURE_END_OPEN, D2D1_FILL_MODE_WINDING, D2D1_GRADIENT_STOP, D2D1_PIXEL_FORMAT,
 };
 use windows::Win32::Graphics::Direct2D::{
-    CLSID_D2D1Shadow, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_BITMAP_OPTIONS_NONE, D2D1_BITMAP_OPTIONS_TARGET,
-    D2D1_BITMAP_PROPERTIES1, D2D1_DEVICE_CONTEXT_OPTIONS_NONE, D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_ELLIPSE,
-    D2D1_EXTEND_MODE_CLAMP, D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_GAMMA_2_2,
+    CLSID_D2D1Shadow, D2D1_ANTIALIAS_MODE_ALIASED, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_BITMAP_OPTIONS_NONE,
+    D2D1_BITMAP_OPTIONS_TARGET, D2D1_BITMAP_PROPERTIES1, D2D1_DEVICE_CONTEXT_OPTIONS_NONE, D2D1_DRAW_TEXT_OPTIONS_NONE,
+    D2D1_ELLIPSE, D2D1_EXTEND_MODE_CLAMP, D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_GAMMA_2_2,
     D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC, D2D1_INTERPOLATION_MODE_LINEAR,
     D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR, D2D1_LAYER_OPTIONS1_NONE, D2D1_LAYER_PARAMETERS1,
-    D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES, D2D1_PROPERTY_TYPE_FLOAT, D2D1_PROPERTY_TYPE_VECTOR4, D2D1_ROUNDED_RECT,
-    D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION, D2D1_SHADOW_PROP_COLOR, D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE,
-    D2D1CreateFactory, ID2D1Bitmap1, ID2D1Brush, ID2D1Device, ID2D1DeviceContext, ID2D1Factory1, ID2D1Geometry,
-    ID2D1Image, ID2D1Layer, ID2D1PathGeometry, ID2D1RenderTarget, ID2D1SolidColorBrush,
+    D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES, D2D1_PRIMITIVE_BLEND_COPY, D2D1_PRIMITIVE_BLEND_SOURCE_OVER,
+    D2D1_PROPERTY_TYPE_FLOAT, D2D1_PROPERTY_TYPE_VECTOR4, D2D1_ROUNDED_RECT, D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION,
+    D2D1_SHADOW_PROP_COLOR, D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, D2D1CreateFactory, ID2D1Bitmap1, ID2D1Brush,
+    ID2D1Device, ID2D1DeviceContext, ID2D1Factory1, ID2D1Geometry, ID2D1Image, ID2D1Layer, ID2D1PathGeometry,
+    ID2D1RenderTarget, ID2D1SolidColorBrush,
 };
 use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE, D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP};
 use windows::Win32::Graphics::Direct3D11::{
@@ -771,6 +772,34 @@ impl Canvas<'_> {
     pub fn pop_layer(&self) {
         // SAFETY: pairs a `push_round_clip`.
         unsafe { self.dc.PopLayer() };
+    }
+
+    /// Draws `f` moved by `(dx, dy)` and kept inside `clip` (pixels before the move): a part of a bigger drawing.
+    pub fn part(&self, clip: D2D_RECT_F, (dx, dy): (f32, f32), f: impl FnOnce(&Self) -> Result<()>) -> Result<()> {
+        let mut before = Matrix3x2::identity();
+        // SAFETY: plain state calls, the clip and the transform put back as they were.
+        unsafe {
+            self.dc.GetTransform(&mut before);
+            self.dc.PushAxisAlignedClip(&clip, D2D1_ANTIALIAS_MODE_ALIASED);
+            self.dc.SetTransform(&(Matrix3x2::translation(dx, dy) * before));
+        }
+        let result = f(self);
+        // SAFETY: as above.
+        unsafe {
+            self.dc.SetTransform(&before);
+            self.dc.PopAxisAlignedClip();
+        }
+        result
+    }
+
+    /// Makes the rounded box `r` transparent, its edge smoothed: what is under the surface shows there.
+    pub fn punch_round(&self, r: D2D_RECT_F, radius: f32) -> Result<()> {
+        // SAFETY: plain state calls; the blend is put back.
+        unsafe { self.dc.SetPrimitiveBlend(D2D1_PRIMITIVE_BLEND_COPY) };
+        let result = self.fill_round(r, radius, Rgba([0.0, 0.0, 0.0, 0.0]));
+        // SAFETY: as above.
+        unsafe { self.dc.SetPrimitiveBlend(D2D1_PRIMITIVE_BLEND_SOURCE_OVER) };
+        result
     }
 
     /// A linear gradient over `r` from `(x0, y0)` to `(x1, y1)` through `stops`.

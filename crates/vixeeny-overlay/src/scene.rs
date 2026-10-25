@@ -9,7 +9,7 @@
 //! │  ├─ outline of the selected annotation (4)
 //! │  └─ size label · text field · size ring
 //! ├─ scroll bar
-//! └─ toolbar · style panel · tip
+//! └─ toolbar · style panel (each with the light of the button under the pointer) · tip
 //! ```
 //! Rectangles are 1×1 solid surfaces scaled by their visual: moving the zone moves visuals, it draws nothing.
 
@@ -116,6 +116,17 @@ pub fn ease_in(gfx: &Gfx, from: f32, to: f32, seconds: f64) -> Result<IDComposit
     unsafe {
         let a = gfx.dcomp.CreateAnimation()?;
         a.AddCubic(0.0, from, 0.0, 0.0, (to - from) / (d * d * d))?;
+        a.End(seconds, to)?;
+        Ok(a)
+    }
+}
+
+/// The same at an even pace: for what follows a value that keeps moving.
+pub fn linear(gfx: &Gfx, from: f32, to: f32, seconds: f64) -> Result<IDCompositionAnimation> {
+    // SAFETY: plain calls on a new animation object.
+    unsafe {
+        let a = gfx.dcomp.CreateAnimation()?;
+        a.AddCubic(0.0, from, (to - from) / seconds as f32, 0.0, 0.0)?;
         a.End(seconds, to)?;
         Ok(a)
     }
@@ -239,6 +250,23 @@ impl<L: PartialEq + Clone> Piece<L> {
         Ok(was.is_none())
     }
 
+    /// Takes the piece to `(x, y)` over `seconds`, from where it was (at once when it was hidden, or without motion);
+    /// returns whether it was hidden until now.
+    pub fn glide_to(&self, gfx: &Gfx, x: f32, y: f32, seconds: f64, motion: bool) -> Result<bool> {
+        match self.at.get() {
+            Some((x0, y0)) if motion && (x0, y0) != (x, y) => {
+                self.at.set(Some((x, y)));
+                // SAFETY: plain property calls with animations of the same device.
+                unsafe {
+                    self.visual.SetOffsetX(&ease_out(gfx, x0, x, seconds)?)?;
+                    self.visual.SetOffsetY(&ease_out(gfx, y0, y, seconds)?)?;
+                }
+                Ok(false)
+            }
+            _ => self.move_to(x, y),
+        }
+    }
+
     pub fn hide(&self) -> Result<()> {
         if self.at.replace(None).is_some() {
             set_offset(&self.visual, PARKED, PARKED)?;
@@ -283,6 +311,58 @@ impl<L> Piece<L> {
     }
 }
 
+/// How long a highlight takes to come; it leaves as a piece fades ([`Piece::fade`]).
+const GLOW_IN: f64 = 0.08;
+
+/// The highlight of what is under the pointer, over what it lights: it fades in where it comes and out where it leaves.
+/// Two pieces, so that one can leave while the other comes.
+pub struct Glow<K, L> {
+    pieces: [Piece<L>; 2],
+    live: Cell<usize>,
+    key: Cell<Option<K>>,
+}
+
+impl<K: Copy + PartialEq, L: PartialEq + Clone> Glow<K, L> {
+    /// Its pieces on top of `parent`'s children.
+    pub fn new(gfx: &Gfx, parent: &IDCompositionVisual2) -> Result<Self> {
+        let pieces = [Piece::new(gfx, true)?, Piece::new(gfx, true)?];
+        for p in &pieces {
+            add(parent, &p.visual)?;
+        }
+        Ok(Self { pieces, live: Cell::new(0), key: Cell::new(None) })
+    }
+
+    /// Lights `key` with `look` at `(x, y)` (its parent's pixels), drawn by `draw` on a surface of `size`; `None`:
+    /// nothing is lit.
+    pub fn set(
+        &self,
+        gfx: &Gfx,
+        lit: Option<(K, &L, (f32, f32))>,
+        size: impl FnOnce() -> Result<(u32, u32)>,
+        draw: impl FnOnce(&crate::gfx::Canvas<'_>) -> Result<()>,
+        motion: bool,
+    ) -> Result<()> {
+        let was = self.key.replace(lit.as_ref().map(|l| l.0));
+        let moved = was != lit.as_ref().map(|l| l.0);
+        if moved && was.is_some() {
+            self.pieces[self.live.get()].fade(gfx, 0.0, motion)?;
+        }
+        let Some((_, look, (x, y))) = lit else {
+            return Ok(());
+        };
+        if moved {
+            self.live.set(1 - self.live.get());
+        }
+        let piece = &self.pieces[self.live.get()];
+        piece.show(gfx, look, size, draw)?;
+        piece.move_to(x, y)?;
+        if moved {
+            piece.appear(gfx, 0.0, GLOW_IN, motion)?;
+        }
+        Ok(())
+    }
+}
+
 /// The pictures of an image part: one visual of tiles.
 pub struct Picture {
     pub visual: IDCompositionVisual2,
@@ -322,6 +402,7 @@ pub struct Solids {
     pub handle_side: u32,
 }
 
+use crate::layout::PanelHit;
 /// What a piece of the toolbar family shows.
 pub use crate::paint::{BarLook, FieldLook, PanelLook};
 
@@ -361,7 +442,10 @@ pub struct Pane {
     pub brush: Piece<u32>,
     pub scrollbar: IDCompositionVisual2,
     pub toolbar: Piece<BarLook>,
+    /// The lights of the buttons under the pointer, over the toolbar and the panel.
+    pub bar_glow: Glow<usize, ()>,
     pub panel: Piece<PanelLook>,
+    pub panel_glow: Glow<PanelHit, ()>,
     pub tip: Piece<TipLook>,
     /// The content's offset (scroll), to set it only when it changes.
     pub content_at: Cell<Option<(f32, f32)>>,
@@ -438,9 +522,11 @@ impl Pane {
         add(&root, &scrollbar)?;
         let toolbar = Piece::new(gfx, true)?;
         add(&root, &toolbar.visual)?;
+        let bar_glow = Glow::new(gfx, &toolbar.visual)?;
         let panel = Piece::new(gfx, true)?;
         add(&root, &panel.visual)?;
-        let tip = Piece::new(gfx, false)?;
+        let panel_glow = Glow::new(gfx, &panel.visual)?;
+        let tip = Piece::new(gfx, true)?;
         add(&root, &tip.visual)?;
         // SAFETY: plain property call.
         unsafe { target.SetRoot(&root)? };
@@ -473,7 +559,9 @@ impl Pane {
             brush,
             scrollbar,
             toolbar,
+            bar_glow,
             panel,
+            panel_glow,
             tip,
             content_at: Cell::new(None),
             frozen_away: Cell::new(false),
