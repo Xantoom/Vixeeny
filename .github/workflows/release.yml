@@ -62,7 +62,11 @@ jobs:
       - name: Tools (Inno Setup, pkg-config)
         shell: pwsh
         run: |
-          choco upgrade innosetup pkgconfiglite -y --no-progress
+          # The image usually has Inno Setup: only what is missing is installed.
+          $missing = @()
+          if (-not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) { $missing += "innosetup" }
+          if (-not (Test-Path "C:\ProgramData\chocolatey\bin\pkg-config.exe")) { $missing += "pkgconfiglite" }
+          if ($missing) { choco install @missing -y --no-progress }
           "C:\ProgramData\chocolatey\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
           "$env:FFMPEG_DIR\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
           "C:\Program Files (x86)\Inno Setup 6" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
@@ -78,16 +82,12 @@ jobs:
           name: ffmpeg
           path: native/build/work
       - run: cargo xtask build-native
+      # One invocation: the crates the programs share are built once, side by side with the rest.
       - name: Build the programs
         shell: pwsh
         run: |
           $env:PKG_CONFIG_PATH = "${{ github.workspace }}\native\build\work\prefix\lib\pkgconfig"
-          cargo build --release -p vixeeny-daemon -p xtask
-          cargo build --release -p vixeeny-app --features native-codecs
-      # Idle CPU and wake-ups of the programs being released (informational).
-      - name: Idle smoke test (20 s)
-        continue-on-error: true
-        run: target\release\xtask.exe bench-idle --seconds 20
+          cargo build --release -p vixeeny-daemon -p xtask -p vixeeny-app --features vixeeny-app/native-codecs
       # The release build of xtask, built above: its compression is many times faster.
       - name: Package (stage, update archive, portable archive)
         shell: pwsh
@@ -103,6 +103,31 @@ jobs:
           path: |
             dist/*.zip
             dist/*.exe
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: xtask
+          path: target/release/xtask.exe
+          retention-days: 1
+  # Idle CPU and wake-ups of the daemon being released (informational), on a machine of its own:
+  # the release does not wait for it.
+  idle:
+    needs: windows
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: vixeeny-windows-unsigned
+          path: dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: xtask
+          path: xtask
+      - name: Idle smoke test (20 s)
+        shell: pwsh
+        run: |
+          Expand-Archive (Get-Item dist\*-portable.zip).FullName -DestinationPath app
+          xtask\xtask.exe bench-idle --seconds 20 --daemon app\Vixeeny.exe
   # Signing runs apart, on a fresh machine that runs nothing else: no build script, no
   # third-party action and no package of the build can reach the key.
   sign:
@@ -172,7 +197,7 @@ jobs:
         run: |
           run=$(gh run list --workflow ci.yml --commit "${{ github.sha }}" --limit 1 --json databaseId --jq '.[0].databaseId')
           if [ -z "$run" ]; then echo "::error::CI did not run on this commit."; exit 1; fi
-          gh run watch "$run" --interval 60 --exit-status
+          gh run watch "$run" --interval 10 --exit-status
       - name: Draft release
         if: github.event_name == 'push' || inputs.release
         env:

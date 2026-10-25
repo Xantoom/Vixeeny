@@ -49,12 +49,21 @@ fn manifest(stage: &Path) -> Result<String> {
     Ok(text)
 }
 
+/// Each file is compressed on its own thread, in an archive of its own, and the pieces are copied into `out` in order.
 fn write_zip(stage: &Path, out: &Path) -> Result<()> {
+    use rayon::prelude::*;
+    let pieces = files_under(stage)?
+        .par_iter()
+        .map(|relative| -> Result<_> {
+            let mut piece = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+            piece.start_file(relative.to_string_lossy().replace('\\', "/"), deflated())?;
+            piece.write_all(&std::fs::read(stage.join(relative))?)?;
+            Ok(piece.finish_into_readable()?)
+        })
+        .collect::<Result<Vec<_>>>()?;
     let mut zip = zip::ZipWriter::new(std::fs::File::create(out)?);
-    for relative in files_under(stage)? {
-        let name = relative.to_string_lossy().replace('\\', "/");
-        zip.start_file(name, deflated())?;
-        zip.write_all(&std::fs::read(stage.join(&relative))?)?;
+    for piece in pieces {
+        zip.merge_archive(piece)?;
     }
     zip.finish()?;
     Ok(())

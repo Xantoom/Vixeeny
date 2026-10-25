@@ -6509,6 +6509,7 @@ name = "xtask"
 version = "0.28.1"
 dependencies = [
  "anyhow",
+ "rayon",
  "serde",
  "serde_json",
  "sha2",
