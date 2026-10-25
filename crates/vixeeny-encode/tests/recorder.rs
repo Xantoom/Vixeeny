@@ -707,8 +707,9 @@ fn a_drifting_source_through_the_mixer_stays_in_sync_with_the_video() {
     let mut source = FakeAudioSource::new(440.0);
     source.drift = 1.0001;
     let mut mixer = Mixer::new(&[1.0], 0);
+    // The picture does not matter here, only its time: one frame, copied, rather than 3600 drawn.
+    let still = frame(320, 180, 0);
     let mut t = 0i64;
-    let mut n = 0usize;
     while t < seconds * 1_000 * MS {
         let chunk = source.next_chunk(480);
         mixer.push(0, &chunk);
@@ -717,8 +718,7 @@ fn a_drifting_source_through_the_mixer_stays_in_sync_with_the_video() {
             rec.push_audio(0, block.samples);
         }
         if (t / (10 * MS)) % 3 == 0 {
-            rec.push_frame(t, frame(320, 180, n));
-            n += 1;
+            rec.push_frame(t, still.clone());
         }
     }
     for block in mixer.finish(t) {

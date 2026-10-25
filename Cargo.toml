@@ -52,6 +52,22 @@ debug = "line-tables-only"
 [profile.dev.package."*"]
 debug = false
 
+# Tests that simulate long runs: an hour of audio drift, long scrolled pages. Unoptimized, they take seconds; these
+# crates are small, so optimizing them costs little build time.
+[profile.dev.package.vixeeny-audio]
+opt-level = 2
+
+[profile.dev.package.vixeeny-stitch]
+opt-level = 2
+
+# The settings window's tests render whole pages in software, dozens of times: Slint's renderer, unoptimized, takes
+# seconds. Built once (dependencies are cached).
+[profile.dev.package.i-slint-renderer-software]
+opt-level = 2
+
+[profile.dev.package.i-slint-core]
+opt-level = 2
+
 [profile.release]
 lto = "thin"
 codegen-units = 1
@@ -62,3 +78,11 @@ panic = "abort"
 # half the time for a slightly larger program.
 [profile.release.package.vixeeny-ui]
 codegen-units = 16
+
+# For trying a change in the real app: optimized like a release, without its link-time optimization and with the
+# crates built in parallel and incrementally; a few times faster to rebuild. Releases keep `release`.
+[profile.quick]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true

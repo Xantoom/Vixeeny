@@ -31,6 +31,10 @@ libultrahdr; see `native/versions.toml`),
 then set `PKG_CONFIG_PATH=native\build\work\prefix\lib\pkgconfig` and build `vixeeny-app`
 with `--features native-codecs`. `cargo xtask dist` gathers the release files.
 
+To try a change in the real app, `cargo build --profile quick` builds it optimized like a
+release but without link-time optimization: a rebuild takes seconds instead of half a minute.
+The programs land in `target\quick`, and they need the FFmpeg DLLs beside them.
+
 The UI tests render every window without a display; set `VIXEENY_SCREENSHOTS=<folder>` to keep
 the images (`cargo test -p vixeeny-ui`).
 

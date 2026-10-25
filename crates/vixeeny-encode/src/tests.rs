@@ -520,7 +520,9 @@ fn a_probe_that_hangs_or_crashes_is_contained() {
         std::fs::write(&path, format!("@echo off\r\n{body}\r\n")).unwrap();
         path
     };
-    let hang = script("hang", "ping -n 30 127.0.0.1 >nul");
+    // A loop of cmd itself: a program it started (`ping`, `timeout`) would outlive the kill, and keep the test's output
+    // open until it ends.
+    let hang = script("hang", ":again\r\ngoto again");
     let started = std::time::Instant::now();
     assert!(matches!(run_child(&hang, std::time::Duration::from_millis(200)), Err(ProbeError::Timeout)));
     assert!(started.elapsed() < std::time::Duration::from_secs(10), "the child was killed");

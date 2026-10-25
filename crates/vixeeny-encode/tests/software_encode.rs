@@ -212,42 +212,57 @@ fn software_encoders_encode_every_declared_pixel_format() {
 }
 
 /// Every value of every expert option (each choice, both ends of a range) opens and encodes, on the software encoders
-/// and the hardware ones this machine has.
+/// and the hardware ones this machine has. The encoders are tried side by side, and the values of a software encoder
+/// too; a hardware encoder's values one after the other (its driver opens one session at a time anyway).
 #[test]
 fn every_option_value_encodes() {
-    use vixeeny_encode::registry::ParamType;
+    use rayon::prelude::*;
+    use vixeeny_encode::registry::{Kind, ParamType};
     ffmpeg::init().unwrap();
     let registry = vixeeny_encode::registry::Registry::builtin().unwrap();
     let join = |o: std::collections::BTreeMap<String, String>| {
         o.into_iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(",")
     };
-    let mut failed = Vec::new();
-    for e in registry.encoders() {
-        if let Err(err) = try_encode(&e.ffmpeg_encoder, &join(e.custom_options(&[].into()))) {
-            assert!(e.kind == vixeeny_encode::registry::Kind::Hardware, "{}: {err}", e.id);
-            eprintln!("{}: skipped ({err})", e.id);
-            continue;
-        }
-        for p in &e.params {
-            let values: Vec<String> = match p.kind {
-                ParamType::Enum => p.values.clone(),
-                ParamType::Bool => vec!["0".into(), "1".into()],
-                ParamType::Int | ParamType::Float => {
-                    [p.min, p.max].into_iter().flatten().map(|v| v.to_string()).collect()
-                }
-                ParamType::String => Vec::new(),
-            };
-            for v in values {
-                let params = [(p.key.clone(), v.clone())].into();
-                let options = join(e.custom_options(&params));
-                match try_encode(&e.ffmpeg_encoder, &options) {
-                    Ok(30) => {}
-                    Ok(n) => failed.push(format!("{} {}={v}: {n} packets", e.id, p.key)),
-                    Err(err) => failed.push(format!("{} {}={v}: {err}", e.id, p.key)),
-                }
+    let encoders: Vec<_> = registry.encoders().collect();
+    let failed: Vec<String> = encoders
+        .par_iter()
+        .flat_map(|e| {
+            if let Err(err) = try_encode(&e.ffmpeg_encoder, &join(e.custom_options(&[].into()))) {
+                assert!(e.kind == Kind::Hardware, "{}: {err}", e.id);
+                eprintln!("{}: skipped ({err})", e.id);
+                return Vec::new();
             }
-        }
-        eprintln!("{}: every option tried", e.id);
-    }
+            let tries: Vec<(&str, String)> = e
+                .params
+                .iter()
+                .flat_map(|p| {
+                    let values: Vec<String> = match p.kind {
+                        ParamType::Enum => p.values.clone(),
+                        ParamType::Bool => vec!["0".into(), "1".into()],
+                        ParamType::Int | ParamType::Float => {
+                            [p.min, p.max].into_iter().flatten().map(|v| v.to_string()).collect()
+                        }
+                        ParamType::String => Vec::new(),
+                    };
+                    values.into_iter().map(|v| (p.key.as_str(), v))
+                })
+                .collect();
+            let one = |(key, v): &(&str, String)| {
+                let params = [(key.to_string(), v.clone())].into();
+                match try_encode(&e.ffmpeg_encoder, &join(e.custom_options(&params))) {
+                    Ok(30) => None,
+                    Ok(n) => Some(format!("{} {key}={v}: {n} packets", e.id)),
+                    Err(err) => Some(format!("{} {key}={v}: {err}", e.id)),
+                }
+            };
+            let failed: Vec<String> = if e.kind == Kind::Hardware {
+                tries.iter().filter_map(one).collect()
+            } else {
+                tries.par_iter().filter_map(one).collect()
+            };
+            eprintln!("{}: every option tried", e.id);
+            failed
+        })
+        .collect();
     assert!(failed.is_empty(), "{failed:#?}");
 }

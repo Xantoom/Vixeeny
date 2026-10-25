@@ -10,6 +10,12 @@ repository.workspace = true
 [lints]
 workspace = true
 
+# The tests are in `tests/`: the code generated from the .slint files, the bulk of the build, is then compiled once, not
+# a second time as a test of the library.
+[lib]
+test = false
+doctest = false
+
 [dependencies]
 slint = { version = "1.18.1", default-features = false, features = ["std", "compat-1-2"] }
 vixeeny-common = { path = "../vixeeny-common" }

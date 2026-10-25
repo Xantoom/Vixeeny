@@ -22,6 +22,3 @@ pub mod settings_panel;
 pub mod theme;
 pub use slint;
 pub use slint::ComponentHandle;
-
-#[cfg(test)]
-mod tests;

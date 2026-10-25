@@ -1,5 +1,6 @@
 //! Headless rendering with Slint's software renderer: checks layouts without a display. Set `VIXEENY_SCREENSHOTS=<dir>`
 //! to also write the rendered frames as PNG files.
+#![allow(clippy::unwrap_used, reason = "test helpers fail the test")]
 
 use std::rc::Rc;
 
@@ -7,7 +8,7 @@ use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferTyp
 use slint::platform::{Platform, WindowAdapter};
 use slint::{ComponentHandle, PhysicalSize, Rgb8Pixel, SharedPixelBuffer};
 
-use super::*;
+use vixeeny_ui::*;
 
 struct Headless(Rc<MinimalSoftwareWindow>);
 
@@ -50,7 +51,7 @@ fn settings_panel() -> (settings_panel::SettingsPanel, Rc<std::cell::RefCell<Vec
         vixeeny_common::config::Config::default(),
         Some("en-US".into()),
         "1.2.3",
-        crate::theme::Look::dark(),
+        vixeeny_ui::theme::Look::dark(),
     )
     .unwrap();
     let seen = Rc::new(RefCell::new(Vec::new()));
@@ -354,7 +355,7 @@ fn a_refused_shortcut_says_why_in_the_users_language() {
         vixeeny_common::config::Config::default(),
         Some("fr-FR".into()),
         "1.2.3",
-        crate::theme::Look::dark(),
+        vixeeny_ui::theme::Look::dark(),
     )
     .unwrap();
     panel.select_section(Section::Shortcuts);
