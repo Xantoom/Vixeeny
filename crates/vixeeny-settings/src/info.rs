@@ -12,15 +12,8 @@ use crate::encoders;
 pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
     let fr = env.lang == Lang::Fr;
     let pick = |en: &str, f: &str| Some(if fr { f } else { en }.to_owned());
-    // The replay's video and sound rows say what the videos' do, about the replay's own settings; its profiles have one
-    // more.
+    // The replay's video and sound rows say what the videos' do, about the replay's own settings.
     if let Some(id) = id.strip_prefix(crate::pages::REPLAY_PREFIX) {
-        if id == "preset" {
-            return pick(
-                "Quality: for editing and keeping; large files.\nBalanced: in between.\nCompact: for sharing; light files.\nLight: the least work for the graphics card, for a replay that runs through every game.",
-                "Qualité : pour le montage et l'archivage ; fichiers lourds.\nÉquilibré : entre les deux.\nCompact : pour le partage ; fichiers légers.\nLéger : le moins de travail pour la carte graphique, pour un replay qui tourne pendant tous les jeux.",
-            );
-        }
         return info(id, env, &crate::pages::replay_view(config));
     }
     // The encoder's own options are `p:<key>`.
@@ -68,8 +61,8 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
             "AV1 : fichiers plus petits à qualité égale, lecture plus récente.\nHEVC : intermédiaire.\nH.264 : fichiers plus gros, lu par presque tous les appareils.",
         ),
         "preset" => pick(
-            "Quality: for editing and keeping; large files.\nBalanced: in between.\nCompact: for sharing; light files.",
-            "Qualité : pour le montage et l'archivage ; fichiers lourds.\nÉquilibré : entre les deux.\nCompact : pour le partage ; fichiers légers.",
+            "Quality: for editing and keeping; large files.\nBalanced: good quality, light files.\nPerformance: Balanced's quality without the encoder's heavier tools (look-ahead, B-frames, extra pass): the least work for the graphics card, a little larger files.",
+            "Qualité : pour le montage et l'archivage ; fichiers lourds.\nÉquilibré : bonne qualité, fichiers légers.\nPerformance : la qualité d'Équilibré sans les outils lourds de l'encodeur (look-ahead, B-frames, passe supplémentaire) : le moins de travail pour la carte graphique, des fichiers un peu plus lourds.",
         ),
         "container" => pick(
             "MP4: the most common format; still plays after a crash.\nMKV: takes every sound format.",
@@ -214,8 +207,8 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
             "Continue d'enregistrer quelques secondes après l'appui sur le raccourci : la fin du moment est dans le replay.",
         ),
         "replay_same_video" => pick(
-            "Records the replay with the settings of the Video and Sound pages.\nOff: the replay has its own, set below.",
-            "Enregistre le replay avec les réglages des pages Vidéo et Son.\nDésactivé : le replay a les siens, réglés ci-dessous.",
+            "Records the replay with the settings of the Recording page (on the graphics card all the same).\nOff: the replay has its own, set below.",
+            "Enregistre le replay avec les réglages de la page Enregistrement (toujours sur la carte graphique).\nDésactivé : le replay a les siens, réglés ci-dessous.",
         ),
         "max_rate" => pick(
             "Keeps the bitrate under a ceiling: the quality stays the profile's, except in the busiest scenes.\n4500 kbit/s keeps 30 seconds under 20 MB, Discord's limit without Nitro.",

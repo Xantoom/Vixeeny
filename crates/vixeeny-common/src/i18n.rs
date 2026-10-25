@@ -56,8 +56,6 @@ keys! {
     ScrollTruncated => "Height limit reached ({height} px)", "Hauteur maximale atteinte ({height} px)";
     SecGeneral => "General", "Général";
     SecShortcuts => "Shortcuts", "Raccourcis";
-    SecVideo => "Video", "Vidéo";
-    SecAudio => "Sound", "Son";
     SecAbout => "About", "À propos";
     SetLanguage => "Language", "Langue";
     SetLangAuto => "Automatic", "Automatique";
@@ -107,7 +105,6 @@ keys! {
     SetKindHardware => "Hardware (GPU)", "Matériel (GPU)";
     SetKindSoftware => "Software (CPU)", "Logiciel (CPU)";
     SetPresetBest => "Quality", "Qualité";
-    SetPresetLight => "Compact", "Compact";
     SetPresetCustom => "Custom", "Personnalisé";
     SetDetecting => "Detecting the encoders of this PC…", "Détection des encodeurs de ce PC…";
     SetNoHardware => "No hardware encoder found: the processor encodes.",
@@ -395,7 +392,7 @@ keys! {
     UnitSeconds => "s", "s";
     SetReplayAfterSeconds => "Seconds after the shortcut", "Secondes après le raccourci";
     GrpReplayVideo => "Video and sound settings", "Paramètres vidéo et son";
-    SetSameAsVideo => "Same settings as Video and Sound", "Mêmes paramètres que Vidéo et Son";
+    SetSameAsVideo => "Same settings as Recording", "Mêmes paramètres que l'enregistrement";
     GameNoneOpen => "No game is open right now", "Aucun jeu n'est ouvert actuellement";
     SetWhatsNew => "Show what's new after an update", "Afficher les nouveautés après une mise à jour";
     UpdateNotes => "What's new in {version}", "Nouveautés de la version {version}";
@@ -403,9 +400,12 @@ keys! {
     WhatsNewLoading => "Loading the list of changes…", "Chargement de la liste des changements…";
     WhatsNewFailed => "The list of changes could not be loaded.", "La liste des changements n'a pas pu être chargée.";
     UiOk => "OK", "OK";
-    SetPresetPerformance => "Light", "Léger";
+    SetPresetPerformance => "Performance", "Performance";
     SetMaxRate => "Limit the bitrate", "Limiter le débit";
     SetMaxRateKbps => "Maximum bitrate", "Débit maximum";
+    SecRecording => "Recording", "Enregistrement";
+    SetReplayNoHardware => "The replay needs a hardware encoder (graphics card or processor graphics): none was found.",
+        "Le replay a besoin d'un encodeur matériel (carte graphique ou graphique du processeur) : aucun n'a été trouvé.";
 }
 
 impl Lang {

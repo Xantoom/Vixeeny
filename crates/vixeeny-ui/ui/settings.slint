@@ -716,7 +716,7 @@ export component SettingsWindow inherits Window {
     default-font-family: Theme.font;
 
     property <bool> searching: root.search-text != "";
-    property <bool> is-rows: root.section != 6 && root.section != 9 && !root.searching;
+    property <bool> is-rows: root.section != 5 && root.section != 8 && !root.searching;
     // The first tab and the title of the page share this line.
     property <length> top: 52px;
     property <length> tab-h: 38px;
@@ -728,11 +728,10 @@ export component SettingsWindow inherits Window {
             : i == 1 ? Icons.apps
             : i == 2 ? Icons.image
             : i == 3 ? Icons.video
-            : i == 4 ? Icons.speaker
-            : i == 5 ? Icons.history
-            : i == 6 ? Icons.keyboard
-            : i == 7 ? Icons.alert
-            : i == 8 ? Icons.download
+            : i == 4 ? Icons.history
+            : i == 5 ? Icons.keyboard
+            : i == 6 ? Icons.alert
+            : i == 7 ? Icons.download
             : Icons.info;
     }
     function go(i: int) {
@@ -868,7 +867,7 @@ export component SettingsWindow inherits Window {
         }
         // Back to how the page comes, at the end of the title's line: only once changed.
         reset := IconButton {
-            visible: root.section != 9 && !root.searching;
+            visible: root.section != 8 && !root.searching;
             x: 24px + page.column - self.width;
             y: page-title.y + (page-title.height - self.height) / 2;
             icon: Icons.arrow-reset;
@@ -878,7 +877,7 @@ export component SettingsWindow inherits Window {
             clicked => { root.confirming = 1; }
         }
         // While a shortcut is recorded: how, under the title.
-        if root.section == 6 && root.recording-row >= 0 && !root.searching : Text {
+        if root.section == 5 && root.recording-row >= 0 && !root.searching : Text {
             x: 24px;
             y: root.top + root.tab-h;
             width: page.column;
@@ -904,7 +903,7 @@ export component SettingsWindow inherits Window {
                     text: root.notice;
                 }
                 // Where the update stands, and what to do about it.
-                if root.section == 8 : Group {
+                if root.section == 7 : Group {
                     GroupRow {
                         title: root.update-title;
                         description: root.update-detail;
@@ -1036,7 +1035,7 @@ export component SettingsWindow inherits Window {
             }
 
             // ---- shortcuts: a table, one row per action and a column per shortcut (two at most)
-            if root.section == 6 && !root.searching : Rectangle {
+            if root.section == 5 && !root.searching : Rectangle {
                 width: parent.width;
                 height: parent.height;
                 property <length> key-w: max(180px, min(240px, (page.column - 220px) / 2));
@@ -1068,7 +1067,7 @@ export component SettingsWindow inherits Window {
             }
 
             // ---- about: who we are, this machine, the links
-            if root.section == 9 && !root.searching : Page {
+            if root.section == 8 && !root.searching : Page {
                 width: parent.width - 8px;
                 height: parent.height;
                 column: page.column;

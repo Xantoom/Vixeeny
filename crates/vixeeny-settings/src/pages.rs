@@ -588,8 +588,14 @@ fn custom_rows(env: &Env, config: &Config, encoder: &str) -> (Vec<Row>, Vec<Row>
 }
 
 /// The recording, in the order of OBS: the folder, the picture, the encoder, the file, then the encoder's own options
-/// when they are set by hand.
-pub fn video(env: &Env, config: &Config) -> Vec<Row> {
+/// when they are set by hand. The recordings' page: the video settings, then the sound ones.
+pub fn recording(env: &Env, config: &Config) -> Vec<Row> {
+    let mut rows = video(env, config);
+    rows.extend(audio(env, config));
+    rows
+}
+
+fn video(env: &Env, config: &Config) -> Vec<Row> {
     let t = |k| env.t(k);
     let mut rows = vec![
         header("h_location", t(Key::GrpLocation)),
@@ -625,8 +631,7 @@ fn video_settings(env: &Env, config: &Config, replay: bool) -> Vec<Row> {
     let profile = &config.video;
     // The profile advised, and those the list names (any other is the custom one).
     let advised_preset = if replay { "performance" } else { DEFAULT_PRESET };
-    let named =
-        move |preset: &str| matches!(preset, "quality" | "balanced" | "small") || (replay && preset == "performance");
+    let named = |preset: &str| matches!(preset, "quality" | "balanced" | "performance" | "small");
     // No hardware encoder on this computer: the software ones are used whatever the setting.
     let no_hardware = !encoders::hardware_possible(env);
     let hardware = encoders::uses_hardware(env, profile);
@@ -726,7 +731,10 @@ fn video_settings(env: &Env, config: &Config, replay: bool) -> Vec<Row> {
             switch_params(c, before.as_deref(), now.as_deref(), advised_preset);
         },
     );
-    rows.push(if no_hardware { crate::greyed(crate::warned(kind, t(Key::SetNoHardware))) } else { kind });
+    // The replay always records on the graphics card (see `Config::replay_video`).
+    if !replay {
+        rows.push(if no_hardware { crate::greyed(crate::warned(kind, t(Key::SetNoHardware))) } else { kind });
+    }
     let recommended = encoders::best(env, hardware, &profile.auto_codec).map(|e| e.id.clone());
     // One section per maker when there are several chips (a graphics card and the processor's).
     let makers = list.iter().map(|e| e.vendor).collect::<std::collections::BTreeSet<_>>();
@@ -773,12 +781,8 @@ fn video_settings(env: &Env, config: &Config, replay: bool) -> Vec<Row> {
     let mut presets = vec![
         opt("quality", t(Key::SetPresetBest)),
         opt("balanced", t(Key::SetPresetBalanced)),
-        opt("small", t(Key::SetPresetLight)),
+        opt("performance", t(Key::SetPresetPerformance)),
     ];
-    // The replay runs through every game: the light profile, without the encoder's heavier tools, is its own.
-    if replay {
-        presets.push(opt("performance", t(Key::SetPresetPerformance)));
-    }
     if let Some(advised) = presets.iter_mut().find(|o| o.value == advised_preset) {
         advised.recommended = true;
     }
@@ -788,7 +792,10 @@ fn video_settings(env: &Env, config: &Config, replay: bool) -> Vec<Row> {
         t(Key::SetPreset),
         Kind::Choice(presets),
         Box::new(move |c| {
-            Value::Text(if named(&c.video.preset) {
+            Value::Text(if c.video.preset == "small" {
+                // Before 1.0: what balanced is now.
+                "balanced".to_owned()
+            } else if named(&c.video.preset) {
                 c.video.preset.clone()
             } else {
                 // The older presets were tuned by hand: they are the custom one now.
@@ -928,7 +935,7 @@ fn video_settings(env: &Env, config: &Config, replay: bool) -> Vec<Row> {
 }
 
 /// The profile advised for the videos.
-const DEFAULT_PRESET: &str = "small";
+const DEFAULT_PRESET: &str = "balanced";
 
 /// The encoder goes from `from` to `to`: each keeps its own custom options. One that has none yet, chosen while the
 /// options are set by hand, starts from the profile `advised` (the same picture to start from).
@@ -1136,7 +1143,7 @@ fn volume_row(id: &str, label: String, key: &'static str) -> Row {
     volume
 }
 
-pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
+fn audio(env: &Env, config: &Config) -> Vec<Row> {
     let t = |k| env.t(k);
     let chosen = &config.video.audio.sources;
     let mode = capture_mode(config);
@@ -1363,6 +1370,12 @@ pub fn audio(env: &Env, config: &Config) -> Vec<Row> {
 pub fn replay(env: &Env, config: &Config) -> Vec<Row> {
     let t = |k| env.t(k);
     let enabled = toggle("replay_enabled", t(Key::SetReplayStart), |c| c.replay.enabled, |c, v| c.replay.enabled = v);
+    // The replay runs beside a game: without a hardware encoder (once the computer has said so), none.
+    if env.probe.is_some() && !encoders::hardware_possible(env) {
+        let mut off = crate::greyed(crate::warned(enabled, t(Key::SetReplayNoHardware)));
+        off.get = Box::new(|_| Value::Bool(false));
+        return vec![off];
+    }
     // The rest only matters while the replay runs.
     if !config.replay.enabled {
         return vec![enabled];

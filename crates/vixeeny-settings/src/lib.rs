@@ -26,9 +26,8 @@ pub enum Section {
     Overlay,
     /// Screenshots: folder, format, capture options.
     Image,
-    /// Recording: folder, picture, encoder, file.
-    Video,
-    Audio,
+    /// Recordings: folder, picture, encoder, file, sound.
+    Recording,
     /// The replay buffer.
     Replay,
     Shortcuts,
@@ -40,12 +39,11 @@ pub enum Section {
 }
 
 impl Section {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 9] = [
         Self::General,
         Self::Overlay,
         Self::Image,
-        Self::Video,
-        Self::Audio,
+        Self::Recording,
         Self::Replay,
         Self::Shortcuts,
         Self::Notifications,
@@ -58,8 +56,7 @@ impl Section {
             Self::General => Key::SecGeneral,
             Self::Overlay => Key::SecOverlay,
             Self::Image => Key::SecImage,
-            Self::Video => Key::SecVideo,
-            Self::Audio => Key::SecAudio,
+            Self::Recording => Key::SecRecording,
             Self::Replay => Key::SecReplay,
             Self::Shortcuts => Key::SecShortcuts,
             Self::Notifications => Key::SecNotifications,
@@ -608,8 +605,7 @@ pub fn rows(section: Section, env: &Env, config: &Config) -> Vec<Row> {
         Section::General => pages::general(env),
         Section::Overlay => pages::overlay(env, config),
         Section::Image => pages::image(env, config),
-        Section::Video => pages::video(env, config),
-        Section::Audio => pages::audio(env, config),
+        Section::Recording => pages::recording(env, config),
         Section::Replay => pages::replay(env, config),
         Section::Notifications => pages::notifications(env, config),
         Section::Updates => pages::updates(env, config),
@@ -644,21 +640,15 @@ pub fn reset(section: Section, config: &mut Config) {
             config.paths.naming.images = new.paths.naming.images;
             config.paths.per_app_subfolder.images = new.paths.per_app_subfolder.images;
         }
-        Section::Video => {
-            // The sound has its own page.
-            let audio = std::mem::take(&mut config.video.audio);
+        Section::Recording => {
+            // What other sound modes had chosen stays at hand.
+            let aside = std::mem::take(&mut config.video.audio.set_aside);
             config.video = new.video;
-            config.video.audio = audio;
+            config.video.audio.set_aside = aside;
             config.paths.videos = new.paths.videos;
             config.paths.naming.videos = new.paths.naming.videos;
             config.paths.per_app_subfolder.videos = new.paths.per_app_subfolder.videos;
             config.disk_alert.recordings = new.disk_alert.recordings;
-        }
-        Section::Audio => {
-            // What other modes had chosen stays at hand.
-            let aside = std::mem::take(&mut config.video.audio.set_aside);
-            config.video.audio = new.video.audio;
-            config.video.audio.set_aside = aside;
         }
         Section::Replay => {
             config.replay = new.replay;
@@ -896,7 +886,7 @@ mod tests {
         assert_eq!(c.general.theme, "dark");
         // Numbers are clamped and put on the step.
         c.video.split.mode = "size:2048".into();
-        let video = rows(Section::Video, &env(), &c);
+        let video = rows(Section::Recording, &env(), &c);
         let amount = row(&video, "split_amount");
         amount.apply(&mut c, Value::Int(5_000_000)).unwrap();
         assert_eq!(c.video.split.mode, "size:1000000");
@@ -972,7 +962,7 @@ mod tests {
 
     #[test]
     fn the_video_page_offers_what_the_monitors_can_show() {
-        let rates = |e: &Env, c: &Config| match &row(&rows(Section::Video, e, c), "fps").kind {
+        let rates = |e: &Env, c: &Config| match &row(&rows(Section::Recording, e, c), "fps").kind {
             Kind::Choice(o) => o.iter().map(|o| o.value.clone()).collect::<Vec<_>>(),
             _ => panic!("fps is a list"),
         };
@@ -981,7 +971,7 @@ mod tests {
         assert_eq!(rates(&slow, &c), ["30", "60"]);
         let fast = env().with_display(Display { hdr: true, max_refresh: 144 });
         assert_eq!(rates(&fast, &c), ["30", "60", "120"]);
-        let fps = |e: &Env, c: &Config| row(&rows(Section::Video, e, c), "fps").value(c);
+        let fps = |e: &Env, c: &Config| row(&rows(Section::Recording, e, c), "fps").value(c);
         assert_eq!(fps(&slow, &c), Value::Text("60".into()));
         // A rate this machine does not offer shows as the closest one offered.
         c.video.fps = 144;
@@ -989,9 +979,9 @@ mod tests {
         assert_eq!(fps(&slow, &c), Value::Text("60".into()));
         // HDR: offered only while Windows shows it.
         c.video.hdr = "keep_hdr".into();
-        assert!(!has(Section::Video, &c, "hdr"));
+        assert!(!has(Section::Recording, &c, "hdr"));
         assert!(!has(Section::Image, &c, "image_hdr"));
-        let on = rows(Section::Video, &fast, &c);
+        let on = rows(Section::Recording, &fast, &c);
         assert!(row(&on, "hdr").enabled());
         assert_eq!(row(&on, "hdr").value(&c), Value::Bool(true));
         // Only hybrid MP4, which older settings read as.
@@ -1004,12 +994,12 @@ mod tests {
     #[test]
     fn the_split_is_a_kind_and_an_amount() {
         let mut c = Config::default();
-        assert!(!has(Section::Video, &c, "split_amount"));
-        let video = rows(Section::Video, &env(), &c);
+        assert!(!has(Section::Recording, &c, "split_amount"));
+        let video = rows(Section::Recording, &env(), &c);
         let kind = row(&video, "split");
         kind.apply(&mut c, Value::Text("size".into())).unwrap();
         assert_eq!(c.video.split.mode, "size:2048");
-        let video = rows(Section::Video, &env(), &c);
+        let video = rows(Section::Recording, &env(), &c);
         let (kind, amount) = (row(&video, "split"), row(&video, "split_amount"));
         amount.apply(&mut c, Value::Int(4096)).unwrap();
         assert_eq!(c.video.split.mode, "size:4096");
@@ -1029,12 +1019,12 @@ mod tests {
         // The replay's settings show while it runs.
         c.replay.enabled = true;
         for (section, id) in
-            [(Section::Image, "dir_images"), (Section::Video, "dir_videos"), (Section::Replay, "dir_replays")]
+            [(Section::Image, "dir_images"), (Section::Recording, "dir_videos"), (Section::Replay, "dir_replays")]
         {
             let page = rows(section, &env(), &c);
             assert!(matches!(row(&page, id).kind, Kind::Folder), "{id}");
         }
-        let video = rows(Section::Video, &env(), &c);
+        let video = rows(Section::Recording, &env(), &c);
         row(&video, "dir_videos").apply(&mut c, Value::Text(" D:\\Clips ".into())).unwrap();
         assert_eq!(c.paths.videos, "D:\\Clips");
         // Each kind names its files its own way; a template cannot be emptied.
@@ -1090,17 +1080,18 @@ mod tests {
         let replay = rows(Section::Replay, &env(), &c);
         // Where its files go comes right under its switch, as on the video page.
         assert_eq!(replay[1].id, "h_folder");
+        // Three minutes until changed.
         let duration = row(&replay, "replay_duration");
-        assert_eq!(duration.value(&c), Value::Int(30));
+        assert_eq!((duration.value(&c), duration.unit.as_str()), (Value::Int(3), "min"));
         duration.apply(&mut c, Value::Int(90)).unwrap();
-        assert_eq!(c.replay.duration_seconds, 60);
-        // The amount stays in the new unit.
-        row(&replay, "replay_unit").apply(&mut c, Value::Text("minutes".into())).unwrap();
         assert_eq!(c.replay.duration_seconds, 3600);
+        // The amount stays in the new unit.
+        row(&replay, "replay_unit").apply(&mut c, Value::Text("seconds".into())).unwrap();
+        assert_eq!(c.replay.duration_seconds, 60);
         let replay = rows(Section::Replay, &env(), &c);
         row(&replay, "replay_duration").apply(&mut c, Value::Int(5)).unwrap();
-        assert_eq!(c.replay.duration_seconds, 300);
-        assert_eq!(row(&replay, "replay_duration").unit, "min");
+        assert_eq!(c.replay.duration_seconds, 5);
+        assert_eq!(row(&replay, "replay_duration").unit, "s");
         row(&replay, "replay_storage").apply(&mut c, Value::Text("disk".into())).unwrap();
         assert_eq!(c.replay.storage, "disk");
         // No game open: said in the list.
@@ -1112,11 +1103,11 @@ mod tests {
     fn the_disk_alerts_are_a_switch_and_a_share_each() {
         let mut c = Config::default();
         c.replay.enabled = true;
-        let video = rows(Section::Video, &env(), &c);
+        let video = rows(Section::Recording, &env(), &c);
         row(&video, "disk_alert_percent:videos").apply(&mut c, Value::Int(150)).unwrap();
         assert_eq!(c.disk_alert.recordings.threshold(), 99);
         row(&video, "disk_alert:videos").apply(&mut c, Value::Bool(false)).unwrap();
-        assert!(!has(Section::Video, &c, "disk_alert_percent:videos"));
+        assert!(!has(Section::Recording, &c, "disk_alert_percent:videos"));
         assert_eq!(c.disk_alert.recordings.threshold(), 0);
         // Kept for when it is on again; the replay's is its own.
         assert_eq!(c.disk_alert.recordings.percent, 99);
@@ -1136,8 +1127,6 @@ mod tests {
         assert_eq!(fps.value(&c), Value::Text("60".into()));
         fps.apply(&mut c, Value::Text("30".into())).unwrap();
         assert_eq!(c.replay.video.fps, 30);
-        row(&replay, "replay:encoder_kind").apply(&mut c, Value::Text("software".into())).unwrap();
-        assert_eq!((c.replay.video.encoder_kind.as_str(), c.video.encoder_kind.as_str()), ("software", "hardware"));
         // A replay is not cut into parts; its sound is its own too, one track whatever it records.
         assert!(!replay.iter().any(|r| r.id == "replay:split"));
         c.video.audio.bitrate_kbps = 320;
@@ -1154,14 +1143,16 @@ mod tests {
         row(&replay, "replay_same_video").apply(&mut c, Value::Bool(true)).unwrap();
         assert!(!has(Section::Replay, &c, "replay:fps"));
         assert_eq!(c.replay_video().fps, 30);
-        assert_eq!(c.replay.video.encoder_kind, "software");
+        // Still on the graphics card when the videos are not.
+        c.video.encoder_kind = "software".into();
+        assert_eq!(c.replay_video().encoder_kind, "hardware");
         // Its expanders are its own.
         c.replay.same_as_video = false;
         c.replay.video.preset = "custom".into();
         let opened = env().with_open(["replay:expert_video".to_owned()].into());
         let replay = rows(Section::Replay, &opened, &c);
         assert!(replay.iter().any(|r| r.id == "replay:chroma"));
-        assert!(!rows(Section::Video, &opened, &c).iter().any(|r| r.id == "chroma"));
+        assert!(!rows(Section::Recording, &opened, &c).iter().any(|r| r.id == "chroma"));
         assert!(row(&replay, "replay:encoder").info.starts_with("AV1"));
     }
 
@@ -1194,21 +1185,21 @@ mod tests {
         let mut c = Config::default();
         // Hardware by default; nothing listed while the probe runs.
         let detecting = env().with_probe(None, true);
-        assert!(encoder_options(&rows(Section::Video, &detecting, &c)).is_empty());
+        assert!(encoder_options(&rows(Section::Recording, &detecting, &c)).is_empty());
         // No hardware encoder here: the software ones, and the kind says so.
-        let none = rows(Section::Video, &env(), &c);
+        let none = rows(Section::Recording, &env(), &c);
         assert!(encoder_options(&none).contains(&"libx264".to_owned()));
         let kind = row(&none, "encoder_kind");
         assert!(kind.greyed && !kind.warning.is_empty());
         assert_eq!(kind.value(&c), Value::Text("software".into()));
         let e = with_nvenc();
-        let video = rows(Section::Video, &e, &c);
+        let video = rows(Section::Recording, &e, &c);
         assert_eq!(encoder_options(&video), ["nvenc_h264"]);
         // `auto` shows the encoder it resolves to.
         assert_eq!(row(&video, "encoder").value(&c), Value::Text("nvenc_h264".into()));
         // Software lists the software encoders only, and resets the choice.
         row(&video, "encoder_kind").apply(&mut c, Value::Text("software".into())).unwrap();
-        let video = rows(Section::Video, &e, &c);
+        let video = rows(Section::Recording, &e, &c);
         let software = encoder_options(&video);
         assert!(software.contains(&"libx264".to_owned()));
         assert!(!software.contains(&"nvenc_h264".to_owned()));
@@ -1228,17 +1219,17 @@ mod tests {
         };
         let mut c = Config::default();
         let uhd = env().with_machine(screen(3840, 2160));
-        let video = rows(Section::Video, &uhd, &c);
+        let video = rows(Section::Recording, &uhd, &c);
         assert_eq!(
             options(&video, "resolution"),
             ["3840 × 2160 (4K UHD)", "2560 × 1440 (QHD)", "1920 × 1080 (Full HD)", "1280 × 720 (HD)", "854 × 480 (SD)"]
         );
         // The screen's own height, set by name (or a larger screen's): the screen's size, once.
         c.video.resolution = "2160p".into();
-        let video = rows(Section::Video, &uhd, &c);
+        let video = rows(Section::Recording, &uhd, &c);
         assert_eq!(options(&video, "resolution").len(), 5);
         let qhd = env().with_machine(screen(2560, 1440));
-        let video = rows(Section::Video, &qhd, &c);
+        let video = rows(Section::Recording, &qhd, &c);
         assert_eq!(options(&video, "resolution")[0], "2560 × 1440 (QHD)");
         assert_eq!(options(&video, "resolution").len(), 4);
         assert!(matches!(row(&video, "resolution").value(&c), Value::Text(v) if v == "source"));
@@ -1248,11 +1239,11 @@ mod tests {
         assert!(!video.iter().any(|r| r.id == "ten_bit"));
         // An ultrawide screen can be recorded as 16:9, and the sizes follow.
         let wide = env().with_machine(screen(3440, 1440));
-        let video = rows(Section::Video, &wide, &c);
+        let video = rows(Section::Recording, &wide, &c);
         assert_eq!(options(&video, "aspect"), ["The screen's (21:9)", "16:9, cropped in the middle"]);
         assert_eq!(options(&video, "resolution")[1], "2580 × 1080");
         row(&video, "aspect").apply(&mut c, Value::Text("16:9".into())).unwrap();
-        let video = rows(Section::Video, &wide, &c);
+        let video = rows(Section::Recording, &wide, &c);
         assert_eq!(options(&video, "resolution")[..2], ["2560 × 1440 (QHD)", "1920 × 1080 (Full HD)"]);
     }
 
@@ -1261,7 +1252,7 @@ mod tests {
         let mut c = Config::default();
         c.video.preset = "quality".into();
         let env = with_nvenc();
-        let video = rows(Section::Video, &env, &c);
+        let video = rows(Section::Recording, &env, &c);
         row(&video, "preset").apply(&mut c, Value::Text("custom".into())).unwrap();
         assert_eq!(c.video.preset, "custom");
         // NVENC's best quality: CQ 19, not the scale's 23.
@@ -1269,8 +1260,8 @@ mod tests {
         assert_eq!(c.video.params["multipass"], "qres");
         // Set by hand, then another preset and back: what was set by hand is kept.
         c.video.params.insert("rc.quality".into(), "21".into());
-        let video = rows(Section::Video, &env, &c);
-        row(&video, "preset").apply(&mut c, Value::Text("small".into())).unwrap();
+        let video = rows(Section::Recording, &env, &c);
+        row(&video, "preset").apply(&mut c, Value::Text("balanced".into())).unwrap();
         row(&video, "preset").apply(&mut c, Value::Text("custom".into())).unwrap();
         assert_eq!(c.video.params["rc.quality"], "21");
     }
@@ -1280,12 +1271,12 @@ mod tests {
         let mut c = Config::default();
         let env = with_nvenc();
         let kind = |c: &mut Config, v: &str| {
-            row(&rows(Section::Video, &env, c), "encoder_kind").apply(c, Value::Text(v.into())).unwrap();
+            row(&rows(Section::Recording, &env, c), "encoder_kind").apply(c, Value::Text(v.into())).unwrap();
         };
         c.video.encoder = "nvenc_h264".into();
         kind(&mut c, "software");
         assert_eq!(c.video.encoder, "auto");
-        row(&rows(Section::Video, &env, &c), "encoder").apply(&mut c, Value::Text("libx265".into())).unwrap();
+        row(&rows(Section::Recording, &env, &c), "encoder").apply(&mut c, Value::Text("libx265".into())).unwrap();
         kind(&mut c, "hardware");
         assert_eq!(c.video.encoder, "nvenc_h264");
         kind(&mut c, "software");
@@ -1297,7 +1288,7 @@ mod tests {
         let mut c = Config::default();
         let env = with_nvenc();
         let set = |c: &mut Config, id: &str, v: Value| {
-            row(&rows(Section::Video, &env, c), id).apply(c, v).unwrap();
+            row(&rows(Section::Recording, &env, c), id).apply(c, v).unwrap();
         };
         set(&mut c, "preset", Value::Text("custom".into()));
         set(&mut c, "p:rc.quality", Value::Int(30));
@@ -1320,12 +1311,12 @@ mod tests {
     fn expert_settings_stay_folded_until_opened() {
         let mut c = Config::default();
         c.video.preset = "custom".into();
-        let closed = rows(Section::Video, &with_nvenc(), &c);
+        let closed = rows(Section::Recording, &with_nvenc(), &c);
         assert!(matches!(row(&closed, "expert_video").kind, Kind::Expander));
         assert!(closed.iter().any(|r| r.id == "p:preset"));
         assert!(!closed.iter().any(|r| r.id == "p:multipass" || r.id == "chroma"));
         let open = with_nvenc().with_open(["expert_video".to_owned()].into());
-        let opened = rows(Section::Video, &open, &c);
+        let opened = rows(Section::Recording, &open, &c);
         assert!(opened.iter().any(|r| r.id == "p:multipass"));
         assert!(opened.iter().any(|r| r.id == "chroma"));
     }
@@ -1348,7 +1339,7 @@ mod tests {
         assert!(!greyed.enabled());
         assert!(greyed.info.contains("WebP"), "{}", greyed.info);
         assert!(greyed.apply(&mut c, Value::Bool(false)).is_err());
-        let video = rows(Section::Video, &env, &c);
+        let video = rows(Section::Recording, &env, &c);
         row(&video, "hdr").apply(&mut c, Value::Bool(true)).unwrap();
         assert_eq!(c.video.hdr, "keep_hdr");
         row(&video, "hdr").apply(&mut c, Value::Bool(false)).unwrap();
@@ -1356,20 +1347,24 @@ mod tests {
     }
 
     #[test]
-    fn presets_are_quality_balanced_compact_or_custom_and_custom_shows_the_encoder_options() {
+    fn presets_are_quality_balanced_performance_or_custom_and_custom_shows_the_encoder_options() {
         let mut c = Config::default();
         c.video.encoder_kind = "software".into();
-        let ids = |c: &Config| -> Vec<String> { rows(Section::Video, &env(), c).into_iter().map(|r| r.id).collect() };
+        let ids =
+            |c: &Config| -> Vec<String> { rows(Section::Recording, &env(), c).into_iter().map(|r| r.id).collect() };
         assert!(!ids(&c).iter().any(|i| i.starts_with("p:")));
-        assert_eq!(row(&rows(Section::Video, &env(), &c), "preset").value(&c), Value::Text("small".into()));
-        c.video.preset = "balanced".into();
-        assert_eq!(row(&rows(Section::Video, &env(), &c), "preset").value(&c), Value::Text("balanced".into()));
-        // Older presets are shown as custom.
+        let preset = |c: &Config| row(&rows(Section::Recording, &env(), c), "preset").value(c);
+        assert_eq!(preset(&c), Value::Text("balanced".into()));
         c.video.preset = "performance".into();
-        let video = rows(Section::Video, &env(), &c);
+        assert_eq!(preset(&c), Value::Text("performance".into()));
+        // The compact profile of before 1.0 is the balanced one; older presets are shown as custom.
+        c.video.preset = "small".into();
+        assert_eq!(preset(&c), Value::Text("balanced".into()));
+        c.video.preset = "fast".into();
+        let video = rows(Section::Recording, &env(), &c);
         assert_eq!(row(&video, "preset").value(&c), Value::Text("custom".into()));
         c.video.preset = "custom".into();
-        let video = rows(Section::Video, &env(), &c);
+        let video = rows(Section::Recording, &env(), &c);
         assert!(ids(&c).iter().any(|i| i == "p:rc.quality"));
         // A custom option is stored by its key and read back (the default until set).
         let crf = row(&video, "p:rc.quality");
@@ -1401,9 +1396,9 @@ mod tests {
             programs: vec![AudioEntry { id: "spotify.exe".into(), name: "Spotify".into(), icon: None }],
             games: Vec::new(),
         });
-        let audio = rows(Section::Audio, &e, &c);
+        let audio = rows(Section::Recording, &e, &c);
         // All the PC sound; the microphone is off, its choice left out.
-        let capture = |c: &Config| row(&rows(Section::Audio, &e, c), "audio_capture").value(c);
+        let capture = |c: &Config| row(&rows(Section::Recording, &e, c), "audio_capture").value(c);
         assert_eq!(capture(&c), Value::Text("system".into()));
         assert_eq!(row(&audio, "mic_on").value(&c), Value::Bool(false));
         assert!(!has_in(&audio, "mic_device"));
@@ -1413,7 +1408,7 @@ mod tests {
         // On: the Windows default, then the one picked.
         row(&audio, "mic_on").apply(&mut c, Value::Bool(true)).unwrap();
         assert_eq!(c.video.audio.sources, ["system", "mic"]);
-        let audio = rows(Section::Audio, &e, &c);
+        let audio = rows(Section::Recording, &e, &c);
         assert!(row(&audio, "mic_volume").meter);
         assert_eq!(row(&audio, "mic_volume").number_text(100, Lang::Fr), "100\u{a0}%");
         match &row(&audio, "audio_routing").kind {
@@ -1429,20 +1424,20 @@ mod tests {
         row(&audio, "mic_device").apply(&mut c, Value::Text("mic:{in-1}".into())).unwrap();
         // The recorded program: the microphone stays.
         let set = |c: &mut Config, mode: &str| {
-            row(&rows(Section::Audio, &e, c), "audio_capture").apply(c, Value::Text(mode.into())).unwrap();
+            row(&rows(Section::Recording, &e, c), "audio_capture").apply(c, Value::Text(mode.into())).unwrap();
         };
         set(&mut c, "target");
         assert_eq!(c.video.audio.sources, ["mic:{in-1}", TARGET_SOURCE]);
         // One output: the first device, then the one picked.
         set(&mut c, "output");
         assert_eq!(c.video.audio.sources, ["mic:{in-1}", "out:{out-1}"]);
-        let audio = rows(Section::Audio, &e, &c);
+        let audio = rows(Section::Recording, &e, &c);
         assert_eq!(row(&audio, "audio_output").value(&c), Value::Text("out:{out-1}".into()));
         // Chosen programs: ticked one by one; none ticked is still that choice.
         set(&mut c, "programs");
         assert_eq!(c.video.audio.sources, ["mic:{in-1}"]);
         assert_eq!(capture(&c), Value::Text("programs".into()));
-        let audio = rows(Section::Audio, &e, &c);
+        let audio = rows(Section::Recording, &e, &c);
         assert_eq!(row(&audio, "src:app:spotify.exe").label, "Spotify");
         row(&audio, "src:app:spotify.exe").apply(&mut c, Value::Bool(true)).unwrap();
         assert_eq!(c.video.audio.sources, ["mic:{in-1}", "app:spotify.exe"]);
@@ -1456,7 +1451,7 @@ mod tests {
         assert_eq!(c.video.audio.set_aside, ["out:{out-2}"]);
         // A ticked program that is closed now stays listed.
         c.video.audio.sources.push("app:game.exe".into());
-        let audio = rows(Section::Audio, &e, &c);
+        let audio = rows(Section::Recording, &e, &c);
         assert_eq!(row(&audio, "src:app:game.exe").label, "game.exe (closed)");
         // Off removes the microphone, whichever it was; on again, it is back.
         row(&audio, "mic_on").apply(&mut c, Value::Bool(false)).unwrap();
@@ -1478,14 +1473,13 @@ mod tests {
         c.video.fps = 30;
         c.video.audio.bitrate_kbps = 320;
         c.video.audio.set_aside = vec!["out:{x}".into()];
-        assert!(differs(Section::General, &c) && differs(Section::Video, &c));
+        assert!(differs(Section::General, &c) && differs(Section::Recording, &c));
         assert!(!differs(Section::Image, &c));
-        reset(Section::Video, &mut c);
+        reset(Section::Recording, &mut c);
         assert_eq!(c.video.fps, Config::default().video.fps);
-        // The sound is another page's.
-        assert_eq!(c.video.audio.bitrate_kbps, 320);
-        reset(Section::Audio, &mut c);
-        assert!(!differs(Section::Audio, &c));
+        // The sound is on the same page.
+        assert_eq!(c.video.audio.bitrate_kbps, Config::default().video.audio.bitrate_kbps);
+        assert!(!differs(Section::Recording, &c));
         assert_eq!(c.video.audio.set_aside, ["out:{x}"]);
         assert_eq!(c.general.theme, "dark");
         reset_all(&mut c);
@@ -1495,7 +1489,7 @@ mod tests {
     #[test]
     fn the_volumes_are_percentages_of_each_side() {
         let mut c = Config::default();
-        let audio = rows(Section::Audio, &env(), &c);
+        let audio = rows(Section::Recording, &env(), &c);
         let capture = row(&audio, "capture_volume");
         assert_eq!(capture.value(&c), Value::Int(100));
         capture.apply(&mut c, Value::Int(152)).unwrap();
@@ -1504,13 +1498,13 @@ mod tests {
         capture.apply(&mut c, Value::Int(100)).unwrap();
         assert!(c.video.audio.volumes.is_empty());
         c.video.audio.sources.push("mic".into());
-        let audio = rows(Section::Audio, &env(), &c);
+        let audio = rows(Section::Recording, &env(), &c);
         row(&audio, "mic_volume").apply(&mut c, Value::Int(60)).unwrap();
         assert_eq!(c.video.audio.volumes["mic"], 0.6);
         // Nothing recorded besides the microphone: no volume for it.
         c.video.audio.capture = "none".into();
         c.video.audio.sources = vec!["mic".into()];
-        assert!(!has(Section::Audio, &c, "capture_volume"));
+        assert!(!has(Section::Recording, &c, "capture_volume"));
     }
 
     #[test]
@@ -1548,7 +1542,7 @@ mod tests {
         assert!(pages.contains(&Section::Image) && pages.contains(&Section::Replay));
         // The folded expert settings are found too.
         let found = search("chroma", &fr, &c);
-        assert_eq!(found[0].section, Section::Video);
+        assert_eq!(found[0].section, Section::Recording);
         assert!(search("zzz", &fr, &c).is_empty());
     }
 
@@ -1580,7 +1574,7 @@ mod tests {
         };
         let mut c = Config::default();
         c.replay.enabled = true;
-        c.replay.duration_seconds = 300;
+        c.replay.duration_seconds = 1200;
         c.replay.video.max_rate.enabled = false;
         // Under the storage's name.
         let hint = |env: &Env, c: &Config| row(&rows(Section::Replay, env, c), "replay_storage").detail.clone();
@@ -1589,44 +1583,48 @@ mod tests {
         c.replay.storage = "disk".into();
         assert!(!hint(&with_ram(64), &c).contains(" in RAM"));
         assert!(hint(&with_ram(64), &c).contains("GB"));
-        // Held to its ceiling: five minutes at 4.5 Mbit/s, under 200 MB.
+        // Held to its ceiling: twenty minutes at 4.5 Mbit/s, under 1 GB.
         c.replay.video.max_rate.enabled = true;
         assert!(hint(&with_ram(64), &c).contains("MB"), "{}", hint(&with_ram(64), &c));
     }
 
     #[test]
-    fn the_replay_starts_on_h264_and_the_light_profile_with_a_ceiling() {
+    fn the_replay_starts_on_the_performance_profile_and_the_videos_encoder() {
         let mut c = Config::default();
         c.replay.enabled = true;
+        let marked = |rows: &[Row], id: &str| -> Vec<String> {
+            let Kind::Choice(presets) = &row(rows, id).kind else {
+                panic!("the profile is a choice");
+            };
+            presets.iter().filter(|o| o.recommended).map(|o| o.value.clone()).collect()
+        };
         let replay = rows(Section::Replay, &with_nvenc(), &c);
         assert_eq!(row(&replay, "replay:preset").value(&c), Value::Text("performance".into()));
-        let Kind::Choice(presets) = &row(&replay, "replay:preset").kind else {
-            panic!("the profile is a choice");
-        };
-        let marked: Vec<_> = presets.iter().filter(|o| o.recommended).map(|o| o.value.as_str()).collect();
-        assert_eq!(marked, ["performance"]);
-        // Not a custom one: no options by hand, and the videos have no such profile.
+        assert_eq!(marked(&replay, "replay:preset"), ["performance"]);
+        // Not a custom one: no options by hand. The videos advise the balanced one.
         assert!(!replay.iter().any(|r| r.id.starts_with("replay:p:")));
-        let video = rows(Section::Video, &with_nvenc(), &c);
-        let Kind::Choice(presets) = &row(&video, "preset").kind else {
-            panic!("the profile is a choice");
-        };
-        assert!(!presets.iter().any(|o| o.value == "performance"));
-        // The ceiling: on for the replay, off for the videos, its amount nested under it.
-        assert_eq!(row(&replay, "replay:max_rate_kbps").value(&c), Value::Int(4_500));
-        assert!(!has(Section::Video, &c, "max_rate_kbps"));
+        let video = rows(Section::Recording, &with_nvenc(), &c);
+        assert_eq!(marked(&video, "preset"), ["balanced"]);
+        // Always on the graphics card: no choice of the kind.
+        assert!(!has_in(&replay, "replay:encoder_kind") && has_in(&video, "encoder_kind"));
+        // The ceiling: off for both until turned on, its amount nested under it.
+        assert!(!has_in(&replay, "replay:max_rate_kbps") && !has_in(&video, "max_rate_kbps"));
         row(&video, "max_rate").apply(&mut c, Value::Bool(true)).unwrap();
         assert_eq!(c.video.max_rate.kbps(), Some(4_500));
         // A bitrate of the user's own leaves no room for it.
         c.video.preset = "custom".into();
         c.video.params.insert("rc.mode".into(), "vbr".into());
-        assert!(!has(Section::Video, &c, "max_rate"));
-        // H.264 is the encoder `auto` stands for, and the one recommended, where AV1 is the videos'.
+        assert!(!has(Section::Recording, &c, "max_rate"));
+        // The encoder `auto` stands for is the videos' one.
         let both = with_nvenc_av1();
         let replay = rows(Section::Replay, &both, &c);
-        assert_eq!(row(&replay, "replay:encoder").value(&c), Value::Text("nvenc_h264".into()));
-        let video = rows(Section::Video, &both, &Config::default());
-        assert_eq!(row(&video, "encoder").value(&Config::default()), Value::Text("nvenc_av1".into()));
+        assert_eq!(row(&replay, "replay:encoder").value(&c), Value::Text("nvenc_av1".into()));
+        // No hardware encoder: no replay, said beside its switch.
+        let none = env().with_probe(Some(vixeeny_encode::probe::ProbeResult::default()), false);
+        let replay = rows(Section::Replay, &none, &c);
+        assert_eq!(replay.len(), 1);
+        assert!(replay[0].greyed && !replay[0].warning.is_empty());
+        assert_eq!(replay[0].value(&c), Value::Bool(false));
     }
 
     fn with_nvenc_av1() -> Env {
@@ -1647,7 +1645,7 @@ mod tests {
     fn settings_explain_themselves_and_recommend_only_numbers() {
         let mut c = Config::default();
         c.video.preset = "custom".into();
-        let video = rows(Section::Video, &with_nvenc(), &c);
+        let video = rows(Section::Recording, &with_nvenc(), &c);
         assert!(row(&video, "encoder_kind").info.starts_with("Hardware:"));
         assert!(!row(&video, "encoder_kind").info.contains("Recommended"));
         assert!(row(&video, "p:preset").info.contains("Recommended here: P4"));
@@ -1661,7 +1659,7 @@ mod tests {
         assert_eq!(marked, ["P4"]);
         // A setting with nothing to add has no "i".
         assert!(row(&video, "video_cursor").info.is_empty());
-        assert!(row(&video, "preset").info.contains("Compact"));
+        assert!(row(&video, "preset").info.contains("Performance"));
         c.image.format = "jpeg".into();
         let image = rows(Section::Image, &env(), &c);
         assert!(row(&image, "image_format").info.is_empty());

@@ -32,9 +32,8 @@ containers = ["mkv", "mp4", "fmp4"]
 
 [encoder.presets]
 quality = { crf = 18, preset = "veryfast" }
-balanced = { crf = 23, preset = "veryfast" }
+balanced = { crf = 26, preset = "veryfast" }
 performance = { crf = 26, preset = "superfast" }
-small = { crf = 26, preset = "veryfast" }
 
 [encoder.rate_control]
 quality = { name = "CRF", min = 0, max = 51, default = 23 }
@@ -105,9 +104,8 @@ containers = ["mkv", "mp4", "fmp4"]
 
 [encoder.presets]
 quality = { crf = 20, preset = "superfast" }
-balanced = { crf = 24, preset = "superfast" }
-performance = { crf = 27, preset = "ultrafast" }
-small = { crf = 28, preset = "superfast" }
+balanced = { crf = 28, preset = "superfast" }
+performance = { crf = 28, preset = "ultrafast" }
 
 [encoder.rate_control]
 quality = { name = "CRF", min = 0, max = 51, default = 24 }
@@ -171,9 +169,8 @@ containers = ["mkv", "mp4", "fmp4", "webm"]
 
 [encoder.presets]
 quality = { crf = 26, deadline = "realtime", cpu-used = 6, row-mt = 1, b = 0 }
-balanced = { crf = 32, deadline = "realtime", cpu-used = 7, row-mt = 1, b = 0 }
-performance = { crf = 36, deadline = "realtime", cpu-used = 8, row-mt = 1, b = 0 }
-small = { crf = 38, deadline = "realtime", cpu-used = 7, row-mt = 1, b = 0 }
+balanced = { crf = 38, deadline = "realtime", cpu-used = 7, row-mt = 1, b = 0 }
+performance = { crf = 38, deadline = "realtime", cpu-used = 8, row-mt = 1, b = 0 }
 
 # Constant quality needs `b = 0`.
 [encoder.rate_control]
@@ -230,9 +227,8 @@ containers = ["mkv", "mp4", "fmp4", "webm"]
 
 [encoder.presets]
 quality = { crf = 26, preset = 10 }
-balanced = { crf = 30, preset = 10 }
+balanced = { crf = 36, preset = 10 }
 performance = { crf = 36, preset = 12 }
-small = { crf = 36, preset = 10 }
 
 [encoder.rate_control]
 quality = { name = "CRF", min = 1, max = 63, default = 30 }
@@ -276,9 +272,8 @@ containers = ["mkv", "mp4", "fmp4"]
 
 [encoder.presets]
 quality = { rc = "vbr", cq = 19, preset = "p4", tune = "hq", multipass = "qres", spatial-aq = 1, temporal-aq = 1 }
-balanced = { rc = "vbr", cq = 24, preset = "p4", tune = "hq", multipass = "qres", spatial-aq = 1, temporal-aq = 1 }
-performance = { rc = "vbr", cq = 25, preset = "p2", tune = "hq" }
-small = { rc = "vbr", cq = 28, preset = "p4", tune = "hq", multipass = "qres", spatial-aq = 1, temporal-aq = 1 }
+balanced = { rc = "vbr", cq = 28, preset = "p4", tune = "hq", multipass = "qres", spatial-aq = 1, temporal-aq = 1 }
+performance = { rc = "vbr", cq = 28, preset = "p4", tune = "hq", bf = 0 }
 
 [encoder.rate_control]
 quality = { name = "CQ", min = 1, max = 51, default = 24 }
@@ -357,9 +352,8 @@ containers = ["mkv", "mp4", "fmp4"]
 
 [encoder.presets]
 quality = { rc = "vbr", cq = 20, preset = "p5", tune = "hq", multipass = "qres", spatial-aq = 1, temporal-aq = 1, b_ref_mode = "middle" }
-balanced = { rc = "vbr", cq = 25, preset = "p5", tune = "hq", multipass = "qres", spatial-aq = 1, temporal-aq = 1, b_ref_mode = "middle" }
-performance = { rc = "vbr", cq = 27, preset = "p2", tune = "hq" }
-small = { rc = "vbr", cq = 30, preset = "p5", tune = "hq", multipass = "qres", spatial-aq = 1, temporal-aq = 1, b_ref_mode = "middle" }
+balanced = { rc = "vbr", cq = 30, preset = "p5", tune = "hq", multipass = "qres", spatial-aq = 1, temporal-aq = 1, b_ref_mode = "middle" }
+performance = { rc = "vbr", cq = 30, preset = "p5", tune = "hq", bf = 0 }
 
 [encoder.rate_control]
 quality = { name = "CQ", min = 1, max = 51, default = 25 }
@@ -436,9 +430,8 @@ containers = ["mkv", "mp4", "fmp4", "webm"]
 
 [encoder.presets]
 quality = { rc = "vbr", cq = 24, preset = "p5", tune = "hq", multipass = "qres", spatial-aq = 1, temporal-aq = 1, b_ref_mode = "middle" }
-balanced = { rc = "vbr", cq = 30, preset = "p5", tune = "hq", multipass = "qres", spatial-aq = 1, temporal-aq = 1, b_ref_mode = "middle" }
-performance = { rc = "vbr", cq = 32, preset = "p2", tune = "hq" }
-small = { rc = "vbr", cq = 36, preset = "p5", tune = "hq", multipass = "qres", spatial-aq = 1, temporal-aq = 1, b_ref_mode = "middle" }
+balanced = { rc = "vbr", cq = 36, preset = "p5", tune = "hq", multipass = "qres", spatial-aq = 1, temporal-aq = 1, b_ref_mode = "middle" }
+performance = { rc = "vbr", cq = 36, preset = "p5", tune = "hq", bf = 0 }
 
 [encoder.rate_control]
 quality = { name = "CQ", min = 1, max = 63, default = 30 }
@@ -516,9 +509,8 @@ containers = ["mkv", "mp4", "fmp4"]
 # runs from 1 to 51, 51 the best (the user's scale is mirrored into it).
 [encoder.presets]
 quality = { usage = "transcoding", quality = "quality", rc = "qvbr", qvbr_quality_level = 51, vbaq = 1, preencode = 1, high_motion_quality_boost_enable = 1 }
-balanced = { usage = "transcoding", quality = "balanced", rc = "qvbr", qvbr_quality_level = 46, vbaq = 1, preencode = 1, high_motion_quality_boost_enable = 1 }
-performance = { usage = "transcoding", quality = "speed", rc = "qvbr", qvbr_quality_level = 44, vbaq = 1 }
-small = { usage = "transcoding", quality = "quality", rc = "qvbr", qvbr_quality_level = 40, vbaq = 1, preencode = 1, high_motion_quality_boost_enable = 1 }
+balanced = { usage = "transcoding", quality = "quality", rc = "qvbr", qvbr_quality_level = 40, vbaq = 1, preencode = 1, high_motion_quality_boost_enable = 1 }
+performance = { usage = "transcoding", quality = "quality", rc = "qvbr", qvbr_quality_level = 40 }
 
 [encoder.rate_control]
 quality = { name = "QVBR", min = 1, max = 51, default = 6, inverted = true }
@@ -593,9 +585,8 @@ containers = ["mkv", "mp4", "fmp4"]
 # Constant quality is QVBR (see AMF H.264).
 [encoder.presets]
 quality = { usage = "transcoding", quality = "quality", rc = "qvbr", qvbr_quality_level = 51, vbaq = 1, preencode = 1, high_motion_quality_boost_enable = 1 }
-balanced = { usage = "transcoding", quality = "balanced", rc = "qvbr", qvbr_quality_level = 48, vbaq = 1, preencode = 1, high_motion_quality_boost_enable = 1 }
-performance = { usage = "transcoding", quality = "speed", rc = "qvbr", qvbr_quality_level = 46, vbaq = 1 }
-small = { usage = "transcoding", quality = "quality", rc = "qvbr", qvbr_quality_level = 41, vbaq = 1, preencode = 1, high_motion_quality_boost_enable = 1 }
+balanced = { usage = "transcoding", quality = "quality", rc = "qvbr", qvbr_quality_level = 41, vbaq = 1, preencode = 1, high_motion_quality_boost_enable = 1 }
+performance = { usage = "transcoding", quality = "quality", rc = "qvbr", qvbr_quality_level = 41 }
 
 [encoder.rate_control]
 quality = { name = "QVBR", min = 1, max = 51, default = 4, inverted = true }
@@ -662,9 +653,8 @@ containers = ["mkv", "mp4", "fmp4", "webm"]
 # Constant quality is QVBR (see AMF H.264); AV1's adaptive quantization is CAQ.
 [encoder.presets]
 quality = { usage = "transcoding", quality = "quality", rc = "qvbr", qvbr_quality_level = 51, aq_mode = "caq", preencode = 1, high_motion_quality_boost_enable = 1 }
-balanced = { usage = "transcoding", quality = "balanced", rc = "qvbr", qvbr_quality_level = 44, aq_mode = "caq", preencode = 1, high_motion_quality_boost_enable = 1 }
-performance = { usage = "transcoding", quality = "speed", rc = "qvbr", qvbr_quality_level = 41, aq_mode = "caq" }
-small = { usage = "transcoding", quality = "quality", rc = "qvbr", qvbr_quality_level = 34, aq_mode = "caq", preencode = 1, high_motion_quality_boost_enable = 1 }
+balanced = { usage = "transcoding", quality = "quality", rc = "qvbr", qvbr_quality_level = 34, aq_mode = "caq", preencode = 1, high_motion_quality_boost_enable = 1 }
+performance = { usage = "transcoding", quality = "quality", rc = "qvbr", qvbr_quality_level = 34 }
 
 [encoder.rate_control]
 quality = { name = "QVBR", min = 1, max = 51, default = 8, inverted = true }
@@ -731,9 +721,8 @@ containers = ["mkv", "mp4", "fmp4"]
 
 [encoder.presets]
 quality = { global_quality = 16, preset = "medium" }
-balanced = { global_quality = 20, preset = "medium" }
-performance = { global_quality = 21, preset = "veryfast" }
-small = { global_quality = 23, preset = "medium" }
+balanced = { global_quality = 23, preset = "medium" }
+performance = { global_quality = 23, preset = "medium", bf = 0 }
 
 [encoder.rate_control]
 quality = { name = "ICQ", min = 1, max = 51, default = 20 }
@@ -783,9 +772,8 @@ containers = ["mkv", "mp4", "fmp4"]
 
 [encoder.presets]
 quality = { global_quality = 16, preset = "medium" }
-balanced = { global_quality = 20, preset = "medium" }
-performance = { global_quality = 21, preset = "veryfast" }
-small = { global_quality = 23, preset = "medium" }
+balanced = { global_quality = 23, preset = "medium" }
+performance = { global_quality = 23, preset = "medium", bf = 0 }
 
 [encoder.rate_control]
 quality = { name = "ICQ", min = 1, max = 51, default = 20 }
@@ -835,9 +823,8 @@ containers = ["mkv", "mp4", "fmp4", "webm"]
 
 [encoder.presets]
 quality = { global_quality = 12, preset = "medium" }
-balanced = { global_quality = 16, preset = "medium" }
-performance = { global_quality = 18, preset = "veryfast" }
-small = { global_quality = 22, preset = "medium" }
+balanced = { global_quality = 22, preset = "medium" }
+performance = { global_quality = 22, preset = "medium", bf = 0 }
 
 [encoder.rate_control]
 quality = { name = "ICQ", min = 1, max = 51, default = 16 }
@@ -887,9 +874,8 @@ containers = ["mkv", "mp4", "fmp4", "webm"]
 
 [encoder.presets]
 quality = { global_quality = 20, preset = "medium" }
-balanced = { global_quality = 24, preset = "medium" }
-performance = { global_quality = 28, preset = "veryfast" }
-small = { global_quality = 30, preset = "medium" }
+balanced = { global_quality = 30, preset = "medium" }
+performance = { global_quality = 30, preset = "medium", bf = 0 }
 
 [encoder.rate_control]
 quality = { name = "ICQ", min = 1, max = 51, default = 24 }

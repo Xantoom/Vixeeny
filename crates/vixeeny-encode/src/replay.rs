@@ -71,8 +71,9 @@ pub fn profile_kbps(
         size,
         profile.fps,
         match profile.preset.as_str() {
-            "balanced" => 0.7,
-            "small" => 0.5,
+            // Without B-frames, a little more for the same level.
+            "performance" => 0.6,
+            "balanced" | "small" => 0.5,
             _ => 1.0,
         },
         bitrate,

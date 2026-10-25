@@ -1029,7 +1029,7 @@ impl SettingsPanel {
         self.window.set_pc_screens(pc_tiles(&overview.screens));
         self.window.set_pc_disks(pc_tiles(&overview.disks));
         let notice = match section {
-            Section::Video => video_problems(&config, (1920, 1080), env.lang).join("\n"),
+            Section::Recording => video_problems(&config, (1920, 1080), env.lang).join("\n"),
             Section::Replay => vixeeny_settings::replay_problems(&config, (1920, 1080), env.lang).join("\n"),
             _ => String::new(),
         };
@@ -1299,7 +1299,7 @@ impl SettingsPanel {
         let shown = || state.rows.borrow().iter().any(|r| r.id == found.id);
         self.select_section(found.section);
         let expert = match found.section {
-            Section::Video => Some("expert_video"),
+            Section::Recording => Some("expert_video"),
             Section::Replay => Some("replay:expert_video"),
             _ => None,
         };
@@ -1337,7 +1337,7 @@ impl SettingsPanel {
                 if let Some(p) = panel(&weak, &state) {
                     p.refresh();
                     if let Some(section) = Section::ALL.get(i as usize) {
-                        if *section == Section::Audio {
+                        if matches!(section, Section::Recording | Section::Replay) {
                             p.load_audio();
                         }
                         (state.on_section.borrow())(*section);

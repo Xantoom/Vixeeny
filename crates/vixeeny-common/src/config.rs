@@ -183,11 +183,18 @@ const OLD_TEMPLATE: &str = "{app}_{date}_{time}";
 const NEW_SHORTCUTS: [(&str, &str); 2] = [("capture_all_monitors", "Ctrl+F7"), ("replay_toggle", "Ctrl+Shift+F11")];
 
 /// 1.0: the notifications get a table of their own, the disk alert one per kind of video, the replay its own video and
-/// sound settings (those of the videos so far) and switches for what a number turned off. Files still on the former
-/// default name join the new one, and the actions without a shortcut get theirs when it is free.
+/// sound settings (those of the videos so far) and switches for what a number turned off; the compact profile is called
+/// balanced. Files still on the former default name join the new one, and the actions without a shortcut get theirs
+/// when it is free.
 fn v9_settings_of_their_own(table: &mut toml::Table) {
     let general = table.get_mut("general").and_then(|g| g.as_table_mut());
     let notifications = general.and_then(|g| g.remove("notifications")).and_then(|v| v.as_bool()).unwrap_or(true);
+    // The compact profile is the balanced one now.
+    if let Some(video) = table.get_mut("video").and_then(|v| v.as_table_mut())
+        && video.get("preset").and_then(toml::Value::as_str) == Some("small")
+    {
+        video.insert("preset".into(), "balanced".into());
+    }
     let replay_video = table.get("video").cloned();
     let mut replay = match table.remove("replay") {
         Some(toml::Value::Table(replay)) => replay,
@@ -363,10 +370,16 @@ impl Default for Config {
 }
 
 impl Config {
-    /// What the replay records with, sound included: its own settings, or those of the videos.
+    /// What the replay records with, sound included: its own settings, or those of the videos. Always a hardware
+    /// encoder (the replay runs beside a game: the processor is the game's): the hardware one the settings had, else
+    /// the best one.
     pub fn replay_video(&self) -> Video {
         let mut video = if self.replay.same_as_video { self.video.clone() } else { self.replay.video.clone() };
         video.split = Split::default();
+        if video.encoder_kind == "software" {
+            video.encoder_kind = "hardware".into();
+            video.encoder = video.encoder_by_kind.get("hardware").cloned().unwrap_or_else(|| "auto".into());
+        }
         video
     }
 }
@@ -662,7 +675,8 @@ pub struct Video {
     pub chroma: String,
     pub hdr: String,
     pub mode: String,
-    /// `quality` (for editing and keeping), `balanced`, `small` (compact files, for sharing) or `custom` (`params`).
+    /// `quality` (for editing and keeping), `balanced`, `performance` (balanced without the tools that load the
+    /// encoder: the replay's) or `custom` (`params`). `small`, from before 1.0, reads as `balanced`.
     pub preset: String,
     /// The encoder options of the `custom` preset, by the registry's parameter key: those of the encoder in use.
     pub params: BTreeMap<String, String>,
@@ -691,7 +705,7 @@ impl Default for Video {
             chroma: "420".into(),
             hdr: "tonemap_sdr".into(),
             mode: "simple".into(),
-            preset: "small".into(),
+            preset: "balanced".into(),
             params: BTreeMap::new(),
             params_by_encoder: BTreeMap::new(),
             max_rate: MaxRate::default(),
@@ -703,9 +717,9 @@ impl Default for Video {
     }
 }
 
-/// The replay's ceiling until changed, in kbit/s: 30 seconds, and the second back to their first key frame, stay under
-/// Discord's 20 MB with the sound (160 kbit/s), even when the encoder's two-second buffer is spent at once: (4 500 ×
-/// 31 + 9 000 + 160 × 31) kbit ≈ 19.2 MB.
+/// The ceiling offered when it is turned on, in kbit/s: 30 seconds, and the second back to their first key frame, stay
+/// under Discord's 20 MB with the sound (160 kbit/s), even when the encoder's two-second buffer is spent at once: (4
+/// 500 × 31 + 9 000 + 160 × 31) kbit ≈ 19.2 MB.
 pub const REPLAY_MAX_KBPS: u32 = 4_500;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -772,15 +786,13 @@ pub struct Audio {
 }
 
 impl Video {
-    /// The replay's settings until changed: light enough to run through every game, and shared as they are saved.
-    /// H.264, the codec every network and player takes; 1080p, where they stop; the light profile (no look-ahead,
-    /// B-frames or extra pass); a ceiling for Discord; AAC in one track, what a web player plays.
+    /// The replay's settings until changed: light enough to run through every game. The encoder the videos' `auto`
+    /// picks; 1080p at 60 FPS, where the networks stop; the performance profile (no look-ahead, B-frames, extra pass or
+    /// adaptive quantisation); AAC in one track, what a web player plays. The editor makes the copy for a network.
     pub fn replay() -> Self {
         Self {
-            auto_codec: "h264".into(),
             resolution: "1080p".into(),
             preset: "performance".into(),
-            max_rate: MaxRate { enabled: true, kbps: REPLAY_MAX_KBPS },
             audio: Audio { routing: "mix_all".into(), codec: "aac".into(), ..Audio::default() },
             ..Self::default()
         }
@@ -939,8 +951,8 @@ impl Default for Replay {
     fn default() -> Self {
         Self {
             enabled: false,
-            duration_seconds: 30,
-            duration_unit: "seconds".into(),
+            duration_seconds: 180,
+            duration_unit: "minutes".into(),
             after_enabled: false,
             after_seconds: 5,
             storage: "auto".into(),
@@ -1414,12 +1426,13 @@ mod tests {
     }
 
     #[test]
-    fn the_replay_starts_light_and_made_to_be_shared() {
+    fn the_replay_starts_light_on_a_hardware_encoder() {
         let cfg = Config::default();
         let replay = cfg.replay_video();
-        assert_eq!(replay.auto_codec, "h264");
+        assert_eq!((replay.encoder.as_str(), replay.auto_codec.as_str()), ("auto", ""));
         assert_eq!((replay.resolution.as_str(), replay.fps, replay.preset.as_str()), ("1080p", 60, "performance"));
-        assert_eq!(replay.max_rate.kbps(), Some(REPLAY_MAX_KBPS));
+        assert_eq!((cfg.replay.duration_seconds, cfg.replay.duration_unit.as_str()), (180, "minutes"));
+        assert_eq!((replay.max_rate.kbps(), cfg.video.preset.as_str()), (None, "balanced"));
         assert_eq!((replay.audio.codec.as_str(), replay.audio.bitrate_kbps), ("aac", 160));
         assert_eq!((replay.audio.capture.as_str(), replay.audio.routing.as_str()), ("target", "mix_all"));
         // The videos keep theirs, and the replay takes them all, sound included, when it follows them.
@@ -1429,6 +1442,15 @@ mod tests {
         cfg.replay.same_as_video = true;
         assert_eq!(cfg.replay_video().audio.bitrate_kbps, 320);
         assert_eq!(cfg.replay_video().resolution, "source");
+        // Never the processor: the hardware encoder the settings had, else the best one.
+        cfg.video.encoder_kind = "software".into();
+        cfg.video.encoder = "libx265".into();
+        assert_eq!(cfg.replay_video().encoder, "auto");
+        cfg.video.encoder_by_kind.insert("hardware".into(), "nvenc_hevc".into());
+        assert_eq!(
+            (cfg.replay_video().encoder_kind.as_str(), cfg.replay_video().encoder.as_str()),
+            ("hardware", "nvenc_hevc")
+        );
         // A file without them gets them too.
         let read =
             Config::from_toml(&format!("schema_version = {SCHEMA_VERSION}\n[replay]\nenabled = true\n")).unwrap();
@@ -1443,7 +1465,7 @@ mod tests {
         let read = |text: &str| Config::from_toml(&format!("schema_version = 9\n{text}")).unwrap();
         let cfg = read(
             "[general]\nnotifications = false\n\
-             [video]\nfps = 120\n[video.audio]\nbitrate_kbps = 320\n\
+             [video]\nfps = 120\npreset = \"small\"\n[video.audio]\nbitrate_kbps = 320\n\
              [replay]\nnotify = \"on\"\nduration_seconds = 300\nafter_seconds = 10\n\
              [recording_widget]\ndisk_alert_percent = 0\n\
              [paths.naming.images]\ntemplate = \"{app}_{date}_{time}\"\n\
@@ -1459,6 +1481,7 @@ mod tests {
         // The replay keeps recording as it did: with the video settings, as its own.
         assert!(!cfg.replay.same_as_video);
         assert_eq!(cfg.replay.video.fps, 120);
+        assert_eq!((cfg.video.preset.as_str(), cfg.replay.video.preset.as_str()), ("balanced", "balanced"));
         assert_eq!(cfg.replay_video().audio.bitrate_kbps, 320);
         assert_eq!((cfg.replay.video.auto_codec.as_str(), cfg.replay.video.max_rate.kbps()), ("", None));
         // The alert was off: off, its share ready for when it is on again.

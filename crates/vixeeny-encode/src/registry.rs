@@ -249,7 +249,6 @@ pub enum PresetName {
     Quality,
     Balanced,
     Performance,
-    Small,
 }
 
 impl PresetName {
@@ -258,7 +257,8 @@ impl PresetName {
             "quality" => Some(Self::Quality),
             "balanced" => Some(Self::Balanced),
             "performance" => Some(Self::Performance),
-            "small" => Some(Self::Small),
+            // Before 1.0: what balanced is now.
+            "small" => Some(Self::Balanced),
             // The custom preset starts from the balanced one and overrides its options.
             "custom" => Some(Self::Balanced),
             _ => None,
@@ -266,13 +266,14 @@ impl PresetName {
     }
 }
 
-/// FFmpeg options of the four simple-mode presets.
+/// FFmpeg options of the three simple-mode presets: balanced for recordings, quality for editing and keeping,
+/// performance (balanced's level without the tools that load the encoder: look-ahead, B-frames, extra pass, adaptive
+/// quantisation) for the replay.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Presets {
     pub quality: BTreeMap<String, OptionValue>,
     pub balanced: BTreeMap<String, OptionValue>,
     pub performance: BTreeMap<String, OptionValue>,
-    pub small: BTreeMap<String, OptionValue>,
 }
 
 impl Presets {
@@ -281,7 +282,6 @@ impl Presets {
             PresetName::Quality => &self.quality,
             PresetName::Balanced => &self.balanced,
             PresetName::Performance => &self.performance,
-            PresetName::Small => &self.small,
         }
     }
 }
@@ -510,8 +510,8 @@ impl Encoder {
         let mut options: BTreeMap<String, String> =
             self.presets.get(preset).iter().map(|(k, v)| (k.clone(), v.to_ffmpeg())).collect();
         let rate = u64::from(width) * u64::from(height) * u64::from(fps.max(1));
-        // The fast preset keeps its own speed.
-        if preset != PresetName::Performance
+        // The performance preset of a software encoder keeps its own speed (there, the speed is the tools).
+        if (preset != PresetName::Performance || self.kind == Kind::Hardware)
             && let Some((key, value)) = self.speed_for(rate, tools)
             && let Some(param) = self.params.iter().find(|p| p.key == key)
             && options.contains_key(&param.ffmpeg_option)
@@ -567,8 +567,8 @@ impl Encoder {
     ///
     /// With `choose`, what the options leave open is chosen as NVIDIA advises for recording (Video Codec SDK 13.1
     /// programming guide, recommended settings; NVIDIA's broadcasting guide): the look-ahead on, [`LOOKAHEAD_FRAMES`]
-    /// of it, which then picks up to 4 B-frames for each group, else 2 B-frames. Without `choose` (the fast preset),
-    /// the encoder's own.
+    /// of it, which then picks up to 4 B-frames for each group, else 2 B-frames. Without `choose` (the performance
+    /// preset), the encoder's own.
     ///
     /// What the encoder lacks is left out rather than refused when it opens: B-frames beyond its most (none for HEVC on
     /// Pascal), B-frames as references (and always for H.264, which some decoders play wrong with them, as OBS found),

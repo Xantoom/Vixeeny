@@ -159,11 +159,11 @@ fn changing_the_language_relabels_the_window_at_once() {
         p.window().get_section_titles().iter().map(|s| s.to_string()).collect::<Vec<_>>()
     };
     assert_eq!(titles(&panel)[0], "General");
-    assert_eq!(titles(&panel)[4], "Sound");
+    assert_eq!(titles(&panel)[3], "Recording");
     panel.window().invoke_row_chosen("language".into(), 1); // auto, fr, en
     assert_eq!(panel.config().general.language, "fr");
     assert_eq!(titles(&panel)[0], "Général");
-    assert_eq!(titles(&panel)[4], "Son");
+    assert_eq!(titles(&panel)[3], "Enregistrement");
     let first = panel.window().get_groups().row_data(0).unwrap();
     assert_eq!(first.rows.row_data(0).unwrap().label, "Langue");
 }
@@ -172,7 +172,7 @@ fn changing_the_language_relabels_the_window_at_once() {
 fn the_video_page_edits_the_current_profile_and_reports_problems() {
     use vixeeny_settings::Section;
     let (panel, _) = settings_panel();
-    panel.select_section(Section::Video);
+    panel.select_section(Section::Recording);
     settings_render(&panel, "9-settings-video");
     let w = panel.window();
     w.invoke_row_chosen("fps".into(), 0); // 30, 60 (and 120 on a fast monitor)
@@ -253,7 +253,7 @@ fn rows_that_appear_on_the_same_page_unfold() {
     let unfolded = fresh(&panel);
     assert!(unfolded.contains(&"png_compression".to_owned()), "{unfolded:?}");
     assert!(!unfolded.contains(&"image_format".to_owned()));
-    panel.select_section(Section::Video);
+    panel.select_section(Section::Recording);
     assert!(fresh(&panel).is_empty());
 }
 
@@ -314,7 +314,7 @@ fn the_search_leads_to_the_setting() {
     assert!(labels.contains(&"Replay saved".to_owned()), "{labels:?}");
     // A folded expert setting: its section opens, the row is outlined.
     w.set_search_text(Default::default());
-    panel.select_section(Section::Video);
+    panel.select_section(Section::Recording);
     w.invoke_row_chosen("preset".into(), 4); // quality, balanced, compact, a line, custom
     panel.select_section(Section::General);
     w.set_search_text("chroma".into());
@@ -322,7 +322,7 @@ fn the_search_leads_to_the_setting() {
     assert_eq!(w.get_search_hits().row_count(), 1);
     w.invoke_search_picked(0);
     assert_eq!(w.get_search_text(), "");
-    assert_eq!(panel.current_section(), Section::Video);
+    assert_eq!(panel.current_section(), Section::Recording);
     assert_eq!(w.get_highlight_id(), "chroma");
 }
 
@@ -458,7 +458,7 @@ fn every_page_of_the_settings_renders() {
         settings_render(&panel, &name);
     }
     // The programs to record, ticked one by one.
-    panel.select_section(Section::Audio);
+    panel.select_section(Section::Recording);
     panel.window().invoke_row_chosen("audio_capture".into(), 3);
     panel.window().invoke_row_toggled("src:app:Spotify.exe".into(), true);
     settings_render(&panel, "9-page-audio-programs");
@@ -547,7 +547,7 @@ fn info_tooltip_stays_while_the_pointer_moves_on_its_dot() {
     use slint::platform::WindowEvent;
     use vixeeny_settings::Section;
     let (panel, _) = settings_panel();
-    panel.select_section(Section::Video);
+    panel.select_section(Section::Recording);
     let window = WINDOW.with(Rc::clone);
     window.dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: 2.0 });
     let size = (2080, 1440);
@@ -576,7 +576,7 @@ fn info_tooltip_stays_while_the_pointer_moves_on_its_dot() {
 fn with_mica_the_window_lets_it_through() {
     use vixeeny_settings::Section;
     let (panel, _) = settings_panel();
-    panel.select_section(Section::Video);
+    panel.select_section(Section::Recording);
     panel.window().global::<Theme>().set_mica(true);
     let shot = settings_render(&panel, "9-settings-mica");
     let at = |x: usize, y: usize| shot.as_slice()[y * 1040 + x];
@@ -611,7 +611,7 @@ fn a_tooltip_goes_after_a_scroll() {
         }),
         false,
     );
-    panel.select_section(Section::Video);
+    panel.select_section(Section::Recording);
     panel.window().invoke_row_chosen("preset".into(), 4); // custom: the expert settings
     let window = WINDOW.with(Rc::clone);
     let size = (1040, 720);

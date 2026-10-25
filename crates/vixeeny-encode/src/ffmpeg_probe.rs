@@ -120,7 +120,6 @@ pub fn verify(registry: &Registry, require_hardware: bool) -> Vec<Mismatch> {
             crate::registry::PresetName::Quality,
             crate::registry::PresetName::Balanced,
             crate::registry::PresetName::Performance,
-            crate::registry::PresetName::Small,
         ] {
             for key in e.presets.get(name).keys() {
                 if find_option(&codec, key, None).is_none() {

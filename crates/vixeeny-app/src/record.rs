@@ -412,6 +412,10 @@ fn plan(
     let (w, h) = validate::output_size(&profile.resolution, (cw, ch)).context("bad resolution")?;
     let output_size = (w.max(2) & !1, h.max(2) & !1);
     let encoder = choose_encoder(&registry, profile, probe.as_ref(), output_size)?.clone();
+    // The replay runs beside a game: without a hardware encoder, none.
+    if replay && encoder.kind == Kind::Software {
+        anyhow::bail!("the replay needs a hardware encoder");
+    }
     let made = (allow_gpu && vixeeny_encode::gpu::feed(&encoder).is_some())
         .then(|| {
             let vendor = vendor_of(&encoder);
