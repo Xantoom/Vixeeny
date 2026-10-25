@@ -111,6 +111,10 @@ pub(crate) fn app_name(
     dest: &Destination<'_>,
     metadata: &dyn Fn(&str) -> ExeMetadata,
 ) -> String {
+    // A zone is Vixeeny's, whatever is under it.
+    if action == ActionId::CaptureRegion {
+        return naming::DEFAULT_APP_NAME.to_owned();
+    }
     let window = match action {
         ActionId::CaptureWindow => snap.foreground.as_ref(),
         // Only a window over the screen being captured (all of them for an all-monitor capture), and never one of
@@ -598,6 +602,18 @@ mod tests {
         // ...but it does name a capture of every screen.
         let all = run_with(ActionId::CaptureAllMonitors, &other, &dir, "{app}", false, true, &names, &no_metadata);
         assert_eq!(all.file_name().unwrap(), "Game.png");
+        // A zone is Vixeeny's, even over the full-screen game.
+        let now = now();
+        let dest = Destination {
+            dir: &dir,
+            template: "{app}",
+            per_app_subfolder: false,
+            use_foreground_app: true,
+            app_names: &names,
+            now: &now,
+            after_save: None,
+        };
+        assert_eq!(app_name(ActionId::CaptureRegion, &snap, &dest, &no_metadata), "Vixeeny");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
