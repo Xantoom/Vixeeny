@@ -304,6 +304,14 @@ unsafe extern "system" fn collect_window(hwnd: HWND, data: LPARAM) -> windows::c
     TRUE
 }
 
+/// Whether window `id` still shows: there, visible, not minimised.
+pub fn window_shown(id: WindowId) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::IsIconic;
+    let hwnd = hwnd_of(id);
+    // SAFETY: a plain query; a stale handle answers false.
+    is_capturable(hwnd) && !unsafe { IsIconic(hwnd) }.as_bool()
+}
+
 fn is_capturable(hwnd: HWND) -> bool {
     // SAFETY: simple queries on a window handle; stale handles just return false/errors.
     unsafe {
@@ -1271,6 +1279,14 @@ fn utf16z(text: &str) -> Vec<u16> {
 
 #[cfg(test)]
 mod tests {
+    /// A window that is gone does not show; the one in front does.
+    #[test]
+    fn a_window_shows_while_it_is_there() {
+        assert!(!super::window_shown(crate::WindowId(0x7fff_fff0)));
+        if let Ok(Some(front)) = super::foreground_window() {
+            assert!(super::window_shown(front.id), "{}", front.title);
+        }
+    }
 
     #[test]
     fn a_window_is_full_screen_when_it_covers_its_whole_monitor() {

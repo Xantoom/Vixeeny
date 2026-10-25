@@ -417,8 +417,8 @@ struct Recording {
     handle: Option<record::Handle>,
     /// The replay buffer (`ReplayToggle`), which runs alongside a recording.
     replay: Option<record::Handle>,
-    /// The game (its process and executable) the replay was started for: the replay stops when it closes.
-    replay_game: Option<(u32, String)>,
+    /// The game (its process, executable and window) the replay was started for: the replay stops when it closes.
+    replay_game: Option<(u32, String, vixeeny_platform::WindowId)>,
     /// A game whose replay the user stopped by hand: it is not started again for it.
     declined: Option<u32>,
     /// The games announced while they run, the replay on or off: each is told once per run of the game, and again only
@@ -460,7 +460,7 @@ impl Recording {
         if self.handle.is_some() {
             return;
         }
-        if let Some((pid, exe)) = &self.replay_game {
+        if let Some((pid, exe, window)) = &self.replay_game {
             let never = config.replay.never.contains(exe);
             if !config.replay.enabled || never || !vixeeny_platform::process_alive(*pid) {
                 tracing::info!("the game closed (or the replay was turned off): replay stopped");
@@ -469,8 +469,18 @@ impl Recording {
                 }
                 self.replay_game = None;
                 self.stop_replay();
+                return;
             }
-            return;
+            // A launcher that started the game and hid its window, still running: the replay goes to the game in front.
+            let (pid, window) = (*pid, *window);
+            if vixeeny_platform::window_shown(window)
+                || self.games.game_in_front(game_lists(config)).is_none_or(|game| game.pid == pid)
+            {
+                return;
+            }
+            tracing::info!("the replay's window went, another game is in front: the replay moves to it");
+            self.replay_game = None;
+            self.stop_replay();
         }
         // Turned off in the settings: the buffer goes, its memory or files with it.
         if !config.replay.enabled {
@@ -519,7 +529,7 @@ impl Recording {
                 let exe = game.exe_path.as_deref().and_then(vixeeny_platform::games::exe_name).unwrap_or_default();
                 tracing::info!("full-screen game ({exe}): replay started");
                 self.replay = Some(handle);
-                self.replay_game = Some((game.pid, exe));
+                self.replay_game = Some((game.pid, exe, game.id));
                 self.declined = None;
                 if let Some(look) = self.look.clone() {
                     vixeeny_platform::on_process_exit(game.pid, move || {
@@ -551,11 +561,11 @@ impl Recording {
             ActionId::ReplayToggle => {
                 if self.replay.is_some() {
                     let game = self.replay_game.take();
-                    self.declined = game.as_ref().map(|(pid, _)| *pid);
+                    self.declined = game.as_ref().map(|(pid, ..)| *pid);
                     self.stop_replay();
                     if config.notifications.game_start(false)
                         && let Some(window) = vixeeny_platform::foreground_window().ok().flatten()
-                        && game.is_some_and(|(pid, _)| pid == window.pid)
+                        && game.is_some_and(|(pid, ..)| pid == window.pid)
                     {
                         announce(config, false, &window);
                     }

@@ -119,6 +119,8 @@ pub struct Runtime<T: Tray, S: Spawner> {
     hooked: bool,
     /// The last game the app was told about: once per game.
     last_game: Option<u32>,
+    /// The process of that game last seen in front (the game, or another process of it).
+    front: Option<u32>,
 }
 
 impl<T: Tray, S: Spawner> Runtime<T, S> {
@@ -153,6 +155,7 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
             games: Box::new(NoGames),
             hooked: false,
             last_game: None,
+            front: None,
         }
     }
 
@@ -201,8 +204,18 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
         match self.games.game(window, &self.config) {
             Some(pid) if self.last_game.is_none_or(|game| !self.games.same_game(pid, game)) => {
                 self.last_game = Some(pid);
+                self.front = Some(pid);
                 self.dispatch(Event::Action(ActionId::ReplayWatch));
                 true
+            }
+            // Another process of the same game (the game a launcher started, the game's web pages): a running app sees
+            // whether its replay follows it.
+            Some(pid) if self.front != Some(pid) => {
+                self.front = Some(pid);
+                if self.core.app_running() {
+                    self.dispatch(Event::Action(ActionId::ReplayWatch));
+                }
+                false
             }
             _ => false,
         }
@@ -577,6 +590,8 @@ mod tests {
             events.send(Event::Foreground(1));
             rt.pump();
             assert_eq!(rt.last_game, Some(game), "{pid}");
+            // A running app is still told when another process of the game comes in front (a launcher's game).
+            assert_eq!(rt.front, Some(pid), "{pid}");
         }
         assert_eq!(*spawned.lock().unwrap(), vec![(1, ActionId::ReplayWatch)]);
     }
