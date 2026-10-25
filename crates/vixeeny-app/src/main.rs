@@ -841,6 +841,16 @@ fn run() -> anyhow::Result<()> {
                     }
                     continue;
                 }
+                // A zone capture's shortcut again while its editor is open: it closes.
+                if let DaemonToApp::RunAction { action, frozen } = &mut msg
+                    && action.freezes_screen()
+                    && region::dismiss_open()
+                {
+                    if let Some(frozen) = frozen.take() {
+                        vixeeny_capture::freeze::release(&frozen);
+                    }
+                    continue;
+                }
                 // Frozen while another action runs: they would hide it, and the action that
                 // waits for its turn captures the screen itself.
                 if let DaemonToApp::RunAction { frozen, .. } = &mut msg

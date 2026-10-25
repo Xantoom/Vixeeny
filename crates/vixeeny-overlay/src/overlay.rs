@@ -1745,6 +1745,20 @@ pub fn step_aside() {
     }
 }
 
+/// Closes the editor whose window is `hwnd` as Escape would, from any thread (its shortcut
+/// pressed again). Nothing happens while a command runs.
+pub fn close(hwnd: u64) {
+    // SAFETY: plain call; a window that is gone makes it fail, which changes nothing.
+    let _ = unsafe {
+        windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+            Some(HWND(hwnd as *mut _)),
+            WM_CLOSE,
+            WPARAM(0),
+            LPARAM(0),
+        )
+    };
+}
+
 /// Posts a message to an editor window (tests drive a headless overlay this way).
 #[doc(hidden)]
 pub fn post(hwnd: u64, msg: u32, wparam: usize, lparam: isize) {

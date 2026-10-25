@@ -24,7 +24,7 @@ pub mod widget;
 mod window;
 
 pub use drawing::ScreenPart;
-pub use overlay::{Overlay, OverlayError, Screen, Screens, Wake, post, step_aside};
+pub use overlay::{Overlay, OverlayError, Screen, Screens, Wake, close, post, step_aside};
 pub use theme::{Look, dark_theme};
 pub use window::{Capture, Focus};
 /// The graphics card's types of [`Screens`] and [`ScreenPart`].

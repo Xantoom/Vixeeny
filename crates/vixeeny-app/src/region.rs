@@ -533,6 +533,18 @@ fn grab_screens(
     Ok((base, hdr))
 }
 
+/// A window of the zone editor while it is open.
+static OPEN: std::sync::Mutex<Option<u64>> = std::sync::Mutex::new(None);
+
+/// A zone capture's shortcut pressed again while the editor is open: it closes as Escape
+/// closes it, rather than opening once more after it. False when no editor is open.
+pub fn dismiss_open() -> bool {
+    let open = *OPEN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    open.map(vixeeny_overlay::close).is_some()
+}
+
 pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Result<()> {
     let started = Instant::now();
     tracing::debug!(
@@ -685,7 +697,13 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
             crate::capture_backend::warm();
         }
     });
+    *OPEN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = overlay.handles().first().copied();
     let result = overlay.run(cursor);
+    *OPEN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     drop(thaw);
     result.map_err(|e| anyhow::anyhow!("editor window: {e}"))?;
     if let Some(zone) = scroll_zone.take() {
