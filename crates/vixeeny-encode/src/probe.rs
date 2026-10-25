@@ -29,7 +29,7 @@ pub struct Adapter {
     pub vendor_id: u32,
     pub device_id: u32,
     pub driver_version: String,
-    /// A software renderer (WARP, llvmpipe…): never used for encoding.
+    /// A software renderer (WARP): never used for encoding.
     pub software: bool,
 }
 

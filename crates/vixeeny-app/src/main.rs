@@ -463,7 +463,7 @@ fn overlay(config: &Config, recording: &Recording) -> Option<ActionId> {
     outcome.action
 }
 
-/// The recording started by `RecordToggle`, if any (Windows with FFmpeg only).
+/// The recording started by `RecordToggle`, if any.
 #[derive(Default)]
 struct Recording {
     handle: Option<record::Handle>,

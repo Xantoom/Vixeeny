@@ -225,7 +225,7 @@ fn custom_rate_modes_on_this_gpu() {
     }
 }
 
-/// The probe no longer tries software encoders: each one offers every pixel format the registry
+/// The probe does not try software encoders: each one offers every pixel format the registry
 /// declares, so each of them must encode.
 #[test]
 fn software_encoders_encode_every_declared_pixel_format() {

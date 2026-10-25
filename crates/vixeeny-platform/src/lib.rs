@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! vixeeny-platform — OS abstractions: monitors, DPI, windows, processes.
+//! What Vixeeny asks of Windows: monitors, DPI, windows, processes, the clipboard, the machine.
 //!
 //! All coordinates are **physical pixels** in the virtual desktop. Callers must have called
 //! [`ensure_dpi_aware`] first, otherwise Windows hands out scaled (virtualised) values.
@@ -68,11 +68,11 @@ pub struct ExeMetadata {
     pub file_description: Option<String>,
 }
 
-/// Opaque monitor handle (an `HMONITOR` on Windows).
+/// A monitor (its `HMONITOR`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MonitorId(pub u64);
 
-/// Opaque window handle (an `HWND` on Windows).
+/// A window (its `HWND`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WindowId(pub u64);
 

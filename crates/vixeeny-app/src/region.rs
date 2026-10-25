@@ -392,8 +392,7 @@ fn frozen_desktop(
     Ok((image, hdr))
 }
 
-/// The screens as they are now, for the editor shown live.
-/// At most this many pictures a second of the screens followed live.
+/// The screens followed live are pictured at most this often (60 times a second).
 const LIVE_INTERVAL: std::time::Duration = std::time::Duration::from_micros(16_667);
 
 /// A part of a monitor followed live (physical pixels).
@@ -405,6 +404,7 @@ struct LivePart {
     size: (u32, u32),
 }
 
+/// The screens as they are now, for the editor shown live.
 struct LiveScreens {
     monitors: Vec<MonitorInfo>,
     /// The top-left corner of the desktop: the editor's image starts there.

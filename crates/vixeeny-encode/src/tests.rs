@@ -352,7 +352,7 @@ fn resolution_settings() {
     assert_eq!(output_size("p", (1, 1)), None);
 }
 
-/// The property of 6.4, over every encoder × container × depth × chroma × HDR: the verdict
+/// Over every encoder × container × depth × chroma × HDR: the verdict
 /// agrees with the registry data written out by hand.
 #[test]
 fn validation_agrees_with_the_data_exhaustively() {
@@ -495,13 +495,6 @@ fn check_multi_gpu(result: &ProbeResult) {
         1
     );
     assert!(find(result, "libx264", None).is_some());
-    // Vulkan and VAAPI do not exist on Windows.
-    assert!(
-        result
-            .encoders
-            .iter()
-            .all(|e| !e.id.starts_with("vaapi") && !e.id.starts_with("vulkan"))
-    );
 }
 
 #[test]

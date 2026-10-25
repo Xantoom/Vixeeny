@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! vixeeny-image — image encoding and HDR → SDR tone mapping.
+//! Image encoding and HDR → SDR tone mapping.
 //!
 //! Input is always opaque 8-bit BGRA ([`Bgra`], what the capture layer hands over). Every
 //! encoder embeds an sRGB colour description and no other metadata.

@@ -72,7 +72,7 @@ pub enum Shown {
     Sdr(CpuFrame),
 }
 
-/// What an OS must provide for single images.
+/// What the capture of still images needs from the system.
 pub trait StillBackend {
     /// The whole monitor, physical pixels.
     fn grab_monitor(

@@ -87,12 +87,7 @@ impl WgcBackend {
         {
             return Err(CaptureError::Unsupported);
         }
-        let format = DirectXPixelFormat::B8G8R8A8UIntNormalized;
-        // Every capture starts before any is waited for: they run side by side.
-        let started = monitors
-            .iter()
-            .map(|m| self.start_monitor(m, false, format))
-            .collect::<Result<Vec<_>, _>>()?;
+        let started = self.start_monitors(monitors, false, |_| false)?;
         // What no monitor covers is black, as on an assembled frame.
         let covered: u64 = monitors.iter().map(|m| m.rect.area()).sum();
         let black = (covered < bounds.area())
@@ -177,20 +172,41 @@ impl WgcBackend {
         self.start(item, cursor, pixel_format)?.finish(read)
     }
 
-    /// `monitor`'s picture in `pixel_format`: duplicated when it can be (not with the pointer),
-    /// captured otherwise.
+    /// `monitor`'s picture, as scRGB half floats when `hdr`: duplicated when it can be (not with
+    /// the pointer), captured otherwise.
     fn start_monitor(
         &self,
         monitor: &MonitorInfo,
         cursor: bool,
-        pixel_format: DirectXPixelFormat,
+        hdr: bool,
     ) -> Result<Grab, CaptureError> {
-        let hdr = pixel_format == DirectXPixelFormat::R16G16B16A16Float;
         if !cursor && let Some(frame) = crate::dda::frame(&self.device, monitor, hdr) {
             return Ok(Grab::Duplicated(frame));
         }
-        let item = monitor_item(monitor)?;
-        Ok(Grab::Captured(self.start(&item, cursor, pixel_format)?))
+        let format = if hdr {
+            DirectXPixelFormat::R16G16B16A16Float
+        } else {
+            DirectXPixelFormat::B8G8R8A8UIntNormalized
+        };
+        Ok(Grab::Captured(self.start(
+            &monitor_item(monitor)?,
+            cursor,
+            format,
+        )?))
+    }
+
+    /// Every monitor's picture, as [`start_monitor`](Self::start_monitor) with `hdr` for each: every
+    /// capture starts before any is waited for, so they run side by side.
+    fn start_monitors(
+        &self,
+        monitors: &[MonitorInfo],
+        cursor: bool,
+        hdr: impl Fn(&MonitorInfo) -> bool,
+    ) -> Result<Vec<Grab>, CaptureError> {
+        monitors
+            .iter()
+            .map(|m| self.start_monitor(m, cursor, hdr(m)))
+            .collect()
     }
 
     /// A capture of `item` under way: its first frame is waited for by [`Started::finish`].
@@ -505,7 +521,7 @@ impl StillBackend for WgcBackend {
         monitor: &MonitorInfo,
         cursor: bool,
     ) -> Result<CpuFrame, CaptureError> {
-        self.start_monitor(monitor, cursor, DirectXPixelFormat::B8G8R8A8UIntNormalized)?
+        self.start_monitor(monitor, cursor, false)?
             .finish(|t| self.read_sdr(t))
     }
 
@@ -515,11 +531,10 @@ impl StillBackend for WgcBackend {
         area: Option<&PhysicalRect>,
         cursor: bool,
     ) -> Result<HdrFrame, CaptureError> {
-        self.start_monitor(monitor, cursor, DirectXPixelFormat::R16G16B16A16Float)?
-            .finish(|t| {
-                let raw = read_back(&self.device, &self.context, t)?;
-                raw_hdr(&raw, area)
-            })
+        self.start_monitor(monitor, cursor, true)?.finish(|t| {
+            let raw = read_back(&self.device, &self.context, t)?;
+            raw_hdr(&raw, area)
+        })
     }
 
     fn grab_monitor_sdr(
@@ -530,7 +545,7 @@ impl StillBackend for WgcBackend {
         info: &HdrInfo,
         tonemap: ToneMapFn,
     ) -> Result<CpuFrame, CaptureError> {
-        self.start_monitor(monitor, cursor, DirectXPixelFormat::R16G16B16A16Float)?
+        self.start_monitor(monitor, cursor, true)?
             .finish(|t| self.read_tonemapped(t, area, info, tonemap))
     }
 
@@ -562,17 +577,8 @@ impl StillBackend for WgcBackend {
         cursor: bool,
         tonemap: Option<ToneMapFn>,
     ) -> Result<Vec<CpuFrame>, CaptureError> {
-        // Every capture starts before any is waited for: they run side by side.
-        let started = monitors
-            .iter()
-            .map(|m| {
-                let format = match (m.hdr, tonemap) {
-                    (Some(_), Some(_)) => DirectXPixelFormat::R16G16B16A16Float,
-                    _ => DirectXPixelFormat::B8G8R8A8UIntNormalized,
-                };
-                self.start_monitor(m, cursor, format)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let started =
+            self.start_monitors(monitors, cursor, |m| m.hdr.is_some() && tonemap.is_some())?;
         monitors
             .iter()
             .zip(started)
@@ -590,17 +596,7 @@ impl StillBackend for WgcBackend {
         monitors: &[MonitorInfo],
         cursor: bool,
     ) -> Result<Vec<Shown>, CaptureError> {
-        // Every capture starts before any is waited for: they run side by side.
-        let started = monitors
-            .iter()
-            .map(|m| {
-                let format = match m.hdr {
-                    Some(_) => DirectXPixelFormat::R16G16B16A16Float,
-                    None => DirectXPixelFormat::B8G8R8A8UIntNormalized,
-                };
-                self.start_monitor(m, cursor, format)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let started = self.start_monitors(monitors, cursor, |m| m.hdr.is_some())?;
         monitors
             .iter()
             .zip(started)
@@ -620,17 +616,7 @@ impl StillBackend for WgcBackend {
         cursor: bool,
         tonemap: ToneMapFn,
     ) -> Result<Vec<(CpuFrame, Option<HdrFrame>)>, CaptureError> {
-        // Every capture starts before any is waited for: they run side by side.
-        let started = monitors
-            .iter()
-            .map(|m| {
-                let format = match m.hdr {
-                    Some(_) => DirectXPixelFormat::R16G16B16A16Float,
-                    None => DirectXPixelFormat::B8G8R8A8UIntNormalized,
-                };
-                self.start_monitor(m, cursor, format)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let started = self.start_monitors(monitors, cursor, |m| m.hdr.is_some())?;
         monitors
             .iter()
             .zip(started)

@@ -142,7 +142,7 @@ pub struct RecordConfig {
     pub vfr: bool,
     /// Audio tracks, in file order; fed with `push_audio` (empty = no audio).
     pub audio: Vec<AudioTrackConfig>,
-    /// Hardware encoders that read D3D11 frames (Windows): frames come from `push_hw`.
+    /// Hardware encoders that read D3D11 frames: frames come from `push_hw`.
     pub gpu: Option<Arc<GpuPipeline>>,
     /// Keep the last seconds of encoded packets in RAM for [`Recorder::save_replay`].
     pub replay_seconds: Option<u32>,

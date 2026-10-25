@@ -855,7 +855,6 @@ impl SettingsPanel {
         *self.state.on_section.borrow_mut() = Box::new(f);
     }
 
-    /// The programs, microphones and outputs the audio page offers (found by the host).
     /// What the monitors can show (HDR, refresh rate): the video page offers what fits.
     pub fn set_display(&self, display: Display) {
         self.state.display.set(display);
@@ -1714,7 +1713,6 @@ impl SettingsPanel {
     }
 }
 
-/// A shortcut as the field shows it: `Ctrl+Shift+KeyR` → `CTRL + SHIFT + R`.
 /// Why a shortcut is not a key combination, in the user's language.
 fn invalid_shortcut(error: &HotkeyError, lang: Lang) -> String {
     match error {

@@ -338,53 +338,30 @@ fn compilers() -> Result<Vec<String>> {
     )])
 }
 
+/// The options of libjxl, and of jpegli, which builds from the same tree.
+const JPEGXL: &[&str] = &[
+    "-DJPEGXL_ENABLE_TOOLS=OFF",
+    "-DJPEGXL_ENABLE_BENCHMARK=OFF",
+    "-DJPEGXL_ENABLE_EXAMPLES=OFF",
+    "-DJPEGXL_ENABLE_MANPAGES=OFF",
+    "-DJPEGXL_ENABLE_DOXYGEN=OFF",
+    "-DJPEGXL_ENABLE_JNI=OFF",
+    "-DJPEGXL_ENABLE_SJPEG=OFF",
+    "-DJPEGXL_ENABLE_OPENEXR=OFF",
+    "-DJPEGXL_ENABLE_PLUGINS=OFF",
+    "-DJPEGXL_ENABLE_VIEWERS=OFF",
+    "-DJPEGXL_STATIC=ON",
+    // JPEGXL_STATIC would default to the static CRT (/MT); everything else here and
+    // the Rust side use /MD.
+    "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL",
+    "-DBUILD_TESTING=OFF",
+];
+
 fn recipe(ctx: &Ctx, name: &str, src: &Path) -> Result<()> {
     match name {
-        "libjxl" => cmake(
-            ctx,
-            src,
-            ".",
-            &[
-                "-DJPEGXL_ENABLE_TOOLS=OFF",
-                "-DJPEGXL_ENABLE_BENCHMARK=OFF",
-                "-DJPEGXL_ENABLE_EXAMPLES=OFF",
-                "-DJPEGXL_ENABLE_MANPAGES=OFF",
-                "-DJPEGXL_ENABLE_DOXYGEN=OFF",
-                "-DJPEGXL_ENABLE_JNI=OFF",
-                "-DJPEGXL_ENABLE_SJPEG=OFF",
-                "-DJPEGXL_ENABLE_OPENEXR=OFF",
-                "-DJPEGXL_ENABLE_PLUGINS=OFF",
-                "-DJPEGXL_ENABLE_VIEWERS=OFF",
-                "-DJPEGXL_STATIC=ON",
-                // JPEGXL_STATIC would default to the static CRT (/MT); everything else here and
-                // the Rust side use /MD.
-                "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL",
-                "-DBUILD_TESTING=OFF",
-            ],
-        ),
+        "libjxl" => cmake(ctx, src, ".", JPEGXL),
         "jpegli" => {
-            cmake(
-                ctx,
-                src,
-                ".",
-                &[
-                    "-DJPEGXL_ENABLE_TOOLS=OFF",
-                    "-DJPEGXL_ENABLE_BENCHMARK=OFF",
-                    "-DJPEGXL_ENABLE_EXAMPLES=OFF",
-                    "-DJPEGXL_ENABLE_MANPAGES=OFF",
-                    "-DJPEGXL_ENABLE_DOXYGEN=OFF",
-                    "-DJPEGXL_ENABLE_JNI=OFF",
-                    "-DJPEGXL_ENABLE_SJPEG=OFF",
-                    "-DJPEGXL_ENABLE_OPENEXR=OFF",
-                    "-DJPEGXL_ENABLE_PLUGINS=OFF",
-                    "-DJPEGXL_ENABLE_VIEWERS=OFF",
-                    "-DJPEGXL_STATIC=ON",
-                    // JPEGXL_STATIC would default to the static CRT (/MT); everything else here and
-                    // the Rust side use /MD.
-                    "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL",
-                    "-DBUILD_TESTING=OFF",
-                ],
-            )?;
+            cmake(ctx, src, ".", JPEGXL)?;
             install_jpegli(ctx, src)
         }
         // Only for libultrahdr, installed apart: its `jpeglib.h` must not shadow jpegli's.

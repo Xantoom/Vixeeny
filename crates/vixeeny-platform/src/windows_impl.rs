@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Win32 implementation: `EnumDisplayMonitors`, per-monitor DPI, DWM frame bounds.
+//! The Win32 calls behind the monitors, windows, processes and shell functions of the crate.
 
 use std::ffi::c_void;
 

@@ -217,8 +217,6 @@ impl Gfx {
         Ok(gfx)
     }
 
-    /// Whether the graphics card still works with this device (a driver update or a reset
-    /// removes it).
     /// Gives back what the graphics card and the system keep for this process while nothing
     /// is on screen; the next drawing takes again what it needs. For a process that waits.
     pub fn trim(&self) {

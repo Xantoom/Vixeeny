@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! vixeeny-overlay — what Vixeeny draws natively (see the README): the zone editor of Print
+//! What Vixeeny draws natively (its README says why): the zone editor of Print
 //! Screen, the side strip, the notifications and the recording widget.
 
 pub mod backdrop;

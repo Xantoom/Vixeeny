@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! minisign checks: a file whose signature is wrong is refused.
 
-/// The public key the releases are signed with (`packaging/minisign.pub`). Until the maintainer
-/// has generated the key pair it is a placeholder and no update is accepted.
+/// The public key the releases are signed with (`packaging/minisign.pub`): a build without a valid
+/// one accepts no update.
 pub const PUBLIC_KEY: &str = include_str!("../../../packaging/minisign.pub");
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]

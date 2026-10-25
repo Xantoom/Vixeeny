@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! vixeeny-ui — the Slint user interface: `.slint` files and their Rust binding. The
+//! The Slint user interface: `.slint` files and their Rust binding. The
 //! windows shown often (side strip, notifications, recording widget) are native: see
 //! `vixeeny-overlay`.
 

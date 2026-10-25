@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! synthetic pages scrolled in many ways must reassemble pixel-exactly.
+//! Synthetic pages scrolled in many ways must reassemble pixel-exactly.
 
 use super::*;
 

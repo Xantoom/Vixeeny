@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Audio encoders of the recorder: AAC (Media Foundation / AudioToolbox / native),
+//! Audio encoders of the recorder: AAC (Media Foundation, or FFmpeg's own),
 //! Opus, FLAC, PCM. Input is 48 kHz 32-bit float in 2, 6 (5.1) or 8 (7.1) channels; swresample
 //! converts to whatever the encoder wants, and a FIFO cuts the frame size it asks for.
 
