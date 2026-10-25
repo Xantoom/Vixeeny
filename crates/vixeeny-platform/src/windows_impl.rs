@@ -586,6 +586,145 @@ pub fn on_foreground_change(changed: impl Fn(WindowId) + Send + 'static) -> bool
     spawned && rx.recv().unwrap_or(false)
 }
 
+/// The smallest window of a game counted as a page over it, in pixels each way: the game's buttons and handles are
+/// smaller.
+const PAGE_MIN: u32 = 64;
+
+/// Whether one of the game's own windows shows over its window `game` (process `pid`): an in-game web page, its shop or
+/// its account window, of the game's process or of another process of the game (see [`crate::games::part_of_game`]).
+/// Only while the game is in front: another program in front is not the game's.
+pub fn game_page_in_front(game: WindowId, pid: u32) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::IsIconic;
+    let game_hwnd = hwnd_of(game);
+    let pid_of = |hwnd: HWND| {
+        let mut pid = 0u32;
+        // SAFETY: a valid out-pointer; a stale handle leaves 0.
+        unsafe { GetWindowThreadProcessId(hwnd, Some(&raw mut pid)) };
+        pid
+    };
+    // SAFETY: plain call.
+    let front = unsafe { GetForegroundWindow() };
+    let front_pid = pid_of(front);
+    if front.0.is_null() || front_pid == 0 || !crate::games::part_of_game(front_pid, pid) {
+        return false;
+    }
+    let Some(game_rect) = frame_rect(game_hwnd) else {
+        return false;
+    };
+    // Shows, at a size of a page, over the game.
+    let a_page = |hwnd: HWND| {
+        let mut cloaked = 0u32;
+        // SAFETY: plain queries on a window handle; a stale one answers false or fails.
+        let shown = unsafe {
+            IsWindowVisible(hwnd).as_bool()
+                && !IsIconic(hwnd).as_bool()
+                && DwmGetWindowAttribute(
+                    hwnd,
+                    DWMWA_CLOAKED,
+                    (&raw mut cloaked).cast::<c_void>(),
+                    size_of::<u32>() as u32,
+                )
+                .map_or(true, |()| cloaked == 0)
+        };
+        shown
+            && frame_rect(hwnd)
+                .and_then(|r| r.intersection(&game_rect))
+                .is_some_and(|r| r.width >= PAGE_MIN && r.height >= PAGE_MIN)
+    };
+    if front != game_hwnd {
+        return a_page(front);
+    }
+    // The game in front, a window of the game above it (shown without taking the keyboard).
+    let mut handles: Vec<HWND> = Vec::new();
+    // SAFETY: the callback only dereferences the pointer to `handles`, which outlives the call.
+    if unsafe { EnumWindows(Some(collect_window), LPARAM(&raw mut handles as isize)) }.is_err() {
+        return false;
+    }
+    handles.into_iter().take_while(|h| *h != game_hwnd).any(|h| a_page(h) && crate::games::part_of_game(pid_of(h), pid))
+}
+
+/// Stops the watch of [`on_game_windows`] when dropped.
+pub struct GameWindows {
+    thread: u32,
+}
+
+impl Drop for GameWindows {
+    fn drop(&mut self) {
+        use windows::Win32::UI::WindowsAndMessaging::{PostThreadMessageW, WM_QUIT};
+        // SAFETY: plain call; the thread ends its loop on `WM_QUIT` and removes its hooks.
+        let _ = unsafe { PostThreadMessageW(self.thread, WM_QUIT, WPARAM(0), LPARAM(0)) };
+    }
+}
+
+/// Calls `changed`, on a thread of its own, each time a window comes to the foreground and each time a window of
+/// process `pid` shows, hides or goes: when [`game_page_in_front`] may have changed. Windows tells; nothing is polled.
+/// `None` when Windows refused the hooks.
+pub fn on_game_windows(pid: u32, changed: impl Fn() + Send + 'static) -> Option<GameWindows> {
+    use windows::Win32::System::Threading::GetCurrentThreadId;
+    use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook, UnhookWinEvent};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CHILDID_SELF, DispatchMessageW, EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE, EVENT_SYSTEM_FOREGROUND, GetMessageW,
+        MSG, OBJID_WINDOW, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
+    };
+    thread_local! {
+        static CHANGED: std::cell::RefCell<Option<Box<dyn Fn()>>> = const { std::cell::RefCell::new(None) };
+    }
+    unsafe extern "system" fn told(_: HWINEVENTHOOK, _: u32, _: HWND, object: i32, child: i32, _: u32, _: u32) {
+        // A window itself, not a part of it.
+        if object == OBJID_WINDOW.0 && child == CHILDID_SELF as i32 {
+            CHANGED.with(|c| {
+                if let Some(changed) = &*c.borrow() {
+                    changed();
+                }
+            });
+        }
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .name("game-windows".into())
+        .spawn(move || {
+            let hook = |first, last, process| {
+                // SAFETY: out-of-context hooks call `told` from this thread's message loop below.
+                let hook = unsafe {
+                    SetWinEventHook(
+                        first,
+                        last,
+                        None,
+                        Some(told),
+                        process,
+                        0,
+                        WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS,
+                    )
+                };
+                (!hook.is_invalid()).then_some(hook)
+            };
+            // The foreground, of any program; the windows of the game's process going, showing and hiding.
+            let hooks = [
+                hook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, 0),
+                hook(EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE, pid),
+            ];
+            let Some(hooks) = hooks.into_iter().collect::<Option<Vec<_>>>() else {
+                let _ = tx.send(None);
+                return;
+            };
+            CHANGED.with(|c| *c.borrow_mut() = Some(Box::new(changed)));
+            // SAFETY: plain call.
+            let _ = tx.send(Some(unsafe { GetCurrentThreadId() }));
+            let mut msg = MSG::default();
+            // SAFETY: a plain message loop on this thread, until `WM_QUIT`.
+            while unsafe { GetMessageW(&mut msg, None, 0, 0) }.as_bool() {
+                // SAFETY: `msg` was filled by `GetMessageW`.
+                unsafe { DispatchMessageW(&msg) };
+            }
+            for hook in hooks {
+                // SAFETY: hooks this thread set.
+                let _ = unsafe { UnhookWinEvent(hook) };
+            }
+        })
+        .ok()?;
+    rx.recv().ok().flatten().map(|thread| GameWindows { thread })
+}
+
 /// Calls `ended` on a thread of its own when process `pid` ends (at once if it already has). `false` when no thread
 /// could be started.
 pub fn on_process_exit(pid: u32, ended: impl FnOnce() + Send + 'static) -> bool {

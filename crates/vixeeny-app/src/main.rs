@@ -419,6 +419,9 @@ struct Recording {
     replay: Option<record::Handle>,
     /// The game (its process, executable and window) the replay was started for: the replay stops when it closes.
     replay_game: Option<(u32, String, vixeeny_platform::WindowId)>,
+    /// Watches the replay's game for its own windows over it (an in-game web page), and whether the replay films the
+    /// screen for one now.
+    pages: Option<(vixeeny_platform::GameWindows, bool)>,
     /// A game whose replay the user stopped by hand: it is not started again for it.
     declined: Option<u32>,
     /// The games announced while they run, the replay on or off: each is told once per run of the game, and again only
@@ -435,6 +438,8 @@ enum Wake {
     Daemon(DaemonToApp),
     /// The game of the replay closed.
     Look,
+    /// A window came in front, or one of the game's showed or went (see `Recording::follow_pages`).
+    Pages,
     /// A recording paused, resumed or ended.
     Recording,
 }
@@ -455,6 +460,7 @@ impl Recording {
             tracing::info!("the replay's capture ended");
             self.replay = None;
             self.replay_game = None;
+            self.pages = None;
         }
         // A recording runs: the replay waits for its end (see `handle`).
         if self.handle.is_some() {
@@ -531,6 +537,14 @@ impl Recording {
                 self.replay = Some(handle);
                 self.replay_game = Some((game.pid, exe, game.id));
                 self.declined = None;
+                // The game's web pages are windows of their own: the replay films the screen while one shows.
+                self.pages = self.look.clone().and_then(|look| {
+                    vixeeny_platform::on_game_windows(game.pid, move || {
+                        let _ = look.send(Wake::Pages);
+                    })
+                    .map(|watch| (watch, false))
+                });
+                self.follow_pages();
                 if let Some(look) = self.look.clone() {
                     vixeeny_platform::on_process_exit(game.pid, move || {
                         let _ = look.send(Wake::Look);
@@ -547,8 +561,24 @@ impl Recording {
         }
     }
 
+    /// Has the replay film the game's screen while one of the game's own windows shows over it (an in-game web page,
+    /// its shop), and the game's window alone otherwise: another program over the game stays out of the replay.
+    fn follow_pages(&mut self) {
+        let (Some(replay), Some((pid, _, window)), Some((_, screen))) =
+            (&self.replay, &self.replay_game, &mut self.pages)
+        else {
+            return;
+        };
+        let page = vixeeny_platform::game_page_in_front(*window, *pid);
+        if page != *screen {
+            *screen = page;
+            replay.film_screen(page);
+        }
+    }
+
     /// Stops the buffer: its memory is freed, its files on disk removed.
     fn stop_replay(&mut self) {
+        self.pages = None;
         if let Some(replay) = self.replay.take() {
             drop(replay);
             tracing::info!("replay stopped, its buffer released");
@@ -804,6 +834,7 @@ fn run() -> anyhow::Result<()> {
                 recording.report(&mut send, &config)?;
             }
             Ok(Wake::Look) => recording.watch(&config),
+            Ok(Wake::Pages) => recording.follow_pages(),
             Ok(Wake::Recording) => {
                 recording.report(&mut send, &config)?;
                 if recording.replay.as_ref().is_some_and(record::Handle::finished) {

@@ -39,6 +39,8 @@ enum Ctl {
     Save(bool),
     TogglePause,
     Stop,
+    /// Replay only: films the game's screen (`true`: a window of the game shows over it), or its window again.
+    Screen(bool),
 }
 
 /// Told each time a recording changes state (paused, resumed, ended): the app reports it then, instead of looking.
@@ -129,6 +131,11 @@ impl Handle {
     /// Replay only: writes the buffer's last seconds to a new file, then opens it in the video editor.
     pub fn save_and_edit(&self) {
         let _ = self.ctl.send(Ctl::Save(true));
+    }
+
+    /// Replay only: films the game's screen (`true`, one of the game's windows shows over it) or its window alone.
+    pub fn film_screen(&self, screen: bool) {
+        let _ = self.ctl.send(Ctl::Screen(screen));
     }
 
     /// The session is over: its thread ended, or is ending (it tells the change just before).
@@ -925,6 +932,11 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
         gpu_lost,
     });
     let notice = plan.notice;
+    // A replay's window, and the screen it is on: what it films (see `Ctl::Screen`).
+    let sources = plan.window.filter(|_| save_as.is_some()).map(|window| Sources {
+        window: vixeeny_capture::StreamTarget::Window(window),
+        screen: vixeeny_capture::StreamTarget::Monitor(plan.monitor.clone()),
+    });
     let keep_alive = KeepAlive { _parts: plan.gpu };
     let thread = std::thread::Builder::new().name("recording".into()).spawn(move || {
         reading.store(true, Ordering::Release);
@@ -941,6 +953,7 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
             &rx,
             &thread_state,
             &notice,
+            sources.as_ref(),
         );
         drop(stream);
         drop(keep_alive);
@@ -976,6 +989,13 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
         }
     })?;
     Ok(Handle { ctl, state, thread: Some(thread), reported: RecState::Recording })
+}
+
+/// What a replay films: the game's window, or the screen it is on while a window of the game shows over it (an in-game
+/// web page).
+struct Sources {
+    window: vixeeny_capture::StreamTarget,
+    screen: vixeeny_capture::StreamTarget,
 }
 
 /// Starts writing the replay; the file is finished (and reported) by a thread of its own, so the recording goes on, and
@@ -1039,6 +1059,7 @@ fn record_loop(
     ctl: &Receiver<Ctl>,
     state: &AtomicU8,
     notice: &Config,
+    sources: Option<&Sources>,
 ) -> anyhow::Result<vixeeny_encode::recorder::Summary> {
     let now = || vixeeny_platform::monotonic_ns() - origin;
     let mut watch = watch.map(Watcher::new);
@@ -1082,6 +1103,17 @@ fn record_loop(
                         *editing |= edit;
                     } else {
                         save_at = Some((std::time::Instant::now() + after, edit));
+                    }
+                }
+            }
+            Ok(Ctl::Screen(screen)) => {
+                if let Some(sources) = sources {
+                    let target = if screen { &sources.screen } else { &sources.window };
+                    match stream.retarget(target) {
+                        Ok(()) => {
+                            tracing::info!("the replay films the game's {}", if screen { "screen" } else { "window" })
+                        }
+                        Err(e) => tracing::warn!("the replay cannot change what it films: {e}"),
                     }
                 }
             }

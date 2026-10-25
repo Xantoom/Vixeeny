@@ -214,15 +214,98 @@ enum Source {
     Held(ID3D11Device, Held),
 }
 
-pub struct VideoStream {
+/// A capture session on one item (a monitor or a window), handing its frames to the stream's [`Shared`].
+struct Session {
     pool: Direct3D11CaptureFramePool,
     session: GraphicsCaptureSession,
     item: GraphicsCaptureItem,
     arrived: i64,
     closed: i64,
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        let _ = self.pool.RemoveFrameArrived(self.arrived);
+        let _ = self.item.RemoveClosed(self.closed);
+        let _ = self.session.Close();
+        let _ = self.pool.Close();
+    }
+}
+
+// SAFETY: WinRT objects (agile) and plain data.
+unsafe impl Send for Session {}
+// SAFETY: see above.
+unsafe impl Sync for Session {}
+
+/// How a session is opened: kept to open another on a new target (see [`VideoStream::retarget`]).
+struct Settings {
+    cursor: bool,
+    /// The shortest time between two frames, in 100 ns ticks.
+    min_interval: Option<i64>,
+}
+
+pub struct VideoStream {
+    session: Mutex<Session>,
+    shared: Arc<Shared>,
+    settings: Settings,
+    tx: SyncSender<Result<CapturedFrame, CaptureError>>,
     rx: Receiver<Result<CapturedFrame, CaptureError>>,
     buffers: BufferPool,
     held: Option<Held>,
+}
+
+/// The item `target` is captured through, and the part of it kept.
+fn item_of(target: &StreamTarget) -> Result<(GraphicsCaptureItem, Option<PhysicalRect>), CaptureError> {
+    let interop = factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>().map_err(os("interop"))?;
+    Ok(match target {
+        // SAFETY: the handles come from the OS enumeration; a stale one makes the call fail.
+        StreamTarget::Monitor(m) => (
+            unsafe { interop.CreateForMonitor(HMONITOR(m.id.0 as usize as *mut _)) }.map_err(os("CreateForMonitor"))?,
+            None,
+        ),
+        StreamTarget::Region { monitor, rect } => (
+            // SAFETY: as above.
+            unsafe { interop.CreateForMonitor(HMONITOR(monitor.id.0 as usize as *mut _)) }
+                .map_err(os("CreateForMonitor"))?,
+            Some(*rect),
+        ),
+        StreamTarget::Window(w) => (
+            // SAFETY: as above.
+            unsafe { interop.CreateForWindow(HWND(w.0 as usize as *mut _)) }.map_err(os("CreateForWindow"))?,
+            None,
+        ),
+    })
+}
+
+/// Opens a session on `item`, its frames handed to `shared`.
+fn open_session(
+    item: GraphicsCaptureItem,
+    shared: &Arc<Shared>,
+    tx: &SyncSender<Result<CapturedFrame, CaptureError>>,
+    settings: &Settings,
+) -> Result<Session, CaptureError> {
+    let size = item.Size().map_err(os("item size"))?;
+    if let Ok(mut last) = shared.last_size.lock() {
+        *last = size;
+    }
+    let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(&shared.winrt_device, pixel_format(shared.hdr), 2, size)
+        .map_err(os("CreateFreeThreaded"))?;
+    let arrived = pool.FrameArrived(&frame_handler(Arc::clone(shared), tx.clone())).map_err(os("FrameArrived"))?;
+    let closing = tx.clone();
+    let closed = item
+        .Closed(&TypedEventHandler::new(move |_, _| {
+            let _ = closing.try_send(Err(CaptureError::Os("the captured window was closed".into())));
+            Ok(())
+        }))
+        .map_err(os("Closed"))?;
+    let session = pool.CreateCaptureSession(&item).map_err(os("CreateCaptureSession"))?;
+    let _ = session.SetIsCursorCaptureEnabled(settings.cursor);
+    let _ = session.SetIsBorderRequired(false);
+    if let Some(ticks) = settings.min_interval {
+        let _ = session.SetMinUpdateInterval(windows::Foundation::TimeSpan { Duration: ticks });
+    }
+    session.StartCapture().map_err(os("StartCapture"))?;
+    Ok(Session { pool, session, item, arrived, closed })
 }
 
 impl VideoStream {
@@ -254,12 +337,8 @@ impl VideoStream {
         notify: Notify,
     ) -> Result<Self, CaptureError> {
         let held = Held::default();
-        let stream = Self::open_with(target, false, false, Source::Held(device, held.clone()), Some(notify), None)?;
-        if let Some(interval) = min_interval {
-            let ticks = i64::try_from(interval.as_nanos() / 100).unwrap_or(i64::MAX);
-            let _ = stream.session.SetMinUpdateInterval(windows::Foundation::TimeSpan { Duration: ticks });
-        }
-        Ok(stream)
+        let ticks = min_interval.map(|interval| i64::try_from(interval.as_nanos() / 100).unwrap_or(i64::MAX));
+        Self::open_with(target, false, false, Source::Held(device, held.clone()), Some(notify), None, ticks)
     }
 
     /// The newest frame, if one came since the last taken (see [`start_held`](Self::start_held)).
@@ -282,7 +361,11 @@ impl VideoStream {
         pacing: Option<Pacing>,
     ) -> Result<Self, CaptureError> {
         let source = gpu.map_or(Source::Cpu, Source::Sink);
-        Self::open_with(target, cursor, hdr, source, notify, pacing)
+        // Windows 11 24H2 and later: no more than two frames per period of the recording (a screen faster than that
+        // skips its other refreshes), so every period still gets a frame. Older versions refuse it and deliver every
+        // refresh: the gate sorts them.
+        let ticks = pacing.as_ref().map(|p| i64::from(p.fps.1) * 10_000_000 / (2 * i64::from(p.fps.0.max(1))));
+        Self::open_with(target, cursor, hdr, source, notify, pacing, ticks)
     }
 
     fn open_with(
@@ -292,30 +375,12 @@ impl VideoStream {
         source: Source,
         notify: Option<Notify>,
         pacing: Option<Pacing>,
+        min_interval: Option<i64>,
     ) -> Result<Self, CaptureError> {
         if !GraphicsCaptureSession::IsSupported().map_err(os("IsSupported"))? {
             return Err(CaptureError::Os("Windows Graphics Capture is not available".into()));
         }
-        let interop = factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>().map_err(os("interop"))?;
-        let (item, region): (GraphicsCaptureItem, Option<PhysicalRect>) = match target {
-            // SAFETY: the handles come from the OS enumeration; a stale one makes the call fail.
-            StreamTarget::Monitor(m) => (
-                unsafe { interop.CreateForMonitor(HMONITOR(m.id.0 as usize as *mut _)) }
-                    .map_err(os("CreateForMonitor"))?,
-                None,
-            ),
-            StreamTarget::Region { monitor, rect } => (
-                // SAFETY: as above.
-                unsafe { interop.CreateForMonitor(HMONITOR(monitor.id.0 as usize as *mut _)) }
-                    .map_err(os("CreateForMonitor"))?,
-                Some(*rect),
-            ),
-            StreamTarget::Window(w) => (
-                // SAFETY: as above.
-                unsafe { interop.CreateForWindow(HWND(w.0 as usize as *mut _)) }.map_err(os("CreateForWindow"))?,
-                None,
-            ),
-        };
+        let (item, region) = item_of(target)?;
         let size = item.Size().map_err(os("item size"))?;
 
         let mut held = None;
@@ -361,7 +426,7 @@ impl VideoStream {
         let buffers = BufferPool::default();
         let shared = Arc::new(Shared {
             device,
-            winrt_device: winrt_device.clone(),
+            winrt_device,
             context: Mutex::new(context),
             staging: Mutex::new(None),
             region,
@@ -373,28 +438,24 @@ impl VideoStream {
             last_size: Mutex::new(size),
             buffers: buffers.clone(),
         });
-        let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(&winrt_device, pixel_format(hdr), 2, size)
-            .map_err(os("CreateFreeThreaded"))?;
         let (tx, rx) = sync_channel(BACKLOG);
-        let arrived = pool.FrameArrived(&frame_handler(shared, tx.clone())).map_err(os("FrameArrived"))?;
-        let closed = item
-            .Closed(&TypedEventHandler::new(move |_, _| {
-                let _ = tx.try_send(Err(CaptureError::Os("the captured window was closed".into())));
-                Ok(())
-            }))
-            .map_err(os("Closed"))?;
-        let session = pool.CreateCaptureSession(&item).map_err(os("CreateCaptureSession"))?;
-        let _ = session.SetIsCursorCaptureEnabled(cursor);
-        let _ = session.SetIsBorderRequired(false);
-        if let Some(Pacing { fps: (num, den), .. }) = pacing {
-            // Windows 11 24H2 and later: no more than two frames per period of the recording (a screen faster than that
-            // skips its other refreshes), so every period still gets a frame. Older versions refuse it and deliver
-            // every refresh: the gate sorts them.
-            let ticks = i64::from(den) * 10_000_000 / (2 * i64::from(num.max(1)));
-            let _ = session.SetMinUpdateInterval(windows::Foundation::TimeSpan { Duration: ticks });
+        let settings = Settings { cursor, min_interval };
+        let session = open_session(item, &shared, &tx, &settings)?;
+        Ok(Self { session: Mutex::new(session), shared, settings, tx, rx, buffers, held })
+    }
+
+    /// Captures `target` from now on, in place of what it captured: the frames go on to the same place (the recording
+    /// goes on). A monitor or a window only: a part of a monitor stays the one it was opened with.
+    pub fn retarget(&self, target: &StreamTarget) -> Result<(), CaptureError> {
+        if matches!(target, StreamTarget::Region { .. }) || self.shared.region.is_some() {
+            return Err(CaptureError::InvalidRegion);
         }
-        session.StartCapture().map_err(os("StartCapture"))?;
-        Ok(Self { pool, session, item, arrived, closed, rx, buffers, held })
+        let (item, _) = item_of(target)?;
+        let session = open_session(item, &self.shared, &self.tx, &self.settings)?;
+        // The session before stops once the new one runs: no gap in between.
+        let old = self.session.lock().map(|mut current| std::mem::replace(&mut *current, session));
+        drop(old);
+        Ok(())
     }
 
     /// Where the pixels of the CPU frames come from: hand them back once used.
@@ -409,15 +470,6 @@ impl VideoStream {
             Err(RecvTimeoutError::Timeout) => Ok(None),
             Err(RecvTimeoutError::Disconnected) => Err(CaptureError::Os("capture stopped".into())),
         }
-    }
-}
-
-impl Drop for VideoStream {
-    fn drop(&mut self) {
-        let _ = self.pool.RemoveFrameArrived(self.arrived);
-        let _ = self.item.RemoveClosed(self.closed);
-        let _ = self.session.Close();
-        let _ = self.pool.Close();
     }
 }
 
@@ -606,5 +658,46 @@ mod tests {
         let owner = unsafe { frame.texture.GetDevice() }.expect("device");
         assert_eq!(owner, device, "the frame is on the device given");
         assert!(stream.take_held().is_none(), "taken once");
+    }
+
+    /// A replay that goes from the game's window to its screen: the same stream, its frames still coming, from the new
+    /// source. A part of a monitor cannot change.
+    #[test]
+    fn a_stream_changes_what_it_captures_and_goes_on() {
+        vixeeny_platform::ensure_dpi_aware();
+        let Some(monitor) = vixeeny_platform::monitors().ok().and_then(|m| m.into_iter().next()) else {
+            vixeeny_common::skip_test("no monitor");
+            return;
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        let stream = match VideoStream::start_notify(
+            &StreamTarget::Monitor(monitor.clone()),
+            false,
+            false,
+            Box::new(move || {
+                let _ = tx.send(());
+            }),
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                vixeeny_common::skip_test(&e);
+                return;
+            }
+        };
+        let next = || {
+            rx.recv_timeout(Duration::from_secs(2)).ok()?;
+            stream.recv(Duration::ZERO).ok().flatten()
+        };
+        let Some(first) = next() else {
+            vixeeny_common::skip_test("no frame");
+            return;
+        };
+        assert_eq!((first.frame.width, first.frame.height), (monitor.rect.width, monitor.rect.height));
+        // Opened again on the monitor: a new session gives a first frame at once, from the same stream.
+        stream.retarget(&StreamTarget::Monitor(monitor.clone())).expect("retarget");
+        let second = next().expect("a frame after the change");
+        assert!(second.time_ns > first.time_ns);
+        let region = StreamTarget::Region { monitor, rect: PhysicalRect::new(0, 0, 10, 10) };
+        assert!(stream.retarget(&region).is_err());
     }
 }
