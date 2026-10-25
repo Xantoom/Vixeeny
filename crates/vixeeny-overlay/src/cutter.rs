@@ -23,7 +23,6 @@ use std::time::Duration;
 
 use vixeeny_platform::PhysicalRect;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
-use windows::Win32::Graphics::Direct2D::Common::D2D_RECT_F;
 use windows::Win32::Graphics::Direct2D::ID2D1Bitmap1;
 use windows::Win32::Graphics::DirectComposition::{IDCompositionSurface, IDCompositionVisual2};
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, ReleaseCapture, SetCapture, VK_CONTROL, VK_SHIFT};
@@ -50,13 +49,13 @@ const TIMELINE_H: f32 = 64.0;
 /// The player's card: the controls over the timeline.
 const PLAYER_H: f32 = CONTROLS_H + TIMELINE_H;
 const EXPORT_H: f32 = 56.0;
-/// Between the video and the cards, and between the cards.
+/// Between the video and the card under it.
 const GAP: f32 = 10.0;
 const PAD: f32 = 16.0;
 /// From a card's edge to what it holds.
 const INSET: f32 = 12.0;
-/// The bands under the video: the two cards and the margin under them.
-const BOTTOM_H: f32 = GAP + PLAYER_H + GAP + EXPORT_H + PAD;
+/// The bands under the video: their card and the margin under it.
+const BOTTOM_H: f32 = GAP + PLAYER_H + EXPORT_H + PAD;
 const CARD_RADIUS: f32 = 8.0;
 const CAPTION_W: f32 = 46.0;
 /// The strip's top, from the player card's.
@@ -318,6 +317,8 @@ struct Item {
     label: String,
     detail: String,
     mark: Mark,
+    /// Rows of one group (a network's plans) go together; a hairline parts two groups.
+    group: String,
 }
 
 /// A list open, and where it is in it.
@@ -373,9 +374,9 @@ impl Layout {
         self.bottom + GAP
     }
 
-    /// The export card's top.
+    /// The export row's top, under a hairline in the same card.
     fn export(&self) -> f32 {
-        self.player() + PLAYER_H + GAP
+        self.player() + PLAYER_H
     }
 
     /// A part of the window, in window coordinates.
@@ -395,8 +396,8 @@ impl Layout {
             Target::Close => (self.w - CAPTION_W, 0.0, CAPTION_W, TITLE_H),
             Target::Video => self.band,
             Target::Previous => (left - 4.0, card + 8.0, 32.0, 32.0),
-            Target::Play => (left + 34.0, card + 4.0, 40.0, 40.0),
-            Target::Next => (left + 80.0, card + 8.0, 32.0, 32.0),
+            Target::Play => (left + 32.0, card + 8.0, 32.0, 32.0),
+            Target::Next => (left + 68.0, card + 8.0, 32.0, 32.0),
             Target::Mute => (mute_x, card + 8.0, 32.0, 32.0),
             Target::Volume => (right - 6.0 - VOLUME_W, card + 14.0, VOLUME_W, 20.0),
             Target::Sign => (mute_x - 16.0 - KEPT_W, card + 12.0, 24.0, 24.0),
@@ -540,6 +541,13 @@ pub fn format_time(t: f64) -> String {
     if h > 0 { format!("{h}:{m:02}:{s:02}.{ms:03}") } else { format!("{m}:{s:02}.{ms:03}") }
 }
 
+/// `m:ss` (or `h:mm:ss`), whole seconds down: a limit worked out is no more precise.
+fn format_seconds(t: f64) -> String {
+    let s = t.max(0.0).floor() as u64;
+    let (h, m, s) = (s / 3_600, s / 60 % 60, s % 60);
+    if h > 0 { format!("{h}:{m:02}:{s:02}") } else { format!("{m}:{s:02}") }
+}
+
 /// Lower case, without accents: what a search compares.
 fn fold(s: &str) -> String {
     s.chars()
@@ -580,6 +588,7 @@ fn preset_items(options: &ExportOptions, choice: &ExportChoice, custom: &str, se
         label: p.name.clone(),
         detail: p.detail.clone(),
         mark: if p.brand.is_empty() { Mark::Glyph(icons::VIDEO) } else { Mark::Brand(p.brand.clone()) },
+        group: p.brand.clone(),
     };
     let mut rows: Vec<(Item, &str)> = Vec::new();
     let mut presets = options.presets.iter();
@@ -589,7 +598,7 @@ fn preset_items(options: &ExportOptions, choice: &ExportChoice, custom: &str, se
     if choice.preset == CUSTOM {
         let detail = format!("{}p{} · {}", choice.height, choice.fps, codec_label(options, &choice.codec));
         let mark = Mark::Glyph(icons::SETTINGS);
-        rows.push((Item { key: CUSTOM.into(), label: custom.into(), detail, mark }, ""));
+        rows.push((Item { key: CUSTOM.into(), label: custom.into(), detail, mark, group: String::new() }, ""));
     }
     rows.extend(presets.map(|p| (item(p), p.keywords.as_str())));
     let query = fold(search.trim());
@@ -804,7 +813,13 @@ impl Inner {
     /// The rows of the list `menu`.
     fn items(&self, menu: &MenuState) -> Vec<Item> {
         let options = self.options.borrow();
-        let plain = |key: String, label: String| Item { key, label, detail: String::new(), mark: Mark::None };
+        let plain = |key: String, label: String| Item {
+            key,
+            label,
+            detail: String::new(),
+            mark: Mark::None,
+            group: String::new(),
+        };
         match menu.kind {
             MenuKind::Preset => preset_items(&options, &self.choice.borrow(), &self.texts.custom, &menu.search),
             MenuKind::Codec => options.codecs.iter().map(|c| plain(c.id.clone(), c.label.clone())).collect(),
@@ -1344,7 +1359,7 @@ impl Inner {
     /// The band of the video: its card, and the frame shown last in it.
     fn paint_band(&self) -> Result<()> {
         let u = self.u;
-        let (bx, by, bw, bh) = self.layout.band;
+        let (_, by, _, bh) = self.layout.band;
         let (sw, sh) = ((self.layout.w * u).round() as u32, (bh * u).round() as u32);
         let mut slot = self.video_surface.borrow_mut();
         if slot.as_ref().is_none_or(|(_, s)| *s != (sw, sh)) {
@@ -1358,30 +1373,33 @@ impl Inner {
             return Ok(());
         };
         let frame = self.frame.borrow();
-        let (vx, vy, vw, vh) = self.layout.video;
-        let target = rect(vx * u, (vy - by) * u, vw * u, vh * u);
-        let card = rect(bx * u, 0.0, bw * u, sh as f32);
-        let theme = &self.theme;
-        self.gfx.draw(surface, sw, sh, |c| {
-            c.fill_rect(rect(0.0, 0.0, sw as f32, sh as f32), theme.bg_deep)?;
-            c.fill_round(card, CARD_RADIUS * u, Rgba::hex(0x000000, 255))?;
-            if let Some((bitmap, _)) = frame.as_ref() {
-                c.push_round_clip(card, CARD_RADIUS * u)?;
-                c.picture(bitmap, target)?;
-                c.pop_layer();
-            }
-            c.stroke_round(card, CARD_RADIUS * u, 1.0, theme.divider)
-        })?;
+        let bitmap = frame.as_ref().map(|(b, _)| b);
+        self.gfx
+            .draw(surface, sw, sh, |c| paint_video(c, &self.theme, u, &self.layout, bitmap, (sw as f32, sh as f32)))?;
         // SAFETY: plain call.
         unsafe { self.gfx.dcomp.Commit() }
     }
 }
 
-/// A card of the window: a soft shadow, the flyout's colour, a hairline border.
-fn card(c: &Canvas<'_>, t: &Theme, u: f32, r: D2D_RECT_F) -> Result<()> {
-    c.shadow(r, CARD_RADIUS * u, 10.0 * u, 2.0 * u, Rgba::hex(0x000000, 0x30))?;
-    c.fill_round(r, CARD_RADIUS * u, t.flyout)?;
-    c.stroke_round(r, CARD_RADIUS * u, 1.0, t.stroke_strong)
+/// The video in its band: the picture alone, its corners rounded, on the window's background.
+fn paint_video(
+    c: &Canvas<'_>,
+    t: &Theme,
+    u: f32,
+    l: &Layout,
+    bitmap: Option<&ID2D1Bitmap1>,
+    (w, h): (f32, f32),
+) -> Result<()> {
+    c.fill_rect(rect(0.0, 0.0, w, h), t.bg_deep)?;
+    let Some(bitmap) = bitmap else {
+        return Ok(());
+    };
+    let (vx, vy, vw, vh) = l.video;
+    let picture = rect(vx * u, (vy - l.band.1) * u, vw * u, vh * u);
+    c.push_round_clip(picture, CARD_RADIUS * u)?;
+    c.picture(bitmap, picture)?;
+    c.pop_layer();
+    Ok(())
 }
 
 /// Draws `mark` `size` pixels wide at `(x, y)`.
@@ -1399,7 +1417,7 @@ fn paint_mark(c: &Canvas<'_>, t: &Theme, mark: &Mark, x: f32, y: f32, size: f32)
 fn paint_title(c: &Canvas<'_>, t: &Theme, u: f32, l: &Layout, name: &str, look: &TitleLook) -> Result<()> {
     c.fill_rect(rect(0.0, 0.0, l.w * u, TITLE_H * u), t.bg_deep)?;
     let icon = 18.0 * u;
-    c.icon(icons::CUT, (PAD + 2.0) * u, (TITLE_H * u - icon) / 2.0, icon, t.accent)?;
+    c.icon(icons::CUT, (PAD + 2.0) * u, (TITLE_H * u - icon) / 2.0, icon, t.text_2)?;
     let text = c.gfx.paragraph_lines(name, 13.0 * u, false, (l.w - 2.0 * CAPTION_W - 70.0) * u, 1)?;
     c.text_layout(&text.layout, (PAD + 30.0) * u, (TITLE_H * u - text.height) / 2.0, t.text)?;
     // Minimise: a quiet square; close: red under the pointer, as Windows draws them.
@@ -1433,7 +1451,7 @@ fn clock_size(u: f32) -> (u32, u32) {
 
 /// Where the time is drawn, window logical pixels.
 fn clock_at(l: &Layout) -> (f32, f32) {
-    (PAD + INSET + 124.0, l.player())
+    (PAD + INSET + 112.0, l.player())
 }
 
 /// The time of the playhead and the length of the clip, at `(x, y)` (pixels of the canvas): a layer of its own, drawn
@@ -1484,8 +1502,12 @@ fn paint_bottom(
     // Window logical box → this surface's pixels.
     let at = |(x, y, w, h): Box2| rect(x * u, (y - top) * u, w * u, h * u);
     c.fill_rect(rect(0.0, 0.0, l.w * u, BOTTOM_H * u), t.bg_deep)?;
-    card(c, t, u, at((PAD, l.player(), l.w - 2.0 * PAD, PLAYER_H)))?;
-    card(c, t, u, at((PAD, l.export(), l.w - 2.0 * PAD, EXPORT_H)))?;
+    // One card, a hairline between the player and the export.
+    let card = at((PAD, l.player(), l.w - 2.0 * PAD, PLAYER_H + EXPORT_H));
+    c.fill_round(card, CARD_RADIUS * u, t.flyout)?;
+    c.stroke_round(card, CARD_RADIUS * u, 1.0, t.stroke_strong)?;
+    let line = at((PAD + INSET, l.export(), l.w - 2.0 * (PAD + INSET), 0.0));
+    c.fill_rect(rect(line.left, line.top, line.right - line.left, 1.0), t.divider)?;
     let back = |target: Target, round: f32| -> Result<()> {
         let fill = if look.held == Some(target) {
             t.subtle_pressed
@@ -1507,20 +1529,8 @@ fn paint_bottom(
     icon_in(icons::PREVIOUS, Target::Previous, 18.0, t.text)?;
     back(Target::Next, 6.0)?;
     icon_in(icons::NEXT, Target::Next, 18.0, t.text)?;
-    let play = at(l.part(Target::Play));
-    let fill = if look.hover == Target::Play { t.accent.brighter(0.08) } else { t.accent };
-    c.fill_circle(
-        f32::midpoint(play.left, play.right),
-        f32::midpoint(play.top, play.bottom),
-        (play.right - play.left) / 2.0,
-        fill,
-    )?;
-    icon_in(
-        if s.playing { icons::PAUSE_FILLED } else { icons::PLAY_FILLED },
-        Target::Play,
-        18.0,
-        Rgba::hex(0xffffff, 255),
-    )?;
+    back(Target::Play, 6.0)?;
+    icon_in(if s.playing { icons::PAUSE_FILLED } else { icons::PLAY_FILLED }, Target::Play, 18.0, t.text)?;
 
     back(Target::Mute, 6.0)?;
     let silent = s.muted || s.volume == 0.0;
@@ -1535,22 +1545,22 @@ fn paint_bottom(
     let level = if s.muted { 0.0 } else { s.volume };
     let kx = track.left + (track.right - track.left) * level;
     c.fill_round(rect(track.left, cy - 2.0 * u, track.right - track.left, 4.0 * u), 2.0 * u, t.control_stroke)?;
-    c.fill_round(rect(track.left, cy - 2.0 * u, kx - track.left, 4.0 * u), 2.0 * u, t.accent)?;
+    c.fill_round(rect(track.left, cy - 2.0 * u, kx - track.left, 4.0 * u), 2.0 * u, t.text_2)?;
     c.fill_circle(kx, cy, 7.0 * u, t.flyout)?;
     c.stroke_circle(kx, cy, 7.0 * u, 1.0, t.stroke_strong)?;
-    c.fill_circle(kx, cy, 4.0 * u, t.accent)?;
+    c.fill_circle(kx, cy, 4.0 * u, t.text)?;
 
     // The length kept, how it is written, and the longest a network takes.
     let sign = at(l.part(Target::Sign));
     let i = 20.0 * u;
-    let (data, colour) = if s.lossless { (icons::FLASH, t.accent) } else { (icons::SYNC, t.text_2) };
+    let data = if s.lossless { icons::FLASH } else { icons::SYNC };
     let mid = f32::midpoint(sign.top, sign.bottom);
-    c.icon(data, f32::midpoint(sign.left, sign.right) - i / 2.0, mid - i / 2.0, i, colour)?;
+    c.icon(data, f32::midpoint(sign.left, sign.right) - i / 2.0, mid - i / 2.0, i, t.text_2)?;
     let kept = c.gfx.paragraph(&format_time(frames.length(s.from, s.to)), 14.0 * u, true, 1.0e5)?;
     let kx = sign.right + 8.0 * u;
     c.text_layout(&kept.layout, kx, mid - kept.height / 2.0, t.text)?;
     if let Some(limit) = look.limit {
-        let max = c.gfx.paragraph(&format!("{} {}", texts.max, format_time(limit)), 13.0 * u, false, 1.0e5)?;
+        let max = c.gfx.paragraph(&format!("{} {}", texts.max, format_seconds(limit)), 13.0 * u, false, 1.0e5)?;
         c.text_layout(&max.layout, kx + kept.width + 8.0 * u, mid - max.height / 2.0, t.text_3)?;
     }
 
@@ -1593,7 +1603,7 @@ fn paint_bottom(
     if spacing >= 4.0 * u {
         for &k in &frames.keys {
             let x = l.x_of(frames, frames.time(k)) * u;
-            let colour = if k == s.from { t.accent } else { t.text_3 };
+            let colour = if k == s.from { t.text_2 } else { t.text_3.with_alpha(0.5) };
             c.fill_rect(rect(x - 0.5 * u, ticks_y, 1.0 * u, 4.0 * u), colour)?;
         }
     }
@@ -1610,18 +1620,22 @@ fn paint_bottom(
             c.fill_round(rect(r.left, r.top, (r.right - r.left) * p.clamp(0.0, 1.0), 6.0 * u), 3.0 * u, t.accent)?;
         }
         (None, Some(export)) => {
+            // The preset as a button; the values it sets quieter, framed only under the pointer.
             let dropdown = |target: Target, mark: &Mark, label: &str| -> Result<()> {
                 let r = at(l.part(target));
                 let open = look.menu.map(MenuKind::anchor) == Some(target);
+                let main = target == Target::Preset;
                 let fill = if look.held == Some(target) || open {
-                    t.control_pressed
+                    Some(t.control_pressed)
                 } else if look.hover == target {
-                    t.control_hover
+                    Some(t.control_hover)
                 } else {
-                    t.control
+                    main.then_some(t.control)
                 };
-                c.fill_round(r, 6.0 * u, fill)?;
-                c.stroke_round(r, 6.0 * u, 1.0, t.control_stroke)?;
+                if let Some(fill) = fill {
+                    c.fill_round(r, 6.0 * u, fill)?;
+                    c.stroke_round(r, 6.0 * u, 1.0, t.control_stroke)?;
+                }
                 let mid = f32::midpoint(r.top, r.bottom);
                 let mut x = r.left + 12.0 * u;
                 if *mark != Mark::None {
@@ -1685,12 +1699,6 @@ fn paint_menu(c: &Canvas<'_>, t: &Theme, u: f32, look: &MenuLook) -> Result<()> 
         let field = rect(r.left + 6.0 * u, y + 2.0 * u, (look.w - 12.0) * u, 34.0 * u);
         c.fill_round(field, 4.0 * u, t.control)?;
         c.stroke_round(field, 4.0 * u, 1.0, t.control_stroke)?;
-        // Focused, as a text box is: the accent under it.
-        c.fill_round(
-            rect(field.left + 1.0, field.bottom - 2.0 * u, field.right - field.left - 2.0, 2.0 * u),
-            u,
-            t.accent,
-        )?;
         let mid = f32::midpoint(field.top, field.bottom);
         let i = 16.0 * u;
         c.icon(icons::SEARCH, field.left + 10.0 * u, mid - i / 2.0, i, t.text_2)?;
@@ -1698,7 +1706,7 @@ fn paint_menu(c: &Canvas<'_>, t: &Theme, u: f32, look: &MenuLook) -> Result<()> 
         if look.search.is_empty() {
             c.text(
                 &look.placeholder,
-                rect(tx, field.top, field.right - tx, field.bottom - field.top),
+                rect(tx + 3.0 * u, field.top, field.right - tx - 3.0 * u, field.bottom - field.top),
                 14.0 * u,
                 t.text_3,
                 Align::Leading,
@@ -1707,7 +1715,7 @@ fn paint_menu(c: &Canvas<'_>, t: &Theme, u: f32, look: &MenuLook) -> Result<()> 
         } else {
             let typed = c.gfx.paragraph(&look.search, 14.0 * u, false, 1.0e5)?;
             c.text_layout(&typed.layout, tx, mid - typed.height / 2.0, t.text)?;
-            c.fill_rect(rect(tx + typed.width + 1.0 * u, mid - 8.0 * u, 1.0 * u, 16.0 * u), t.text)?;
+            c.fill_rect(rect(tx + typed.width + 2.0 * u, mid - 8.0 * u, 1.0 * u, 16.0 * u), t.text)?;
         }
         y += look.search_h * u;
         c.fill_rect(rect(r.left, y - 4.0 * u, r.right - r.left, 1.0), t.divider)?;
@@ -1720,6 +1728,9 @@ fn paint_menu(c: &Canvas<'_>, t: &Theme, u: f32, look: &MenuLook) -> Result<()> 
         let i = look.first + k;
         let row = rect(r.left + 4.0 * u, y, (look.w - 8.0) * u, ITEM_H * u);
         let mid = f32::midpoint(row.top, row.bottom);
+        if k > 0 && look.items[k - 1].group != item.group {
+            c.fill_rect(rect(row.left + 8.0 * u, row.top, row.right - row.left - 16.0 * u, 1.0), t.divider)?;
+        }
         if look.hover == Some(i) {
             c.fill_round(row, 4.0 * u, t.subtle_hover)?;
         } else if look.selected == Some(i) {
@@ -2089,6 +2100,8 @@ mod tests {
         assert_eq!(format_time(12.3456), "0:12.346");
         assert_eq!(format_time(75.5), "1:15.500");
         assert_eq!(format_time(3725.0), "1:02:05.000");
+        assert_eq!(format_seconds(46.9), "0:46");
+        assert_eq!(format_seconds(7_200.0), "2:00:00");
     }
 
     #[test]
@@ -2308,19 +2321,8 @@ mod tests {
             let bh = (BOTTOM_H * u).ceil() as u32;
             let vh = h - th - bh;
             let top = gfx.render(w, th, |c| paint_title(c, &t, u, &l, &texts.title, &title)).expect("title");
-            let (bx, _, bw, _) = l.band;
-            let (vx, vy, vw, vhh) = l.video;
-            let video = gfx
-                .render(w, vh, |c| {
-                    let card = rect(bx * u, 0.0, bw * u, vh as f32);
-                    c.fill_rect(rect(0.0, 0.0, w as f32, vh as f32), t.bg_deep)?;
-                    c.fill_round(card, CARD_RADIUS * u, Rgba::hex(0x000000, 255))?;
-                    c.push_round_clip(card, CARD_RADIUS * u)?;
-                    c.picture(&bitmap, rect(vx * u, (vy - TITLE_H) * u, vw * u, vhh * u))?;
-                    c.pop_layer();
-                    c.stroke_round(card, CARD_RADIUS * u, 1.0, t.divider)
-                })
-                .expect("video");
+            let video =
+                gfx.render(w, vh, |c| paint_video(c, &t, u, &l, Some(&bitmap), (w as f32, vh as f32))).expect("video");
             let bottom = gfx
                 .render(w, bh, |c| {
                     paint_bottom(c, &t, u, &l, &frames, &texts, &look, &thumbs)?;
