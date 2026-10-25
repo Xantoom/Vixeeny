@@ -4,6 +4,8 @@
 //! Needs the native build: `cargo xtask build-native ffmpeg`.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod common;
+
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
@@ -12,36 +14,13 @@ use ffmpeg_next::ffi;
 use vixeeny_encode::audio::{AudioCodec, AudioTrackConfig};
 use vixeeny_encode::clock::Fps;
 use vixeeny_encode::cut::{Clip, Next, Pictures, Reencode, Sound, export};
-use vixeeny_encode::recorder::{
-    FrameFormat, OutputContainer, RecordConfig, Recorder, Split, VideoFrame,
-};
-use vixeeny_encode::registry::{Chroma, PresetName, Registry};
+use vixeeny_encode::recorder::{FrameFormat, OutputContainer, RecordConfig, Recorder, VideoFrame};
+use vixeeny_encode::registry::{PresetName, Registry};
+
+use common::scratch;
 
 const MS: i64 = 1_000_000;
 const FPS: usize = 30;
-
-/// A folder of its own for a test, removed when the test ends, even early or failing.
-struct Scratch(PathBuf);
-
-impl std::ops::Deref for Scratch {
-    type Target = std::path::Path;
-    fn deref(&self) -> &std::path::Path {
-        &self.0
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-fn scratch(name: &str) -> Scratch {
-    let dir = std::env::temp_dir().join(format!("vixeeny-cut-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    Scratch(dir)
-}
 
 /// Frame `i`: its number drawn as the brightness of the whole picture, so that a decoded frame
 /// tells which one it is.
@@ -54,17 +33,6 @@ fn frame(i: usize) -> VideoFrame {
         format: FrameFormat::Bgra8,
         data: [v, v, v, 255].repeat(320 * 180),
     }
-}
-
-fn x264(registry: &Registry) -> (vixeeny_encode::registry::Encoder, Vec<(String, String)>) {
-    let encoder = registry.get("libx264").unwrap().clone();
-    let options = encoder
-        .presets
-        .get(PresetName::Performance)
-        .iter()
-        .map(|(k, v)| (k.clone(), v.to_ffmpeg()))
-        .collect();
-    (encoder, options)
 }
 
 /// Records `seconds` at 30 fps, a key frame every second, with two audio tracks.
@@ -80,19 +48,10 @@ fn recording_with(dir: &Path, seconds: usize, hdr: bool) -> PathBuf {
 /// The same with these encoder options too.
 fn recording_of(dir: &Path, seconds: usize, hdr: bool, extra: &[(&str, &str)]) -> PathBuf {
     let registry = Registry::builtin().unwrap();
-    let (encoder, mut options) = if hdr {
-        let encoder = registry.get("libx265").unwrap().clone();
-        let options = encoder
-            .presets
-            .get(PresetName::Performance)
-            .iter()
-            .map(|(k, v)| (k.clone(), v.to_ffmpeg()))
-            .collect();
-        (encoder, options)
-    } else {
-        x264(&registry)
-    };
-    options.extend(extra.iter().map(|&(k, v)| (k.to_owned(), v.to_owned())));
+    let id = if hdr { "libx265" } else { "libx264" };
+    let mut cfg = common::config(&registry, id, PresetName::Performance);
+    cfg.options
+        .extend(extra.iter().map(|&(k, v)| (k.to_owned(), v.to_owned())));
     let track = |title: &str| AudioTrackConfig {
         title: title.into(),
         codec: AudioCodec::Aac,
@@ -101,27 +60,14 @@ fn recording_of(dir: &Path, seconds: usize, hdr: bool, extra: &[(&str, &str)]) -
         channels: 2,
     };
     let cfg = RecordConfig {
-        crop: None,
-        encoder,
-        options,
         container: OutputContainer::Mp4Hybrid,
-        output_size: (320, 180),
         fps: Fps::whole(FPS as u32),
         depth: if hdr { 10 } else { 8 },
-        chroma: Chroma::C420,
         hdr,
         peak_nits: 603.0,
         sdr_white_nits: if hdr { 240.0 } else { 203.0 },
-        split: Split::Off,
-        keyframe_seconds: 1.0,
-        queue: 1_000,
-        vfr: false,
         audio: vec![track("Game"), track("Mic")],
-        gpu: None,
-        replay_seconds: None,
-        replay_storage: vixeeny_encode::replay::Storage::Ram,
-        files: true,
-        buffers: Default::default(),
+        ..cfg
     };
     let out = dir.join("rec.mp4");
     let path = out.clone();
@@ -173,7 +119,9 @@ fn number(bgra: &[u8]) -> usize {
 
 fn reencode() -> Reencode {
     let registry = Registry::builtin().unwrap();
-    let (encoder, options) = x264(&registry);
+    let RecordConfig {
+        encoder, options, ..
+    } = common::config(&registry, "libx264", PresetName::Performance);
     Reencode {
         encoder,
         options,

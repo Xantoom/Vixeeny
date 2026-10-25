@@ -540,67 +540,7 @@ fn every_page_of_the_settings_renders() {
         ],
         games: Vec::new(),
     });
-    {
-        use vixeeny_settings::machine::{Cpu, Disk, Gpu, Machine, Module, Screen};
-        panel.set_machine(Machine {
-            cpu: Some(Cpu {
-                name: "AMD Ryzen 7 9800X3D 8-Core Processor".into(),
-                cores: 8,
-                threads: 16,
-                base_mhz: 4700,
-                boost_mhz: 0,
-            }),
-            ram_bytes: 64 << 30,
-            modules: vec![
-                Module {
-                    bytes: 32 << 30,
-                    kind: "DDR5".into(),
-                    mts: 6000,
-                    cl: 30,
-                };
-                2
-            ],
-            gpus: vec![Gpu {
-                name: "NVIDIA GeForce RTX 5080".into(),
-                integrated: false,
-                memory_bytes: 16 << 30,
-            }],
-            disks: vec![
-                Disk {
-                    letter: "C:".into(),
-                    label: String::new(),
-                    model: "CT2000T500SSD8".into(),
-                    bytes: 2_000_398_934_016,
-                    free_bytes: 312_000_000_000,
-                },
-                Disk {
-                    letter: "D:".into(),
-                    label: "Jeux".into(),
-                    model: "Samsung SSD 990 PRO 4TB".into(),
-                    bytes: 4_000_787_030_016,
-                    free_bytes: 3_100_000_000_000,
-                },
-            ],
-            screens: vec![
-                Screen {
-                    number: 1,
-                    primary: true,
-                    name: "Odyssey G80SH".into(),
-                    width: 3840,
-                    height: 2160,
-                    hz: 240,
-                },
-                Screen {
-                    number: 2,
-                    primary: false,
-                    name: "LG ULTRAWIDE".into(),
-                    width: 3440,
-                    height: 1440,
-                    hz: 144,
-                },
-            ],
-        });
-    }
+    panel.set_machine(vixeeny_settings::Machine::sample());
     for section in Section::ALL {
         panel.select_section(section);
         let name = format!("9-page-{section:?}").to_lowercase();

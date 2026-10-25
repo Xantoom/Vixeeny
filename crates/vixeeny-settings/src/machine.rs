@@ -320,56 +320,7 @@ mod tests {
             mts: 6000,
             cl,
         };
-        let env = Env::new(Lang::En, "1.0.0").with_machine(Machine {
-            cpu: Some(Cpu {
-                name: "AMD Ryzen 7 9800X3D 8-Core Processor".into(),
-                cores: 8,
-                threads: 16,
-                base_mhz: 4700,
-                boost_mhz: 0,
-            }),
-            ram_bytes: 64 << 30,
-            modules: vec![stick(30), stick(30)],
-            gpus: vec![Gpu {
-                name: "NVIDIA GeForce RTX 5080".into(),
-                integrated: false,
-                memory_bytes: 16 << 30,
-            }],
-            disks: vec![
-                Disk {
-                    letter: "C:".into(),
-                    label: String::new(),
-                    model: "CT2000T500SSD8".into(),
-                    bytes: 2_000_398_934_016,
-                    free_bytes: 1_000_000_000_000,
-                },
-                Disk {
-                    letter: "D:".into(),
-                    label: "Games".into(),
-                    model: String::new(),
-                    bytes: 4_000_000_000_000,
-                    free_bytes: 100_000_000_000,
-                },
-            ],
-            screens: vec![
-                Screen {
-                    number: 1,
-                    primary: true,
-                    name: "Odyssey G80SH".into(),
-                    width: 3840,
-                    height: 2160,
-                    hz: 240,
-                },
-                Screen {
-                    number: 2,
-                    primary: false,
-                    name: "LG ULTRAWIDE".into(),
-                    width: 3440,
-                    height: 1440,
-                    hz: 144,
-                },
-            ],
-        });
+        let env = Env::new(Lang::En, "1.0.0").with_machine(Machine::sample());
         let o = overview(&env);
         let shown = |tiles: &[Tile]| {
             tiles

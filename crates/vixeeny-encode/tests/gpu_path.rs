@@ -7,21 +7,23 @@
 #![cfg(windows)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use std::path::{Path, PathBuf};
+mod common;
+
+use std::path::Path;
 use std::sync::Arc;
 
 use vixeeny_encode::clock::Fps;
 use vixeeny_encode::d3d_convert::{self as d3d, Device, DeviceContext, Rect};
 use vixeeny_encode::ffmpeg::{codec, format, frame, media};
 use vixeeny_encode::gpu::{Feed, GpuPipeline, Source};
-use vixeeny_encode::recorder::{
-    FrameFormat, OutputContainer, RecordConfig, Recorder, Split, VideoFrame,
-};
+use vixeeny_encode::recorder::{FrameFormat, RecordConfig, Recorder, VideoFrame};
 use vixeeny_encode::registry::{Chroma, PresetName, Registry};
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, ID3D11Texture2D,
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
+
+use common::{namer, scratch};
 
 const W: u32 = 320;
 const H: u32 = 180;
@@ -31,62 +33,11 @@ const COLOUR: [u8; 4] = [40, 160, 220, 255];
 /// Its BT.709 limited-range Y, Cb, Cr.
 const YCBCR: [i32; 3] = [157, 69, 159];
 
-fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("vixeeny-gpu-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
-}
-
 fn texture(device: &Device) -> ID3D11Texture2D {
     let pixels: Vec<u8> = COLOUR.repeat((W * H) as usize);
     let bind = (D3D11_BIND_SHADER_RESOURCE.0 | D3D11_BIND_RENDER_TARGET.0) as u32;
     let format = DXGI_FORMAT_B8G8R8A8_UNORM;
     vixeeny_platform::d3d::texture(device, (W, H), format, bind, 0, Some((&pixels, W * 4))).unwrap()
-}
-
-fn config(
-    registry: &Registry,
-    id: &str,
-    depth: u8,
-    chroma: Chroma,
-    preset: PresetName,
-) -> RecordConfig {
-    let encoder = registry.get(id).unwrap().clone();
-    let options = encoder
-        .presets
-        .get(preset)
-        .iter()
-        .map(|(k, v)| (k.clone(), v.to_ffmpeg()))
-        .collect();
-    RecordConfig {
-        crop: None,
-        encoder,
-        options,
-        container: OutputContainer::Mkv,
-        output_size: (W, H),
-        fps: Fps::whole(30),
-        depth,
-        chroma,
-        hdr: false,
-        peak_nits: 1000.0,
-        sdr_white_nits: 203.0,
-        split: Split::Off,
-        keyframe_seconds: 1.0,
-        queue: 1_000,
-        vfr: false,
-        audio: Vec::new(),
-        gpu: None,
-        replay_seconds: None,
-        replay_storage: vixeeny_encode::replay::Storage::Ram,
-        files: true,
-        buffers: Default::default(),
-    }
-}
-
-fn namer(dir: &Path) -> Box<dyn FnMut(u32) -> PathBuf + Send> {
-    let dir = dir.to_path_buf();
-    Box::new(move |part| dir.join(format!("rec-{part}.mkv")))
 }
 
 /// Y, Cb, Cr of the centre of the first decoded frame, on 8 bits.
@@ -200,12 +151,26 @@ fn record_gpu_with(
             return None;
         }
     };
+    let cfg = RecordConfig {
+        depth,
+        chroma,
+        ..common::config(&registry, id, preset)
+    };
+    let name = format!("{id}-{depth}-{}-{preset:?}", chroma.name());
+    Some(record_texture(cfg, pipeline, &texture(device), &name))
+}
+
+/// Records 10 frames of `source` through `pipeline`: Y, Cb, Cr of the centre of the first one.
+fn record_texture(
+    mut cfg: RecordConfig,
+    pipeline: GpuPipeline,
+    source: &ID3D11Texture2D,
+    name: &str,
+) -> [i32; 3] {
     let pipeline = Arc::new(pipeline);
-    let mut cfg = config(&registry, id, depth, chroma, preset);
     cfg.gpu = Some(Arc::clone(&pipeline));
-    let dir = scratch(&format!("{id}-{depth}-{}-{preset:?}", chroma.name()));
-    let rec = Recorder::start(cfg, namer(&dir)).unwrap();
-    let source = texture(device);
+    let dir = scratch(name);
+    let rec = Recorder::start(cfg, namer(&dir, "mkv")).unwrap();
     let rect = Rect {
         left: 0,
         top: 0,
@@ -213,13 +178,11 @@ fn record_gpu_with(
         bottom: H as i32,
     };
     for i in 0..10 {
-        let frame = pipeline.convert(&source, rect).unwrap();
+        let frame = pipeline.convert(source, rect).unwrap();
         assert!(rec.push_hw(i * 1_000 * MS / 30, frame));
     }
     let summary = rec.stop(10 * 1_000 * MS / 30).unwrap();
-    let got = centre(&summary.files[0]);
-    let _ = std::fs::remove_dir_all(dir);
-    Some(got)
+    centre(&summary.files[0])
 }
 
 #[test]
@@ -240,14 +203,8 @@ fn a_software_encoder_records_downloaded_gpu_frames_with_the_right_colours() {
     let registry = Registry::builtin().unwrap();
     let dir = scratch("cpu");
     let rec = Recorder::start(
-        config(
-            &registry,
-            "libx264",
-            8,
-            Chroma::C420,
-            PresetName::Performance,
-        ),
-        namer(&dir),
+        common::config(&registry, "libx264", PresetName::Performance),
+        namer(&dir, "mkv"),
     )
     .unwrap();
     for i in 0..10 {
@@ -262,7 +219,16 @@ fn a_software_encoder_records_downloaded_gpu_frames_with_the_right_colours() {
     }
     let summary = rec.stop(10 * 1_000 * MS / 30).unwrap();
     assert_colour(centre(&summary.files[0]), "x264 via the CPU");
-    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Whether `device` is on an NVIDIA card (machines without one fall back to the default adapter).
+fn is_nvidia(device: &Device) -> bool {
+    use windows::core::Interface;
+    let dxgi: windows::Win32::Graphics::Dxgi::IDXGIDevice = device.cast().unwrap();
+    // SAFETY: plain queries of a live device.
+    let adapter = unsafe { dxgi.GetAdapter() }.unwrap();
+    // SAFETY: as above.
+    unsafe { adapter.GetDesc() }.unwrap().VendorId == 0x10de
 }
 
 #[test]
@@ -278,16 +244,7 @@ fn nvenc_reads_the_gpu_frames_directly_when_present() {
         vixeeny_common::skip_test("no NVENC in FFmpeg");
         return;
     }
-    // Machines without an NVIDIA GPU fall back to the default adapter: skip them.
-    let nvidia = {
-        use windows::core::Interface;
-        let dxgi: windows::Win32::Graphics::Dxgi::IDXGIDevice = device.cast().unwrap();
-        // SAFETY: plain queries of a live device.
-        let adapter = unsafe { dxgi.GetAdapter() }.unwrap();
-        // SAFETY: as above.
-        unsafe { adapter.GetDesc() }.unwrap().VendorId == 0x10de
-    };
-    if !nvidia {
+    if !is_nvidia(&device) {
         vixeeny_common::skip_test("no NVIDIA card");
         return;
     }
@@ -326,15 +283,7 @@ fn nvenc_records_with_the_quality_presets() {
         vixeeny_common::skip_test("no Direct3D device");
         return;
     };
-    let nvidia = {
-        use windows::core::Interface;
-        let dxgi: windows::Win32::Graphics::Dxgi::IDXGIDevice = device.cast().unwrap();
-        // SAFETY: plain queries of a live device.
-        let adapter = unsafe { dxgi.GetAdapter() }.unwrap();
-        // SAFETY: as above.
-        unsafe { adapter.GetDesc() }.unwrap().VendorId == 0x10de
-    };
-    if !nvidia {
+    if !is_nvidia(&device) {
         vixeeny_common::skip_test("no NVIDIA card");
         return;
     }
@@ -434,30 +383,21 @@ fn record_hdr(
             return None;
         }
     };
-    let pipeline = Arc::new(pipeline);
-    let mut cfg = config(&registry, id, depth, Chroma::C420, PresetName::Performance);
-    cfg.hdr = keep_hdr;
-    cfg.gpu = Some(Arc::clone(&pipeline));
+    let cfg = RecordConfig {
+        depth,
+        hdr: keep_hdr,
+        ..common::config(&registry, id, PresetName::Performance)
+    };
     // Tests run side by side: each recording has its own folder.
     static RUN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let run = RUN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let dir = scratch(&format!("hdr-{id}-{keep_hdr}-{run}"));
-    let rec = Recorder::start(cfg, namer(&dir)).unwrap();
-    let source = hdr_texture(device, rgb);
-    let rect = Rect {
-        left: 0,
-        top: 0,
-        right: W as i32,
-        bottom: H as i32,
-    };
-    for i in 0..10 {
-        let frame = pipeline.convert(&source, rect).unwrap();
-        assert!(rec.push_hw(i * 1_000 * MS / 30, frame));
-    }
-    let summary = rec.stop(10 * 1_000 * MS / 30).unwrap();
-    let got = centre(&summary.files[0]);
-    let _ = std::fs::remove_dir_all(dir);
-    Some(got)
+    let name = format!("hdr-{id}-{keep_hdr}-{run}");
+    Some(record_texture(
+        cfg,
+        pipeline,
+        &hdr_texture(device, rgb),
+        &name,
+    ))
 }
 
 /// An HDR monitor recorded on the GPU, whatever the video processor of the card takes: kept as

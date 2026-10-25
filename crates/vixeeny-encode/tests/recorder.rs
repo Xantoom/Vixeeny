@@ -5,7 +5,9 @@
 //! Needs the native build: `cargo xtask build-native ffmpeg`.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use std::path::{Path, PathBuf};
+mod common;
+
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -16,30 +18,9 @@ use vixeeny_encode::recorder::{
 };
 use vixeeny_encode::registry::{Chroma, PresetName, Registry};
 
+use common::{Scratch, namer, scratch};
+
 const MS: i64 = 1_000_000;
-
-/// A folder of its own for a test, removed when the test ends, even early or failing.
-struct Scratch(PathBuf);
-
-impl std::ops::Deref for Scratch {
-    type Target = std::path::Path;
-    fn deref(&self) -> &std::path::Path {
-        &self.0
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-fn scratch(name: &str) -> Scratch {
-    let dir = std::env::temp_dir().join(format!("vixeeny-rec-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    Scratch(dir)
-}
 
 /// A moving gradient, so that every frame differs.
 fn frame(w: u32, h: u32, i: usize) -> VideoFrame {
@@ -64,51 +45,23 @@ fn frame(w: u32, h: u32, i: usize) -> VideoFrame {
 }
 
 fn config(registry: &Registry, id: &str, container: OutputContainer, fps: u32) -> RecordConfig {
-    let encoder = registry.get(id).unwrap().clone();
-    let mut options: Vec<(String, String)> = encoder
-        .presets
-        .get(PresetName::Performance)
-        .iter()
-        .map(|(k, v)| (k.clone(), v.to_ffmpeg()))
-        .collect();
+    let mut cfg = common::config(registry, id, PresetName::Performance);
     // Faster than the user presets: this is a test.
     match id {
-        "libsvtav1" => options.retain(|(k, _)| k != "preset"),
-        "libx265" => options.push(("x265-params".into(), "log-level=none".into())),
+        "libsvtav1" => {
+            cfg.options.retain(|(k, _)| k != "preset");
+            cfg.options.push(("preset".into(), "12".into()));
+        }
+        "libx265" => cfg
+            .options
+            .push(("x265-params".into(), "log-level=none".into())),
         _ => {}
     }
-    if id == "libsvtav1" {
-        options.push(("preset".into(), "12".into()));
-    }
     RecordConfig {
-        crop: None,
-        encoder,
-        options,
         container,
-        output_size: (320, 180),
         fps: Fps::whole(fps),
-        depth: 8,
-        chroma: Chroma::C420,
-        hdr: false,
-        peak_nits: 1000.0,
-        sdr_white_nits: 203.0,
-        split: Split::Off,
-        keyframe_seconds: 1.0,
-        queue: 1_000,
-        vfr: false,
-        audio: Vec::new(),
-        gpu: None,
-        replay_seconds: None,
-        replay_storage: vixeeny_encode::replay::Storage::Ram,
-        files: true,
-        buffers: Default::default(),
+        ..cfg
     }
-}
-
-fn namer(dir: &Path, ext: &str) -> Box<dyn FnMut(u32) -> PathBuf + Send> {
-    let dir = dir.to_path_buf();
-    let ext = ext.to_owned();
-    Box::new(move |part| dir.join(format!("rec-{part}.{ext}")))
 }
 
 /// What a demuxer sees in the video stream.
