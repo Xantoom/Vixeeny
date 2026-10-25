@@ -394,8 +394,8 @@ keys! {
     OptMinutes => "Minutes", "Minutes";
     UnitSeconds => "s", "s";
     SetReplayAfterSeconds => "Seconds after the shortcut", "Secondes après le raccourci";
-    GrpReplayVideo => "Video settings", "Paramètres vidéo";
-    SetSameAsVideo => "Same settings as Video", "Mêmes paramètres que Vidéo";
+    GrpReplayVideo => "Video and sound settings", "Paramètres vidéo et son";
+    SetSameAsVideo => "Same settings as Video and Sound", "Mêmes paramètres que Vidéo et Son";
     GameNoneOpen => "No game is open right now", "Aucun jeu n'est ouvert actuellement";
     SetWhatsNew => "Show what's new after an update", "Afficher les nouveautés après une mise à jour";
     UpdateNotes => "What's new in {version}", "Nouveautés de la version {version}";
@@ -403,6 +403,9 @@ keys! {
     WhatsNewLoading => "Loading the list of changes…", "Chargement de la liste des changements…";
     WhatsNewFailed => "The list of changes could not be loaded.", "La liste des changements n'a pas pu être chargée.";
     UiOk => "OK", "OK";
+    SetPresetPerformance => "Light", "Léger";
+    SetMaxRate => "Limit the bitrate", "Limiter le débit";
+    SetMaxRateKbps => "Maximum bitrate", "Débit maximum";
 }
 
 impl Lang {

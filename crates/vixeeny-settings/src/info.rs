@@ -10,12 +10,19 @@ use crate::encoders;
 
 /// The info of the row `id`, in the language of `env` (`None`: nothing to add).
 pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
-    // The replay's video rows say what the videos' do, about the replay's own settings.
-    if let Some(id) = id.strip_prefix(crate::pages::REPLAY_PREFIX) {
-        return info(id, env, &crate::pages::replay_view(config));
-    }
     let fr = env.lang == Lang::Fr;
     let pick = |en: &str, f: &str| Some(if fr { f } else { en }.to_owned());
+    // The replay's video and sound rows say what the videos' do, about the replay's own settings; its profiles have one
+    // more.
+    if let Some(id) = id.strip_prefix(crate::pages::REPLAY_PREFIX) {
+        if id == "preset" {
+            return pick(
+                "Quality: for editing and keeping; large files.\nBalanced: in between.\nCompact: for sharing; light files.\nLight: the least work for the graphics card, for a replay that runs through every game.",
+                "Qualité : pour le montage et l'archivage ; fichiers lourds.\nÉquilibré : entre les deux.\nCompact : pour le partage ; fichiers légers.\nLéger : le moins de travail pour la carte graphique, pour un replay qui tourne pendant tous les jeux.",
+            );
+        }
+        return info(id, env, &crate::pages::replay_view(config));
+    }
     // The encoder's own options are `p:<key>`.
     let key = id;
     if id.starts_with("template:") {
@@ -207,8 +214,12 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
             "Continue d'enregistrer quelques secondes après l'appui sur le raccourci : la fin du moment est dans le replay.",
         ),
         "replay_same_video" => pick(
-            "Records the replay with the settings of the Video page.\nOff: the replay has its own, set below.",
-            "Enregistre le replay avec les réglages de la page Vidéo.\nDésactivé : le replay a les siens, réglés ci-dessous.",
+            "Records the replay with the settings of the Video and Sound pages.\nOff: the replay has its own, set below.",
+            "Enregistre le replay avec les réglages des pages Vidéo et Son.\nDésactivé : le replay a les siens, réglés ci-dessous.",
+        ),
+        "max_rate" => pick(
+            "Keeps the bitrate under a ceiling: the quality stays the profile's, except in the busiest scenes.\n4500 kbit/s keeps 30 seconds under 20 MB, Discord's limit without Nitro.",
+            "Garde le débit sous un plafond : la qualité reste celle du profil, sauf dans les scènes les plus chargées.\n4500 kbit/s garde 30 secondes sous 20 Mo, la limite de Discord sans Nitro.",
         ),
         "disk_alert:videos" => pick(
             "A warning sign on the recording widget when the disk of the videos is almost full.",

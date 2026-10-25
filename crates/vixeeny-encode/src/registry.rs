@@ -29,6 +29,11 @@ impl Family {
         }
     }
 
+    /// The family of a setting's name (`h264`, `hevc`, `av1`, `vp9`).
+    pub fn from_name(name: &str) -> Option<Self> {
+        [Self::H264, Self::Hevc, Self::Av1, Self::Vp9].into_iter().find(|f| f.name() == name)
+    }
+
     /// Hardware encoders are preferred in this order: AV1 (the smallest files for the quality), HEVC, H.264, VP9.
     pub const fn preference(self) -> u8 {
         match self {
@@ -537,6 +542,24 @@ impl Encoder {
             }
         }
         options
+    }
+
+    /// Holds constant-quality `options` to `kbps` at most (kbit/s), over the two seconds of buffer of the custom rates:
+    /// the encoder keeps its quality until a scene needs more. The bitrate modes keep their own rates. QSV needs a
+    /// target under the ceiling to take it (FFmpeg then picks QVBR); VP9 takes it as its constrained quality; QSV with
+    /// look-ahead, its own constant-quality mode, has none.
+    pub fn cap_rate(&self, options: &mut BTreeMap<String, String>, kbps: u32) {
+        if !["cq", "qvbr_quality_level", "global_quality", "crf"].iter().any(|k| options.contains_key(*k)) {
+            return;
+        }
+        let bits = u64::from(kbps.max(1)) * 1000;
+        options.insert("maxrate".into(), bits.to_string());
+        options.insert("bufsize".into(), (bits * 2).to_string());
+        if options.contains_key("global_quality") {
+            options.insert("b".into(), (bits * 3 / 4).to_string());
+        } else if self.family == Family::Vp9 {
+            options.insert("b".into(), bits.to_string());
+        }
     }
 
     /// Fits FFmpeg `options` to the tools of the GPU's encoder (`tools`: its driver's answer; `None`, not described:

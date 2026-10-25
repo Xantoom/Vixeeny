@@ -1009,12 +1009,12 @@ impl SettingsPanel {
         if section.is_rows() {
             let built = rows(section, &env, &config);
             show_groups(&self.window, grouped(&built, &config, env.lang));
-            // The level of the microphone, while its meter is on screen.
-            let metered = built
-                .iter()
-                .any(|r| r.meter)
-                .then(|| config.video.audio.sources.iter().find(|s| *s == "mic" || s.starts_with("mic:")).cloned())
-                .flatten();
+            // The level of the microphone, while its meter is on screen: the replay's on its page.
+            let metered = built.iter().find(|r| r.meter).and_then(|r| {
+                let replay = r.id.starts_with(vixeeny_settings::REPLAY_PREFIX).then(|| config.replay_video());
+                let audio = &replay.as_ref().unwrap_or(&config.video).audio;
+                audio.sources.iter().find(|s| *s == "mic" || s.starts_with("mic:")).cloned()
+            });
             *state.rows.borrow_mut() = built;
             self.meter(metered);
         } else {

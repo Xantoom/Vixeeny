@@ -24,7 +24,7 @@ use vixeeny_encode::gpu::{Feed, GpuPipeline, HwFrame, Source as GpuSource};
 use vixeeny_encode::probe::ProbeResult;
 use vixeeny_encode::recorder::{FrameFormat, OutputContainer, RecordConfig, Recorder, Split, VideoFrame};
 use vixeeny_encode::registry::Vendor;
-use vixeeny_encode::registry::{Chroma, Encoder, Kind, PresetName, Registry};
+use vixeeny_encode::registry::{Chroma, Encoder, Family, Kind, PresetName, Registry};
 use vixeeny_encode::replay;
 use vixeeny_encode::validate::{self, Context as ValidateContext, Severity};
 
@@ -202,7 +202,8 @@ fn choose_encoder<'a>(
         if profile.encoder_kind == "software" {
             return registry.get("libx264").context("no encoder available");
         }
-        return validate::pick_auto(registry, probe, Some(size)).context("no encoder available");
+        let family = Family::from_name(&profile.auto_codec);
+        return validate::pick_auto(registry, probe, Some(size), family).context("no encoder available");
     }
     registry.get(&profile.encoder).with_context(|| format!("unknown encoder `{}`", profile.encoder))
 }
@@ -436,6 +437,9 @@ fn plan(
     } else {
         encoder.preset_options(preset, output_size, profile.fps, tools)
     };
+    if let Some(kbps) = profile.max_rate.kbps() {
+        encoder.cap_rate(&mut options, kbps);
+    }
     encoder.fit_tools(
         &mut options,
         tools,

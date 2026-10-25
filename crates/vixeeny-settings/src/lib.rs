@@ -16,6 +16,7 @@ use vixeeny_encode::probe::ProbeResult;
 
 pub use encoders::{EncoderInfo, param_label};
 pub use machine::Machine;
+pub use pages::REPLAY_PREFIX;
 
 /// The sections of the settings window, in the order of the sidebar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1137,11 +1138,18 @@ mod tests {
         assert_eq!(c.replay.video.fps, 30);
         row(&replay, "replay:encoder_kind").apply(&mut c, Value::Text("software".into())).unwrap();
         assert_eq!((c.replay.video.encoder_kind.as_str(), c.video.encoder_kind.as_str()), ("software", "hardware"));
-        // A replay is not cut into parts; its sound is the videos'.
+        // A replay is not cut into parts; its sound is its own too, one track whatever it records.
         assert!(!replay.iter().any(|r| r.id == "replay:split"));
         c.video.audio.bitrate_kbps = 320;
-        assert_eq!(c.replay_video().audio.bitrate_kbps, 320);
-        assert!(c.replay.video.audio == vixeeny_common::config::Audio::default());
+        row(&replay, "replay:audio_bitrate").apply(&mut c, Value::Text("128".into())).unwrap();
+        assert_eq!((c.replay_video().audio.bitrate_kbps, c.video.audio.bitrate_kbps), (128, 320));
+        row(&replay, "replay:mic_on").apply(&mut c, Value::Bool(true)).unwrap();
+        assert!(
+            c.replay.video.audio.sources.iter().any(|s| s == "mic")
+                && !c.video.audio.sources.iter().any(|s| s == "mic")
+        );
+        let replay = rows(Section::Replay, &with_nvenc(), &c);
+        assert_eq!(row(&replay, "replay:audio_routing").value(&c), Value::Text("mix_all".into()));
         // The same as the videos: none of them, and what was set stays.
         row(&replay, "replay_same_video").apply(&mut c, Value::Bool(true)).unwrap();
         assert!(!has(Section::Replay, &c, "replay:fps"));
@@ -1573,6 +1581,7 @@ mod tests {
         let mut c = Config::default();
         c.replay.enabled = true;
         c.replay.duration_seconds = 300;
+        c.replay.video.max_rate.enabled = false;
         // Under the storage's name.
         let hint = |env: &Env, c: &Config| row(&rows(Section::Replay, env, c), "replay_storage").detail.clone();
         assert!(hint(&with_ram(64), &c).ends_with("in RAM"), "{}", hint(&with_ram(64), &c));
@@ -1580,6 +1589,58 @@ mod tests {
         c.replay.storage = "disk".into();
         assert!(!hint(&with_ram(64), &c).contains(" in RAM"));
         assert!(hint(&with_ram(64), &c).contains("GB"));
+        // Held to its ceiling: five minutes at 4.5 Mbit/s, under 200 MB.
+        c.replay.video.max_rate.enabled = true;
+        assert!(hint(&with_ram(64), &c).contains("MB"), "{}", hint(&with_ram(64), &c));
+    }
+
+    #[test]
+    fn the_replay_starts_on_h264_and_the_light_profile_with_a_ceiling() {
+        let mut c = Config::default();
+        c.replay.enabled = true;
+        let replay = rows(Section::Replay, &with_nvenc(), &c);
+        assert_eq!(row(&replay, "replay:preset").value(&c), Value::Text("performance".into()));
+        let Kind::Choice(presets) = &row(&replay, "replay:preset").kind else {
+            panic!("the profile is a choice");
+        };
+        let marked: Vec<_> = presets.iter().filter(|o| o.recommended).map(|o| o.value.as_str()).collect();
+        assert_eq!(marked, ["performance"]);
+        // Not a custom one: no options by hand, and the videos have no such profile.
+        assert!(!replay.iter().any(|r| r.id.starts_with("replay:p:")));
+        let video = rows(Section::Video, &with_nvenc(), &c);
+        let Kind::Choice(presets) = &row(&video, "preset").kind else {
+            panic!("the profile is a choice");
+        };
+        assert!(!presets.iter().any(|o| o.value == "performance"));
+        // The ceiling: on for the replay, off for the videos, its amount nested under it.
+        assert_eq!(row(&replay, "replay:max_rate_kbps").value(&c), Value::Int(4_500));
+        assert!(!has(Section::Video, &c, "max_rate_kbps"));
+        row(&video, "max_rate").apply(&mut c, Value::Bool(true)).unwrap();
+        assert_eq!(c.video.max_rate.kbps(), Some(4_500));
+        // A bitrate of the user's own leaves no room for it.
+        c.video.preset = "custom".into();
+        c.video.params.insert("rc.mode".into(), "vbr".into());
+        assert!(!has(Section::Video, &c, "max_rate"));
+        // H.264 is the encoder `auto` stands for, and the one recommended, where AV1 is the videos'.
+        let both = with_nvenc_av1();
+        let replay = rows(Section::Replay, &both, &c);
+        assert_eq!(row(&replay, "replay:encoder").value(&c), Value::Text("nvenc_h264".into()));
+        let video = rows(Section::Video, &both, &Config::default());
+        assert_eq!(row(&video, "encoder").value(&Config::default()), Value::Text("nvenc_av1".into()));
+    }
+
+    fn with_nvenc_av1() -> Env {
+        use vixeeny_encode::probe::{EncoderProbe, FormatProbe, ProbeResult};
+        use vixeeny_encode::registry::Chroma;
+        let probe = |id: &str| EncoderProbe {
+            id: id.into(),
+            adapter: Some(0),
+            formats: vec![FormatProbe { depth: 8, chroma: Chroma::C420, uhd: true, hdr: false }],
+            tools: None,
+            max: None,
+        };
+        let probe = ProbeResult { encoders: vec![probe("nvenc_h264"), probe("nvenc_av1")], ..ProbeResult::default() };
+        env().with_probe(Some(probe), false)
     }
 
     #[test]

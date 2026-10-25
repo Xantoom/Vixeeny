@@ -411,22 +411,22 @@ fn a_system_without_a_gpu_only_offers_software() {
     assert!(result.encoders.iter().all(|e| e.id.starts_with("lib")));
     assert!(result.supports("libx264", 8, Chroma::C420, false));
     let r = registry();
-    assert_eq!(pick_auto(&r, Some(&result), None).map(|e| e.id.as_str()), Some("libx264"));
-    assert_eq!(pick_auto(&r, None, None).map(|e| e.id.as_str()), Some("libx264"));
+    assert_eq!(pick_auto(&r, Some(&result), None, None).map(|e| e.id.as_str()), Some("libx264"));
+    assert_eq!(pick_auto(&r, None, None, None).map(|e| e.id.as_str()), Some("libx264"));
 }
 
 #[test]
 fn auto_prefers_av1_on_the_best_vendor_then_hevc_then_h264() {
     let r = registry();
     let result = probe(&r, &multi_gpu(), "0.1");
-    assert_eq!(pick_auto(&r, Some(&result), None).map(|e| e.id.as_str()), Some("nvenc_av1"));
+    assert_eq!(pick_auto(&r, Some(&result), None, None).map(|e| e.id.as_str()), Some("nvenc_av1"));
     // Without AV1, HEVC wins; with only H.264, H.264.
     let mut only_hevc = result.clone();
     only_hevc.encoders.retain(|e| e.id.contains("hevc") || e.id.contains("h264") || e.id.starts_with("lib"));
-    assert_eq!(pick_auto(&r, Some(&only_hevc), None).map(|e| e.id.as_str()), Some("nvenc_hevc"));
+    assert_eq!(pick_auto(&r, Some(&only_hevc), None, None).map(|e| e.id.as_str()), Some("nvenc_hevc"));
     let mut only_hevc = result;
     only_hevc.encoders.retain(|e| e.id == "nvenc_hevc" || e.id.starts_with("lib"));
-    assert_eq!(pick_auto(&r, Some(&only_hevc), None).map(|e| e.id.as_str()), Some("nvenc_hevc"));
+    assert_eq!(pick_auto(&r, Some(&only_hevc), None, None).map(|e| e.id.as_str()), Some("nvenc_hevc"));
     let intel = ProbeResult {
         encoders: vec![EncoderProbe {
             id: "qsv_h264".into(),
@@ -437,7 +437,48 @@ fn auto_prefers_av1_on_the_best_vendor_then_hevc_then_h264() {
         }],
         ..ProbeResult::default()
     };
-    assert_eq!(pick_auto(&r, Some(&intel), None).map(|e| e.id.as_str()), Some("qsv_h264"));
+    assert_eq!(pick_auto(&r, Some(&intel), None, None).map(|e| e.id.as_str()), Some("qsv_h264"));
+    // A profile kept to H.264 takes the best H.264 one, and the best of all where there is none.
+    let result = probe(&r, &multi_gpu(), "0.1");
+    let h264 = Some(Family::H264);
+    assert_eq!(pick_auto(&r, Some(&result), None, h264).map(|e| e.id.as_str()), Some("nvenc_h264"));
+    let mut no_h264 = result;
+    no_h264.encoders.retain(|e| !e.id.contains("h264"));
+    assert_eq!(pick_auto(&r, Some(&no_h264), None, h264).map(|e| e.id.as_str()), Some("nvenc_av1"));
+}
+
+#[test]
+fn a_ceiling_holds_constant_quality_and_leaves_the_bitrate_modes_alone() {
+    use crate::registry::PresetName;
+    use std::collections::BTreeMap;
+    let r = registry();
+    let capped = |id: &str, preset| {
+        let e = r.get(id).unwrap();
+        let mut o = e.preset_options(preset, (1920, 1080), 60, None);
+        e.cap_rate(&mut o, 4_500);
+        o
+    };
+    for id in ["nvenc_h264", "amf_h264", "libx264", "libsvtav1"] {
+        let o = capped(id, PresetName::Performance);
+        assert_eq!((o["maxrate"].as_str(), o["bufsize"].as_str()), ("4500000", "9000000"), "{id}");
+    }
+    // QSV takes a ceiling with a target under it (QVBR); VP9 as its constrained quality.
+    let qsv = capped("qsv_h264", PresetName::Performance);
+    assert_eq!((qsv["b"].as_str(), qsv["maxrate"].as_str()), ("3375000", "4500000"));
+    assert_eq!(capped("libvpx_vp9", PresetName::Small)["b"], "4500000");
+    // A bitrate of the user's own stays.
+    let e = r.get("nvenc_h264").unwrap();
+    let params =
+        BTreeMap::from([("rc.mode".to_owned(), "cbr".to_owned()), ("rc.bitrate".to_owned(), "8000".to_owned())]);
+    let mut o = e.custom_options(&params);
+    let before = o.clone();
+    e.cap_rate(&mut o, 4_500);
+    assert_eq!(o, before);
+    // The ceiling given is kept over the one the encoder's level would set.
+    let mut o = e.preset_options(PresetName::Performance, (1920, 1080), 60, None);
+    e.cap_rate(&mut o, 4_500);
+    e.fit_tools(&mut o, None, false, 1920 * 1080 * 60);
+    assert_eq!(o["maxrate"], "4500000");
 }
 
 #[test]
@@ -828,7 +869,7 @@ fn pictures_larger_than_an_encoder_takes_go_to_one_that_takes_them() {
     assert!(result.fits("qsv_av1", (3840, 2160)));
     let mut intel = result.clone();
     intel.encoders.retain(|e| !e.id.starts_with("nvenc"));
-    let auto = |size| pick_auto(&r, Some(&intel), size).map(|e| e.id.clone());
+    let auto = |size| pick_auto(&r, Some(&intel), size, None).map(|e| e.id.clone());
     assert_eq!(auto(Some((3840, 2160))).as_deref(), Some("qsv_av1"));
     assert_eq!(auto(Some(ultrawide)).as_deref(), Some("libx264"));
     // Chosen by hand, it is reported.

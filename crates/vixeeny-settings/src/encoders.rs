@@ -19,6 +19,7 @@ pub struct EncoderInfo {
     pub hardware: bool,
     /// The maker of a hardware encoder's chip (`NVIDIA`, `AMD`, `Intel`; empty for software).
     pub vendor: &'static str,
+    pub family: Family,
     /// Lower is better: for the hardware ones the codec (AV1, HEVC, H.264), then the vendor (the order `pick_auto`
     /// uses); for the software ones the registry's order (x264 first: an AV1 encoder on the processor cannot keep up
     /// with a game in real time).
@@ -51,6 +52,7 @@ pub fn all() -> Vec<EncoderInfo> {
                 id: e.id.clone(),
                 name: e.display_name.clone(),
                 hardware,
+                family: e.family,
                 vendor: match e.vendor {
                     Vendor::Nvidia => "NVIDIA",
                     Vendor::Amd => "AMD",
@@ -78,11 +80,13 @@ pub fn choices(env: &Env, hardware: bool) -> Vec<&EncoderInfo> {
 }
 
 /// The best usable encoder of one kind (the one recommended), among those that take the main screen's pictures when one
-/// does (H.264 stops at 4096 wide on NVIDIA and AMD).
-pub fn best(env: &Env, hardware: bool) -> Option<&EncoderInfo> {
+/// does (H.264 stops at 4096 wide on NVIDIA and AMD): of the codec `auto_codec` names first, when there is one (see
+/// [`Video::auto_codec`]).
+pub fn best<'a>(env: &'a Env, hardware: bool, auto_codec: &str) -> Option<&'a EncoderInfo> {
     let screen = crate::pages::main_screen(env);
     let fits = |e: &EncoderInfo| env.probe.as_ref().is_none_or(|p| !e.hardware || p.fits(&e.id, screen));
-    choices(env, hardware).into_iter().min_by_key(|e| (!fits(e), e.rank))
+    let family = Family::from_name(auto_codec);
+    choices(env, hardware).into_iter().min_by_key(|e| (!fits(e), Some(e.family) != family, e.rank))
 }
 
 /// Whether this computer may have a hardware encoder: one was found, or they are still being looked for.
@@ -98,7 +102,10 @@ pub fn uses_hardware(env: &Env, profile: &Video) -> bool {
 /// The encoder a profile uses: its own when it is listed for its kind, else the best one.
 pub fn resolved<'a>(env: &'a Env, profile: &Video) -> Option<&'a EncoderInfo> {
     let hardware = uses_hardware(env, profile);
-    choices(env, hardware).into_iter().find(|e| e.id == profile.encoder).or_else(|| best(env, hardware))
+    choices(env, hardware)
+        .into_iter()
+        .find(|e| e.id == profile.encoder)
+        .or_else(|| best(env, hardware, &profile.auto_codec))
 }
 
 pub fn spec(id: &str) -> Option<&'static Encoder> {

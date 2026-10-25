@@ -260,19 +260,20 @@ pub fn validate(profile: &Video, ctx: &Context<'_>) -> Vec<Issue> {
 }
 
 /// The encoder `auto` stands for: the best hardware encoder the probe validated for 8-bit 4:2:0 that takes pictures of
-/// `size` (when known), else libx264. Order: AV1 first (the smallest files for the quality), then HEVC, then H.264;
-/// NVIDIA, AMD, Intel… (the `preference` of each).
+/// `size` (when known), else libx264. Order: those of `family` first when there are (the codec a profile keeps to),
+/// then AV1 (the smallest files for the quality), HEVC, H.264; NVIDIA, AMD, Intel… (the `preference` of each).
 pub fn pick_auto<'a>(
     registry: &'a Registry,
     probe: Option<&ProbeResult>,
     size: Option<(u32, u32)>,
+    family: Option<Family>,
 ) -> Option<&'a Encoder> {
     let best = probe.and_then(|probe| {
         registry
             .encoders()
             .filter(|e| e.kind == Kind::Hardware && probe.supports(&e.id, 8, Chroma::C420, false))
             .filter(|e| size.is_none_or(|size| probe.fits(&e.id, size)))
-            .min_by_key(|e| (e.family.preference(), e.vendor.preference()))
+            .min_by_key(|e| (Some(e.family) != family, e.family.preference(), e.vendor.preference()))
     });
     best.or_else(|| registry.get("libx264"))
 }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The rows of each page of the settings window.
 
-use vixeeny_common::config::{Config, DiskAlert, Naming, TARGET_SOURCE};
+use vixeeny_common::config::{Config, DiskAlert, MaxRate, Naming, TARGET_SOURCE};
 use vixeeny_common::i18n::Key;
 use vixeeny_encode::registry::{
     BITRATE_RANGE, DEFAULT_BITRATE, DEFAULT_MAXRATE, Family, ParamType, PresetName, RateMode, rate_keys,
@@ -623,6 +623,10 @@ pub fn video(env: &Env, config: &Config) -> Vec<Row> {
 fn video_settings(env: &Env, config: &Config, replay: bool) -> Vec<Row> {
     let t = |k| env.t(k);
     let profile = &config.video;
+    // The profile advised, and those the list names (any other is the custom one).
+    let advised_preset = if replay { "performance" } else { DEFAULT_PRESET };
+    let named =
+        move |preset: &str| matches!(preset, "quality" | "balanced" | "small") || (replay && preset == "performance");
     // No hardware encoder on this computer: the software ones are used whatever the setting.
     let no_hardware = !encoders::hardware_possible(env);
     let hardware = encoders::uses_hardware(env, profile);
@@ -697,8 +701,8 @@ fn video_settings(env: &Env, config: &Config, replay: bool) -> Vec<Row> {
     }
     // What the encoder changes from, and what `auto` stands for in each kind: each encoder has its own options.
     let before = current.clone();
-    let best_hardware = encoders::best(env, true).map(|e| e.id.clone());
-    let best_software = encoders::best(env, false).map(|e| e.id.clone());
+    let best_hardware = encoders::best(env, true, &profile.auto_codec).map(|e| e.id.clone());
+    let best_software = encoders::best(env, false, &profile.auto_codec).map(|e| e.id.clone());
     let kind = choice(
         "encoder_kind",
         t(Key::SetEncoderKind),
@@ -719,11 +723,11 @@ fn video_settings(env: &Env, config: &Config, replay: bool) -> Vec<Row> {
             profile.encoder_by_kind.insert(left, theirs);
             let best = if profile.encoder_kind == "software" { &best_software } else { &best_hardware };
             let now = if profile.encoder == "auto" { best.clone() } else { Some(profile.encoder.clone()) };
-            switch_params(c, before.as_deref(), now.as_deref());
+            switch_params(c, before.as_deref(), now.as_deref(), advised_preset);
         },
     );
     rows.push(if no_hardware { crate::greyed(crate::warned(kind, t(Key::SetNoHardware))) } else { kind });
-    let recommended = encoders::best(env, hardware).map(|e| e.id.clone());
+    let recommended = encoders::best(env, hardware, &profile.auto_codec).map(|e| e.id.clone());
     // One section per maker when there are several chips (a graphics card and the processor's).
     let makers = list.iter().map(|e| e.vendor).collect::<std::collections::BTreeSet<_>>();
     let mut options: Vec<Opt> = Vec::new();
@@ -756,7 +760,7 @@ fn video_settings(env: &Env, config: &Config, replay: bool) -> Vec<Row> {
                 Value::Text(id) => {
                     // The one `auto` already stands for: still `auto`.
                     if !(c.video.encoder == "auto" && resolved.as_deref() == Some(id.as_str())) {
-                        switch_params(c, resolved.as_deref(), Some(&id));
+                        switch_params(c, resolved.as_deref(), Some(&id), advised_preset);
                         c.video.encoder = id;
                     }
                     Ok(())
@@ -766,21 +770,29 @@ fn video_settings(env: &Env, config: &Config, replay: bool) -> Vec<Row> {
         ));
     }
     let encoder = current.clone();
+    let mut presets = vec![
+        opt("quality", t(Key::SetPresetBest)),
+        opt("balanced", t(Key::SetPresetBalanced)),
+        opt("small", t(Key::SetPresetLight)),
+    ];
+    // The replay runs through every game: the light profile, without the encoder's heavier tools, is its own.
+    if replay {
+        presets.push(opt("performance", t(Key::SetPresetPerformance)));
+    }
+    if let Some(advised) = presets.iter_mut().find(|o| o.value == advised_preset) {
+        advised.recommended = true;
+    }
+    presets.extend([crate::separator(), opt("custom", t(Key::SetPresetCustom))]);
     rows.push(row(
         "preset",
         t(Key::SetPreset),
-        Kind::Choice(vec![
-            opt("quality", t(Key::SetPresetBest)),
-            opt("balanced", t(Key::SetPresetBalanced)),
-            advised("small", t(Key::SetPresetLight)),
-            crate::separator(),
-            opt("custom", t(Key::SetPresetCustom)),
-        ]),
-        Box::new(|c| {
-            Value::Text(match c.video.preset.as_str() {
-                "quality" | "balanced" | "small" => c.video.preset.clone(),
+        Kind::Choice(presets),
+        Box::new(move |c| {
+            Value::Text(if named(&c.video.preset) {
+                c.video.preset.clone()
+            } else {
                 // The older presets were tuned by hand: they are the custom one now.
-                _ => "custom".to_owned(),
+                "custom".to_owned()
             })
         }),
         Box::new(move |c, v| {
@@ -792,7 +804,7 @@ fn video_settings(env: &Env, config: &Config, replay: bool) -> Vec<Row> {
             if v == "custom"
                 && c.video.params.is_empty()
                 && let Some(left) = PresetName::from_setting(&c.video.preset)
-                && matches!(c.video.preset.as_str(), "quality" | "balanced" | "small")
+                && named(&c.video.preset)
                 && let Some(spec) = encoder.as_deref().and_then(encoders::spec)
             {
                 c.video.params = spec.preset_params(left);
@@ -812,7 +824,8 @@ fn video_settings(env: &Env, config: &Config, replay: bool) -> Vec<Row> {
     }
 
     // ---- the encoder's options, set by hand: right under the profile that shows them
-    if !matches!(profile.preset.as_str(), "quality" | "balanced" | "small") {
+    let custom = !named(&profile.preset);
+    if custom {
         let (basic, expert) = current.as_deref().map(|id| custom_rows(env, config, id)).unwrap_or_default();
         rows.extend(basic);
         let (row, open) = crate::expander(env, "expert_video", t(Key::SetExpert));
@@ -826,6 +839,30 @@ fn video_settings(env: &Env, config: &Config, replay: bool) -> Vec<Row> {
                 |c| c.video.chroma.clone(),
                 |c, v| c.video.chroma = v,
             ));
+        }
+    }
+
+    // A ceiling on constant quality (the bitrate modes have rates of their own).
+    let spec = current.as_deref().and_then(encoders::spec);
+    if !custom || spec.is_none_or(|spec| spec.rate_mode(&profile.params) == RateMode::Quality) {
+        rows.push(toggle(
+            "max_rate",
+            t(Key::SetMaxRate),
+            |c| c.video.max_rate.enabled,
+            |c, v| c.video.max_rate.enabled = v,
+        ));
+        if profile.max_rate.enabled {
+            let (lo, hi) = MaxRate::RANGE;
+            rows.push(nested(counted(
+                number(
+                    "max_rate_kbps",
+                    t(Key::SetMaxRateKbps),
+                    (i64::from(lo), i64::from(hi), 100),
+                    move |c| i64::from(c.video.max_rate.kbps.clamp(lo, hi)),
+                    |c, v| c.video.max_rate.kbps = v as u32,
+                ),
+                "kbit/s",
+            )));
         }
     }
 
@@ -890,9 +927,12 @@ fn video_settings(env: &Env, config: &Config, replay: bool) -> Vec<Row> {
     rows
 }
 
+/// The profile advised for the videos.
+const DEFAULT_PRESET: &str = "small";
+
 /// The encoder goes from `from` to `to`: each keeps its own custom options. One that has none yet, chosen while the
-/// options are set by hand, starts from the profile advised (the same picture to start from).
-fn switch_params(c: &mut Config, from: Option<&str>, to: Option<&str>) {
+/// options are set by hand, starts from the profile `advised` (the same picture to start from).
+fn switch_params(c: &mut Config, from: Option<&str>, to: Option<&str>, advised: &str) {
     let (Some(from), Some(to)) = (from, to) else {
         return;
     };
@@ -900,7 +940,7 @@ fn switch_params(c: &mut Config, from: Option<&str>, to: Option<&str>) {
     if c.video.preset == "custom"
         && c.video.params.is_empty()
         && let Some(spec) = encoders::spec(to)
-        && let Some(advised) = PresetName::from_setting(&vixeeny_common::config::Video::default().preset)
+        && let Some(advised) = PresetName::from_setting(advised)
     {
         c.video.params = spec.preset_params(advised);
     }
@@ -1413,7 +1453,8 @@ pub fn replay(env: &Env, config: &Config) -> Vec<Row> {
         |c, v| c.replay.same_as_video = v,
     ));
     if !config.replay.same_as_video {
-        rows.extend(replay_video_rows(env, config));
+        rows.extend(replay_rows(env, config, |env, config| video_settings(env, config, true)));
+        rows.extend(replay_rows(env, config, audio));
     }
     rows.extend(game_rows(env, config));
     rows
@@ -1432,21 +1473,21 @@ fn replay_amount(c: &Config) -> u32 {
 }
 
 /// What the replay's rows are prefixed with, beside those of the videos they repeat.
-pub(crate) const REPLAY_PREFIX: &str = "replay:";
+pub const REPLAY_PREFIX: &str = "replay:";
 
-/// The settings as the replay's video rows see them: its own video settings in the place of the videos'.
+/// The settings as the replay's rows see them: its own video and sound settings in the place of the videos'.
 pub(crate) fn replay_view(config: &Config) -> Config {
     let mut view = config.clone();
     view.video = config.replay_video();
     view
 }
 
-/// The picture, encoder and file rows of the video page, over the replay's own video settings: each reads and writes
-/// [`replay_view`], its id prefixed with [`REPLAY_PREFIX`] (its expanders too).
-fn replay_video_rows(env: &Env, config: &Config) -> Vec<Row> {
+/// The rows of a `page` of the video settings (the picture, encoder and file ones, the sound ones), over the replay's
+/// own settings: each reads and writes [`replay_view`], its id prefixed with [`REPLAY_PREFIX`] (its expanders too).
+fn replay_rows(env: &Env, config: &Config, page: fn(&Env, &Config) -> Vec<Row>) -> Vec<Row> {
     let mut inner = env.clone();
     inner.open = env.open.iter().filter_map(|id| id.strip_prefix(REPLAY_PREFIX)).map(str::to_owned).collect();
-    video_settings(&inner, &replay_view(config), true)
+    page(&inner, &replay_view(config))
         .into_iter()
         .map(|mut row| {
             row.id = format!("{REPLAY_PREFIX}{}", row.id);
@@ -1455,11 +1496,9 @@ fn replay_video_rows(env: &Env, config: &Config) -> Vec<Row> {
             row.set = Box::new(move |c, v| {
                 let mut view = replay_view(c);
                 set(&mut view, v)?;
-                // The sound and the cut into parts stay the videos'.
-                let audio = std::mem::take(&mut c.replay.video.audio);
+                // The cut into parts stays the videos'.
                 let split = std::mem::take(&mut c.replay.video.split);
                 c.replay.video = view.video;
-                c.replay.video.audio = audio;
                 c.replay.video.split = split;
                 Ok(())
             });
