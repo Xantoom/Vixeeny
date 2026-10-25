@@ -3,11 +3,13 @@ name: Release
 # prepares the draft GitHub release `v<version of Cargo.toml>`, whose tag is made when the draft
 # is published. It runs on the release branch when the version changes (and by hand), not on a
 # tag: a tag cannot read the caches of the branch, and every release would build everything from
-# nothing (~25 min). A version that already has a release is not built again.
+# nothing (~25 min). A version that already has a release is not built again; when the
+# dependencies change, the programs are only built, so that the cache holds them for the next
+# release.
 on:
   push:
     branches: ["1.0"]
-    paths: ["Cargo.toml"]
+    paths: ["Cargo.toml", "Cargo.lock"]
   workflow_dispatch:
     inputs:
       release:
@@ -22,26 +24,31 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       build: ${{ steps.check.outputs.build }}
+      warm: ${{ steps.check.outputs.warm }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: check
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BEFORE: ${{ github.event.before }}
         run: |
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
           if [ "${{ github.event_name }}" = workflow_dispatch ] || ! gh release view "v$version" >/dev/null 2>&1; then
             echo build=true >> "$GITHUB_OUTPUT"
+          elif gh api "repos/$GH_REPO/compare/$BEFORE...${{ github.sha }}" --jq '.files[].filename' | grep -qx Cargo.lock; then
+            echo "v$version already has a release; the dependencies changed: build only, for the cache."
+            echo warm=true >> "$GITHUB_OUTPUT"
           else
             echo "v$version already has a release: nothing to build."
-            echo build=false >> "$GITHUB_OUTPUT"
           fi
   ffmpeg:
     needs: version
-    if: needs.version.outputs.build == 'true'
+    if: needs.version.outputs.build == 'true' || needs.version.outputs.warm == 'true'
     uses: ./.github/workflows/ffmpeg.yml
   windows:
     needs: [version, ffmpeg]
-    if: needs.version.outputs.build == 'true'
+    if: needs.version.outputs.build == 'true' || needs.version.outputs.warm == 'true'
     runs-on: windows-latest
     env:
       FFMPEG_DIR: ${{ github.workspace }}\native\build\work\ffmpeg-prebuilt
@@ -90,20 +97,24 @@ jobs:
           cargo build --release -p vixeeny-daemon -p xtask -p vixeeny-app --features vixeeny-app/native-codecs
       # The release build of xtask, built above: its compression is many times faster.
       - name: Package (stage, update archive, portable archive)
+        if: needs.version.outputs.build == 'true'
         shell: pwsh
         run: target\release\xtask.exe dist --out dist
       - name: Installer
+        if: needs.version.outputs.build == 'true'
         shell: pwsh
         run: |
           $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"').Matches[0].Groups[1].Value
           iscc "/DAppVersion=$version" "/DStageDir=$PWD\dist\stage" "/DOutDir=$PWD\dist" packaging\windows\vixeeny.iss
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: needs.version.outputs.build == 'true'
         with:
           name: vixeeny-windows-unsigned
           path: |
             dist/*.zip
             dist/*.exe
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: needs.version.outputs.build == 'true'
         with:
           name: xtask
           path: target/release/xtask.exe
@@ -111,7 +122,8 @@ jobs:
   # Idle CPU and wake-ups of the daemon being released (informational), on a machine of its own:
   # the release does not wait for it.
   idle:
-    needs: windows
+    needs: [version, windows]
+    if: needs.version.outputs.build == 'true'
     runs-on: windows-latest
     continue-on-error: true
     steps:
@@ -131,7 +143,8 @@ jobs:
   # Signing runs apart, on a fresh machine that runs nothing else: no build script, no
   # third-party action and no package of the build can reach the key.
   sign:
-    needs: windows
+    needs: [version, windows]
+    if: needs.version.outputs.build == 'true'
     runs-on: ubuntu-latest
     environment: release
     permissions:
