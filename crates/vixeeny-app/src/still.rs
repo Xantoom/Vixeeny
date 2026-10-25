@@ -111,21 +111,17 @@ pub(crate) fn app_name(
     dest: &Destination<'_>,
     metadata: &dyn Fn(&str) -> ExeMetadata,
 ) -> String {
-    // A zone is Vixeeny's, whatever is under it.
-    if action == ActionId::CaptureRegion {
+    // A zone and every screen at once are Vixeeny's, whatever is on them.
+    if matches!(action, ActionId::CaptureRegion | ActionId::CaptureAllMonitors) {
         return naming::DEFAULT_APP_NAME.to_owned();
     }
     let window = match action {
         ActionId::CaptureWindow => snap.foreground.as_ref(),
-        // Only a window over the screen being captured (all of them for an all-monitor capture), and never one of
-        // Vixeeny's own (a menu, the settings, a notification).
+        // Only a window over the screen being captured, and never one of Vixeeny's own (a menu, the settings, a
+        // notification).
         _ => snap.foreground.as_ref().filter(|w| {
-            let monitors: Vec<MonitorInfo> = if action == ActionId::CaptureAllMonitors {
-                snap.monitors.clone()
-            } else {
-                let (x, y) = snap.cursor;
-                monitor_at(&snap.monitors, x, y).into_iter().cloned().collect()
-            };
+            let (x, y) = snap.cursor;
+            let monitors: Vec<MonitorInfo> = monitor_at(&snap.monitors, x, y).into_iter().cloned().collect();
             dest.use_foreground_app && is_full_screen(w, &monitors) && !is_ours(w)
         }),
     };
@@ -594,14 +590,13 @@ mod tests {
         let own = run_with(ActionId::CaptureFullscreen, &ours, &dir, "{app}", false, true, &names, &no_metadata);
         assert_eq!(own.file_name().unwrap(), "Desktop.png");
         let _ = std::fs::remove_file(&own);
-        // A game on the other screen names neither this screen's capture...
+        // A game on the other screen does not name this screen's capture, nor one of every screen.
         let mut other = snapshot();
         other.foreground.as_mut().unwrap().rect = PhysicalRect::new(0, 0, 200, 100);
         let here = run_with(ActionId::CaptureFullscreen, &other, &dir, "{app}", false, true, &names, &no_metadata);
         assert_eq!(here.file_name().unwrap(), "Desktop.png");
-        // ...but it does name a capture of every screen.
         let all = run_with(ActionId::CaptureAllMonitors, &other, &dir, "{app}", false, true, &names, &no_metadata);
-        assert_eq!(all.file_name().unwrap(), "Game.png");
+        assert_eq!(all.file_name().unwrap(), "Vixeeny.png");
         // A zone is Vixeeny's, even over the full-screen game.
         let now = now();
         let dest = Destination {
