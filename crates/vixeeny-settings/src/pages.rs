@@ -695,6 +695,10 @@ fn video_settings(env: &Env, config: &Config, replay: bool) -> Vec<Row> {
     if !no_hardware {
         kinds.insert(0, opt("hardware", t(Key::SetKindHardware)));
     }
+    // What the encoder changes from, and what `auto` stands for in each kind: each encoder has its own options.
+    let before = current.clone();
+    let best_hardware = encoders::best(env, true).map(|e| e.id.clone());
+    let best_software = encoders::best(env, false).map(|e| e.id.clone());
     let kind = choice(
         "encoder_kind",
         t(Key::SetEncoderKind),
@@ -702,7 +706,7 @@ fn video_settings(env: &Env, config: &Config, replay: bool) -> Vec<Row> {
         move |c| {
             if no_hardware { "software".to_owned() } else { c.video.encoder_kind.clone() }
         },
-        |c, v| {
+        move |c, v| {
             let profile = &mut c.video;
             if profile.encoder_kind == v {
                 return;
@@ -713,6 +717,9 @@ fn video_settings(env: &Env, config: &Config, replay: bool) -> Vec<Row> {
             let mine = profile.encoder_by_kind.remove(&profile.encoder_kind).unwrap_or_else(|| "auto".into());
             let theirs = std::mem::replace(&mut profile.encoder, mine);
             profile.encoder_by_kind.insert(left, theirs);
+            let best = if profile.encoder_kind == "software" { &best_software } else { &best_hardware };
+            let now = if profile.encoder == "auto" { best.clone() } else { Some(profile.encoder.clone()) };
+            switch_params(c, before.as_deref(), now.as_deref());
         },
     );
     rows.push(if no_hardware { crate::greyed(crate::warned(kind, t(Key::SetNoHardware))) } else { kind });
@@ -749,6 +756,7 @@ fn video_settings(env: &Env, config: &Config, replay: bool) -> Vec<Row> {
                 Value::Text(id) => {
                     // The one `auto` already stands for: still `auto`.
                     if !(c.video.encoder == "auto" && resolved.as_deref() == Some(id.as_str())) {
+                        switch_params(c, resolved.as_deref(), Some(&id));
                         c.video.encoder = id;
                     }
                     Ok(())
@@ -880,6 +888,22 @@ fn video_settings(env: &Env, config: &Config, replay: bool) -> Vec<Row> {
         ));
     }
     rows
+}
+
+/// The encoder goes from `from` to `to`: each keeps its own custom options. One that has none yet, chosen while the
+/// options are set by hand, starts from the profile advised (the same picture to start from).
+fn switch_params(c: &mut Config, from: Option<&str>, to: Option<&str>) {
+    let (Some(from), Some(to)) = (from, to) else {
+        return;
+    };
+    c.video.swap_params(from, to);
+    if c.video.preset == "custom"
+        && c.video.params.is_empty()
+        && let Some(spec) = encoders::spec(to)
+        && let Some(advised) = PresetName::from_setting(&vixeeny_common::config::Video::default().preset)
+    {
+        c.video.params = spec.preset_params(advised);
+    }
 }
 
 /// The screen recordings are measured on: the main one (1920 × 1080 until it is known). The pixels a second a recording

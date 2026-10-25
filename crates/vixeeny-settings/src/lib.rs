@@ -1285,6 +1285,30 @@ mod tests {
     }
 
     #[test]
+    fn each_encoder_keeps_its_own_custom_settings() {
+        let mut c = Config::default();
+        let env = with_nvenc();
+        let set = |c: &mut Config, id: &str, v: Value| {
+            row(&rows(Section::Video, &env, c), id).apply(c, v).unwrap();
+        };
+        set(&mut c, "preset", Value::Text("custom".into()));
+        set(&mut c, "p:rc.quality", Value::Int(30));
+        assert_eq!(c.video.params["rc.quality"], "30");
+        // Another kind, another encoder: its own options, from the profile advised.
+        set(&mut c, "encoder_kind", Value::Text("software".into()));
+        let x264 = c.video.params.clone();
+        assert_ne!(x264.get("rc.quality").map(String::as_str), Some("30"));
+        set(&mut c, "p:rc.quality", Value::Int(18));
+        set(&mut c, "encoder", Value::Text("libx265".into()));
+        assert_ne!(c.video.params.get("rc.quality").map(String::as_str), Some("18"));
+        // Back to each: what was set for it.
+        set(&mut c, "encoder", Value::Text("libx264".into()));
+        assert_eq!(c.video.params["rc.quality"], "18");
+        set(&mut c, "encoder_kind", Value::Text("hardware".into()));
+        assert_eq!(c.video.params["rc.quality"], "30");
+    }
+
+    #[test]
     fn expert_settings_stay_folded_until_opened() {
         let mut c = Config::default();
         c.video.preset = "custom".into();

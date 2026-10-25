@@ -664,8 +664,10 @@ pub struct Video {
     pub mode: String,
     /// `quality` (for editing and keeping), `balanced`, `small` (compact files, for sharing) or `custom` (`params`).
     pub preset: String,
-    /// The encoder options of the `custom` preset, by the registry's parameter key.
+    /// The encoder options of the `custom` preset, by the registry's parameter key: those of the encoder in use.
     pub params: BTreeMap<String, String>,
+    /// Those of the other encoders, by encoder id: back when that encoder is chosen again.
+    pub params_by_encoder: BTreeMap<String, BTreeMap<String, String>>,
     pub show_cursor: bool,
     /// Variable frame rate (Matroska and WebM only).
     pub vfr: bool,
@@ -688,6 +690,7 @@ impl Default for Video {
             mode: "simple".into(),
             preset: "small".into(),
             params: BTreeMap::new(),
+            params_by_encoder: BTreeMap::new(),
             show_cursor: false,
             vfr: false,
             split: Split::default(),
@@ -735,6 +738,21 @@ pub struct Audio {
     pub volumes: BTreeMap<String, f32>,
     /// The tracks of `routing = "advanced"`.
     pub tracks: Vec<AudioTrack>,
+}
+
+impl Video {
+    /// The encoder in use goes from `from` to `to` (ids): its custom options are put aside, and those of `to` taken
+    /// back (none when it never had any).
+    pub fn swap_params(&mut self, from: &str, to: &str) {
+        if from == to {
+            return;
+        }
+        let theirs = self.params_by_encoder.remove(to).unwrap_or_default();
+        let mine = std::mem::replace(&mut self.params, theirs);
+        if !mine.is_empty() {
+            self.params_by_encoder.insert(from.to_owned(), mine);
+        }
+    }
 }
 
 /// The plain colours a window capture can be set on, besides Windows' accent (sRGB).
