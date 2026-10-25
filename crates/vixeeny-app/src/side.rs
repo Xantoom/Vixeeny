@@ -8,7 +8,6 @@ use anyhow::Context;
 use vixeeny_common::config::Config;
 use vixeeny_common::i18n::{Key, Lang, tr};
 use vixeeny_common::ipc::ActionId;
-use vixeeny_overlay::dark_theme;
 use vixeeny_overlay::side::{
     Choice, Edge, SidePanel, SideState, SideTexts, entries, panel_geometry,
 };
@@ -89,10 +88,7 @@ pub fn run(
     let state = SideState {
         recording,
         replay,
-        dark: dark_theme(
-            &config.general.theme,
-            vixeeny_platform::system_prefers_dark(),
-        ),
+        dark: crate::dark(config),
         edge: Edge::from_setting(&config.overlay.edge),
         animate: vixeeny_platform::animations_enabled(),
         pinned,

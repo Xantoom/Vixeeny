@@ -428,7 +428,7 @@ fn annotate(
         session,
         scale,
         &screens,
-        crate::overlay_look(),
+        vixeeny_ui::theme::default_look(),
         move |command, session| {
             crate::region::output_command(
                 &config,

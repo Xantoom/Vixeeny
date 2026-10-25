@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+vixeeny-common = { path = "../vixeeny-common" }
 thiserror.workspace = true
 windows = { workspace = true, features = [
     "Data_Xml_Dom",

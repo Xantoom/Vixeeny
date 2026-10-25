@@ -14,55 +14,17 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt::format::Writer;
 use tracing_subscriber::fmt::time::FormatTime;
 
+use crate::time::LocalTime;
+
 /// Files kept per program (one a day).
 pub const KEEP_DAYS: usize = 7;
 /// Bytes written a day per program at most; past it, one line says so and the rest is dropped.
 pub const DAY_LIMIT: u64 = 1 << 20;
 
-/// Local wall-clock time and its offset from UTC (the platform layer reads them).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Stamp {
-    pub year: u16,
-    pub month: u8,
-    pub day: u8,
-    pub hour: u8,
-    pub minute: u8,
-    pub second: u8,
-    pub millisecond: u16,
-    /// Minutes to add to UTC.
-    pub offset_minutes: i16,
-}
-
-impl Stamp {
-    /// `YYYY-MM-DD`
-    pub fn date(&self) -> String {
-        format!("{:04}-{:02}-{:02}", self.year, self.month, self.day)
-    }
-}
-
-impl std::fmt::Display for Stamp {
-    /// `2026-10-10 16:32:05.123 +02:00`
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let sign = if self.offset_minutes < 0 { '-' } else { '+' };
-        let offset = self.offset_minutes.unsigned_abs();
-        write!(
-            f,
-            "{} {:02}:{:02}:{:02}.{:03} {sign}{:02}:{:02}",
-            self.date(),
-            self.hour,
-            self.minute,
-            self.second,
-            self.millisecond,
-            offset / 60,
-            offset % 60
-        )
-    }
-}
-
 /// Reads the local time.
-pub type Clock = fn() -> Stamp;
+pub type Clock = fn() -> LocalTime;
 
-/// Length of a formatted [`Stamp`]: what precedes the message on each line.
+/// Length of a formatted [`LocalTime`]: what precedes the message on each line.
 pub const STAMP_LEN: usize = "2026-10-10 16:32:05.123 +02:00".len();
 
 struct LocalTimer(Clock);
@@ -86,7 +48,7 @@ pub struct DailyFile {
     /// The previous line without its time, and how many times it came again since.
     last: Vec<u8>,
     repeats: u32,
-    last_repeat: Option<Stamp>,
+    last_repeat: Option<LocalTime>,
 }
 
 impl DailyFile {
@@ -245,9 +207,9 @@ mod tests {
     /// Seconds since the start of 2026-10-10, local; a test moves it.
     static NOW: AtomicU32 = AtomicU32::new(0);
 
-    fn clock() -> Stamp {
+    fn clock() -> LocalTime {
         let t = NOW.load(Ordering::Relaxed);
-        Stamp {
+        LocalTime {
             year: 2026,
             month: 10,
             day: 10 + (t / 86_400) as u8,

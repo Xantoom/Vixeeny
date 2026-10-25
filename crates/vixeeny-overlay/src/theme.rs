@@ -2,6 +2,8 @@
 //! The colours of the native windows: the design tokens of `vixeeny-ui/ui/theme.slint`, for the
 //! look the host gives (light or dark, the system accent).
 
+pub use vixeeny_common::look::{Look, dark_theme};
+
 /// Straight-alpha RGBA, 0.0–1.0.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Rgba(pub [f32; 4]);
@@ -79,35 +81,6 @@ pub fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
     };
     let m = v - c;
     (r + m, g + m, b + m)
-}
-
-/// How the host wants the editor to look.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Look {
-    pub dark: bool,
-    /// The system accent colour.
-    pub accent: [u8; 3],
-    /// Off when the user turned animations off in Windows.
-    pub animations: bool,
-}
-
-impl Default for Look {
-    fn default() -> Self {
-        Self {
-            dark: true,
-            accent: [0x00, 0x78, 0xd4],
-            animations: true,
-        }
-    }
-}
-
-/// Whether the dark theme applies: the `general.theme` setting, or the OS's choice for `system`.
-pub fn dark_theme(setting: &str, os_prefers_dark: bool) -> bool {
-    match setting {
-        "dark" => true,
-        "light" => false,
-        _ => os_prefers_dark,
-    }
 }
 
 /// The colours the editor draws with.
@@ -188,14 +161,5 @@ mod tests {
             let (r2, g2, b2) = hsv_to_rgb(h, s, v);
             assert!((r - r2).abs() < 1e-5 && (g - g2).abs() < 1e-5 && (b - b2).abs() < 1e-5);
         }
-    }
-
-    #[test]
-    fn the_theme_follows_the_setting_or_the_os() {
-        assert!(dark_theme("dark", false));
-        assert!(!dark_theme("light", true));
-        assert!(dark_theme("system", true));
-        assert!(!dark_theme("system", false));
-        assert!(dark_theme("whatever", true));
     }
 }

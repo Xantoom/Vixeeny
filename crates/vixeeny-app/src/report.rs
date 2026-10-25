@@ -32,7 +32,7 @@ pub fn create(config: &Config) -> anyhow::Result<PathBuf> {
         .collect();
 
     let mut text = String::new();
-    let _ = writeln!(text, "Vixeeny report, {}\n", crate::log_clock());
+    let _ = writeln!(text, "Vixeeny report, {}\n", vixeeny_platform::local_time());
     let _ = writeln!(text, "===== Problems of the last {DAYS} days =====");
     text.push_str(&problems(
         logs_read.iter().map(|(_, content)| content.as_str()),

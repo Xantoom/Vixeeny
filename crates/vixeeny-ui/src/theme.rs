@@ -6,43 +6,7 @@ use slint::ComponentHandle;
 
 use crate::Theme;
 
-/// The default accent of Windows 11.
-pub const DEFAULT_ACCENT: [u8; 3] = [0x00, 0x78, 0xd4];
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Look {
-    pub dark: bool,
-    pub accent: [u8; 3],
-    pub animations: bool,
-}
-
-impl Look {
-    pub fn new(dark: bool, accent: Option<[u8; 3]>, animations: bool) -> Self {
-        Self {
-            dark,
-            accent: accent.unwrap_or(DEFAULT_ACCENT),
-            animations,
-        }
-    }
-
-    /// Dark, default accent, animations on (tests, and the places that know nothing better).
-    pub const fn dark() -> Self {
-        Self {
-            dark: true,
-            accent: DEFAULT_ACCENT,
-            animations: true,
-        }
-    }
-
-    /// The window background, for the title bar to match.
-    pub const fn caption(self) -> [u8; 3] {
-        if self.dark {
-            [0x14, 0x14, 0x16]
-        } else {
-            [0xf6, 0xf6, 0xf7]
-        }
-    }
-}
+pub use vixeeny_common::look::{DEFAULT_ACCENT, Look};
 
 static DEFAULT: std::sync::Mutex<Look> = std::sync::Mutex::new(Look::dark());
 

@@ -43,7 +43,7 @@ fn main() {
     vixeeny_common::logging::init(
         "vixeeny-app",
         &program,
-        log_clock,
+        vixeeny_platform::local_time,
         &vixeeny_platform::os_version(),
     );
     if let Some(dir) = vixeeny_common::paths::crash_dir() {
@@ -56,34 +56,17 @@ fn main() {
     }
 }
 
-/// The local time for the log lines.
-fn log_clock() -> vixeeny_common::logging::Stamp {
-    let t = vixeeny_platform::local_time();
-    vixeeny_common::logging::Stamp {
-        year: t.year,
-        month: t.month,
-        day: t.day,
-        hour: t.hour,
-        minute: t.minute,
-        second: t.second,
-        millisecond: t.millisecond,
-        offset_minutes: vixeeny_platform::utc_offset_minutes(),
-    }
+/// Whether the windows are dark: the setting, or the OS's own for `system`.
+fn dark(config: &Config) -> bool {
+    vixeeny_overlay::dark_theme(
+        &config.general.theme,
+        vixeeny_platform::system_prefers_dark(),
+    )
 }
 
 /// The display language: the setting, or the OS's own for `auto`.
 fn lang(setting: &str) -> vixeeny_common::i18n::Lang {
     vixeeny_common::i18n::Lang::resolve(setting, vixeeny_platform::user_locale().as_deref())
-}
-
-/// The look of the native zone editor: the one every window has.
-fn overlay_look() -> vixeeny_overlay::Look {
-    let look = vixeeny_ui::theme::default_look();
-    vixeeny_overlay::Look {
-        dark: look.dark,
-        accent: look.accent,
-        animations: look.animations,
-    }
 }
 
 /// Runs one action. Failures are logged, not fatal: the app stays available for the next one.

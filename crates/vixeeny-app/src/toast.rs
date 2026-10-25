@@ -321,10 +321,7 @@ fn content_of(toast: &Toast, thumb: Option<Thumb>) -> ToastContent {
         .and_then(|p| Config::load(&p).ok())
         .unwrap_or_default();
     let lang = crate::lang(&config.general.language);
-    let dark = vixeeny_overlay::dark_theme(
-        &config.general.theme,
-        vixeeny_platform::system_prefers_dark(),
-    );
+    let dark = crate::dark(&config);
     match toast {
         // A screenshot: its picture says it all.
         Toast::Saved(Saved::Image, path)

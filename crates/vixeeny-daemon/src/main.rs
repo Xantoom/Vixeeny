@@ -12,7 +12,7 @@ fn main() {
     vixeeny_common::logging::init(
         "vixeeny-daemon",
         "daemon",
-        log_clock,
+        vixeeny_platform::local_time,
         &vixeeny_platform::os_version(),
     );
     if let Some(dir) = vixeeny_common::paths::crash_dir() {
@@ -22,21 +22,6 @@ fn main() {
     if let Err(e) = real_main() {
         tracing::error!("fatal: {e:#}");
         std::process::exit(1);
-    }
-}
-
-/// The local time for the log lines.
-fn log_clock() -> vixeeny_common::logging::Stamp {
-    let t = vixeeny_platform::local_time();
-    vixeeny_common::logging::Stamp {
-        year: t.year,
-        month: t.month,
-        day: t.day,
-        hour: t.hour,
-        minute: t.minute,
-        second: t.second,
-        millisecond: t.millisecond,
-        offset_minutes: vixeeny_platform::utc_offset_minutes(),
     }
 }
 

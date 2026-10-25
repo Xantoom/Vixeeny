@@ -11,7 +11,7 @@ pub mod games;
 mod geometry;
 mod time;
 pub use geometry::{PhysicalRect, virtual_bounds};
-pub use time::{LocalTime, local_time, os_version, utc_offset_minutes};
+pub use time::{local_time, os_version, utc_offset_minutes};
 
 pub mod machine;
 pub mod ocr;

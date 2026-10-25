@@ -5559,6 +5559,7 @@ name = "vixeeny-platform"
 version = "0.28.1"
 dependencies = [
  "thiserror 2.0.21",
+ "vixeeny-common",
  "windows",
 ]
 

@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 thiserror.workspace = true
 tracing.workspace = true
+vixeeny-common = { path = "../vixeeny-common" }
 vixeeny-editor = { path = "../vixeeny-editor" }
 vixeeny-platform = { path = "../vixeeny-platform" }
 windows-numerics = "0.3.1"
@@ -38,7 +39,6 @@ windows = { workspace = true, features = [
 ] }
 
 [dev-dependencies]
-vixeeny-common = { path = "../vixeeny-common" }
 vixeeny-image = { path = "../vixeeny-image" }
 png.workspace = true
 vixeeny-capture = { path = "../vixeeny-capture" }

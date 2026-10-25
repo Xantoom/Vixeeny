@@ -646,7 +646,7 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
         session,
         scale,
         &screens,
-        crate::overlay_look(),
+        vixeeny_ui::theme::default_look(),
         move |command, session| {
             if let Some(close) = output_command(
                 &config,
@@ -822,7 +822,7 @@ pub fn run_edit(args: &[String]) -> anyhow::Result<()> {
         session,
         scale,
         &screens,
-        crate::overlay_look(),
+        vixeeny_ui::theme::default_look(),
         move |command, session| {
             output_command(
                 &config,

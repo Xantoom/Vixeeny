@@ -193,7 +193,7 @@ fn update_view(lang: Lang) -> UpdateView {
 /// A moment as the user reads it, in local time: `11/10/2026 à 14:32`, `2026-10-11, 14:32`.
 fn moment(unix: u64, lang: Lang) -> String {
     let offset = i64::from(vixeeny_platform::utc_offset_minutes()) * 60;
-    let t = vixeeny_platform::LocalTime::from_unix_utc(unix.saturating_add_signed(offset), 0);
+    let t = vixeeny_common::time::LocalTime::from_unix_utc(unix.saturating_add_signed(offset), 0);
     match lang {
         Lang::Fr => format!(
             "{:02}/{:02}/{} à {:02}:{:02}",
@@ -392,7 +392,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     .map_err(|e| anyhow::anyhow!("{e}"))?;
     panel.capture_keys();
     panel.set_audio_source(audio_devices);
-    panel.set_machine_source(machine);
+    panel.set_machine_source(vixeeny_platform::machine::machine);
     panel.set_display(vixeeny_settings::Display {
         hdr: vixeeny_platform::hdr_active(),
         max_refresh: vixeeny_platform::max_refresh_hz(),
@@ -610,11 +610,7 @@ fn now() -> u64 {
 
 /// Light or dark by the setting (or the system), with the accent colour of the system.
 pub fn look_of(config: &Config) -> vixeeny_ui::theme::Look {
-    let dark = vixeeny_overlay::dark_theme(
-        &config.general.theme,
-        vixeeny_platform::system_prefers_dark(),
-    );
-    vixeeny_ui::theme::Look::new(dark, vixeeny_platform::system_accent(), true)
+    vixeeny_ui::theme::Look::new(crate::dark(config), vixeeny_platform::system_accent(), true)
 }
 
 /// The programs, microphones and outputs the audio page offers.
@@ -723,64 +719,6 @@ fn programs(apps: Vec<vixeeny_audio::AppInfo>) -> (Vec<vixeeny_settings::AudioEn
             .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
     (entries.into_iter().map(|(_, e)| e).collect(), found)
-}
-
-/// What this computer is made of, for the general page.
-fn machine() -> vixeeny_settings::Machine {
-    use vixeeny_settings::machine::{Cpu, Disk, Gpu, Module, Screen};
-    let m = vixeeny_platform::machine::machine();
-    vixeeny_settings::Machine {
-        cpu: m.cpu.map(|c| Cpu {
-            name: c.name,
-            cores: c.cores,
-            threads: c.threads,
-            base_mhz: c.base_mhz,
-            boost_mhz: c.boost_mhz,
-        }),
-        ram_bytes: m.ram_bytes,
-        modules: m
-            .modules
-            .into_iter()
-            .map(|r| Module {
-                bytes: r.bytes,
-                kind: r.kind,
-                mts: r.mts,
-                cl: r.cl,
-            })
-            .collect(),
-        gpus: m
-            .gpus
-            .into_iter()
-            .map(|g| Gpu {
-                name: g.name,
-                integrated: g.integrated,
-                memory_bytes: g.memory_bytes,
-            })
-            .collect(),
-        disks: m
-            .disks
-            .into_iter()
-            .map(|d| Disk {
-                letter: d.letter,
-                label: d.label,
-                model: d.model,
-                bytes: d.bytes,
-                free_bytes: d.free_bytes,
-            })
-            .collect(),
-        screens: m
-            .screens
-            .into_iter()
-            .map(|s| Screen {
-                number: s.number,
-                primary: s.primary,
-                name: s.name,
-                width: s.width,
-                height: s.height,
-                hz: s.hz,
-            })
-            .collect(),
-    }
 }
 
 /// Measures the microphone the audio page shows the level of: a capture of it while the page

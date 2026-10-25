@@ -4,74 +4,9 @@
 
 use vixeeny_common::i18n::{Key, Lang, tr};
 
+pub use vixeeny_common::machine::{Cpu, Disk, Gpu, Machine, Module, Screen};
+
 use crate::Env;
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Machine {
-    pub cpu: Option<Cpu>,
-    /// Installed memory, in bytes (0: unknown).
-    pub ram_bytes: u64,
-    /// The memory sticks (empty: unknown).
-    pub modules: Vec<Module>,
-    /// The graphics cards first, then the processor's graphics.
-    pub gpus: Vec<Gpu>,
-    pub disks: Vec<Disk>,
-    pub screens: Vec<Screen>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Cpu {
-    pub name: String,
-    pub cores: u32,
-    pub threads: u32,
-    /// Base and boost frequencies, in MHz (0: unknown).
-    pub base_mhz: u32,
-    pub boost_mhz: u32,
-}
-
-/// A memory stick.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Module {
-    pub bytes: u64,
-    /// `DDR5` (empty: unknown).
-    pub kind: String,
-    /// MT/s (0: unknown).
-    pub mts: u32,
-    /// CAS latency (0: unknown).
-    pub cl: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Gpu {
-    pub name: String,
-    pub integrated: bool,
-    /// Its own memory, in bytes (0 for an integrated one).
-    pub memory_bytes: u64,
-}
-
-/// A drive letter.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Disk {
-    /// `C:`.
-    pub letter: String,
-    /// The name given to the volume (often empty).
-    pub label: String,
-    /// The model of the disk under it (empty when unknown).
-    pub model: String,
-    pub bytes: u64,
-    pub free_bytes: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Screen {
-    /// 1, 2, 3...
-    pub number: u32,
-    pub primary: bool,
-    pub name: String,
-    pub width: u32,
-    pub height: u32,
-    pub hz: u32,
-}
 
 /// What a tile shows: its icon (or, for a screen, its outline).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

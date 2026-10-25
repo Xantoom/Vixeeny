@@ -9,8 +9,11 @@ pub mod hotkey;
 pub mod i18n;
 pub mod ipc;
 pub mod logging;
+pub mod look;
+pub mod machine;
 pub mod naming;
 pub mod paths;
+pub mod time;
 
 /// A test that needs hardware this machine may lack (a monitor, a graphics card, an encoder)
 /// gives up through here: the reason is printed, and with `VIXEENY_REAL_HARDWARE` set (the

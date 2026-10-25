@@ -109,7 +109,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     let cutter = Cutter::new(
         geometry,
         monitor.dpi,
-        crate::overlay_look(),
+        vixeeny_ui::theme::default_look(),
         frames,
         texts(lang, &path),
     )
