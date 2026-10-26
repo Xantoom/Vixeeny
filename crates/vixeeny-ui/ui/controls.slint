@@ -1115,11 +1115,12 @@ export component GroupRow inherits Rectangle {
         background: Theme.stroke;
     }
 
+    // From the row's top: the row above lights up to its own edge under the pointer, and the line does not go into it.
     if root.nested : Rectangle {
         x: root.pad + 6px;
-        y: -12px;
+        y: 0px;
         width: 1px;
-        height: root.nested-next ? root.natural + 12px : txt.y + 10px + 12px;
+        height: root.nested-next ? root.natural : txt.y + 10px;
         background: Theme.stroke-strong;
     }
     if root.nested : Rectangle {
