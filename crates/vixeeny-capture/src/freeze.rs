@@ -372,8 +372,8 @@ fn present(
 
 /// Freezes every monitor. Must run on a thread with a message loop (the windows live there). The screens go on
 /// [`thaw`], on [`THAW_MESSAGE`] or after ten seconds.
-pub fn freeze(gpu: &Gpu, monitors: &[MonitorInfo]) -> Result<Frozen, CaptureError> {
-    take(gpu, monitors, true, false)
+pub fn freeze(gpu: &Gpu, monitors: &[MonitorInfo], cursor: bool) -> Result<Frozen, CaptureError> {
+    take(gpu, monitors, true, cursor)
 }
 
 /// Captures every monitor for the app without showing anything (a full-screen capture takes the screen of the moment

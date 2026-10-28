@@ -29,7 +29,7 @@ mod widget;
 mod widget_math;
 
 use anyhow::Context;
-use vixeeny_common::config::Config;
+use vixeeny_common::config::{Config, Image};
 use vixeeny_common::ipc::{self, ActionId, AppToDaemon, DaemonToApp, Endpoint, Hello};
 
 fn main() {
@@ -86,8 +86,10 @@ fn perform(action: ActionId, config: &Config, frozen: Option<ipc::Frozen>) {
             Ok(None) => tracing::debug!("no window chosen"),
             Ok(Some((path, thumb))) => {
                 tracing::debug!("saved {}", path.display());
-                let saved = toast::Toast::Saved(toast::Saved::Image, path);
-                toast::notify_with(config, &saved, thumb);
+                if config.image.for_action(action).keep_copy {
+                    let saved = toast::Toast::Saved(toast::Saved::Image, path);
+                    toast::notify_with(config, &saved, thumb);
+                }
             }
             Err(e) => {
                 tracing::error!("capture failed: {e:#}");
@@ -142,11 +144,17 @@ fn direct_capture(
     };
     let started = std::time::Instant::now();
     let snapshot = still::Snapshot { monitors, cursor, foreground };
-    let dir = vixeeny_common::paths::ready_dir(&config.paths.images, vixeeny_common::paths::DEFAULT_IMAGES)
-        .context("cannot make the images folder")?;
+    let image_settings = config.image.for_action(action);
+    let dir = if image_settings.keep_copy {
+        vixeeny_common::paths::ready_dir(&config.paths.images, vixeeny_common::paths::DEFAULT_IMAGES)
+            .context("cannot make the images folder")?
+    } else {
+        std::path::PathBuf::new()
+    };
     let now = vixeeny_platform::local_time();
     let destination = still::Destination {
         dir: &dir,
+        keep_copy: image_settings.keep_copy,
         template: &config.paths.naming.images.template,
         per_app_subfolder: config.paths.per_app_subfolder.images,
         use_foreground_app: true,
@@ -154,26 +162,26 @@ fn direct_capture(
         now: &now,
         after_save: None,
     };
-    let options = CaptureOptions { show_cursor: false, tonemap: Some(tonemap_hdr) };
-    let (format, settings) = image_output(config);
+    let options = CaptureOptions { show_cursor: image_settings.show_cursor, tonemap: Some(tonemap_hdr) };
+    let (format, settings) = image_output(image_settings);
     // The notification's thumbnail is made from the picture saved, not from the file.
     let thumb = std::sync::Mutex::new(None);
-    let card = config.notifications.enabled && config.notifications.image_saved;
+    let card = image_settings.keep_copy && config.notifications.enabled && config.notifications.image_saved;
     let after = |image: &vixeeny_image::Bgra<'_>, encoded: Option<&[u8]>, name: &str| {
         if card && let Ok(mut slot) = thumb.lock() {
             *slot = Some(thumbnail::scaled(image, 640));
         }
-        if config.image.copy_to_clipboard
-            && let Err(e) = clipboard::copy_bgra(config, image, encoded, name)
+        if image_settings.copy_to_clipboard
+            && let Err(e) = clipboard::copy_bgra(image_settings, image, encoded, name)
         {
             tracing::warn!("clipboard: {e:#}");
         }
     };
     let destination =
-        still::Destination { after_save: (config.image.copy_to_clipboard || card).then_some(&after), ..destination };
+        still::Destination { after_save: (image_settings.copy_to_clipboard || card).then_some(&after), ..destination };
     // Asked once the window is captured.
-    let backdrop = window_backdrop_kind(config)
-        .then_some(|| window_backdrop(config).unwrap_or(vixeeny_image::backdrop::Backdrop::Blur));
+    let backdrop = window_backdrop_kind(image_settings)
+        .then_some(|| window_backdrop(image_settings).unwrap_or(vixeeny_image::backdrop::Backdrop::Blur));
     let run = |backend: &mut dyn vixeeny_capture::StillBackend| {
         let mut capturer = Capturer::new(backend, snapshot.monitors.clone());
         still::run(
@@ -185,7 +193,7 @@ fn direct_capture(
             still::Output {
                 format,
                 settings: &settings,
-                keep_hdr: keep_hdr(config),
+                keep_hdr: keep_hdr(image_settings),
                 backdrop: backdrop.as_ref().map(|b| b as &dyn Fn() -> vixeeny_image::backdrop::Backdrop),
             },
             &vixeeny_platform::exe_metadata,
@@ -227,15 +235,14 @@ fn direct_capture(
 }
 
 /// Whether window captures are set on a background.
-fn window_backdrop_kind(config: &Config) -> bool {
-    matches!(config.image.window_backdrop.as_str(), "wallpaper" | "blur" | "colour" | "gradient")
+fn window_backdrop_kind(image: &Image) -> bool {
+    matches!(image.window_backdrop.as_str(), "wallpaper" | "blur" | "colour" | "gradient")
 }
 
 /// What a window capture is set on, by the setting: the wallpaper blurred (`blur`, from before, too), a plain colour or
 /// a gradient; nothing by default.
-fn window_backdrop(config: &Config) -> Option<vixeeny_image::backdrop::Backdrop> {
+fn window_backdrop(image: &Image) -> Option<vixeeny_image::backdrop::Backdrop> {
     use vixeeny_image::backdrop::Backdrop;
-    let image = &config.image;
     match image.window_backdrop.as_str() {
         "wallpaper" | "blur" => Some(wallpaper()),
         "colour" => Some(Backdrop::Colour(
@@ -264,8 +271,8 @@ fn wallpaper() -> vixeeny_image::backdrop::Backdrop {
 
 /// On an HDR screen, the user's choice: keep HDR (`keep_hdr`), or convert to SDR. Formats that cannot hold HDR (WebP)
 /// are always converted.
-fn keep_hdr(config: &Config) -> bool {
-    matches!(config.image.hdr.as_str(), "keep_hdr" | "hdr")
+fn keep_hdr(image: &Image) -> bool {
+    matches!(image.hdr.as_str(), "keep_hdr" | "hdr")
 }
 
 /// HDR monitors become SDR through the documented tone mapper (`vixeeny_image::tonemap`).
@@ -278,9 +285,8 @@ fn tonemap_hdr(rgba: &[f32], info: &vixeeny_platform::HdrInfo) -> Vec<u8> {
 
 /// Output format and settings from `[image]`. An unknown value falls back to the default (PNG, 4:4:4), never to a
 /// failed capture.
-fn image_output(config: &Config) -> (vixeeny_image::ImageFormat, vixeeny_image::Settings) {
+fn image_output(image: &Image) -> (vixeeny_image::ImageFormat, vixeeny_image::Settings) {
     use vixeeny_image::{ImageFormat, PngCompression, Settings};
-    let image = &config.image;
     let mut settings = Settings::default();
     settings.png.compression = match image.png.compression.as_str() {
         "default" => PngCompression::Default,
@@ -298,8 +304,8 @@ fn image_output(config: &Config) -> (vixeeny_image::ImageFormat, vixeeny_image::
     settings.jxl.lossless = image.jxl.lossless;
     settings.jxl.distance = jxl_distance(image.jxl.quality);
     settings.jxl.effort = image.jxl.effort.clamp(1, 9);
-    let format = ImageFormat::from_name(&config.image.format).filter(|f| f.available()).unwrap_or_else(|| {
-        tracing::warn!("image format `{}` is not available, using PNG", config.image.format);
+    let format = ImageFormat::from_name(&image.format).filter(|f| f.available()).unwrap_or_else(|| {
+        tracing::warn!("image format `{}` is not available, using PNG", image.format);
         ImageFormat::Png
     });
     (format, settings)
@@ -866,29 +872,29 @@ mod tests {
         // JPEG, by default and when asked; PNG in a build without it.
         let jpeg = if native { ImageFormat::Jpeg } else { ImageFormat::Png };
         let mut config = Config::default();
-        assert_eq!(image_output(&config).0, jpeg);
-        config.image.format = "jpeg".into();
-        config.image.jpeg.quality = 70;
-        let (format, settings) = image_output(&config);
+        assert_eq!(image_output(&config.image.region).0, jpeg);
+        config.image.region.format = "jpeg".into();
+        config.image.region.jpeg.quality = 70;
+        let (format, settings) = image_output(&config.image.region);
         assert_eq!(format, jpeg);
         assert_eq!((settings.jpeg.quality, settings.jpeg.chroma), (70, Chroma::Yuv444));
-        config.image.format = "bmp".into(); // unknown
-        assert_eq!(image_output(&config).0, ImageFormat::Png);
-        config.image.format = "avif".into();
-        assert_eq!(image_output(&config).0, ImageFormat::Avif);
+        config.image.region.format = "bmp".into(); // unknown
+        assert_eq!(image_output(&config.image.region).0, ImageFormat::Png);
+        config.image.region.format = "avif".into();
+        assert_eq!(image_output(&config.image.region).0, ImageFormat::Avif);
         // Every format's own options reach its encoder.
-        config.image.png.compression = "high".into();
-        config.image.png.optimize = 9;
-        config.image.webp.lossless = false;
-        config.image.avif.speed = 2;
-        config.image.jxl.quality = 90;
-        let settings = image_output(&config).1;
+        config.image.region.png.compression = "high".into();
+        config.image.region.png.optimize = 9;
+        config.image.region.webp.lossless = false;
+        config.image.region.avif.speed = 2;
+        config.image.region.jxl.quality = 90;
+        let settings = image_output(&config.image.region).1;
         assert_eq!(settings.png.compression, vixeeny_image::PngCompression::High);
         assert_eq!(settings.png.oxipng_level, Some(6));
         assert!(!settings.webp.lossless);
         assert_eq!(settings.avif.speed, 2);
         assert!((settings.jxl.distance - 1.0).abs() < 1e-4);
-        config.image.png.optimize = 0;
-        assert_eq!(image_output(&config).1.png.oxipng_level, None);
+        config.image.region.png.optimize = 0;
+        assert_eq!(image_output(&config.image.region).1.png.oxipng_level, None);
     }
 }

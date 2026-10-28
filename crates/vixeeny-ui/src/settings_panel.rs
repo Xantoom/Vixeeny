@@ -328,6 +328,9 @@ fn same_row(a: &SettingRow, b: &SettingRow) -> bool {
     a.id == b.id
         && a.label == b.label
         && a.info == b.info
+        && a.suffix == b.suffix
+        && a.detail == b.detail
+        && a.nested == b.nested
         && a.warning == b.warning
         && a.kind == b.kind
         && a.enabled == b.enabled
@@ -481,9 +484,16 @@ fn show_groups(window: &SettingsWindow, groups: Vec<Titled>) {
     }
 }
 
-/// Whether a shortcut starts a group of actions (captures, recording, the program).
-const fn starts_group(action: ActionId) -> bool {
-    matches!(action, ActionId::CaptureRegion | ActionId::RecordToggle | ActionId::OverlayToggle)
+/// Each family of shortcuts gets its own titled card.
+fn shortcut_heading(action: ActionId, lang: Lang) -> &'static str {
+    let key = match action {
+        ActionId::CaptureRegion => Key::GrpShortcutImages,
+        ActionId::RecordToggle => Key::GrpShortcutRecording,
+        ActionId::ReplayToggle => Key::GrpShortcutReplay,
+        ActionId::OverlayToggle => Key::GrpShortcutOverlay,
+        _ => return "",
+    };
+    tr(key, lang)
 }
 
 fn picture(icon: Option<&vixeeny_settings::Icon>) -> slint::Image {
@@ -500,6 +510,7 @@ fn row_model(row: &Row, config: &Config, lang: Lang) -> SettingRow {
         warning: row.warning.as_str().into(),
         info: row.info.as_str().into(),
         detail: row.detail.as_str().into(),
+        suffix: row.suffix.as_str().into(),
         nested: row.nested,
         meter: row.meter,
         shown: SharedString::new(),
@@ -1118,7 +1129,7 @@ impl SettingsPanel {
                     })
                     .collect();
                 ShortcutRow {
-                    group: starts_group(action),
+                    group_title: shortcut_heading(action, lang).into(),
                     label: action_label(action, lang).into(),
                     keys: ModelRc::from(Rc::new(VecModel::from(keys))),
                     error: errors
@@ -1132,8 +1143,8 @@ impl SettingsPanel {
         let mut spans: Vec<ShortcutSpan> = Vec::new();
         for (i, row) in table.iter().enumerate() {
             match spans.last_mut() {
-                Some(span) if !row.group => span.count += 1,
-                _ => spans.push(ShortcutSpan { start: i as i32, count: 1 }),
+                Some(span) if row.group_title.is_empty() => span.count += 1,
+                _ => spans.push(ShortcutSpan { title: row.group_title.clone(), start: i as i32, count: 1 }),
             }
         }
         // The second column is drawn whole only once a second shortcut is set.
@@ -1302,12 +1313,17 @@ impl SettingsPanel {
         let shown = || state.rows.borrow().iter().any(|r| r.id == found.id);
         self.select_section(found.section);
         let expert = match found.section {
-            Section::Recording => Some("expert_video"),
-            Section::Replay => Some("replay:expert_video"),
+            Section::Image => found
+                .id
+                .strip_prefix("image:")
+                .and_then(|id| id.split_once(':'))
+                .map(|(kind, _)| format!("image:{kind}:encoding")),
+            Section::Recording => Some("expert_video".to_owned()),
+            Section::Replay => Some("replay:expert_video".to_owned()),
             _ => None,
         };
         if let Some(expert) = expert.filter(|_| !found.id.is_empty() && !shown()) {
-            state.open.borrow_mut().insert(expert.into());
+            state.open.borrow_mut().insert(expert);
             self.rebuild_env();
             self.refresh();
         }
@@ -1534,7 +1550,14 @@ impl SettingsPanel {
                     return;
                 };
                 if action == "press" {
-                    (state.on_page_action.borrow())(p.current_section(), &id, "");
+                    let enabled = state
+                        .rows
+                        .borrow()
+                        .iter()
+                        .any(|r| r.id == id.as_str() && matches!(r.kind, Kind::Button) && r.enabled());
+                    if enabled {
+                        (state.on_page_action.borrow())(p.current_section(), &id, "");
+                    }
                     return;
                 }
                 let folder =

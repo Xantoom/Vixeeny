@@ -338,6 +338,58 @@ fn restart_for_update(handle: &PanelHandle, lang: Lang) {
     }
 }
 
+/// Renders the real overlays with sample state, without starting a capture or a recording.
+fn preview_overlay(config: Config, widget: bool) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static SIDE: AtomicBool = AtomicBool::new(false);
+    static WIDGET: AtomicBool = AtomicBool::new(false);
+    let showing = if widget { &WIDGET } else { &SIDE };
+    if showing.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(move || {
+        let result =
+            if widget { preview_widget(&config) } else { crate::side::run(&config, false, false, false).map(|_| ()) };
+        if let Err(e) = result {
+            tracing::warn!("overlay preview: {e:#}");
+        }
+        showing.store(false, Ordering::SeqCst);
+    });
+}
+
+fn preview_widget(config: &Config) -> anyhow::Result<()> {
+    use crate::widget_math::FromWidget;
+    use std::time::{Duration, Instant};
+    let monitors = vixeeny_platform::monitors()?;
+    let (x, y) = vixeeny_platform::cursor_position()?;
+    let monitor = vixeeny_platform::monitor_at(&monitors, x, y).or_else(|| monitors.first()).context("no monitor")?;
+    let mut settings = config.recording_widget.clone();
+    // Show the sample even in the visibility mode that only shows alerts.
+    settings.display = "always".into();
+    let (send, receive) = std::sync::mpsc::channel();
+    let mut sample = crate::widget::Widget::spawn(&settings, monitor, move |press| {
+        let _ = send.send(press);
+    })?;
+    let start = Instant::now();
+    let mut paused = false;
+    let mut elapsed = Duration::from_secs(12);
+    let mut last = start;
+    while start.elapsed() < Duration::from_secs(8) {
+        if !paused {
+            elapsed += last.elapsed();
+        }
+        last = Instant::now();
+        sample.state(paused, elapsed);
+        match receive.recv_timeout(Duration::from_millis(100)) {
+            Ok(FromWidget::Stop) => break,
+            Ok(FromWidget::TogglePause) => paused = !paused,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+        }
+    }
+    Ok(())
+}
+
 fn about_lines(lang: Lang) -> Vec<Line> {
     vec![Line { text: tr(Key::AboutLicense, lang).into(), detail: REPO.into() }]
 }
@@ -470,6 +522,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     }
     {
         let handle = handle;
+        let pending = Rc::clone(&unsaved);
         panel.on_page_action(move |section, action, value| {
             let lang = crate::lang(&load_config().general.language);
             match (section, action) {
@@ -485,6 +538,10 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
                 }
                 (Section::Updates, "update-restart") => restart_for_update(&handle, lang),
                 (Section::General, "admin") => grant_admin(&handle, lang),
+                (Section::Overlay, "preview_side" | "preview_widget") => {
+                    let config = pending.borrow().clone().unwrap_or_else(load_config);
+                    preview_overlay(config, action == "preview_widget");
+                }
                 (Section::About, "github") => {
                     let _ = vixeeny_platform::open_path(REPO);
                 }

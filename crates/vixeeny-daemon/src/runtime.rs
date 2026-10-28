@@ -64,7 +64,7 @@ pub trait HotkeyBackend {
 /// the frozen screens.
 pub trait Freezer {
     /// `None` when the screens cannot be frozen, or already are.
-    fn freeze(&mut self) -> Option<Frozen>;
+    fn freeze(&mut self, _cursor: bool) -> Option<Frozen>;
     /// The screens captured for the app without being shown (with the pointer when `cursor`), as
     /// [`freeze`](Self::freeze) otherwise.
     fn hold(&mut self, _cursor: bool) -> Option<Frozen> {
@@ -77,7 +77,7 @@ pub trait Freezer {
 pub struct NoFreeze;
 
 impl Freezer for NoFreeze {
-    fn freeze(&mut self) -> Option<Frozen> {
+    fn freeze(&mut self, _cursor: bool) -> Option<Frozen> {
         None
     }
     fn thaw(&mut self) {}
@@ -291,14 +291,14 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
                 if self.frozen.is_some() && self.frozen_for.is_none() {
                     self.thaw();
                 }
-                if let Some(frozen) = self.freezer.hold(self.config.image.show_cursor) {
+                if let Some(frozen) = self.freezer.hold(self.config.image.for_action(action).show_cursor) {
                     self.frozen = Some(frozen);
                     self.frozen_for = None;
                 }
             }
             Event::Action(action) | Event::Control(ControlRequest::Action(action)) if action.freezes_screen() => {
                 // `None` while earlier frozen screens are still up: they serve this press.
-                if let Some(frozen) = self.freezer.freeze() {
+                if let Some(frozen) = self.freezer.freeze(self.config.image.for_action(action).show_cursor) {
                     self.frozen = Some(frozen);
                     self.frozen_for = None;
                 }
@@ -617,7 +617,7 @@ mod tests {
         log: Arc<Mutex<Vec<&'static str>>>,
     }
     impl Freezer for FakeFreezer {
-        fn freeze(&mut self) -> Option<Frozen> {
+        fn freeze(&mut self, _cursor: bool) -> Option<Frozen> {
             self.log.lock().unwrap().push("freeze");
             Some(Frozen { adapter: 1, screens: Vec::new() })
         }
@@ -633,7 +633,8 @@ mod tests {
     #[test]
     fn a_full_screen_capture_gets_the_screens_of_its_press() {
         let mut config = Config::default();
-        config.image.show_cursor = true;
+        config.image.fullscreen.show_cursor = true;
+        config.image.all_monitors.show_cursor = true;
         let (rt, tx, _, spawned) = runtime(false, config);
         let freezer = FakeFreezer::default();
         let mut rt = rt.with_freezer(Box::new(freezer.clone()));
@@ -730,7 +731,7 @@ mod tests {
         let notified = || log.lock().unwrap().iter().filter(|l| l.starts_with("notify")).count();
 
         // A slider moved: the shortcuts stay registered, the taken one is not reported again.
-        config.image.jpeg.quality = 42;
+        config.image.region.jpeg.quality = 42;
         config.save(&path).unwrap();
         rt.reload_config();
         assert!(applied.lock().unwrap().is_empty());

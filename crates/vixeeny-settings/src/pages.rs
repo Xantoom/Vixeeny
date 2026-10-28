@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The rows of each page of the settings window.
 
-use vixeeny_common::config::{Config, DiskAlert, Naming, TARGET_SOURCE};
+use vixeeny_common::config::{Config, DiskAlert, ImageKind, Naming, TARGET_SOURCE};
 use vixeeny_common::i18n::Key;
 use vixeeny_encode::registry::{
     BITRATE_RANGE, DEFAULT_BITRATE, DEFAULT_MAXRATE, Family, ParamType, PresetName, RateMode, rate_keys,
@@ -88,23 +88,26 @@ pub fn general(env: &Env) -> Vec<Row> {
     rows
 }
 
-/// The administrator's rights: a button while they can be given, a mark once they are.
+/// The administrator's rights: the same button, disabled once granted.
 fn admin(env: &Env) -> Option<Row> {
     let t = |k| env.t(k);
-    let (row, hint) = match env.admin {
+    let row = match env.admin {
         Admin::Hidden => return None,
-        Admin::Granted => (info("admin", t(Key::SetAdmin), t(Key::SetAdminGranted)), Key::SetAdminHint),
-        Admin::Missing { moves } => (
-            button("admin", t(Key::SetAdmin), t(Key::SetAdminGrant)),
-            if moves { Key::SetAdminHintMove } else { Key::SetAdminHint },
-        ),
+        Admin::Granted => crate::greyed(button("admin", t(Key::SetAdmin), t(Key::SetAdminGranted))),
+        Admin::Missing { .. } => button("admin", t(Key::SetAdmin), t(Key::SetAdminGrant)),
     };
-    Some(hinted(row, t(hint)))
+    Some(hinted(row, t(Key::SetAdminHint)))
 }
 
 /// How the files of one kind are named. `get` and `naming` reach the settings of that kind.
-fn naming_rows(env: &Env, kind: &str, get: fn(&Config) -> &Naming, naming: fn(&mut Config) -> &mut Naming) -> [Row; 1] {
-    let template = row(
+fn naming_rows(
+    env: &Env,
+    kind: &str,
+    get: fn(&Config) -> &Naming,
+    naming: fn(&mut Config) -> &mut Naming,
+    extension: String,
+) -> [Row; 1] {
+    let mut template = row(
         format!("template:{kind}"),
         env.t(Key::SetTemplate),
         Kind::Text,
@@ -120,6 +123,7 @@ fn naming_rows(env: &Env, kind: &str, get: fn(&Config) -> &Naming, naming: fn(&m
             _ => Err(Invalid),
         }),
     );
+    template.suffix = extension;
     [template]
 }
 
@@ -129,6 +133,7 @@ pub fn overlay(env: &Env, config: &Config) -> Vec<Row> {
     let mut rows = vec![
         header("h_side", t(Key::GrpSideBar)),
         toggle("overlay_enabled", t(Key::SetOverlayOn), |c| c.overlay.enabled, |c, v| c.overlay.enabled = v),
+        button("preview_side", t(Key::GrpSideBar), t(Key::SetPreview)),
     ];
     if config.overlay.enabled {
         rows.push(crate::picked(
@@ -155,27 +160,6 @@ pub fn overlay(env: &Env, config: &Config) -> Vec<Row> {
         |c, v| c.recording_widget.enabled = v,
     ));
     if config.recording_widget.enabled {
-        rows.push(hinted(
-            crate::picked(
-                crate::Picker::Corner,
-                choice(
-                    "widget_corner",
-                    t(Key::SetWidgetCorner),
-                    vec![
-                        opt("top_left", t(Key::SetCornerTl)),
-                        opt("top_center", t(Key::SetCornerTc)),
-                        opt("top_right", t(Key::SetCornerTr)),
-                        opt("bottom_left", t(Key::SetCornerBl)),
-                        opt("bottom_center", t(Key::SetCornerBc)),
-                        opt("bottom_right", t(Key::SetCornerBr)),
-                        opt("custom", t(Key::SetCornerCustom)),
-                    ],
-                    |c| widget_place(&c.recording_widget),
-                    set_widget_place,
-                ),
-            ),
-            t(Key::SetWidgetPlaceHint),
-        ));
         rows.push(choice(
             "widget_display",
             t(Key::SetWidgetDisplay),
@@ -187,7 +171,26 @@ pub fn overlay(env: &Env, config: &Config) -> Vec<Row> {
             |c| c.recording_widget.display.clone(),
             |c, v| c.recording_widget.display = v,
         ));
+        rows.push(crate::picked(
+            crate::Picker::Corner,
+            choice(
+                "widget_corner",
+                t(Key::SetWidgetCorner),
+                vec![
+                    opt("top_left", t(Key::SetCornerTl)),
+                    opt("top_center", t(Key::SetCornerTc)),
+                    opt("top_right", t(Key::SetCornerTr)),
+                    opt("bottom_left", t(Key::SetCornerBl)),
+                    opt("bottom_center", t(Key::SetCornerBc)),
+                    opt("bottom_right", t(Key::SetCornerBr)),
+                    opt("custom", t(Key::SetCornerCustom)),
+                ],
+                |c| widget_place(&c.recording_widget),
+                set_widget_place,
+            ),
+        ));
     }
+    rows.push(button("preview_widget", t(Key::GrpWidget), t(Key::SetPreview)));
     rows
 }
 
@@ -272,26 +275,111 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
             |c, v| c.paths.per_app_subfolder.images = v,
         ),
     ];
-    rows.extend(naming_rows(env, "images", |c| &c.paths.naming.images, |c| &mut c.paths.naming.images));
-    rows.extend([
-        header("h_format", t(Key::GrpEncoding)),
-        choice(
-            "image_format",
-            t(Key::SetImageFormat),
-            vec![
-                opt("png", "PNG"),
-                advised("jpeg", "JPEG"),
-                crate::separator(),
-                opt("webp", "WebP"),
-                opt("avif", "AVIF"),
-                opt("jxl", "JPEG XL"),
-            ],
-            |c| c.image.format.clone(),
-            |c, v| c.image.format = v,
-        ),
-    ]);
+    let mut extensions = Vec::new();
+    for kind in ImageKind::ALL {
+        let extension = image_extension(&config.image.get(kind).format);
+        if !extensions.contains(&extension) {
+            extensions.push(extension);
+        }
+    }
+    rows.extend(naming_rows(
+        env,
+        "images",
+        |c| &c.paths.naming.images,
+        |c| &mut c.paths.naming.images,
+        extensions.join(" / "),
+    ));
+    for kind in ImageKind::ALL {
+        let title = match kind {
+            ImageKind::Region => Key::GrpCaptureRegion,
+            ImageKind::Window => Key::GrpWindowCapture,
+            ImageKind::Fullscreen => Key::GrpCaptureFullscreen,
+            ImageKind::AllMonitors => Key::GrpCaptureAllMonitors,
+            ImageKind::Scrolling => Key::GrpCaptureScrolling,
+        };
+        rows.push(header(&format!("h_image:{}", kind.name()), t(title)));
+        let view = image_view(config, kind);
+        let mut profile = vec![
+            toggle(
+                "clipboard",
+                t(Key::SetCopyClipboard),
+                |c| c.image.region.copy_to_clipboard,
+                |c, v| c.image.region.copy_to_clipboard = v,
+            ),
+            toggle("keep_copy", t(Key::SetKeepCopy), |c| c.image.region.keep_copy, |c, v| c.image.region.keep_copy = v),
+            toggle(
+                "image_cursor",
+                t(Key::SetShowCursor),
+                |c| c.image.region.show_cursor,
+                |c, v| c.image.region.show_cursor = v,
+            ),
+        ];
+        let id = format!("image:{}:encoding", kind.name());
+        let (encoding, open) = crate::expander(env, &id, t(Key::SetImageEncoding));
+        if kind == ImageKind::Window {
+            profile.extend(backdrop_rows(env, &view).into_iter().filter(|r| !matches!(r.kind, Kind::Header)));
+        }
+        profile.push(encoding);
+        if open {
+            profile.extend(image_encoding(env, &view).into_iter().map(nested));
+        }
+        rows.extend(profile.into_iter().map(move |mut row| {
+            if !matches!(row.kind, Kind::Expander) {
+                row.id = format!("image:{}:{}", kind.name(), row.id);
+            }
+            let (get, set) = (row.get, row.set);
+            row.get = Box::new(move |c| get(&image_view(c, kind)));
+            row.set = Box::new(move |c, value| {
+                let mut view = image_view(c, kind);
+                set(&mut view, value)?;
+                *c.image.get_mut(kind) = view.image.region;
+                Ok(())
+            });
+            row
+        }));
+    }
+    rows
+}
+
+pub(crate) fn image_view(config: &Config, kind: ImageKind) -> Config {
+    let mut view = config.clone();
+    view.image.region = config.image.get(kind).clone();
+    view
+}
+
+pub(crate) fn image_extension(format: &str) -> &'static str {
+    match format {
+        "jpeg" | "jpg" => ".jpg",
+        "webp" => ".webp",
+        "avif" => ".avif",
+        "jxl" => ".jxl",
+        _ => ".png",
+    }
+}
+
+fn video_extension(container: &str) -> String {
+    if container == "mkv" { ".mkv" } else { ".mp4" }.into()
+}
+
+/// Encoding options for one capture kind, using its profile in the region slot.
+fn image_encoding(env: &Env, config: &Config) -> Vec<Row> {
+    let t = |k| env.t(k);
+    let mut rows = vec![choice(
+        "image_format",
+        t(Key::SetImageFormat),
+        vec![
+            opt("png", "PNG"),
+            advised("jpeg", "JPEG"),
+            crate::separator(),
+            opt("webp", "WebP"),
+            opt("avif", "AVIF"),
+            opt("jxl", "JPEG XL"),
+        ],
+        |c| c.image.region.format.clone(),
+        |c, v| c.image.region.format = v,
+    )];
     // The options of the chosen format's encoder.
-    match config.image.format.as_str() {
+    match config.image.region.format.as_str() {
         "png" => {
             rows.push(choice(
                 "png_compression",
@@ -301,8 +389,8 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
                     opt("default", t(Key::OptPngDefault)),
                     opt("high", t(Key::OptPngHigh)),
                 ],
-                |c| c.image.png.compression.clone(),
-                |c, v| c.image.png.compression = v,
+                |c| c.image.region.png.compression.clone(),
+                |c, v| c.image.region.png.compression = v,
             ));
             rows.push(choice(
                 "png_optimize",
@@ -314,7 +402,7 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
                     opt("6", t(Key::OptPngHigh)),
                 ],
                 |c| {
-                    match c.image.png.optimize {
+                    match c.image.region.png.optimize {
                         0 => "0",
                         1..=2 => "2",
                         3..=4 => "4",
@@ -322,7 +410,7 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
                     }
                     .to_owned()
                 },
-                |c, v| c.image.png.optimize = v.parse().unwrap_or(0),
+                |c, v| c.image.region.png.optimize = v.parse().unwrap_or(0),
             ));
         }
         "jpeg" => {
@@ -330,32 +418,32 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
                 "jpeg_quality",
                 t(Key::SetQuality),
                 (1, 100, 1),
-                |c| i64::from(c.image.jpeg.quality),
-                |c, v| c.image.jpeg.quality = v as u8,
+                |c| i64::from(c.image.region.jpeg.quality),
+                |c, v| c.image.region.jpeg.quality = v as u8,
             ));
         }
         "webp" => {
             rows.push(toggle(
                 "webp_lossless",
                 t(Key::SetLossless),
-                |c| c.image.webp.lossless,
-                |c, v| c.image.webp.lossless = v,
+                |c| c.image.region.webp.lossless,
+                |c, v| c.image.region.webp.lossless = v,
             ));
-            if !config.image.webp.lossless {
+            if !config.image.region.webp.lossless {
                 rows.push(slider(
                     "webp_quality",
                     t(Key::SetQuality),
                     (0, 100, 1),
-                    |c| i64::from(c.image.webp.quality),
-                    |c, v| c.image.webp.quality = v as u8,
+                    |c| i64::from(c.image.region.webp.quality),
+                    |c, v| c.image.region.webp.quality = v as u8,
                 ));
             }
             rows.push(slider(
                 "webp_effort",
                 t(Key::SetEffort),
                 (0, 6, 1),
-                |c| i64::from(c.image.webp.effort),
-                |c, v| c.image.webp.effort = v as u8,
+                |c| i64::from(c.image.region.webp.effort),
+                |c, v| c.image.region.webp.effort = v as u8,
             ));
         }
         "avif" => {
@@ -363,72 +451,61 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
                 "avif_quality",
                 t(Key::SetQuality),
                 (0, 100, 1),
-                |c| i64::from(c.image.avif.quality),
-                |c, v| c.image.avif.quality = v as u8,
+                |c| i64::from(c.image.region.avif.quality),
+                |c, v| c.image.region.avif.quality = v as u8,
             ));
             rows.push(choice(
                 "avif_depth",
                 t(Key::SetAvifDepth),
                 vec![opt("8", "8 bits"), opt("10", "10 bits")],
-                |c| c.image.avif.depth.to_string(),
-                |c, v| c.image.avif.depth = v.parse().unwrap_or(10),
+                |c| c.image.region.avif.depth.to_string(),
+                |c, v| c.image.region.avif.depth = v.parse().unwrap_or(10),
             ));
             rows.push(slider(
                 "avif_speed",
                 t(Key::SetAvifSpeed),
                 (0, i64::from(vixeeny_common::config::AVIF_MAX_SPEED), 1),
-                |c| i64::from(c.image.avif.speed.min(vixeeny_common::config::AVIF_MAX_SPEED)),
-                |c, v| c.image.avif.speed = v as u8,
+                |c| i64::from(c.image.region.avif.speed.min(vixeeny_common::config::AVIF_MAX_SPEED)),
+                |c, v| c.image.region.avif.speed = v as u8,
             ));
         }
         "jxl" => {
             rows.push(toggle(
                 "jxl_lossless",
                 t(Key::SetLossless),
-                |c| c.image.jxl.lossless,
-                |c, v| c.image.jxl.lossless = v,
+                |c| c.image.region.jxl.lossless,
+                |c, v| c.image.region.jxl.lossless = v,
             ));
-            if !config.image.jxl.lossless {
+            if !config.image.region.jxl.lossless {
                 rows.push(slider(
                     "jxl_quality",
                     t(Key::SetQuality),
                     (1, 100, 1),
-                    |c| i64::from(c.image.jxl.quality),
-                    |c, v| c.image.jxl.quality = v as u8,
+                    |c| i64::from(c.image.region.jxl.quality),
+                    |c, v| c.image.region.jxl.quality = v as u8,
                 ));
             }
             rows.push(slider(
                 "jxl_effort",
                 t(Key::SetEffort),
                 (1, 9, 1),
-                |c| i64::from(c.image.jxl.effort),
-                |c, v| c.image.jxl.effort = v as u8,
+                |c| i64::from(c.image.region.jxl.effort),
+                |c, v| c.image.region.jxl.effort = v as u8,
             ));
         }
         _ => {}
     }
-    rows.extend([
-        header("h_capture", t(Key::GrpCapture)),
-        toggle(
-            "clipboard",
-            t(Key::SetCopyClipboard),
-            |c| c.image.copy_to_clipboard,
-            |c, v| c.image.copy_to_clipboard = v,
-        ),
-        toggle("image_cursor", t(Key::SetShowCursor), |c| c.image.show_cursor, |c, v| c.image.show_cursor = v),
-    ]);
     // Only when Windows shows HDR: there is nothing to keep otherwise.
     if env.display.hdr {
         let hdr = toggle(
             "image_hdr",
             t(Key::SetHdrEnable),
-            |c| hdr_on(&c.image.hdr),
-            |c, v| c.image.hdr = if v { "keep_hdr" } else { "tonemap_sdr" }.into(),
+            |c| hdr_on(&c.image.region.hdr),
+            |c, v| c.image.region.hdr = if v { "keep_hdr" } else { "tonemap_sdr" }.into(),
         );
         // WebP has no HDR: its pictures are always converted.
-        rows.push(if config.image.format == "webp" { crate::greyed(hdr) } else { hdr });
+        rows.push(if config.image.region.format == "webp" { crate::greyed(hdr) } else { hdr });
     }
-    rows.extend(backdrop_rows(env, config));
     rows
 }
 
@@ -611,7 +688,13 @@ fn video(env: &Env, config: &Config) -> Vec<Row> {
             |c, v| c.paths.per_app_subfolder.videos = v,
         ),
     ];
-    rows.extend(naming_rows(env, "videos", |c| &c.paths.naming.videos, |c| &mut c.paths.naming.videos));
+    rows.extend(naming_rows(
+        env,
+        "videos",
+        |c| &c.paths.naming.videos,
+        |c| &mut c.paths.naming.videos,
+        video_extension(&config.video.container),
+    ));
     rows.extend(video_settings(env, config, false));
     // The widget's warning sign.
     rows.extend(disk_alert_rows(
@@ -1371,7 +1454,13 @@ pub fn replay(env: &Env, config: &Config) -> Vec<Row> {
             |c, v| c.paths.per_app_subfolder.replays = v,
         ),
     ];
-    rows.extend(naming_rows(env, "replays", |c| &c.paths.naming.replays, |c| &mut c.paths.naming.replays));
+    rows.extend(naming_rows(
+        env,
+        "replays",
+        |c| &c.paths.naming.replays,
+        |c| &mut c.paths.naming.replays,
+        video_extension(&config.replay_video().container),
+    ));
 
     // ---- what it keeps
     rows.push(header("h_replay", t(Key::GrpReplay)));
@@ -1511,22 +1600,22 @@ fn backdrop_rows(env: &Env, config: &Config) -> Vec<Row> {
                 opt("colour", t(Key::OptBackdropColour)),
                 opt("gradient", t(Key::OptBackdropGradient)),
             ],
-            |c| backdrop_kind(&c.image.window_backdrop).to_owned(),
-            |c, v| c.image.window_backdrop = v,
+            |c| backdrop_kind(&c.image.region.window_backdrop).to_owned(),
+            |c, v| c.image.region.window_backdrop = v,
         ),
     ];
     let swatches: Vec<[u8; 3]> = std::iter::once(env.accent).chain(BACKDROP_COLOURS.iter().map(|(_, c)| *c)).collect();
-    match backdrop_kind(&config.image.window_backdrop) {
+    match backdrop_kind(&config.image.region.window_backdrop) {
         "colour" => {
             let accent = env.accent;
             rows.push(row(
                 "backdrop_colour",
                 t(Key::SetBackdropColour),
                 Kind::Colour { swatches, pairs: Vec::new() },
-                Box::new(move |c| Value::Text(hex(c.image.backdrop_colour().unwrap_or(accent)))),
+                Box::new(move |c| Value::Text(hex(c.image.region.backdrop_colour().unwrap_or(accent)))),
                 Box::new(|c, v| match v {
                     Value::Text(t) => {
-                        c.image.backdrop_colour = t;
+                        c.image.region.backdrop_colour = t;
                         Ok(())
                     }
                     _ => Err(Invalid),
@@ -1539,12 +1628,12 @@ fn backdrop_rows(env: &Env, config: &Config) -> Vec<Row> {
                 t(Key::SetBackdropGradient),
                 Kind::Colour { swatches, pairs: BACKDROP_GRADIENTS.iter().map(|(_, from, to)| (*from, *to)).collect() },
                 Box::new(|c| {
-                    let (from, to) = c.image.backdrop_gradient();
+                    let (from, to) = c.image.region.backdrop_gradient();
                     Value::Text(format!("{},{}", hex(from), hex(to)))
                 }),
                 Box::new(|c, v| match v {
                     Value::Text(t) => {
-                        c.image.backdrop_gradient = t;
+                        c.image.region.backdrop_gradient = t;
                         Ok(())
                     }
                     _ => Err(Invalid),

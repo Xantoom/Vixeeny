@@ -30,6 +30,7 @@ fn copy_to_clipboard(config: &Config, snap: &Snapshot, action: ActionId, img: &R
     let now = vixeeny_platform::local_time();
     let dest = Destination {
         dir: std::path::Path::new(""),
+        keep_copy: false,
         template: &config.paths.naming.images.template,
         per_app_subfolder: false,
         use_foreground_app: true,
@@ -39,7 +40,12 @@ fn copy_to_clipboard(config: &Config, snap: &Snapshot, action: ActionId, img: &R
     };
     let name = still::file_stem(action, snap, &dest, &vixeeny_platform::exe_metadata, (img.width, img.height));
     let bgra = to_bgra(img);
-    copy_bgra(config, &Bgra::new(img.width, img.height, img.width as usize * 4, &bgra), None, &name)
+    copy_bgra(
+        config.image.for_action(action),
+        &Bgra::new(img.width, img.height, img.width as usize * 4, &bgra),
+        None,
+        &name,
+    )
 }
 
 pub use crate::clipboard::copy_bgra;
@@ -103,7 +109,15 @@ pub fn output_command(
             let img = session.export()?;
             // The picture is in hand: the editor goes while it is encoded.
             vixeeny_overlay::step_aside();
-            Some(match copy_to_clipboard(config, snapshot, action, &img) {
+            let result = if config.image.for_action(action).keep_copy {
+                let mut saving = config.clone();
+                saving.image.get_mut(vixeeny_common::config::ImageKind::for_action(action)).copy_to_clipboard = true;
+                let hdr = hdr.and_then(|desktop| annotated_hdr(session, &img, desktop));
+                save(&saving, snapshot, action, &img, hdr.as_ref(), None).map(|_| ())
+            } else {
+                copy_to_clipboard(config, snapshot, action, &img)
+            };
+            Some(match result {
                 Ok(()) => true,
                 Err(e) => {
                     tracing::error!("clipboard: {e:#}");
@@ -128,7 +142,9 @@ pub fn output_command(
             };
             vixeeny_overlay::step_aside();
             let hdr = hdr.and_then(|desktop| annotated_hdr(session, &img, desktop));
-            Some(match save(config, snapshot, action, &img, hdr.as_ref(), chosen) {
+            let mut saving = config.clone();
+            saving.image.get_mut(vixeeny_common::config::ImageKind::for_action(action)).keep_copy = true;
+            Some(match save(&saving, snapshot, action, &img, hdr.as_ref(), chosen) {
                 Ok(path) => {
                     tracing::debug!("saved {}", path.display());
                     true
@@ -176,17 +192,22 @@ pub fn save_bgra(
     hdr: Option<&HdrCapture>,
     chosen: Option<PathBuf>,
 ) -> anyhow::Result<PathBuf> {
-    let (default_format, settings) = crate::image_output(config);
+    let image_settings = config.image.for_action(action);
+    let (default_format, settings) = crate::image_output(image_settings);
     // Once saved, the image goes to the clipboard as well when the settings say so.
     let copy = |image: &Bgra<'_>, encoded: Option<&[u8]>, name: &str| {
-        if config.image.copy_to_clipboard
-            && let Err(e) = copy_bgra(config, image, encoded, name)
+        if image_settings.copy_to_clipboard
+            && let Err(e) = copy_bgra(image_settings, image, encoded, name)
         {
             tracing::warn!("clipboard: {e:#}");
         }
     };
-    let output =
-        |format| still::Output { format, settings: &settings, keep_hdr: crate::keep_hdr(config), backdrop: None };
+    let output = |format| still::Output {
+        format,
+        settings: &settings,
+        keep_hdr: crate::keep_hdr(image_settings),
+        backdrop: None,
+    };
     if let Some(path) = chosen {
         // "Save as": the extension picks the format.
         let format = path
@@ -215,11 +236,16 @@ pub fn save_bgra(
             Ok(path)
         });
     }
-    let dir = vixeeny_common::paths::ready_dir(&config.paths.images, vixeeny_common::paths::DEFAULT_IMAGES)
-        .context("cannot make the images folder")?;
+    let dir = if image_settings.keep_copy {
+        vixeeny_common::paths::ready_dir(&config.paths.images, vixeeny_common::paths::DEFAULT_IMAGES)
+            .context("cannot make the images folder")?
+    } else {
+        PathBuf::new()
+    };
     let now = vixeeny_platform::local_time();
     let dest = Destination {
         dir: &dir,
+        keep_copy: image_settings.keep_copy,
         template: &config.paths.naming.images.template,
         per_app_subfolder: config.paths.per_app_subfolder.images,
         use_foreground_app: true,
@@ -373,6 +399,7 @@ struct LiveScreens {
     /// The top-left corner of the desktop: the editor's image starts there.
     origin: (i32, i32),
     keep_hdr: bool,
+    show_cursor: bool,
     /// The HDR picture exported along (see [`output_command`]).
     hdr: std::rc::Rc<std::cell::RefCell<Option<HdrCapture>>>,
     /// Each monitor followed: where the part followed is in the editor's image, where it is in the monitor's picture,
@@ -382,7 +409,7 @@ struct LiveScreens {
 
 impl vixeeny_overlay::Screens for LiveScreens {
     fn grab(&self) -> Option<RgbaImage> {
-        match grab_screens(&self.monitors, self.keep_hdr) {
+        match grab_screens(&self.monitors, self.keep_hdr, self.show_cursor) {
             Ok((picture, hdr)) => {
                 *self.hdr.borrow_mut() = hdr;
                 Some(picture)
@@ -417,6 +444,7 @@ impl vixeeny_overlay::Screens for LiveScreens {
             match vixeeny_capture::VideoStream::start_held(
                 &target,
                 device.clone(),
+                self.show_cursor,
                 Some(LIVE_INTERVAL),
                 Box::new(move || wake.wake()),
             ) {
@@ -458,19 +486,27 @@ impl vixeeny_overlay::Screens for LiveScreens {
 }
 
 /// A picture of every screen (HDR screens tone-mapped), and with `keep_hdr` the same as HDR.
-fn grab_screens(monitors: &[MonitorInfo], keep_hdr: bool) -> anyhow::Result<(RgbaImage, Option<HdrCapture>)> {
+fn grab_screens(
+    monitors: &[MonitorInfo],
+    keep_hdr: bool,
+    show_cursor: bool,
+) -> anyhow::Result<(RgbaImage, Option<HdrCapture>)> {
     let mut backend = crate::capture_backend::Lent::take()?;
     // Assembled on the graphics card and read once, when no screen is HDR (nothing HDR to keep then).
-    match backend.grab_desktop(monitors, |w, h, rows, stride| RgbaImage::from_bgra(w, h, stride, rows)) {
+    match if show_cursor {
+        Err(vixeeny_capture::CaptureError::Unsupported)
+    } else {
+        backend.grab_desktop(monitors, |w, h, rows, stride| RgbaImage::from_bgra(w, h, stride, rows))
+    } {
         Ok(base) => return Ok((base.context("unexpected capture buffer")?, None)),
         Err(vixeeny_capture::CaptureError::Unsupported) => {}
         Err(e) => return Err(e.into()),
     }
     let mut capturer = Capturer::new(&mut *backend, monitors.to_vec());
     let (frame, hdr) = if keep_hdr {
-        capturer.grab_all_both(false, crate::tonemap_hdr)?
+        capturer.grab_all_both(show_cursor, crate::tonemap_hdr)?
     } else {
-        let options = CaptureOptions { show_cursor: false, tonemap: Some(crate::tonemap_hdr) };
+        let options = CaptureOptions { show_cursor, tonemap: Some(crate::tonemap_hdr) };
         (capturer.grab(&CaptureTarget::AllMonitors, options)?, None)
     };
     let base = RgbaImage::from_bgra(frame.width, frame.height, frame.stride, &frame.data)
@@ -499,7 +535,12 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
     tracing::debug!("{} monitor(s) after {:?}", monitors.len(), started.elapsed());
     let bounds = vixeeny_platform::virtual_bounds(monitors.iter().map(|m| &m.rect)).context("no monitor found")?;
 
-    let keep_hdr = crate::keep_hdr(config);
+    let image_settings = match mode {
+        Mode::Editor => &config.image.region,
+        Mode::Scroll => &config.image.scrolling,
+    };
+    let keep_hdr = crate::keep_hdr(image_settings);
+    let show_cursor = image_settings.show_cursor;
     let from_daemon = thaw.0.borrow().as_ref().and_then(|frozen| {
         frozen_desktop(frozen, &monitors, bounds, keep_hdr)
             .map_err(|e| tracing::warn!("frozen screens not used: {e:#}"))
@@ -507,7 +548,7 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
     });
     let (base, hdr) = match from_daemon {
         Some(desktop) => desktop,
-        None => grab_screens(&monitors, keep_hdr)?,
+        None => grab_screens(&monitors, keep_hdr, show_cursor)?,
     };
     tracing::debug!("screen read ({}x{}) after {:?}", base.width, base.height, started.elapsed());
 
@@ -589,6 +630,7 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
             monitors: live_monitors,
             origin: (bounds.x, bounds.y),
             keep_hdr,
+            show_cursor,
             hdr: live_hdr,
             streams: std::cell::RefCell::default(),
         });

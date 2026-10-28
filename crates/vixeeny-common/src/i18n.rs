@@ -351,10 +351,10 @@ keys! {
     UiResetPageTitle => "Reset the \"{page}\" page?", "Réinitialiser la page « {page} » ?";
     UiResetPageBody => "Its settings go back to their default values. The other pages do not change.",
         "Ses paramètres reprennent leur valeur par défaut. Les autres pages ne changent pas.";
-    UiResetAll => "Reset all settings", "Réinitialiser tous les paramètres";
-    UiResetAllHint => "Every page goes back to its default values.",
-        "Toutes les pages reprennent leurs valeurs par défaut.";
-    UiResetAllTitle => "Reset all settings?", "Réinitialiser tous les paramètres ?";
+    UiResetAll => "Restore default settings", "Restaurer les paramètres par défaut";
+    UiResetAllHint => "Restores all application settings to their defaults.",
+        "Restaure tous les paramètres par défaut de l’application.";
+    UiResetAllTitle => "Restore default settings?", "Restaurer les paramètres par défaut ?";
     UiResetAllBody => "Every setting, on every page, goes back to its default value.",
         "Tous les paramètres, sur toutes les pages, reprennent leur valeur par défaut.";
     GrpReset => "Reset", "Réinitialisation";
@@ -369,11 +369,19 @@ keys! {
     SetAdminGrant => "Grant", "Accorder";
     SetAdminGranted => "Granted", "Accordés";
     SetAdminHint =>
-        "Shortcuts and captures also work in programs started as administrator, games often. Windows asks once.",
-        "Les raccourcis et les captures fonctionnent aussi dans les programmes lancés en administrateur, souvent des jeux. Windows le demande une fois.";
-    SetAdminHintMove =>
-        "Shortcuts and captures also work in programs started as administrator, games often. Vixeeny is installed again in Program Files, where only administrators can change its files; your settings stay. Windows asks once.",
-        "Les raccourcis et les captures fonctionnent aussi dans les programmes lancés en administrateur, souvent des jeux. Vixeeny est réinstallé dans Program Files, où seuls les administrateurs peuvent modifier ses fichiers ; vos paramètres restent. Windows le demande une fois.";
+        "Allows capturing all applications, including those started as administrator.",
+        "Permet de capturer toutes les applications, même celles démarrées en tant qu’administrateur.";
+    SetPreview => "Show preview", "Afficher un aperçu";
+    SetKeepCopy => "Keep a copy", "Garder une copie";
+    SetImageEncoding => "Encoding settings", "Paramètres d’encodage";
+    GrpCaptureRegion => "Region capture", "Capture de zone";
+    GrpCaptureFullscreen => "Screen capture", "Capture d’écran";
+    GrpCaptureAllMonitors => "All screens capture", "Capture de tous les écrans";
+    GrpCaptureScrolling => "Scrolling capture", "Capture défilante";
+    GrpShortcutImages => "Image captures", "Captures d’image";
+    GrpShortcutRecording => "Recording", "Enregistrement";
+    GrpShortcutReplay => "Replay", "Replay";
+    GrpShortcutOverlay => "Overlay", "Overlay";
     SetAdminDownloading => "Downloading the installer… {percent} %", "Téléchargement de l'installateur… {percent} %";
     SecNotifications => "Notifications", "Notifications";
     GrpNotifyCaptures => "Screenshots", "Captures d'écran";

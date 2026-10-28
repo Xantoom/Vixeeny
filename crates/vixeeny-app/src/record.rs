@@ -655,6 +655,7 @@ fn output_file(
         foreground: vixeeny_platform::foreground_window()?,
     };
     let destination = crate::still::Destination {
+        keep_copy: true,
         dir: &dir,
         template: &naming.template,
         per_app_subfolder: per_app,

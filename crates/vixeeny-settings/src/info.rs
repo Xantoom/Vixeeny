@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! What a setting does and what to choose, shown behind the "i" beside its label. Only where there is something useful
+//! What a setting does and what to choose, shown on hover over its label. Only where there is something useful
 //! to say: obvious settings have none.
 
 use vixeeny_common::config::Config;
@@ -15,6 +15,10 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
     // The replay's video and sound rows say what the videos' do, about the replay's own settings.
     if let Some(id) = id.strip_prefix(crate::pages::REPLAY_PREFIX) {
         return info(id, env, &crate::pages::replay_view(config));
+    }
+    if let Some((kind, id)) = id.strip_prefix("image:").and_then(|id| id.split_once(':')) {
+        let kind = vixeeny_common::config::ImageKind::ALL.into_iter().find(|k| k.name() == kind)?;
+        return info(id, env, &crate::pages::image_view(config, kind));
     }
     // The encoder's own options are `p:<key>`.
     let key = id;
@@ -41,7 +45,7 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
             "10 bits évite les bandes dans les dégradés.\nNécessaire pour le HDR.",
         ),
         "window_backdrop" => pick("In window captures only.", "Dans capture de fenêtre seulement."),
-        "image_hdr" if config.image.format == "webp" => pick(
+        "image_hdr" if config.image.region.format == "webp" => pick(
             "WebP cannot keep HDR: its pictures are always converted.\nPNG, JPEG, AVIF and JPEG XL can keep it.",
             "Le WebP ne peut pas garder le HDR : ses images sont toujours converties.\nPNG, JPEG, AVIF et JPEG XL peuvent le garder.",
         ),

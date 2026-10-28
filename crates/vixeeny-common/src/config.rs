@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::ipc::ActionId;
 
 /// Schema version written by this build. Bump it and add a migration to [`MIGRATIONS`].
-pub const SCHEMA_VERSION: u32 = 10;
+pub const SCHEMA_VERSION: u32 = 11;
 
 /// `MIGRATIONS[n]` upgrades a table from schema `n + 1` to `n + 2`.
 pub type Migration = fn(&mut toml::Table);
@@ -23,6 +23,7 @@ pub const MIGRATIONS: &[Migration] = &[
     v7_free_shortcuts,
     v8_new_defaults,
     v9_settings_of_their_own,
+    v10_image_per_capture,
 ];
 
 /// 0.9 → 1.0: MP4 recordings are fragmented (a recording cut short still plays), and the cursor is left out of videos
@@ -273,6 +274,15 @@ fn v9_settings_of_their_own(table: &mut toml::Table) {
     }
 }
 
+/// Each kind of screenshot keeps the image settings used before the split.
+fn v10_image_per_capture(table: &mut toml::Table) {
+    if let Some(image) = table.remove("image") {
+        let profiles: toml::Table =
+            ImageKind::ALL.into_iter().map(|kind| (kind.name().into(), image.clone())).collect();
+        table.insert("image".into(), profiles.into());
+    }
+}
+
 /// Moves each action still on `old` to `new`, all at once (two actions may swap theirs). A move whose `new` is held by
 /// a shortcut that stays where it is does not happen.
 fn move_shortcuts(hotkeys: &mut toml::Table, moves: &[(&str, &str, &str)]) {
@@ -340,7 +350,7 @@ pub struct Config {
     pub general: General,
     pub hotkeys: Hotkeys,
     pub paths: Paths,
-    pub image: Image,
+    pub image: Images,
     pub video: Video,
     pub recording_widget: RecordingWidget,
     pub replay: Replay,
@@ -358,7 +368,7 @@ impl Default for Config {
             general: General::default(),
             hotkeys: Hotkeys::default(),
             paths: Paths::default(),
-            image: Image::default(),
+            image: Images::default(),
             video: Video::default(),
             recording_widget: RecordingWidget::default(),
             replay: Replay::default(),
@@ -534,6 +544,76 @@ impl Default for PerAppSubfolder {
     }
 }
 
+/// The five kinds of still capture, each with independent output settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageKind {
+    Region,
+    Window,
+    Fullscreen,
+    AllMonitors,
+    Scrolling,
+}
+
+impl ImageKind {
+    pub const ALL: [Self; 5] = [Self::Region, Self::Window, Self::Fullscreen, Self::AllMonitors, Self::Scrolling];
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Region => "region",
+            Self::Window => "window",
+            Self::Fullscreen => "fullscreen",
+            Self::AllMonitors => "all_monitors",
+            Self::Scrolling => "scrolling",
+        }
+    }
+
+    pub const fn for_action(action: ActionId) -> Self {
+        match action {
+            ActionId::CaptureWindow => Self::Window,
+            ActionId::CaptureFullscreen => Self::Fullscreen,
+            ActionId::CaptureAllMonitors => Self::AllMonitors,
+            ActionId::CaptureScrolling => Self::Scrolling,
+            _ => Self::Region,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Images {
+    pub region: Image,
+    pub window: Image,
+    pub fullscreen: Image,
+    pub all_monitors: Image,
+    pub scrolling: Image,
+}
+
+impl Images {
+    pub fn get(&self, kind: ImageKind) -> &Image {
+        match kind {
+            ImageKind::Region => &self.region,
+            ImageKind::Window => &self.window,
+            ImageKind::Fullscreen => &self.fullscreen,
+            ImageKind::AllMonitors => &self.all_monitors,
+            ImageKind::Scrolling => &self.scrolling,
+        }
+    }
+
+    pub fn get_mut(&mut self, kind: ImageKind) -> &mut Image {
+        match kind {
+            ImageKind::Region => &mut self.region,
+            ImageKind::Window => &mut self.window,
+            ImageKind::Fullscreen => &mut self.fullscreen,
+            ImageKind::AllMonitors => &mut self.all_monitors,
+            ImageKind::Scrolling => &mut self.scrolling,
+        }
+    }
+
+    pub fn for_action(&self, action: ActionId) -> &Image {
+        self.get(ImageKind::for_action(action))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Image {
@@ -541,6 +621,7 @@ pub struct Image {
     pub show_cursor: bool,
     pub hdr: String,
     pub copy_to_clipboard: bool,
+    pub keep_copy: bool,
     /// What a window capture is set on, with a margin and a shadow: `none`, `wallpaper` (the desktop's, blurred),
     /// `colour` or `gradient`. `blur` (from before 0.21) reads as `wallpaper`.
     pub window_backdrop: String,
@@ -564,6 +645,7 @@ impl Default for Image {
             show_cursor: false,
             hdr: "tonemap_sdr".into(),
             copy_to_clipboard: true,
+            keep_copy: true,
             window_backdrop: "none".into(),
             backdrop_colour: "accent".into(),
             backdrop_gradient: "dusk".into(),
@@ -1201,6 +1283,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn old_image_settings_are_preserved_for_every_capture_kind() {
+        let config = Config::from_toml("schema_version = 10\n[image]\nformat = 'png'\nshow_cursor = true\ncopy_to_clipboard = false\n[image.jpeg]\nquality = 42\n").unwrap();
+        for kind in ImageKind::ALL {
+            let image = config.image.get(kind);
+            assert_eq!(image.format, "png");
+            assert!(image.show_cursor && image.keep_copy);
+            assert!(!image.copy_to_clipboard);
+            assert_eq!(image.jpeg.quality, 42);
+        }
+        let encoded = toml::to_string(&config).unwrap();
+        let decoded = Config::from_toml(&encoded).unwrap();
+        assert_eq!(config, decoded);
+    }
+
+    #[test]
     fn backdrop_colours_read_as_codes_or_names() {
         assert_eq!(parse_hex("#0063B1"), Some([0x00, 0x63, 0xb1]));
         assert_eq!(parse_hex("f80"), Some([0xff, 0x88, 0x00]));
@@ -1266,8 +1363,8 @@ mod tests {
         assert!(cfg.notifications.enabled && cfg.notifications.game_start(true));
         assert_eq!(cfg.hotkeys.capture_region, ["F8"]);
         assert_eq!(cfg.hotkeys.record_toggle, defaults.hotkeys.record_toggle);
-        assert_eq!(cfg.image.format, "png");
-        assert_eq!(cfg.image.jpeg, defaults.image.jpeg);
+        assert_eq!(cfg.image.region.format, "png");
+        assert_eq!(cfg.image.region.jpeg, defaults.image.region.jpeg);
         assert_eq!(cfg.replay.duration_seconds, defaults.replay.duration_seconds);
     }
 

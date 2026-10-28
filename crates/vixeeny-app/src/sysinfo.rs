@@ -94,7 +94,14 @@ pub fn collect(config: &Config, probe: Option<&vixeeny_encode::probe::ProbeResul
         encoders,
         settings: vec![
             ("Language".to_owned(), config.general.language.clone()),
-            ("Images".to_owned(), config.image.format.clone()),
+            (
+                "Images".to_owned(),
+                vixeeny_common::config::ImageKind::ALL
+                    .into_iter()
+                    .map(|kind| format!("{}: {}", kind.name(), config.image.get(kind).format))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ),
         ],
     }
 }

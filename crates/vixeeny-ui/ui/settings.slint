@@ -10,12 +10,13 @@ import { Theme, Icons, Icon, Card, Button, IconButton, Toggle, TextBox, ComboBox
 export struct SettingRow {
     id: string,
     label: string,
-    // Behind the "i" beside the label.
+    // Shown on hover over the label.
     info: string,
     // Behind a warning sign beside the label (empty: nothing wrong).
     warning: string,
     // A short line under the label (an estimate).
     detail: string,
+    suffix: string,
     // Belongs to the row above it (a program of its list): set in.
     nested: bool,
     // 0 toggle, 1 choice, 2 number, 3 text, 4 folder, 5 info, 8 slider, 9 expander (`on`: open), 10 choice of a screen
@@ -280,6 +281,7 @@ export struct SettingGroup {
 
 // A group of actions of the shortcuts table, as one card: its rows in the table.
 export struct ShortcutSpan {
+    title: string,
     start: int,
     count: int,
 }
@@ -296,7 +298,7 @@ export struct ShortcutKey {
 
 export struct ShortcutRow {
     // Starts a new group of actions (shown apart from the one above).
-    group: bool,
+    group-title: string,
     label: string,
     // Always the two slots.
     keys: [ShortcutKey],
@@ -478,6 +480,7 @@ component SettingLine inherits GroupRow {
     if root.entry.kind == 3 : TextBox {
         width: Theme.value-w;
         text: root.entry.text;
+        suffix: root.entry.suffix;
         enabled: root.entry.enabled;
         accepted(s) => { root.text-edited(s); }
     }
@@ -581,7 +584,7 @@ component ShortcutLine inherits Rectangle {
 
     property <string> detail: root.entry.error;
     property <bool> compact: root.second-w < root.key-w;
-    height: max(56px, info.preferred-height + 24px);
+    height: max(64px, info.preferred-height + 28px);
     if root.divider : Rectangle {
         x: 0px;
         y: 0px;
@@ -1067,21 +1070,30 @@ export component SettingsWindow inherits Window {
                     width: parent.width - 8px;
                     height: parent.height;
                     column: page.column;
-                    for span in root.shortcut-spans : Card {
-                        clip: true;
-                        VerticalLayout {
-                            for k in span.count : ShortcutLine {
-                                property <int> i: span.start + k;
-                                entry: root.shortcuts[self.i];
-                                divider: k > 0;
-                                recording-here: root.recording-row == self.i;
-                                recording-slot: root.recording-slot;
-                                held: root.recording-keys;
-                                key-w: key-w;
-                                second-w: second-w;
-                                t: root.t;
-                                record(slot) => { root.shortcut-record(self.i, slot); }
-                                clear(slot) => { root.shortcut-clear(self.i, slot); }
+                    for span in root.shortcut-spans : VerticalLayout {
+                        spacing: 8px;
+                        Text {
+                            text: span.title;
+                            color: Theme.text-2;
+                            font-size: 13px;
+                            font-weight: 600;
+                        }
+                        Card {
+                            clip: true;
+                            VerticalLayout {
+                                for k in span.count : ShortcutLine {
+                                    property <int> i: span.start + k;
+                                    entry: root.shortcuts[self.i];
+                                    divider: k > 0;
+                                    recording-here: root.recording-row == self.i;
+                                    recording-slot: root.recording-slot;
+                                    held: root.recording-keys;
+                                    key-w: key-w;
+                                    second-w: second-w;
+                                    t: root.t;
+                                    record(slot) => { root.shortcut-record(self.i, slot); }
+                                    clear(slot) => { root.shortcut-clear(self.i, slot); }
+                                }
                             }
                         }
                     }

@@ -185,22 +185,29 @@ impl Shared {
 
 /// Follows the zone until told to finish. Returns the assembled image, and on an HDR screen its levels (the image's
 /// layer then holds the rows as captured, RGBA half floats).
-fn capture_loop(
-    shared: &Arc<Shared>,
+struct CaptureSettings {
     monitor: MonitorInfo,
     rect: PhysicalRect,
     max_height: u32,
+    show_cursor: bool,
+}
+
+fn capture_loop(
+    shared: &Arc<Shared>,
+    settings: CaptureSettings,
     lang: Lang,
     preview: &vixeeny_ui::scroll_panel::ScrollHandle,
     preview_box: (u32, u32),
 ) -> anyhow::Result<Option<(Stitched, Option<HdrInfo>)>> {
+    let CaptureSettings { monitor, rect, max_height, show_cursor } = settings;
     // The control window must be out of the capture before the first frame.
     shared.wait_for(&shared.shown, None);
     // An HDR screen is read as it is and tone-mapped here, as every other capture is.
     let hdr = vixeeny_platform::hdr_info(monitor.id).map(HdrScreen::new);
     let target = StreamTarget::Region { monitor, rect };
     let told = shared.clone();
-    let stream = VideoStream::start_notify(&target, false, hdr.is_some(), Box::new(move || told.tell(&told.arrived)))?;
+    let stream =
+        VideoStream::start_notify(&target, show_cursor, hdr.is_some(), Box::new(move || told.tell(&told.arrived)))?;
     let buffers = stream.buffers();
     let mut stitcher = Stitcher::new(vixeeny_stitch::Config { max_height, ..Default::default() });
     let mut warned_full = false;
@@ -282,11 +289,15 @@ pub fn run(config: &Config, snapshot: Snapshot, zone: PhysicalRect, scale: f32) 
     let preview_box = ((PANEL_WIDTH * scale) as u32, at.height);
     let worker = {
         let shared = shared.clone();
-        let monitor = monitor.clone();
-        let max_height = config.scrolling.max_height.max(100);
+        let settings = CaptureSettings {
+            monitor: monitor.clone(),
+            rect: relative,
+            max_height: config.scrolling.max_height.max(100),
+            show_cursor: config.image.scrolling.show_cursor,
+        };
         std::thread::Builder::new()
             .name("scroll-capture".into())
-            .spawn(move || capture_loop(&shared, monitor, relative, max_height, lang, &handle, preview_box))?
+            .spawn(move || capture_loop(&shared, settings, lang, &handle, preview_box))?
     };
 
     let events = shared.clone();
@@ -314,7 +325,8 @@ pub fn run(config: &Config, snapshot: Snapshot, zone: PhysicalRect, scale: f32) 
     if let (Some(layer), Some(info)) = (stitched.layer, hdr_info) {
         let (w, h) = (frame.width, frame.height);
         frame = tonemapped(&layer, w, h, &info).context("unexpected stitched image")?;
-        let keep = crate::keep_hdr(config) && crate::image_output(config).0.holds_hdr();
+        let keep =
+            crate::keep_hdr(&config.image.scrolling) && crate::image_output(&config.image.scrolling).0.holds_hdr();
         hdr = keep.then(|| hdr_picture(w, h, &layer, info));
     }
     if config.scrolling.annotate {

@@ -88,6 +88,8 @@ impl Output<'_> {
 /// Where and under which name captures are written.
 pub struct Destination<'a> {
     pub dir: &'a Path,
+    /// Write a persistent file; otherwise only run the clipboard callback.
+    pub keep_copy: bool,
     pub template: &'a str,
     pub per_app_subfolder: bool,
     /// `{app}` of a desktop capture is the full-screen application with the focus (a game), not `Desktop`.
@@ -359,7 +361,9 @@ fn write_named(
         format.extension(),
         std::path::Path::exists,
     );
-    write_atomic(&path, bytes)?;
+    if dest.keep_copy {
+        write_atomic(&path, bytes)?;
+    }
     Ok(path)
 }
 
@@ -453,6 +457,7 @@ mod tests {
         let mut capturer = Capturer::new(FakeBackend::default(), snap.monitors.clone());
         let now = now();
         let dest = Destination {
+            keep_copy: true,
             dir,
             template,
             per_app_subfolder: per_app,
@@ -479,6 +484,44 @@ mod tests {
         dir
     }
 
+    #[test]
+    fn a_clipboard_only_capture_does_not_create_a_file_or_folder() {
+        let dir = temp_dir("clipboard-only");
+        let snap = snapshot();
+        let names = BTreeMap::new();
+        let now = now();
+        let copied = std::sync::Mutex::new(None);
+        let after = |image: &Bgra<'_>, encoded: Option<&[u8]>, name: &str| {
+            *copied.lock().unwrap() = Some((image.width, image.height, encoded.unwrap().to_vec(), name.to_owned()));
+        };
+        let dest = Destination {
+            keep_copy: false,
+            dir: &dir,
+            template: "{app}",
+            per_app_subfolder: true,
+            use_foreground_app: false,
+            app_names: &names,
+            now: &now,
+            after_save: Some(&after),
+        };
+        let mut capturer = Capturer::new(FakeBackend::default(), snap.monitors.clone());
+        run(
+            ActionId::CaptureFullscreen,
+            &snap,
+            &mut capturer,
+            &dest,
+            CaptureOptions::default(),
+            Output { format: ImageFormat::Png, settings: &Settings::default(), keep_hdr: false, backdrop: None },
+            &no_metadata,
+        )
+        .unwrap();
+        assert!(!dir.exists());
+        let (width, height, bytes, name) = copied.into_inner().unwrap().unwrap();
+        assert_eq!((width, height), (160, 100));
+        assert!(!name.is_empty());
+        assert!(vixeeny_image::decode(&bytes).is_ok());
+    }
+
     /// A window capture on its background: larger by the margin, the background in the corner; other captures
     /// untouched.
     #[test]
@@ -488,6 +531,7 @@ mod tests {
         let names = BTreeMap::new();
         let now = now();
         let dest = Destination {
+            keep_copy: true,
             dir: &dir,
             template: "{app}_{time}",
             per_app_subfolder: false,
@@ -600,6 +644,7 @@ mod tests {
         // A zone is Vixeeny's, even over the full-screen game.
         let now = now();
         let dest = Destination {
+            keep_copy: true,
             dir: &dir,
             template: "{app}",
             per_app_subfolder: false,
@@ -630,6 +675,7 @@ mod tests {
         let copied = || copied.lock().unwrap().take();
         let encoded = || encoded.lock().unwrap().take();
         let dest = Destination {
+            keep_copy: true,
             dir: &dir,
             template: "{app}",
             per_app_subfolder: false,

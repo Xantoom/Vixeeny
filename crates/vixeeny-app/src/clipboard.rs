@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use vixeeny_common::config::Config;
+use vixeeny_common::config::Image;
 use vixeeny_image::{Bgra, ImageFormat};
 use vixeeny_platform::PlatformError;
 use vixeeny_platform::clipboard::ImageClip;
@@ -12,8 +12,8 @@ use vixeeny_platform::clipboard::ImageClip;
 /// `vixeeny_platform::clipboard`). A bitmap goes along in every case. `encoded`: the image already encoded with the
 /// image settings (the file just saved), not encoded again then. `name`: the file's name where it is pasted, without
 /// the extension (that of the saved file).
-pub fn copy_bgra(config: &Config, image: &Bgra<'_>, encoded: Option<&[u8]>, name: &str) -> anyhow::Result<()> {
-    let (format, settings) = crate::image_output(config);
+pub fn copy_bgra(settings: &Image, image: &Bgra<'_>, encoded: Option<&[u8]>, name: &str) -> anyhow::Result<()> {
+    let (format, settings) = crate::image_output(settings);
     let made;
     let bytes = match encoded {
         Some(bytes) => bytes,

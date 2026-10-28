@@ -333,12 +333,13 @@ impl VideoStream {
     pub fn start_held(
         target: &StreamTarget,
         device: ID3D11Device,
+        cursor: bool,
         min_interval: Option<Duration>,
         notify: Notify,
     ) -> Result<Self, CaptureError> {
         let held = Held::default();
         let ticks = min_interval.map(|interval| i64::try_from(interval.as_nanos() / 100).unwrap_or(i64::MAX));
-        Self::open_with(target, false, false, Source::Held(device, held.clone()), Some(notify), None, ticks)
+        Self::open_with(target, cursor, false, Source::Held(device, held.clone()), Some(notify), None, ticks)
     }
 
     /// The newest frame, if one came since the last taken (see [`start_held`](Self::start_held)).
@@ -632,6 +633,7 @@ mod tests {
         let stream = match VideoStream::start_held(
             &StreamTarget::Monitor(monitor),
             device.clone(),
+            false,
             Some(Duration::from_micros(16_667)),
             Box::new(move || {
                 let _ = tx.send(());

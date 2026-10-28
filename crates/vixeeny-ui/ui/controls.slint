@@ -233,6 +233,7 @@ export global Fields {
 export component TextBox inherits Rectangle {
     in property <string> text;
     in property <string> placeholder;
+    in property <string> suffix;
     in property <bool> enabled: true;
     in property <bool> read-only: false;
     callback edited(string);
@@ -263,7 +264,7 @@ export component TextBox inherits Rectangle {
     }
     Text {
         x: 10px;
-        width: parent.width - 20px;
+        width: parent.width - 20px - (root.suffix != "" ? suffix.width + 8px : 0px);
         text: root.placeholder;
         visible: input.text == "" && !input.has-focus;
         color: Theme.text-3;
@@ -281,7 +282,7 @@ export component TextBox inherits Rectangle {
         clicked => { input.focus(); }
         input := TextInput {
             x: 10px;
-            width: parent.width - 20px;
+            width: parent.width - 20px - (root.suffix != "" ? suffix.width + 8px : 0px);
             height: parent.height;
             text: root.text;
             enabled: root.enabled;
@@ -296,6 +297,16 @@ export component TextBox inherits Rectangle {
             accepted => { root.accepted(self.text); }
             changed has-focus => { if (!self.has-focus) { root.accepted(self.text); } }
         }
+    }
+    suffix := Text {
+        x: parent.width - self.width - 10px;
+        height: parent.height;
+        width: min(self.preferred-width, parent.width / 2);
+        text: root.suffix;
+        color: Theme.text-3;
+        font-size: 13px;
+        vertical-alignment: center;
+        overflow: elide;
     }
     accessible-role: text-input;
     accessible-label: root.placeholder;
@@ -1038,7 +1049,7 @@ export component InfoTip inherits Rectangle {
 export component GroupRow inherits Rectangle {
     in property <string> title;
     in property <string> description;
-    // What the setting does and what to choose: behind an "i" beside the title.
+    // What the setting does and what to choose: shown on hover over the title.
     in property <string> info;
     // What is wrong with it as it is: behind a warning sign beside the title.
     in property <string> warning;
@@ -1162,15 +1173,32 @@ export component GroupRow inherits Rectangle {
         HorizontalLayout {
             alignment: start;
             spacing: 6px;
-            Text {
-                text: root.title;
-                color: root.tint;
-                font-size: 14px;
-                wrap: word-wrap;
-            }
-            if root.info != "" : InfoTip {
-                y: (parent.height - self.height) / 2;
-                text: root.info;
+            Rectangle {
+                horizontal-stretch: 1;
+                preferred-width: title.preferred-width;
+                height: title.preferred-height;
+                title := Text {
+                    width: parent.width;
+                    text: root.title;
+                    color: root.tint;
+                    font-size: 14px;
+                    wrap: word-wrap;
+                }
+                TouchArea {
+                    enabled: root.info != "";
+                    mouse-cursor: root.clickable ? pointer : help;
+                    clicked => { if root.clickable { root.clicked(); } }
+                    changed has-hover => {
+                        if self.has-hover {
+                            Tip.text = root.info;
+                            Tip.left = root.absolute-position.x + txt.x;
+                            Tip.top = root.absolute-position.y + txt.y;
+                            Tip.bottom = root.absolute-position.y + txt.y + title.height;
+                        } else if Tip.text == root.info {
+                            Tip.text = "";
+                        }
+                    }
+                }
             }
             if root.warning != "" : InfoTip {
                 y: (parent.height - self.height) / 2;

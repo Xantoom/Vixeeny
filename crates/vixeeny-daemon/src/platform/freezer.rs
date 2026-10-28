@@ -37,7 +37,8 @@ impl GpuFreezer {
                 self.gpu = Self::device();
             }
             let gpu = self.gpu.as_ref()?;
-            let taken = if show { freeze::freeze(gpu, &monitors) } else { freeze::hold(gpu, &monitors, cursor) };
+            let taken =
+                if show { freeze::freeze(gpu, &monitors, cursor) } else { freeze::hold(gpu, &monitors, cursor) };
             match taken {
                 Ok(frozen) => {
                     tracing::debug!(
@@ -60,8 +61,8 @@ impl GpuFreezer {
 }
 
 impl Freezer for GpuFreezer {
-    fn freeze(&mut self) -> Option<Frozen> {
-        self.take(true, false)
+    fn freeze(&mut self, cursor: bool) -> Option<Frozen> {
+        self.take(true, cursor)
     }
 
     fn hold(&mut self, cursor: bool) -> Option<Frozen> {

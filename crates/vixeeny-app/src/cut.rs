@@ -827,7 +827,7 @@ impl Host {
             };
             let result = match anim_format(&dest) {
                 Some(format) => {
-                    let settings = crate::image_output(&config).1;
+                    let settings = crate::image_output(&config.image.region).1;
                     write_animation(&clip, range, &dest, format, &settings, &tell, &stop)
                 }
                 None => write(&clip, range, &dest, &reencoders, reshape.is_none(), &tell, &stop),

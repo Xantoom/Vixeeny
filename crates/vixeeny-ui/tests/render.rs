@@ -85,6 +85,32 @@ fn settings_render_at(
 }
 
 #[test]
+fn image_profiles_and_shortcut_groups_render_in_french() {
+    use slint::Model;
+    use vixeeny_settings::Section;
+    let (panel, _) = settings_panel();
+    panel.window().invoke_row_chosen("language".into(), 1);
+    panel.window().set_animated(false);
+    panel.select_section(Section::Image);
+    let window = panel.window();
+    assert_eq!(window.get_groups().row_count(), 6);
+    for kind in vixeeny_common::config::ImageKind::ALL {
+        window.invoke_row_toggled(format!("image:{}:encoding", kind.name()).into(), true);
+    }
+    window.invoke_row_chosen("image:window:image_format".into(), 0);
+    window.invoke_row_number("image:region:jpeg_quality".into(), 61);
+    assert_eq!(panel.config().image.region.jpeg.quality, 61);
+    assert_eq!(panel.config().image.window.format, "png");
+    assert_eq!(panel.config().image.fullscreen.format, "jpeg");
+    settings_render_at(&panel, "settings-images-fr", (1040, 1900));
+    panel.select_section(Section::Shortcuts);
+    assert_eq!(window.get_shortcut_spans().row_count(), 4);
+    settings_render_at(&panel, "settings-shortcuts-fr", (1040, 1100));
+    panel.select_section(Section::Overlay);
+    settings_render(&panel, "settings-overlays-fr");
+}
+
+#[test]
 fn a_page_resets_once_changed_and_asked() {
     use vixeeny_settings::Section;
     let (panel, seen) = settings_panel();
@@ -202,12 +228,12 @@ fn a_backdrop_colour_is_picked_or_typed() {
     use vixeeny_settings::Section;
     let (panel, seen) = settings_panel();
     panel.select_section(Section::Image);
-    panel.window().invoke_row_chosen("window_backdrop".into(), 3); // gradient
+    panel.window().invoke_row_chosen("image:window:window_backdrop".into(), 3); // gradient
     let w = panel.window();
-    w.invoke_row_colour("backdrop_gradient".into(), 1, slint::Color::from_rgb_u8(1, 2, 3));
-    settings_render_at(&panel, "backdrop_gradient", (1040, 1500));
+    w.invoke_row_colour("image:window:backdrop_gradient".into(), 1, slint::Color::from_rgb_u8(1, 2, 3));
+    settings_render_at(&panel, "image:window:backdrop_gradient", (1040, 1500));
     // Its start opens the picker.
-    let at = slint::LogicalPosition::new(726.0, 784.0);
+    let at = slint::LogicalPosition::new(726.0, 744.0);
     let button = slint::platform::PointerEventButton::Left;
     for event in [
         slint::platform::WindowEvent::PointerMoved { position: at },
@@ -218,18 +244,19 @@ fn a_backdrop_colour_is_picked_or_typed() {
     }
     slint::platform::update_timers_and_animations();
     settings_render_at(&panel, "backdrop_picker", (1040, 1500));
-    let last =
-        |seen: &std::cell::RefCell<Vec<vixeeny_common::config::Config>>| seen.borrow().last().map(|c| c.image.clone());
+    let last = |seen: &std::cell::RefCell<Vec<vixeeny_common::config::Config>>| {
+        seen.borrow().last().map(|c| c.image.window.clone())
+    };
     assert_eq!(last(&seen).map(|i| i.backdrop_gradient), Some("#654ea3,#010203".into()));
-    w.invoke_row_chosen("window_backdrop".into(), 2); // colour
-    w.invoke_row_code("backdrop_colour".into(), 0, "#ABCDEF".into());
+    w.invoke_row_chosen("image:window:window_backdrop".into(), 2); // colour
+    w.invoke_row_code("image:window:backdrop_colour".into(), 0, "#ABCDEF".into());
     slint::platform::update_timers_and_animations();
     assert_eq!(last(&seen).map(|i| i.backdrop_colour), Some("#abcdef".into()));
     // Not a colour: nothing changes.
-    w.invoke_row_code("backdrop_colour".into(), 0, "#zz".into());
+    w.invoke_row_code("image:window:backdrop_colour".into(), 0, "#zz".into());
     slint::platform::update_timers_and_animations();
     assert_eq!(last(&seen).map(|i| i.backdrop_colour), Some("#abcdef".into()));
-    settings_render_at(&panel, "backdrop_colour", (1040, 1500));
+    settings_render_at(&panel, "image:window:backdrop_colour", (1040, 1500));
 }
 
 #[test]
@@ -248,11 +275,12 @@ fn rows_that_appear_on_the_same_page_unfold() {
     };
     panel.select_section(Section::Image);
     assert!(fresh(&panel).is_empty(), "a new page does not unfold");
+    panel.window().invoke_row_toggled("image:region:encoding".into(), true);
     // PNG brings its own options in: they unfold, the rows already there do not.
-    panel.window().invoke_row_chosen("image_format".into(), 0); // PNG, JPEG
+    panel.window().invoke_row_chosen("image:region:image_format".into(), 0); // PNG, JPEG
     let unfolded = fresh(&panel);
-    assert!(unfolded.contains(&"png_compression".to_owned()), "{unfolded:?}");
-    assert!(!unfolded.contains(&"image_format".to_owned()));
+    assert!(unfolded.contains(&"image:region:png_compression".to_owned()), "{unfolded:?}");
+    assert!(!unfolded.contains(&"image:region:image_format".to_owned()));
     panel.select_section(Section::Recording);
     assert!(fresh(&panel).is_empty());
 }
@@ -276,7 +304,7 @@ fn rows_that_stop_applying_fold_away_then_go() {
     let now = rows(&panel);
     let corner = now.iter().position(|(id, _)| id == "widget_corner");
     let widget = now.iter().position(|(id, _)| id == "widget");
-    assert!(corner.is_some_and(|c| widget.is_some_and(|w| c == w + 1)), "{now:?}");
+    assert!(corner.is_some_and(|c| widget.is_some_and(|w| c == w + 2)), "{now:?}");
     assert!(now.iter().any(|(id, leaving)| id == "widget_corner" && *leaving));
     // The next change takes them away for good.
     panel.window().invoke_row_chosen("overlay_edge".into(), 0);
@@ -557,10 +585,9 @@ fn the_updates_and_about_pages_show_what_the_host_gives_them() {
     settings_render(&panel, "9-settings-updates-current");
 }
 
-// The tooltip of an "i" shows anywhere on its dot, and stays while the pointer moves on it: a popup took the pointer
-// from the dot and closed again at the next move.
+// The label keeps its tooltip while the pointer moves over it.
 #[test]
-fn info_tooltip_stays_while_the_pointer_moves_on_its_dot() {
+fn info_tooltip_stays_while_the_pointer_moves_over_its_label() {
     use slint::LogicalPosition;
     use slint::platform::WindowEvent;
     use vixeeny_settings::Section;
@@ -577,14 +604,14 @@ fn info_tooltip_stays_while_the_pointer_moves_on_its_dot() {
     let move_to = |x: f32, y: f32| {
         window.dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(x, y) });
     };
-    // The glyph, the ring, inside the dot off the glyph, and the margin around it.
-    for (x, y) in [(334.0, 285.0), (328.5, 285.0), (334.0, 280.0), (330.0, 281.0), (339.5, 289.5)] {
+    // Different points of the file-name label, including its text and the space beside it.
+    for (x, y) in [(260.0, 285.0), (280.0, 285.0), (300.0, 280.0), (310.0, 281.0), (300.0, 284.5)] {
         for dx in [0.0, 0.5, 1.0, 1.5] {
             move_to(x + dx, y);
             assert!(changed("tip-on") > 20_000, "no tooltip at ({}, {y})", x + dx);
         }
         move_to(600.0, 600.0);
-        assert!(changed("tip-off") < 2_000, "the tooltip stays away from the dot");
+        assert!(changed("tip-off") < 2_000, "the tooltip stays away from the label");
     }
     window.dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: 1.0 });
 }
@@ -605,8 +632,7 @@ fn with_mica_the_window_lets_it_through() {
     panel.window().global::<Theme>().set_mica(false);
 }
 
-// An "i" hovered, then the page scrolled under the pointer: the tooltip goes once the pointer leaves, although the dot
-// is no longer where it was shown.
+// A label hovered, then the page scrolled under the pointer: its tooltip clears when the pointer leaves.
 #[test]
 fn a_tooltip_goes_after_a_scroll() {
     use slint::LogicalPosition;
@@ -649,13 +675,13 @@ fn a_tooltip_goes_after_a_scroll() {
     }
     scroll(500.0, -4000.0);
     settings_render_at(&panel, "tip-scroll-2", size);
-    // Where the pointer ends, without ever resting on an "i".
+    // Where the pointer ends, away from any label.
     let end = at(335.0 + 49.0 * 5.5, 604.0 - 49.0 * 10.0);
     window.dispatch_event(WindowEvent::PointerMoved { position: end });
     scroll(end.y, 100.0);
     let clean = settings_render_at(&panel, "tip-scroll-3", size);
     scroll(end.y, -100.0);
-    // The container's "i", near the bottom; a little scroll; the pointer moves up and away.
+    // A label near the bottom; a little scroll; the pointer moves up and away.
     window.dispatch_event(WindowEvent::PointerMoved { position: at(335.0, 604.0) });
     scroll(604.0, 100.0);
     for k in 0..50 {
