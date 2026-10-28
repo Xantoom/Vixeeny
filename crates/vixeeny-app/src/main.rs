@@ -144,7 +144,7 @@ fn direct_capture(
     };
     let started = std::time::Instant::now();
     let snapshot = still::Snapshot { monitors, cursor, foreground };
-    let image_settings = config.image.for_action(action);
+    let image_settings = &config.image.for_action(action);
     let dir = if image_settings.keep_copy {
         vixeeny_common::paths::ready_dir(&config.paths.images, vixeeny_common::paths::DEFAULT_IMAGES)
             .context("cannot make the images folder")?
@@ -155,7 +155,7 @@ fn direct_capture(
     let destination = still::Destination {
         dir: &dir,
         keep_copy: image_settings.keep_copy,
-        template: &config.paths.naming.images.template,
+        template: config.image_template(action),
         per_app_subfolder: config.paths.per_app_subfolder.images,
         use_foreground_app: true,
         app_names: &config.paths.app_names,

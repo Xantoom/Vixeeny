@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::ipc::ActionId;
 
 /// Schema version written by this build. Bump it and add a migration to [`MIGRATIONS`].
-pub const SCHEMA_VERSION: u32 = 11;
+pub const SCHEMA_VERSION: u32 = 12;
 
 /// `MIGRATIONS[n]` upgrades a table from schema `n + 1` to `n + 2`.
 pub type Migration = fn(&mut toml::Table);
@@ -24,6 +24,7 @@ pub const MIGRATIONS: &[Migration] = &[
     v8_new_defaults,
     v9_settings_of_their_own,
     v10_image_per_capture,
+    v11_common_image_encoding,
 ];
 
 /// 0.9 → 1.0: MP4 recordings are fragmented (a recording cut short still plays), and the cursor is left out of videos
@@ -283,6 +284,20 @@ fn v10_image_per_capture(table: &mut toml::Table) {
     }
 }
 
+fn v11_common_image_encoding(table: &mut toml::Table) {
+    if let Some(image) = table.get_mut("image").and_then(toml::Value::as_table_mut) {
+        let defaults = image.get("region").cloned().unwrap_or_else(|| toml::Value::Table(toml::Table::new()));
+        let keys = ["format", "hdr", "png", "jpeg", "webp", "avif", "jxl"];
+        for kind in ImageKind::ALL {
+            if let Some(profile) = image.get_mut(kind.name()).and_then(toml::Value::as_table_mut) {
+                let custom = keys.iter().any(|key| profile.get(*key) != defaults.get(*key));
+                profile.insert("custom_encoding".into(), custom.into());
+            }
+        }
+        image.insert("defaults".into(), defaults);
+    }
+}
+
 /// Moves each action still on `old` to `new`, all at once (two actions may swap theirs). A move whose `new` is held by
 /// a shortcut that stays where it is does not happen.
 fn move_shortcuts(hotkeys: &mut toml::Table, moves: &[(&str, &str, &str)]) {
@@ -385,6 +400,11 @@ impl Config {
     /// What the replay records with, sound included: its own settings, or those of the videos. Always a hardware
     /// encoder (the replay runs beside a game: the processor is the game's): the hardware one the settings had, else
     /// the best one.
+    pub fn image_template(&self, action: ActionId) -> &str {
+        let image = self.image.get(ImageKind::for_action(action));
+        if image.custom_name { &image.template } else { &self.paths.naming.images.template }
+    }
+
     pub fn replay_video(&self) -> Video {
         let mut video = if self.replay.same_as_video { self.video.clone() } else { self.replay.video.clone() };
         video.split = Split::default();
@@ -581,6 +601,7 @@ impl ImageKind {
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Images {
+    pub defaults: Image,
     pub region: Image,
     pub window: Image,
     pub fullscreen: Image,
@@ -609,14 +630,32 @@ impl Images {
         }
     }
 
-    pub fn for_action(&self, action: ActionId) -> &Image {
-        self.get(ImageKind::for_action(action))
+    pub fn effective(&self, kind: ImageKind) -> Image {
+        let mut image = self.get(kind).clone();
+        if !image.custom_encoding {
+            let common = &self.defaults;
+            image.format = common.format.clone();
+            image.hdr = common.hdr.clone();
+            image.png = common.png.clone();
+            image.jpeg = common.jpeg.clone();
+            image.webp = common.webp.clone();
+            image.avif = common.avif.clone();
+            image.jxl = common.jxl.clone();
+        }
+        image
+    }
+
+    pub fn for_action(&self, action: ActionId) -> Image {
+        self.effective(ImageKind::for_action(action))
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Image {
+    pub custom_encoding: bool,
+    pub custom_name: bool,
+    pub template: String,
     pub format: String,
     pub show_cursor: bool,
     pub hdr: String,
@@ -641,6 +680,9 @@ pub struct Image {
 impl Default for Image {
     fn default() -> Self {
         Self {
+            custom_encoding: false,
+            custom_name: false,
+            template: Naming::default().template,
             format: "jpeg".into(),
             show_cursor: false,
             hdr: "tonemap_sdr".into(),

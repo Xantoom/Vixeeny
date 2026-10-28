@@ -85,6 +85,77 @@ fn settings_render_at(
 }
 
 #[test]
+fn the_side_bar_shortcut_follows_the_overlay_switch() {
+    use slint::Model;
+    use vixeeny_settings::Section;
+    let (panel, _) = settings_panel();
+    panel.select_section(Section::Overlay);
+    panel.window().invoke_row_toggled("overlay_enabled".into(), false);
+    panel.select_section(Section::Shortcuts);
+    let rows = panel.window().get_shortcuts();
+    assert!(!rows.row_data(10).unwrap().enabled);
+    assert!((0..10).all(|i| rows.row_data(i).unwrap().enabled));
+    settings_render_at(&panel, "shortcuts-overlay-disabled", (1040, 1100));
+    panel.select_section(Section::Overlay);
+    panel.window().invoke_row_toggled("overlay_enabled".into(), true);
+    panel.select_section(Section::Shortcuts);
+    assert!(panel.window().get_shortcuts().row_data(10).unwrap().enabled);
+}
+
+#[test]
+fn updates_add_a_navigation_badge_for_available_and_ready_states() {
+    use settings_panel::{UpdateStage, UpdateView};
+    let (panel, _) = settings_panel();
+    let base = settings_render(&panel, "update-badge-none");
+    for stage in [UpdateStage::Available, UpdateStage::Ready] {
+        panel.set_update(&UpdateView { stage, ..Default::default() });
+        let shot = settings_render(&panel, "update-badge-present");
+        let changed = (318..356)
+            .flat_map(|y| (12..208).map(move |x| y * 1040 + x))
+            .filter(|i| base.as_slice()[*i] != shot.as_slice()[*i])
+            .count();
+        assert!(changed > 10, "no update badge for {stage:?}");
+        // The former restart control at the bottom of navigation is gone.
+        assert!(
+            (620..700)
+                .flat_map(|y| (12..208).map(move |x| y * 1040 + x))
+                .all(|i| base.as_slice()[i] == shot.as_slice()[i])
+        );
+    }
+}
+
+#[test]
+fn long_file_names_scroll_to_the_text_cursor() {
+    use slint::platform::{Key, PointerEventButton, WindowEvent};
+    let (panel, _) = settings_panel();
+    panel.select_section(vixeeny_settings::Section::Recording);
+    let w = panel.window();
+    w.invoke_row_text("template:videos".into(), format!("{}{}", "A".repeat(80), "Z".repeat(80)).into());
+    slint::platform::update_timers_and_animations();
+    settings_render(&panel, "long-name-initial");
+    let at = slint::LogicalPosition::new(800.0, 283.0);
+    w.window().dispatch_event(WindowEvent::PointerMoved { position: at });
+    w.window().dispatch_event(WindowEvent::PointerPressed { position: at, button: PointerEventButton::Left });
+    w.window().dispatch_event(WindowEvent::PointerReleased { position: at, button: PointerEventButton::Left });
+    w.window().dispatch_event(WindowEvent::KeyPressed { text: Key::Home.into() });
+    let start = settings_render(&panel, "long-name-start");
+    w.window().dispatch_event(WindowEvent::KeyPressed { text: Key::End.into() });
+    let end = settings_render(&panel, "long-name-end");
+    let changed = (274..294)
+        .flat_map(|y| (725..930).map(move |x| y * 1040 + x))
+        .filter(|i| start.as_slice()[*i] != end.as_slice()[*i])
+        .count();
+    assert!(changed > 300, "the field did not scroll to the end: {changed}");
+    w.window().dispatch_event(WindowEvent::KeyPressed { text: Key::Home.into() });
+    let again = settings_render(&panel, "long-name-start-again");
+    let changed = (274..294)
+        .flat_map(|y| (725..930).map(move |x| y * 1040 + x))
+        .filter(|i| start.as_slice()[*i] != again.as_slice()[*i])
+        .count();
+    assert!(changed < 100, "the field did not return to the beginning: {changed}");
+}
+
+#[test]
 fn image_profiles_and_shortcut_groups_render_in_french() {
     use slint::Model;
     use vixeeny_settings::Section;
@@ -95,7 +166,7 @@ fn image_profiles_and_shortcut_groups_render_in_french() {
     let window = panel.window();
     assert_eq!(window.get_groups().row_count(), 6);
     for kind in vixeeny_common::config::ImageKind::ALL {
-        window.invoke_row_toggled(format!("image:{}:encoding", kind.name()).into(), true);
+        window.invoke_row_toggled(format!("image:{}:custom_encoding", kind.name()).into(), true);
     }
     window.invoke_row_chosen("image:window:image_format".into(), 0);
     window.invoke_row_number("image:region:jpeg_quality".into(), 61);
@@ -275,12 +346,12 @@ fn rows_that_appear_on_the_same_page_unfold() {
     };
     panel.select_section(Section::Image);
     assert!(fresh(&panel).is_empty(), "a new page does not unfold");
-    panel.window().invoke_row_toggled("image:region:encoding".into(), true);
+
     // PNG brings its own options in: they unfold, the rows already there do not.
-    panel.window().invoke_row_chosen("image:region:image_format".into(), 0); // PNG, JPEG
+    panel.window().invoke_row_chosen("image:defaults:image_format".into(), 0); // PNG, JPEG
     let unfolded = fresh(&panel);
-    assert!(unfolded.contains(&"image:region:png_compression".to_owned()), "{unfolded:?}");
-    assert!(!unfolded.contains(&"image:region:image_format".to_owned()));
+    assert!(unfolded.contains(&"image:defaults:png_compression".to_owned()), "{unfolded:?}");
+    assert!(!unfolded.contains(&"image:defaults:image_format".to_owned()));
     panel.select_section(Section::Recording);
     assert!(fresh(&panel).is_empty());
 }
@@ -304,7 +375,7 @@ fn rows_that_stop_applying_fold_away_then_go() {
     let now = rows(&panel);
     let corner = now.iter().position(|(id, _)| id == "widget_corner");
     let widget = now.iter().position(|(id, _)| id == "widget");
-    assert!(corner.is_some_and(|c| widget.is_some_and(|w| c == w + 2)), "{now:?}");
+    assert!(corner.is_some_and(|c| widget.is_some_and(|w| c == w + 3)), "{now:?}");
     assert!(now.iter().any(|(id, leaving)| id == "widget_corner" && *leaving));
     // The next change takes them away for good.
     panel.window().invoke_row_chosen("overlay_edge".into(), 0);
@@ -570,8 +641,8 @@ fn the_updates_and_about_pages_show_what_the_host_gives_them() {
         .map(|(kind, level, text)| vixeeny_ui::NoteLine { kind, level, text: text.into() })
         .collect(),
     });
-    // The list of changes, unfolded.
-    panel.window().invoke_toggle_notes();
+    // The separate notes card starts unfolded.
+    assert!(panel.window().get_notes_open());
     settings_render(&panel, "9-settings-updates-ready");
     // Up to date: the card is green.
     panel.set_update(&settings_panel::UpdateView {

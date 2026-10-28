@@ -585,8 +585,36 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
         });
     }
 
-    // The sidebar shows when an update waits for a restart.
+    // Keep the navigation badge current when the background updater writes its state.
     panel.set_update(&update_view(lang));
+    if let Some(path) = vixeeny_updater::state::file() {
+        let changed = vixeeny_ui::bell::Bell::new();
+        if let Some(dir) = path.parent() {
+            let bell = changed.clone();
+            if !vixeeny_platform::on_dir_change(&[dir.to_path_buf()], move |_| bell.ring()) {
+                tracing::warn!("settings: cannot watch the update state");
+            }
+        }
+        let stamp = move || std::fs::metadata(&path).ok().and_then(|m| Some((m.modified().ok()?, m.len())));
+        let mut last = stamp();
+        let weak = panel.window().as_weak();
+        let update_handle = panel.handle();
+        changed.on_ring(move || {
+            let now = stamp();
+            if now == last {
+                return;
+            }
+            last = now;
+            if let Some(window) = weak.upgrade() {
+                // An operation in this window supplies its own progress and final state.
+                if matches!(window.get_update_state(), 1 | 3 | 6) {
+                    return;
+                }
+                let lang = crate::lang(&load_config().general.language);
+                update_handle.set_update(update_view(lang));
+            }
+        });
+    }
     panel.select_section(if open_updates { Section::Updates } else { Section::General });
     // A second launch finds the window by this mark and brings it forward.
     vixeeny_ui::theme::when_native(panel.window(), |handle| {

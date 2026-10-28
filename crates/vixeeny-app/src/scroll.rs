@@ -325,8 +325,8 @@ pub fn run(config: &Config, snapshot: Snapshot, zone: PhysicalRect, scale: f32) 
     if let (Some(layer), Some(info)) = (stitched.layer, hdr_info) {
         let (w, h) = (frame.width, frame.height);
         frame = tonemapped(&layer, w, h, &info).context("unexpected stitched image")?;
-        let keep =
-            crate::keep_hdr(&config.image.scrolling) && crate::image_output(&config.image.scrolling).0.holds_hdr();
+        let keep = crate::keep_hdr(&config.image.for_action(ActionId::CaptureScrolling))
+            && crate::image_output(&config.image.for_action(ActionId::CaptureScrolling)).0.holds_hdr();
         hdr = keep.then(|| hdr_picture(w, h, &layer, info));
     }
     if config.scrolling.annotate {

@@ -1130,6 +1130,7 @@ impl SettingsPanel {
                     .collect();
                 ShortcutRow {
                     group_title: shortcut_heading(action, lang).into(),
+                    enabled: action != ActionId::OverlayToggle || config.overlay.enabled,
                     label: action_label(action, lang).into(),
                     keys: ModelRc::from(Rc::new(VecModel::from(keys))),
                     error: errors

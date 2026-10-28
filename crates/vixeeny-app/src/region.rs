@@ -31,7 +31,7 @@ fn copy_to_clipboard(config: &Config, snap: &Snapshot, action: ActionId, img: &R
     let dest = Destination {
         dir: std::path::Path::new(""),
         keep_copy: false,
-        template: &config.paths.naming.images.template,
+        template: config.image_template(action),
         per_app_subfolder: false,
         use_foreground_app: true,
         app_names: &config.paths.app_names,
@@ -41,7 +41,7 @@ fn copy_to_clipboard(config: &Config, snap: &Snapshot, action: ActionId, img: &R
     let name = still::file_stem(action, snap, &dest, &vixeeny_platform::exe_metadata, (img.width, img.height));
     let bgra = to_bgra(img);
     copy_bgra(
-        config.image.for_action(action),
+        &config.image.for_action(action),
         &Bgra::new(img.width, img.height, img.width as usize * 4, &bgra),
         None,
         &name,
@@ -192,7 +192,7 @@ pub fn save_bgra(
     hdr: Option<&HdrCapture>,
     chosen: Option<PathBuf>,
 ) -> anyhow::Result<PathBuf> {
-    let image_settings = config.image.for_action(action);
+    let image_settings = &config.image.for_action(action);
     let (default_format, settings) = crate::image_output(image_settings);
     // Once saved, the image goes to the clipboard as well when the settings say so.
     let copy = |image: &Bgra<'_>, encoded: Option<&[u8]>, name: &str| {
@@ -246,7 +246,7 @@ pub fn save_bgra(
     let dest = Destination {
         dir: &dir,
         keep_copy: image_settings.keep_copy,
-        template: &config.paths.naming.images.template,
+        template: config.image_template(action),
         per_app_subfolder: config.paths.per_app_subfolder.images,
         use_foreground_app: true,
         app_names: &config.paths.app_names,
@@ -535,10 +535,10 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
     tracing::debug!("{} monitor(s) after {:?}", monitors.len(), started.elapsed());
     let bounds = vixeeny_platform::virtual_bounds(monitors.iter().map(|m| &m.rect)).context("no monitor found")?;
 
-    let image_settings = match mode {
-        Mode::Editor => &config.image.region,
-        Mode::Scroll => &config.image.scrolling,
-    };
+    let image_settings = &config.image.for_action(match mode {
+        Mode::Editor => ActionId::CaptureRegion,
+        Mode::Scroll => ActionId::CaptureScrolling,
+    });
     let keep_hdr = crate::keep_hdr(image_settings);
     let show_cursor = image_settings.show_cursor;
     let from_daemon = thaw.0.borrow().as_ref().and_then(|frozen| {

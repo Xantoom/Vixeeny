@@ -299,6 +299,7 @@ export struct ShortcutKey {
 export struct ShortcutRow {
     // Starts a new group of actions (shown apart from the one above).
     group-title: string,
+    enabled: bool,
     label: string,
     // Always the two slots.
     keys: [ShortcutKey],
@@ -376,7 +377,7 @@ component SettingLine inherits GroupRow {
         triggered => { self.running = false; root.reveal(root.absolute-position.y); }
     }
     glyph: root.entry.kind == 4 ? Icons.folder : "";
-    dimmed: !root.entry.enabled && root.entry.kind != 5 && root.entry.kind != 6;
+    dimmed: !root.entry.enabled && root.entry.kind != 5 && root.entry.kind != 6 && root.entry.kind != 13;
     stack-under: root.entry.kind == 3 ? 620px : 500px;
     clickable: (root.entry.kind == 0 || root.entry.kind == 9) && root.entry.enabled;
     clicked => { root.toggled(!root.entry.on); }
@@ -509,6 +510,7 @@ component SettingLine inherits GroupRow {
 // cross empties it.
 component ShortcutField inherits Rectangle {
     in property <ShortcutKey> key;
+    in property <bool> enabled: true;
     in property <bool> recording;
     // The keys held while it records.
     in property <string> held;
@@ -528,6 +530,7 @@ component ShortcutField inherits Rectangle {
     clip: true;
     animate background, border-color { duration: Theme.t-fast; }
     touch := TouchArea {
+        enabled: root.enabled;
         mouse-cursor: pointer;
         clicked => { root.record(); }
         // Why it is red, while the pointer rests on it.
@@ -557,6 +560,7 @@ component ShortcutField inherits Rectangle {
         x: parent.width - self.width - 4px;
         y: (parent.height - self.height) / 2;
         icon: Icons.dismiss;
+        enabled: root.enabled;
         label: root.t.remove;
         size: 24px;
         tint: Theme.text-3;
@@ -582,6 +586,7 @@ component ShortcutLine inherits Rectangle {
     callback record(int);
     callback clear(int);
 
+    opacity: root.entry.enabled ? 1 : 0.45;
     property <string> detail: root.entry.error;
     property <bool> compact: root.second-w < root.key-w;
     height: max(64px, info.preferred-height + 28px);
@@ -619,6 +624,7 @@ component ShortcutLine inherits Rectangle {
         if k == 0 || !root.compact : ShortcutField {
             width: parent.width;
             key: key;
+            enabled: root.entry.enabled;
             recording: root.recording-here && root.recording-slot == key.slot;
             held: root.held;
             t: root.t;
@@ -627,6 +633,7 @@ component ShortcutLine inherits Rectangle {
         }
         if k == 1 && root.compact : Button {
             icon: Icons.add;
+            enabled: root.entry.enabled;
             clicked => { root.record(key.slot); }
             accessible-label: root.t.add-shortcut;
         }
@@ -708,7 +715,7 @@ export component SettingsWindow inherits Window {
     // What changed in the version offered (or this one), under a heading that folds it.
     in property <string> update-notes-title;
     in property <[NoteLine]> update-notes;
-    property <bool> notes-open: false;
+    in-out property <bool> notes-open: true;
     public function toggle-notes() { root.notes-open = !root.notes-open; }
     // The page holds a setting changed from how it comes (its reset button works), and the question its reset asks.
     in property <bool> page-changed;
@@ -846,36 +853,12 @@ export component SettingsWindow inherits Window {
                 height: root.tab-h - 2px;
                 text: title;
                 icon: root.nav-icon(i);
+                badge: i == 7 && (root.update-state == 2 || root.update-state == 4);
                 current: i == root.section && !root.searching;
                 clicked => { root.go(i); }
             }
         }
-        // An update waits: a discreet way to it.
-        if root.update-state == 4 : Rectangle {
-            x: 12px;
-            y: parent.height - 16px - self.height;
-            width: parent.width - 24px;
-            height: 36px;
-            border-radius: 18px;
-            background: pill.has-hover ? Theme.accent-hover : Theme.accent;
-            animate background { duration: Theme.t-fast; }
-            HorizontalLayout {
-                padding-left: 12px;
-                padding-right: 12px;
-                spacing: 8px;
-                alignment: center;
-                Icon { y: (parent.height - self.height) / 2; data: Icons.download; tint: Theme.on-accent; size: 16px; }
-                Text {
-                    text: root.t.restart;
-                    color: Theme.on-accent;
-                    font-size: 13px;
-                    font-weight: 600;
-                    vertical-alignment: center;
-                    overflow: elide;
-                }
-            }
-            pill := TouchArea { mouse-cursor: pointer; clicked => { root.go(8); } }
-        }
+
     }
 
     // ---- the page
@@ -998,14 +981,18 @@ export component SettingsWindow inherits Window {
                         browse => { root.row-browse(r.id); }
                         action(a) => { root.row-action(r.id, a); }
                     }
-                    // What changed in this version, unfolding under the updates' settings.
-                    if root.section == 7 && gi == root.groups.length - 1 && root.update-notes.length > 0 : NotesFold {
-                        title: root.update-notes-title;
-                        lines: root.update-notes;
-                        open: root.notes-open;
-                        animated: root.animated;
-                        clicked => { root.toggle-notes(); }
+
+                        }
                     }
+                }
+                if root.section == 7 && root.update-notes.length > 0 : Card {
+                    VerticalLayout {
+                        NotesFold {
+                            title: root.update-notes-title;
+                            lines: root.update-notes;
+                            open: root.notes-open;
+                            animated: root.animated;
+                            clicked => { root.toggle-notes(); }
                         }
                     }
                 }

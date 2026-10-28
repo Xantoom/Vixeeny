@@ -371,6 +371,9 @@ keys! {
     SetAdminHint =>
         "Allows capturing all applications, including those started as administrator.",
         "Permet de capturer toutes les applications, même celles démarrées en tant qu’administrateur.";
+    GrpImageSettings => "Settings", "Paramètres";
+    SetCustomEncoding => "Custom encoding settings", "Paramètres d’encodage personnalisés";
+    SetCustomName => "Custom file name", "Nom personnalisé";
     SetPreview => "Show preview", "Afficher un aperçu";
     SetKeepCopy => "Keep a copy", "Garder une copie";
     SetImageEncoding => "Encoding settings", "Paramètres d’encodage";

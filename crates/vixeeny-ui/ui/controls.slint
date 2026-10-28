@@ -280,9 +280,19 @@ export component TextBox inherits Rectangle {
     touch := TouchArea {
         mouse-cursor: MouseCursor.text;
         clicked => { input.focus(); }
-        input := TextInput {
+        viewport := Rectangle {
             x: 10px;
             width: parent.width - 20px - (root.suffix != "" ? suffix.width + 8px : 0px);
+            height: parent.height;
+            clip: true;
+        input := TextInput {
+            property <length> offset;
+            x: min(0px, max(parent.width - self.width - 2px, self.offset));
+            width: max(parent.width - 2px, self.preferred-width);
+            cursor-position-changed(pos) => {
+                if pos.x + self.offset < 2px { self.offset = 2px - pos.x; }
+                else if pos.x + self.offset > parent.width - 2px { self.offset = parent.width - 2px - pos.x; }
+            }
             height: parent.height;
             text: root.text;
             enabled: root.enabled;
@@ -297,6 +307,7 @@ export component TextBox inherits Rectangle {
             accepted => { root.accepted(self.text); }
             changed has-focus => { if (!self.has-focus) { root.accepted(self.text); } }
         }
+    }
     }
     suffix := Text {
         x: parent.width - self.width - 10px;
@@ -918,6 +929,7 @@ export component NavItem inherits Rectangle {
     in property <string> text;
     in property <string> icon;
     in property <bool> current: false;
+    in property <bool> badge: false;
     callback clicked();
 
     height: 36px;
@@ -944,6 +956,13 @@ export component NavItem inherits Rectangle {
             vertical-alignment: center;
             overflow: elide;
             animate color { duration: Theme.t-normal; }
+        }
+        if root.badge : Rectangle {
+            width: 7px;
+            height: 7px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 3.5px;
+            background: Theme.accent;
         }
     }
     touch := TouchArea {

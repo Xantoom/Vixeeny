@@ -935,10 +935,10 @@ mod tests {
     #[test]
     fn rows_that_do_not_apply_are_left_out() {
         let mut c = Config::default();
-        assert!(has(Section::Image, &c, "image:region:jpeg_quality"));
-        c.image.region.format = "png".into();
-        assert!(!has(Section::Image, &c, "image:region:jpeg_quality"));
-        assert!(!has(Section::Image, &c, "image:region:avif_depth"));
+        assert!(has(Section::Image, &c, "image:defaults:jpeg_quality"));
+        c.image.defaults.format = "png".into();
+        assert!(!has(Section::Image, &c, "image:defaults:jpeg_quality"));
+        assert!(!has(Section::Image, &c, "image:defaults:avif_depth"));
         assert!(has(Section::Overlay, &c, "widget_corner"));
         c.recording_widget.enabled = false;
         assert!(!has(Section::Overlay, &c, "widget_corner"));
@@ -992,7 +992,7 @@ mod tests {
         // HDR: offered only while Windows shows it.
         c.video.hdr = "keep_hdr".into();
         assert!(!has(Section::Recording, &c, "hdr"));
-        assert!(!has(Section::Image, &c, "image:region:image_hdr"));
+        assert!(!has(Section::Image, &c, "image:defaults:image_hdr"));
         let on = rows(Section::Recording, &fast, &c);
         assert!(row(&on, "hdr").enabled());
         assert_eq!(row(&on, "hdr").value(&c), Value::Bool(true));
@@ -1052,10 +1052,34 @@ mod tests {
     }
 
     #[test]
+    fn image_overrides_start_off_and_follow_the_effective_format() {
+        use vixeeny_common::{config::ImageKind, ipc::ActionId};
+        let mut c = Config::default();
+        c.image.defaults.format = "png".into();
+        for kind in ImageKind::ALL {
+            assert!(!c.image.get(kind).custom_encoding && !c.image.get(kind).custom_name);
+            assert_eq!(c.image.effective(kind).format, "png");
+        }
+        let page = rows(Section::Image, &env(), &c);
+        assert!(!page.iter().any(|r| r.id == "image:window:image_format"));
+        row(&page, "image:window:custom_name").apply(&mut c, Value::Bool(true)).unwrap();
+        let page = rows(Section::Image, &env(), &c);
+        assert_eq!(row(&page, "image:window:template").suffix, ".png");
+        row(&page, "image:window:template").apply(&mut c, Value::Text("Window {date}".into())).unwrap();
+        assert_eq!(c.image_template(ActionId::CaptureWindow), "Window {date}");
+        row(&page, "image:window:custom_encoding").apply(&mut c, Value::Bool(true)).unwrap();
+        let page = rows(Section::Image, &env(), &c);
+        assert_eq!(row(&page, "image:window:template").suffix, ".jpg");
+        assert_eq!(c.image.for_action(ActionId::CaptureWindow).format, "jpeg");
+        assert_eq!(c.image.for_action(ActionId::CaptureFullscreen).format, "png");
+    }
+
+    #[test]
     fn capture_settings_are_independent_and_reset_together() {
         use vixeeny_common::config::ImageKind;
         let mut config = Config::default();
         for (index, kind) in ImageKind::ALL.into_iter().enumerate() {
+            config.image.get_mut(kind).custom_encoding = true;
             let page = rows(Section::Image, &env(), &config);
             for (id, value) in [("clipboard", false), ("keep_copy", false), ("image_cursor", true)] {
                 row(&page, &format!("image:{}:{id}", kind.name())).apply(&mut config, Value::Bool(value)).unwrap();
@@ -1079,7 +1103,8 @@ mod tests {
     fn overlays_have_previews_and_visibility_precedes_position() {
         let page = rows(Section::Overlay, &env(), &Config::default());
         let index = |id| page.iter().position(|r| r.id == id).unwrap();
-        assert_eq!(index("widget_display"), index("widget") + 1);
+        assert_eq!(index("preview_widget"), index("widget") + 1);
+        assert_eq!(index("widget_display"), index("preview_widget") + 1);
         assert!(index("widget_display") < index("widget_corner"));
         assert!(row(&page, "widget_corner").info.is_empty());
         for id in ["preview_side", "preview_widget"] {
@@ -1092,7 +1117,7 @@ mod tests {
         let mut config = Config::default();
         config.image.window.format = "png".into();
         let page = rows(Section::Image, &env(), &config);
-        assert_eq!(row(&page, "template:images").suffix, ".jpg / .png");
+        assert_eq!(row(&page, "template:images").suffix, ".jpg");
         let before = config.paths.naming.images.template.clone();
         assert_eq!(row(&page, "template:images").value(&config), Value::Text(before));
         config.video.container = "mkv".into();
@@ -1104,13 +1129,13 @@ mod tests {
         let mut c = Config::default();
         let ids = |c: &Config| -> Vec<String> { rows(Section::Image, &env(), c).into_iter().map(|r| r.id).collect() };
         for (format, own) in [
-            ("png", &["image:region:png_compression", "image:region:png_optimize"][..]),
-            ("jpeg", &["image:region:jpeg_quality"]),
-            ("webp", &["image:region:webp_lossless", "image:region:webp_effort"]),
-            ("avif", &["image:region:avif_quality", "image:region:avif_depth", "image:region:avif_speed"]),
-            ("jxl", &["image:region:jxl_lossless", "image:region:jxl_effort"]),
+            ("png", &["image:defaults:png_compression", "image:defaults:png_optimize"][..]),
+            ("jpeg", &["image:defaults:jpeg_quality"]),
+            ("webp", &["image:defaults:webp_lossless", "image:defaults:webp_effort"]),
+            ("avif", &["image:defaults:avif_quality", "image:defaults:avif_depth", "image:defaults:avif_speed"]),
+            ("jxl", &["image:defaults:jxl_lossless", "image:defaults:jxl_effort"]),
         ] {
-            c.image.region.format = format.into();
+            c.image.defaults.format = format.into();
             let ids = ids(&c);
             for id in own {
                 assert!(ids.iter().any(|i| i == id), "{format}: {id}");
@@ -1119,21 +1144,21 @@ mod tests {
             let others = ids
                 .iter()
                 .filter(|i| {
-                    i.starts_with("image:region:") && !i.trim_start_matches("image:region:").starts_with(format)
+                    i.starts_with("image:defaults:") && !i.trim_start_matches("image:defaults:").starts_with(format)
                 })
                 .filter(|i| {
                     ["png", "jpeg", "webp", "avif", "jxl"]
                         .iter()
-                        .any(|f| i.trim_start_matches("image:region:").starts_with(f))
+                        .any(|f| i.trim_start_matches("image:defaults:").starts_with(f))
                 })
                 .count();
             assert_eq!(others, 0, "{format}");
         }
         // A lossy quality only when it is not lossless.
-        c.image.region.format = "webp".into();
-        assert!(!ids(&c).iter().any(|i| i == "image:region:webp_quality"));
-        c.image.region.webp.lossless = false;
-        assert!(ids(&c).iter().any(|i| i == "image:region:webp_quality"));
+        c.image.defaults.format = "webp".into();
+        assert!(!ids(&c).iter().any(|i| i == "image:defaults:webp_quality"));
+        c.image.defaults.webp.lossless = false;
+        assert!(ids(&c).iter().any(|i| i == "image:defaults:webp_quality"));
     }
 
     #[test]
@@ -1392,16 +1417,16 @@ mod tests {
         let mut c = Config::default();
         let env = env().with_display(Display { hdr: true, max_refresh: 60 });
         let images = rows(Section::Image, &env, &c);
-        let hdr = row(&images, "image:region:image_hdr");
+        let hdr = row(&images, "image:defaults:image_hdr");
         assert_eq!(hdr.value(&c), Value::Bool(false));
-        assert_eq!(c.image.region.hdr, "tonemap_sdr");
+        assert_eq!(c.image.defaults.hdr, "tonemap_sdr");
         hdr.apply(&mut c, Value::Bool(true)).unwrap();
-        assert_eq!(c.image.region.hdr, "keep_hdr");
+        assert_eq!(c.image.defaults.hdr, "keep_hdr");
         assert!(hdr.enabled());
         // WebP cannot keep it: the switch is greyed out, its "i" says why.
-        c.image.region.format = "webp".into();
+        c.image.defaults.format = "webp".into();
         let images = rows(Section::Image, &env, &c);
-        let greyed = row(&images, "image:region:image_hdr");
+        let greyed = row(&images, "image:defaults:image_hdr");
         assert!(!greyed.enabled());
         assert!(greyed.info.contains("WebP"), "{}", greyed.info);
         assert!(greyed.apply(&mut c, Value::Bool(false)).is_err());
@@ -1714,9 +1739,9 @@ mod tests {
         // A setting with nothing to add has no "i".
         assert!(row(&video, "video_cursor").info.is_empty());
         assert!(row(&video, "preset").info.contains("Performance"));
-        c.image.region.format = "jpeg".into();
+        c.image.defaults.format = "jpeg".into();
         let image = rows(Section::Image, &env(), &c);
-        assert!(row(&image, "image:region:image_format").info.is_empty());
-        assert!(row(&image, "image:region:jpeg_quality").info.is_empty());
+        assert!(row(&image, "image:defaults:image_format").info.is_empty());
+        assert!(row(&image, "image:defaults:jpeg_quality").info.is_empty());
     }
 }

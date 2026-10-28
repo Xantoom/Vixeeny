@@ -159,6 +159,7 @@ pub fn overlay(env: &Env, config: &Config) -> Vec<Row> {
         |c| c.recording_widget.enabled,
         |c, v| c.recording_widget.enabled = v,
     ));
+    rows.push(button("preview_widget", t(Key::GrpWidget), t(Key::SetPreview)));
     if config.recording_widget.enabled {
         rows.push(choice(
             "widget_display",
@@ -190,7 +191,6 @@ pub fn overlay(env: &Env, config: &Config) -> Vec<Row> {
             ),
         ));
     }
-    rows.push(button("preview_widget", t(Key::GrpWidget), t(Key::SetPreview)));
     rows
 }
 
@@ -262,7 +262,7 @@ fn folder_row(env: &Env, row: Row, setting: &str) -> Row {
 pub fn image(env: &Env, config: &Config) -> Vec<Row> {
     let t = |k| env.t(k);
     let mut rows = vec![
-        header("h_location", t(Key::GrpLocation)),
+        header("h_location", t(Key::GrpImageSettings)),
         folder_row(
             env,
             folder("dir_images", t(Key::SetFolder), |c| c.paths.images.clone(), |c, v| c.paths.images = v),
@@ -275,20 +275,32 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
             |c, v| c.paths.per_app_subfolder.images = v,
         ),
     ];
-    let mut extensions = Vec::new();
-    for kind in ImageKind::ALL {
-        let extension = image_extension(&config.image.get(kind).format);
-        if !extensions.contains(&extension) {
-            extensions.push(extension);
-        }
-    }
     rows.extend(naming_rows(
         env,
         "images",
         |c| &c.paths.naming.images,
         |c| &mut c.paths.naming.images,
-        extensions.join(" / "),
+        image_extension(&config.image.defaults.format).into(),
     ));
+    let mut common = config.clone();
+    common.image.region = config.image.defaults.clone();
+    rows.extend(image_encoding(env, &common).into_iter().map(|mut row| {
+        row.id = format!("image:defaults:{}", row.id);
+        let (get, set) = (row.get, row.set);
+        row.get = Box::new(move |c| {
+            let mut view = c.clone();
+            view.image.region = c.image.defaults.clone();
+            get(&view)
+        });
+        row.set = Box::new(move |c, value| {
+            let mut view = c.clone();
+            view.image.region = c.image.defaults.clone();
+            set(&mut view, value)?;
+            c.image.defaults = view.image.region;
+            Ok(())
+        });
+        row
+    }));
     for kind in ImageKind::ALL {
         let title = match kind {
             ImageKind::Region => Key::GrpCaptureRegion,
@@ -314,13 +326,39 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
                 |c, v| c.image.region.show_cursor = v,
             ),
         ];
-        let id = format!("image:{}:encoding", kind.name());
-        let (encoding, open) = crate::expander(env, &id, t(Key::SetImageEncoding));
         if kind == ImageKind::Window {
             profile.extend(backdrop_rows(env, &view).into_iter().filter(|r| !matches!(r.kind, Kind::Header)));
         }
-        profile.push(encoding);
-        if open {
+        profile.push(toggle(
+            "custom_name",
+            t(Key::SetCustomName),
+            |c| c.image.region.custom_name,
+            |c, v| c.image.region.custom_name = v,
+        ));
+        if config.image.get(kind).custom_name {
+            let mut name = row(
+                "template",
+                t(Key::SetTemplate),
+                Kind::Text,
+                Box::new(|c| Value::Text(c.image.region.template.clone())),
+                Box::new(|c, v| match v {
+                    Value::Text(t) if !t.trim().is_empty() => {
+                        c.image.region.template = t;
+                        Ok(())
+                    }
+                    _ => Err(Invalid),
+                }),
+            );
+            name.suffix = image_extension(&config.image.effective(kind).format).into();
+            profile.push(nested(name));
+        }
+        profile.push(toggle(
+            "custom_encoding",
+            t(Key::SetCustomEncoding),
+            |c| c.image.region.custom_encoding,
+            |c, v| c.image.region.custom_encoding = v,
+        ));
+        if config.image.get(kind).custom_encoding {
             profile.extend(image_encoding(env, &view).into_iter().map(nested));
         }
         rows.extend(profile.into_iter().map(move |mut row| {

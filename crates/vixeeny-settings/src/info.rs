@@ -17,6 +17,11 @@ pub fn info(id: &str, env: &Env, config: &Config) -> Option<String> {
         return info(id, env, &crate::pages::replay_view(config));
     }
     if let Some((kind, id)) = id.strip_prefix("image:").and_then(|id| id.split_once(':')) {
+        if kind == "defaults" {
+            let mut view = config.clone();
+            view.image.region = config.image.defaults.clone();
+            return info(id, env, &view);
+        }
         let kind = vixeeny_common::config::ImageKind::ALL.into_iter().find(|k| k.name() == kind)?;
         return info(id, env, &crate::pages::image_view(config, kind));
     }
