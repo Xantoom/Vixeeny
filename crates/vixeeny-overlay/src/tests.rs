@@ -225,12 +225,13 @@ fn the_notification_draws_with_a_thumbnail_and_as_an_error() {
             })
             .expect("drawn");
         save(&format!("toast-{name}"), w, h, &pixels);
-        // The text fits: everything is inside the card, the title line above it and the bar below.
-        let (_, cy, _, ch) = l.card;
+        // The text fits: everything is inside the card, under the title line and the bar across the card.
+        let (cx, cy, cw, ch) = l.card;
         let (_, (_, text_y)) = &l.body;
         let bottom = l.button.as_ref().map_or(text_y + l.body.0.height, |(_, b)| b.1 + b.3);
-        assert!(bottom <= by && by + bh <= cy + ch, "{name}: {bottom} > {by}");
-        assert!(l.app_icon.1 + l.app_icon.3 <= l.heading.1.1, "{name}: the title line comes first");
+        assert!(bottom <= cy + ch, "{name}: {bottom} > {}", cy + ch);
+        assert!(l.app_icon.1 + l.app_icon.3 <= by && by + bh <= l.heading.1.1, "{name}: title line, bar, text");
+        assert!(bx == cx && bw == cw, "{name}: the bar spans the card");
         let (ix, iy, iw, ih) = l.app_icon;
         let o = (((iy + ih / 2.0) as u32 * w + (ix + iw / 2.0) as u32) * 4) as usize;
         assert_eq!(&pixels[o..o + 3], &[230, 80, 120], "{name}: the app's icon is drawn");
