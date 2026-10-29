@@ -397,6 +397,13 @@ component SettingLine inherits GroupRow {
             size: 14px;
         }
     }
+    // The preview, before the value.
+    if root.entry.preview : Button {
+        width: 32px;
+        icon: Icons.eye;
+        tip: root.t.preview;
+        clicked => { root.action("preview"); }
+    }
     // In the middle of the row's height, beside a taller preview button.
     if root.entry.kind == 0 : VerticalLayout {
         alignment: center;
@@ -521,13 +528,6 @@ component SettingLine inherits GroupRow {
         horizontal-alignment: right;
         vertical-alignment: center;
         wrap: word-wrap;
-    }
-    // The preview, after the value: the eyes of a page make one column.
-    if root.entry.preview : Button {
-        width: 32px;
-        icon: Icons.eye;
-        tip: root.t.preview;
-        clicked => { root.action("preview"); }
     }
 }
 
