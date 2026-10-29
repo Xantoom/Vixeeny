@@ -262,8 +262,6 @@ keys! {
     AboutReportReady => "Report ready, without personal data. Drop the selected file into the GitHub page.",
         "Rapport prêt, sans données personnelles. Glissez le fichier sélectionné dans la page GitHub.";
     SetDiskAlert => "Low disk space alert", "Alerte d'espace disque";
-    WidgetFramesLost => "{n} frame(s) lost: the encoder cannot keep up",
-        "{n} image(s) perdue(s) : l'encodeur ne suit pas";
     WidgetDiskLow => "Disk almost full: {size} free", "Disque presque plein : {size} libres";
     ToastMenuOpen => "Open the image", "Ouvrir l'image";
     ToastMenuReveal => "Show in File Explorer", "Afficher dans l'Explorateur de fichiers";
@@ -423,6 +421,8 @@ keys! {
     ToastSample => "Sample notification", "Notification d’exemple";
     ToastSampleBody => "Captures, recordings and alerts show here.",
         "Les captures, les enregistrements et les alertes s’affichent ici.";
+    WidgetFrameLost => "1 frame lost: the encoder cannot keep up", "1 image perdue : l’encodeur ne suit pas";
+    WidgetFramesLost => "{n} frames lost: the encoder cannot keep up", "{n} images perdues : l’encodeur ne suit pas";
 }
 
 impl Lang {

@@ -34,11 +34,12 @@ use windows::Win32::Graphics::DirectComposition::{
     DCompositionCreateDevice2, IDCompositionDesktopDevice, IDCompositionSurface,
 };
 use windows::Win32::Graphics::DirectWrite::{
-    DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT,
-    DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_LINE_SPACING_METHOD_UNIFORM,
-    DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_LEADING,
-    DWRITE_TEXT_ALIGNMENT_TRAILING, DWRITE_TEXT_METRICS, DWRITE_WORD_WRAPPING_NO_WRAP, DWRITE_WORD_WRAPPING_WRAP,
-    DWriteCreateFactory, IDWriteFactory, IDWriteFactory5, IDWriteFontCollection, IDWriteTextLayout,
+    DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_FEATURE, DWRITE_FONT_FEATURE_TAG_TABULAR_FIGURES,
+    DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT, DWRITE_FONT_WEIGHT_NORMAL,
+    DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_LINE_SPACING_METHOD_UNIFORM, DWRITE_PARAGRAPH_ALIGNMENT_CENTER,
+    DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_TEXT_ALIGNMENT_TRAILING, DWRITE_TEXT_METRICS,
+    DWRITE_TEXT_RANGE, DWRITE_WORD_WRAPPING_NO_WRAP, DWRITE_WORD_WRAPPING_WRAP, DWriteCreateFactory, IDWriteFactory,
+    IDWriteFactory5, IDWriteFontCollection, IDWriteTextLayout,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_ALPHA_MODE_IGNORE, DXGI_ALPHA_MODE_PREMULTIPLIED, DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM,
@@ -404,6 +405,25 @@ impl Gfx {
             layout
         };
         Ok(Paragraph { layout, width: m.widthIncludingTrailingWhitespace, height: m.height, lines: m.lineCount })
+    }
+
+    /// [`Gfx::paragraph`] with digits all as wide (a counting number keeps its width).
+    pub fn paragraph_tabular(&self, text: &str, size: f32, bold: bool, width: f32) -> Result<Paragraph> {
+        let mut p = self.paragraph(text, size, bold, width)?;
+        let mut m = DWRITE_TEXT_METRICS::default();
+        // SAFETY: plain calls on live objects; the out-pointer is valid.
+        unsafe {
+            let typography = self.dwrite.CreateTypography()?;
+            typography.AddFontFeature(DWRITE_FONT_FEATURE {
+                nameTag: DWRITE_FONT_FEATURE_TAG_TABULAR_FIGURES,
+                parameter: 1,
+            })?;
+            p.layout.SetTypography(&typography, DWRITE_TEXT_RANGE { startPosition: 0, length: u32::MAX })?;
+            p.layout.GetMetrics(&mut m)?;
+        }
+        p.width = m.widthIncludingTrailingWhitespace;
+        p.height = m.height;
+        Ok(p)
     }
 
     /// [`Gfx::paragraph`] on `max_lines` lines at most: a longer text is cut, ending with "…".

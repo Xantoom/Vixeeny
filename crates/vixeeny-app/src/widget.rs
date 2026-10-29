@@ -11,7 +11,7 @@ use anyhow::Context;
 use vixeeny_common::config::RecordingWidget;
 use vixeeny_platform::{MonitorInfo, PhysicalRect};
 
-use crate::widget_math::{Alert, FromWidget, ToWidget, corner_geometry};
+use crate::widget_math::{Alert, FromWidget, ToWidget, corner_fraction, corner_geometry};
 
 /// The recorder's end: owns the child process.
 pub struct Widget {
@@ -29,12 +29,14 @@ impl Widget {
     ) -> anyhow::Result<Self> {
         let PhysicalRect { x, y, width: w, height: h } =
             corner_geometry(&settings.corner, settings.custom, monitor.work, monitor.dpi);
+        let (anchor, _) = corner_fraction(&settings.corner, settings.custom);
         let mut command = Command::new(std::env::current_exe()?);
         command
             .arg("--widget")
             .args([x.to_string(), y.to_string(), w.to_string(), h.to_string()])
             .arg(&settings.display)
             .arg(monitor.dpi.to_string())
+            .arg(anchor.to_string())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
@@ -88,7 +90,8 @@ impl Drop for Widget {
     }
 }
 
-/// `--widget <x> <y> <width> <height> <always|fade|alerts> <dpi>`: the widget process.
+/// `--widget <x> <y> <width> <height> <always|fade|alerts> <dpi> <anchor>`: the widget process (`anchor`: where along
+/// its window a narrower bar keeps, 0 left to 1 right).
 pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     use std::rc::Rc;
     use vixeeny_overlay::widget::{Display, Widget as Bar, WidgetEvent};
@@ -99,14 +102,19 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     let geometry = PhysicalRect::new(num(0)? as i32, num(1)? as i32, num(2)? as u32, num(3)? as u32);
     let display = Display::from_name(args.get(4).map_or("", String::as_str));
     let dpi = num(5)? as u32;
+    let anchor = args.get(6).and_then(|a| a.parse().ok()).unwrap_or(0.0);
 
     vixeeny_platform::ensure_dpi_aware();
-    let look = vixeeny_overlay::Look {
-        animations: vixeeny_platform::animations_enabled(),
-        ..vixeeny_overlay::Look::default()
-    };
+    let config = vixeeny_common::paths::config_file()
+        .and_then(|p| vixeeny_common::config::Config::load(&p).ok())
+        .unwrap_or_default();
+    let look = vixeeny_overlay::Look::new(
+        crate::dark(&config),
+        vixeeny_platform::system_accent(),
+        vixeeny_platform::animations_enabled(),
+    );
     // Out of the captures from its creation, never stealing the keyboard.
-    let bar = Rc::new(Bar::new(geometry, dpi, look, display)?);
+    let bar = Rc::new(Bar::new(geometry, anchor, dpi, look, display)?);
     bar.on_event(move |event| {
         let press = match event {
             WidgetEvent::TogglePause => FromWidget::TogglePause,

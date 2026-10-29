@@ -346,7 +346,7 @@ fn content_of(toast: &Toast, thumb: Option<Thumb>) -> ToastContent {
         },
         Toast::Lossy(kind, path, lost) => ToastContent {
             heading: tr(kind.title(), lang).into(),
-            body: tr(Key::WidgetFramesLost, lang).replace("{n}", &lost.to_string()),
+            body: crate::widget_math::frames_lost(*lost, lang),
             thumb: crate::thumbnail::thumbnail(path, 256),
             warning: true,
             dark,

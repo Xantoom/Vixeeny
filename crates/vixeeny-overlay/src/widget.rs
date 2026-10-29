@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The recording widget, drawn natively: a small bar with a blinking red dot, the elapsed time, and the pause / stop
-//! buttons. It stays where it was put. In pause the dot is amber and still and the time frozen. With `auto_hide` it
-//! fades after 3 s and comes back under the pointer. It never takes the keyboard and is left out of every screen
-//! capture.
+//! buttons, as wide as what it shows. It stays where it was put, held by the side of its corner. In pause the dot is
+//! amber and still and the time frozen. With `auto_hide` it fades after 3 s and comes back under the pointer. It never
+//! takes the keyboard and is left out of every screen capture.
 //!
 //! While recording it draws once a second (the time and the dot), nothing in between.
 
@@ -55,10 +55,14 @@ impl Display {
     }
 }
 
-/// `HH:MM:SS`.
+/// `M:SS`, then `H:MM:SS` from an hour on.
 pub fn format_elapsed(elapsed: Duration) -> String {
     let s = elapsed.as_secs();
-    format!("{:02}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
+    if s < 3600 {
+        format!("{}:{:02}", s / 60, s % 60)
+    } else {
+        format!("{}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
+    }
 }
 
 /// The time shown: it counts by itself between two updates and freezes while paused.
@@ -85,14 +89,21 @@ impl Clock {
     }
 }
 
-// Logical pixels: the window, and the bar inside it (the rest is room for its shadow).
+// Logical pixels: the widest window, and the bar inside it (the rest is room for its shadow).
 pub const WIDTH: u32 = 216;
 pub const HEIGHT: u32 = 60;
 const MARGIN: f32 = 10.0;
-const BAR_W: f32 = WIDTH as f32 - 2.0 * MARGIN;
+const MAX_BAR_W: f32 = WIDTH as f32 - 2.0 * MARGIN;
 const BAR_H: f32 = HEIGHT as f32 - 2.0 * MARGIN;
 const BUTTON: f32 = 30.0;
 const ALERT: f32 = 28.0;
+/// From the bar's ends to its buttons.
+const INSET: f32 = 5.0;
+/// Where the time starts, after the state button.
+const TIME_X: f32 = INSET + BUTTON + 6.0;
+/// From the time to what follows it.
+const TIME_GAP: f32 = 8.0;
+const TIME_SIZE: f32 = 14.0;
 const FADE_AFTER_MS: u32 = 3000;
 const FADED: f32 = 0.15;
 const RISE: f64 = 0.18;
@@ -128,31 +139,44 @@ pub enum WidgetTarget {
     Outside,
 }
 
-/// The parts of the bar, logical pixels from its top-left corner.
-fn part(target: WidgetTarget) -> Box2 {
+/// The parts of a bar `width` wide, logical pixels from its top-left corner.
+fn part(target: WidgetTarget, width: f32) -> Box2 {
     let y = (BAR_H - BUTTON) / 2.0;
-    let stop = BAR_W - 5.0 - BUTTON;
+    let stop = width - INSET - BUTTON;
     match target {
-        WidgetTarget::State => (5.0, y, BUTTON, BUTTON),
+        WidgetTarget::State => (INSET, y, BUTTON, BUTTON),
         WidgetTarget::Alert => (stop - 7.0 - ALERT, (BAR_H - ALERT) / 2.0, ALERT, ALERT),
         WidgetTarget::Stop => (stop, y, BUTTON, BUTTON),
-        WidgetTarget::Bar | WidgetTarget::Outside => (0.0, 0.0, BAR_W, BAR_H),
+        WidgetTarget::Bar | WidgetTarget::Outside => (0.0, 0.0, width, BAR_H),
     }
 }
 
-/// What is at `(x, y)`, window pixels at `u` physical pixels per logical one; the warning sign is there only while
-/// `alert` is on.
-pub fn widget_at(u: f32, x: f32, y: f32, alert: bool) -> WidgetTarget {
+/// What is at `(x, y)` on the bar `look` shows, window pixels at `u` physical pixels per logical one; the warning sign
+/// is there only while something goes wrong.
+pub fn widget_at(u: f32, x: f32, y: f32, look: &WidgetLook) -> WidgetTarget {
     let (lx, ly) = (x / u - MARGIN, y / u - MARGIN);
+    let width = look.width as f32;
     let inside = |(bx, by, bw, bh): Box2| lx >= bx && lx < bx + bw && ly >= by && ly < by + bh;
-    if !inside(part(WidgetTarget::Bar)) {
+    if !inside(part(WidgetTarget::Bar, width)) {
         return WidgetTarget::Outside;
     }
     [WidgetTarget::State, WidgetTarget::Alert, WidgetTarget::Stop]
         .into_iter()
-        .filter(|t| alert || *t != WidgetTarget::Alert)
-        .find(|t| inside(part(*t)))
+        .filter(|t| look.alert != Alert::None || *t != WidgetTarget::Alert)
+        .find(|t| inside(part(*t, width)))
         .unwrap_or(WidgetTarget::Bar)
+}
+
+/// `time` laid out as the bar shows it, its digits all as wide.
+fn time_text(gfx: &Gfx, u: f32, time: &str) -> Result<crate::gfx::Paragraph> {
+    gfx.paragraph_tabular(time, TIME_SIZE * u, true, 1.0e5)
+}
+
+/// The width of the bar (logical pixels) for `time`, with the warning sign or not.
+pub fn bar_width(gfx: &Gfx, u: f32, time: &str, alert: Alert) -> Result<u32> {
+    let sign = if alert == Alert::None { 0.0 } else { ALERT + 7.0 };
+    let width = TIME_X + time_text(gfx, u, time)?.width / u + TIME_GAP + sign + BUTTON + INSET;
+    Ok(width.ceil().min(MAX_BAR_W) as u32)
 }
 
 /// What the bar shows; drawn again only when this changes.
@@ -165,21 +189,24 @@ pub struct WidgetLook {
     pub alert: Alert,
     pub hover: Option<WidgetTarget>,
     pub held: Option<WidgetTarget>,
+    /// The bar's width, logical pixels (see [`bar_width`]).
+    pub width: u32,
 }
 
-/// Size of the bar's surface: the whole window.
-pub fn widget_surface(u: f32) -> (u32, u32) {
-    ((WIDTH as f32 * u).ceil() as u32, (HEIGHT as f32 * u).ceil() as u32)
+/// Size of the window, and of the bar's surface, for a bar `width` wide.
+pub fn widget_surface(u: f32, width: u32) -> (u32, u32) {
+    (((width as f32 + 2.0 * MARGIN) * u).ceil() as u32, (HEIGHT as f32 * u).ceil() as u32)
 }
 
 pub fn paint_widget(c: &Canvas<'_>, t: &Theme, u: f32, look: &WidgetLook) -> Result<()> {
     let (ox, oy) = (MARGIN * u, MARGIN * u);
-    let bar = rect(ox, oy, BAR_W * u, BAR_H * u);
-    c.shadow(bar, 8.0 * u, 10.0 * u, 5.0 * u, Rgba::hex(0x000000, 0x55))?;
-    c.fill_round(bar, 8.0 * u, t.flyout.with_alpha(0xeb as f32 / 255.0))?;
-    c.stroke_round(bar, 8.0 * u, 1.0, t.stroke_strong)?;
+    let width = look.width as f32;
+    let bar = rect(ox, oy, width * u, BAR_H * u);
+    c.shadow(bar, 10.0 * u, 10.0 * u, 5.0 * u, Rgba::hex(0x000000, 0x55))?;
+    c.fill_round(bar, 10.0 * u, t.flyout)?;
+    c.stroke_round(bar, 10.0 * u, 1.0, t.stroke_strong)?;
     let at = |target| {
-        let (x, y, w, h) = part(target);
+        let (x, y, w, h) = part(target, width);
         (ox + x * u, oy + y * u, w * u, h * u)
     };
     let back = |target: WidgetTarget| -> Result<()> {
@@ -194,12 +221,16 @@ pub fn paint_widget(c: &Canvas<'_>, t: &Theme, u: f32, look: &WidgetLook) -> Res
         c.fill_round(rect(x, y, w, h), 6.0 * u, fill)
     };
 
-    // Recording: the red dot, with a halo that blinks. Paused: the pause sign, amber.
+    // Recording: the red dot, with a halo that blinks. Paused: the pause sign, amber. Under the pointer: what a click
+    // does.
     back(WidgetTarget::State)?;
     let (sx, sy, sw, sh) = at(WidgetTarget::State);
     let (cx, cy) = (sx + sw / 2.0, sy + sh / 2.0);
-    if look.paused {
-        let icon = 16.0 * u;
+    let icon = 16.0 * u;
+    if look.hover == Some(WidgetTarget::State) {
+        let action = if look.paused { icons::PLAY_FILLED } else { icons::PAUSE_FILLED };
+        c.icon(action, cx - icon / 2.0, cy - icon / 2.0, icon, t.text)?;
+    } else if look.paused {
         c.icon(icons::PAUSE_FILLED, cx - icon / 2.0, cy - icon / 2.0, icon, t.warning)?;
     } else {
         if look.pulse {
@@ -210,10 +241,10 @@ pub fn paint_widget(c: &Canvas<'_>, t: &Theme, u: f32, look: &WidgetLook) -> Res
 
     // The time, frozen and dimmed while paused.
     let colour = if look.paused { t.text_2 } else { t.text };
-    let time = c.gfx.paragraph(&look.time, 14.0 * u, true, 1.0e5)?;
-    c.text_layout(&time.layout, sx + sw + 6.0 * u, oy + (BAR_H * u - time.height) / 2.0, colour)?;
+    let time = time_text(c.gfx, u, &look.time)?;
+    c.text_layout(&time.layout, ox + TIME_X * u, oy + (BAR_H * u - time.height) / 2.0, colour)?;
 
-    // The warning sign, then a divider and stop.
+    // The warning sign, then stop.
     if look.alert != Alert::None {
         back(WidgetTarget::Alert)?;
         let (x, y, w, h) = at(WidgetTarget::Alert);
@@ -221,11 +252,8 @@ pub fn paint_widget(c: &Canvas<'_>, t: &Theme, u: f32, look: &WidgetLook) -> Res
         let icon = 18.0 * u;
         c.icon(icons::WARNING, x + (w - icon) / 2.0, y + (h - icon) / 2.0, icon, tint)?;
     }
-    let (px, _, _, _) = at(WidgetTarget::Stop);
-    c.fill_rect(rect(px - 4.0 * u, oy + (BAR_H - 18.0) / 2.0 * u, 1.0, 18.0 * u), t.divider)?;
     back(WidgetTarget::Stop)?;
     let (x, y, w, h) = at(WidgetTarget::Stop);
-    let icon = 16.0 * u;
     c.icon(icons::STOP_FILLED, x + (w - icon) / 2.0, y + (h - icon) / 2.0, icon, t.record)?;
     Ok(())
 }
@@ -280,6 +308,9 @@ struct Inner {
     theme: Theme,
     u: f32,
     popup: Popup,
+    /// The window at its widest, and where along it the bar keeps its place (0 left, 1 right).
+    room: PhysicalRect,
+    anchor: f32,
     piece: Piece<WidgetLook>,
     auto_hide: bool,
     /// Only on screen while something goes wrong.
@@ -308,12 +339,30 @@ impl Inner {
         let u = self.u;
         let drawn = self
             .piece
-            .show(&self.gfx, &look, || Ok(widget_surface(u)), |c| paint_widget(c, &self.theme, u, &look))
+            .show(&self.gfx, &look, || Ok(widget_surface(u, look.width)), |c| paint_widget(c, &self.theme, u, &look))
             // SAFETY: plain call.
             .and_then(|()| unsafe { self.gfx.dcomp.Commit() });
         if let Err(e) = drawn {
             tracing::warn!("recording widget: {e}");
         }
+    }
+
+    /// Sizes the bar to what it shows, the window with it: a narrower one keeps to the side of its corner.
+    fn fit(&self) {
+        let width = {
+            let look = self.look.borrow();
+            match bar_width(&self.gfx, self.u, &look.time, look.alert) {
+                Ok(w) => w,
+                Err(e) => return tracing::warn!("recording widget: {e}"),
+            }
+        };
+        if std::mem::replace(&mut self.look.borrow_mut().width, width) == width {
+            return;
+        }
+        let (w, h) = widget_surface(self.u, width);
+        let room = self.room;
+        let x = room.x + ((room.width as f32 - w as f32) * self.anchor).round() as i32;
+        self.popup.place(PhysicalRect::new(x, room.y, w, h));
     }
 
     /// Fades the bar to `to`.
@@ -408,6 +457,7 @@ impl Inner {
             look.time = format_elapsed(elapsed);
             look.paused = clock.paused;
         }
+        self.fit();
         if clock.paused {
             self.timer(TICK_TIMER, None);
         } else {
@@ -438,7 +488,7 @@ impl Inner {
         let mut bar = RECT::default();
         // SAFETY: a valid out-pointer, a window of this thread.
         unsafe { GetWindowRect(self.popup.hwnd, &mut bar)? };
-        let (ax, _, aw, _) = part(WidgetTarget::Alert);
+        let (ax, _, aw, _) = part(WidgetTarget::Alert, self.look.borrow().width as f32);
         let anchor = bar.left + ((MARGIN + ax + aw / 2.0) * u) as i32;
         let centre = POINT { x: i32::midpoint(bar.left, bar.right), y: i32::midpoint(bar.top, bar.bottom) };
         let work = popup::work_area_at(centre).unwrap_or(bar);
@@ -470,7 +520,6 @@ impl Inner {
             return Some(r);
         }
         let (x, y) = popup::point(lparam);
-        let alert = self.look.borrow().alert != Alert::None;
         match msg {
             WM_TIMER => match wparam.0 {
                 TICK_TIMER => {
@@ -512,7 +561,7 @@ impl Inner {
                         self.fade_to(1.0);
                     }
                 }
-                let hover = widget_at(self.u, x, y, alert);
+                let hover = widget_at(self.u, x, y, &self.look.borrow());
                 let before = self.look.borrow_mut().hover.replace(hover);
                 if before != Some(hover) {
                     if hover == WidgetTarget::Alert {
@@ -534,7 +583,7 @@ impl Inner {
                 // SAFETY: plain call on a window of this thread.
                 unsafe { SetCapture(self.popup.hwnd) };
                 self.hide_tip();
-                let at = widget_at(self.u, x, y, alert);
+                let at = widget_at(self.u, x, y, &self.look.borrow());
                 self.press.set(Some(at));
             }
             // Another window took the mouse: its release will not come here.
@@ -546,7 +595,7 @@ impl Inner {
                 let pressed = self.press.take();
                 // SAFETY: plain call.
                 let _ = unsafe { ReleaseCapture() };
-                let at = widget_at(self.u, x, y, alert);
+                let at = widget_at(self.u, x, y, &self.look.borrow());
                 if pressed == Some(at) {
                     let event = match at {
                         WidgetTarget::State => Some(WidgetEvent::TogglePause),
@@ -577,8 +626,9 @@ pub struct Widget {
 }
 
 impl Widget {
-    /// The widget over `geometry` (physical pixels) on a monitor at `dpi`.
-    pub fn new(geometry: PhysicalRect, dpi: u32, look: Look, display: Display) -> Result<Self> {
+    /// The widget within `geometry` (physical pixels, its widest window) on a monitor at `dpi`; a narrower bar keeps to
+    /// `anchor` along it (0 left, 0.5 middle, 1 right).
+    pub fn new(geometry: PhysicalRect, anchor: f32, dpi: u32, look: Look, display: Display) -> Result<Self> {
         let gfx = Gfx::shared()?;
         let u = dpi.max(48) as f32 / 96.0;
         // Never in the video, never stealing the keyboard.
@@ -590,6 +640,8 @@ impl Widget {
             gfx,
             u,
             popup,
+            room: geometry,
+            anchor: anchor.clamp(0.0, 1.0),
             piece,
             auto_hide: display == Display::Fade,
             alerts_only: display == Display::Alerts,
@@ -603,6 +655,7 @@ impl Widget {
                 alert: Alert::None,
                 hover: None,
                 held: None,
+                width: WIDTH - 2 * MARGIN as u32,
             }),
             alert_text: RefCell::default(),
             tip: RefCell::default(),
@@ -615,6 +668,7 @@ impl Widget {
         });
         let weak: Weak<Inner> = Rc::downgrade(&inner);
         inner.popup.on_message(move |msg, wparam, lparam| weak.upgrade()?.message(msg, wparam, lparam));
+        inner.fit();
         Ok(Self { inner })
     }
 
@@ -638,6 +692,7 @@ impl Widget {
         let inner = &self.inner;
         let before = std::mem::replace(&mut inner.look.borrow_mut().alert, alert);
         *inner.alert_text.borrow_mut() = text.to_owned();
+        inner.fit();
         if inner.alerts_only && !inner.closed.get() {
             if alert == Alert::None {
                 inner.withdraw();
@@ -700,24 +755,36 @@ mod tests {
     }
 
     #[test]
-    fn elapsed_is_hh_mm_ss() {
-        assert_eq!(format_elapsed(Duration::ZERO), "00:00:00");
-        assert_eq!(format_elapsed(Duration::from_millis(59_999)), "00:00:59");
-        assert_eq!(format_elapsed(Duration::from_secs(3_725)), "01:02:05");
+    fn elapsed_is_short_under_an_hour() {
+        assert_eq!(format_elapsed(Duration::ZERO), "0:00");
+        assert_eq!(format_elapsed(Duration::from_millis(59_999)), "0:59");
+        assert_eq!(format_elapsed(Duration::from_secs(3_599)), "59:59");
+        assert_eq!(format_elapsed(Duration::from_secs(3_725)), "1:02:05");
         assert_eq!(format_elapsed(Duration::from_secs(100 * 3600)), "100:00:00");
     }
 
     #[test]
     fn the_buttons_are_where_they_are_drawn() {
         // The bar is 10 px inside the window: the state at its left end, stop at its right end, the warning sign just
-        // before stop; the rest moves the widget.
+        // before stop; the rest is the bar.
+        let look = |alert| WidgetLook {
+            paused: false,
+            time: "0:05".into(),
+            pulse: false,
+            alert,
+            hover: None,
+            held: None,
+            width: 150,
+        };
+        let (calm, warned) = (look(Alert::None), look(Alert::Warning));
         for u in [1.0, 1.5] {
-            assert_eq!(widget_at(u, 30.0 * u, 30.0 * u, false), WidgetTarget::State);
-            assert_eq!(widget_at(u, 186.0 * u, 30.0 * u, false), WidgetTarget::Stop);
-            assert_eq!(widget_at(u, 150.0 * u, 30.0 * u, true), WidgetTarget::Alert);
-            assert_eq!(widget_at(u, 150.0 * u, 30.0 * u, false), WidgetTarget::Bar);
-            assert_eq!(widget_at(u, 80.0 * u, 30.0 * u, true), WidgetTarget::Bar);
-            assert_eq!(widget_at(u, 3.0 * u, 3.0 * u, true), WidgetTarget::Outside);
+            assert_eq!(widget_at(u, 30.0 * u, 30.0 * u, &calm), WidgetTarget::State);
+            assert_eq!(widget_at(u, 140.0 * u, 30.0 * u, &calm), WidgetTarget::Stop);
+            assert_eq!(widget_at(u, 104.0 * u, 30.0 * u, &warned), WidgetTarget::Alert);
+            assert_eq!(widget_at(u, 104.0 * u, 30.0 * u, &calm), WidgetTarget::Bar);
+            assert_eq!(widget_at(u, 70.0 * u, 30.0 * u, &warned), WidgetTarget::Bar);
+            assert_eq!(widget_at(u, 3.0 * u, 3.0 * u, &warned), WidgetTarget::Outside);
+            assert_eq!(widget_at(u, 165.0 * u, 30.0 * u, &calm), WidgetTarget::Outside);
         }
     }
 

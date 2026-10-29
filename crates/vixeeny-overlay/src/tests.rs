@@ -246,27 +246,26 @@ fn the_notification_draws_with_a_thumbnail_and_as_an_error() {
 
 #[test]
 fn the_recording_widget_draws_its_states_and_alerts() {
-    use crate::widget::widget_surface;
-    use crate::widget::{Alert, AlertTip, WidgetLook, WidgetTarget, paint_alert_tip, paint_widget};
+    use crate::widget::{Alert, AlertTip, WidgetLook, WidgetTarget, bar_width, paint_alert_tip, paint_widget};
+    use crate::widget::{format_elapsed, widget_surface};
     let gfx = Gfx::new().expect("graphics devices");
-    let t = Theme::new(Look::default());
     let mut drawn = Vec::new();
-    for (name, paused, alert) in [
-        ("recording", false, Alert::None),
-        ("paused", true, Alert::None),
-        ("warning", false, Alert::Warning),
-        ("critical", true, Alert::Critical),
+    let mut widths = Vec::new();
+    for (name, dark, paused, alert, secs, hover) in [
+        ("recording", true, false, Alert::None, 5, None),
+        ("paused", true, true, Alert::None, 754, None),
+        ("hover-pause", false, false, Alert::None, 5, Some(WidgetTarget::State)),
+        ("hover-resume", true, true, Alert::None, 5, Some(WidgetTarget::State)),
+        ("warning", false, false, Alert::Warning, 3_725, Some(WidgetTarget::Stop)),
+        ("critical", true, true, Alert::Critical, 3_725, None),
     ] {
         let u = 1.25;
-        let (w, h) = widget_surface(u);
-        let look = WidgetLook {
-            paused,
-            time: "01:02:05".into(),
-            pulse: true,
-            alert,
-            hover: Some(WidgetTarget::Stop),
-            held: None,
-        };
+        let t = Theme::new(Look::new(dark, None, true));
+        let time = format_elapsed(std::time::Duration::from_secs(secs));
+        let width = bar_width(&gfx, u, &time, alert).expect("measured");
+        widths.push(width);
+        let (w, h) = widget_surface(u, width);
+        let look = WidgetLook { paused, time, pulse: true, alert, hover, held: None, width };
         let pixels = gfx
             .render(w, h, |c| {
                 backdrop(c, w, h)?;
@@ -276,18 +275,19 @@ fn the_recording_widget_draws_its_states_and_alerts() {
         save(&format!("widget-{name}"), w, h, &pixels);
         drawn.push(pixels);
     }
-    // Red dot vs. pause sign; with and without the warning sign.
+    // Red dot vs. pause sign vs. what a click does; the bar as wide as what it shows.
     assert_ne!(drawn[0], drawn[1]);
     assert_ne!(drawn[0], drawn[2]);
+    assert!(widths[0] < widths[1] && widths[1] < widths[4] && widths[4] < 196, "{widths:?}");
     assert!(drawn[0].as_chunks::<4>().0.iter().any(|p| p[2] > 200 && p[1] < 80));
-    let tip = AlertTip::new(&gfx, 1.25, "42 frame(s) lost: the encoder cannot keep up\nDisk almost full: 3.1 GB free")
+    let tip = AlertTip::new(&gfx, 1.25, "42 frames lost: the encoder cannot keep up\nDisk almost full: 3.1 GB free")
         .expect("laid out");
     assert_eq!(tip.text.lines, 2);
     let (w, h) = tip.size;
     let pixels = gfx
         .render(w, h, |c| {
             backdrop(c, w, h)?;
-            paint_alert_tip(c, &t, 1.25, &tip)
+            paint_alert_tip(c, &Theme::new(Look::default()), 1.25, &tip)
         })
         .expect("drawn");
     save("widget-tip", w, h, &pixels);

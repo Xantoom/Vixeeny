@@ -8,6 +8,15 @@ use vixeeny_platform::PhysicalRect;
 /// Gap from the window to the screen edge at 96 DPI (the bar is 16 px from it).
 pub const MARGIN: u32 = 6;
 
+/// "`n` frames lost", singular or plural.
+pub fn frames_lost(n: u64, lang: Lang) -> String {
+    if n == 1 {
+        tr(Key::WidgetFrameLost, lang).into()
+    } else {
+        tr(Key::WidgetFramesLost, lang).replace("{n}", &n.to_string())
+    }
+}
+
 /// Where the widget's window can be on a monitor's work area (physical pixels; `dpi` 96 = 100 %): its left-most and
 /// right-most x, its top-most and lowest y, and its size.
 fn room(work: PhysicalRect, dpi: u32) -> ((i32, i32), (i32, i32), (u32, u32)) {
@@ -26,7 +35,13 @@ fn room(work: PhysicalRect, dpi: u32) -> ((i32, i32), (i32, i32), (u32, u32)) {
 pub fn corner_geometry(corner: &str, custom: (f32, f32), work: PhysicalRect, dpi: u32) -> PhysicalRect {
     let ((left, right), (top, bottom), (w, h)) = room(work, dpi);
     let along = |lo: i32, hi: i32, f: f32| lo + ((hi - lo) as f32 * f.clamp(0.0, 1.0)).round() as i32;
-    let (fx, fy) = match corner {
+    let (fx, fy) = corner_fraction(corner, custom);
+    PhysicalRect::new(along(left, right, fx), along(top, bottom, fy), w, h)
+}
+
+/// Where `corner` is, as fractions of the room across and down (0 left or top, 1 right or bottom).
+pub fn corner_fraction(corner: &str, custom: (f32, f32)) -> (f32, f32) {
+    match corner {
         "top_center" => (0.5, 0.0),
         "top_right" => (1.0, 0.0),
         "bottom_left" => (0.0, 1.0),
@@ -34,8 +49,7 @@ pub fn corner_geometry(corner: &str, custom: (f32, f32), work: PhysicalRect, dpi
         "bottom_right" => (1.0, 1.0),
         "custom" => custom,
         _ => (0.0, 0.0),
-    };
-    PhysicalRect::new(along(left, right, fx), along(top, bottom, fy), w, h)
+    }
 }
 
 /// A message from the recorder to the widget.
@@ -135,7 +149,7 @@ impl Health {
         let mut lines = Vec::new();
         if self.lost_frames > 0 {
             level = Alert::Warning;
-            lines.push(tr(Key::WidgetFramesLost, lang).replace("{n}", &self.lost_frames.to_string()));
+            lines.push(frames_lost(self.lost_frames, lang));
         }
         if let Some((free, _)) = self.disk
             && self.disk_low(disk_percent)
@@ -242,7 +256,9 @@ mod tests {
         let lost = Health { lost_frames: 42, disk: Some((500 * GB, 1000 * GB)) };
         let (level, text) = lost.alert(5, en);
         assert_eq!(level, Alert::Warning);
-        assert!(text.starts_with("42 frame"), "{text}");
+        assert!(text.starts_with("42 frames lost"), "{text}");
+        assert!(frames_lost(1, en).starts_with("1 frame lost"));
+        assert!(frames_lost(2, Lang::Fr).starts_with("2 images perdues"));
         // Under 5 % free: a warning; under 1 GB: red.
         let low = Health { lost_frames: 0, disk: Some((40 * GB, 1000 * GB)) };
         assert_eq!(low.alert(5, en).0, Alert::Warning);

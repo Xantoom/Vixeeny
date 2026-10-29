@@ -166,6 +166,16 @@ impl Popup {
         let _ = unsafe { ShowWindow(self.hwnd, windows::Win32::UI::WindowsAndMessaging::SW_HIDE) };
     }
 
+    /// Moves and sizes the window to `geometry` (physical pixels), leaving its place in the stack and the focus as they
+    /// are.
+    pub fn place(&self, geometry: PhysicalRect) {
+        use windows::Win32::UI::WindowsAndMessaging::{SWP_NOACTIVATE, SWP_NOZORDER, SetWindowPos};
+        let PhysicalRect { x, y, width, height } = geometry;
+        // SAFETY: plain call on a window of this thread.
+        let _ =
+            unsafe { SetWindowPos(self.hwnd, None, x, y, width as i32, height as i32, SWP_NOZORDER | SWP_NOACTIVATE) };
+    }
+
     /// Asks for a `WM_MOUSELEAVE` when the pointer leaves the window.
     pub fn track_leave(&self) {
         let mut t = TRACKMOUSEEVENT {
