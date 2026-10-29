@@ -37,8 +37,8 @@ use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT,
     DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_LINE_SPACING_METHOD_UNIFORM,
     DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_LEADING,
-    DWRITE_TEXT_METRICS, DWRITE_WORD_WRAPPING_NO_WRAP, DWRITE_WORD_WRAPPING_WRAP, DWriteCreateFactory, IDWriteFactory,
-    IDWriteFactory5, IDWriteFontCollection, IDWriteTextLayout,
+    DWRITE_TEXT_ALIGNMENT_TRAILING, DWRITE_TEXT_METRICS, DWRITE_WORD_WRAPPING_NO_WRAP, DWRITE_WORD_WRAPPING_WRAP,
+    DWriteCreateFactory, IDWriteFactory, IDWriteFactory5, IDWriteFontCollection, IDWriteTextLayout,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_ALPHA_MODE_IGNORE, DXGI_ALPHA_MODE_PREMULTIPLIED, DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM,
@@ -82,6 +82,7 @@ pub enum Font {
 pub enum Align {
     Leading,
     Centre,
+    Trailing,
 }
 
 pub struct Gfx {
@@ -633,7 +634,7 @@ impl Canvas<'_> {
         Ok(())
     }
 
-    /// `text` in the box `r`, vertically centred, leading or centred.
+    /// `text` in the box `r`, vertically centred, leading, centred or trailing.
     pub fn text(&self, text: &str, r: D2D_RECT_F, size: f32, c: Rgba, align: Align) -> Result<()> {
         let format = self.gfx.format(size, Font::Ui, DWRITE_FONT_WEIGHT_NORMAL)?;
         let wide: Vec<u16> = text.encode_utf16().collect();
@@ -645,6 +646,7 @@ impl Canvas<'_> {
             format.SetTextAlignment(match align {
                 Align::Leading => DWRITE_TEXT_ALIGNMENT_LEADING,
                 Align::Centre => DWRITE_TEXT_ALIGNMENT_CENTER,
+                Align::Trailing => DWRITE_TEXT_ALIGNMENT_TRAILING,
             })?;
             let layout = self.gfx.dwrite.CreateTextLayout(
                 &wide,

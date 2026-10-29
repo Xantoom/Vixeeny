@@ -34,21 +34,29 @@ pub const fn action_of(choice: Choice) -> ActionId {
     }
 }
 
-fn texts(lang: Lang) -> SideTexts {
+fn texts(config: &Config, lang: Lang) -> SideTexts {
+    // The first shortcut of each action, as the settings write it.
+    let shortcuts = Choice::ALL
+        .into_iter()
+        .filter_map(|choice| {
+            let (_, keys) = config.hotkeys.bindings().into_iter().find(|(action, _)| *action == action_of(choice))?;
+            let first = keys.first().filter(|k| !k.is_empty())?;
+            Some((choice, vixeeny_ui::settings_panel::shortcut_label(first, lang)))
+        })
+        .collect();
     SideTexts {
-        image: tr(Key::OvlImage, lang).into(),
         region: tr(Key::OvlRegion, lang).into(),
         window: tr(Key::OvlWindow, lang).into(),
         screen: tr(Key::OvlScreen, lang).into(),
         all_monitors: tr(Key::OvlAllMonitors, lang).into(),
         scrolling: tr(Key::OvlScrolling, lang).into(),
-        video: tr(Key::OvlVideo, lang).into(),
         record: tr(Key::OvlRecord, lang).into(),
         stop_recording: tr(Key::OvlStopRecording, lang).into(),
         replay_start: tr(Key::OvlReplayStart, lang).into(),
         replay_stop: tr(Key::OvlReplayStop, lang).into(),
         replay_save: tr(Key::OvlReplaySave, lang).into(),
         settings: tr(Key::OvlSettings, lang).into(),
+        shortcuts,
     }
 }
 
@@ -82,7 +90,7 @@ pub fn run(config: &Config, recording: bool, replay: bool, pinned: bool) -> anyh
         animate: vixeeny_platform::animations_enabled(),
         pinned,
     };
-    let texts = texts(lang);
+    let texts = texts(config, lang);
     let geometry = panel_geometry(state.edge, monitor.rect, monitor.dpi, &entries(&texts, &state));
     let panel = SidePanel::new(&texts, &state, geometry, monitor.dpi)?;
 

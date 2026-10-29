@@ -39,13 +39,11 @@ keys! {
     ScrollIntro => "Scroll the content, then Enter or Finish.", "Faites défiler, puis Entrée ou Terminer.";
     ScrollFinish => "Finish", "Terminer";
     ScrollCancel => "Cancel", "Annuler";
-    OvlImage => "Screenshot", "Capture d'image";
     OvlRegion => "Region", "Zone";
     OvlWindow => "Window", "Fenêtre";
     OvlScreen => "Screen", "Écran";
     OvlAllMonitors => "All screens", "Tous les écrans";
     OvlScrolling => "Scrolling capture", "Capture défilante";
-    OvlVideo => "Video", "Vidéo";
     OvlRecord => "Record", "Enregistrer";
     OvlStopRecording => "Stop recording", "Arrêter l'enregistrement";
     OvlReplayStart => "Start replay buffer", "Activer le replay";

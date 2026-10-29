@@ -68,10 +68,10 @@ pub enum Choice {
     Settings,
 }
 
-const HEADER_ID: i32 = 200;
+const SEPARATOR_ID: i32 = 200;
 
 impl Choice {
-    const ALL: [Self; 9] = [
+    pub const ALL: [Self; 9] = [
         Self::Region,
         Self::Window,
         Self::Screen,
@@ -95,19 +95,19 @@ impl Choice {
 /// Translated texts.
 #[derive(Debug, Clone, Default)]
 pub struct SideTexts {
-    pub image: String,
     pub region: String,
     pub window: String,
     pub screen: String,
     pub all_monitors: String,
     pub scrolling: String,
-    pub video: String,
     pub record: String,
     pub stop_recording: String,
     pub replay_start: String,
     pub replay_stop: String,
     pub replay_save: String,
     pub settings: String,
+    /// The first shortcut of each action, as the user reads it; an action without one is left out.
+    pub shortcuts: Vec<(Choice, String)>,
 }
 
 /// What the strip needs to know when it opens.
@@ -129,35 +129,53 @@ pub struct Entry {
     pub id: i32,
     pub glyph: i32,
     pub label: String,
+    /// Its shortcut, shown after the label; empty for none.
+    pub shortcut: String,
     pub enabled: bool,
-    pub header: bool,
+    /// A line between two groups of actions.
+    pub separator: bool,
     pub active: bool,
 }
 
 impl Entry {
     fn action(choice: Choice, glyph: i32, label: &str) -> Self {
-        Self { id: choice.id(), glyph, label: label.to_owned(), enabled: true, header: false, active: false }
+        Self {
+            id: choice.id(),
+            glyph,
+            label: label.to_owned(),
+            shortcut: String::new(),
+            enabled: true,
+            separator: false,
+            active: false,
+        }
     }
 
-    fn header(n: i32, label: &str) -> Self {
-        Self { id: HEADER_ID + n, glyph: 0, label: label.to_uppercase(), enabled: false, header: true, active: false }
+    fn separator(n: i32) -> Self {
+        Self {
+            id: SEPARATOR_ID + n,
+            glyph: 0,
+            label: String::new(),
+            shortcut: String::new(),
+            enabled: false,
+            separator: true,
+            active: false,
+        }
     }
 
     const fn selectable(&self) -> bool {
-        self.enabled && !self.header
+        self.enabled && !self.separator
     }
 }
 
-/// The entries, in display order.
+/// The entries, in display order: the captures, the videos, then the settings, a line between the groups.
 pub fn entries(texts: &SideTexts, state: &SideState) -> Vec<Entry> {
     let mut list = vec![
-        Entry::header(0, &texts.image),
         Entry::action(Choice::Region, 0, &texts.region),
         Entry::action(Choice::Window, 1, &texts.window),
         Entry::action(Choice::Screen, 2, &texts.screen),
         Entry::action(Choice::AllMonitors, 3, &texts.all_monitors),
         Entry::action(Choice::Scrolling, 4, &texts.scrolling),
-        Entry::header(1, &texts.video),
+        Entry::separator(0),
     ];
     let mut record = if state.recording {
         Entry::action(Choice::RecordToggle, 7, &texts.stop_recording)
@@ -173,7 +191,13 @@ pub fn entries(texts: &SideTexts, state: &SideState) -> Vec<Entry> {
     let mut save = Entry::action(Choice::ReplaySave, 9, &texts.replay_save);
     save.enabled = state.replay;
     list.push(save);
+    list.push(Entry::separator(1));
     list.push(Entry::action(Choice::Settings, 11, &texts.settings));
+    for entry in &mut list {
+        if let Some((_, keys)) = texts.shortcuts.iter().find(|(c, _)| c.id() == entry.id) {
+            entry.shortcut.clone_from(keys);
+        }
+    }
     list
 }
 
@@ -205,16 +229,17 @@ const GAP: f64 = 2.0;
 const MARGIN: f64 = 12.0;
 const BUTTON: f64 = 40.0;
 const SEPARATOR: f64 = 9.0;
-const SMALL: f64 = 28.0;
-/// Beside the strip, for the name of the action under the pointer.
-const TIP_ROOM: f64 = 220.0;
+/// The pin and close buttons, each a row of the column (a column of the row).
+const SMALL: f64 = 30.0;
+/// Beside the strip, for the name of the action under the pointer and its shortcut.
+const TIP_ROOM: f64 = 340.0;
 const TIP_HEIGHT: f64 = 40.0;
 
 /// The window's size in logical pixels: the strip (the pin and close buttons, a separator, the entries), the room for
 /// the label beside it, and the margin it slides in through.
 fn logical_size(entries: &[Entry], vertical: bool) -> (f64, f64) {
-    let along: f64 = entries.iter().map(|e| if e.header { SEPARATOR } else { BUTTON }).sum();
-    let along = 2.0 * PAD + SMALL + SEPARATOR + along + GAP * (entries.len() + 1) as f64;
+    let along: f64 = entries.iter().map(|e| if e.separator { SEPARATOR } else { BUTTON }).sum();
+    let along = 2.0 * PAD + 2.0 * SMALL + SEPARATOR + along + GAP * (entries.len() + 2) as f64;
     let across = BUTTON + 2.0 * PAD;
     if vertical {
         (across + TIP_ROOM + 2.0 * MARGIN, along + 2.0 * MARGIN)
@@ -288,18 +313,14 @@ pub fn slots(entries: &[Entry], vertical: bool) -> (Vec<(Slot, Box2)>, (f32, f32
     };
     let mut out = Vec::with_capacity(entries.len() + 3);
     let mut at = pad;
-    out.push((Slot::Pin, boxed(at, small, pad, button / 2.0)));
-    out.push((Slot::Close, boxed(at, small, pad + button / 2.0, button / 2.0)));
-    // Pin and close share a row of a column (and a column of a row), one above the other.
-    if !vertical {
-        out[0].1 = (pad, pad, small, button / 2.0);
-        out[1].1 = (pad, pad + button / 2.0, small, button / 2.0);
-    }
+    out.push((Slot::Pin, boxed(at, small, pad, button)));
+    at += small + gap;
+    out.push((Slot::Close, boxed(at, small, pad, button)));
     at += small + gap;
     out.push((Slot::Divider, boxed(at, separator, pad, button)));
     at += separator + gap;
     for (i, e) in entries.iter().enumerate() {
-        let len = if e.header { separator } else { button };
+        let len = if e.separator { separator } else { button };
         out.push((Slot::Entry(i), boxed(at, len, pad, button)));
         at += len + gap;
     }
@@ -526,11 +547,11 @@ impl Strip {
         }
     }
 
-    /// The label beside the strip, if one shows.
-    pub fn tip(&self) -> Option<(usize, &str)> {
+    /// The label beside the strip and the shortcut after it, if one shows.
+    pub fn tip(&self) -> Option<(usize, Tip)> {
         let i = usize::try_from(self.selected).ok()?;
         let e = self.entries.get(i)?;
-        (self.tip_on && !e.label.is_empty()).then_some((i, e.label.as_str()))
+        (self.tip_on && !e.label.is_empty()).then(|| (i, Tip { label: e.label.clone(), shortcut: e.shortcut.clone() }))
     }
 
     pub fn pointer(&self) -> Pointer {
@@ -570,9 +591,11 @@ pub fn paint_strip(c: &Canvas<'_>, t: &Theme, layout: &StripLayout, entries: &[E
     let o = SHADOW * u;
     let (_, _, sw, sh) = layout.strip;
     let strip = rect(o, o, sw, sh);
-    c.shadow(strip, 8.0 * u, 14.0 * u, 6.0 * u, Rgba::hex(0x000000, 0x45))?;
-    c.fill_round(strip, 8.0 * u, t.flyout.with_alpha(0xeb as f32 / 255.0))?;
-    c.stroke_round(strip, 8.0 * u, 1.0, t.stroke_strong)?;
+    // The buttons' corners (6) nest in the strip's: its padding (6) between them.
+    let radius = 10.0 * u;
+    c.shadow(strip, radius, 14.0 * u, 6.0 * u, Rgba::hex(0x000000, 0x45))?;
+    c.fill_round(strip, radius, t.flyout)?;
+    c.stroke_round(strip, radius, 1.0, t.stroke_strong)?;
     let vertical = layout.edge.is_vertical();
     // A hairline across a separator box.
     let divider = |(x, y, w, h): Box2| {
@@ -589,9 +612,7 @@ pub fn paint_strip(c: &Canvas<'_>, t: &Theme, layout: &StripLayout, entries: &[E
             Slot::Pin | Slot::Close => {
                 let target = if *slot == Slot::Pin { Target::Pin } else { Target::Close };
                 let active = *slot == Slot::Pin && look.pinned;
-                let fill = if active {
-                    Some(t.accent_soft)
-                } else if look.held == Some(target) {
+                let fill = if look.held == Some(target) {
                     Some(t.subtle_pressed)
                 } else if look.hover == Some(target) {
                     Some(t.subtle_hover)
@@ -607,28 +628,23 @@ pub fn paint_strip(c: &Canvas<'_>, t: &Theme, layout: &StripLayout, entries: &[E
                     _ => icons::DISMISS,
                 };
                 let tint = if active { t.accent } else { t.text_2 };
-                let size = 14.0 * u;
+                let size = 16.0 * u;
                 c.icon(icon, b.0 + (b.2 - size) / 2.0, b.1 + (b.3 - size) / 2.0, size, tint)?;
             }
             Slot::Entry(i) => {
                 let Some(e) = entries.get(i) else {
                     continue;
                 };
-                if e.header {
+                if e.separator {
                     divider(b)?;
                     continue;
                 }
                 if look.selected == i as i32 && e.selectable() {
                     let fill = if look.pressed { t.subtle_pressed } else { t.selected };
-                    c.fill_round(rect(b.0, b.1, b.2, b.3), 10.0 * u, fill)?;
+                    c.fill_round(rect(b.0, b.1, b.2, b.3), 6.0 * u, fill)?;
                 }
-                let tint = if e.glyph == 6 || e.glyph == 7 {
-                    t.record
-                } else if e.active {
-                    t.accent
-                } else {
-                    t.text
-                };
+                // The record button is red; what runs says so with the dot under its icon alone.
+                let tint = if e.glyph == 6 { t.record } else { t.text };
                 let tint = if e.enabled { tint } else { tint.with_alpha(tint.0[3] * 0.38) };
                 let size = 20.0 * u;
                 c.icon(glyph(e.glyph), b.0 + (b.2 - size) / 2.0, b.1 + (b.3 - size) / 2.0, size, tint)?;
@@ -643,9 +659,22 @@ pub fn paint_strip(c: &Canvas<'_>, t: &Theme, layout: &StripLayout, entries: &[E
     Ok(())
 }
 
-/// The size of the label's box for `text`.
-pub fn tip_bubble(gfx: &Gfx, u: f32, text: &str) -> Result<(f32, f32)> {
-    let (w, _) = gfx.measure(text, 13.0 * u, Font::Ui)?;
+/// What the label beside the strip says: the action, and its shortcut in grey after it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tip {
+    pub label: String,
+    pub shortcut: String,
+}
+
+/// Room between the action and its shortcut, logical pixels.
+const TIP_SPACE: f32 = 16.0;
+
+/// The size of the label's box for `tip`.
+pub fn tip_bubble(gfx: &Gfx, u: f32, tip: &Tip) -> Result<(f32, f32)> {
+    let (mut w, _) = gfx.measure(&tip.label, 13.0 * u, Font::Ui)?;
+    if !tip.shortcut.is_empty() {
+        w += TIP_SPACE * u + gfx.measure(&tip.shortcut, 12.0 * u, Font::Ui)?.0;
+    }
     Ok(((w + 20.0 * u).ceil(), (30.0 * u).ceil()))
 }
 
@@ -655,13 +684,18 @@ fn tip_surface(u: f32, bubble: (f32, f32)) -> (u32, u32) {
 }
 
 /// The label, its box `TIP_SHADOW` logical pixels into the surface.
-pub fn paint_tip(c: &Canvas<'_>, t: &Theme, u: f32, text: &str, bubble: (f32, f32)) -> Result<()> {
+pub fn paint_tip(c: &Canvas<'_>, t: &Theme, u: f32, tip: &Tip, bubble: (f32, f32)) -> Result<()> {
     let m = TIP_SHADOW * u;
     let r = rect(m, m, bubble.0, bubble.1);
     c.shadow(r, 6.0 * u, 8.0 * u, 2.0 * u, Rgba::hex(0x000000, 0x35))?;
     c.fill_round(r, 6.0 * u, t.flyout)?;
     c.stroke_round(r, 6.0 * u, 1.0, t.stroke_strong)?;
-    c.text(text, r, 13.0 * u, t.text, Align::Centre)
+    if tip.shortcut.is_empty() {
+        return c.text(&tip.label, r, 13.0 * u, t.text, Align::Centre);
+    }
+    let inner = rect(m + 10.0 * u, m, bubble.0 - 20.0 * u, bubble.1);
+    c.text(&tip.label, inner, 13.0 * u, t.text, Align::Leading)?;
+    c.text(&tip.shortcut, inner, 12.0 * u, t.text_2, Align::Trailing)
 }
 
 const ENTER_TIMER: usize = 1;
@@ -674,7 +708,7 @@ struct Inner {
     theme: Theme,
     popup: Popup,
     strip: Piece<StripLook>,
-    tip: Piece<String>,
+    tip: Piece<Tip>,
     model: RefCell<Strip>,
     animate: bool,
     /// The slide-in is over: the label may show.
@@ -704,10 +738,9 @@ impl Inner {
         let u = m.layout.u;
         let tip = m.tip().filter(|_| self.entered.get() && !self.exiting.get());
         match tip {
-            Some((i, text)) => {
-                let bubble = tip_bubble(gfx, u, text)?;
-                let text = text.to_owned();
-                self.tip.show(gfx, &text, || Ok(tip_surface(u, bubble)), |c| paint_tip(c, t, u, &text, bubble))?;
+            Some((i, tip)) => {
+                let bubble = tip_bubble(gfx, u, &tip)?;
+                self.tip.show(gfx, &tip, || Ok(tip_surface(u, bubble)), |c| paint_tip(c, t, u, &tip, bubble))?;
                 let (x, y) = m.layout.tip_origin(i, bubble);
                 let m = TIP_SHADOW * u;
                 let (x, y) = ((x - m).round(), (y - m).round());
@@ -876,7 +909,7 @@ impl SidePanel {
     /// `dpi`.
     pub fn new(texts: &SideTexts, state: &SideState, geometry: PhysicalRect, dpi: u32) -> Result<Self> {
         let gfx = Gfx::shared()?;
-        let theme = Theme::new(Look { dark: state.dark, animations: state.animate, ..Look::default() });
+        let theme = Theme::new(Look::new(state.dark, vixeeny_platform::system_accent(), state.animate));
         let entries = entries(texts, state);
         let layout = StripLayout::new(state.edge, &entries, dpi, (geometry.width, geometry.height));
         // Never in a capture: nor in a recording, a replay or a screen share.
@@ -953,19 +986,18 @@ mod tests {
 
     fn texts() -> SideTexts {
         SideTexts {
-            image: "Screenshot".into(),
             region: "Region".into(),
             window: "Window".into(),
             screen: "Screen".into(),
             all_monitors: "All screens".into(),
             scrolling: "Scrolling capture".into(),
-            video: "Video".into(),
             record: "Record".into(),
             stop_recording: "Stop recording".into(),
             replay_start: "Start replay buffer".into(),
             replay_stop: "Stop replay buffer".into(),
             replay_save: "Save replay".into(),
             settings: "Settings".into(),
+            shortcuts: vec![(Choice::Window, "ALT + PRINT SCREEN".into())],
         }
     }
 
@@ -997,10 +1029,17 @@ mod tests {
         assert_eq!((record.label.as_str(), record.active), ("Stop recording", true));
         assert_eq!(find(&list, Choice::ReplayToggle).label, "Stop replay buffer");
         assert!(find(&list, Choice::ReplaySave).enabled);
+        assert_eq!(find(&list, Choice::Window).shortcut, "ALT + PRINT SCREEN");
+        assert_eq!(find(&list, Choice::Region).shortcut, "");
+        // The groups: captures, videos, settings; no line before the first nor after the last.
+        let lines: Vec<usize> = list.iter().enumerate().filter(|(_, e)| e.separator).map(|(i, _)| i).collect();
+        let at = |c: Choice| list.iter().position(|e| e.id == c.id()).unwrap();
+        assert_eq!(lines, [at(Choice::Scrolling) + 1, at(Choice::ReplaySave) + 1]);
+        assert_eq!(at(Choice::Settings), list.len() - 1);
     }
 
     #[test]
-    fn the_keyboard_skips_titles_and_disabled_entries_and_wraps() {
+    fn the_keyboard_skips_lines_and_disabled_entries_and_wraps() {
         let list = entries(&texts(), &state());
         let first = first_selectable(&list);
         assert_eq!(list[first as usize].id, Choice::Region.id());
@@ -1008,11 +1047,11 @@ mod tests {
         let last = list.len() as i32 - 1;
         assert_eq!(next_selectable(&list, last, 1), first);
         assert_eq!(next_selectable(&list, first, -1), last);
-        // Down from the scrolling capture jumps over the "Video" title to Record.
+        // Down from the scrolling capture jumps over the line to Record.
         let scrolling = list.iter().position(|e| e.id == Choice::Scrolling.id()).unwrap() as i32;
         let record = list.iter().position(|e| e.id == Choice::RecordToggle.id()).unwrap() as i32;
         assert_eq!(next_selectable(&list, scrolling, 1), record);
-        // The replay save is disabled while there is no replay: Replay → Settings.
+        // The replay save is disabled while there is no replay: Replay → (line) → Settings.
         let replay = list.iter().position(|e| e.id == Choice::ReplayToggle.id()).unwrap() as i32;
         let settings = list.iter().position(|e| e.id == Choice::Settings.id()).unwrap() as i32;
         assert_eq!(next_selectable(&list, replay, 1), settings);
@@ -1055,6 +1094,17 @@ mod tests {
         s.pointer_up(x, y);
     }
 
+    /// The centre of `slot`, in window pixels.
+    fn centre(s: &Strip, slot: Slot) -> (f32, f32) {
+        let (sx, sy, _, _) = s.layout.strip;
+        let (bx, by, bw, bh) = s.layout.slot(slot).expect("a slot");
+        (sx + bx + bw / 2.0, sy + by + bh / 2.0)
+    }
+
+    fn entry_slot(s: &Strip, c: Choice) -> Slot {
+        Slot::Entry(s.entries.iter().position(|e| e.id == c.id()).expect("an entry"))
+    }
+
     #[test]
     fn the_strip_fits_its_window_and_its_parts_fit_the_strip() {
         for edge in [Edge::Left, Edge::Right, Edge::Top, Edge::Bottom] {
@@ -1077,7 +1127,7 @@ mod tests {
 
     #[test]
     fn the_keyboard_picks_and_escape_closes() {
-        // Down, Down, Enter: the third entry (Screen), not the titles.
+        // Down, Down, Enter: the third entry (Screen).
         let mut s = strip_at_100(Edge::Right, false);
         assert_eq!(s.entries[s.selected as usize].id, Choice::Region.id());
         s.key(StripKey::Next);
@@ -1094,29 +1144,32 @@ mod tests {
 
     #[test]
     fn clicks_pick_pin_and_dismiss() {
-        // The strip: 12 px from the window's edges, 6 px padding, the pin and close row (28), a separator (9), then the
-        // entries (separators of 9, buttons of 40), 2 px apart.
         let mut s = strip_at_100(Edge::Right, false);
-        let (ww, _) = s.layout.window;
-        let x = ww - 12.0 - 26.0;
-        let first = 12.0 + 6.0 + 28.0 + 2.0 + 9.0 + 2.0;
-        click(&mut s, x, first + 4.0); // the separator before the screenshots
+        // The line between the captures and the videos picks nothing.
+        let line = Slot::Entry(s.entries.iter().position(|e| e.separator).expect("a line"));
+        let (x, y) = centre(&s, line);
+        click(&mut s, x, y);
         assert_eq!((s.chosen, s.closing), (None, false));
-        // separator, 5 buttons, separator, each followed by a gap → the record button
-        let record_y = first + 9.0 + 2.0 + 5.0 * 42.0 + 9.0 + 2.0 + 20.0;
-        click(&mut s, x, record_y);
+        let (x, y) = centre(&s, entry_slot(&s, Choice::RecordToggle));
+        click(&mut s, x, y);
         assert_eq!(s.chosen, Some(Choice::RecordToggle));
 
-        // The pin keeps it open when the user clicks elsewhere; the close button still closes.
+        // The pin keeps it open when the user clicks elsewhere; the close button still closes. Each is a whole row of
+        // the column, as wide as the actions.
         let mut s = strip_at_100(Edge::Right, false);
-        let pin_y = 12.0 + 6.0 + 14.0;
-        click(&mut s, ww - 12.0 - 6.0 - 40.0 + 10.0, pin_y);
+        for slot in [Slot::Pin, Slot::Close] {
+            let (_, _, w, h) = s.layout.slot(slot).expect("a slot");
+            assert!(w >= 30.0 && h >= 30.0, "{slot:?}: {w}×{h}");
+        }
+        let (x, y) = centre(&s, Slot::Pin);
+        click(&mut s, x, y);
         assert!(s.pinned);
         click(&mut s, 10.0, 10.0);
         assert!(!s.closing, "pinned: a click elsewhere does nothing");
         s.dismiss();
         assert!(!s.closing, "pinned: losing the focus does nothing");
-        click(&mut s, ww - 12.0 - 6.0 - 10.0, pin_y);
+        let (x, y) = centre(&s, Slot::Close);
+        click(&mut s, x, y);
         assert_eq!((s.chosen, s.closing), (None, true));
         // Unpinned, a click beside the strip closes it.
         let mut s = strip_at_100(Edge::Right, false);
@@ -1127,12 +1180,10 @@ mod tests {
     #[test]
     fn a_press_that_slides_off_its_button_does_nothing_and_disabled_entries_stay_off() {
         let mut s = strip_at_100(Edge::Right, false);
-        let (ww, _) = s.layout.window;
-        let x = ww - 12.0 - 26.0;
-        let first = 12.0 + 6.0 + 28.0 + 2.0 + 9.0 + 2.0;
-        let region_y = first + 9.0 + 2.0 + 20.0;
+        let (x, region_y) = centre(&s, entry_slot(&s, Choice::Region));
+        let (_, window_y) = centre(&s, entry_slot(&s, Choice::Window));
         s.pointer_down(x, region_y);
-        s.pointer_up(x, region_y + 42.0);
+        s.pointer_up(x, window_y);
         assert_eq!(s.chosen, None);
         // No replay buffer: "Save replay" is disabled, the pointer does not select it.
         let save = s.entries.iter().position(|e| e.id == Choice::ReplaySave.id()).unwrap();

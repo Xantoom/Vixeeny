@@ -125,19 +125,18 @@ fn every_piece_draws() {
 
 fn side_texts() -> crate::side::SideTexts {
     crate::side::SideTexts {
-        image: "Screenshot".into(),
         region: "Region".into(),
         window: "Window".into(),
         screen: "Screen".into(),
         all_monitors: "All screens".into(),
         scrolling: "Scrolling capture".into(),
-        video: "Video".into(),
         record: "Record".into(),
         stop_recording: "Stop recording".into(),
         replay_start: "Start replay buffer".into(),
         replay_stop: "Stop replay buffer".into(),
         replay_save: "Save replay".into(),
         settings: "Settings".into(),
+        shortcuts: vec![(crate::side::Choice::Window, "ALT + PRINT SCREEN".into())],
     }
 }
 
@@ -155,8 +154,8 @@ fn the_side_strip_draws_in_both_themes_and_orientations() {
         strip.key(side::StripKey::Next);
         let t = Theme::new(Look { dark, ..Look::default() });
         let u = layout.u;
-        let (_, text) = strip.tip().expect("the keyboard shows the label");
-        let bubble = side::tip_bubble(&gfx, u, text).expect("measured");
+        let (_, tip) = strip.tip().expect("the keyboard shows the label");
+        let bubble = side::tip_bubble(&gfx, u, &tip).expect("measured");
         let (tx, ty) = layout.tip_origin(strip.selected as usize, bubble);
         let pixels = gfx
             .render(w, h, |c| {
@@ -168,7 +167,7 @@ fn the_side_strip_draws_in_both_themes_and_orientations() {
                 side::paint_strip(c, &t, &layout, &entries, &strip.look())?;
                 // SAFETY: as above.
                 unsafe { c.dc.SetTransform(&at(tx - 12.0 * u, ty - 12.0 * u)) };
-                side::paint_tip(c, &t, u, text, bubble)
+                side::paint_tip(c, &t, u, &tip, bubble)
             })
             .expect("drawn");
         save(&format!("side-{name}"), w, h, &pixels);
