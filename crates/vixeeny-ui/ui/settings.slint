@@ -397,14 +397,18 @@ component SettingLine inherits GroupRow {
             size: 14px;
         }
     }
-    // The preview, before the value.
-    if root.entry.preview : Button {
-        width: 32px;
-        icon: Icons.eye;
-        tip: root.t.preview;
-        clicked => { root.action("preview"); }
+    // The preview, before the value: a small plain button.
+    if root.entry.preview : VerticalLayout {
+        alignment: center;
+        IconButton {
+            size: 28px;
+            icon: Icons.eye;
+            label: root.t.preview;
+            tip: root.t.preview;
+            tint: Theme.text-2;
+            clicked => { root.action("preview"); }
+        }
     }
-    // In the middle of the row's height, beside a taller preview button.
     if root.entry.kind == 0 : VerticalLayout {
         alignment: center;
         Toggle {
@@ -414,8 +418,9 @@ component SettingLine inherits GroupRow {
         }
     }
     if root.entry.kind == 1 : ComboBox {
-        // Every value of the page has the same width; a long choice is cut here, whole in the list.
-        width: Theme.value-w;
+        // As wide as its choice, up to the width of the page's values; a longer one is cut here, whole in the list.
+        width: min(Theme.value-w, self.fit);
+        animate width { duration: root.animated ? Theme.t-fast : 0ms; }
         options: root.entry.options;
         headings: root.entry.headings;
         separators: root.entry.separators;
@@ -445,10 +450,11 @@ component SettingLine inherits GroupRow {
             hi: root.entry.max;
             enabled: root.entry.enabled;
             unit: root.entry.text;
+            step: root.entry.step;
             changed(v) => { root.number(v); }
         }
         if root.entry.unit-id != "" : ComboBox {
-            width: 120px;
+            width: self.fit;
             options: root.entry.options;
             current: root.entry.selected;
             enabled: root.entry.enabled;
@@ -977,6 +983,7 @@ export component SettingsWindow inherits Window {
                     for r[i] in g.rows : SettingLine {
                         // A setting that belongs to the one above goes with it, without a line between them.
                         divider: i > 0 && !r.nested;
+                        nested-next: r.nested && g.rows[i + 1].nested;
                         entry: r;
                         t: root.t;
                         view-h: root.height;

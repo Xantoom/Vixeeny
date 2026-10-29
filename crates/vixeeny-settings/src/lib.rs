@@ -509,8 +509,11 @@ fn slider(
     get: impl Fn(&Config) -> i64 + 'static,
     set: impl Fn(&mut Config, i64) + 'static,
 ) -> Row {
+    // The value it comes with is the one advised, marked on the track.
+    let advised = get(&Config::default());
     let mut r = number(id, label, (min, max, step), get, set);
     r.kind = Kind::Slider { min, max, step };
+    r.mark = Some(advised);
     r
 }
 

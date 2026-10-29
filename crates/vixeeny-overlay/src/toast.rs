@@ -41,7 +41,7 @@ pub struct ToastContent {
     pub dark: bool,
     /// The button; empty for none.
     pub action_label: String,
-    /// Only the picture (a screenshot): no text, a shorter life, and a right-click menu.
+    /// Only the picture (a screenshot): no text, and a right-click menu.
     pub picture_only: bool,
     /// The right-click menu: open, edit, show in the folder, close.
     pub menu: Vec<String>,
@@ -94,9 +94,8 @@ const PRESSED: f32 = 0.97;
 const PRESS: f64 = 0.08;
 /// A card clicked shrinks a little more as it fades out.
 const CLICKED: f32 = 0.92;
-const LIFETIME_MS: u32 = 5500;
-/// A picture-only card goes sooner: it only says "done".
-const PICTURE_LIFETIME_MS: u32 = 2000;
+/// How long every card stays; past it, a card under the pointer waits for the pointer to leave.
+const LIFETIME_MS: u32 = 2000;
 /// The largest picture-only card, logical pixels.
 const PICTURE_MAX: (f32, f32) = (320.0, 200.0);
 /// Lines of the body at most: a longer message is cut (the logs hold all of it).
@@ -412,6 +411,8 @@ struct Card {
     animate: bool,
     /// On its way out: what `done` learns once it is gone.
     leaving: Cell<Option<Option<ToastEvent>>>,
+    /// Its time is up while the pointer is on it: it goes when the pointer leaves.
+    expired: Cell<bool>,
 }
 
 impl Card {
@@ -445,7 +446,7 @@ impl Card {
 
     /// Starts the card's life again (`on`), its bar emptying until it ends, or holds it (the bar full).
     fn set_timer(&self, gfx: &Gfx, on: bool) {
-        let ms = if self.content.picture_only { PICTURE_LIFETIME_MS } else { LIFETIME_MS };
+        let ms = LIFETIME_MS;
         // SAFETY: plain timer and property calls, with an animation of the same device, on a window of this thread.
         let bar = unsafe {
             if on {
@@ -611,7 +612,14 @@ impl Shared {
         let mut look = card.look.get();
         match msg {
             WM_TIMER if wparam.0 == LIFETIME_TIMER => {
-                self.leave(id, &card, None);
+                // SAFETY: plain timer call on a window of this thread.
+                let _ = unsafe { KillTimer(Some(card.popup.hwnd), LIFETIME_TIMER) };
+                // Under the pointer (or held), it stays until the pointer leaves.
+                if look.hovered || card.press.get().is_some() {
+                    card.expired.set(true);
+                } else {
+                    self.leave(id, &card, None);
+                }
                 return Some(LRESULT(0));
             }
             WM_SETCURSOR if (lparam.0 & 0xffff) == 1 => {
@@ -626,17 +634,16 @@ impl Shared {
             }
             WM_MOUSEMOVE => {
                 card.popup.track_leave();
-                if !look.hovered {
-                    // The card stays while the pointer is on it.
-                    card.set_timer(gfx, false);
-                }
                 look.hovered = true;
                 look.hover = Some(card.layout.at(x, y, true));
             }
             popup::WM_MOUSELEAVE => {
                 look.hovered = false;
                 look.hover = None;
-                card.set_timer(gfx, true);
+                if card.expired.get() && card.press.get().is_none() {
+                    self.leave(id, &card, None);
+                    return Some(LRESULT(0));
+                }
             }
             WM_LBUTTONDOWN | WM_LBUTTONDBLCLK => {
                 // SAFETY: plain call on a window of this thread.
@@ -668,10 +675,10 @@ impl Shared {
                     return Some(LRESULT(0));
                 }
                 // Dismissed: the card stays while the pointer is on it, then goes.
+                card.expired.set(true);
                 if !card.popup.has_pointer() {
-                    look.hovered = false;
-                    look.hover = None;
-                    card.set_timer(gfx, true);
+                    self.leave(id, &card, None);
+                    return Some(LRESULT(0));
                 }
             }
             WM_LBUTTONUP => {
@@ -696,6 +703,11 @@ impl Shared {
                 }
                 if matches!(pressed, Some(CardTarget::Card | CardTarget::Button)) {
                     card.press(gfx, false);
+                }
+                // Let go away from the card once its time is up.
+                if card.expired.get() && !card.popup.has_pointer() {
+                    self.leave(id, &card, None);
+                    return Some(LRESULT(0));
                 }
             }
             _ => return None,
@@ -796,6 +808,7 @@ impl Toasts {
             done: RefCell::new(Some(Box::new(done))),
             animate,
             leaving: Cell::new(None),
+            expired: Cell::new(false),
         });
         let id = shared.count.get() + 1;
         shared.count.set(id);

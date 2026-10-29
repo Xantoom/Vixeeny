@@ -608,13 +608,15 @@ fn custom_rows(env: &Env, config: &Config, encoder: &str) -> (Vec<Row>, Vec<Row>
     };
     if let Some((key, q)) = scale {
         let label = if lang == vixeeny_common::i18n::Lang::Fr { "Qualité" } else { "Quality" };
-        rows.push(param_row(
+        let mut quality = param_row(
             format!("p:{key}"),
             label.into(),
             Kind::Slider { min: q.min, max: q.max, step: 1 },
             key.into(),
             q.default.to_string(),
-        ));
+        );
+        quality.mark = Some(q.default);
+        rows.push(quality);
     } else {
         let (min, max) = BITRATE_RANGE;
         let mut rate = |key: &str, default: i64| {
@@ -679,7 +681,16 @@ fn custom_rows(env: &Env, config: &Config, encoder: &str) -> (Vec<Row>, Vec<Row>
             ParamType::Float => (param_label(&param.key, lang), Kind::Slider { min, max, step }),
             ParamType::String => (param_label(&param.key, lang), Kind::Text),
         };
+        let slides = matches!(kind, Kind::Slider { .. });
         let mut row = param_row(format!("p:{}", param.key), label, kind, param.key.clone(), param.default.to_ffmpeg());
+        if slides {
+            // The speed that keeps up, else the encoder's own default.
+            let advised = speed
+                .as_ref()
+                .filter(|(k, _)| *k == param.key)
+                .map_or_else(|| param.default.to_ffmpeg(), |(_, v)| v.clone());
+            row.mark = advised.parse::<f64>().ok().map(|n| n.round() as i64);
+        }
         match (param.key.as_str(), param.kind) {
             ("preset", ParamType::Int) => {
                 row = hinted(row, encoders::numbered_preset_ends(min, max, lang));

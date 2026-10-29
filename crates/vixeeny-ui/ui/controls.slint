@@ -350,8 +350,10 @@ export component ComboBox inherits Rectangle {
     in property <bool> enabled: true;
     in property <string> placeholder;
     callback selected(int);
+    // The width that shows the choice whole (with the arrow): the box follows it.
+    out property <length> fit: max(72px, shown.preferred-width + 42px);
 
-    min-width: 140px;
+    min-width: 72px;
     height: 32px;
     border-radius: Theme.radius;
     border-width: 1px;
@@ -395,6 +397,10 @@ export component ComboBox inherits Rectangle {
             for option in root.options : Text { text: option; font-size: 14px; }
         }
         mark := Text { text: root.mark-text; font-size: 12px; }
+        shown := Text {
+            text: root.current >= 0 && root.current < root.options.length ? root.options[root.current] : root.placeholder;
+            font-size: 14px;
+        }
     }
     property <length> mark-w: root.marks.length > 0 ? mark.preferred-width + 16px : 0px;
     // A row is 38 px high with 2 px under it; a line between groups, 9 px.
@@ -496,6 +502,8 @@ export component NumberBox inherits Rectangle {
     in property <int> hi: 100;
     in property <bool> enabled: true;
     in property <string> unit;
+    // What a notch of the wheel adds or takes away.
+    in property <int> step: 1;
     callback changed(int);
 
     property <bool> wrong: input.text != "" && (input.text.to-float() < root.lo || input.text.to-float() > root.hi);
@@ -538,6 +546,18 @@ export component NumberBox inherits Rectangle {
     touch := TouchArea {
         mouse-cursor: MouseCursor.text;
         clicked => { input.focus(); }
+        // The wheel over it goes up or down a step (from what is typed, if anything).
+        scroll-event(e) => {
+            if !root.enabled || e.delta-y == 0 {
+                return reject;
+            }
+            let from = input.text == "" ? root.value : round(input.text.to-float());
+            let s = max(1, root.step);
+            let n = max(root.lo, min(root.hi, e.delta-y > 0 ? floor(from / s) * s + s : ceil(from / s) * s - s));
+            input.text = n;
+            if n != root.value { root.changed(n); }
+            accept
+        }
         input := TextInput {
             x: 10px;
             width: parent.width - 20px - (root.unit != "" ? unit.preferred-width + 8px : 0px);
@@ -573,7 +593,7 @@ export component Slider inherits Rectangle {
     in property <int> hi: 100;
     in property <int> step: 1;
     in property <bool> enabled: true;
-    // A value marked on the track (100 % of a volume), which the thumb sticks to; -1: none.
+    // The value advised, marked on the track (100 % of a volume), which the thumb is lightly pulled to; -1: none.
     in property <int> mark: -1;
     callback changed(int);
     // Held (`true`) and let go: the values given meanwhile are only a preview of the last.
@@ -589,8 +609,8 @@ export component Slider inherits Rectangle {
         let r = clamp((x - 10px) / max(1px, root.width - 20px), 0, 1);
         let raw = root.lo + r * (root.hi - root.lo);
         let snapped = root.lo + round((raw - root.lo) / max(1, root.step)) * max(1, root.step);
-        // Within 3 % of the track from the mark, the mark.
-        let held = root.mark >= root.lo && abs(raw - root.mark) <= (root.hi - root.lo) * 0.03 ? root.mark : snapped;
+        // Within 1.5 % of the track from the mark, the mark: a light pull.
+        let held = root.mark >= root.lo && abs(raw - root.mark) <= (root.hi - root.lo) * 0.015 ? root.mark : snapped;
         root.changed(clamp(round(held), root.lo, root.hi));
     }
     Rectangle {
@@ -935,7 +955,7 @@ export component ColourField inherits Rectangle {
     accessible-role: button;
 }
 
-// An entry of the side navigation: the current one on a light ground, in bold.
+// An entry of the side navigation: the current one on a light ground, in bold, its icon in the accent colour.
 export component NavItem inherits Rectangle {
     in property <string> text;
     in property <string> icon;
@@ -957,8 +977,9 @@ export component NavItem inherits Rectangle {
         Icon {
             y: (parent.height - self.height) / 2;
             data: root.icon;
-            tint: Theme.text;
+            tint: root.current ? Theme.accent : Theme.text;
             size: 18px;
+            animate tint { duration: root.animated ? Theme.t-normal : 0ms; }
         }
         Text {
             horizontal-stretch: 1;
@@ -1103,8 +1124,10 @@ export component GroupRow inherits Rectangle {
     // A card of its own; else a row of a card shared with its group (no frame), under a line when `divider`.
     in property <bool> framed: true;
     in property <bool> divider: false;
-    // Belongs to the row above it: set in.
+    // Belongs to the row above it: set in, joined to it by a line that turns at a right angle.
     in property <bool> nested: false;
+    // The row under it belongs to the same row: the line goes on down to it.
+    in property <bool> nested-next: false;
     callback clicked();
 
     property <bool> stacked: root.width < root.stack-under;
@@ -1155,6 +1178,21 @@ export component GroupRow inherits Rectangle {
         background: Theme.stroke;
     }
 
+    // From the row's top: the row above lights up to its own edge under the pointer, and the line does not go into it.
+    if root.nested : Rectangle {
+        x: root.pad + 6px;
+        y: 0px;
+        width: 1px;
+        height: root.nested-next ? root.natural : txt.y + 10px;
+        background: Theme.stroke-strong;
+    }
+    if root.nested : Rectangle {
+        x: root.pad + 6px;
+        y: txt.y + 10px;
+        width: root.indent - 12px;
+        height: 1px;
+        background: Theme.stroke-strong;
+    }
     touch := TouchArea {
         enabled: root.clickable && !root.fold;
         mouse-cursor: root.clickable ? pointer : default;
