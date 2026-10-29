@@ -546,9 +546,10 @@ export component NumberBox inherits Rectangle {
     touch := TouchArea {
         mouse-cursor: MouseCursor.text;
         clicked => { input.focus(); }
-        // The wheel over it goes up or down a step (from what is typed, if anything).
+        // Once clicked in, the wheel over it goes up or down a step (from what is typed, if anything); otherwise it
+        // scrolls the page.
         scroll-event(e) => {
-            if !root.enabled || e.delta-y == 0 {
+            if !root.enabled || !input.has-focus || e.delta-y == 0 {
                 return reject;
             }
             let from = input.text == "" ? root.value : round(input.text.to-float());
