@@ -83,12 +83,12 @@ const PAD: f32 = 14.0;
 const PAD_LEFT: f32 = 18.0;
 const THUMB: f32 = 76.0;
 const ICON: f32 = 24.0;
-/// The line at the top: the app's icon and name (a screenshot's title).
-const HEADER_TOP: f32 = 12.0;
+/// The line at the top: the app's icon and name (a screenshot's title), as far from the top edge as from the bar.
+const HEADER_TOP: f32 = 10.5;
 const HEADER: f32 = 16.0;
 /// The bar under the line at the top, across the card, that empties until the card goes; the room above it.
 const BAR: f32 = 3.0;
-const BAR_ABOVE: f32 = 9.0;
+const BAR_ABOVE: f32 = 10.5;
 /// A press sinks the card to this scale.
 const PRESSED: f32 = 0.97;
 const PRESS: f64 = 0.08;
@@ -238,7 +238,7 @@ fn header(gfx: &Gfx, title: &str, (x0, y0): (f32, f32), card_w: f32, u: f32) -> 
     let icon = (x0 + PAD_LEFT * u, y0 + HEADER_TOP * u, HEADER * u, HEADER * u);
     let text_x = icon.0 + icon.2 + 8.0 * u;
     // Room for the close button on the right.
-    let label = gfx.paragraph_lines(title, 12.0 * u, false, x0 + card_w - 36.0 * u - text_x, 1)?;
+    let label = gfx.paragraph_lines(title, 12.0 * u, false, x0 + card_w - (PAD_LEFT + 22.0) * u - text_x, 1)?;
     let text_y = icon.1 + (icon.3 - label.height) / 2.0;
     Ok((icon, (label, (text_x, text_y))))
 }
@@ -248,9 +248,10 @@ fn countdown_box((x0, y0): (f32, f32), card_w: f32, u: f32) -> Box2 {
     (x0, y0 + (HEADER_TOP + HEADER + BAR_ABOVE) * u, card_w, BAR * u)
 }
 
-/// The close button, at the end of the line at the top.
+/// The close button, at the end of the line at the top: its cross as far from the right edge as the icon is from the
+/// left one.
 fn close_box((x0, y0): (f32, f32), card_w: f32, u: f32) -> Box2 {
-    (x0 + card_w - 30.0 * u, y0 + (HEADER_TOP + HEADER / 2.0 - 11.0) * u, 22.0 * u, 22.0 * u)
+    (x0 + card_w - (PAD_LEFT + 17.0) * u, y0 + (HEADER_TOP + HEADER / 2.0 - 11.0) * u, 22.0 * u, 22.0 * u)
 }
 
 /// What the card shows; drawn again only when this changes.
