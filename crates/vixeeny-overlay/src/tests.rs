@@ -221,7 +221,7 @@ fn the_notification_draws_with_a_thumbnail_and_as_an_error() {
                 paint_card(c, &t, content, &l, thumb.as_ref(), Some(&icon), &look)?;
                 // The bar two thirds of the way through the card's life.
                 let shown = bw * 2.0 / 3.0;
-                c.part(rect(bx, by, shown, bh), (bx, by), |c| paint_countdown(c, content, bw, bh))
+                c.part(rect(bx, by, shown, bh), (bx, by), |c| paint_countdown(c, &t, bw, bh))
             })
             .expect("drawn");
         save(&format!("toast-{name}"), w, h, &pixels);
@@ -230,8 +230,8 @@ fn the_notification_draws_with_a_thumbnail_and_as_an_error() {
         let (_, (_, text_y)) = &l.body;
         let bottom = l.button.as_ref().map_or(text_y + l.body.0.height, |(_, b)| b.1 + b.3);
         assert!(bottom <= cy + ch, "{name}: {bottom} > {}", cy + ch);
-        assert!(l.app_icon.1 + l.app_icon.3 <= by && by < l.heading.1.1, "{name}: title line, shadow, text");
-        assert!(bx == cx && bw == cw, "{name}: the shadow spans the card");
+        assert!(l.app_icon.1 + l.app_icon.3 <= by && by + bh <= l.heading.1.1, "{name}: title line, bar, text");
+        assert!(bx == cx && bw == cw, "{name}: the bar spans the card");
         let (ix, iy, iw, ih) = l.app_icon;
         let o = (((iy + ih / 2.0) as u32 * w + (ix + iw / 2.0) as u32) * 4) as usize;
         assert_eq!(&pixels[o..o + 3], &[230, 80, 120], "{name}: the app's icon is drawn");

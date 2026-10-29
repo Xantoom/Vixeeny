@@ -2,9 +2,9 @@
 //! The notification, after the Windows 11 ones, drawn natively: a card in the corner of the screen under a line with
 //! the app's icon and name, with the thumbnail of the capture, a title and the whole text. Clicking the card opens the
 //! file, its button the folder (or the settings for an error): it sinks a little under the press and fades as it goes.
-//! It slides in, never takes the keyboard, and goes by itself after a while unless the pointer is on it; the shadow
-//! under its first line recedes until then. A screenshot shows as its picture under its title: a click opens it, a
-//! right-click offers a menu.
+//! It slides in, never takes the keyboard, and goes by itself after a while unless the pointer is on it; a bar in the
+//! Windows accent colour, under its first line, empties until then. A screenshot shows as its picture under its title:
+//! a click opens it, a right-click offers a menu.
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
@@ -86,10 +86,9 @@ const ICON: f32 = 24.0;
 /// The line at the top: the app's icon and name (a screenshot's title).
 const HEADER_TOP: f32 = 12.0;
 const HEADER: f32 = 16.0;
-/// The shadow under the line at the top, across the card: it recedes until the card goes. Its height, and the room
-/// above it.
-const SHADOW: f32 = 8.0;
-const SHADOW_ABOVE: f32 = 9.0;
+/// The bar under the line at the top, across the card, that empties until the card goes; the room above it.
+const BAR: f32 = 3.0;
+const BAR_ABOVE: f32 = 9.0;
 /// A press sinks the card to this scale.
 const PRESSED: f32 = 0.97;
 const PRESS: f64 = 0.08;
@@ -155,8 +154,7 @@ impl CardLayout {
         let body = gfx.paragraph_lines(&content.body, 12.0 * u, false, text_w, BODY_LINES)?;
         let gap = 3.0 * u;
         let countdown = countdown_box((x0, y0), card_w, u);
-        // The shadow fades into the room above the text.
-        let top = countdown.1 + PAD * u;
+        let top = countdown.1 + countdown.3 + PAD * u;
         let heading_at = (x0 + text_x, top);
         let body_at = (x0 + text_x, top + heading.height + gap);
         let mut text_h = heading.height + gap + body.height;
@@ -202,7 +200,7 @@ impl CardLayout {
         let title = if content.heading.is_empty() { "Vixeeny" } else { &content.heading };
         let (app_icon, header) = header(gfx, title, (x0, y0), card_w, u)?;
         let countdown = countdown_box((x0, y0), card_w, u);
-        let picture = (x0, countdown.1 + 1.0, card_w, picture_h);
+        let picture = (x0, countdown.1 + countdown.3, card_w, picture_h);
         let card_h = picture.1 + picture_h - y0;
         let card = (x0, y0, card_w, card_h);
         let empty = || gfx.paragraph("", 12.0 * u, false, 1.0);
@@ -245,9 +243,9 @@ fn header(gfx: &Gfx, title: &str, (x0, y0): (f32, f32), card_w: f32, u: f32) -> 
     Ok((icon, (label, (text_x, text_y))))
 }
 
-/// The receding shadow: the whole width of the card, under the line at the top.
+/// The countdown bar: the whole width of the card, under the line at the top.
 fn countdown_box((x0, y0): (f32, f32), card_w: f32, u: f32) -> Box2 {
-    (x0, y0 + (HEADER_TOP + HEADER + SHADOW_ABOVE) * u, card_w, SHADOW * u)
+    (x0, y0 + (HEADER_TOP + HEADER + BAR_ABOVE) * u, card_w, BAR * u)
 }
 
 /// The close button, at the end of the line at the top.
@@ -285,9 +283,9 @@ pub fn paint_card(
         c.fill_round(card, radius, t.subtle_hover)?;
     }
     paint_header(c, t, l, app_icon, look)?;
-    // The line that parts the title from the rest; the shadow under it is a visual of its own.
-    let (bx, by, bw, _) = l.countdown;
-    c.fill_rect(rect(bx, by, bw, 1.0), t.divider)?;
+    // The bar's track parts the title from the rest; the bar itself is a visual of its own.
+    let (bx, by, bw, bh) = l.countdown;
+    c.fill_rect(rect(bx, by, bw, bh), t.divider)?;
     if content.picture_only
         && let Some(bitmap) = thumb
     {
@@ -382,11 +380,10 @@ fn paint_header(
     Ok(())
 }
 
-/// The whole shadow under the title line, `w` × `h`, darkest at the line: its own visual, which the compositor shrinks
-/// to nothing over the card's life.
-pub fn paint_countdown(c: &Canvas<'_>, content: &ToastContent, w: f32, h: f32) -> Result<()> {
-    let shade = Rgba::hex(0x000000, if content.dark { 0x70 } else { 0x2a });
-    c.gradient(rect(0.0, 0.0, w, h), 0.0, (0.0, 0.0), (0.0, h), &[(0.0, shade), (1.0, Rgba::hex(0x000000, 0))])
+/// The full countdown bar, `w` × `h`, in the Windows accent colour: its own visual, which the compositor shrinks to
+/// nothing over the card's life.
+pub fn paint_countdown(c: &Canvas<'_>, t: &Theme, w: f32, h: f32) -> Result<()> {
+    c.fill_rect(rect(0.0, 0.0, w, h), t.accent)
 }
 
 type Done = Box<dyn FnOnce(Option<ToastEvent>)>;
@@ -763,13 +760,13 @@ impl Toasts {
             None => None,
         };
         let (thumb, app_icon) = (bitmap(&content.thumb), bitmap(&content.app_icon));
-        let theme = Theme::new(Look { dark: content.dark, animations: animate, ..Look::default() });
+        let theme = Theme::new(Look::new(content.dark, vixeeny_platform::system_accent(), animate));
         // The countdown bar, over the card, shrinking towards its left end.
         let bar = Piece::new(gfx, false)?;
         scene::add(&piece.visual, &bar.visual)?;
         let (bx, by, bw, bh) = layout.countdown;
         let bar_size = (bw.round().max(1.0) as u32, bh.round().max(1.0) as u32);
-        bar.show(gfx, &true, || Ok(bar_size), |c| paint_countdown(c, content, bar_size.0 as f32, bar_size.1 as f32))?;
+        bar.show(gfx, &true, || Ok(bar_size), |c| paint_countdown(c, &theme, bar_size.0 as f32, bar_size.1 as f32))?;
         bar.move_to(bx.round(), by.round())?;
         let (cx, cy, cw, ch) = layout.card;
         // SAFETY: plain creation and property calls on visuals of the same device.
