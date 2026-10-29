@@ -1101,6 +1101,8 @@ pub struct Notifications {
     pub failures: bool,
     /// A new version can be installed.
     pub updates: bool,
+    /// Where the cards go: `bottom_right`, `bottom_center`, `bottom_left`, `top_right`, `top_center` or `top_left`.
+    pub place: String,
 }
 
 impl Default for Notifications {
@@ -1114,6 +1116,7 @@ impl Default for Notifications {
             game_start: "both".into(),
             failures: true,
             updates: true,
+            place: "bottom_right".into(),
         }
     }
 }

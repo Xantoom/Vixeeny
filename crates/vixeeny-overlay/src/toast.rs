@@ -45,8 +45,8 @@ pub struct ToastContent {
     pub picture_only: bool,
     /// The right-click menu: open, edit, show in the folder, close.
     pub menu: Vec<String>,
-    /// In the top-right corner (over a game, where its own notifications go), not the bottom.
-    pub top: bool,
+    /// Where on the screen it goes.
+    pub place: Place,
     /// The app's icon, before its name at the top of the card.
     pub app_icon: Option<RgbaImage>,
     /// A click on the card does something (opens the file, the settings): it lights under the pointer.
@@ -64,13 +64,66 @@ pub enum ToastEvent {
     Edit,
 }
 
-/// Where the card goes: the bottom-right (or `top`-right) corner of the work area of a monitor (what the taskbar leaves
-/// free), `margin` physical pixels from its edges.
-pub fn corner(work: PhysicalRect, size: (u32, u32), margin: u32, top: bool) -> (i32, i32) {
-    (
-        work.x + work.width as i32 - size.0 as i32 - margin as i32,
-        if top { work.y + margin as i32 } else { work.y + work.height as i32 - size.1 as i32 - margin as i32 },
-    )
+/// A corner or the middle of the top or bottom edge of the screen, where the card goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Place {
+    TopLeft,
+    TopCenter,
+    TopRight,
+    BottomLeft,
+    BottomCenter,
+    #[default]
+    BottomRight,
+}
+
+impl Place {
+    /// By its name in the settings (`bottom_right`…); the bottom-right corner for an unknown one.
+    pub fn from_name(name: &str) -> Self {
+        match name {
+            "top_left" => Self::TopLeft,
+            "top_center" => Self::TopCenter,
+            "top_right" => Self::TopRight,
+            "bottom_left" => Self::BottomLeft,
+            "bottom_center" => Self::BottomCenter,
+            _ => Self::BottomRight,
+        }
+    }
+
+    fn top(self) -> bool {
+        matches!(self, Self::TopLeft | Self::TopCenter | Self::TopRight)
+    }
+
+    /// The column: 0 left, 1 middle, 2 right.
+    fn column(self) -> i32 {
+        match self {
+            Self::TopLeft | Self::BottomLeft => 0,
+            Self::TopCenter | Self::BottomCenter => 1,
+            Self::TopRight | Self::BottomRight => 2,
+        }
+    }
+
+    /// The way to the nearest edge, which the card slides in from and out to: sideways in a corner, up or down in a
+    /// middle.
+    fn away(self) -> (f32, f32) {
+        match self.column() {
+            0 => (-1.0, 0.0),
+            2 => (1.0, 0.0),
+            _ => (0.0, if self.top() { -1.0 } else { 1.0 }),
+        }
+    }
+}
+
+/// Where the card goes: at `place` of the work area of a monitor (what the taskbar leaves free), `margin` physical
+/// pixels from its edges.
+pub fn corner(work: PhysicalRect, size: (u32, u32), margin: u32, place: Place) -> (i32, i32) {
+    let m = margin as i32;
+    let x = match place.column() {
+        0 => work.x + m,
+        1 => work.x + (work.width as i32 - size.0 as i32) / 2,
+        _ => work.x + work.width as i32 - size.0 as i32 - m,
+    };
+    let y = if place.top() { work.y + m } else { work.y + work.height as i32 - size.1 as i32 - m };
+    (x, y)
 }
 
 // Logical pixels.
@@ -509,10 +562,12 @@ impl Card {
         let Some(effect) = self.piece.effect.as_ref().filter(|_| self.animate) else {
             return Ok(false);
         };
-        let width = self.layout.size.0 as f32;
+        let (w, h) = (self.layout.size.0 as f32, self.layout.size.1 as f32);
+        let (ax, ay) = self.content.place.away();
         // SAFETY: plain property and timer calls, with animations of the same device, on a window of this thread.
         unsafe {
-            self.piece.visual.SetOffsetX(&scene::ease_in(gfx, 0.0, width, LEAVE)?)?;
+            self.piece.visual.SetOffsetX(&scene::ease_in(gfx, 0.0, ax * w, LEAVE)?)?;
+            self.piece.visual.SetOffsetY(&scene::ease_in(gfx, 0.0, ay * h, LEAVE)?)?;
             effect.SetOpacity(&scene::ease_in(gfx, 1.0, 0.0, LEAVE)?)?;
             gfx.dcomp.Commit()?;
             SetTimer(Some(self.popup.hwnd), LEAVE_TIMER, (LEAVE * 1000.0) as u32, None);
@@ -741,7 +796,7 @@ impl Toasts {
         self.shared.current.borrow().is_none()
     }
 
-    /// Shows a card in the bottom-right (or top-right) corner of `work`, the work area of a monitor (physical pixels,
+    /// Shows a card at its place (see [`ToastContent::place`]) on `work`, the work area of a monitor (physical pixels,
     /// at `dpi`), in the place of the one on screen (whose `done` is not called). `done` learns what the user did
     /// (`None`: the card went by itself or was closed) once the card is gone.
     pub fn show(
@@ -756,7 +811,7 @@ impl Toasts {
         let gfx = &shared.gfx;
         let layout = CardLayout::new(gfx, content, dpi)?;
         let u = layout.u;
-        let (x, y) = corner(work, layout.size, (12.0 * u) as u32, content.top);
+        let (x, y) = corner(work, layout.size, (12.0 * u) as u32, content.place);
         // Never in a capture or a recording: the card is about them, not part of them.
         let popup =
             Popup::new(gfx, PhysicalRect::new(x, y, layout.size.0, layout.size.1), Focus::Never, Capture::Hidden)?;
@@ -815,8 +870,9 @@ impl Toasts {
         let weak: Weak<Shared> = Rc::downgrade(shared);
         card.popup.on_message(move |msg, wparam, lparam| weak.upgrade()?.message(id, msg, wparam, lparam));
         // Drawn where it slides in from, transparent: it appears with the slide.
-        let slide = 40.0 * u;
-        scene::set_offset(&card.piece.visual, if animate { slide } else { 0.0 }, 0.0)?;
+        let (ax, ay) = content.place.away();
+        let (sx, sy) = if animate { (ax * 40.0 * u, ay * 40.0 * u) } else { (0.0, 0.0) };
+        scene::set_offset(&card.piece.visual, sx, sy)?;
         if let Some(effect) = &card.piece.effect {
             // SAFETY: plain property call.
             unsafe { effect.SetOpacity2(if animate { 0.0 } else { 1.0 })? };
@@ -826,7 +882,8 @@ impl Toasts {
         if animate && let Some(effect) = &card.piece.effect {
             // SAFETY: plain property calls with animations of the same device.
             unsafe {
-                card.piece.visual.SetOffsetX(&scene::ease_out(gfx, slide, 0.0, ENTER)?)?;
+                card.piece.visual.SetOffsetX(&scene::ease_out(gfx, sx, 0.0, ENTER)?)?;
+                card.piece.visual.SetOffsetY(&scene::ease_out(gfx, sy, 0.0, ENTER)?)?;
                 effect.SetOpacity(&scene::ease_out(gfx, 0.0, 1.0, ENTER)?)?;
                 gfx.dcomp.Commit()?;
             }
@@ -844,13 +901,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_card_sits_in_the_bottom_right_corner() {
+    fn the_card_sits_at_its_place() {
+        let (main, left) = (PhysicalRect::new(0, 0, 1920, 1032), PhysicalRect::new(-1920, 40, 1920, 1040));
         // Above a 48-pixel taskbar.
-        assert_eq!(corner(PhysicalRect::new(0, 0, 1920, 1032), (360, 96), 16, false), (1544, 920));
+        assert_eq!(corner(main, (360, 96), 16, Place::BottomRight), (1544, 920));
         // A second monitor to the left keeps its own corner; a taskbar on top moves nothing.
-        assert_eq!(corner(PhysicalRect::new(-1920, 40, 1920, 1040), (360, 96), 16, false), (-376, 968));
+        assert_eq!(corner(left, (360, 96), 16, Place::BottomRight), (-376, 968));
         // At the top, under a taskbar on top.
-        assert_eq!(corner(PhysicalRect::new(0, 0, 1920, 1032), (360, 96), 16, true), (1544, 16));
-        assert_eq!(corner(PhysicalRect::new(-1920, 40, 1920, 1040), (360, 96), 16, true), (-376, 56));
+        assert_eq!(corner(main, (360, 96), 16, Place::TopRight), (1544, 16));
+        assert_eq!(corner(left, (360, 96), 16, Place::TopRight), (-376, 56));
+        // On the left, and in the middle.
+        assert_eq!(corner(left, (360, 96), 16, Place::BottomLeft), (-1904, 968));
+        assert_eq!(corner(main, (360, 96), 16, Place::TopCenter), (780, 16));
+        assert_eq!(Place::from_name("bottom_center"), Place::BottomCenter);
+        assert_eq!(Place::from_name("???"), Place::BottomRight);
+        assert_eq!(Place::TopLeft.away(), (-1.0, 0.0));
+        assert_eq!(Place::BottomCenter.away(), (0.0, 1.0));
     }
 }

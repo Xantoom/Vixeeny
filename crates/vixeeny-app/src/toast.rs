@@ -448,7 +448,6 @@ fn content_of(toast: &Toast, thumb: Option<Thumb>) -> ToastContent {
                 body: name.clone(),
                 thumb: vixeeny_platform::exe_icon(&path, 64).map(|(width, height, data)| Thumb { width, height, data }),
                 dark,
-                top: true,
                 ..ToastContent::default()
             }
         }
@@ -472,6 +471,7 @@ fn content_of(toast: &Toast, thumb: Option<Thumb>) -> ToastContent {
         }
     };
     content.clickable = clickable(toast);
+    content.place = vixeeny_overlay::toast::Place::from_name(&config.notifications.place);
     content.app_icon = std::env::current_exe().ok().and_then(|exe| {
         let (width, height, data) = vixeeny_platform::exe_icon(&exe.display().to_string(), 32)?;
         Some(Thumb { width, height, data })
@@ -487,7 +487,7 @@ fn clickable(toast: &Toast) -> bool {
     }
 }
 
-/// Shows the card for `toast` in a corner of the main monitor (see [`ToastContent::top`]); `act` runs once it is gone.
+/// Shows the card for `toast` at its place on the main monitor (see [`ToastContent::place`]); `act` runs once it is gone.
 fn show(toasts: &Toasts, toast: Toast, thumb: Option<Thumb>) -> anyhow::Result<()> {
     let content = content_of(&toast, thumb);
     let monitors = vixeeny_platform::monitors()?;

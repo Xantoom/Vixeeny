@@ -1830,6 +1830,23 @@ pub fn notifications(env: &Env, config: &Config) -> Vec<Row> {
     }
     // Each kind of card shows a sample of itself (`preview_notify_<kind>`).
     let sampled = |row: Row| Row { preview: format!("preview_{}", row.id), ..row };
+    rows.push(crate::picked(
+        crate::Picker::Corner,
+        choice(
+            "notify_place",
+            t(Key::SetWidgetCorner),
+            vec![
+                opt("top_left", t(Key::SetCornerTl)),
+                opt("top_center", t(Key::SetCornerTc)),
+                opt("top_right", t(Key::SetCornerTr)),
+                opt("bottom_left", t(Key::SetCornerBl)),
+                opt("bottom_center", t(Key::SetCornerBc)),
+                opt("bottom_right", t(Key::SetCornerBr)),
+            ],
+            |c| c.notifications.place.clone(),
+            |c, v| c.notifications.place = v,
+        ),
+    ));
     rows.extend([
         header("h_notify_captures", t(Key::GrpNotifyCaptures)),
         sampled(toggle(

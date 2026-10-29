@@ -1495,7 +1495,7 @@ export component SearchBox inherits Rectangle {
 // centre, top right, bottom left, bottom centre, bottom right, then one of the user's: a click or a drag anywhere else
 // puts it there). The chosen one is in the accent colour.
 export component ScreenPicker inherits Rectangle {
-    // false: the four edges; true: the six places and the user's own.
+    // false: the four edges; true: the six places, and the user's own when it has a seventh option.
     in property <bool> corners;
     // The names of the places, in the order above.
     in property <[string]> options;
@@ -1527,9 +1527,10 @@ export component ScreenPicker inherits Rectangle {
         // While pressed, where the user's window goes (thousandths).
         property <int> drag-x: round(clamp((anywhere.mouse-x - 8px - self.win-w / 2) / self.room-w, 0, 1) * 1000);
         property <int> drag-y: round(clamp((anywhere.mouse-y - 8px - self.win-h / 2) / self.room-h, 0, 1) * 1000);
+        property <bool> free: root.corners && root.options.length > 6;
         anywhere := TouchArea {
-            enabled: root.corners;
-            mouse-cursor: root.corners ? pointer : default;
+            enabled: parent.free;
+            mouse-cursor: parent.free ? pointer : default;
             clicked => { root.placed(parent.drag-x, parent.drag-y); }
         }
         for i in root.corners ? 6 : 4 : Rectangle {
