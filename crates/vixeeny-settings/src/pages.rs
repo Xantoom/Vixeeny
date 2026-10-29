@@ -1817,6 +1817,7 @@ pub fn notifications(env: &Env, config: &Config) -> Vec<Row> {
     if !config.notifications.enabled {
         return rows;
     }
+    rows.push(button("preview_notification", t(Key::ToastSample), t(Key::SetPreview)));
     rows.extend([
         header("h_notify_captures", t(Key::GrpNotifyCaptures)),
         toggle(

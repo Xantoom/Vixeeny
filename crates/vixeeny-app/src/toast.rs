@@ -26,6 +26,8 @@ pub enum Toast {
     Update(String),
     /// A game started (its executable, and the name it is shown by): the replay runs with it (`true`) or is off.
     Replay(bool, PathBuf, String),
+    /// What a card looks like (asked for in the settings).
+    Sample,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,6 +118,7 @@ impl Toast {
             Self::Replay(on, exe, name) => {
                 [if *on { "replay-on" } else { "replay-off" }.to_owned(), format!("{}|{name}", exe.display())]
             }
+            Self::Sample => ["sample".to_owned(), String::new()],
         }
     }
 
@@ -141,6 +144,7 @@ impl Toast {
             "failed-crash" => failed(Failed::Crash),
             "text-copied" => Some(Self::TextCopied(text.to_owned())),
             "update" => Some(Self::Update(text.to_owned())),
+            "sample" => Some(Self::Sample),
             "replay-on" | "replay-off" => {
                 let (exe, name) = text.split_once('|')?;
                 Some(Self::Replay(kind == "replay-on", PathBuf::from(exe), name.to_owned()))
@@ -186,11 +190,19 @@ pub fn notify_with(config: &Config, toast: &Toast, thumb: Option<Thumb>) {
     }
 }
 
+/// Shows the sample card, whatever the switches say.
+pub fn notify_sample() {
+    if let Err(e) = send_to_host(&encode(&Toast::Sample, None)) {
+        tracing::warn!("cannot show the notification: {e}");
+    }
+}
+
 /// Whether the user wants the card for `toast` (the notifications page).
 fn shown(config: &Config, toast: &Toast) -> bool {
     let n = &config.notifications;
     n.enabled
         && match toast {
+            Toast::Sample => true,
             Toast::Saved(kind, _) | Toast::Lossy(kind, ..) => match kind {
                 Saved::Image => n.image_saved,
                 Saved::Recording => n.recording_saved,
@@ -307,12 +319,13 @@ fn content_of(toast: &Toast, thumb: Option<Thumb>) -> ToastContent {
     let config = vixeeny_common::paths::config_file().and_then(|p| Config::load(&p).ok()).unwrap_or_default();
     let lang = crate::lang(&config.general.language);
     let dark = crate::dark(&config);
-    match toast {
+    let mut content = match toast {
         // A screenshot: its picture says it all.
         Toast::Saved(Saved::Image, path)
             if let Some(thumb) = thumb.or_else(|| crate::thumbnail::thumbnail(path, 640)) =>
         {
             ToastContent {
+                heading: tr(Key::ToastImageSaved, lang).into(),
                 thumb: Some(thumb),
                 dark,
                 picture_only: true,
@@ -382,7 +395,24 @@ fn content_of(toast: &Toast, thumb: Option<Thumb>) -> ToastContent {
             action_label: tr(Key::UpdateView, lang).into(),
             ..ToastContent::default()
         },
-    }
+        Toast::Sample => ToastContent {
+            heading: tr(Key::ToastSample, lang).into(),
+            body: tr(Key::ToastSampleBody, lang).into(),
+            dark,
+            ..ToastContent::default()
+        },
+    };
+    content.clickable = clickable(toast);
+    content.app_icon = std::env::current_exe().ok().and_then(|exe| {
+        let (width, height, data) = vixeeny_platform::exe_icon(&exe.display().to_string(), 32)?;
+        Some(Thumb { width, height, data })
+    });
+    content
+}
+
+/// A click on the card does something (see [`act`]); the sample shows how a click looks.
+fn clickable(toast: &Toast) -> bool {
+    !matches!(toast, Toast::Failed(Failed::NoText, _) | Toast::TextCopied(_) | Toast::Replay(..))
 }
 
 /// Shows the card for `toast` in a corner of the main monitor (see [`ToastContent::top`]); `act` runs once it is gone.
@@ -423,7 +453,7 @@ fn act(event: Option<ToastEvent>, toast: &Toast) {
             }
         }
         (Some(_), Toast::Failed(..)) => crate::open_settings(),
-        (Some(_), Toast::Replay(..)) => {}
+        (Some(_), Toast::Replay(..) | Toast::Sample) => {}
         (Some(_), Toast::Update(_)) => {
             if let Err(e) = crate::settings::spawn(true) {
                 tracing::error!("{e:#}");
@@ -523,6 +553,7 @@ Merci"
             Toast::Failed(Failed::Ocr, "no language".into()),
             Toast::Replay(true, PathBuf::from(r"D:\Games\Hades\Hades.exe"), "Hades".into()),
             Toast::Replay(false, PathBuf::from("Client-Win64-Shipping.exe"), "Wuthering | Waves".into()),
+            Toast::Sample,
         ] {
             let line = encode_line(&toast.to_args());
             assert_eq!(line.matches('\n').count(), 1);
@@ -563,6 +594,7 @@ Merci"
         config.notifications.game_start = "on".into();
         assert!(shown(&config, &Toast::Replay(true, PathBuf::new(), String::new())));
         assert!(!shown(&config, &Toast::Replay(false, PathBuf::new(), String::new())));
+        assert!(shown(&config, &Toast::Sample));
         // Off: none at all.
         config.notifications.enabled = false;
         assert!(!shown(&config, &failed) && !shown(&config, &Toast::Failed(Failed::DiskLow, String::new())));

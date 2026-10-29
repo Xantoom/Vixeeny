@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The notification, after the Windows 11 ones, drawn natively: a card in the corner of the screen with the thumbnail
-//! of the capture, a title and the whole text. Clicking the card opens the file, its button the folder (or the settings
-//! for an error). It slides in, never takes the keyboard, and goes by itself after a while unless the pointer is on it.
-//! A screenshot shows as its picture alone for 3 s: a click opens it, a right-click offers a menu.
+//! The notification, after the Windows 11 ones, drawn natively: a card in the corner of the screen under a line with
+//! the app's icon and name, with the thumbnail of the capture, a title and the whole text. Clicking the card opens the
+//! file, its button the folder (or the settings for an error): it sinks a little under the press and fades as it goes.
+//! It slides in, never takes the keyboard, and goes by itself after a while unless the pointer is on it; a bar along
+//! its foot empties until then. A screenshot shows as its picture under its title: a click opens it, a right-click
+//! offers a menu.
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
@@ -10,6 +12,7 @@ use std::rc::{Rc, Weak};
 use vixeeny_editor::RgbaImage;
 use vixeeny_platform::PhysicalRect;
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
+use windows::Win32::Graphics::DirectComposition::IDCompositionScaleTransform;
 use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
 use windows::Win32::UI::WindowsAndMessaging::{
     KillTimer, SetTimer, WM_CAPTURECHANGED, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_RBUTTONUP,
@@ -44,6 +47,10 @@ pub struct ToastContent {
     pub menu: Vec<String>,
     /// In the top-right corner (over a game, where its own notifications go), not the bottom.
     pub top: bool,
+    /// The app's icon, before its name at the top of the card.
+    pub app_icon: Option<RgbaImage>,
+    /// A click on the card does something (opens the file, the settings): it lights under the pointer.
+    pub clickable: bool,
 }
 
 /// What the user did with the card.
@@ -76,6 +83,19 @@ const PAD: f32 = 14.0;
 const PAD_LEFT: f32 = 18.0;
 const THUMB: f32 = 76.0;
 const ICON: f32 = 24.0;
+/// The line at the top: the app's icon and name (a screenshot's title).
+const HEADER_TOP: f32 = 12.0;
+const HEADER: f32 = 16.0;
+const HEADER_GAP: f32 = 10.0;
+/// The bar that empties until the card goes, and the room under it.
+const BAR: f32 = 3.0;
+const BAR_GAP: f32 = 12.0;
+const BAR_BELOW: f32 = 10.0;
+/// A press sinks the card to this scale.
+const PRESSED: f32 = 0.97;
+const PRESS: f64 = 0.08;
+/// A card clicked shrinks a little more as it fades out.
+const CLICKED: f32 = 0.92;
 const LIFETIME_MS: u32 = 5500;
 /// A picture-only card goes sooner: it only says "done".
 const PICTURE_LIFETIME_MS: u32 = 2000;
@@ -96,6 +116,9 @@ pub enum CardTarget {
     Outside,
 }
 
+/// A paragraph and where it starts.
+pub type Placed = (Paragraph, (f32, f32));
+
 /// Where everything is, in physical pixels; the boxes are relative to the window.
 pub struct CardLayout {
     pub u: f32,
@@ -103,10 +126,15 @@ pub struct CardLayout {
     pub card: Box2,
     /// The thumbnail, or the icon when there is none.
     pub picture: Box2,
-    pub heading: (Paragraph, (f32, f32)),
-    pub body: (Paragraph, (f32, f32)),
+    pub heading: Placed,
+    pub body: Placed,
     pub button: Option<(Paragraph, Box2)>,
     pub close: Box2,
+    /// The app's icon and the name beside it.
+    pub app_icon: Box2,
+    pub header: Placed,
+    /// The bar that empties until the card goes.
+    pub countdown: Box2,
 }
 
 impl CardLayout {
@@ -116,17 +144,18 @@ impl CardLayout {
         if content.picture_only
             && let Some(thumb) = &content.thumb
         {
-            return Self::picture(gfx, (thumb.width, thumb.height), u);
+            return Self::picture(gfx, content, (thumb.width, thumb.height), u);
         }
         let card_w = (WIDTH - 2.0 * SIDE) * u;
+        let (x0, y0) = (SIDE * u, ABOVE * u);
+        let (app_icon, header) = header(gfx, "Vixeeny", (x0, y0), card_w, u)?;
         let picture_side = if content.thumb.is_some() { THUMB } else { ICON };
         let text_x = (PAD_LEFT + picture_side + PAD) * u;
         let text_w = card_w - text_x - PAD * u;
         let heading = gfx.paragraph(&content.heading, 14.0 * u, true, text_w)?;
         let body = gfx.paragraph_lines(&content.body, 12.0 * u, false, text_w, BODY_LINES)?;
         let gap = 3.0 * u;
-        let (x0, y0) = (SIDE * u, ABOVE * u);
-        let top = y0 + PAD * u;
+        let top = y0 + (HEADER_TOP + HEADER + HEADER_GAP) * u;
         let heading_at = (x0 + text_x, top);
         let body_at = (x0 + text_x, top + heading.height + gap);
         let mut text_h = heading.height + gap + body.height;
@@ -143,31 +172,53 @@ impl CardLayout {
         } else {
             (x0 + PAD_LEFT * u, top + 2.0 * u, ICON * u, ICON * u)
         };
-        let inner = text_h.max(picture.3).max(40.0 * u);
-        let card_h = (inner + 2.0 * PAD * u).ceil();
+        let inner = text_h.max(picture.3);
+        let countdown = (x0 + PAD_LEFT * u, top + inner + BAR_GAP * u, card_w - (PAD_LEFT + PAD) * u, BAR * u);
+        let card_h = (countdown.1 + countdown.3 + BAR_BELOW * u - y0).ceil();
         let card = (x0, y0, card_w, card_h);
         let size = ((WIDTH * u).ceil() as u32, (card_h + (ABOVE + BELOW) * u).ceil() as u32);
-        let close = (x0 + card_w - 28.0 * u, y0 + 6.0 * u, 22.0 * u, 22.0 * u);
-        Ok(Self { u, size, card, picture, heading: (heading, heading_at), body: (body, body_at), button, close })
+        Ok(Self {
+            u,
+            size,
+            card,
+            picture,
+            heading: (heading, heading_at),
+            body: (body, body_at),
+            button,
+            close: close_box((x0, y0), card_w, u),
+            app_icon,
+            header,
+            countdown,
+        })
     }
 
-    /// The card of a picture alone: the picture's shape, as large as fits [`PICTURE_MAX`].
-    fn picture(gfx: &Gfx, (w, h): (u32, u32), u: f32) -> Result<Self> {
+    /// The card of a picture under its title: the picture's shape, as large as fits [`PICTURE_MAX`] (and no narrower
+    /// than its title needs).
+    fn picture(gfx: &Gfx, content: &ToastContent, (w, h): (u32, u32), u: f32) -> Result<Self> {
         let scale = (PICTURE_MAX.0 / w.max(1) as f32).min(PICTURE_MAX.1 / h.max(1) as f32);
-        let card_w = (w as f32 * scale).max(48.0).round() * u;
-        let card_h = (h as f32 * scale).max(48.0).round() * u;
+        let card_w = (w as f32 * scale).max(200.0).round() * u;
+        let picture_h = (h as f32 * scale).max(48.0).round() * u;
         let (x0, y0) = (SIDE * u, ABOVE * u);
+        let title = if content.heading.is_empty() { "Vixeeny" } else { &content.heading };
+        let (app_icon, header) = header(gfx, title, (x0, y0), card_w, u)?;
+        let picture = (x0, y0 + (HEADER_TOP + HEADER + HEADER_GAP) * u, card_w, picture_h);
+        let card_h = picture.1 + picture_h - y0;
         let card = (x0, y0, card_w, card_h);
+        let inset = 10.0 * u;
+        let countdown = (x0 + inset, y0 + card_h - inset - BAR * u, card_w - 2.0 * inset, BAR * u);
         let empty = || gfx.paragraph("", 12.0 * u, false, 1.0);
         Ok(Self {
             u,
             size: ((card_w + 2.0 * SIDE * u).ceil() as u32, (card_h + (ABOVE + BELOW) * u).ceil() as u32),
             card,
-            picture: card,
+            picture,
             heading: (empty()?, (x0, y0)),
             body: (empty()?, (x0, y0)),
             button: None,
-            close: (0.0, 0.0, 0.0, 0.0),
+            close: close_box((x0, y0), card_w, u),
+            app_icon,
+            header,
+            countdown,
         })
     }
 
@@ -185,6 +236,21 @@ impl CardLayout {
     }
 }
 
+/// The app's icon and the title beside it, on the line at the top of a card at `(x0, y0)`, `card_w` wide.
+fn header(gfx: &Gfx, title: &str, (x0, y0): (f32, f32), card_w: f32, u: f32) -> Result<(Box2, Placed)> {
+    let icon = (x0 + PAD_LEFT * u, y0 + HEADER_TOP * u, HEADER * u, HEADER * u);
+    let text_x = icon.0 + icon.2 + 8.0 * u;
+    // Room for the close button on the right.
+    let label = gfx.paragraph_lines(title, 12.0 * u, false, x0 + card_w - 36.0 * u - text_x, 1)?;
+    let text_y = icon.1 + (icon.3 - label.height) / 2.0;
+    Ok((icon, (label, (text_x, text_y))))
+}
+
+/// The close button, at the end of the line at the top.
+fn close_box((x0, y0): (f32, f32), card_w: f32, u: f32) -> Box2 {
+    (x0 + card_w - 30.0 * u, y0 + (HEADER_TOP + HEADER / 2.0 - 11.0) * u, 22.0 * u, 22.0 * u)
+}
+
 /// What the card shows; drawn again only when this changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CardLook {
@@ -200,6 +266,7 @@ pub fn paint_card(
     content: &ToastContent,
     l: &CardLayout,
     thumb: Option<&windows::Win32::Graphics::Direct2D::ID2D1Bitmap1>,
+    app_icon: Option<&windows::Win32::Graphics::Direct2D::ID2D1Bitmap1>,
     look: &CardLook,
 ) -> Result<()> {
     let u = l.u;
@@ -207,29 +274,31 @@ pub fn paint_card(
     let card = rect(cx, cy, cw, ch);
     let radius = 10.0 * u;
     c.shadow(card, radius, 16.0 * u, 4.0 * u, Rgba::hex(0x000000, 0x60))?;
+    c.fill_round(card, radius, t.flyout)?;
+    // Lit under the pointer when a click on it does something.
+    let lit = look.hover == Some(CardTarget::Card) && (content.clickable || content.picture_only);
+    if lit {
+        c.fill_round(card, radius, t.subtle_hover)?;
+    }
+    paint_header(c, t, l, app_icon, look)?;
     if content.picture_only
         && let Some(bitmap) = thumb
     {
-        // The picture alone; the accent around it while the pointer is on it.
+        // The picture under its title; the accent around the card while the pointer is on it.
+        let (px, py, pw, ph) = l.picture;
         c.push_round_clip(card, radius)?;
-        let drawn = c.picture(bitmap, card);
+        let drawn = c.picture(bitmap, rect(px, py, pw, ph));
         c.pop_layer();
         drawn?;
+        let (bx, by, bw, bh) = l.countdown;
+        c.fill_round(rect(bx, by, bw, bh), bh / 2.0, Rgba::hex(0x000000, 0x70))?;
         return if look.hovered {
             c.stroke_round(card, radius, 2.0 * u, t.accent)
         } else {
             c.stroke_round(card, radius, 1.0, t.stroke_strong)
         };
     }
-    c.fill_round(card, radius, t.flyout)?;
-    // The colour of the kind, along the left edge: accent for news, red for a failure.
-    let kind = if content.error {
-        t.danger
-    } else if content.warning {
-        t.warning
-    } else {
-        t.accent
-    };
+    let kind = kind_colour(t, content);
     c.push_round_clip(card, radius)?;
     let stripe = c.fill_rect(rect(cx, cy, 3.0 * u, ch), kind);
     c.pop_layer();
@@ -278,7 +347,36 @@ pub fn paint_card(
         c.stroke_round(r, 6.0 * u, 1.0, t.control_stroke)?;
         c.text(&content.action_label, r, 12.0 * u, t.text, Align::Centre)?;
     }
-    // Close, while the pointer is on the card.
+    let (bx, by, bw, bh) = l.countdown;
+    c.fill_round(rect(bx, by, bw, bh), bh / 2.0, t.divider)
+}
+
+/// The colour of the kind of card: accent for news, amber for a warning, red for a failure.
+fn kind_colour(t: &Theme, content: &ToastContent) -> Rgba {
+    if content.error {
+        t.danger
+    } else if content.warning {
+        t.warning
+    } else {
+        t.accent
+    }
+}
+
+/// The line at the top: the app's icon, the name (or title), and the close button while the pointer is on the card.
+fn paint_header(
+    c: &Canvas<'_>,
+    t: &Theme,
+    l: &CardLayout,
+    app_icon: Option<&windows::Win32::Graphics::Direct2D::ID2D1Bitmap1>,
+    look: &CardLook,
+) -> Result<()> {
+    let u = l.u;
+    if let Some(bitmap) = app_icon {
+        let (x, y, w, h) = l.app_icon;
+        c.picture(bitmap, rect(x, y, w, h))?;
+    }
+    let (label, (x, y)) = &l.header;
+    c.text_layout(&label.layout, *x, *y, t.text_2)?;
     if look.hovered {
         let (x, y, w, h) = l.close;
         if look.hover == Some(CardTarget::Close) {
@@ -287,6 +385,12 @@ pub fn paint_card(
         c.icon(icons::DISMISS, x + 5.0 * u, y + 5.0 * u, 12.0 * u, t.text_2)?;
     }
     Ok(())
+}
+
+/// The full countdown bar, `w` × `h`: its own visual, which the compositor shrinks to nothing over the card's life.
+pub fn paint_countdown(c: &Canvas<'_>, t: &Theme, content: &ToastContent, w: f32, h: f32) -> Result<()> {
+    let colour = if content.picture_only { Rgba::hex(0xffffff, 0xe0) } else { kind_colour(t, content) };
+    c.fill_round(rect(0.0, 0.0, w, h), h / 2.0, colour)
 }
 
 type Done = Box<dyn FnOnce(Option<ToastEvent>)>;
@@ -302,6 +406,12 @@ struct Card {
     popup: Popup,
     piece: Piece<CardLook>,
     thumb: Option<windows::Win32::Graphics::Direct2D::ID2D1Bitmap1>,
+    app_icon: Option<windows::Win32::Graphics::Direct2D::ID2D1Bitmap1>,
+    /// The countdown bar, shrunk from its left end by the compositor (held for its surface).
+    _bar: Piece<bool>,
+    bar_scale: IDCompositionScaleTransform,
+    /// The card sinking under a press, around its centre.
+    press_scale: IDCompositionScaleTransform,
     look: Cell<CardLook>,
     press: Cell<Option<CardTarget>>,
     done: RefCell<Option<Done>>,
@@ -320,7 +430,17 @@ impl Card {
                 gfx,
                 &look,
                 || Ok(size),
-                |c| paint_card(c, &self.theme, &self.content, &self.layout, self.thumb.as_ref(), &look),
+                |c| {
+                    paint_card(
+                        c,
+                        &self.theme,
+                        &self.content,
+                        &self.layout,
+                        self.thumb.as_ref(),
+                        self.app_icon.as_ref(),
+                        &look,
+                    )
+                },
             )
             // SAFETY: plain call.
             .and_then(|()| unsafe { gfx.dcomp.Commit() });
@@ -329,16 +449,63 @@ impl Card {
         }
     }
 
-    fn set_timer(&self, on: bool) {
-        // SAFETY: plain timer calls on a window of this thread.
-        unsafe {
+    /// Starts the card's life again (`on`), its bar emptying until it ends, or holds it (the bar full).
+    fn set_timer(&self, gfx: &Gfx, on: bool) {
+        let ms = if self.content.picture_only { PICTURE_LIFETIME_MS } else { LIFETIME_MS };
+        // SAFETY: plain timer and property calls, with an animation of the same device, on a window of this thread.
+        let bar = unsafe {
             if on {
-                let ms = if self.content.picture_only { PICTURE_LIFETIME_MS } else { LIFETIME_MS };
                 SetTimer(Some(self.popup.hwnd), LIFETIME_TIMER, ms, None);
             } else {
                 let _ = KillTimer(Some(self.popup.hwnd), LIFETIME_TIMER);
             }
+            if on && self.animate {
+                scene::linear(gfx, 1.0, 0.0, f64::from(ms) / 1000.0).and_then(|a| self.bar_scale.SetScaleX(&a))
+            } else {
+                self.bar_scale.SetScaleX2(1.0)
+            }
+            .and_then(|()| gfx.dcomp.Commit())
+        };
+        if let Err(e) = bar {
+            tracing::warn!("notification: {e}");
         }
+    }
+
+    /// Sinks the card under a press (`true`), or lifts it back.
+    fn press(&self, gfx: &Gfx, down: bool) {
+        if !self.animate {
+            return;
+        }
+        let (from, to) = if down { (1.0, PRESSED) } else { (PRESSED, 1.0) };
+        // SAFETY: plain property calls with animations of the same device.
+        let pressed = unsafe {
+            scene::ease_out(gfx, from, to, PRESS)
+                .and_then(|a| {
+                    self.press_scale.SetScaleX(&a)?;
+                    self.press_scale.SetScaleY(&a)
+                })
+                .and_then(|()| gfx.dcomp.Commit())
+        };
+        if let Err(e) = pressed {
+            tracing::warn!("notification: {e}");
+        }
+    }
+
+    /// Shrinks the card clicked a little more while it fades; `false` when it cannot (no animations).
+    fn shrink_out(&self, gfx: &Gfx) -> Result<bool> {
+        let Some(effect) = self.piece.effect.as_ref().filter(|_| self.animate) else {
+            return Ok(false);
+        };
+        // SAFETY: plain property and timer calls, with animations of the same device, on a window of this thread.
+        unsafe {
+            let shrink = scene::ease_out(gfx, PRESSED, CLICKED, LEAVE)?;
+            self.press_scale.SetScaleX(&shrink)?;
+            self.press_scale.SetScaleY(&shrink)?;
+            effect.SetOpacity(&scene::ease_out(gfx, 1.0, 0.0, LEAVE)?)?;
+            gfx.dcomp.Commit()?;
+            SetTimer(Some(self.popup.hwnd), LEAVE_TIMER, (LEAVE * 1000.0) as u32, None);
+        }
+        Ok(true)
     }
 
     /// Slides the card out to the side it came from while it fades; `false` when it cannot (no animations): it goes at
@@ -401,7 +568,7 @@ impl Shared {
 
     /// The card `id` goes by itself or is closed: out of the screen first, then [`Shared::finish`].
     fn leave(&self, id: u64, card: &Card, event: Option<ToastEvent>) {
-        card.set_timer(false);
+        card.set_timer(&self.gfx, false);
         card.leaving.set(Some(event));
         match card.slide_out(&self.gfx) {
             Ok(true) => {}
@@ -409,6 +576,24 @@ impl Shared {
             Err(e) => {
                 tracing::warn!("notification: {e}");
                 self.finish(id, event);
+            }
+        }
+    }
+
+    /// The user chose `event` on the card `id`: it is done at once, while the card shrinks and fades away.
+    fn activate(&self, id: u64, card: &Card, event: Option<ToastEvent>) {
+        card.set_timer(&self.gfx, false);
+        card.leaving.set(Some(None));
+        let done = card.done.borrow_mut().take();
+        if let Some(done) = done {
+            done(event);
+        }
+        match card.shrink_out(&self.gfx) {
+            Ok(true) => {}
+            Ok(false) => self.finish(id, None),
+            Err(e) => {
+                tracing::warn!("notification: {e}");
+                self.finish(id, None);
             }
         }
     }
@@ -439,7 +624,7 @@ impl Shared {
                 let hand = match look.hover {
                     Some(CardTarget::Button | CardTarget::Close) => true,
                     // A picture alone opens with a click anywhere on it.
-                    Some(CardTarget::Card) => card.content.picture_only,
+                    Some(CardTarget::Card) => card.content.picture_only || card.content.clickable,
                     _ => false,
                 };
                 popup::set_pointer(if hand { Pointer::Hand } else { Pointer::Arrow });
@@ -449,7 +634,7 @@ impl Shared {
                 card.popup.track_leave();
                 if !look.hovered {
                     // The card stays while the pointer is on it.
-                    card.set_timer(false);
+                    card.set_timer(gfx, false);
                 }
                 look.hovered = true;
                 look.hover = Some(card.layout.at(x, y, true));
@@ -457,17 +642,25 @@ impl Shared {
             popup::WM_MOUSELEAVE => {
                 look.hovered = false;
                 look.hover = None;
-                card.set_timer(true);
+                card.set_timer(gfx, true);
             }
             WM_LBUTTONDOWN | WM_LBUTTONDBLCLK => {
                 // SAFETY: plain call on a window of this thread.
                 unsafe { SetCapture(card.popup.hwnd) };
-                card.press.set(Some(card.layout.at(x, y, look.hovered)));
+                let at = card.layout.at(x, y, look.hovered);
+                card.press.set(Some(at));
+                if matches!(at, CardTarget::Card | CardTarget::Button) {
+                    card.press(gfx, true);
+                }
             }
             // Another window took the mouse: its release will not come here.
-            WM_CAPTURECHANGED => card.press.set(None),
+            WM_CAPTURECHANGED => {
+                if matches!(card.press.take(), Some(CardTarget::Card | CardTarget::Button)) {
+                    card.press(gfx, false);
+                }
+            }
             WM_RBUTTONUP if !card.content.menu.is_empty() => {
-                card.set_timer(false);
+                card.set_timer(gfx, false);
                 let chosen = popup::context_menu(card.popup.hwnd, &card.content.menu, card.content.dark);
                 let event = match chosen {
                     Some(0) => Some(Some(ToastEvent::Activated)),
@@ -477,14 +670,14 @@ impl Shared {
                     None => None,
                 };
                 if let Some(event) = event {
-                    self.finish(id, event);
+                    self.activate(id, &card, event);
                     return Some(LRESULT(0));
                 }
                 // Dismissed: the card stays while the pointer is on it, then goes.
                 if !card.popup.has_pointer() {
                     look.hovered = false;
                     look.hover = None;
-                    card.set_timer(true);
+                    card.set_timer(gfx, true);
                 }
             }
             WM_LBUTTONUP => {
@@ -497,17 +690,18 @@ impl Shared {
                     self.leave(id, &card, None);
                     return Some(LRESULT(0));
                 }
-                if pressed == Some(at) {
-                    let event = match at {
-                        CardTarget::Card => Some(Some(ToastEvent::Activated)),
-                        CardTarget::Button => Some(Some(ToastEvent::Action)),
-                        CardTarget::Close => Some(None),
-                        CardTarget::Outside => None,
-                    };
-                    if let Some(event) = event {
-                        self.finish(id, event);
-                        return Some(LRESULT(0));
-                    }
+                let event = match at {
+                    _ if pressed != Some(at) => None,
+                    CardTarget::Card => Some(ToastEvent::Activated),
+                    CardTarget::Button => Some(ToastEvent::Action),
+                    CardTarget::Close | CardTarget::Outside => None,
+                };
+                if let Some(event) = event {
+                    self.activate(id, &card, Some(event));
+                    return Some(LRESULT(0));
+                }
+                if matches!(pressed, Some(CardTarget::Card | CardTarget::Button)) {
+                    card.press(gfx, false);
                 }
             }
             _ => return None,
@@ -562,23 +756,52 @@ impl Toasts {
             Popup::new(gfx, PhysicalRect::new(x, y, layout.size.0, layout.size.1), Focus::Never, Capture::Hidden)?;
         let piece = Piece::new(gfx, true)?;
         scene::add(&popup.root, &piece.visual)?;
-        let thumb = match &content.thumb {
+        let bitmap = |picture: &Option<RgbaImage>| match picture {
             Some(t) => match gfx.rgba_bitmap(t.width, t.height, &t.data) {
                 Ok(b) => Some(b),
                 Err(e) => {
-                    tracing::warn!("notification thumbnail: {e}");
+                    tracing::warn!("notification picture: {e}");
                     None
                 }
             },
             None => None,
         };
+        let (thumb, app_icon) = (bitmap(&content.thumb), bitmap(&content.app_icon));
+        let theme = Theme::new(Look { dark: content.dark, animations: animate, ..Look::default() });
+        // The countdown bar, over the card, shrinking towards its left end.
+        let bar = Piece::new(gfx, false)?;
+        scene::add(&piece.visual, &bar.visual)?;
+        let (bx, by, bw, bh) = layout.countdown;
+        let bar_size = (bw.round().max(1.0) as u32, bh.round().max(1.0) as u32);
+        bar.show(
+            gfx,
+            &true,
+            || Ok(bar_size),
+            |c| paint_countdown(c, &theme, content, bar_size.0 as f32, bar_size.1 as f32),
+        )?;
+        bar.move_to(bx.round(), by.round())?;
+        let (cx, cy, cw, ch) = layout.card;
+        // SAFETY: plain creation and property calls on visuals of the same device.
+        let (bar_scale, press_scale) = unsafe {
+            let bar_scale = gfx.dcomp.CreateScaleTransform()?;
+            bar.visual.SetTransform(&bar_scale)?;
+            let press_scale = gfx.dcomp.CreateScaleTransform()?;
+            press_scale.SetCenterX2(cx + cw / 2.0)?;
+            press_scale.SetCenterY2(cy + ch / 2.0)?;
+            piece.visual.SetTransform(&press_scale)?;
+            (bar_scale, press_scale)
+        };
         let card = Rc::new(Card {
             content: content.clone(),
             layout,
-            theme: Theme::new(Look { dark: content.dark, animations: animate, ..Look::default() }),
+            theme,
             popup,
             piece,
             thumb,
+            app_icon,
+            _bar: bar,
+            bar_scale,
+            press_scale,
             look: Cell::new(CardLook { hovered: false, hover: None, held: None }),
             press: Cell::new(None),
             done: RefCell::new(Some(Box::new(done))),
@@ -606,7 +829,7 @@ impl Toasts {
                 gfx.dcomp.Commit()?;
             }
         }
-        card.set_timer(true);
+        card.set_timer(gfx, true);
         // The previous card goes: the new one has its place.
         let old = shared.current.borrow_mut().replace((id, card));
         drop(old);

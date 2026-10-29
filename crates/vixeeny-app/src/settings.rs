@@ -542,6 +542,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
                     let config = pending.borrow().clone().unwrap_or_else(load_config);
                     preview_overlay(config, action == "preview_widget");
                 }
+                (Section::Notifications, "preview_notification") => crate::toast::notify_sample(),
                 (Section::About, "github") => {
                     let _ = vixeeny_platform::open_path(REPO);
                 }

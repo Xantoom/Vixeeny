@@ -184,15 +184,17 @@ fn the_side_strip_draws_in_both_themes_and_orientations() {
 
 #[test]
 fn the_notification_draws_with_a_thumbnail_and_as_an_error() {
-    use crate::toast::{CardLayout, CardLook, ToastContent, paint_card};
+    use crate::toast::{CardLayout, CardLook, ToastContent, paint_card, paint_countdown};
     let gfx = Gfx::new().expect("graphics devices");
     let green = [[40u8, 200, 90, 255]; 64 * 48].concat();
+    let icon = gfx.rgba_bitmap(16, 16, &[[120u8, 80, 230, 255]; 16 * 16].concat()).expect("icon");
     let saved = ToastContent {
         heading: "Image saved".into(),
         body: "capture-001.png".into(),
         thumb: Some(RgbaImage { width: 64, height: 48, data: green }),
         dark: true,
         action_label: "Open folder".into(),
+        clickable: true,
         ..ToastContent::default()
     };
     let failed = ToastContent {
@@ -212,18 +214,26 @@ fn the_notification_draws_with_a_thumbnail_and_as_an_error() {
         let thumb = content.thumb.as_ref().map(|t| gfx.rgba_bitmap(t.width, t.height, &t.data).expect("bitmap"));
         let look = CardLook { hovered: true, hover: Some(crate::toast::CardTarget::Button), held: None };
         let (w, h) = l.size;
+        let (bx, by, bw, bh) = l.countdown;
         let pixels = gfx
             .render(w, h, |c| {
                 backdrop(c, w, h)?;
-                paint_card(c, &t, content, &l, thumb.as_ref(), &look)
+                paint_card(c, &t, content, &l, thumb.as_ref(), Some(&icon), &look)?;
+                // The bar two thirds of the way through the card's life.
+                let shown = bw * 2.0 / 3.0;
+                c.part(rect(bx, by, shown, bh), (bx, by), |c| paint_countdown(c, &t, content, bw, bh))
             })
             .expect("drawn");
         save(&format!("toast-{name}"), w, h, &pixels);
-        // The text fits: everything is inside the card.
+        // The text fits: everything is inside the card, the title line above it and the bar below.
         let (_, cy, _, ch) = l.card;
-        let (_, (_, by)) = &l.body;
-        let bottom = l.button.as_ref().map_or(by + l.body.0.height, |(_, b)| b.1 + b.3);
-        assert!(bottom <= cy + ch, "{name}: {bottom} > {}", cy + ch);
+        let (_, (_, text_y)) = &l.body;
+        let bottom = l.button.as_ref().map_or(text_y + l.body.0.height, |(_, b)| b.1 + b.3);
+        assert!(bottom <= by && by + bh <= cy + ch, "{name}: {bottom} > {by}");
+        assert!(l.app_icon.1 + l.app_icon.3 <= l.heading.1.1, "{name}: the title line comes first");
+        let (ix, iy, iw, ih) = l.app_icon;
+        let o = (((iy + ih / 2.0) as u32 * w + (ix + iw / 2.0) as u32) * 4) as usize;
+        assert_eq!(&pixels[o..o + 3], &[230, 80, 120], "{name}: the app's icon is drawn");
         if content.thumb.is_some() {
             let (px, py, pw, ph) = l.picture;
             let o = (((py + ph / 2.0) as u32 * w + (px + pw / 2.0) as u32) * 4) as usize;
@@ -317,6 +327,7 @@ fn a_screenshot_notification_is_its_picture_alone() {
     let blue = [[200u8, 120, 40, 255]; 640 * 360].concat();
     let content = ToastContent {
         thumb: Some(RgbaImage { width: w, height: h, data: blue }),
+        heading: "Image saved".into(),
         dark: true,
         picture_only: true,
         menu: vec!["Open".into(), "Show".into(), "Close".into()],
@@ -324,8 +335,10 @@ fn a_screenshot_notification_is_its_picture_alone() {
     };
     let l = CardLayout::new(&gfx, &content, 120).expect("laid out");
     let (_, _, cw, ch) = l.card;
-    // As large as fits 320×200 at 125 %, with the picture's shape.
-    assert!((cw / l.u - 320.0).abs() < 1.0 && (ch / l.u - 180.0).abs() < 1.0, "{cw}×{ch}");
+    // As large as fits 320×200 at 125 %, with the picture's shape, under its title line.
+    let (_, _, pw, ph) = l.picture;
+    assert!((pw / l.u - 320.0).abs() < 1.0 && (ph / l.u - 180.0).abs() < 1.0, "{pw}×{ph}");
+    assert!((cw - pw).abs() < 1.0 && ch > ph, "{cw}×{ch}");
     let (cx, cy, _, _) = l.card;
     assert_eq!(l.at(cx + cw - 3.0, cy + 3.0, true), CardTarget::Card, "no close button");
     let t = Theme::new(Look { dark: true, ..Look::default() });
@@ -341,6 +354,7 @@ fn a_screenshot_notification_is_its_picture_alone() {
                 &content,
                 &l,
                 Some(&bitmap),
+                None,
                 &CardLook { hovered: true, hover: Some(CardTarget::Card), held: None },
             )
         })

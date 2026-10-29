@@ -422,6 +422,9 @@ keys! {
     CutNoMatch => "No result", "Aucun résultat";
     CutMax => "max", "max";
     UnitGb => "GB", "Go";
+    ToastSample => "Sample notification", "Notification d’exemple";
+    ToastSampleBody => "Captures, recordings and alerts show here.",
+        "Les captures, les enregistrements et les alertes s’affichent ici.";
 }
 
 impl Lang {
