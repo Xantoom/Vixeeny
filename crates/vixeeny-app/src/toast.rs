@@ -26,8 +26,74 @@ pub enum Toast {
     Update(String),
     /// A game started (its executable, and the name it is shown by): the replay runs with it (`true`) or is off.
     Replay(bool, PathBuf, String),
-    /// What a card looks like (asked for in the settings).
-    Sample,
+    /// What a card of this kind looks like (asked for in the settings); a click does nothing.
+    Sample(Sample),
+}
+
+/// The kinds of cards, as the notifications page lists them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Sample {
+    Image,
+    Text,
+    Recording,
+    Replay,
+    Game,
+    Failure,
+    Update,
+}
+
+impl Sample {
+    const ALL: [Self; 7] =
+        [Self::Image, Self::Text, Self::Recording, Self::Replay, Self::Game, Self::Failure, Self::Update];
+
+    /// Its name, as in the id of its row (`notify_<name>`) and on the card process's input.
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Image => "image",
+            Self::Text => "text",
+            Self::Recording => "recording",
+            Self::Replay => "replay",
+            Self::Game => "game",
+            Self::Failure => "failures",
+            Self::Update => "updates",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|s| s.name() == name)
+    }
+
+    /// A card of this kind, with made-up content.
+    fn example(self, lang: vixeeny_common::i18n::Lang) -> Toast {
+        use vixeeny_common::i18n::tr;
+        match self {
+            Self::Image => Toast::Saved(Saved::Image, PathBuf::from("Vixeeny.png")),
+            Self::Text => Toast::TextCopied(tr(Key::ToastSampleText, lang).into()),
+            Self::Recording => Toast::Saved(Saved::Recording, PathBuf::from("Vixeeny.mp4")),
+            Self::Replay => Toast::Saved(Saved::Replay, PathBuf::from("Vixeeny.mp4")),
+            Self::Game => {
+                Toast::Replay(true, std::env::current_exe().unwrap_or_default(), tr(Key::ToastSampleGame, lang).into())
+            }
+            Self::Failure => Toast::Failed(Failed::Recording, tr(Key::ToastDiskFull, lang).into()),
+            Self::Update => {
+                Toast::Update(tr(Key::UpdateAvailable, lang).replace("{version}", env!("CARGO_PKG_VERSION")))
+            }
+        }
+    }
+}
+
+/// A made-up capture for the samples: the accent colour, darkening down and across.
+fn sample_picture(width: u32, height: u32) -> Thumb {
+    let [r, g, b] = vixeeny_platform::system_accent().unwrap_or([0, 120, 212]);
+    let mut data = Vec::with_capacity(width as usize * height as usize * 4);
+    for y in 0..height {
+        for x in 0..width {
+            let shade = 1.0 - 0.6 * (x as f32 / width as f32 + y as f32 / height as f32) / 2.0;
+            let c = |v: u8| (f32::from(v) * shade) as u8;
+            data.extend_from_slice(&[c(r), c(g), c(b), 255]);
+        }
+    }
+    Thumb { width, height, data }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,7 +184,7 @@ impl Toast {
             Self::Replay(on, exe, name) => {
                 [if *on { "replay-on" } else { "replay-off" }.to_owned(), format!("{}|{name}", exe.display())]
             }
-            Self::Sample => ["sample".to_owned(), String::new()],
+            Self::Sample(kind) => ["sample".to_owned(), kind.name().to_owned()],
         }
     }
 
@@ -144,7 +210,7 @@ impl Toast {
             "failed-crash" => failed(Failed::Crash),
             "text-copied" => Some(Self::TextCopied(text.to_owned())),
             "update" => Some(Self::Update(text.to_owned())),
-            "sample" => Some(Self::Sample),
+            "sample" => Sample::from_name(text).map(Self::Sample),
             "replay-on" | "replay-off" => {
                 let (exe, name) = text.split_once('|')?;
                 Some(Self::Replay(kind == "replay-on", PathBuf::from(exe), name.to_owned()))
@@ -190,9 +256,9 @@ pub fn notify_with(config: &Config, toast: &Toast, thumb: Option<Thumb>) {
     }
 }
 
-/// Shows the sample card, whatever the switches say.
-pub fn notify_sample() {
-    if let Err(e) = send_to_host(&encode(&Toast::Sample, None)) {
+/// Shows a sample card of `kind`, whatever the switches say.
+pub fn notify_sample(kind: Sample) {
+    if let Err(e) = send_to_host(&encode(&Toast::Sample(kind), None)) {
         tracing::warn!("cannot show the notification: {e}");
     }
 }
@@ -202,7 +268,7 @@ fn shown(config: &Config, toast: &Toast) -> bool {
     let n = &config.notifications;
     n.enabled
         && match toast {
-            Toast::Sample => true,
+            Toast::Sample(_) => true,
             Toast::Saved(kind, _) | Toast::Lossy(kind, ..) => match kind {
                 Saved::Image => n.image_saved,
                 Saved::Recording => n.recording_saved,
@@ -395,12 +461,15 @@ fn content_of(toast: &Toast, thumb: Option<Thumb>) -> ToastContent {
             action_label: tr(Key::UpdateView, lang).into(),
             ..ToastContent::default()
         },
-        Toast::Sample => ToastContent {
-            heading: tr(Key::ToastSample, lang).into(),
-            body: tr(Key::ToastSampleBody, lang).into(),
-            dark,
-            ..ToastContent::default()
-        },
+        // The card of its kind, with a made-up picture where the real one has one.
+        Toast::Sample(kind) => {
+            let example = kind.example(lang);
+            let mut content = content_of(&example, Some(sample_picture(640, 360)));
+            if matches!(kind, Sample::Recording | Sample::Replay) {
+                content.thumb = Some(sample_picture(256, 144));
+            }
+            content
+        }
     };
     content.clickable = clickable(toast);
     content.app_icon = std::env::current_exe().ok().and_then(|exe| {
@@ -410,9 +479,12 @@ fn content_of(toast: &Toast, thumb: Option<Thumb>) -> ToastContent {
     content
 }
 
-/// A click on the card does something (see [`act`]); the sample shows how a click looks.
+/// A click on the card does something (see [`act`]); a sample shows how a click on its kind looks.
 fn clickable(toast: &Toast) -> bool {
-    !matches!(toast, Toast::Failed(Failed::NoText, _) | Toast::TextCopied(_) | Toast::Replay(..))
+    match toast {
+        Toast::Sample(kind) => clickable(&kind.example(vixeeny_common::i18n::Lang::En)),
+        _ => !matches!(toast, Toast::Failed(Failed::NoText, _) | Toast::TextCopied(_) | Toast::Replay(..)),
+    }
 }
 
 /// Shows the card for `toast` in a corner of the main monitor (see [`ToastContent::top`]); `act` runs once it is gone.
@@ -453,7 +525,7 @@ fn act(event: Option<ToastEvent>, toast: &Toast) {
             }
         }
         (Some(_), Toast::Failed(..)) => crate::open_settings(),
-        (Some(_), Toast::Replay(..) | Toast::Sample) => {}
+        (Some(_), Toast::Replay(..)) | (_, Toast::Sample(_)) => {}
         (Some(_), Toast::Update(_)) => {
             if let Err(e) = crate::settings::spawn(true) {
                 tracing::error!("{e:#}");
@@ -553,7 +625,9 @@ Merci"
             Toast::Failed(Failed::Ocr, "no language".into()),
             Toast::Replay(true, PathBuf::from(r"D:\Games\Hades\Hades.exe"), "Hades".into()),
             Toast::Replay(false, PathBuf::from("Client-Win64-Shipping.exe"), "Wuthering | Waves".into()),
-            Toast::Sample,
+            Toast::Sample(Sample::Image),
+            Toast::Sample(Sample::Failure),
+            Toast::Sample(Sample::Update),
         ] {
             let line = encode_line(&toast.to_args());
             assert_eq!(line.matches('\n').count(), 1);
@@ -594,7 +668,11 @@ Merci"
         config.notifications.game_start = "on".into();
         assert!(shown(&config, &Toast::Replay(true, PathBuf::new(), String::new())));
         assert!(!shown(&config, &Toast::Replay(false, PathBuf::new(), String::new())));
-        assert!(shown(&config, &Toast::Sample));
+        assert!(shown(&config, &Toast::Sample(Sample::Game)));
+        // Each row of the notifications page has its sample.
+        for name in ["image", "text", "recording", "replay", "game", "failures", "updates"] {
+            assert!(Sample::from_name(name).is_some(), "{name}");
+        }
         // Off: none at all.
         config.notifications.enabled = false;
         assert!(!shown(&config, &failed) && !shown(&config, &Toast::Failed(Failed::DiskLow, String::new())));

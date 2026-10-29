@@ -42,6 +42,8 @@ export component Button inherits Rectangle {
     in property <bool> subtle: false;
     in property <bool> danger: false;
     in property <bool> enabled: true;
+    // Shown under it while the pointer rests on it; also its name when it has no text.
+    in property <string> tip;
     callback clicked();
 
     min-width: 32px;
@@ -83,9 +85,19 @@ export component Button inherits Rectangle {
         enabled: root.enabled;
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
+        changed has-hover => {
+            if self.has-hover && root.tip != "" {
+                Tip.text = root.tip;
+                Tip.left = root.absolute-position.x;
+                Tip.top = root.absolute-position.y;
+                Tip.bottom = root.absolute-position.y + root.height;
+            } else if root.tip != "" && Tip.text == root.tip {
+                Tip.text = "";
+            }
+        }
     }
     accessible-role: button;
-    accessible-label: root.text;
+    accessible-label: root.text != "" ? root.text : root.tip;
     accessible-enabled: root.enabled;
 }
 
@@ -1220,6 +1232,7 @@ export component GroupRow inherits Rectangle {
         y: root.stacked ? 13px + txt.preferred-height + 10px : (root.natural - self.preferred-height) / 2;
         width: min(self.preferred-width, parent.width - 2 * root.pad);
         height: self.preferred-height;
+        spacing: 12px;
         opacity: root.dimmed ? 0.6 : 1.0;
         animate opacity { duration: Theme.t-normal; }
         @children

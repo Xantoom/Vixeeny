@@ -542,7 +542,12 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
                     let config = pending.borrow().clone().unwrap_or_else(load_config);
                     preview_overlay(config, action == "preview_widget");
                 }
-                (Section::Notifications, "preview_notification") => crate::toast::notify_sample(),
+                (Section::Notifications, id)
+                    if let Some(kind) =
+                        id.strip_prefix("preview_notify_").and_then(crate::toast::Sample::from_name) =>
+                {
+                    crate::toast::notify_sample(kind);
+                }
                 (Section::About, "github") => {
                     let _ = vixeeny_platform::open_path(REPO);
                 }

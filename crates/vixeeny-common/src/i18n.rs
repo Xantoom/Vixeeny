@@ -405,9 +405,6 @@ keys! {
     CutNoMatch => "No result", "Aucun résultat";
     CutMax => "max", "max";
     UnitGb => "GB", "Go";
-    ToastSample => "Sample notification", "Notification d’exemple";
-    ToastSampleBody => "Captures, recordings and alerts show here.",
-        "Les captures, les enregistrements et les alertes s’affichent ici.";
     WidgetFrameLost => "1 frame lost: the encoder cannot keep up", "1 image perdue : l’encodeur ne suit pas";
     WidgetFramesLost => "{n} frames lost: the encoder cannot keep up", "{n} images perdues : l’encodeur ne suit pas";
     UiSearch => "Search", "Rechercher";
@@ -415,6 +412,8 @@ keys! {
     UiResetAllTitle => "Reset all settings?", "Réinitialiser tous les paramètres ?";
     SetNotifyText => "Text copied from a capture", "Texte copié depuis une capture";
     SetReplayAfterSeconds => "After the shortcut", "Après le raccourci";
+    ToastSampleText => "Text read from the selected area.", "Texte lu dans la zone choisie.";
+    ToastSampleGame => "Your game", "Votre jeu";
 }
 
 impl Lang {

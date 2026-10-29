@@ -1808,48 +1808,45 @@ pub fn updates(env: &Env, _config: &Config) -> Vec<Row> {
 /// their setting.
 pub fn notifications(env: &Env, config: &Config) -> Vec<Row> {
     let t = |k| env.t(k);
-    // The sample shows only while notifications are on.
-    let preview = if config.notifications.enabled { "preview_notification" } else { "" };
-    let mut rows = vec![Row {
-        preview: preview.into(),
-        ..toggle(
-            "notifications",
-            t(Key::SetNotifications),
-            |c| c.notifications.enabled,
-            |c, v| c.notifications.enabled = v,
-        )
-    }];
+    let mut rows = vec![toggle(
+        "notifications",
+        t(Key::SetNotifications),
+        |c| c.notifications.enabled,
+        |c, v| c.notifications.enabled = v,
+    )];
     if !config.notifications.enabled {
         return rows;
     }
+    // Each kind of card shows a sample of itself (`preview_notify_<kind>`).
+    let sampled = |row: Row| Row { preview: format!("preview_{}", row.id), ..row };
     rows.extend([
         header("h_notify_captures", t(Key::GrpNotifyCaptures)),
-        toggle(
+        sampled(toggle(
             "notify_image",
             t(Key::SetNotifyImage),
             |c| c.notifications.image_saved,
             |c, v| c.notifications.image_saved = v,
-        ),
-        toggle(
+        )),
+        sampled(toggle(
             "notify_text",
             t(Key::SetNotifyText),
             |c| c.notifications.text_copied,
             |c, v| c.notifications.text_copied = v,
-        ),
+        )),
         header("h_notify_videos", t(Key::GrpNotifyVideos)),
-        toggle(
+        sampled(toggle(
             "notify_recording",
             t(Key::SetNotifyRecording),
             |c| c.notifications.recording_saved,
             |c, v| c.notifications.recording_saved = v,
-        ),
-        toggle(
+        )),
+        sampled(toggle(
             "notify_replay",
             t(Key::SetNotifyReplay),
             |c| c.notifications.replay_saved,
             |c, v| c.notifications.replay_saved = v,
-        ),
-        choice(
+        )),
+        sampled(choice(
             "notify_game",
             t(Key::SetReplayNotify),
             vec![
@@ -1859,20 +1856,20 @@ pub fn notifications(env: &Env, config: &Config) -> Vec<Row> {
             ],
             |c| c.notifications.game_start.clone(),
             |c, v| c.notifications.game_start = v,
-        ),
+        )),
         header("h_notify_vixeeny", "Vixeeny".to_owned()),
-        toggle(
+        sampled(toggle(
             "notify_failures",
             t(Key::SetNotifyFailures),
             |c| c.notifications.failures,
             |c, v| c.notifications.failures = v,
-        ),
-        toggle(
+        )),
+        sampled(toggle(
             "notify_updates",
             t(Key::SetNotifyUpdates),
             |c| c.notifications.updates,
             |c, v| c.notifications.updates = v,
-        ),
+        )),
     ]);
     rows
 }
