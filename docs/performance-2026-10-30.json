@@ -1,0 +1,265 @@
+{
+  "date": "2026-10-30",
+  "baseline_commit": "5fd24ec",
+  "after": "accompanying working-tree changes",
+  "platform": "Windows x64, native execution from WSL, cargo-xwin, quick profile",
+  "rust": "1.99.1",
+  "cpu": "AMD Ryzen 7 9800X3D",
+  "method": "Median of seven batches/samples per process. Editor: median of three process runs; final pair reversed. Default worker counts. Sequential execution. Synthetic inputs.",
+  "benchmarks": [
+    {
+      "area": "editor",
+      "case": "BGRA 128x128",
+      "unit": "ms",
+      "before_run_medians": [
+        0.3949,
+        0.382,
+        0.3766
+      ],
+      "after_run_medians": [
+        0.0073,
+        0.0096,
+        0.0097
+      ],
+      "before_median": 0.382,
+      "after_median": 0.0096
+    },
+    {
+      "area": "editor",
+      "case": "BGRA 1920x1080",
+      "unit": "ms",
+      "before_run_medians": [
+        0.47,
+        0.4772,
+        0.4657
+      ],
+      "after_run_medians": [
+        0.3014,
+        0.2688,
+        0.2647
+      ],
+      "before_median": 0.47,
+      "after_median": 0.2688
+    },
+    {
+      "area": "editor",
+      "case": "BGRA 3840x2160",
+      "unit": "ms",
+      "before_run_medians": [
+        0.9653,
+        0.9487,
+        0.9498
+      ],
+      "after_run_medians": [
+        0.9728,
+        0.9044,
+        0.8706
+      ],
+      "before_median": 0.9498,
+      "after_median": 0.9044
+    },
+    {
+      "area": "editor",
+      "case": "BGRA 7680x2160",
+      "unit": "ms",
+      "before_run_medians": [
+        1.6962,
+        1.8249,
+        1.7874
+      ],
+      "after_run_medians": [
+        1.8674,
+        1.7833,
+        1.769
+      ],
+      "before_median": 1.7874,
+      "after_median": 1.7833
+    },
+    {
+      "area": "editor",
+      "case": "blur 128x128",
+      "unit": "ms",
+      "before_run_medians": [
+        0.7839,
+        0.7911,
+        0.7811
+      ],
+      "after_run_medians": [
+        0.6223,
+        0.5857,
+        0.5843
+      ],
+      "before_median": 0.7839,
+      "after_median": 0.5857
+    },
+    {
+      "area": "editor",
+      "case": "blur 1920x1080",
+      "unit": "ms",
+      "before_run_medians": [
+        19.4134,
+        19.1063,
+        19.2774
+      ],
+      "after_run_medians": [
+        18.8468,
+        19.0988,
+        19.8385
+      ],
+      "before_median": 19.2774,
+      "after_median": 19.0988
+    },
+    {
+      "area": "audio",
+      "case": "audio burst 1s, 4 sources",
+      "unit": "ms",
+      "before_run_medians": [
+        0.3143
+      ],
+      "after_run_medians": [
+        0.0999
+      ],
+      "before_median": 0.3143,
+      "after_median": 0.0999
+    },
+    {
+      "area": "audio",
+      "case": "audio burst 10s, 4 sources",
+      "unit": "ms",
+      "before_run_medians": [
+        70.8895
+      ],
+      "after_run_medians": [
+        1.7124
+      ],
+      "before_median": 70.8895,
+      "after_median": 1.7124
+    },
+    {
+      "area": "audio",
+      "case": "audio streaming 60s, 4 sources",
+      "unit": "ms",
+      "before_run_medians": [
+        6.4554
+      ],
+      "after_run_medians": [
+        4.1091
+      ],
+      "before_median": 6.4554,
+      "after_median": 4.1091
+    },
+    {
+      "area": "stitch",
+      "case": "scroll 1920x1080",
+      "unit": "ms/frame",
+      "before_run_medians": [
+        2.1775
+      ],
+      "after_run_medians": [
+        1.827
+      ],
+      "before_median": 2.1775,
+      "after_median": 1.827
+    },
+    {
+      "area": "stitch",
+      "case": "scroll 3840x2160",
+      "unit": "ms/frame",
+      "before_run_medians": [
+        6.3499
+      ],
+      "after_run_medians": [
+        6.2878
+      ],
+      "before_median": 6.3499,
+      "after_median": 6.2878
+    }
+  ],
+  "idle_samples": [
+    {
+      "elapsed_seconds": 21.4888071,
+      "cpu_percent_one_core": 0.0727122726137739,
+      "context_switches_per_minute": 5846.764755964514,
+      "private_mib": 55.15234375,
+      "working_set_mib": 46.328125,
+      "threads": 30,
+      "busiest_threads": []
+    },
+    {
+      "elapsed_seconds": 21.398397199999998,
+      "cpu_percent_one_core": 0,
+      "context_switches_per_minute": 5826.604620648878,
+      "private_mib": 54.8984375,
+      "working_set_mib": 42.6171875,
+      "threads": 30,
+      "busiest_threads": []
+    },
+    {
+      "elapsed_seconds": 21.4024947,
+      "cpu_percent_one_core": 0.14601101618308077,
+      "context_switches_per_minute": 5814.275473223222,
+      "private_mib": 54.5234375,
+      "working_set_mib": 42.67578125,
+      "threads": 30,
+      "busiest_threads": [
+        {
+          "module": "nvwgf2umx.dll",
+          "switches": 2068,
+          "state": "Wait",
+          "wait": "UserRequest"
+        },
+        {
+          "module": "nvwgf2umx.dll",
+          "switches": 5,
+          "state": "Wait",
+          "wait": "UserRequest"
+        },
+        {
+          "module": "CRYPT32.dll",
+          "switches": 1,
+          "state": "Wait",
+          "wait": "UserRequest"
+        },
+        {
+          "module": "nvwgf2umx.dll",
+          "switches": 0,
+          "state": "Wait",
+          "wait": "UserRequest"
+        },
+        {
+          "module": "nvwgf2umx.dll",
+          "switches": 0,
+          "state": "Wait",
+          "wait": "UserRequest"
+        },
+        {
+          "module": "nvwgf2umx.dll",
+          "switches": 0,
+          "state": "Wait",
+          "wait": "UserRequest"
+        },
+        {
+          "module": "nvwgf2umx.dll",
+          "switches": 0,
+          "state": "Wait",
+          "wait": "UserRequest"
+        },
+        {
+          "module": "nvwgf2umx.dll",
+          "switches": 0,
+          "state": "Wait",
+          "wait": "UserRequest"
+        }
+      ]
+    }
+  ],
+  "validation": {
+    "windows_tests_passed": 633,
+    "windows_tests_failed": 0,
+    "windows_tests_ignored": 0,
+    "new_tests": 7,
+    "clippy_workspace_all_targets": "passed",
+    "fmt": "passed",
+    "real_capture": "Two 3840x2160 SDR monitors, window streaming, gate. No HDR monitor available."
+  }
+}

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Flattens a base image and its annotations into the exported pixels.
 
+use rayon::prelude::*;
 use tiny_skia::{BlendMode, FillRule, IntSize, LineCap, LineJoin, Paint, Path, PathBuilder, Pixmap, Stroke, Transform};
 
 use crate::effects::{self, Region};
@@ -26,26 +27,26 @@ pub fn bgra_to_rgba(src: &[u8], src_stride: usize, dst: &mut [u8], dst_stride: u
     let Some(dst) = dst.get_mut(..dst_len) else {
         return;
     };
-    let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get).min(8).min(rows.max(1));
-    let per = rows.div_ceil(threads);
-    std::thread::scope(|scope| {
-        for (i, chunk) in dst.chunks_mut(per * dst_stride).enumerate() {
-            let first = i * per;
-            scope.spawn(move || {
-                for (y, out) in chunk.chunks_mut(dst_stride).enumerate() {
-                    let at = (first + y) * src_stride;
-                    let Some(input) = src.get(at..at + width * 4) else {
-                        return;
-                    };
-                    let out = &mut out[..width * 4];
-                    let pixels = out.as_chunks_mut::<4>().0.iter_mut().zip(input.as_chunks::<4>().0);
-                    for (o, i) in pixels {
-                        *o = [i[2], i[1], i[0], 255];
-                    }
-                }
-            });
+    let convert = |first: usize, chunk: &mut [u8]| {
+        for (y, out) in chunk.chunks_mut(dst_stride).enumerate() {
+            let at = (first + y) * src_stride;
+            let Some(input) = src.get(at..at + width * 4) else {
+                return;
+            };
+            let out = &mut out[..width * 4];
+            let pixels = out.as_chunks_mut::<4>().0.iter_mut().zip(input.as_chunks::<4>().0);
+            for (o, i) in pixels {
+                *o = [i[2], i[1], i[0], 255];
+            }
         }
-    });
+    };
+    // Thumbnails stay on the caller; large screens reuse the image pipeline's worker pool.
+    if width * rows < 1 << 16 {
+        convert(0, dst);
+    } else {
+        let per = rows.div_ceil(rayon::current_num_threads().min(8));
+        dst.par_chunks_mut(per * dst_stride).enumerate().for_each(|(i, chunk)| convert(i * per, chunk));
+    }
 }
 
 impl RgbaImage {

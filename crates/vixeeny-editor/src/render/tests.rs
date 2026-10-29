@@ -5,6 +5,24 @@ use crate::model::{Item, Style};
 const WHITE: Color = Color::rgb(255, 255, 255);
 const RED: Color = Color::rgb(255, 0, 0);
 
+#[test]
+fn bgra_conversion_preserves_padded_rows_in_small_and_parallel_images() {
+    for (width, rows) in [(17, 5), (65, 1010), (70_000, 1)] {
+        let (src_stride, dst_stride) = (width * 4 + 12, width * 4 + 20);
+        let src: Vec<u8> = (0..src_stride * rows).map(|i| (i * 71 % 251) as u8).collect();
+        let mut dst = vec![0x79; dst_stride * rows];
+        bgra_to_rgba(&src, src_stride, &mut dst, dst_stride, (width, rows));
+        for y in 0..rows {
+            for x in 0..width {
+                let s = y * src_stride + x * 4;
+                let d = y * dst_stride + x * 4;
+                assert_eq!(&dst[d..d + 4], &[src[s + 2], src[s + 1], src[s], 255]);
+            }
+            assert!(dst[y * dst_stride + width * 4..(y + 1) * dst_stride].iter().all(|b| *b == 0x79));
+        }
+    }
+}
+
 fn style(c: Color, w: f32) -> Style {
     Style { color: c, width: w }
 }

@@ -383,7 +383,10 @@ impl Stitcher {
             return;
         }
         row.pixels.copy_from_slice(frame.row(i));
-        row.layer = layer.filter(|_| layered).map(|l| layer_row(l, n, i).into());
+        match (row.layer.as_mut(), layer.filter(|_| layered).map(|l| layer_row(l, n, i))) {
+            (Some(kept), Some(new)) if kept.len() == new.len() => kept.copy_from_slice(new),
+            (_, new) => row.layer = new.map(Into::into),
+        }
         row.sig = sigs[i];
         row.view = seen;
     }
@@ -488,19 +491,41 @@ fn spread(rows: Vec<usize>) -> Vec<usize> {
 fn signatures(frame: &Frame) -> Vec<Sig> {
     let w = frame.width as usize;
     let bands = BANDS.min(w);
-    // The band of each column, and the columns of each band.
-    let band_of: Vec<u8> = (0..w).map(|x| (x * bands / w) as u8).collect();
-    let mut counts = [0u32; BANDS];
-    for b in &band_of {
-        counts[*b as usize] += 1;
-    }
+    // Sum contiguous bands, so the inner loop has no scatter or dependency on a per-column index. The boundaries
+    // are the inverse of floor(x * bands / w), including widths not divisible by the number of bands.
+    let edges: [usize; BANDS + 1] = std::array::from_fn(|k| (k.min(bands) * w).div_ceil(bands));
     (0..frame.height as usize)
         .map(|y| {
-            let mut sums = [0u32; BANDS];
-            for (px, b) in frame.row(y).as_chunks::<4>().0.iter().zip(&band_of) {
-                sums[*b as usize] += u32::from(px[0]) + 2 * u32::from(px[1]) + u32::from(px[2]);
-            }
-            std::array::from_fn(|k| (sums[k] / counts[k].max(1)) as u16)
+            let pixels = frame.row(y).as_chunks::<4>().0;
+            std::array::from_fn(|k| {
+                let band = &pixels[edges[k]..edges[k + 1]];
+                let sum: u32 = band.iter().map(|px| u32::from(px[0]) + 2 * u32::from(px[1]) + u32::from(px[2])).sum();
+                (sum / band.len().max(1) as u32) as u16
+            })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn contiguous_band_signatures_match_the_column_mapping_at_every_width() {
+        for w in [1, 2, 7, 31, 32, 33, 63, 64, 65, 1001, 1919, 1920] {
+            let data = (0..w * 7 * 4).map(|i| (i * 71 % 251) as u8).collect();
+            let frame = Frame::new(w, 7, data).unwrap();
+            for (y, signature) in signatures(&frame).iter().enumerate() {
+                let mut sums = [0_u32; BANDS];
+                let mut counts = [0_u32; BANDS];
+                for (x, px) in frame.row(y).as_chunks::<4>().0.iter().enumerate() {
+                    let band = x * BANDS.min(w as usize) / w as usize;
+                    sums[band] += u32::from(px[0]) + 2 * u32::from(px[1]) + u32::from(px[2]);
+                    counts[band] += 1;
+                }
+                let expected: Sig = std::array::from_fn(|k| (sums[k] / counts[k].max(1)) as u16);
+                assert_eq!(*signature, expected, "width {w}, row {y}");
+            }
+        }
+    }
 }

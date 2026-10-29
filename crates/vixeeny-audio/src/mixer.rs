@@ -9,6 +9,7 @@
 
 use crate::layout::convert;
 use crate::{AudioChunk, CHANNELS, SAMPLE_RATE};
+use std::collections::VecDeque;
 
 /// 20 ms.
 const BLOCK_FRAMES: u64 = 960;
@@ -33,7 +34,7 @@ impl Block {
 struct Source {
     volume: f32,
     /// Interleaved samples from track index `Mixer::next` on.
-    buf: Vec<f32>,
+    buf: VecDeque<f32>,
     /// Track index just after the last chunk, to recognise a continuation.
     expected: Option<u64>,
 }
@@ -71,7 +72,7 @@ impl Mixer {
     pub fn with_channels(volumes: &[f32], origin_ns: i64, channels: usize) -> Self {
         Self {
             channels,
-            sources: volumes.iter().map(|&volume| Source { volume, buf: Vec::new(), expected: None }).collect(),
+            sources: volumes.iter().map(|&volume| Source { volume, buf: VecDeque::new(), expected: None }).collect(),
             epoch_ns: origin_ns,
             epoch_idx: 0,
             next: 0,
@@ -119,24 +120,34 @@ impl Mixer {
             _ => at,
         };
         s.expected = Some((start + frames as i64).max(0) as u64);
-        let converted =
-            convert(&chunk.samples[..frames as usize * chunk.channels.max(1)], chunk.channels, self.channels);
         let channels = self.channels;
-        let mut data: &[f32] = &converted;
+        let mut skip = 0;
         if start < next as i64 {
             // Already emitted: keep only what is still ahead.
-            let skip = next as i64 - start;
-            if skip >= frames as i64 {
+            skip = (next as i64 - start) as usize;
+            if skip >= frames as usize {
                 return;
             }
-            data = &data[skip as usize * channels..];
             start = next as i64;
         }
+        let data = convert(
+            &chunk.samples[skip * chunk.channels.max(1)..frames as usize * chunk.channels.max(1)],
+            chunk.channels,
+            channels,
+        );
         let from = (start - next as i64) as usize * channels;
         if s.buf.len() < from + data.len() {
             s.buf.resize(from + data.len(), 0.0);
         }
-        s.buf[from..from + data.len()].copy_from_slice(data);
+        // The ring may wrap. Copy each contiguous part without moving the already queued samples.
+        let (a, b) = s.buf.as_mut_slices();
+        let first = data.len().min(a.len().saturating_sub(from));
+        if first > 0 {
+            a[from..from + first].copy_from_slice(&data[..first]);
+        }
+        let rest = &data[first..];
+        let second = from.saturating_sub(a.len());
+        b[second..second + rest.len()].copy_from_slice(rest);
     }
 
     fn emit_until(&mut self, limit: u64, partial: bool, out: &mut Vec<Block>) {
@@ -145,8 +156,13 @@ impl Mixer {
             let mut samples = vec![0.0f32; len * self.channels];
             for s in &mut self.sources {
                 let take = (len * self.channels).min(s.buf.len());
-                for (acc, v) in samples.iter_mut().zip(&s.buf[..take]) {
-                    *acc += v * s.volume;
+                let (a, b) = s.buf.as_slices();
+                let first = take.min(a.len());
+                let (left, right) = samples[..take].split_at_mut(first);
+                for (out, input) in [(left, &a[..first]), (right, &b[..take - first])] {
+                    for (acc, v) in out.iter_mut().zip(input) {
+                        *acc += v * s.volume;
+                    }
                 }
                 s.buf.drain(..take);
             }
@@ -246,6 +262,41 @@ mod tests {
 
     fn collect(blocks: &[Block]) -> Vec<f32> {
         blocks.iter().flat_map(|b| b.samples.iter().copied()).collect()
+    }
+
+    #[test]
+    fn overlapping_chunks_replace_the_right_samples_after_the_queue_wraps() {
+        let mut m = Mixer::new(&[1.0], 0);
+        m.sources[0].buf.reserve(12_000);
+        m.push(0, &chunk(0, 2880, |_| 0.25)); // 0–60 ms
+        let mut all = collect(&m.drain(190 * MS)); // emits 0–40 ms
+        m.push(0, &chunk(45 * MS, 5760, |_| 0.75)); // overwrites 45–165 ms
+        assert!(!m.sources[0].buf.as_slices().1.is_empty(), "exercise a wrapped buffer");
+        all.extend(collect(&m.finish(180 * MS)));
+        assert_eq!(all.len(), 8640 * CHANNELS);
+        for (i, frame) in all.as_chunks::<CHANNELS>().0.iter().enumerate() {
+            let expected = if i < 2160 {
+                0.25
+            } else if i < 7920 {
+                0.75
+            } else {
+                0.0
+            };
+            assert_eq!(*frame, [expected; CHANNELS], "frame {i}");
+        }
+    }
+
+    #[test]
+    fn a_late_surround_chunk_converts_only_the_part_still_on_the_timeline() {
+        let mut m = Mixer::new(&[1.0], 0);
+        m.push(0, &chunk(0, 960, |_| 0.1));
+        m.drain(190 * MS); // emits through 40 ms
+        let samples = (0..2880).flat_map(|i| [i as f32 / 10_000.0, 0.0, 0.0, 0.0, 0.0, 0.0]).collect();
+        m.push(0, &AudioChunk { time_ns: 0, channels: 6, samples }); // last 20 ms are still useful
+        let out = collect(&m.finish(60 * MS));
+        let reference = crate::layout::convert(&[0.2, 0.0, 0.0, 0.0, 0.0, 0.0], 6, CHANNELS);
+        assert!((out[0] - reference[0] * 0.96).abs() < 1e-6);
+        assert_eq!(out.len(), 960 * CHANNELS);
     }
 
     #[test]

@@ -2,6 +2,8 @@
 //! Pixel effects on a straight 4-channel buffer: Gaussian-like blur and mosaic. They run on the flattened image at
 //! export, which is what makes them irreversible.
 
+use rayon::prelude::*;
+
 /// Integer pixel region inside a `width`×`height` buffer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Region {
@@ -59,25 +61,21 @@ fn box_rows(data: &mut [u8], stride: usize, rows: usize, n: usize, radius: usize
     let Some(data) = data.get_mut(..(rows - 1) * stride + n * 4) else {
         return;
     };
-    // Below this many pixels, starting threads costs more than it saves.
-    let threads = if rows * n < 1 << 16 {
-        1
-    } else {
-        std::thread::available_parallelism().map_or(1, std::num::NonZero::get).min(8).min(rows)
-    };
-    let per = rows.div_ceil(threads);
-    std::thread::scope(|scope| {
-        for chunk in data.chunks_mut(per * stride) {
-            scope.spawn(move || {
-                let mut tmp = Vec::with_capacity(n);
-                for row in chunk.chunks_mut(stride) {
-                    for _ in 0..3 {
-                        box_line(row, 0, 4, n, radius, &mut tmp);
-                    }
-                }
-            });
+    let blur_rows = |chunk: &mut [u8]| {
+        let mut tmp = Vec::with_capacity(n);
+        for row in chunk.chunks_mut(stride) {
+            for _ in 0..3 {
+                box_line(row, 0, 4, n, radius, &mut tmp);
+            }
         }
-    });
+    };
+    // Small selections need no scheduling; the large ones reuse workers across both axes and successive blurs.
+    if rows * n < 1 << 16 {
+        blur_rows(data);
+    } else {
+        let per = rows.div_ceil(rayon::current_num_threads().min(8));
+        data.par_chunks_mut(per * stride).for_each(blur_rows);
+    }
 }
 
 /// Pixels per side of the tiles a transposition copies, so both sides stay in the cache.

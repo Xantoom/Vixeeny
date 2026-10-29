@@ -159,14 +159,27 @@ impl AudioEncoder {
     }
 
     /// Queues samples and returns the packets that became ready.
-    pub(crate) fn push(&mut self, samples: &[f32]) -> Result<Vec<Packet>, RecordError> {
-        self.fifo.extend_from_slice(samples);
+    pub(crate) fn push(&mut self, mut samples: &[f32]) -> Result<Vec<Packet>, RecordError> {
         let mut packets = Vec::new();
         let per_frame = self.frame_samples * self.channels;
-        while self.fifo.len() >= per_frame {
-            let chunk: Vec<f32> = self.fifo.drain(..per_frame).collect();
-            self.encode(&chunk, &mut packets)?;
+        // Only the incomplete tail needs storage. Whole frames can be borrowed from the caller, without a new
+        // allocation and without shifting all the later samples for every encoded frame.
+        if !self.fifo.is_empty() {
+            let take = (per_frame - self.fifo.len()).min(samples.len());
+            self.fifo.extend_from_slice(&samples[..take]);
+            samples = &samples[take..];
+            if self.fifo.len() == per_frame {
+                let mut chunk = std::mem::take(&mut self.fifo);
+                self.encode(&chunk, &mut packets)?;
+                chunk.clear();
+                self.fifo = chunk;
+            }
         }
+        let mut frames = samples.chunks_exact(per_frame);
+        for frame in &mut frames {
+            self.encode(frame, &mut packets)?;
+        }
+        self.fifo.extend_from_slice(frames.remainder());
         Ok(packets)
     }
 
@@ -210,4 +223,39 @@ impl AudioEncoder {
 fn bytemuck_cast(samples: &[f32]) -> &[u8] {
     // SAFETY: f32 has no padding and no invalid bit patterns as bytes; the length is exact.
     unsafe { std::slice::from_raw_parts(samples.as_ptr().cast(), std::mem::size_of_val(samples)) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn audio_packet_contents_and_timestamps_do_not_depend_on_input_chunk_sizes() {
+        ffmpeg_next::init().unwrap();
+        for channels in [2, 6, 8] {
+            let cfg = AudioTrackConfig {
+                title: String::new(),
+                codec: AudioCodec::Pcm16,
+                bitrate_kbps: 192,
+                vbr: false,
+                channels,
+            };
+            let samples: Vec<f32> = (0..5001 * channels).map(|i| (i % 101) as f32 / 100.0 - 0.5).collect();
+            let encoded = |parts: &[usize]| {
+                let mut encoder = AudioEncoder::open(&cfg, false).unwrap();
+                let mut packets = Vec::new();
+                let mut from = 0;
+                for &frames in parts {
+                    let to = from + frames * channels;
+                    packets.extend(encoder.push(&samples[from..to]).unwrap());
+                    from = to;
+                }
+                assert_eq!(from, samples.len());
+                packets.extend(encoder.finish().unwrap());
+                packets.into_iter().map(|p| (p.pts(), p.duration(), p.data().unwrap().to_vec())).collect::<Vec<_>>()
+            };
+            let whole = encoded(&[5001]);
+            assert_eq!(encoded(&[0, 1, 479, 0, 480, 961, 3, 2000, 1077]), whole);
+        }
+    }
 }

@@ -7,7 +7,7 @@
 //! encoders take each frame as a texture ([`GpuCapture`]), and a viewer on the graphics card takes the newest one when
 //! it can ([`VideoStream::start_held`]).
 
-use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, sync_channel};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TrySendError, sync_channel};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -545,7 +545,7 @@ fn deliver(
     let result = shared.read(&texture, content).map(|frame| CapturedFrame { hdr: shared.hdr, time_ns, frame });
     // A full queue drops the frame: the consumer is behind.
     let read = result.is_ok();
-    if tx.try_send(result).is_ok() {
+    if queue_cpu(tx, result, &shared.buffers) {
         if read && let Some(gate) = &shared.gate {
             gate.taken(time_ns);
         }
@@ -554,6 +554,23 @@ fn deliver(
         }
     }
     Ok(())
+}
+
+/// Hands read-back pixels over, or recycles their allocation when the consumer cannot take them.
+fn queue_cpu(
+    tx: &SyncSender<Result<CapturedFrame, CaptureError>>,
+    result: Result<CapturedFrame, CaptureError>,
+    buffers: &BufferPool,
+) -> bool {
+    match tx.try_send(result) {
+        Ok(()) => true,
+        Err(TrySendError::Full(result) | TrySendError::Disconnected(result)) => {
+            if let Ok(captured) = result {
+                buffers.give(captured.frame.data);
+            }
+            false
+        }
+    }
 }
 
 /// The part of `texture` that holds the picture: `content`, within the texture. A window that grew reports its new size
@@ -569,6 +586,24 @@ fn within(texture: &ID3D11Texture2D, content: SizeInt32) -> (u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn refused_cpu_frames_return_their_pixels_to_the_pool() {
+        for disconnected in [false, true] {
+            let buffers = BufferPool::default();
+            let (tx, rx) = sync_channel(1);
+            tx.try_send(Err(CaptureError::InvalidRegion)).unwrap();
+            if disconnected {
+                drop(rx);
+            }
+            let frame = CpuFrame::new(64, 64);
+            let address = frame.data.as_ptr();
+            let captured = CapturedFrame { hdr: false, time_ns: 0, frame };
+            assert!(!queue_cpu(&tx, Ok(captured), &buffers));
+            let recycled = buffers.take(64 * 64 * 4);
+            assert_eq!(recycled.as_ptr(), address);
+        }
+    }
 
     /// A window that grew reports more than the texture its frame still comes in: only the texture's pixels are used.
     #[test]

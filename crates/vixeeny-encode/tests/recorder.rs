@@ -348,6 +348,28 @@ fn a_hybrid_recording_cut_short_is_readable_up_to_the_last_fragment() {
 }
 
 #[test]
+fn frames_discarded_by_the_clock_or_pause_return_their_pixel_buffers() {
+    let registry = Registry::builtin().unwrap();
+    for vfr in [false, true] {
+        let dir = scratch(if vfr { "recycle-paused" } else { "recycle-clock" });
+        let mut cfg = config(&registry, "libx264", OutputContainer::Mkv, 30);
+        cfg.vfr = vfr;
+        let pool = cfg.buffers.clone();
+        let rec = Recorder::start(cfg, namer(&dir, "mkv")).unwrap();
+        assert!(rec.push_frame(0, frame(320, 180, 0)));
+        if vfr {
+            rec.pause(20 * MS);
+        }
+        let discarded = frame(320, 180, 1);
+        let address = discarded.data.as_ptr();
+        assert!(rec.push_frame(if vfr { 30 * MS } else { MS }, discarded));
+        rec.stop(100 * MS).unwrap();
+        let buffers = [pool.take(0), pool.take(0)];
+        assert!(buffers.iter().any(|b| b.as_ptr() == address), "recycle discarded pixels, vfr={vfr}");
+    }
+}
+
+#[test]
 fn a_slow_encoder_drops_input_frames_instead_of_blocking() {
     let registry = Registry::builtin().unwrap();
     let dir = scratch("queue");

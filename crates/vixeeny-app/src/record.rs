@@ -1085,6 +1085,7 @@ fn record_loop(
     let after = Duration::from_secs(u64::from(notice.replay.after()));
     // When the waiting save is written, and whether it is then edited.
     let mut save_at: Option<(std::time::Instant, bool)> = None;
+    let buffers = stream.buffers();
     loop {
         if let Some((at, edit)) = save_at
             && std::time::Instant::now() >= at
@@ -1217,6 +1218,8 @@ fn record_loop(
                             data: f.data,
                         },
                     );
+                } else {
+                    buffers.give(captured.frame.data);
                 }
             }
             Ok(None) => {

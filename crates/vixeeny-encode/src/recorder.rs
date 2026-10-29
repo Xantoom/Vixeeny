@@ -202,6 +202,14 @@ enum Input {
     Hw(HwFrame),
 }
 
+impl Input {
+    fn recycle(self, buffers: &vixeeny_common::buffers::BufferPool) {
+        if let Self::Cpu(frame) = self {
+            buffers.give(frame.data);
+        }
+    }
+}
+
 /// The last converted frame, repeated when the source is late.
 enum Last {
     Sw(frame::Video),
@@ -304,10 +312,8 @@ impl Recorder {
                 self.stats.queue_dropped.fetch_add(1, Ordering::Relaxed);
                 // The pixels go back to the capture: the next frame does not allocate them again while the encoder is
                 // already behind.
-                if let Cmd::Frame(_, input) = cmd
-                    && let Input::Cpu(frame) = *input
-                {
-                    self.buffers.give(frame.data);
+                if let Cmd::Frame(_, input) = cmd {
+                    (*input).recycle(&self.buffers);
                 }
                 false
             }
@@ -771,6 +777,8 @@ impl Worker {
                     if let Some(pts) = self.vfr.stamp(t) {
                         self.last = Some(self.prepare(*frame)?);
                         self.send(pts)?;
+                    } else {
+                        (*frame).recycle(&self.cfg.buffers);
                     }
                     continue;
                 }
@@ -825,6 +833,9 @@ impl Worker {
                 }
                 Emit::Repeat(i) => self.send(i)?,
             }
+        }
+        if let Some(unused) = new {
+            unused.recycle(&self.cfg.buffers);
         }
         Ok(())
     }

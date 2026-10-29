@@ -35,6 +35,9 @@ To try a change in the real app, `cargo build --profile quick` builds it optimiz
 release but without link-time optimization: a rebuild takes seconds instead of half a minute.
 The programs land in `target\quick`, and they need the FFmpeg DLLs beside them.
 
+For performance work, see the reproducible CPU benchmarks and measured results in
+[docs/PERFORMANCE.md](docs/PERFORMANCE.md).
+
 The UI tests render every window without a display; set `VIXEENY_SCREENSHOTS=<folder>` to keep
 the images (`cargo test -p vixeeny-ui`).
 
