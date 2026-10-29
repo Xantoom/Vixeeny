@@ -415,9 +415,10 @@ fn open_process_loopback(pid: u32) -> Result<Stream, AudioError> {
             },
         },
     };
-    let mut variant = PROPVARIANT::default();
-    // SAFETY: the blob points at `params`, which outlives the activation call; the variant is never cleared (it does
-    // not own the blob).
+    // A `PROPVARIANT` is cleared when dropped, which frees its blob: this one points at `params`, on the stack, so it
+    // is never dropped.
+    let mut variant = std::mem::ManuallyDrop::new(PROPVARIANT::default());
+    // SAFETY: the blob points at `params`, which outlives the activation call.
     unsafe {
         let inner: &mut PROPVARIANT_0_0 = &mut variant.Anonymous.Anonymous;
         inner.vt = VT_BLOB;
@@ -433,7 +434,7 @@ fn open_process_loopback(pid: u32) -> Result<Stream, AudioError> {
         ActivateAudioInterfaceAsync(
             VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK,
             &raw const iid,
-            Some(&raw const variant),
+            Some(&raw const *variant),
             &handler,
         )
     };
@@ -878,5 +879,22 @@ impl AudioSource for WasapiSource {
 impl Drop for WasapiSource {
     fn drop(&mut self) {
         let _ = self.stop();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use windows::Win32::System::Memory::{GetProcessHeap, HEAP_FLAGS, HeapValidate};
+
+    use super::*;
+
+    /// Opening an application's sound leaves the heap whole (its activation parameters are on the stack, never freed).
+    #[test]
+    fn a_process_loopback_leaves_the_heap_whole() {
+        let _com = ComGuard::new();
+        let stream = open_process_loopback(std::process::id()).expect("process loopback");
+        drop(stream);
+        // SAFETY: plain calls on this process's heap.
+        assert!(unsafe { HeapValidate(GetProcessHeap().expect("heap"), HEAP_FLAGS(0), None) }.as_bool());
     }
 }
