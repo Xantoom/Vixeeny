@@ -7,9 +7,9 @@
 //! stereo. Each packet is dated with the QPC time the driver gives (100 ns units), the same clock as
 //! `vixeeny_platform::monotonic_ns`.
 //!
-//! A source that fails (device unplugged, application gone) reports `Lost` and tries again each time Windows reports a
-//! device or a new audio session: the track is silent meanwhile and recovers by itself. Nothing is polled: the capture
-//! thread sleeps until the driver, the device list, the followed process or `stop` wakes it.
+//! A source that fails (device unplugged) reports `Lost`, an application that closes `Exited`, and tries again each
+//! time Windows reports a device or a new audio session: the track is silent meanwhile and recovers by itself. Nothing
+//! is polled: the capture thread sleeps until the driver, the device list, the followed process or `stop` wakes it.
 
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -684,6 +684,8 @@ impl Drop for Listening {
 enum Ended {
     Stopped,
     Lost(String),
+    /// The application closed.
+    Exited,
 }
 
 fn capture_loop(stream: &Stream, kind: &SourceKind, sink: &mut dyn AudioSink, stop: &Event, changed: &Event) -> Ended {
@@ -706,13 +708,7 @@ fn capture_loop(stream: &Stream, kind: &SourceKind, sink: &mut dyn AudioSink, st
                 }
                 continue;
             }
-            3 => {
-                let exe = match kind {
-                    SourceKind::Application(exe) => exe.as_str(),
-                    _ => "the application",
-                };
-                return Ended::Lost(format!("{exe} exited"));
-            }
+            3 => return Ended::Exited,
             _ => return Ended::Lost("wait failed".into()),
         }
         loop {
@@ -814,7 +810,7 @@ fn run(kind: &SourceKind, max_channels: usize, mut sink: Box<dyn AudioSink>, sto
     };
     let mut lost = false;
     loop {
-        let reason = match open(kind, max_channels) {
+        let ended = match open(kind, max_channels) {
             Ok(stream) => {
                 listening.forget_sessions();
                 if lost {
@@ -823,14 +819,22 @@ fn run(kind: &SourceKind, max_channels: usize, mut sink: Box<dyn AudioSink>, sto
                 }
                 match capture_loop(&stream, kind, sink.as_mut(), stop, &listening.changed) {
                     Ended::Stopped => return,
-                    Ended::Lost(reason) => reason,
+                    ended => ended,
                 }
             }
-            Err(e) => e.to_string(),
+            Err(e) => Ended::Lost(e.to_string()),
         };
         if !lost {
-            tracing::warn!("audio source {kind:?} lost: {reason}");
-            sink.on_event(SourceEvent::Lost(reason));
+            match ended {
+                Ended::Lost(reason) => {
+                    tracing::warn!("audio source {kind:?} lost: {reason}");
+                    sink.on_event(SourceEvent::Lost(reason));
+                }
+                _ => {
+                    tracing::info!("audio source {kind:?}: the application closed");
+                    sink.on_event(SourceEvent::Exited);
+                }
+            }
             lost = true;
         }
         // Try again when a device comes or goes, or (for an application) a session starts.

@@ -174,6 +174,10 @@ impl Rig {
                     let text = format!("{name}: {reason}");
                     crate::toast::notify(&self.notice, &Toast::Failed(Failed::Audio, text));
                 }
+                Msg::Event(source, SourceEvent::Exited) => {
+                    let name = self.sources.get(source).map_or("?", |(s, _)| s.name.as_str());
+                    tracing::info!("audio source `{name}` closed");
+                }
                 Msg::Event(source, SourceEvent::Back) => {
                     let name = self.sources.get(source).map_or("?", |(s, _)| s.name.as_str());
                     tracing::info!("audio source `{name}` is back");

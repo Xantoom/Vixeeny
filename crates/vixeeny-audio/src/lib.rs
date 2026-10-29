@@ -55,7 +55,10 @@ impl AudioChunk {
 pub enum SourceEvent {
     /// The device or application went away: the track is silent until it comes back.
     Lost(String),
-    /// A lost source is delivering again.
+    /// The application closed: the track is silent until it starts again. Not a failure (a launcher that hands over to
+    /// its game, a game that quits before the recording stops).
+    Exited,
+    /// A lost or closed source is delivering again.
     Back,
 }
 
