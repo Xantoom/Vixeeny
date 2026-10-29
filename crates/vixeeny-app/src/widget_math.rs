@@ -194,35 +194,35 @@ mod tests {
     #[test]
     fn corners_hug_the_edges_with_a_margin_scaled_by_dpi() {
         let monitor = PhysicalRect::new(1920, 0, 2560, 1440); // a second monitor to the right
-        assert_eq!(corner_geometry("top_left", (0.0, 0.0), monitor, 96), PhysicalRect::new(1926, 6, 216, 60));
+        assert_eq!(corner_geometry("top_left", (0.0, 0.0), monitor, 96), PhysicalRect::new(1926, 6, 226, 60));
         assert_eq!(
             corner_geometry("top_right", (0.0, 0.0), monitor, 96),
-            PhysicalRect::new(1920 + 2560 - 216 - 6, 6, 216, 60)
+            PhysicalRect::new(1920 + 2560 - 226 - 6, 6, 226, 60)
         );
         assert_eq!(
             corner_geometry("bottom_left", (0.0, 0.0), monitor, 96),
-            PhysicalRect::new(1926, 1440 - 60 - 6, 216, 60)
+            PhysicalRect::new(1926, 1440 - 60 - 6, 226, 60)
         );
         assert_eq!(
             corner_geometry("bottom_right", (0.0, 0.0), monitor, 96),
-            PhysicalRect::new(1920 + 2560 - 222, 1440 - 66, 216, 60)
+            PhysicalRect::new(1920 + 2560 - 232, 1440 - 66, 226, 60)
         );
         // 200 % scaling doubles everything; an unknown corner is the default one.
         assert_eq!(
-            corner_geometry("???", (0.0, 0.0), PhysicalRect::new(0, 0, 3840, 2160), 192),
-            PhysicalRect::new(12, 12, 432, 120)
+            corner_geometry("???", (0.0, 0.0), PhysicalRect::new(0, 0, 3840, 2260), 192),
+            PhysicalRect::new(12, 12, 452, 120)
         );
     }
 
     #[test]
     fn the_middles_and_a_custom_place_share_the_room_left() {
         let work = PhysicalRect::new(0, 0, 1920, 1032); // above a 48-pixel taskbar
-        // 1920 - 216 - 2 × 6 = 1692 pixels of room across, 1032 - 60 - 12 = 960 down.
-        assert_eq!(corner_geometry("top_center", (0.0, 0.0), work, 96), PhysicalRect::new(852, 6, 216, 60));
-        assert_eq!(corner_geometry("bottom_center", (0.0, 0.0), work, 96), PhysicalRect::new(852, 966, 216, 60));
-        assert_eq!(corner_geometry("custom", (0.25, 0.5), work, 96), PhysicalRect::new(429, 486, 216, 60));
+        // 1920 - 226 - 2 × 6 = 1682 pixels of room across, 1032 - 60 - 12 = 960 down.
+        assert_eq!(corner_geometry("top_center", (0.0, 0.0), work, 96), PhysicalRect::new(847, 6, 226, 60));
+        assert_eq!(corner_geometry("bottom_center", (0.0, 0.0), work, 96), PhysicalRect::new(847, 966, 226, 60));
+        assert_eq!(corner_geometry("custom", (0.25, 0.5), work, 96), PhysicalRect::new(427, 486, 226, 60));
         // A place out of range stays on the screen.
-        assert_eq!(corner_geometry("custom", (3.0, -1.0), work, 96), PhysicalRect::new(1698, 6, 216, 60));
+        assert_eq!(corner_geometry("custom", (3.0, -1.0), work, 96), PhysicalRect::new(1688, 6, 226, 60));
     }
 
     #[test]

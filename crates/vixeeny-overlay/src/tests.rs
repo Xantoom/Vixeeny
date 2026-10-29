@@ -246,7 +246,7 @@ fn the_notification_draws_with_a_thumbnail_and_as_an_error() {
 
 #[test]
 fn the_recording_widget_draws_its_states_and_alerts() {
-    use crate::widget::{Alert, AlertTip, WidgetLook, WidgetTarget, bar_width, paint_alert_tip, paint_widget};
+    use crate::widget::{Alert, AlertTip, Side, WidgetLook, WidgetTarget, bar_width, paint_alert_tip, paint_window};
     use crate::widget::{format_elapsed, widget_surface};
     let gfx = Gfx::new().expect("graphics devices");
     let mut drawn = Vec::new();
@@ -262,14 +262,20 @@ fn the_recording_widget_draws_its_states_and_alerts() {
         let u = 1.25;
         let t = Theme::new(Look::new(dark, None, true));
         let time = format_elapsed(std::time::Duration::from_secs(secs));
-        let width = bar_width(&gfx, u, &time, alert).expect("measured");
+        let width = bar_width(&gfx, u, &time).expect("measured");
         widths.push(width);
-        let (w, h) = widget_surface(u, width);
-        let look = WidgetLook { paused, time, pulse: true, alert, hover, held: None, width };
+        // The warning sign on the right of a widget on the left, on the left of one on the right.
+        let sign_at = match alert {
+            Alert::None => None,
+            Alert::Warning => Some(Side::Right),
+            Alert::Critical => Some(Side::Left),
+        };
+        let look = WidgetLook { paused, time, pulse: true, alert, hover, held: None, width, sign_at };
+        let (w, h) = widget_surface(u, &look);
         let pixels = gfx
             .render(w, h, |c| {
                 backdrop(c, w, h)?;
-                paint_widget(c, &t, u, &look)
+                paint_window(c, &t, u, &look)
             })
             .expect("drawn");
         save(&format!("widget-{name}"), w, h, &pixels);
@@ -278,7 +284,7 @@ fn the_recording_widget_draws_its_states_and_alerts() {
     // Red dot vs. pause sign vs. what a click does; the bar as wide as what it shows.
     assert_ne!(drawn[0], drawn[1]);
     assert_ne!(drawn[0], drawn[2]);
-    assert!(widths[0] < widths[1] && widths[1] < widths[4] && widths[4] < 196, "{widths:?}");
+    assert!(widths[0] < widths[1] && widths[1] < widths[4] && widths[4] < 160, "{widths:?}");
     assert!(drawn[0].as_chunks::<4>().0.iter().any(|p| p[2] > 200 && p[1] < 80));
     let tip = AlertTip::new(&gfx, 1.25, "42 frames lost: the encoder cannot keep up\nDisk almost full: 3.1 GB free")
         .expect("laid out");

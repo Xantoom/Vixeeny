@@ -29,14 +29,14 @@ impl Widget {
     ) -> anyhow::Result<Self> {
         let PhysicalRect { x, y, width: w, height: h } =
             corner_geometry(&settings.corner, settings.custom, monitor.work, monitor.dpi);
-        let (anchor, _) = corner_fraction(&settings.corner, settings.custom);
+        let (fx, fy) = corner_fraction(&settings.corner, settings.custom);
         let mut command = Command::new(std::env::current_exe()?);
         command
             .arg("--widget")
             .args([x.to_string(), y.to_string(), w.to_string(), h.to_string()])
             .arg(&settings.display)
             .arg(monitor.dpi.to_string())
-            .arg(anchor.to_string())
+            .args([fx.to_string(), fy.to_string()])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
@@ -90,8 +90,8 @@ impl Drop for Widget {
     }
 }
 
-/// `--widget <x> <y> <width> <height> <always|fade|alerts> <dpi> <anchor>`: the widget process (`anchor`: where along
-/// its window a narrower bar keeps, 0 left to 1 right).
+/// `--widget <x> <y> <width> <height> <always|fade|alerts> <dpi> <across> <down>`: the widget process (`across`,
+/// `down`: where it is on the screen, 0 left or top to 1 right or bottom).
 pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     use std::rc::Rc;
     use vixeeny_overlay::widget::{Display, Widget as Bar, WidgetEvent};
@@ -102,7 +102,8 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     let geometry = PhysicalRect::new(num(0)? as i32, num(1)? as i32, num(2)? as u32, num(3)? as u32);
     let display = Display::from_name(args.get(4).map_or("", String::as_str));
     let dpi = num(5)? as u32;
-    let anchor = args.get(6).and_then(|a| a.parse().ok()).unwrap_or(0.0);
+    let fraction = |i: usize| args.get(i).and_then(|a| a.parse().ok()).unwrap_or(0.0);
+    let anchor = (fraction(6), fraction(7));
 
     vixeeny_platform::ensure_dpi_aware();
     let config = vixeeny_common::paths::config_file()
