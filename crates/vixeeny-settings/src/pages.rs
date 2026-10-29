@@ -131,9 +131,11 @@ fn naming_rows(
 pub fn overlay(env: &Env, config: &Config) -> Vec<Row> {
     let t = |k| env.t(k);
     let mut rows = vec![
-        header("h_side", t(Key::GrpSideBar)),
-        toggle("overlay_enabled", t(Key::SetOverlayOn), |c| c.overlay.enabled, |c, v| c.overlay.enabled = v),
-        button("preview_side", t(Key::GrpSideBar), t(Key::SetPreview)),
+        header("h_side", String::new()),
+        Row {
+            preview: "preview_side".into(),
+            ..toggle("overlay_enabled", t(Key::GrpSideBar), |c| c.overlay.enabled, |c, v| c.overlay.enabled = v)
+        },
     ];
     if config.overlay.enabled {
         rows.push(crate::picked(
@@ -152,14 +154,11 @@ pub fn overlay(env: &Env, config: &Config) -> Vec<Row> {
             ),
         ));
     }
-    rows.push(header("h_widget", t(Key::GrpWidget)));
-    rows.push(toggle(
-        "widget",
-        t(Key::SetWidget),
-        |c| c.recording_widget.enabled,
-        |c, v| c.recording_widget.enabled = v,
-    ));
-    rows.push(button("preview_widget", t(Key::GrpWidget), t(Key::SetPreview)));
+    rows.push(header("h_widget", String::new()));
+    rows.push(Row {
+        preview: "preview_widget".into(),
+        ..toggle("widget", t(Key::GrpWidget), |c| c.recording_widget.enabled, |c, v| c.recording_widget.enabled = v)
+    });
     if config.recording_widget.enabled {
         rows.push(choice(
             "widget_display",
@@ -262,7 +261,7 @@ fn folder_row(env: &Env, row: Row, setting: &str) -> Row {
 pub fn image(env: &Env, config: &Config) -> Vec<Row> {
     let t = |k| env.t(k);
     let mut rows = vec![
-        header("h_location", t(Key::GrpImageSettings)),
+        header("h_location", t(Key::GrpFile)),
         folder_row(
             env,
             folder("dir_images", t(Key::SetFolder), |c| c.paths.images.clone(), |c, v| c.paths.images = v),
@@ -1502,7 +1501,8 @@ pub fn replay(env: &Env, config: &Config) -> Vec<Row> {
 
     // ---- what it keeps
     rows.push(header("h_replay", t(Key::GrpReplay)));
-    rows.push(choice(
+    // The duration, in the unit chosen beside it.
+    let unit = choice(
         "replay_unit",
         t(Key::SetReplayUnit),
         vec![opt("seconds", t(Key::OptSeconds)), opt("minutes", t(Key::OptMinutes))],
@@ -1513,17 +1513,17 @@ pub fn replay(env: &Env, config: &Config) -> Vec<Row> {
             c.replay.duration_unit = v;
             c.replay.duration_seconds = amount * if in_minutes(c) { 60 } else { 1 };
         },
-    ));
-    rows.push(nested(counted(
-        number(
+    );
+    rows.push(Row {
+        unit_choice: Some(Box::new(unit)),
+        ..number(
             "replay_duration",
             t(Key::SetReplayDuration),
             (1, 60, 1),
             |c| i64::from(replay_amount(c)),
             |c, v| c.replay.duration_seconds = v as u32 * if in_minutes(c) { 60 } else { 1 },
-        ),
-        t(if in_minutes(config) { Key::UnitMinutes } else { Key::UnitSeconds }),
-    )));
+        )
+    });
     rows.push(toggle(
         "replay_after",
         t(Key::SetReplayAfter),
@@ -1561,7 +1561,7 @@ pub fn replay(env: &Env, config: &Config) -> Vec<Row> {
     ));
 
     // ---- what it records with
-    rows.push(header("h_replay_video", t(Key::GrpReplayVideo)));
+    rows.push(header("h_replay_video", String::new()));
     rows.push(toggle(
         "replay_same_video",
         t(Key::SetSameAsVideo),
@@ -1808,16 +1808,20 @@ pub fn updates(env: &Env, _config: &Config) -> Vec<Row> {
 /// their setting.
 pub fn notifications(env: &Env, config: &Config) -> Vec<Row> {
     let t = |k| env.t(k);
-    let mut rows = vec![toggle(
-        "notifications",
-        t(Key::SetNotifications),
-        |c| c.notifications.enabled,
-        |c, v| c.notifications.enabled = v,
-    )];
+    // The sample shows only while notifications are on.
+    let preview = if config.notifications.enabled { "preview_notification" } else { "" };
+    let mut rows = vec![Row {
+        preview: preview.into(),
+        ..toggle(
+            "notifications",
+            t(Key::SetNotifications),
+            |c| c.notifications.enabled,
+            |c, v| c.notifications.enabled = v,
+        )
+    }];
     if !config.notifications.enabled {
         return rows;
     }
-    rows.push(button("preview_notification", t(Key::ToastSample), t(Key::SetPreview)));
     rows.extend([
         header("h_notify_captures", t(Key::GrpNotifyCaptures)),
         toggle(

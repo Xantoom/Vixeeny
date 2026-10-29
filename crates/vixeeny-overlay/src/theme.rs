@@ -108,7 +108,7 @@ impl Theme {
     pub fn new(look: Look) -> Self {
         let dark = look.dark;
         let base = Rgba::rgb8(look.accent);
-        let accent = if dark { base.brighter(0.45) } else { base.darker(0.05) };
+        let accent = if dark { base.brighter(0.25) } else { base.darker(0.05) };
         let pick = |d: Rgba, l: Rgba| if dark { d } else { l };
         Self {
             flyout: pick(Rgba::hex(0x232327, 255), Rgba::hex(0xffffff, 255)),

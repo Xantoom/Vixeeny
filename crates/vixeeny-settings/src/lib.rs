@@ -22,8 +22,6 @@ pub use pages::REPLAY_PREFIX;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Section {
     General,
-    /// The side strip and the recording widget.
-    Overlay,
     /// Screenshots: folder, format, capture options.
     Image,
     /// Recordings: folder, picture, encoder, file, sound.
@@ -31,6 +29,8 @@ pub enum Section {
     /// The replay buffer.
     Replay,
     Shortcuts,
+    /// The side strip and the recording widget.
+    Overlay,
     /// Which notifications are shown.
     Notifications,
     Updates,
@@ -41,11 +41,11 @@ pub enum Section {
 impl Section {
     pub const ALL: [Self; 9] = [
         Self::General,
-        Self::Overlay,
         Self::Image,
         Self::Recording,
         Self::Replay,
         Self::Shortcuts,
+        Self::Overlay,
         Self::Notifications,
         Self::Updates,
         Self::About,
@@ -177,6 +177,10 @@ pub struct Row {
     pub meter: bool,
     /// A value marked on a slider's track, which it sticks to (100 % of a volume).
     pub mark: Option<i64>,
+    /// What an eye beside the value shows, by the id the host is told when it is pressed (empty: no eye).
+    pub preview: String,
+    /// The unit of a number, chosen beside it: a choice row of its own, shown in this one.
+    pub unit_choice: Option<Box<Row>>,
     get: Get,
     set: Set,
 }
@@ -448,6 +452,8 @@ fn row(id: impl Into<String>, label: String, kind: Kind, get: Get, set: Set) -> 
         nested: false,
         meter: false,
         mark: None,
+        preview: String::new(),
+        unit_choice: None,
         get,
         set,
     }
@@ -1103,13 +1109,12 @@ mod tests {
     fn overlays_have_previews_and_visibility_precedes_position() {
         let page = rows(Section::Overlay, &env(), &Config::default());
         let index = |id| page.iter().position(|r| r.id == id).unwrap();
-        assert_eq!(index("preview_widget"), index("widget") + 1);
-        assert_eq!(index("widget_display"), index("preview_widget") + 1);
+        assert_eq!(index("widget_display"), index("widget") + 1);
         assert!(index("widget_display") < index("widget_corner"));
         assert!(row(&page, "widget_corner").info.is_empty());
-        for id in ["preview_side", "preview_widget"] {
-            assert!(matches!(row(&page, id).kind, Kind::Button));
-        }
+        // The switches show their previews.
+        assert_eq!(row(&page, "overlay_enabled").preview, "preview_side");
+        assert_eq!(row(&page, "widget").preview, "preview_widget");
     }
 
     #[test]
@@ -1171,18 +1176,18 @@ mod tests {
         let replay = rows(Section::Replay, &env(), &c);
         // Where its files go comes right under its switch, as on the video page.
         assert_eq!(replay[1].id, "h_folder");
-        // Three minutes until changed.
+        // Three minutes until changed, the unit chosen beside the number.
         let duration = row(&replay, "replay_duration");
-        assert_eq!((duration.value(&c), duration.unit.as_str()), (Value::Int(3), "min"));
+        let unit = duration.unit_choice.as_deref().unwrap();
+        assert_eq!((duration.value(&c), unit.value(&c)), (Value::Int(3), Value::Text("minutes".into())));
         duration.apply(&mut c, Value::Int(90)).unwrap();
         assert_eq!(c.replay.duration_seconds, 3600);
         // The amount stays in the new unit.
-        row(&replay, "replay_unit").apply(&mut c, Value::Text("seconds".into())).unwrap();
+        unit.apply(&mut c, Value::Text("seconds".into())).unwrap();
         assert_eq!(c.replay.duration_seconds, 60);
         let replay = rows(Section::Replay, &env(), &c);
         row(&replay, "replay_duration").apply(&mut c, Value::Int(5)).unwrap();
         assert_eq!(c.replay.duration_seconds, 5);
-        assert_eq!(row(&replay, "replay_duration").unit, "s");
         row(&replay, "replay_storage").apply(&mut c, Value::Text("disk".into())).unwrap();
         assert_eq!(c.replay.storage, "disk");
         // No game open: said in the list.

@@ -19,6 +19,10 @@ export struct SettingRow {
     suffix: string,
     // Belongs to the row above it (a program of its list): set in.
     nested: bool,
+    // An eye beside the value shows what it changes.
+    preview: bool,
+    // A number's unit, chosen beside it: the id of its row (its choices in `options`, `selected`), else empty.
+    unit-id: string,
     // 0 toggle, 1 choice, 2 number, 3 text, 4 folder, 5 info, 8 slider, 9 expander (`on`: open), 10 choice of a screen
     // edge, 11 choice of a place on the screen (its own place, if any, in `min` and `max`: thousandths across and down,
     // else -1), 12 colour (one, or a gradient's two: `colours`, their codes in `options`), 13 button (its text in
@@ -157,7 +161,7 @@ component PcCard inherits Card {
                 x: (parent.width - self.width) / 2;
                 y: (parent.height - self.height) / 2;
                 size: 24px;
-                tint: Theme.accent;
+                tint: Theme.text-2;
                 data: root.tile.kind == 0 ? Icons.cpu
                     : root.tile.kind == 1 ? Icons.gpu
                     : root.tile.kind == 2 ? Icons.ram
@@ -170,11 +174,11 @@ component PcCard inherits Card {
                 height: self.width / self.aspect;
                 border-radius: 3px;
                 border-width: 1.5px;
-                border-color: root.tile.primary ? Theme.accent : Theme.text-3;
-                background: root.tile.primary ? Theme.accent-soft : transparent;
+                border-color: root.tile.primary ? Theme.text-2 : Theme.text-3;
+                background: root.tile.primary ? Theme.control : transparent;
                 Text {
                     text: root.tile.badge;
-                    color: root.tile.primary ? Theme.accent : Theme.text-3;
+                    color: root.tile.primary ? Theme.text : Theme.text-3;
                     font-size: 11px;
                     font-weight: 700;
                     horizontal-alignment: center;
@@ -331,10 +335,9 @@ export struct UiTexts {
     cancel: string,
     reset-page-body: string,
     reset-all: string,
-    reset-all-hint: string,
     reset-all-title: string,
     reset-all-body: string,
-    reset-group: string,
+    preview: string,
 }
 
 component SettingLine inherits GroupRow {
@@ -357,6 +360,7 @@ component SettingLine inherits GroupRow {
     callback code(int, string);
     callback browse();
     callback action(string);
+    callback unit-chosen(int);
 
     title: root.entry.label;
     info: root.entry.info;
@@ -393,6 +397,13 @@ component SettingLine inherits GroupRow {
             size: 14px;
         }
     }
+    if root.entry.preview : IconButton {
+        icon: Icons.eye;
+        label: root.t.preview;
+        tip: root.t.preview;
+        tint: Theme.text-2;
+        clicked => { root.action("preview"); }
+    }
     if root.entry.kind == 0 : Toggle {
         on: root.entry.on;
         enabled: root.entry.enabled;
@@ -421,14 +432,24 @@ component SettingLine inherits GroupRow {
         selected(i) => { root.chosen(i); }
         placed(x, y) => { root.text-edited("custom:" + x + ":" + y); }
     }
-    if root.entry.kind == 2 : NumberBox {
-        width: Theme.value-w;
-        value: root.entry.num;
-        lo: root.entry.min;
-        hi: root.entry.max;
-        enabled: root.entry.enabled;
-        unit: root.entry.text;
-        changed(v) => { root.number(v); }
+    if root.entry.kind == 2 : HorizontalLayout {
+        spacing: 8px;
+        NumberBox {
+            width: root.entry.unit-id != "" ? Theme.value-w - 128px : Theme.value-w;
+            value: root.entry.num;
+            lo: root.entry.min;
+            hi: root.entry.max;
+            enabled: root.entry.enabled;
+            unit: root.entry.text;
+            changed(v) => { root.number(v); }
+        }
+        if root.entry.unit-id != "" : ComboBox {
+            width: 120px;
+            options: root.entry.options;
+            current: root.entry.selected;
+            enabled: root.entry.enabled;
+            selected(i) => { root.unit-chosen(i); }
+        }
     }
     if root.entry.kind == 8 : VerticalLayout {
         alignment: center;
@@ -631,11 +652,12 @@ component ShortcutLine inherits Rectangle {
             record => { root.record(key.slot); }
             clear => { root.clear(key.slot); }
         }
-        if k == 1 && root.compact : Button {
+        if k == 1 && root.compact : IconButton {
             icon: Icons.add;
+            label: root.t.add-shortcut;
+            tip: root.t.add-shortcut;
             enabled: root.entry.enabled;
             clicked => { root.record(key.slot); }
-            accessible-label: root.t.add-shortcut;
         }
     }
 }
@@ -704,7 +726,6 @@ export component SettingsWindow inherits Window {
 
     // The about page: the version.
     in property <string> version;
-    in property <string> tagline;
     // The updates page: 0 up to date (or not checked), 1 checking, 2 available, 3 downloading, 4 ready, 5 failed, 6
     // restarting
     in property <int> update-state: 0;
@@ -762,7 +783,7 @@ export component SettingsWindow inherits Window {
     default-font-family: Theme.font;
 
     property <bool> searching: root.search-text != "";
-    property <bool> is-rows: root.section != 5 && root.section != 8 && !root.searching;
+    property <bool> is-rows: root.section != 4 && root.section != 8 && !root.searching;
     // The first tab and the title of the page share this line.
     property <length> top: 52px;
     property <length> tab-h: 38px;
@@ -771,11 +792,11 @@ export component SettingsWindow inherits Window {
 
     pure function nav-icon(i: int) -> string {
         return i == 0 ? Icons.settings
-            : i == 1 ? Icons.apps
-            : i == 2 ? Icons.image
-            : i == 3 ? Icons.video
-            : i == 4 ? Icons.history
-            : i == 5 ? Icons.keyboard
+            : i == 1 ? Icons.image
+            : i == 2 ? Icons.video
+            : i == 3 ? Icons.history
+            : i == 4 ? Icons.keyboard
+            : i == 5 ? Icons.layer
             : i == 6 ? Icons.alert
             : i == 7 ? Icons.download
             : Icons.info;
@@ -822,43 +843,32 @@ export component SettingsWindow inherits Window {
                 vertical-alignment: center;
             }
         }
-        // The tabs, right under the name; the highlight slides from one to the next.
-        items := Rectangle {
+        // The search, on the line of the page's title.
+        search := SearchBox {
             x: 12px;
-            y: root.top;
+            y: root.top + (root.tab-h - 2px - self.height) / 2;
             width: parent.width - 24px;
-            height: root.section-titles.length * root.tab-h;
-            Rectangle {
-                x: 0px;
-                y: root.section * root.tab-h;
-                width: parent.width;
-                height: root.tab-h - 2px;
-                border-radius: Theme.radius;
-                background: Theme.selected;
-                animate y { duration: root.animated ? Theme.t-normal : 0ms; easing: cubic-bezier(0.2, 0, 0, 1); }
-                visible: !root.searching;
-                Rectangle {
-                    x: 0px;
-                    y: (parent.height - self.height) / 2;
-                    width: 3px;
-                    height: 16px;
-                    border-radius: 1.5px;
-                    background: Theme.accent;
-                }
-            }
-            for title[i] in root.section-titles : NavItem {
-                x: 0px;
-                y: i * root.tab-h;
-                width: parent.width;
-                height: root.tab-h - 2px;
-                text: title;
-                icon: root.nav-icon(i);
-                badge: i == 7 && (root.update-state == 2 || root.update-state == 4);
-                current: i == root.section && !root.searching;
-                clicked => { root.go(i); }
-            }
+            placeholder: root.search-placeholder;
+            text <=> root.search-text;
+            edited(text) => { root.search-edited(text); }
         }
-
+        // The tabs under it; the last two (updates, about) at the bottom of the column.
+        property <int> bottom-tabs: 2;
+        for title[i] in root.section-titles : NavItem {
+            property <int> from-end: root.section-titles.length - i;
+            x: 12px;
+            y: self.from-end <= nav.bottom-tabs
+                ? max(root.height - 12px - self.from-end * root.tab-h, root.top + root.tab-h + 20px + i * root.tab-h)
+                : root.top + root.tab-h + 20px + i * root.tab-h;
+            width: parent.width - 24px;
+            height: root.tab-h - 2px;
+            text: title;
+            icon: root.nav-icon(i);
+            badge: i == 7 && (root.update-state == 2 || root.update-state == 4);
+            current: i == root.section && !root.searching;
+            animated: root.animated;
+            clicked => { root.go(i); }
+        }
     }
 
     // ---- the page
@@ -899,7 +909,7 @@ export component SettingsWindow inherits Window {
             clicked => { root.confirming = 1; }
         }
         // While a shortcut is recorded: how, under the title.
-        if root.section == 5 && root.recording-row >= 0 && !root.searching : Text {
+        if root.section == 4 && root.recording-row >= 0 && !root.searching : Text {
             x: 24px;
             y: root.top + root.tab-h;
             width: page.column;
@@ -961,9 +971,8 @@ export component SettingsWindow inherits Window {
                         clip: true;
                         VerticalLayout {
                     for r[i] in g.rows : SettingLine {
-                        // A setting that belongs to the one above is joined to it by its own line.
+                        // A setting that belongs to the one above goes with it, without a line between them.
                         divider: i > 0 && !r.nested;
-                        nested-next: r.nested && g.rows[i + 1].nested;
                         entry: r;
                         t: root.t;
                         view-h: root.height;
@@ -973,6 +982,7 @@ export component SettingsWindow inherits Window {
                         reveal(y) => { rows-area.reveal(y); }
                         toggled(v) => { root.row-toggled(r.id, v); }
                         chosen(k) => { root.row-chosen(r.id, k); }
+                        unit-chosen(k) => { root.row-chosen(r.unit-id, k); }
                         number(v) => { root.row-number(r.id, v); }
                         sliding(on) => { root.row-sliding(on); }
                         text-edited(s) => { root.row-text(r.id, s); }
@@ -998,18 +1008,10 @@ export component SettingsWindow inherits Window {
                 }
                 // All the pages back to how they come.
                 if root.section == 0 : VerticalLayout {
-                    spacing: 8px;
-                    Text {
-                        text: root.t.reset-group;
-                        color: Theme.text;
-                        font-size: 14px;
-                        font-weight: 600;
-                    }
+                    padding-top: 12px;
                     Group {
                         GroupRow {
                             title: root.t.reset-all;
-                            description: root.t.reset-all-hint;
-                            glyph: Icons.arrow-reset;
                             Button {
                                 text: root.t.reset;
                                 danger: true;
@@ -1047,7 +1049,7 @@ export component SettingsWindow inherits Window {
             }
 
             // ---- shortcuts: a table, one row per action and a column per shortcut (two at most)
-            if root.section == 5 && !root.searching : Rectangle {
+            if root.section == 4 && !root.searching : Rectangle {
                 width: parent.width;
                 height: parent.height;
                 property <length> key-w: max(180px, min(240px, (page.column - 220px) / 2));
@@ -1107,7 +1109,7 @@ export component SettingsWindow inherits Window {
                             alignment: center;
                             spacing: 2px;
                             Text { text: "Vixeeny"; color: Theme.text; font-size: 18px; font-weight: 700; }
-                            Text { text: root.version + " · " + root.tagline; color: Theme.text-2; font-size: 13px; wrap: word-wrap; }
+                            Text { text: root.version; color: Theme.text-2; font-size: 13px; wrap: word-wrap; }
                         }
                     }
                 }
@@ -1164,18 +1166,6 @@ export component SettingsWindow inherits Window {
             if e.kind == PointerEventKind.down && e.button == PointerEventButton.left { root.drag-window(); }
         }
         double-clicked => { root.toggle-maximized(); }
-    }
-    // The search, in the title bar: over the middle of the page's column, clear of the window's buttons.
-    search := SearchBox {
-        property <length> centre: nav.width + 24px + page.column / 2;
-        property <length> room: min(self.centre - 140px, root.width - 3 * 46px - 24px - self.centre);
-        width: min(380px, 2 * self.room);
-        x: self.centre - self.width / 2;
-        y: 5px;
-        height: 32px;
-        placeholder: root.search-placeholder;
-        text <=> root.search-text;
-        edited(text) => { root.search-edited(text); }
     }
     HorizontalLayout {
         x: root.width - self.width;

@@ -84,7 +84,6 @@ keys! {
     SetSplitDuration => "By duration", "Par durée";
     SetSplitSizeMb => "Size of each part", "Taille de chaque partie";
     SetSplitMinutes => "Length of each part", "Durée de chaque partie";
-    SetWidget => "Show the widget", "Afficher le widget";
     SetWidgetCorner => "Position", "Position";
     SetCornerTl => "Top left", "Haut gauche";
     SetCornerTr => "Top right", "Haut droite";
@@ -170,7 +169,6 @@ keys! {
     OptFlac => "FLAC (lossless)", "FLAC (sans perte)";
     OptPcm16 => "PCM 16-bit", "PCM 16 bits";
     OptPcm24 => "PCM 24-bit", "PCM 24 bits";
-    AboutTagline => "Screenshots and screen recording for Windows.", "Captures et enregistrement d'écran pour Windows.";
     UiRetry => "Try again", "Réessayer";
     UpdateCheckFailedShort => "Update check failed", "Vérification des mises à jour impossible";
     UpdateFailedShort => "Update failed", "Échec de la mise à jour";
@@ -253,7 +251,6 @@ keys! {
     SetMicVolume => "Volume", "Volume";
     SetCaptureVolume => "Volume", "Volume";
     SetReplayAfter => "Extend after the shortcut", "Prolonger après le raccourci";
-    UiSearch => "Search a setting", "Rechercher un réglage";
     UiSearchNone => "No setting matches “{query}”.", "Aucun réglage ne correspond à « {query} ».";
     UiSearchTitle => "Search", "Recherche";
     ShortcutTaken => "Already used by another program", "Déjà utilisé par un autre logiciel";
@@ -341,19 +338,13 @@ keys! {
     ShortcutModifierOnly => "Add a key to the modifiers", "Ajoutez une touche aux modificateurs";
     ShortcutUnknownKey => "Unknown key: {key}", "Touche inconnue : {key}";
     ShortcutNeedsModifier => "{key} needs CTRL, ALT, SHIFT or WIN", "{key} demande CTRL, ALT, SHIFT ou WIN";
-    SetOverlayOn => "Turn on the side bar", "Activer la barre latérale";
     UiReset => "Reset", "Réinitialiser";
     UiCancel => "Cancel", "Annuler";
     UiResetPageTitle => "Reset the \"{page}\" page?", "Réinitialiser la page « {page} » ?";
     UiResetPageBody => "Its settings go back to their default values. The other pages do not change.",
         "Ses paramètres reprennent leur valeur par défaut. Les autres pages ne changent pas.";
-    UiResetAll => "Restore default settings", "Restaurer les paramètres par défaut";
-    UiResetAllHint => "Restores all application settings to their defaults.",
-        "Restaure tous les paramètres par défaut de l’application.";
-    UiResetAllTitle => "Restore default settings?", "Restaurer les paramètres par défaut ?";
     UiResetAllBody => "Every setting, on every page, goes back to its default value.",
         "Tous les paramètres, sur toutes les pages, reprennent leur valeur par défaut.";
-    GrpReset => "Reset", "Réinitialisation";
     GrpWindowCapture => "Window capture", "Capture de fenêtre";
     OptBackdropGradient => "Gradient", "Dégradé";
     SetBackdropColour => "Colour", "Couleur";
@@ -367,7 +358,6 @@ keys! {
     SetAdminHint =>
         "Allows capturing all applications, including those started as administrator.",
         "Permet de capturer toutes les applications, même celles démarrées en tant qu’administrateur.";
-    GrpImageSettings => "Settings", "Paramètres";
     SetCustomEncoding => "Custom encoding settings", "Paramètres d’encodage personnalisés";
     SetCustomName => "Custom file name", "Nom personnalisé";
     SetPreview => "Show preview", "Afficher un aperçu";
@@ -386,7 +376,6 @@ keys! {
     GrpNotifyCaptures => "Screenshots", "Captures d'écran";
     GrpNotifyVideos => "Videos", "Vidéos";
     SetNotifyImage => "Screenshot saved", "Capture enregistrée";
-    SetNotifyText => "Text copied from a zone", "Texte copié depuis une zone";
     SetNotifyRecording => "Recording saved", "Enregistrement terminé";
     SetNotifyReplay => "Replay saved", "Replay enregistré";
     SetNotifyFailures => "Errors", "Erreurs";
@@ -397,8 +386,6 @@ keys! {
     OptSeconds => "Seconds", "Secondes";
     OptMinutes => "Minutes", "Minutes";
     UnitSeconds => "s", "s";
-    SetReplayAfterSeconds => "Seconds after the shortcut", "Secondes après le raccourci";
-    GrpReplayVideo => "Video and sound settings", "Paramètres vidéo et son";
     SetSameAsVideo => "Same settings as Recording", "Mêmes paramètres que l'enregistrement";
     GameNoneOpen => "No game is open right now", "Aucun jeu n'est ouvert actuellement";
     SetWhatsNew => "Show what's new after an update", "Afficher les nouveautés après une mise à jour";
@@ -423,6 +410,11 @@ keys! {
         "Les captures, les enregistrements et les alertes s’affichent ici.";
     WidgetFrameLost => "1 frame lost: the encoder cannot keep up", "1 image perdue : l’encodeur ne suit pas";
     WidgetFramesLost => "{n} frames lost: the encoder cannot keep up", "{n} images perdues : l’encodeur ne suit pas";
+    UiSearch => "Search", "Rechercher";
+    UiResetAll => "Reset all settings", "Réinitialiser tous les paramètres";
+    UiResetAllTitle => "Reset all settings?", "Réinitialiser tous les paramètres ?";
+    SetNotifyText => "Text copied from a capture", "Texte copié depuis une capture";
+    SetReplayAfterSeconds => "After the shortcut", "Après le raccourci";
 }
 
 impl Lang {

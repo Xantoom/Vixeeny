@@ -110,14 +110,15 @@ fn updates_add_a_navigation_badge_for_available_and_ready_states() {
     for stage in [UpdateStage::Available, UpdateStage::Ready] {
         panel.set_update(&UpdateView { stage, ..Default::default() });
         let shot = settings_render(&panel, "update-badge-present");
-        let changed = (318..356)
+        // On the updates tab, at the bottom of the column.
+        let changed = (630..672)
             .flat_map(|y| (12..208).map(move |x| y * 1040 + x))
             .filter(|i| base.as_slice()[*i] != shot.as_slice()[*i])
             .count();
         assert!(changed > 10, "no update badge for {stage:?}");
-        // The former restart control at the bottom of navigation is gone.
+        // Nothing else of the column changes.
         assert!(
-            (620..700)
+            (40..620)
                 .flat_map(|y| (12..208).map(move |x| y * 1040 + x))
                 .all(|i| base.as_slice()[i] == shot.as_slice()[i])
         );
@@ -256,11 +257,11 @@ fn changing_the_language_relabels_the_window_at_once() {
         p.window().get_section_titles().iter().map(|s| s.to_string()).collect::<Vec<_>>()
     };
     assert_eq!(titles(&panel)[0], "General");
-    assert_eq!(titles(&panel)[3], "Recording");
+    assert_eq!(titles(&panel)[2], "Recording");
     panel.window().invoke_row_chosen("language".into(), 1); // auto, fr, en
     assert_eq!(panel.config().general.language, "fr");
     assert_eq!(titles(&panel)[0], "Général");
-    assert_eq!(titles(&panel)[3], "Enregistrement");
+    assert_eq!(titles(&panel)[2], "Enregistrement");
     let first = panel.window().get_groups().row_data(0).unwrap();
     assert_eq!(first.rows.row_data(0).unwrap().label, "Langue");
 }
@@ -375,7 +376,7 @@ fn rows_that_stop_applying_fold_away_then_go() {
     let now = rows(&panel);
     let corner = now.iter().position(|(id, _)| id == "widget_corner");
     let widget = now.iter().position(|(id, _)| id == "widget");
-    assert!(corner.is_some_and(|c| widget.is_some_and(|w| c == w + 3)), "{now:?}");
+    assert!(corner.is_some_and(|c| widget.is_some_and(|w| c == w + 2)), "{now:?}");
     assert!(now.iter().any(|(id, leaving)| id == "widget_corner" && *leaving));
     // The next change takes them away for good.
     panel.window().invoke_row_chosen("overlay_edge".into(), 0);

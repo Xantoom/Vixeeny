@@ -277,10 +277,9 @@ fn ui_texts(lang: Lang) -> UiTexts {
         cancel: t(Key::UiCancel),
         reset_page_body: t(Key::UiResetPageBody),
         reset_all: t(Key::UiResetAll),
-        reset_all_hint: t(Key::UiResetAllHint),
         reset_all_title: t(Key::UiResetAllTitle),
         reset_all_body: t(Key::UiResetAllBody),
-        reset_group: t(Key::GrpReset),
+        preview: t(Key::SetPreview),
     }
 }
 
@@ -331,6 +330,8 @@ fn same_row(a: &SettingRow, b: &SettingRow) -> bool {
         && a.suffix == b.suffix
         && a.detail == b.detail
         && a.nested == b.nested
+        && a.preview == b.preview
+        && a.unit_id == b.unit_id
         && a.warning == b.warning
         && a.kind == b.kind
         && a.enabled == b.enabled
@@ -344,6 +345,11 @@ fn same_row(a: &SettingRow, b: &SettingRow) -> bool {
         && a.selected == b.selected
         && a.has_icon == b.has_icon
         && options(a) == options(b)
+}
+
+/// The row `id` of `rows`, or the unit's row of one of them.
+fn find_row<'a>(rows: &'a [Row], id: &str) -> Option<&'a Row> {
+    rows.iter().find_map(|r| if r.id == id { Some(r) } else { r.unit_choice.as_deref().filter(|u| u.id == id) })
 }
 
 /// The rows of a group model, when it is the list the panel made.
@@ -512,6 +518,8 @@ fn row_model(row: &Row, config: &Config, lang: Lang) -> SettingRow {
         detail: row.detail.as_str().into(),
         suffix: row.suffix.as_str().into(),
         nested: row.nested,
+        preview: !row.preview.is_empty(),
+        unit_id: SharedString::new(),
         meter: row.meter,
         shown: SharedString::new(),
         marks: ModelRc::default(),
@@ -590,6 +598,13 @@ fn row_model(row: &Row, config: &Config, lang: Lang) -> SettingRow {
             out.min = *min as i32;
             out.max = *max as i32;
             out.step = *step as i32;
+            // Its unit, chosen beside it: the choices of the unit's row.
+            if let Some(unit) = &row.unit_choice {
+                let choice = row_model(unit, config, lang);
+                out.unit_id = choice.id;
+                out.options = choice.options;
+                out.selected = choice.selected;
+            }
         }
         (Kind::Text, Value::Text(t)) => {
             out.kind = 3;
@@ -994,7 +1009,6 @@ impl SettingsPanel {
         self.window.set_t(ui_texts(lang));
         self.window.set_section_titles(strings(Section::ALL.iter().map(|s| tr(s.title(), lang).to_owned())));
         self.window.set_version(format!("Version {}", self.state.version).into());
-        self.window.set_tagline(tr(Key::AboutTagline, lang).into());
         self.window.set_search_placeholder(tr(Key::UiSearch, lang).into());
         self.window.set_search_title(tr(Key::UiSearchTitle, lang).into());
     }
@@ -1388,7 +1402,7 @@ impl SettingsPanel {
                 let result = {
                     let rows = state.rows.borrow();
                     let mut config = state.config.borrow_mut();
-                    rows.iter().find(|r| r.id == id).map(|r| {
+                    find_row(&rows, id).map(|r| {
                         // A text field reports again when it loses the focus: not a change.
                         if r.value(&config) == value {
                             Err(vixeeny_settings::Invalid)
@@ -1467,7 +1481,7 @@ impl SettingsPanel {
         w.on_row_chosen({
             let (edit, state) = (edit.clone(), self.state.clone());
             move |id, index| {
-                let value = state.rows.borrow().iter().find(|r| r.id == id.as_str()).and_then(|r| match &r.kind {
+                let value = find_row(&state.rows.borrow(), &id).and_then(|r| match &r.kind {
                     Kind::Choice(options) => options.get(index as usize).map(|o| o.value.clone()),
                     _ => None,
                 });
@@ -1558,6 +1572,13 @@ impl SettingsPanel {
                         .any(|r| r.id == id.as_str() && matches!(r.kind, Kind::Button) && r.enabled());
                     if enabled {
                         (state.on_page_action.borrow())(p.current_section(), &id, "");
+                    }
+                    return;
+                }
+                if action == "preview" {
+                    let preview = state.rows.borrow().iter().find(|r| r.id == id.as_str()).map(|r| r.preview.clone());
+                    if let Some(preview) = preview.filter(|p| !p.is_empty()) {
+                        (state.on_page_action.borrow())(p.current_section(), &preview, "");
                     }
                     return;
                 }
