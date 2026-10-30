@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! A picture of a video file, for the gallery: the first frame, scaled down.
+//! A picture of a video file, for its notification: the first frame, scaled down.
 
 use std::path::Path;
 

@@ -48,7 +48,7 @@ pub fn hotkeys_taken_file() -> Option<PathBuf> {
     cache_dir().map(|d| d.join("hotkeys-taken.txt"))
 }
 
-/// Directory for data that can be rebuilt (gallery thumbnails).
+/// Directory for data that can be rebuilt (the clipboard's file, the shortcuts taken).
 pub fn cache_dir() -> Option<PathBuf> {
     if let Some(dir) = portable_dir() {
         return Some(dir.join("cache"));
