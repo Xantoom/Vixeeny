@@ -312,10 +312,17 @@ pub fn share_reencoders(clip: &vixeeny_encode::cut::Clip, reshape: &Reshape) -> 
 fn parse_split(mode: &str) -> Split {
     // `off`, `size:<MB>` or `duration:<minutes>`.
     match mode.split_once(':') {
-        Some(("size", mb)) => mb.parse::<u64>().map_or(Split::Off, |mb| Split::Bytes(mb * 1024 * 1024)),
-        Some(("duration", min)) => {
-            min.parse::<u64>().map_or(Split::Off, |m| Split::Duration(Duration::from_secs(m * 60)))
-        }
+        // 0 would start a new file at every key frame.
+        Some(("size", mb)) => mb
+            .parse::<u64>()
+            .ok()
+            .filter(|mb| *mb > 0)
+            .map_or(Split::Off, |mb| Split::Bytes(mb.saturating_mul(1 << 20))),
+        Some(("duration", min)) => min
+            .parse::<u64>()
+            .ok()
+            .filter(|m| *m > 0)
+            .map_or(Split::Off, |m| Split::Duration(Duration::from_secs(m.saturating_mul(60)))),
         _ => Split::Off,
     }
 }
@@ -1268,6 +1275,16 @@ fn replay_storage(config: &Config, encoder: &Encoder, size: (u32, u32)) -> repla
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_split_of_nothing_or_of_too_much_is_read_safely() {
+        assert_eq!(parse_split("size:2048"), Split::Bytes(2048 << 20));
+        assert_eq!(parse_split("duration:30"), Split::Duration(Duration::from_secs(1800)));
+        assert_eq!(parse_split("size:0"), Split::Off);
+        assert_eq!(parse_split("duration:0"), Split::Off);
+        assert_eq!(parse_split(&format!("size:{}", u64::MAX)), Split::Bytes(u64::MAX));
+        assert_eq!(parse_split("off"), Split::Off);
+    }
 
     #[test]
     fn a_replay_save_counts_the_frames_lost_in_its_seconds() {
