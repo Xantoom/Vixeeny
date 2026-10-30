@@ -9,9 +9,11 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use tracing_subscriber::EnvFilter;
+use tracing_subscriber::filter::Targets;
 use tracing_subscriber::fmt::format::Writer;
 use tracing_subscriber::fmt::time::FormatTime;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::time::LocalTime;
 
@@ -159,13 +161,18 @@ pub fn init(name: &str, program: &str, clock: Clock, system: &str) {
     if std::fs::create_dir_all(&dir).is_err() {
         return;
     }
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    // `RUST_LOG` as `level` or `target=level,…`, without the regular expressions of an `EnvFilter`.
+    let filter = std::env::var("RUST_LOG")
+        .ok()
+        .and_then(|directives| directives.parse::<Targets>().ok())
+        .unwrap_or_else(|| Targets::new().with_default(tracing::Level::INFO));
     // Ignore the error: a subscriber may already be installed (tests).
     let _ = tracing_subscriber::fmt()
-        .with_env_filter(filter)
         .with_ansi(false)
         .with_timer(LocalTimer(clock))
         .with_writer(Mutex::new(DailyFile::new(&dir, name, clock)))
+        .finish()
+        .with(filter)
         .try_init();
     tracing::info!(
         "Vixeeny {} started: {program}, process {}, {system}",
