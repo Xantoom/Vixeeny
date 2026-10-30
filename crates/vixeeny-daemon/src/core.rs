@@ -133,6 +133,8 @@ impl Core {
         match msg {
             AppToDaemon::Ready => {
                 self.ready = true;
+                // Also an app that said it was idle, then ran an action sent before that reached it, and stays.
+                self.exit_expected = false;
                 for action in self.queued.drain(..) {
                     fx.push(Effect::SendToApp(DaemonToApp::RunAction { action, frozen: None }));
                 }
@@ -233,6 +235,18 @@ mod tests {
         // new launch stays tracked.
         assert!(core.handle(Event::AppExited { id: 1, success: false }).is_empty());
         assert!(core.handle(Event::Action(ActionId::CaptureWindow)).is_empty());
+    }
+
+    #[test]
+    fn an_idle_app_that_stays_is_the_app_again() {
+        let mut core = ready_app();
+        core.handle(Event::App(AppToDaemon::Idle));
+        // An action sent before `Idle` arrived started a recording there: the app says it stays.
+        core.handle(Event::App(AppToDaemon::Ready));
+        assert_eq!(core.handle(Event::Action(ActionId::RecordToggle)), vec![run(ActionId::RecordToggle)]);
+        // Its exit later is a crash again if it says nothing first.
+        core.handle(Event::AppDisconnected);
+        assert_eq!(core.handle(Event::AppExited { id: 1, success: false }), vec![Effect::Notify(Key::AppCrashed)]);
     }
 
     #[test]

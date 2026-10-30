@@ -332,6 +332,9 @@ fn parse_action() -> anyhow::Result<(ActionId, Option<ipc::Frozen>)> {
     Ok((action, frozen))
 }
 
+/// How long an app that said it is idle still listens for an action the daemon sent before it knew.
+const IDLE_GRACE: Duration = Duration::from_millis(500);
+
 /// An action is running (the next ones wait for it).
 static BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -859,7 +862,22 @@ fn run() -> anyhow::Result<()> {
             // Idle for long enough: the memory goes back to the system.
             Err(RecvTimeoutError::Timeout) => {
                 ipc::write_msg(&mut send, &AppToDaemon::Idle)?;
-                return Ok(());
+                // An action the daemon sent before it read `Idle` (a shortcut pressed then, the screens frozen for
+                // it) is still this process's to run; it stays if the action keeps it busy.
+                let mut ran = false;
+                while let Ok(Wake::Daemon(DaemonToApp::RunAction { action, frozen })) = rx.recv_timeout(IDLE_GRACE) {
+                    if let Some(fresh) = Config::read_current() {
+                        config = fresh;
+                    }
+                    Actions { config: &mut config, recording: &mut recording, send: &mut send }.run(action, frozen)?;
+                    ran = true;
+                }
+                let busy = recording.handle.is_some() || recording.replay.is_some() || record::saving();
+                if !(ran && busy) {
+                    return Ok(());
+                }
+                ipc::write_msg(&mut send, &AppToDaemon::Ready)?;
+                idle_from = std::time::Instant::now();
             }
         }
     }
