@@ -24,7 +24,9 @@ const LAUNCHERS: &[&str] = &[
     "upc.exe",
     "ubisoftconnect.exe",
     "eadesktop.exe",
+    "ealauncher.exe",
     "battle.net.exe",
+    "riot client.exe",
     "riotclientservices.exe",
     "riotclientux.exe",
     "riotclientuxrender.exe",
@@ -34,7 +36,12 @@ const LAUNCHERS: &[&str] = &[
     "playnite.desktopapp.exe",
     "playnite.fullscreenapp.exe",
     "rockstarlauncher.exe",
+    "socialclubhelper.exe",
     "xboxpcapp.exe",
+    "hyp.exe",
+    "amazon games ui.exe",
+    "itch.exe",
+    "heroic.exe",
 ];
 
 /// The signs are read again, when next needed, after this long (a game installed meanwhile).
