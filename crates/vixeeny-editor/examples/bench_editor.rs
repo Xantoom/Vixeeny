@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! `cargo run --profile quick -p vixeeny-editor --example bench_editor`
-//! Synthetic CPU timings, with buffers allocated before timing. See docs/PERFORMANCE.md.
+//! Synthetic CPU timings, with buffers allocated before timing.
 
 use std::hint::black_box;
 use std::time::Instant;
