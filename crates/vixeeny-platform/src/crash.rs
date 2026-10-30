@@ -124,6 +124,8 @@ pub fn describe_exit(code: u32) -> Option<&'static str> {
         HEAP_CORRUPTION => "heap corruption",
         0xc000_001d => "illegal instruction",
         0xc000_0135 => "a DLL was not found",
+        0xc06d_007e => "a DLL loaded when first needed was not found",
+        0xc06d_007f => "a function of a DLL loaded when first needed was not found",
         0xc000_0142 => "a DLL failed to start",
         0xc000_0017 | 0xc000_012d => "out of memory",
         0xc000_0094 => "integer division by zero",
