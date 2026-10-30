@@ -1195,6 +1195,16 @@ impl SoundOut {
     }
 }
 
+/// A stream of `octx` that takes the packets of `s` as they are; its index.
+fn copied(octx: &mut format::context::Output, s: &format::stream::Stream) -> Result<usize, RecordError> {
+    let mut stream = octx.add_stream(encoder::find(codec::Id::None))?;
+    stream.set_parameters(s.parameters());
+    // SAFETY: the parameters of the stream just created; a zero tag lets the muxer choose its own.
+    unsafe { (*stream.parameters().as_mut_ptr()).codec_tag = 0 };
+    stream.set_time_base(s.time_base());
+    Ok(stream.index())
+}
+
 fn write_cut(
     clip: &Clip,
     (from, to): (usize, usize),
@@ -1233,22 +1243,10 @@ fn write_cut(
                     map[index] = Some(stream.index());
                     video_out = Some(out);
                 }
-                None => {
-                    let mut stream = octx.add_stream(encoder::find(codec::Id::None))?;
-                    stream.set_parameters(s.parameters());
-                    // SAFETY: the parameters of the stream just created; a zero tag lets the muxer choose its own.
-                    unsafe { (*stream.parameters().as_mut_ptr()).codec_tag = 0 };
-                    stream.set_time_base(s.time_base());
-                    map[index] = Some(stream.index());
-                }
+                None => map[index] = Some(copied(&mut octx, &s)?),
             }
         } else if s.parameters().medium() == media::Type::Audio && reencode.is_none_or(|r| r.sound_kbps.is_none()) {
-            let mut stream = octx.add_stream(encoder::find(codec::Id::None))?;
-            stream.set_parameters(s.parameters());
-            // SAFETY: as above.
-            unsafe { (*stream.parameters().as_mut_ptr()).codec_tag = 0 };
-            stream.set_time_base(s.time_base());
-            map[index] = Some(stream.index());
+            map[index] = Some(copied(&mut octx, &s)?);
         }
     }
     // The sound encoded again: every track mixed, from the first frame kept.
