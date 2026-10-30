@@ -143,36 +143,20 @@ fn band(
     last: bool,
 ) -> Result<Part, ImageError> {
     let mut filtered = Vec::with_capacity(rows.len() * (stride + 1));
+    // Above the image's first row: zeros, as the filters take them.
     let mut prev = vec![0; stride];
     let mut cur = vec![0; stride];
-    let mut trial = vec![0; stride];
-    let mut best = vec![0; stride];
     if rows.start > 0 {
         row(rows.start - 1, &mut prev);
     }
     for y in rows {
         row(y, &mut cur);
-        let up = (y > 0).then_some(&prev[..]);
-        if adaptive {
-            // The filter leaving the smallest sum of absolute values, as libpng and the png crate pick it.
-            let mut best_cost = u64::MAX;
-            let mut best_kind = 0;
-            for kind in 0..5 {
-                apply(kind, &cur, up, bpp, &mut trial);
-                let cost = trial.iter().map(|&v| u64::from(v.cast_signed().unsigned_abs())).sum();
-                if cost < best_cost {
-                    best_cost = cost;
-                    best_kind = kind;
-                    std::mem::swap(&mut best, &mut trial);
-                }
-            }
-            filtered.push(best_kind);
-            filtered.extend_from_slice(&best);
-        } else {
-            apply(1, &cur, up, bpp, &mut trial);
-            filtered.push(1);
-            filtered.extend_from_slice(&trial);
-        }
+        // The filter leaving the smallest sum of absolute values, as libpng and the png crate pick it.
+        let kind = if adaptive { best_filter(&cur, &prev, bpp) } else { 1 };
+        filtered.push(kind);
+        let start = filtered.len();
+        filtered.resize(start + stride, 0);
+        apply(kind, &cur, &prev, bpp, &mut filtered[start..]);
         std::mem::swap(&mut prev, &mut cur);
     }
     let adler = {
@@ -199,10 +183,30 @@ fn band(
     Ok(Part { deflated, adler, len: filtered.len() as u64 })
 }
 
-/// PNG filter `kind` (0 none, 1 sub, 2 up, 3 average, 4 Paeth) of `cur` over `up` (`None`: the first row, all zeros
-/// above).
-fn apply(kind: u8, cur: &[u8], up: Option<&[u8]>, bpp: usize, out: &mut [u8]) {
-    let up_at = |i: usize| up.map_or(0, |u| u[i]);
+/// The filter (0 none, 1 sub, 2 up, 3 average, 4 Paeth) whose result's bytes, as signed, add up to the least, the
+/// first of those that tie. The five are weighed in one pass over the row.
+fn best_filter(cur: &[u8], up: &[u8], bpp: usize) -> u8 {
+    let cost = |v: u8| u32::from(v.cast_signed().unsigned_abs());
+    let mut sums = [0_u32; 5];
+    let mut add = |x: u8, a: u8, b: u8, c: u8| {
+        sums[0] += cost(x);
+        sums[1] += cost(x.wrapping_sub(a));
+        sums[2] += cost(x.wrapping_sub(b));
+        sums[3] += cost(x.wrapping_sub(u16::midpoint(u16::from(a), u16::from(b)) as u8));
+        sums[4] += cost(x.wrapping_sub(paeth(a, b, c)));
+    };
+    for i in 0..bpp.min(cur.len()) {
+        add(cur[i], 0, up[i], 0);
+    }
+    for i in bpp..cur.len() {
+        add(cur[i], cur[i - bpp], up[i], up[i - bpp]);
+    }
+    (0..5).min_by_key(|&k| sums[usize::from(k)]).unwrap_or(1)
+}
+
+/// PNG filter `kind` (0 none, 1 sub, 2 up, 3 average, 4 Paeth) of `cur` over `up` (zeros above the first row).
+fn apply(kind: u8, cur: &[u8], up: &[u8], bpp: usize, out: &mut [u8]) {
+    let left = |i: usize| if i >= bpp { (cur[i - bpp], up[i - bpp]) } else { (0, 0) };
     match kind {
         0 => out.copy_from_slice(cur),
         1 => {
@@ -211,24 +215,20 @@ fn apply(kind: u8, cur: &[u8], up: Option<&[u8]>, bpp: usize, out: &mut [u8]) {
                 out[i] = cur[i].wrapping_sub(cur[i - bpp]);
             }
         }
-        2 => match up {
-            Some(u) => {
-                for ((o, &c), &b) in out.iter_mut().zip(cur).zip(u) {
-                    *o = c.wrapping_sub(b);
-                }
+        2 => {
+            for ((o, &c), &b) in out.iter_mut().zip(cur).zip(up) {
+                *o = c.wrapping_sub(b);
             }
-            None => out.copy_from_slice(cur),
-        },
+        }
         3 => {
             for i in 0..cur.len() {
-                let a = if i >= bpp { u16::from(cur[i - bpp]) } else { 0 };
-                out[i] = cur[i].wrapping_sub(u16::midpoint(a, u16::from(up_at(i))) as u8);
+                out[i] = cur[i].wrapping_sub(u16::midpoint(u16::from(left(i).0), u16::from(up[i])) as u8);
             }
         }
         _ => {
             for i in 0..cur.len() {
-                let (a, c) = if i >= bpp { (cur[i - bpp], up_at(i - bpp)) } else { (0, 0) };
-                out[i] = cur[i].wrapping_sub(paeth(a, up_at(i), c));
+                let (a, c) = left(i);
+                out[i] = cur[i].wrapping_sub(paeth(a, up[i], c));
             }
         }
     }
