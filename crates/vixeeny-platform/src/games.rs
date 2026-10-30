@@ -175,7 +175,7 @@ impl Detector {
         }
         let path = window.exe_path.clone()?;
         let exe = exe_name(&path)?;
-        let monitors = crate::monitors().ok()?;
+        let monitors = crate::monitor_layout().ok()?;
         let full_screen = is_full_screen(&window, &monitors);
         if !full_screen || is_ours(&window) {
             return None;

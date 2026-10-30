@@ -76,7 +76,7 @@ pub fn dismiss_open() -> bool {
 /// Shows the overlay until the user picks, dismisses it, or clicks elsewhere.
 pub fn run(config: &Config, recording: bool, replay: bool, pinned: bool) -> anyhow::Result<Outcome> {
     vixeeny_platform::ensure_dpi_aware();
-    let monitors = vixeeny_platform::monitors()?;
+    let monitors = vixeeny_platform::monitor_layout()?;
     let (x, y) = vixeeny_platform::cursor_position()?;
     let monitor =
         vixeeny_platform::monitor_at(&monitors, x, y).or_else(|| monitors.first()).context("no monitor")?.clone();

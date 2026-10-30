@@ -236,7 +236,7 @@ pub fn run_child(config: Config, args: &[String]) -> anyhow::Result<()> {
     };
 
     // On the monitor of the pointer (the game's, most often).
-    let monitors = vixeeny_platform::monitors()?;
+    let monitors = vixeeny_platform::monitor_layout()?;
     let cursor = vixeeny_platform::cursor_position()?;
     let monitor = vixeeny_platform::monitor_at(&monitors, cursor.0, cursor.1)
         .or_else(|| monitors.first())

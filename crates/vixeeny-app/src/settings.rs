@@ -356,7 +356,7 @@ fn preview_overlay(config: Config, widget: bool) {
 fn preview_widget(config: &Config) -> anyhow::Result<()> {
     use crate::widget_math::FromWidget;
     use std::time::{Duration, Instant};
-    let monitors = vixeeny_platform::monitors()?;
+    let monitors = vixeeny_platform::monitor_layout()?;
     let (x, y) = vixeeny_platform::cursor_position()?;
     let monitor = vixeeny_platform::monitor_at(&monitors, x, y).or_else(|| monitors.first()).context("no monitor")?;
     let mut settings = config.recording_widget.clone();

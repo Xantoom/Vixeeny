@@ -72,20 +72,32 @@ unsafe extern "system" fn collect_monitor(
     _: *mut RECT,
     data: LPARAM,
 ) -> windows::core::BOOL {
-    // SAFETY: `data` is the `&mut Vec<HMONITOR>` passed by `monitors()` below, alive for the whole (synchronous)
+    // SAFETY: `data` is the `&mut Vec<HMONITOR>` passed by `listed()` below, alive for the whole (synchronous)
     // enumeration.
     let list = unsafe { &mut *(data.0 as *mut Vec<HMONITOR>) };
     list.push(monitor);
     TRUE
 }
 
+/// Every monitor, with its HDR state.
 pub fn monitors() -> Result<Vec<MonitorInfo>> {
+    listed(true)
+}
+
+/// Every monitor without its HDR state (`hdr` is `None`): enough to place a window or tell one full screen, without
+/// asking the graphics cards.
+pub fn monitor_layout() -> Result<Vec<MonitorInfo>> {
+    listed(false)
+}
+
+fn listed(with_hdr: bool) -> Result<Vec<MonitorInfo>> {
     let mut handles: Vec<HMONITOR> = Vec::new();
     // SAFETY: the callback only dereferences the pointer to `handles`, which outlives the call.
     let ok = unsafe { EnumDisplayMonitors(None, None, Some(collect_monitor), LPARAM(&raw mut handles as isize)) };
     if !ok.as_bool() {
         return Err(PlatformError::Os("EnumDisplayMonitors failed".into()));
     }
+    let outputs = if with_hdr { dxgi_outputs() } else { Vec::new() };
     let mut out = Vec::with_capacity(handles.len());
     for handle in handles {
         let mut info = MONITORINFOEXW::default();
@@ -107,7 +119,7 @@ pub fn monitors() -> Result<Vec<MonitorInfo>> {
             work: rect_of(info.monitorInfo.rcWork),
             primary: info.monitorInfo.dwFlags & MONITORINFOF_PRIMARY != 0,
             dpi: dpi_x,
-            hdr: hdr_info(MonitorId(handle.0 as usize as u64)),
+            hdr: hdr_of(&outputs, MonitorId(handle.0 as usize as u64)),
         });
     }
     Ok(out)
@@ -115,7 +127,7 @@ pub fn monitors() -> Result<Vec<MonitorInfo>> {
 
 /// The highest refresh rate among the monitors, in Hz (60 when it cannot be read).
 pub fn max_refresh_hz() -> u32 {
-    let Ok(list) = monitors() else { return 60 };
+    let Ok(list) = monitor_layout() else { return 60 };
     list.iter()
         .filter_map(|m| {
             let name = utf16z(&m.name);
@@ -1076,31 +1088,38 @@ pub fn reveal(path: &str) -> Result<()> {
     if result.0 as usize > 32 { Ok(()) } else { Err(PlatformError::Os(format!("cannot show {path}"))) }
 }
 
-/// Looks up the DXGI output of `monitor`: `(is HDR, peak nits, GDI device name)`.
-fn dxgi_output(monitor: MonitorId) -> Option<(bool, f32, [u16; 32])> {
+/// The DXGI outputs of every graphics card: `(monitor, is HDR, peak nits, GDI device name)`. One factory for all the
+/// monitors (making one takes milliseconds).
+fn dxgi_outputs() -> Vec<(u64, bool, f32, [u16; 32])> {
+    let mut found = Vec::new();
     // SAFETY: plain DXGI enumeration; every interface is reference counted by the bindings.
     unsafe {
-        let factory: IDXGIFactory1 = CreateDXGIFactory1().ok()?;
+        let Ok(factory) = CreateDXGIFactory1::<IDXGIFactory1>() else {
+            return found;
+        };
         let mut adapter_index = 0;
         while let Ok(adapter) = factory.EnumAdapters1(adapter_index) {
             adapter_index += 1;
             let mut output_index = 0;
             while let Ok(output) = adapter.EnumOutputs(output_index) {
                 output_index += 1;
-                let Ok(output6) = output.cast::<IDXGIOutput6>() else {
-                    continue;
-                };
-                let Ok(desc) = output6.GetDesc1() else {
-                    continue;
-                };
-                if desc.Monitor.0 as usize as u64 == monitor.0 {
+                if let Ok(desc) = output.cast::<IDXGIOutput6>().and_then(|o| o.GetDesc1()) {
                     let hdr = desc.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
-                    return Some((hdr, desc.MaxLuminance, desc.DeviceName));
+                    found.push((desc.Monitor.0 as usize as u64, hdr, desc.MaxLuminance, desc.DeviceName));
                 }
             }
         }
-        None
     }
+    found
+}
+
+/// The HDR parameters of `monitor` among `outputs`, `None` when it shows SDR.
+fn hdr_of(outputs: &[(u64, bool, f32, [u16; 32])], monitor: MonitorId) -> Option<HdrInfo> {
+    let (_, hdr, peak, name) = outputs.iter().find(|(m, ..)| *m == monitor.0)?;
+    hdr.then(|| HdrInfo {
+        sdr_white_nits: sdr_white_nits(name).unwrap_or(80.0),
+        peak_nits: if *peak > 0.0 { *peak } else { 1000.0 },
+    })
 }
 
 /// SDR white level of the display whose GDI name is `gdi_name`, in nits.
@@ -1156,14 +1175,7 @@ fn sdr_white_nits(gdi_name: &[u16; 32]) -> Option<f32> {
 /// HDR parameters of `monitor`, or `None` when it shows SDR (or they cannot be read, in which case capturing as SDR is
 /// the safe choice).
 pub fn hdr_info(monitor: MonitorId) -> Option<HdrInfo> {
-    let (hdr, peak, name) = dxgi_output(monitor)?;
-    if !hdr {
-        return None;
-    }
-    Some(HdrInfo {
-        sdr_white_nits: sdr_white_nits(&name).unwrap_or(80.0),
-        peak_nits: if peak > 0.0 { peak } else { 1000.0 },
-    })
+    hdr_of(&dxgi_outputs(), monitor)
 }
 
 /// `ProductName` and `FileDescription` from the executable's version resource. Missing or unreadable resources give

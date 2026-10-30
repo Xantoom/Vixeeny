@@ -505,7 +505,7 @@ fn show(toasts: &Toasts, toast: Toast, thumb: Option<Thumb>) -> anyhow::Result<(
 
 /// Only window/device work runs on the UI thread; file decoding and shell icons are prepared by the reader.
 fn show_prepared(toasts: &Toasts, toast: Toast, content: ToastContent) -> anyhow::Result<()> {
-    let monitors = vixeeny_platform::monitors()?;
+    let monitors = vixeeny_platform::monitor_layout()?;
     let monitor = monitors
         .iter()
         .find(|m| m.primary)
