@@ -66,7 +66,7 @@ fn main() {
             let front = vixeeny_platform::foreground_window().ok().flatten().map(|w| w.id.0);
             eprintln!("keyboard on the overlay: {}", front == Some(hwnd));
             let monitors = vixeeny_platform::monitors().expect("monitors");
-            let mut capturer = Capturer::new(WgcBackend::new().expect("wgc"), monitors.clone());
+            let mut capturer = Capturer::new(Box::new(WgcBackend::new().expect("wgc")), monitors.clone());
             let bounds = vixeeny_platform::virtual_bounds(monitors.iter().map(|m| &m.rect)).unwrap();
             let frame = capturer
                 .grab(&CaptureTarget::AllMonitors, CaptureOptions { show_cursor: false, tonemap: None })

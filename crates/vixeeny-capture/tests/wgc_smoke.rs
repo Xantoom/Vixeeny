@@ -17,7 +17,7 @@ fn captures_small_regions_with_and_without_the_cursor() {
         vixeeny_common::skip_test("no capture device");
         return;
     };
-    let mut capturer = Capturer::new(backend, monitors.clone());
+    let mut capturer = Capturer::new(Box::new(backend), monitors.clone());
     for monitor in monitors.iter().filter(|m| m.rect.width >= 337 && m.rect.height >= 223) {
         for show_cursor in [false, true] {
             let target = CaptureTarget::Region {
@@ -62,7 +62,7 @@ fn grabs_every_monitor_at_physical_size() {
             return;
         }
     };
-    let mut capturer = Capturer::new(backend, monitors.clone());
+    let mut capturer = Capturer::new(Box::new(backend), monitors.clone());
     for m in &monitors {
         let t = Instant::now();
         match capturer.grab(&CaptureTarget::Monitor(m.id), CaptureOptions::default()) {
@@ -119,7 +119,7 @@ fn hdr_screens_are_captured_as_scrgb() {
             return;
         }
     };
-    let mut capturer = Capturer::new(backend, monitors.clone());
+    let mut capturer = Capturer::new(Box::new(backend), monitors.clone());
     let all = capturer.grab_hdr(&CaptureTarget::AllMonitors, false).unwrap();
     let Some(all) = all else {
         assert!(monitors.iter().all(|m| m.hdr.is_none()));

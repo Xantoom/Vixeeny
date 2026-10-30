@@ -12,6 +12,8 @@ pub mod freeze;
 mod hdr;
 mod wgc;
 mod wgc_stream;
+use std::ops::DerefMut;
+
 pub use fake::FakeBackend;
 pub use frame::{BYTES_PER_PIXEL, CpuFrame};
 pub use hdr::{HdrCapture, HdrFrame, reference};
@@ -180,71 +182,6 @@ pub trait StillBackend {
     }
 }
 
-/// A backend lent for a while (kept by its owner for the next captures).
-impl<B: StillBackend + ?Sized> StillBackend for &mut B {
-    fn grab_monitor(&mut self, monitor: &MonitorInfo, cursor: bool) -> Result<CpuFrame, CaptureError> {
-        (**self).grab_monitor(monitor, cursor)
-    }
-    fn grab_monitor_hdr(
-        &mut self,
-        monitor: &MonitorInfo,
-        area: Option<&PhysicalRect>,
-        cursor: bool,
-    ) -> Result<HdrFrame, CaptureError> {
-        (**self).grab_monitor_hdr(monitor, area, cursor)
-    }
-    fn grab_monitor_sdr(
-        &mut self,
-        monitor: &MonitorInfo,
-        area: Option<&PhysicalRect>,
-        cursor: bool,
-        info: &HdrInfo,
-        tonemap: ToneMapFn,
-    ) -> Result<CpuFrame, CaptureError> {
-        (**self).grab_monitor_sdr(monitor, area, cursor, info, tonemap)
-    }
-    fn grab_window(&mut self, window: WindowId, cursor: bool) -> Result<CpuFrame, CaptureError> {
-        (**self).grab_window(window, cursor)
-    }
-    fn grab_window_hdr(&mut self, window: WindowId, cursor: bool) -> Result<HdrFrame, CaptureError> {
-        (**self).grab_window_hdr(window, cursor)
-    }
-    fn grab_window_sdr(
-        &mut self,
-        window: WindowId,
-        cursor: bool,
-        info: &HdrInfo,
-        tonemap: ToneMapFn,
-    ) -> Result<CpuFrame, CaptureError> {
-        (**self).grab_window_sdr(window, cursor, info, tonemap)
-    }
-    fn window_monitor(&self, window: WindowId) -> Option<MonitorId> {
-        (**self).window_monitor(window)
-    }
-    fn grab_monitors(
-        &mut self,
-        monitors: &[MonitorInfo],
-        cursor: bool,
-        tonemap: Option<ToneMapFn>,
-    ) -> Result<Vec<CpuFrame>, CaptureError> {
-        (**self).grab_monitors(monitors, cursor, tonemap)
-    }
-    fn grab_monitors_shown(&mut self, monitors: &[MonitorInfo], cursor: bool) -> Result<Vec<Shown>, CaptureError> {
-        (**self).grab_monitors_shown(monitors, cursor)
-    }
-    fn grab_monitors_both(
-        &mut self,
-        monitors: &[MonitorInfo],
-        cursor: bool,
-        tonemap: ToneMapFn,
-    ) -> Result<Vec<(CpuFrame, Option<HdrFrame>)>, CaptureError> {
-        (**self).grab_monitors_both(monitors, cursor, tonemap)
-    }
-    fn d3d_device(&self) -> Option<ID3D11Device> {
-        (**self).d3d_device()
-    }
-}
-
 /// Gives back the memory the driver keeps for the textures `device` freed (over 100 MB after a few 4K captures): the
 /// next ones cost about a millisecond more to make. Call it once the device's work is done (its immediate context is
 /// reset).
@@ -262,12 +199,13 @@ pub fn trim(device: &ID3D11Device) {
     }
 }
 
-pub struct Capturer<B: StillBackend> {
+/// Captures through a backend it owns (a `Box`) or borrows (`&mut`, kept by its owner for the next captures).
+pub struct Capturer<B: DerefMut<Target: StillBackend>> {
     backend: B,
     monitors: Vec<MonitorInfo>,
 }
 
-impl<B: StillBackend> Capturer<B> {
+impl<B: DerefMut<Target: StillBackend>> Capturer<B> {
     pub fn new(backend: B, monitors: Vec<MonitorInfo>) -> Self {
         if monitors.iter().any(|m| m.hdr.is_some()) {
             card_tonemap::warm();

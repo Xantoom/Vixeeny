@@ -182,7 +182,7 @@ fn template_vars(
 
 /// Grabs, encodes and saves. Returns the file written. `metadata` reads the version resource of an executable (a
 /// parameter so tests need no real programs).
-pub fn run<B: StillBackend>(
+pub fn run<B: std::ops::DerefMut<Target: StillBackend>>(
     action: ActionId,
     snap: &Snapshot,
     capturer: &mut Capturer<B>,
@@ -454,7 +454,7 @@ mod tests {
         names: &BTreeMap<String, String>,
         metadata: &dyn Fn(&str) -> ExeMetadata,
     ) -> PathBuf {
-        let mut capturer = Capturer::new(FakeBackend::default(), snap.monitors.clone());
+        let mut capturer = Capturer::new(Box::<FakeBackend>::default(), snap.monitors.clone());
         let now = now();
         let dest = Destination {
             keep_copy: true,
@@ -504,7 +504,7 @@ mod tests {
             now: &now,
             after_save: Some(&after),
         };
-        let mut capturer = Capturer::new(FakeBackend::default(), snap.monitors.clone());
+        let mut capturer = Capturer::new(Box::<FakeBackend>::default(), snap.monitors.clone());
         run(
             ActionId::CaptureFullscreen,
             &snap,
@@ -541,7 +541,7 @@ mod tests {
             after_save: None,
         };
         let shoot = |action| {
-            let mut capturer = Capturer::new(FakeBackend::default(), snap.monitors.clone());
+            let mut capturer = Capturer::new(Box::<FakeBackend>::default(), snap.monitors.clone());
             let path = run(
                 action,
                 &snap,
@@ -687,7 +687,7 @@ mod tests {
         let settings = Settings::default();
         let options = CaptureOptions { tonemap: Some(|rgba, _| vec![7; rgba.len()]), ..CaptureOptions::default() };
         let shoot = |format, keep_hdr| {
-            let mut capturer = Capturer::new(FakeBackend::default(), snap.monitors.clone());
+            let mut capturer = Capturer::new(Box::<FakeBackend>::default(), snap.monitors.clone());
             let output = Output { format, settings: &settings, keep_hdr, backdrop: None };
             let path =
                 run(ActionId::CaptureFullscreen, &snap, &mut capturer, &dest, options, output, &no_metadata).unwrap();

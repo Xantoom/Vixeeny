@@ -78,9 +78,9 @@ mod tests {
     }
 
     /// a 150 % monitor with a negative-origin 100 % monitor on its left.
-    fn capturer() -> Capturer<FakeBackend> {
+    fn capturer() -> Capturer<Box<FakeBackend>> {
         let monitors = vec![mon(1, 0, 0, 300, 200, 144), mon(2, -160, 20, 160, 100, 96)];
-        Capturer::new(FakeBackend::default(), monitors)
+        Capturer::new(Box::<FakeBackend>::default(), monitors)
     }
 
     #[test]
@@ -126,7 +126,7 @@ mod tests {
         let hdr = HdrInfo { sdr_white_nits: 80.0, peak_nits: 1000.0 };
         let mut monitors = vec![mon(1, 0, 0, 4, 2, 96), mon(2, 4, 0, 4, 2, 96)];
         monitors[1].hdr = Some(hdr);
-        let mut c = Capturer::new(FakeBackend::default(), monitors);
+        let mut c = Capturer::new(Box::<FakeBackend>::default(), monitors);
         // A fake tone mapper that encodes the headroom it was given into the blue channel.
         let options = CaptureOptions {
             tonemap: Some(|rgba, info| {
@@ -142,7 +142,7 @@ mod tests {
         assert_eq!(c.backend.grabs, vec!["monitor 1 cursor=false", "hdr monitor 2 cursor=false"]);
         // Without a tone mapper the HDR monitor is captured as a plain SDR frame.
         let mut c2 = Capturer::new(
-            FakeBackend::default(),
+            Box::<FakeBackend>::default(),
             vec![{
                 let mut m = mon(2, 0, 0, 4, 2, 96);
                 m.hdr = Some(hdr);
@@ -163,7 +163,7 @@ mod tests {
         let mut monitors = vec![mon(1, 0, 0, 2, 1, 96), mon(2, 2, 0, 2, 1, 96), mon(3, 4, 0, 2, 1, 96)];
         monitors[1].hdr = Some(hdr(160.0, 600.0));
         monitors[2].hdr = Some(hdr(240.0, 1000.0));
-        let mut c = Capturer::new(FakeBackend::default(), monitors);
+        let mut c = Capturer::new(Box::<FakeBackend>::default(), monitors);
         let all = c.grab_hdr(&CaptureTarget::AllMonitors, false).unwrap().unwrap();
         assert_eq!(all.info, hdr(240.0, 1000.0));
         assert_eq!((all.frame.width, all.frame.height), (6, 1));
@@ -192,10 +192,10 @@ mod tests {
         monitors[1].hdr = Some(hdr(160.0, 600.0));
         let tonemap: crate::ToneMapFn = |rgba, _| [7, 7, 7, 255].repeat(rgba.len() / 4);
         let options = CaptureOptions { tonemap: Some(tonemap), ..CaptureOptions::default() };
-        let mut apart = Capturer::new(FakeBackend::default(), monitors.clone());
+        let mut apart = Capturer::new(Box::<FakeBackend>::default(), monitors.clone());
         let sdr = apart.grab(&CaptureTarget::AllMonitors, options).unwrap();
         let hdr = apart.grab_hdr(&CaptureTarget::AllMonitors, false).unwrap();
-        let mut once = Capturer::new(FakeBackend::default(), monitors);
+        let mut once = Capturer::new(Box::<FakeBackend>::default(), monitors);
         assert_eq!(once.grab_all_both(false, tonemap).unwrap(), (sdr, hdr));
         assert_eq!(once.backend.grabs, vec!["monitor 1 cursor=false", "hdr monitor 2 cursor=false"]);
     }
@@ -205,7 +205,7 @@ mod tests {
         let mut monitors = vec![mon(1, 0, 0, 4, 2, 96)];
         monitors[0].hdr = Some(hdr(200.0, 800.0));
         let backend = FakeBackend { window_monitor: Some(MonitorId(1)), ..FakeBackend::default() };
-        let mut c = Capturer::new(backend, monitors);
+        let mut c = Capturer::new(Box::new(backend), monitors);
         let window = CaptureTarget::Window(WindowId(7));
         let kept = c.grab_hdr(&window, true).unwrap().unwrap();
         assert_eq!(kept.info, hdr(200.0, 800.0));
