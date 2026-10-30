@@ -9,14 +9,19 @@ inputs:
 runs:
   using: composite
   steps:
-    # Before FFmpeg: the saved folder holds a copy of it, which the artifact of the run replaces.
+    # The installed libraries, their stamps (a library whose stamp matches is not built again) and pkg-config: 30 MB,
+    # where their sources and build folders are 600 MB more, which a build only needs when it changes.
     - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       if: inputs.native == 'true'
       id: native-cache
       with:
-        path: native/build/work
-        key: native-windows-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}
-        restore-keys: native-windows-
+        path: |
+          native/build/work/prefix
+          native/build/work/turbo-prefix
+          native/build/work/*.stamp
+          native/build/work/tools
+        key: native-prefix-windows-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}
+        restore-keys: native-prefix-windows-
     - shell: pwsh
       run: rustup toolchain install --profile minimal
     # Every CARGO*, RUST*, CC*, CFLAGS*, CXX* and CMAKE* variable of the job is part of the key, which no input narrows:
@@ -42,21 +47,31 @@ runs:
       if: inputs.native == 'true'
       shell: pwsh
       run: |
+        # pkg-config-lite is one program, kept in the cache: Chocolatey takes 15 s to install it.
+        $tools = "$PWD\native\build\work\tools"
         $missing = @()
-        if (-not (Test-Path "C:\ProgramData\chocolatey\bin\pkg-config.exe")) { $missing += "pkgconfiglite" }
+        if (-not (Test-Path "$tools\pkg-config.exe")) { $missing += "pkgconfiglite" }
         if ("${{ steps.native-cache.outputs.cache-hit }}" -ne "true") { $missing += "nasm" }
         if ($missing) { choco install @missing -y --no-progress }
-        $env:PATH = "C:\ProgramData\chocolatey\bin;C:\Program Files\NASM;$env:PATH"
+        if (-not (Test-Path "$tools\pkg-config.exe")) {
+          New-Item -ItemType Directory -Force $tools | Out-Null
+          Copy-Item (Get-ChildItem C:\ProgramData\chocolatey\lib\pkgconfiglite -Recurse -Filter pkg-config.exe)[0].FullName $tools
+        }
+        $env:PATH = "$tools;C:\Program Files\NASM;$env:PATH"
         $env:LIBCLANG_PATH = "C:\Program Files\LLVM\bin"
         $env:PKG_CONFIG_PATH = "$PWD\native\build\work\prefix\lib\pkgconfig"
         cargo xtask build-native
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        "C:\ProgramData\chocolatey\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+        $tools | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
         "LIBCLANG_PATH=$env:LIBCLANG_PATH" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
         "PKG_CONFIG_PATH=$env:PKG_CONFIG_PATH" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
-    # Saved only when the libraries changed: an unchanged copy (750 MB) would only push the other caches out.
+    # Saved only when the libraries changed.
     - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       if: inputs.native == 'true' && steps.native-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/1.0'
       with:
-        path: native/build/work
-        key: native-windows-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}
+        path: |
+          native/build/work/prefix
+          native/build/work/turbo-prefix
+          native/build/work/*.stamp
+          native/build/work/tools
+        key: native-prefix-windows-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}
