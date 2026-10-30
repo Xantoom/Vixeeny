@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Notifications: a card with the thumbnail after a capture, a recording or a replay, and a clear message with a way
 //! out when something fails. The cards are shown by a process of their own (`vixeeny-app --toast-host`), so they never
-//! render on the action thread. Pipe delivery can still apply backpressure. The host reads the next cards on its
-//! standard input: subsequent cards reuse the process. It ends with the process that started it (its input closes),
-//! once its card is gone. A capture's thumbnail
-//! goes along, made from the picture in memory: the card process does not read the file again.
+//! hold up the next hotkey. It is started once and reads the next cards on its standard input: a card costs no new
+//! process, and only a host far behind can make the sender wait on the pipe. It ends with the process that started it
+//! (its input closes), once its card is gone. A capture's thumbnail goes along, made from the picture in memory: the
+//! card process does not read the file again.
 
 use std::path::PathBuf;
 
@@ -242,7 +242,7 @@ pub type Thumb = vixeeny_editor::RgbaImage;
 /// The largest side of a thumbnail sent to the card process.
 const MAX_THUMB_SIDE: u32 = 1024;
 
-/// Shows the card, unless the user turned notifications off. Pipe delivery can block if the host is behind.
+/// Shows the card, unless the user turned notifications off. Waits only if the card process is far behind.
 pub fn notify(config: &Config, toast: &Toast) {
     notify_with(config, toast, None);
 }

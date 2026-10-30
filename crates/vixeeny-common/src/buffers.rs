@@ -17,9 +17,9 @@ impl BufferPool {
     pub fn take(&self, len: usize) -> Vec<u8> {
         let spare = self.0.lock().ok().and_then(|mut spare| spare.pop());
         let mut buffer = spare.unwrap_or_default();
-        // A resized window must not retain two full-screen allocations for the rest of a recording. Hysteresis
-        // avoids reallocating for small size changes; take(0), used to inspect a spare, keeps its allocation.
-        if len > 0 && buffer.capacity() > len.saturating_mul(4).max(1 << 20) {
+        // A window that shrank does not keep two full-screen buffers for the rest of the recording; a small change of
+        // size keeps the one it has.
+        if buffer.capacity() > len.saturating_mul(4).max(1 << 20) {
             buffer = Vec::new();
         }
         buffer.clear();

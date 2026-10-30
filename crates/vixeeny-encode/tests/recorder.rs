@@ -364,7 +364,7 @@ fn frames_discarded_by_the_clock_or_pause_return_their_pixel_buffers() {
         let address = discarded.data.as_ptr();
         assert!(rec.push_frame(if vfr { 30 * MS } else { MS }, discarded));
         rec.stop(100 * MS).unwrap();
-        let buffers = [pool.take(0), pool.take(0)];
+        let buffers = [pool.take(320 * 180 * 4), pool.take(320 * 180 * 4)];
         assert!(buffers.iter().any(|b| b.as_ptr() == address), "recycle discarded pixels, vfr={vfr}");
     }
 }
@@ -391,7 +391,8 @@ fn a_slow_encoder_drops_input_frames_instead_of_blocking() {
     }
     assert!(refused > 0, "the queue must overflow");
     // The pixels of a refused frame go back to the pool, for the next capture.
-    assert!(pool.take(0).capacity() >= big.data.len());
+    // Asked for a quarter of it: only a recycled buffer is that large.
+    assert!(pool.take(big.data.len() / 4).capacity() >= big.data.len());
     assert_eq!(rec.stats().queue_dropped.load(std::sync::atomic::Ordering::Relaxed), refused);
     let summary = rec.stop(200 * 33 * MS).unwrap();
     assert_eq!(summary.dropped_by_queue, refused);
