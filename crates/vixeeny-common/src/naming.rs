@@ -34,7 +34,8 @@ pub fn sanitize(name: &str) -> String {
     if cleaned.is_empty() {
         return DEFAULT_APP_NAME.to_owned();
     }
-    let stem = cleaned.split('.').next().unwrap_or_default().to_ascii_uppercase();
+    // Windows ignores the spaces that end a device name: `CON .png` is CON too.
+    let stem = cleaned.split('.').next().unwrap_or_default().trim_end().to_ascii_uppercase();
     if RESERVED.contains(&stem.as_str()) {
         cleaned.insert(0, '_');
     }
@@ -197,6 +198,7 @@ mod tests {
         assert_eq!(sanitize("COM¹.png"), "_COM¹.png");
         assert_eq!(sanitize("LPT0"), "_LPT0");
         assert_eq!(sanitize("CONSOLE"), "CONSOLE");
+        assert_eq!(sanitize("CON .png"), "_CON .png");
         assert_eq!(sanitize(""), DEFAULT_APP_NAME);
         assert_eq!(sanitize("???"), DEFAULT_APP_NAME);
     }
