@@ -2,12 +2,12 @@ name: Caches
 # Deletes the caches of the branch that a newer one with the same name has replaced (a key less
 # its hashes: `v0-rust-test-Windows_NT-x64-1fd131b7-24480042` is `v0-rust-test-Windows_NT-x64`),
 # called once the jobs that save some are done. GitHub only evicts past 10 GB per repository, and
-# the build caches take 2.5 GB a set.
+# the build caches take 1.6 GB a set.
 on:
   workflow_call:
 jobs:
   prune:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - env:
           GH_TOKEN: ${{ github.token }}

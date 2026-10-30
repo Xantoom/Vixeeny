@@ -21,7 +21,7 @@ permissions:
   contents: read
 jobs:
   version:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     outputs:
       build: ${{ steps.check.outputs.build }}
       warm: ${{ steps.check.outputs.warm }}
@@ -116,7 +116,7 @@ jobs:
   sign:
     needs: [version, windows]
     if: needs.version.outputs.build == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     environment: release
     permissions:
       contents: write

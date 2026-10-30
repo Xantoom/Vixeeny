@@ -31,7 +31,22 @@ runs:
     - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       with:
         save-if: ${{ github.ref == 'refs/heads/1.0' }}
-    - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+    # The environment of a Visual Studio developer prompt (64-bit tools), for the jobs' later steps: what vcvars64.bat
+    # adds or changes.
+    - name: MSVC tools
+      shell: pwsh
+      run: |
+        $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * `
+          -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+        if (-not $vs) { throw "No Visual Studio with the C++ tools" }
+        $vars = cmd /c "`"$vs\VC\Auxiliary\Build\vcvars64.bat`" >nul && set"
+        if ($LASTEXITCODE -ne 0) { throw "vcvars64.bat failed" }
+        foreach ($line in $vars) {
+          $name, $value = $line -split "=", 2
+          if ($value -and [Environment]::GetEnvironmentVariable($name) -ne $value) {
+            "$name=$value" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          }
+        }
     - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
       with:
         name: ffmpeg
