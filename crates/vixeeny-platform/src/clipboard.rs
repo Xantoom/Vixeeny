@@ -67,7 +67,7 @@ type Put<'a> = dyn Fn(u32, usize, &dyn Fn(&mut [u8])) -> crate::Result<()> + 'a;
 fn with_clipboard(fill: impl FnOnce(&Put<'_>) -> crate::Result<()>) -> crate::Result<()> {
     use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL};
     use windows::Win32::System::DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData};
-    use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
+    use windows::Win32::System::Memory::{GMEM_MOVEABLE, GMEM_ZEROINIT, GlobalAlloc, GlobalLock, GlobalUnlock};
 
     use crate::PlatformError;
 
@@ -91,10 +91,10 @@ fn with_clipboard(fill: impl FnOnce(&Put<'_>) -> crate::Result<()>) -> crate::Re
         // SAFETY: the clipboard is open.
         unsafe { EmptyClipboard() }.map_err(|e| os("empty", e))?;
         let put = |format: u32, len: usize, write: &dyn Fn(&mut [u8])| -> crate::Result<()> {
-            // SAFETY: allocates a movable block of `len` bytes; the lock gives a writable pointer to all of it while
-            // `write` fills it; on success the system owns the block.
+            // SAFETY: allocates a movable block of `len` zeroed (initialised) bytes; the lock gives a writable pointer
+            // to all of it while `write` fills it; on success the system owns the block.
             unsafe {
-                let mem: HGLOBAL = GlobalAlloc(GMEM_MOVEABLE, len).map_err(|e| os("alloc", e))?;
+                let mem: HGLOBAL = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, len).map_err(|e| os("alloc", e))?;
                 let ptr = GlobalLock(mem);
                 if ptr.is_null() {
                     let _ = GlobalFree(Some(mem));
