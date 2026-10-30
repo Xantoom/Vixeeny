@@ -22,24 +22,13 @@ pub fn copy_bgra(settings: &Image, image: &Bgra<'_>, encoded: Option<&[u8]>, nam
             &made[..]
         }
     };
-    // The clipboard wants tightly packed rows.
-    let row = image.width as usize * 4;
-    let packed: Vec<u8>;
-    let pixels = if image.stride == row {
-        image.data
-    } else {
-        packed = (0..image.height as usize)
-            .flat_map(|y| image.data[y * image.stride..y * image.stride + row].iter().copied())
-            .collect();
-        &packed
-    };
     let file = if format == ImageFormat::Png { None } else { Some(clip_file(format, bytes, name)?) };
     let clip = ImageClip {
         png: (format == ImageFormat::Png).then_some(bytes),
         jpeg: (format == ImageFormat::Jpeg).then_some(bytes),
         file: file.as_deref(),
     };
-    vixeeny_platform::clipboard::copy_image(image.width, image.height, pixels, clip)
+    vixeeny_platform::clipboard::copy_image(image.width, image.height, image.stride, image.data, clip)
         .map_err(|e: PlatformError| anyhow::anyhow!("{e}"))
 }
 
