@@ -24,28 +24,31 @@ impl Region {
     }
 }
 
-/// One box blur pass along a line of `n` pixels, `stride` bytes apart, with edge replication.
-fn box_line(data: &mut [u8], start: usize, stride: usize, n: usize, radius: usize, tmp: &mut Vec<[u8; 4]>) {
-    tmp.clear();
-    tmp.extend((0..n).map(|i| {
-        let o = start + i * stride;
-        [data[o], data[o + 1], data[o + 2], data[o + 3]]
-    }));
-    let window = (2 * radius + 1) as u32;
-    let at = |i: isize| tmp[i.clamp(0, n as isize - 1) as usize];
-    let mut sum = [0u32; 4];
-    for i in -(radius as isize)..=(radius as isize) {
+/// The widest box a pass takes (pixels): the division by a multiplication below is exact up to it.
+const MAX_WINDOW: usize = (1 << 16) - 1;
+
+/// One box blur pass along a line of pixels, edges replicated: `dst[i]` is the rounded mean of `src[i - radius..=i +
+/// radius]`.
+fn box_pass(src: &[[u8; 4]], dst: &mut [[u8; 4]], radius: usize) {
+    let Some(last) = src.len().checked_sub(1) else {
+        return;
+    };
+    let window = 2 * radius + 1;
+    // `(s + window / 2) / window` as a multiplication and a shift: exact for every sum of `window` bytes below
+    // `MAX_WINDOW`, and many times faster than four divisions a pixel.
+    let scale = (1_u64 << 40).div_ceil(window as u64);
+    let half = (window / 2) as u32;
+    let at = |i: usize| src[i.min(last)];
+    let mut sum = src[0].map(|v| u32::from(v) * (radius as u32 + 1));
+    for i in 1..=radius {
         let p = at(i);
         for c in 0..4 {
             sum[c] += u32::from(p[c]);
         }
     }
-    for i in 0..n {
-        let o = start + i * stride;
-        for c in 0..4 {
-            data[o + c] = ((sum[c] + window / 2) / window) as u8;
-        }
-        let (add, sub) = (at(i as isize + radius as isize + 1), at(i as isize - radius as isize));
+    for (i, out) in dst.iter_mut().enumerate() {
+        *out = sum.map(|s| ((u64::from(s + half) * scale) >> 40) as u8);
+        let (add, sub) = (at(i + radius + 1), src[i.saturating_sub(radius)]);
         for c in 0..4 {
             sum[c] = sum[c] + u32::from(add[c]) - u32::from(sub[c]);
         }
@@ -62,11 +65,12 @@ fn box_rows(data: &mut [u8], stride: usize, rows: usize, n: usize, radius: usize
         return;
     };
     let blur_rows = |chunk: &mut [u8]| {
-        let mut tmp = Vec::with_capacity(n);
+        let (mut once, mut twice) = (vec![[0; 4]; n], vec![[0; 4]; n]);
         for row in chunk.chunks_mut(stride) {
-            for _ in 0..3 {
-                box_line(row, 0, 4, n, radius, &mut tmp);
-            }
+            let row = row[..n * 4].as_chunks_mut::<4>().0;
+            box_pass(row, &mut once, radius);
+            box_pass(&once, &mut twice, radius);
+            box_pass(&twice, row, radius);
         }
     };
     // Small selections need no scheduling; the large ones reuse workers across both axes and successive blurs.
@@ -82,17 +86,24 @@ fn box_rows(data: &mut [u8], stride: usize, rows: usize, n: usize, radius: usize
 const TILE: usize = 32;
 
 /// Copies the `w`×`h` pixels of `src` (`src_stride` bytes per row) to `dst` with rows and columns swapped (`dst_stride`
-/// bytes per row of `h` pixels).
+/// bytes per row of `h` pixels). Bands of rows of `dst` are shared between threads.
 fn transpose(src: &[u8], src_stride: usize, dst: &mut [u8], dst_stride: usize, (w, h): (usize, usize)) {
-    for ty in (0..h).step_by(TILE) {
-        for tx in (0..w).step_by(TILE) {
-            for y in ty..(ty + TILE).min(h) {
-                for x in tx..(tx + TILE).min(w) {
-                    let (s, d) = (y * src_stride + x * 4, x * dst_stride + y * 4);
-                    dst[d..d + 4].copy_from_slice(&src[s..s + 4]);
+    let band = |(t, rows): (usize, &mut [u8])| {
+        let x0 = t * TILE;
+        for ty in (0..h).step_by(TILE) {
+            for x in x0..(x0 + TILE).min(w) {
+                let row = &mut rows[(x - x0) * dst_stride..];
+                for y in ty..(ty + TILE).min(h) {
+                    row[y * 4..y * 4 + 4].copy_from_slice(&src[y * src_stride + x * 4..][..4]);
                 }
             }
         }
+    };
+    let (size, bands) = (dst_stride * TILE, w.div_ceil(TILE));
+    if w * h < 1 << 16 {
+        dst.chunks_mut(size).take(bands).enumerate().for_each(band);
+    } else {
+        dst.par_chunks_mut(size).take(bands).enumerate().for_each(band);
     }
 }
 
@@ -103,7 +114,7 @@ pub fn blur(data: &mut [u8], width: usize, region: Region, sigma: f32) {
         return;
     }
     let w_ideal = (4.0 * sigma * sigma + 1.0).sqrt();
-    let radius = (((w_ideal - 1.0) / 2.0).round() as usize).max(1);
+    let radius = (((w_ideal - 1.0) / 2.0).round() as usize).clamp(1, MAX_WINDOW / 2 - 1);
     let stride = width * 4;
     let Some(area) = data.get_mut((region.y * width + region.x) * 4..) else {
         return;
@@ -146,6 +157,72 @@ pub fn pixelate(data: &mut [u8], width: usize, region: Region, block: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One box blur pass along a line of `n` pixels, `stride` bytes apart, with edge replication, as first written.
+    fn box_line(data: &mut [u8], start: usize, stride: usize, n: usize, radius: usize, tmp: &mut Vec<[u8; 4]>) {
+        tmp.clear();
+        tmp.extend((0..n).map(|i| {
+            let o = start + i * stride;
+            [data[o], data[o + 1], data[o + 2], data[o + 3]]
+        }));
+        let window = (2 * radius + 1) as u32;
+        let at = |i: isize| tmp[i.clamp(0, n as isize - 1) as usize];
+        let mut sum = [0u32; 4];
+        for i in -(radius as isize)..=(radius as isize) {
+            let p = at(i);
+            for c in 0..4 {
+                sum[c] += u32::from(p[c]);
+            }
+        }
+        for i in 0..n {
+            let o = start + i * stride;
+            for c in 0..4 {
+                data[o + c] = ((sum[c] + window / 2) / window) as u8;
+            }
+            let (add, sub) = (at(i as isize + radius as isize + 1), at(i as isize - radius as isize));
+            for c in 0..4 {
+                sum[c] = sum[c] + u32::from(add[c]) - u32::from(sub[c]);
+            }
+        }
+    }
+
+    #[test]
+    fn a_pass_is_the_line_by_line_one() {
+        let mut seed = 0x2545_f491_u32;
+        let mut byte = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            seed as u8
+        };
+        for n in [1, 2, 3, 7, 40, 301] {
+            for radius in [1, 2, 3, 5, 12, 50, 400] {
+                let line: Vec<u8> = (0..n * 4).map(|_| byte()).collect();
+                let mut want = line.clone();
+                box_line(&mut want, 0, 4, n, radius, &mut Vec::new());
+                let mut got = vec![[0; 4]; n];
+                box_pass(line.as_chunks::<4>().0, &mut got, radius);
+                assert_eq!(got.as_flattened(), want, "{n} pixels, radius {radius}");
+            }
+        }
+        // The widest window, all white: still exact.
+        let white = vec![[255; 4]; 3];
+        let mut got = vec![[0; 4]; 3];
+        box_pass(&white, &mut got, MAX_WINDOW / 2);
+        assert_eq!(got, white);
+    }
+
+    #[test]
+    fn the_division_by_a_multiplication_is_exact_for_every_sum() {
+        for window in [3_u32, 5, 151, 4095, MAX_WINDOW as u32] {
+            let scale = (1_u64 << 40).div_ceil(u64::from(window));
+            let step = if window > 5000 { 97 } else { 1 };
+            for s in (0..=255 * window).step_by(step).chain([255 * window]) {
+                let s = s + window / 2;
+                assert_eq!((u64::from(s) * scale) >> 40, u64::from(s / window), "{s} / {window}");
+            }
+        }
+    }
 
     /// The blur as it was first written: rows then columns, three times, one line at a time.
     fn reference(data: &mut [u8], width: usize, region: Region, radius: usize) {
