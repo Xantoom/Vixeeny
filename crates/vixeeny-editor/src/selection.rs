@@ -196,8 +196,9 @@ impl Selection {
             Mode::Drawing { start } => self.rect = Some(Rect::from_corners(start, p)),
             Mode::Moving { grab, original } => {
                 let (dx, dy) = (p.x - grab.x, p.y - grab.y);
-                let x = (original.x + dx).clamp(self.bounds.x, self.bounds.right() - original.w);
-                let y = (original.y + dy).clamp(self.bounds.y, self.bounds.bottom() - original.h);
+                // A zone as wide as the bounds may be a rounding wider: its range then shrinks to its corner.
+                let x = (original.x + dx).clamp(self.bounds.x, (self.bounds.right() - original.w).max(self.bounds.x));
+                let y = (original.y + dy).clamp(self.bounds.y, (self.bounds.bottom() - original.h).max(self.bounds.y));
                 self.rect = Some(Rect::new(x, y, original.w, original.h));
             }
             Mode::Resizing { handle, original } => self.rect = Some(resize(&original, handle, p)),
