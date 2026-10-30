@@ -21,20 +21,14 @@ use windows::Graphics::Capture::{
 use windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;
 use windows::Graphics::DirectX::DirectXPixelFormat;
 use windows::Graphics::SizeInt32;
-use windows::Win32::Foundation::{HMODULE, HWND};
-use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11_BOX, D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE,
-    D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING, D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext,
+    D3D11_BOX, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE, D3D11_TEXTURE2D_DESC, ID3D11Device, ID3D11DeviceContext,
     ID3D11Texture2D,
 };
-use windows::Win32::Graphics::Dxgi::IDXGIDevice;
-use windows::Win32::Graphics::Gdi::HMONITOR;
-use windows::Win32::System::WinRT::Direct3D11::{CreateDirect3D11DeviceFromDXGIDevice, IDirect3DDxgiInterfaceAccess};
-use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop;
-use windows::core::{IInspectable, Interface, factory};
+use windows::Win32::System::WinRT::Direct3D11::IDirect3DDxgiInterfaceAccess;
+use windows::core::{IInspectable, Interface};
 
-use crate::wgc::os;
+use crate::wgc::{d3d_device, monitor_item, os, window_item, winrt_device};
 use crate::{CaptureError, CpuFrame};
 
 /// Frames the consumer may be behind by before new ones are dropped.
@@ -171,21 +165,7 @@ impl Shared {
         let context = self.context.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut cache = self.staging.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if cache.as_ref().is_none_or(|(_, size)| *size != (w, h)) {
-            let mut desc = D3D11_TEXTURE2D_DESC::default();
-            // SAFETY: `desc` is a valid out-pointer.
-            unsafe { texture.GetDesc(&mut desc) };
-            desc.Width = w;
-            desc.Height = h;
-            desc.Usage = D3D11_USAGE_STAGING;
-            desc.BindFlags = 0;
-            desc.MiscFlags = 0;
-            desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
-            let mut staging = None;
-            // SAFETY: `desc` describes a staging texture; the out-pointer is valid.
-            unsafe { self.device.CreateTexture2D(&desc, None, Some(&raw mut staging)) }
-                .map_err(os("CreateTexture2D"))?;
-            let staging = staging.ok_or_else(|| CaptureError::Os("no staging texture".into()))?;
-            *cache = Some((staging, (w, h)));
+            *cache = Some((vixeeny_platform::d3d::staging_for(&self.device, texture, Some((w, h)))?, (w, h)));
         }
         let Some((staging, _)) = cache.as_ref() else {
             return Err(CaptureError::Os("no staging texture".into()));
@@ -258,24 +238,10 @@ pub struct VideoStream {
 
 /// The item `target` is captured through, and the part of it kept.
 fn item_of(target: &StreamTarget) -> Result<(GraphicsCaptureItem, Option<PhysicalRect>), CaptureError> {
-    let interop = factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>().map_err(os("interop"))?;
     Ok(match target {
-        // SAFETY: the handles come from the OS enumeration; a stale one makes the call fail.
-        StreamTarget::Monitor(m) => (
-            unsafe { interop.CreateForMonitor(HMONITOR(m.id.0 as usize as *mut _)) }.map_err(os("CreateForMonitor"))?,
-            None,
-        ),
-        StreamTarget::Region { monitor, rect } => (
-            // SAFETY: as above.
-            unsafe { interop.CreateForMonitor(HMONITOR(monitor.id.0 as usize as *mut _)) }
-                .map_err(os("CreateForMonitor"))?,
-            Some(*rect),
-        ),
-        StreamTarget::Window(w) => (
-            // SAFETY: as above.
-            unsafe { interop.CreateForWindow(HWND(w.0 as usize as *mut _)) }.map_err(os("CreateForWindow"))?,
-            None,
-        ),
+        StreamTarget::Monitor(m) => (monitor_item(m)?, None),
+        StreamTarget::Region { monitor, rect } => (monitor_item(monitor)?, Some(*rect)),
+        StreamTarget::Window(w) => (window_item(*w)?, None),
     })
 }
 
@@ -396,35 +362,11 @@ impl VideoStream {
                 (device, context, None)
             }
             Source::Cpu => {
-                let mut device = None;
-                let mut context = None;
-                // SAFETY: out-pointers are valid; default adapter, no feature-level list.
-                unsafe {
-                    D3D11CreateDevice(
-                        None,
-                        D3D_DRIVER_TYPE_HARDWARE,
-                        HMODULE::default(),
-                        D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-                        None,
-                        D3D11_SDK_VERSION,
-                        Some(&raw mut device),
-                        None,
-                        Some(&raw mut context),
-                    )
-                }
-                .map_err(os("D3D11CreateDevice"))?;
-                (
-                    device.ok_or_else(|| CaptureError::Os("no D3D11 device".into()))?,
-                    context.ok_or_else(|| CaptureError::Os("no D3D11 context".into()))?,
-                    None,
-                )
+                let (device, context) = d3d_device(None)?;
+                (device, context, None)
             }
         };
-        let dxgi: IDXGIDevice = device.cast().map_err(os("IDXGIDevice"))?;
-        // SAFETY: `dxgi` is a live DXGI device.
-        let winrt_device: IDirect3DDevice = unsafe { CreateDirect3D11DeviceFromDXGIDevice(&dxgi) }
-            .and_then(|inspectable| inspectable.cast())
-            .map_err(os("CreateDirect3D11DeviceFromDXGIDevice"))?;
+        let winrt_device = winrt_device(&device)?;
 
         let buffers = BufferPool::default();
         let shared = Arc::new(Shared {
@@ -648,22 +590,7 @@ mod tests {
     /// A window that grew reports more than the texture its frame still comes in: only the texture's pixels are used.
     #[test]
     fn the_content_of_a_frame_stays_within_its_texture() {
-        let mut device = None;
-        // SAFETY: the out-pointer is valid; default adapter, no feature-level list.
-        let made = unsafe {
-            D3D11CreateDevice(
-                None,
-                D3D_DRIVER_TYPE_HARDWARE,
-                HMODULE::default(),
-                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-                None,
-                D3D11_SDK_VERSION,
-                Some(&raw mut device),
-                None,
-                None,
-            )
-        };
-        let (Ok(()), Some(device)) = (made, device) else {
+        let Ok((device, _)) = d3d_device(None) else {
             vixeeny_common::skip_test("no graphics card");
             return;
         };
@@ -684,22 +611,7 @@ mod tests {
             vixeeny_common::skip_test("no monitor");
             return;
         };
-        let mut device = None;
-        // SAFETY: the out-pointer is valid; default adapter, no feature-level list.
-        let made = unsafe {
-            D3D11CreateDevice(
-                None,
-                D3D_DRIVER_TYPE_HARDWARE,
-                HMODULE::default(),
-                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-                None,
-                D3D11_SDK_VERSION,
-                Some(&raw mut device),
-                None,
-                None,
-            )
-        };
-        let (Ok(()), Some(device)) = (made, device) else {
+        let Ok((device, _)) = d3d_device(None) else {
             vixeeny_common::skip_test("no graphics card");
             return;
         };

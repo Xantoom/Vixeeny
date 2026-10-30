@@ -17,9 +17,9 @@ use windows::Graphics::DirectX::DirectXPixelFormat;
 use windows::Win32::Foundation::{HMODULE, HWND};
 use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_UNKNOWN};
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11_BOX, D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE,
-    D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
-    D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
+    D3D11_BOX, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE,
+    D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11CreateDevice, ID3D11Device,
+    ID3D11DeviceContext, ID3D11Texture2D,
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::Graphics::Dxgi::{IDXGIAdapter, IDXGIDevice};
@@ -314,16 +314,7 @@ fn read_back_area(
     // SAFETY: `desc` is a valid out-pointer.
     unsafe { texture.GetDesc(&mut desc) };
     let rect = inside(area, PhysicalRect::new(0, 0, desc.Width, desc.Height))?;
-    desc.Width = rect.width;
-    desc.Height = rect.height;
-    desc.Usage = D3D11_USAGE_STAGING;
-    desc.BindFlags = 0;
-    desc.MiscFlags = 0;
-    desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
-    let mut staging = None;
-    // SAFETY: `desc` describes a staging copy of an existing texture; the out-pointer is valid.
-    unsafe { device.CreateTexture2D(&desc, None, Some(&raw mut staging)) }.map_err(os("CreateTexture2D"))?;
-    let staging = staging.ok_or_else(|| CaptureError::Os("no staging texture".into()))?;
+    let staging = vixeeny_platform::d3d::staging_for(device, texture, Some((rect.width, rect.height)))?;
     // SAFETY: the source rectangle was validated against the texture; the staging texture has exactly its size
     // and format, on the same device. Full-frame calls retain their original copy path.
     unsafe {
@@ -341,7 +332,7 @@ fn read_back_area(
             context.CopySubresourceRegion(&staging, 0, 0, 0, 0, texture, 0, Some(&source));
         }
     }
-    map(context, &staging, desc.Width, desc.Height)
+    map(context, &staging, rect.width, rect.height)
 }
 
 /// The bytes of a staging texture of `width` × `height`, once the GPU has written them.
@@ -562,7 +553,7 @@ fn hwnd(window: WindowId) -> HWND {
 }
 
 /// The capture item of a window.
-fn window_item(window: WindowId) -> Result<GraphicsCaptureItem, CaptureError> {
+pub(crate) fn window_item(window: WindowId) -> Result<GraphicsCaptureItem, CaptureError> {
     let interop = factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>().map_err(os("interop"))?;
     // SAFETY: a stale or invalid window handle makes the call fail.
     unsafe { interop.CreateForWindow(hwnd(window)) }.map_err(os("CreateForWindow"))

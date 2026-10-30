@@ -68,6 +68,18 @@ pub fn compile(source: &str, entry: PCSTR, target: PCSTR) -> Result<Vec<u8>, D3d
     }
 }
 
+/// A staging texture the processor reads a copy of `texture` from: its format, and its size or `size`.
+pub fn staging_for(
+    device: &ID3D11Device,
+    texture: &ID3D11Texture2D,
+    size: Option<(u32, u32)>,
+) -> Result<ID3D11Texture2D, D3dError> {
+    let mut desc = D3D11_TEXTURE2D_DESC::default();
+    // SAFETY: `desc` is a valid out-pointer.
+    unsafe { texture.GetDesc(&raw mut desc) };
+    self::texture(device, size.unwrap_or((desc.Width, desc.Height)), desc.Format, 0, 0, None)
+}
+
 /// A texture of `size` in `format`, for `bind` (none: a staging texture the processor reads), with the `misc` flags,
 /// filled from `init` (its bytes, and the length of a row) when given.
 pub fn texture(

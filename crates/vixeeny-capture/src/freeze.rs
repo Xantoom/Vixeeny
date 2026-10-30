@@ -19,9 +19,9 @@ use windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;
 use windows::Graphics::DirectX::DirectXPixelFormat;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HLOCAL, HWND, LPARAM, LRESULT, LUID, LocalFree, WPARAM};
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_CPU_ACCESS_READ, D3D11_MAP_READ,
-    D3D11_MAPPED_SUBRESOURCE, D3D11_RESOURCE_MISC_SHARED, D3D11_RESOURCE_MISC_SHARED_NTHANDLE, D3D11_TEXTURE2D_DESC,
-    D3D11_USAGE_DEFAULT, D3D11_USAGE_STAGING, ID3D11Device, ID3D11Device1, ID3D11DeviceContext, ID3D11Texture2D,
+    D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE,
+    D3D11_RESOURCE_MISC_SHARED, D3D11_RESOURCE_MISC_SHARED_NTHANDLE, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT,
+    ID3D11Device, ID3D11Device1, ID3D11DeviceContext, ID3D11Texture2D,
 };
 use windows::Win32::Graphics::Dwm::{DWMWA_CLOAK, DWMWA_TRANSITIONS_FORCEDISABLED, DwmFlush, DwmSetWindowAttribute};
 use windows::Win32::Graphics::Dxgi::Common::{
@@ -630,17 +630,7 @@ fn stage(
     context: &ID3D11DeviceContext,
     texture: &ID3D11Texture2D,
 ) -> Result<ID3D11Texture2D, CaptureError> {
-    let mut desc = D3D11_TEXTURE2D_DESC::default();
-    // SAFETY: `desc` is a valid out-pointer.
-    unsafe { texture.GetDesc(&mut desc) };
-    desc.Usage = D3D11_USAGE_STAGING;
-    desc.BindFlags = 0;
-    desc.MiscFlags = 0;
-    desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
-    let mut staging = None;
-    // SAFETY: a staging copy of an existing texture; the out-pointer is valid.
-    unsafe { device.CreateTexture2D(&desc, None, Some(&raw mut staging)) }.map_err(os("CreateTexture2D"))?;
-    let staging = staging.ok_or_else(|| CaptureError::Os("no staging texture".into()))?;
+    let staging = vixeeny_platform::d3d::staging_for(device, texture, None)?;
     // SAFETY: same device, size and format.
     unsafe { context.CopyResource(&staging, texture) };
     Ok(staging)
