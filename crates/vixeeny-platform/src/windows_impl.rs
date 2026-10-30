@@ -302,16 +302,38 @@ pub fn window_info(id: WindowId) -> Result<Option<WindowInfo>> {
     let mut title = [0u16; 512];
     // SAFETY: the buffer is valid for writes and its length is passed.
     let len = unsafe { GetWindowTextW(hwnd, &mut title) };
-    let mut pid = 0u32;
-    // SAFETY: `pid` is a valid out-pointer.
-    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+    let mut pid = window_pid(hwnd);
+    let mut exe = exe_path(pid);
+    // A Store app's window belongs to ApplicationFrameHost, which only frames it (for every Store app): the app is the
+    // process of its content, a window of its own inside the frame.
+    if exe.as_deref().is_some_and(|p| p.to_ascii_lowercase().ends_with("\\applicationframehost.exe"))
+        && let Some(app) = framed_app(hwnd, pid)
+    {
+        (pid, exe) = (app, exe_path(app));
+    }
     Ok(Some(WindowInfo {
         id,
         title: String::from_utf16_lossy(&title[..usize::try_from(len).unwrap_or(0)]),
         rect,
         pid,
-        exe_path: exe_path(pid),
+        exe_path: exe,
     }))
+}
+
+fn window_pid(hwnd: HWND) -> u32 {
+    let mut pid = 0u32;
+    // SAFETY: `pid` is a valid out-pointer; a stale handle leaves 0.
+    unsafe { GetWindowThreadProcessId(hwnd, Some(&raw mut pid)) };
+    pid
+}
+
+/// The process of the content of a frame window `hwnd` of process `frame`: its first child window of another process.
+fn framed_app(hwnd: HWND, frame: u32) -> Option<u32> {
+    use windows::Win32::UI::WindowsAndMessaging::EnumChildWindows;
+    let mut children: Vec<HWND> = Vec::new();
+    // SAFETY: the callback only dereferences the pointer to `children`, which outlives the call.
+    let _ = unsafe { EnumChildWindows(Some(hwnd), Some(collect_window), LPARAM(&raw mut children as isize)) };
+    children.into_iter().map(window_pid).find(|pid| *pid != 0 && *pid != frame)
 }
 
 unsafe extern "system" fn collect_window(hwnd: HWND, data: LPARAM) -> windows::core::BOOL {
