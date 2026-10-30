@@ -11,10 +11,10 @@ use windows::Win32::Graphics::Direct2D::Common::{
     D2D1_PIXEL_FORMAT,
 };
 use windows::Win32::Graphics::Direct2D::{
-    CLSID_D2D1ColorManagement, CLSID_D2D1Scale, CLSID_D2D1Shadow, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
-    D2D1_BITMAP_BRUSH_PROPERTIES1, D2D1_BITMAP_OPTIONS, D2D1_BITMAP_OPTIONS_NONE, D2D1_BITMAP_OPTIONS_TARGET,
-    D2D1_BITMAP_PROPERTIES1, D2D1_BUFFER_PRECISION_32BPC_FLOAT, D2D1_COLOR_SPACE, D2D1_COLOR_SPACE_SCRGB,
-    D2D1_COLOR_SPACE_SRGB, D2D1_COLORMANAGEMENT_PROP_DESTINATION_COLOR_CONTEXT, D2D1_COLORMANAGEMENT_PROP_QUALITY,
+    CLSID_D2D1ColorManagement, CLSID_D2D1Scale, CLSID_D2D1Shadow, D2D1_BITMAP_BRUSH_PROPERTIES1, D2D1_BITMAP_OPTIONS,
+    D2D1_BITMAP_OPTIONS_NONE, D2D1_BITMAP_OPTIONS_TARGET, D2D1_BITMAP_PROPERTIES1, D2D1_BUFFER_PRECISION_32BPC_FLOAT,
+    D2D1_COLOR_SPACE, D2D1_COLOR_SPACE_SCRGB, D2D1_COLOR_SPACE_SRGB,
+    D2D1_COLORMANAGEMENT_PROP_DESTINATION_COLOR_CONTEXT, D2D1_COLORMANAGEMENT_PROP_QUALITY,
     D2D1_COLORMANAGEMENT_PROP_SOURCE_COLOR_CONTEXT, D2D1_COLORMANAGEMENT_QUALITY_BEST,
     D2D1_DEVICE_CONTEXT_OPTIONS_NONE, D2D1_EXTEND_MODE_CLAMP, D2D1_FACTORY_TYPE_SINGLE_THREADED,
     D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC, D2D1_INTERPOLATION_MODE_LINEAR,
@@ -33,7 +33,7 @@ use windows::Win32::Graphics::Dxgi::IDXGIDevice;
 use windows::core::{Interface, Result};
 use windows_numerics::Matrix3x2;
 
-use crate::drawing::{blurred, clamped, effect, floats, output, set, set_enum};
+use crate::drawing::{blurred, clamped, draw_into, effect, floats, output, set, set_enum};
 
 /// What goes behind the window.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -102,20 +102,6 @@ fn target(dc: &ID2D1DeviceContext, (w, h): (u32, u32), format: DXGI_FORMAT) -> R
     unsafe { dc.CreateBitmap(size, None, 0, &props) }
 }
 
-/// Draws into `bitmap` with `f`.
-fn draw_into(dc: &ID2D1DeviceContext, bitmap: &ID2D1Bitmap1, f: impl FnOnce() -> Result<()>) -> Result<()> {
-    // SAFETY: the target is set for the drawing and cleared after it.
-    unsafe {
-        dc.SetTarget(bitmap);
-        dc.BeginDraw();
-        dc.SetTransform(&Matrix3x2::identity());
-        let drawn = f();
-        let ended = dc.EndDraw(None, None);
-        dc.SetTarget(None::<&ID2D1Image>);
-        drawn.and(ended)
-    }
-}
-
 /// `input` from one colour space to another (sRGB ↔ linear scRGB).
 fn convert(
     dc: &ID2D1DeviceContext,
@@ -148,8 +134,6 @@ fn context(d3d: &ID3D11Device) -> Result<ID2D1DeviceContext> {
         let factory: ID2D1Factory1 = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
         let device = factory.CreateDevice(&dxgi)?;
         let dc = device.CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE)?;
-        dc.SetDpi(96.0, 96.0);
-        dc.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
         let mut controls = dc.GetRenderingControls();
         controls.bufferPrecision = D2D1_BUFFER_PRECISION_32BPC_FLOAT;
         dc.SetRenderingControls(&controls);

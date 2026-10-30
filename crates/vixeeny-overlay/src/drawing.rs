@@ -158,7 +158,7 @@ fn target(gfx: &Gfx, w: u32, h: u32) -> Result<ID2D1Bitmap1> {
 }
 
 /// Draws into `bitmap` with `f`, between `BeginDraw` and `EndDraw` (always called).
-fn into(dc: &ID2D1DeviceContext, bitmap: &ID2D1Bitmap1, f: impl FnOnce() -> Result<()>) -> Result<()> {
+pub(crate) fn draw_into(dc: &ID2D1DeviceContext, bitmap: &ID2D1Bitmap1, f: impl FnOnce() -> Result<()>) -> Result<()> {
     // SAFETY: plain state calls; `EndDraw` matches `BeginDraw` whatever `f` returns, and the target is unset after.
     unsafe {
         dc.SetTarget(bitmap);
@@ -274,7 +274,7 @@ impl Drawing {
     /// which turns them to BGRA.
     fn picture(gfx: &Gfx, base: &ID2D1Bitmap1, area: (u32, u32, u32, u32), screens: &RgbaImage) -> Result<()> {
         let source = gfx.bitmap(screens, area)?;
-        into(&gfx.dc, base, || {
+        draw_into(&gfx.dc, base, || {
             // SAFETY: plain drawing call with a bitmap of the same device.
             unsafe {
                 gfx.dc.DrawImage(
@@ -381,7 +381,7 @@ impl Drawing {
         let base: ID2D1Image = self.base.cast()?;
         // The effects are opaque where they are drawn: drawn over, they replace what was there (a copy mode would also
         // clear what lies outside them).
-        into(dc, result, || {
+        draw_into(dc, result, || {
             // SAFETY: plain drawing calls.
             unsafe {
                 dc.Clear(Some(&D2D1_COLOR_F::default()));
@@ -424,7 +424,7 @@ impl Drawing {
                 let Some(scratch) = &self.scratch else {
                     continue;
                 };
-                into(dc, scratch, || {
+                draw_into(dc, scratch, || {
                     // SAFETY: plain drawing calls.
                     unsafe { dc.Clear(Some(&D2D1_COLOR_F::default())) };
                     self.shape(dc, a, None)
@@ -434,7 +434,7 @@ impl Drawing {
                 unsafe { blend.SetInput(1, &scratch.cast::<ID2D1Image>()?, true) };
                 set_enum(&blend, D2D1_BLEND_PROP_MODE.0, D2D1_BLEND_MODE_MULTIPLY.0)?;
                 let out = output(&blend)?;
-                into(dc, result, || {
+                draw_into(dc, result, || {
                     // SAFETY: plain drawing call.
                     unsafe {
                         dc.DrawImage(
@@ -454,7 +454,7 @@ impl Drawing {
                 Annotation::Pixelate { block, .. } => pixelated(dc, &copy, r, *block)?,
                 _ => continue,
             };
-            into(dc, result, || {
+            draw_into(dc, result, || {
                 // SAFETY: plain drawing call: the effect's pixels inside `r`, in place.
                 unsafe {
                     dc.DrawImage(
@@ -481,7 +481,7 @@ impl Drawing {
             return Ok(());
         }
         let shapes: Vec<&Annotation> = std::mem::take(plain);
-        into(dc, &self.result, || {
+        draw_into(dc, &self.result, || {
             for a in shapes {
                 self.shape(dc, a, None)?;
             }
@@ -496,7 +496,7 @@ impl Drawing {
         };
         let dc = &gfx.dc;
         let white = Color::rgb(255, 255, 255);
-        into(dc, scratch, || {
+        draw_into(dc, scratch, || {
             // SAFETY: plain drawing call.
             unsafe { dc.Clear(Some(&D2D1_COLOR_F::default())) };
             for a in layers {
@@ -527,7 +527,7 @@ impl Drawing {
         set(&threshold, D2D1_COLORMATRIX_PROP_COLOR_MATRIX.0, D2D1_PROPERTY_TYPE_MATRIX_5X4, &floats(&matrix))?;
         set(&threshold, D2D1_COLORMATRIX_PROP_CLAMP_OUTPUT.0, D2D1_PROPERTY_TYPE_BOOL, &1u32.to_le_bytes())?;
         let out = output(&threshold)?;
-        into(dc, mask, || {
+        draw_into(dc, mask, || {
             // SAFETY: plain drawing calls.
             unsafe {
                 dc.Clear(Some(&D2D1_COLOR_F::default()));

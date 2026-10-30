@@ -983,23 +983,7 @@ impl SidePanel {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn texts() -> SideTexts {
-        SideTexts {
-            region: "Region".into(),
-            window: "Window".into(),
-            screen: "Screen".into(),
-            all_monitors: "All screens".into(),
-            scrolling: "Scrolling capture".into(),
-            record: "Record".into(),
-            stop_recording: "Stop recording".into(),
-            replay_start: "Start replay buffer".into(),
-            replay_stop: "Stop replay buffer".into(),
-            replay_save: "Save replay".into(),
-            settings: "Settings".into(),
-            shortcuts: vec![(Choice::Window, "ALT + PRINT SCREEN".into())],
-        }
-    }
+    use crate::tests::side_texts as texts;
 
     pub(crate) fn state() -> SideState {
         SideState { recording: false, replay: false, dark: true, edge: Edge::Right, animate: false, pinned: false }

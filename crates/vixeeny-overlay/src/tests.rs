@@ -123,7 +123,7 @@ fn every_piece_draws() {
     }
 }
 
-fn side_texts() -> crate::side::SideTexts {
+pub(crate) fn side_texts() -> crate::side::SideTexts {
     crate::side::SideTexts {
         region: "Region".into(),
         window: "Window".into(),
