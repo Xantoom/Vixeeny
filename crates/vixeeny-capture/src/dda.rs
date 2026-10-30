@@ -23,6 +23,9 @@ use windows::core::Interface;
 /// How long the first picture may take before Windows Graphics Capture is used instead.
 const WAIT: Duration = Duration::from_millis(100);
 
+/// One acquisition budget for all monitors of an interactive desktop capture, before falling back to WGC.
+pub(crate) const DESKTOP_WAIT: Duration = Duration::from_millis(16);
+
 /// A picture held by its duplication until dropped.
 pub(crate) struct Frame {
     duplication: IDXGIOutputDuplication,
@@ -36,9 +39,16 @@ impl Drop for Frame {
     }
 }
 
+/// A duplication session started before any monitor is waited for.
+pub(crate) struct Pending(IDXGIOutputDuplication);
+
 /// `monitor`'s picture on `device`, 8-bit BGRA for an SDR monitor and scRGB half floats for an HDR one (`hdr`: which is
 /// asked for); `None` when Desktop Duplication cannot give it.
 pub(crate) fn frame(device: &ID3D11Device, monitor: &MonitorInfo, hdr: bool) -> Option<Frame> {
+    start(device, monitor, hdr)?.finish(Instant::now() + WAIT)
+}
+
+pub(crate) fn start(device: &ID3D11Device, monitor: &MonitorInfo, hdr: bool) -> Option<Pending> {
     if hdr != monitor.hdr.is_some() {
         return None;
     }
@@ -61,20 +71,28 @@ pub(crate) fn frame(device: &ID3D11Device, monitor: &MonitorInfo, hdr: bool) -> 
         if desc.ModeDesc.Format != format || desc.DesktopImageInSystemMemory.as_bool() {
             return None;
         }
-        let deadline = Instant::now() + WAIT;
+        Some(Pending(duplication))
+    }
+}
+
+impl Pending {
+    pub fn finish(self, deadline: Instant) -> Option<Frame> {
+        let duplication = self.0;
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
             let mut info = DXGI_OUTDUPL_FRAME_INFO::default();
             let mut resource: Option<IDXGIResource> = None;
-            duplication.AcquireNextFrame(left.as_millis() as u32, &raw mut info, &raw mut resource).ok()?;
+            // SAFETY: a live duplication and valid out-pointers. All monitors share the same deadline.
+            unsafe { duplication.AcquireNextFrame(left.as_millis() as u32, &raw mut info, &raw mut resource) }.ok()?;
             // The first frames may carry only the pointer: no picture yet.
             if info.LastPresentTime != 0
                 && let Some(texture) = resource.and_then(|r| r.cast::<ID3D11Texture2D>().ok())
             {
                 return Some(Frame { duplication, texture });
             }
-            let _ = duplication.ReleaseFrame();
-            if left.is_zero() {
+            // SAFETY: the acquired pointer-only frame is released before the next acquisition.
+            let _ = unsafe { duplication.ReleaseFrame() };
+            if Instant::now() >= deadline {
                 return None;
             }
         }

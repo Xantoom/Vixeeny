@@ -289,11 +289,22 @@ impl Gfx {
         let (_, _, w, h) = part;
         let surface = self.opaque_surface(w, h)?;
         let bitmap = self.bitmap(img, part)?;
-        self.draw(&surface, w, h, |c| {
+        self.draw_picture(&surface, &bitmap, (w, h))?;
+        Ok(surface)
+    }
+
+    /// Updates an existing picture surface; refreezing must not rebuild its DirectComposition resources.
+    pub fn draw_picture(
+        &self,
+        surface: &IDCompositionSurface,
+        bitmap: &ID2D1Bitmap1,
+        (w, h): (u32, u32),
+    ) -> Result<()> {
+        self.draw(surface, w, h, |c| {
             // SAFETY: plain drawing call with a live bitmap.
             unsafe {
                 c.dc.DrawBitmap(
-                    &bitmap,
+                    bitmap,
                     Some(&rect(0.0, 0.0, w as f32, h as f32)),
                     1.0,
                     D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
@@ -302,8 +313,26 @@ impl Gfx {
                 );
             }
             Ok(())
-        })?;
-        Ok(surface)
+        })
+    }
+
+    /// Updates a retained upload bitmap from the new desktop's pixels.
+    pub fn update_bitmap(&self, bitmap: &ID2D1Bitmap1, img: &RgbaImage, part: (u32, u32, u32, u32)) -> Result<()> {
+        let (x, y, w, h) = part;
+        if w == 0 || h == 0 || x.saturating_add(w) > img.width || y.saturating_add(h) > img.height {
+            return Err(E_INVALIDARG.into());
+        }
+        let stride = img.width * 4;
+        let start = y as usize * stride as usize + x as usize * 4;
+        let pixels = img.data.get(start..).filter(|p| p.len() >= (h as usize - 1) * stride as usize + w as usize * 4);
+        let Some(pixels) = pixels else { return Err(E_INVALIDARG.into()) };
+        // SAFETY: a plain query on a live bitmap.
+        let size = unsafe { bitmap.GetPixelSize() };
+        if (size.width, size.height) != (w, h) {
+            return Err(E_INVALIDARG.into());
+        }
+        // SAFETY: the validated rectangle supplies h rows of w pixels in the image; the cached bitmap has this size.
+        unsafe { bitmap.CopyFromMemory(None, pixels.as_ptr().cast(), stride) }
     }
 
     /// `h` rows of `w` pixels, `stride` bytes apart, as a Direct2D bitmap.

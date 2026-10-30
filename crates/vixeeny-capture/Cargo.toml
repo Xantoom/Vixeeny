@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 rayon.workspace = true
 thiserror.workspace = true
+tracing.workspace = true
 vixeeny-common = { path = "../vixeeny-common" }
 vixeeny-platform = { path = "../vixeeny-platform" }
 windows = { workspace = true, features = [

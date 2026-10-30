@@ -9,6 +9,7 @@ mod dda;
 mod fake;
 mod frame;
 pub mod freeze;
+mod freeze_veil;
 mod hdr;
 mod wgc;
 mod wgc_stream;

@@ -4,6 +4,9 @@
 /// The default accent of Windows 11.
 pub const DEFAULT_ACCENT: [u8; 3] = [0x00, 0x78, 0xd4];
 
+/// The black veil shown from the first frozen frame through the zone editor's handoff.
+pub const CAPTURE_DIM: f32 = 0.4;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Look {
     pub dark: bool,

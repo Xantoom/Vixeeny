@@ -146,7 +146,35 @@ impl WgcBackend {
         cursor: bool,
         hdr: impl Fn(&MonitorInfo) -> bool,
     ) -> Result<Vec<Grab>, CaptureError> {
-        monitors.iter().map(|m| self.start_monitor(m, cursor, hdr(m))).collect()
+        enum Pending {
+            Duplication(crate::dda::Pending),
+            Capture(Started),
+        }
+        let capture = |m: &MonitorInfo| {
+            let format =
+                if hdr(m) { DirectXPixelFormat::R16G16B16A16Float } else { DirectXPixelFormat::B8G8R8A8UIntNormalized };
+            self.start(&monitor_item(m)?, cursor, format)
+        };
+        let pending = monitors
+            .iter()
+            .map(|m| match (!cursor).then(|| crate::dda::start(&self.device, m, hdr(m))).flatten() {
+                Some(p) => Ok(Pending::Duplication(p)),
+                None => capture(m).map(Pending::Capture),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        // Refreezing a live editor uses this path too: do not accumulate a separate 100 ms wait per display.
+        let deadline = std::time::Instant::now() + crate::dda::DESKTOP_WAIT;
+        pending
+            .into_iter()
+            .zip(monitors)
+            .map(|(pending, monitor)| match pending {
+                Pending::Capture(p) => Ok(Grab::Captured(p)),
+                Pending::Duplication(p) => match p.finish(deadline) {
+                    Some(frame) => Ok(Grab::Duplicated(frame)),
+                    None => capture(monitor).map(Grab::Captured),
+                },
+            })
+            .collect()
     }
 
     /// A capture of `item` under way: its first frame is waited for by [`Started::finish`].

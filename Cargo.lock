@@ -5510,6 +5510,7 @@ version = "0.31.0"
 dependencies = [
  "rayon",
  "thiserror 2.0.21",
+ "tracing",
  "vixeeny-common",
  "vixeeny-image",
  "vixeeny-platform",

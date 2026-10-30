@@ -394,6 +394,25 @@ struct LivePart {
     size: (u32, u32),
 }
 
+struct LiveStream {
+    monitor: vixeeny_platform::MonitorId,
+    part: LivePart,
+    /// A static desktop may never send another frame when only the crop changes. Keep its latest full monitor.
+    /// Dropped before the stream, so a retained pool frame does not delay pool shutdown.
+    latest: Option<std::sync::Arc<std::sync::Mutex<vixeeny_capture::HeldFrame>>>,
+    stream: vixeeny_capture::VideoStream,
+    changed: bool,
+}
+
+/// WGC session shutdown may wait for an in-flight frame. Let the UI commit its transition without that wait.
+fn retire_streams(streams: Vec<LiveStream>) {
+    if !streams.is_empty()
+        && let Err(e) = std::thread::Builder::new().name("live-stop".into()).spawn(move || drop(streams))
+    {
+        tracing::warn!("cannot retire live capture sessions in the background: {e}");
+    }
+}
+
 /// The screens as they are now, for the editor shown live.
 struct LiveScreens {
     monitors: Vec<MonitorInfo>,
@@ -405,7 +424,7 @@ struct LiveScreens {
     hdr: std::rc::Rc<std::cell::RefCell<Option<HdrCapture>>>,
     /// Each monitor followed: where the part followed is in the editor's image, where it is in the monitor's picture,
     /// and its size.
-    streams: std::cell::RefCell<Vec<(LivePart, vixeeny_capture::VideoStream)>>,
+    streams: std::cell::RefCell<Vec<LiveStream>>,
 }
 
 impl vixeeny_overlay::Screens for LiveScreens {
@@ -429,8 +448,9 @@ impl vixeeny_overlay::Screens for LiveScreens {
         device: &vixeeny_overlay::ID3D11Device,
     ) {
         let mut streams = self.streams.borrow_mut();
-        streams.clear();
+        let mut previous = std::mem::take(&mut *streams);
         let Some((x, y, w, h)) = area else {
+            retire_streams(previous);
             return;
         };
         let (ox, oy) = self.origin;
@@ -439,6 +459,20 @@ impl vixeeny_overlay::Screens for LiveScreens {
             let Some(part) = monitor.rect.intersection(&area) else {
                 continue;
             };
+            let part = LivePart {
+                at: ((part.x - ox) as u32, (part.y - oy) as u32),
+                from: ((part.x - monitor.rect.x) as u32, (part.y - monitor.rect.y) as u32),
+                size: (part.width, part.height),
+            };
+            // The stream captures the whole monitor. Moving/resizing the area on it only changes the crop.
+            if let Some(i) = previous.iter().position(|s| s.monitor == monitor.id) {
+                let mut stream = previous.swap_remove(i);
+                stream.part = part;
+                stream.changed = true;
+                streams.push(stream);
+                wake.wake();
+                continue;
+            }
             // The whole monitor is captured; only the part followed is copied, on the graphics card, by the editor.
             let target = vixeeny_capture::StreamTarget::Monitor(monitor.clone());
             let wake = wake.clone();
@@ -449,28 +483,35 @@ impl vixeeny_overlay::Screens for LiveScreens {
                 Some(LIVE_INTERVAL),
                 Box::new(move || wake.wake()),
             ) {
-                Ok(stream) => streams.push((
-                    LivePart {
-                        at: ((part.x - ox) as u32, (part.y - oy) as u32),
-                        from: ((part.x - monitor.rect.x) as u32, (part.y - monitor.rect.y) as u32),
-                        size: (part.width, part.height),
-                    },
-                    stream,
-                )),
+                Ok(stream) => {
+                    streams.push(LiveStream { monitor: monitor.id, part, stream, latest: None, changed: true })
+                }
                 Err(e) => tracing::warn!("live screens not followed: {e}"),
             }
         }
+        retire_streams(previous);
     }
 
     fn take(&self) -> Vec<vixeeny_overlay::ScreenPart> {
         let mut parts = Vec::new();
-        for (part, stream) in self.streams.borrow().iter() {
+        for stream in self.streams.borrow_mut().iter_mut() {
             // Only the newest picture waits.
-            if let Some(frame) = stream.take_held() {
+            if let Some(frame) = stream.stream.take_held() {
+                stream.latest = Some(std::sync::Arc::new(std::sync::Mutex::new(frame)));
+                stream.changed = true;
+            }
+            if stream.changed
+                && let Some(latest) = &stream.latest
+            {
+                let frame = latest.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                let part = &stream.part;
                 let (width, height) = (
                     part.size.0.min(frame.content.0.saturating_sub(part.from.0)),
                     part.size.1.min(frame.content.1.saturating_sub(part.from.1)),
                 );
+                if width == 0 || height == 0 {
+                    continue;
+                }
                 parts.push(vixeeny_overlay::ScreenPart {
                     x: part.at.0,
                     y: part.at.1,
@@ -478,8 +519,9 @@ impl vixeeny_overlay::Screens for LiveScreens {
                     height,
                     texture: frame.texture.clone(),
                     from: part.from,
-                    keep: Box::new(frame),
+                    keep: Box::new(latest.clone()),
                 });
+                stream.changed = false;
             }
         }
         parts
@@ -586,6 +628,7 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
 
     // No window detection: the zone is always drawn freely.
     let mut session = Session::new(base, Vec::new()).with_screens(monitor_areas);
+    session.dim = vixeeny_common::look::CAPTURE_DIM;
     match mode {
         Mode::Editor => {}
         Mode::Scroll => session = session.with_auto_command(Command::Scroll),

@@ -2,7 +2,7 @@
 //! The overlay driven by posted messages, its windows cloaked (nothing shows on screen).
 #![allow(clippy::expect_used, reason = "test helpers fail the test")]
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use vixeeny_editor::{Command, Rect, RgbaImage, Session};
@@ -60,6 +60,118 @@ fn a_zone_is_drawn_and_escape_closes() {
     let log = log.borrow();
     assert_eq!(log[0].0, Command::Close);
     assert_eq!(log[0].1, Some(Rect::new(100.0, 100.0, 400.0, 300.0)));
+}
+
+type WatchedArea = Option<(u32, u32, u32, u32)>;
+
+struct LivePictures {
+    pictures: RefCell<std::collections::VecDeque<Option<RgbaImage>>>,
+    grabs: Rc<Cell<usize>>,
+    watches: Rc<RefCell<Vec<WatchedArea>>>,
+}
+
+impl vixeeny_overlay::Screens for LivePictures {
+    fn grab(&self) -> Option<RgbaImage> {
+        self.grabs.set(self.grabs.get() + 1);
+        self.pictures.borrow_mut().pop_front().flatten()
+    }
+
+    fn watch(&self, area: Option<(u32, u32, u32, u32)>, _: vixeeny_overlay::Wake, _: &vixeeny_overlay::ID3D11Device) {
+        self.watches.borrow_mut().push(area);
+    }
+
+    fn take(&self) -> Vec<vixeeny_overlay::ScreenPart> {
+        Vec::new()
+    }
+}
+
+/// The real overlay loop with deterministic capture results; no desktop capture or visible windows.
+fn refreeze(picture: Option<RgbaImage>, fail_copy: bool) -> (usize, bool, Vec<Command>, Option<Rect>, Vec<u8>) {
+    let grabs = Rc::new(Cell::new(0));
+    let observed = Rc::new(RefCell::new(None));
+    let out = observed.clone();
+    let screen = Screen { position: (0, 0), size: (1200, 900), area: Rect::new(0.0, 0.0, 1200.0, 900.0) };
+    let commands = Rc::new(RefCell::new(Vec::new()));
+    let command_log = commands.clone();
+    let overlay = Overlay::on_screens(session(), 1.0, &[screen], Look::default(), move |c, s| {
+        command_log.borrow_mut().push(c);
+        *out.borrow_mut() = Some((s.is_live(), s.zone(), s.base().data[..4].to_vec()));
+        true
+    })
+    .expect("overlay")
+    .headless();
+    overlay.set_screens(LivePictures {
+        pictures: RefCell::new([picture].into()),
+        grabs: grabs.clone(),
+        watches: Rc::default(),
+    });
+    let hwnd = overlay.handles()[0];
+    draw_zone(hwnd);
+    post(hwnd, WM_KEYDOWN, 0x20, 0); // live
+    for key in [0x20, usize::from(b'K')] {
+        post(hwnd, WM_KEYDOWN, key, 1 << 30); // Windows' key-repeat flag: must not toggle or recapture
+    }
+    post(hwnd, WM_KEYDOWN, usize::from(b'K'), 0); // freeze, or stay live if capture fails
+    if fail_copy {
+        click_button(hwnd, COPY);
+    }
+    post(hwnd, WM_CLOSE, 0, 0);
+    overlay.run((10, 10)).expect("ran");
+    let (live, zone, pixels) = observed.take().expect("closed");
+    let commands = commands.borrow().clone();
+    (grabs.get(), live, commands, zone, pixels)
+}
+
+#[test]
+fn refreezing_uses_the_new_picture_and_ignores_key_repeat() {
+    let picture = RgbaImage::new(1200, 900, [21, 42, 63, 255].repeat(1200 * 900)).expect("image");
+    let (grabs, live, commands, zone, pixels) = refreeze(Some(picture), false);
+    assert_eq!(grabs, 1);
+    assert!(!live);
+    assert_eq!(commands, [Command::Close]);
+    assert_eq!(zone, Some(Rect::new(100.0, 100.0, 400.0, 300.0)));
+    assert_eq!(pixels, [21, 42, 63, 255]);
+}
+
+#[test]
+fn a_failed_refreeze_stays_live_and_never_exports_the_stale_picture() {
+    let (grabs, live, commands, _, pixels) = refreeze(None, true);
+    assert_eq!(grabs, 2, "refreeze and copy each attempt a fresh capture");
+    assert!(live);
+    assert_eq!(commands, [Command::Close], "copy must not reach the export handler");
+    assert_eq!(pixels, [0, 90, 160, 255]);
+}
+
+#[test]
+fn a_changed_desktop_size_does_not_restore_the_old_freeze() {
+    let picture = RgbaImage::new(1, 1, vec![21, 42, 63, 255]).expect("image");
+    let (_, live, _, _, pixels) = refreeze(Some(picture), false);
+    assert!(live);
+    assert_eq!(pixels, [0, 90, 160, 255]);
+}
+
+#[test]
+fn moving_a_live_zone_keeps_its_capture_sessions_until_the_new_crop_is_ready() {
+    use vixeeny_editor::{Point, Tool};
+    let mut s = session();
+    s.pointer_down(Point::new(100.0, 100.0), Default::default());
+    s.pointer_up(Point::new(500.0, 400.0), Default::default());
+    s.choose_tool(Some(Tool::Blur));
+    s.pointer_down(Point::new(200.0, 200.0), Default::default());
+    s.pointer_up(Point::new(250.0, 250.0), Default::default());
+    s.choose_tool(None);
+    let screen = Screen { position: (0, 0), size: (1200, 900), area: Rect::new(0.0, 0.0, 1200.0, 900.0) };
+    let overlay = Overlay::on_screens(s, 1.0, &[screen], Look::default(), |_, _| true).expect("overlay").headless();
+    let watches = Rc::new(RefCell::new(Vec::new()));
+    overlay.set_screens(LivePictures { pictures: RefCell::default(), grabs: Rc::default(), watches: watches.clone() });
+    let hwnd = overlay.handles()[0];
+    post(hwnd, WM_KEYDOWN, 0x20, 0);
+    post(hwnd, WM_LBUTTONDOWN, 1, at(400, 350));
+    post(hwnd, WM_MOUSEMOVE, 1, at(420, 370));
+    post(hwnd, WM_LBUTTONUP, 0, at(420, 370));
+    post(hwnd, WM_CLOSE, 0, 0);
+    overlay.run((10, 10)).expect("ran");
+    assert_eq!(*watches.borrow(), [Some((100, 100, 400, 300)), Some((120, 120, 400, 300)), None]);
 }
 
 #[test]

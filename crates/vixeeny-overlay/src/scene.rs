@@ -17,6 +17,7 @@ use std::cell::{Cell, RefCell};
 
 use vixeeny_editor::{Rect, RgbaImage};
 use windows::Win32::Foundation::HWND;
+use windows::Win32::Graphics::Direct2D::ID2D1Bitmap1;
 use windows::Win32::Graphics::DirectComposition::{
     DCOMPOSITION_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, DCOMPOSITION_BORDER_MODE_HARD, IDCompositionAnimation,
     IDCompositionEffectGroup, IDCompositionSurface, IDCompositionTarget, IDCompositionVisual, IDCompositionVisual2,
@@ -357,19 +358,39 @@ impl<K: Copy + PartialEq, L: PartialEq + Clone> Glow<K, L> {
 /// The pictures of an image part: one visual of tiles.
 pub struct Picture {
     pub visual: IDCompositionVisual2,
+    tiles: RefCell<Vec<PictureTile>>,
+}
+
+struct PictureTile {
+    part: (u32, u32, u32, u32),
+    surface: IDCompositionSurface,
+    bitmap: ID2D1Bitmap1,
+    visual: IDCompositionVisual2,
 }
 
 impl Picture {
     pub fn new(gfx: &Gfx) -> Result<Self> {
-        Ok(Self { visual: visual(gfx)? })
+        Ok(Self { visual: visual(gfx)?, tiles: RefCell::default() })
     }
 
     /// Shows `img`'s `part` with its top-left corner at `(x, y)`.
     pub fn set(&self, gfx: &Gfx, img: &RgbaImage, part: (u32, u32, u32, u32), x: f32, y: f32) -> Result<()> {
-        // SAFETY: plain tree calls on visuals of this device.
-        unsafe { self.visual.RemoveAllVisuals()? };
-        for tile in tiles(part) {
-            let surface = gfx.picture(img, tile)?;
+        let parts = tiles(part);
+        let mut kept = self.tiles.borrow_mut();
+        if kept.len() == parts.len() && kept.iter().zip(&parts).all(|(tile, part)| tile.part == *part) {
+            for tile in kept.iter() {
+                gfx.update_bitmap(&tile.bitmap, img, tile.part)?;
+                gfx.draw_picture(&tile.surface, &tile.bitmap, (tile.part.2, tile.part.3))?;
+                set_offset(&tile.visual, x + (tile.part.0 - part.0) as f32, y + (tile.part.1 - part.1) as f32)?;
+            }
+            return Ok(());
+        }
+        // Build replacement tiles before removing the current image. A failed allocation leaves it in place.
+        let mut made = Vec::with_capacity(parts.len());
+        for tile in parts {
+            let surface = gfx.opaque_surface(tile.2, tile.3)?;
+            let bitmap = gfx.bitmap(img, tile)?;
+            gfx.draw_picture(&surface, &bitmap, (tile.2, tile.3))?;
             let v = visual(gfx)?;
             // SAFETY: plain property calls on a new visual.
             unsafe {
@@ -378,8 +399,14 @@ impl Picture {
                 v.SetBorderMode(DCOMPOSITION_BORDER_MODE_HARD)?;
             }
             set_offset(&v, x + (tile.0 - part.0) as f32, y + (tile.1 - part.1) as f32)?;
-            add(&self.visual, &v)?;
+            made.push(PictureTile { part: tile, surface, bitmap, visual: v });
         }
+        // SAFETY: plain tree calls on visuals of this device.
+        unsafe { self.visual.RemoveAllVisuals()? };
+        for tile in &made {
+            add(&self.visual, &tile.visual)?;
+        }
+        *kept = made;
         Ok(())
     }
 }
@@ -584,6 +611,36 @@ impl Pane {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn refreezing_updates_cached_tiles_with_the_new_pixels() {
+        let gfx = Gfx::new().expect("graphics devices");
+        let picture = Picture::new(&gfx).expect("picture");
+        let mut image = RgbaImage::new(73, 59, [10, 20, 30, 255].repeat(73 * 59)).expect("image");
+        let part = (11, 7, 19, 23);
+        picture.set(&gfx, &image, part, 0.0, 0.0).expect("first freeze");
+        let (surface, bitmap, visual) = {
+            let tiles = picture.tiles.borrow();
+            let tile = &tiles[0];
+            (tile.surface.clone(), tile.bitmap.clone(), tile.visual.clone())
+        };
+        for (i, p) in image.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            *p = [(i % 73) as u8, (i / 73) as u8, 99, 255];
+        }
+        picture.set(&gfx, &image, part, 5.0, 6.0).expect("next freeze");
+        let tiles = picture.tiles.borrow();
+        assert_eq!(tiles[0].surface, surface, "a new freeze must reuse its surface");
+        assert_eq!(tiles[0].bitmap, bitmap, "reuse the upload bitmap too");
+        assert_eq!(tiles[0].visual, visual);
+        let pixels = crate::gfx::read_back(&bitmap, (19, 23), 4).expect("new pixels");
+        for (y, row) in pixels.as_chunks::<{ 19 * 4 }>().0.iter().enumerate() {
+            let start = ((7 + y) * 73 + 11) * 4;
+            assert_eq!(row, &image.data[start..start + 19 * 4]);
+        }
+        drop(tiles);
+        picture.set(&gfx, &image, (0, 0, 12, 8), 0.0, 0.0).expect("changed geometry");
+        assert_ne!(picture.tiles.borrow()[0].surface, surface);
+    }
 
     #[test]
     fn tiles_cover_the_area_once() {

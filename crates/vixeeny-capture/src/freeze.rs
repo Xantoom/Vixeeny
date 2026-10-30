@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The frozen screen of a zone capture, done on the GPU by the daemon the moment the shortcut is pressed: every monitor
 //! is captured at once (Desktop Duplication, or Windows Graphics Capture where it cannot), the frame is copied into a
-//! texture shared with the app and shown 1:1 by a borderless top-most window with its own flip-model swap chain (HDR
-//! monitors keep their HDR content: half floats in scRGB). Nothing goes through the CPU. The app reads the textures,
-//! builds its editor windows hidden, and asks the frozen screens to go once its own windows cover them
+//! texture shared with the app and shown 1:1 under a black veil by a borderless top-most window (HDR monitors keep
+//! their HDR content: half floats in scRGB). Only the displayed copy is dimmed. Nothing goes through the CPU. The app
+//! reads the textures, builds its editor windows hidden, and asks the frozen screens to go once its own windows cover them
 //! ([`THAW_MESSAGE`]), so the screen never flickers.
 
 use std::cell::RefCell;
-use std::sync::Mutex;
 use std::sync::mpsc::channel;
+use std::sync::{Mutex, OnceLock};
 use std::thread::JoinHandle;
 use std::time::Instant;
 
@@ -20,8 +20,8 @@ use windows::Graphics::DirectX::DirectXPixelFormat;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HLOCAL, HWND, LPARAM, LRESULT, LUID, LocalFree, WPARAM};
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_RESOURCE_MISC_SHARED,
-    D3D11_RESOURCE_MISC_SHARED_NTHANDLE, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, ID3D11Device, ID3D11Device1,
-    ID3D11DeviceContext, ID3D11Texture2D,
+    D3D11_RESOURCE_MISC_SHARED_NTHANDLE, D3D11_TEXTURE2D_DESC, ID3D11Device, ID3D11Device1, ID3D11DeviceContext,
+    ID3D11Texture2D,
 };
 use windows::Win32::Graphics::Dwm::{DWMWA_CLOAK, DWMWA_TRANSITIONS_FORCEDISABLED, DwmFlush, DwmSetWindowAttribute};
 use windows::Win32::Graphics::Dxgi::Common::{
@@ -45,6 +45,7 @@ use windows::core::{BOOL, Interface, w};
 
 use crate::wgc::{FRAME_TIMEOUT, d3d_device, frame_handler, halves_to_f32, monitor_item, os, winrt_device};
 
+use crate::freeze_veil::Veil;
 use crate::{CaptureError, CpuFrame, HdrFrame, card_tonemap};
 
 /// The frozen screens go by themselves after this, whatever happens to the app.
@@ -57,6 +58,7 @@ pub struct Gpu {
     winrt: IDirect3DDevice,
     factory: IDXGIFactory2,
     adapter: i64,
+    veil: Veil,
 }
 
 fn luid_value(luid: LUID) -> i64 {
@@ -78,7 +80,9 @@ impl Gpu {
             let factory: IDXGIFactory2 = adapter.GetParent().map_err(os("DXGI factory"))?;
             (factory, luid_value(desc.AdapterLuid))
         };
-        Ok(Self { device, context, winrt, factory, adapter })
+        let veil = Veil::new(&device)?;
+        register_class()?;
+        Ok(Self { device, context, winrt, factory, adapter, veil })
     }
 }
 
@@ -86,7 +90,8 @@ impl Gpu {
 struct Screen {
     window: HWND,
     swap_chain: Option<IDXGISwapChain1>,
-    _texture: ID3D11Texture2D,
+    texture: ID3D11Texture2D,
+    id: u64,
     /// The named handle the app opens the texture by; the name goes with it.
     shared: Option<HANDLE>,
 }
@@ -146,29 +151,30 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
 const CLASS: windows::core::PCWSTR = w!("VixeenyFrozenScreen");
 
 fn register_class() -> Result<(), CaptureError> {
-    thread_local! {
-        static REGISTERED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    }
-    if REGISTERED.with(std::cell::Cell::get) {
-        return Ok(());
-    }
-    // SAFETY: a static class name and a window procedure with the required signature.
-    unsafe {
-        let instance = GetModuleHandleW(None).map_err(os("GetModuleHandleW"))?;
-        let wc = WNDCLASSEXW {
-            cbSize: size_of::<WNDCLASSEXW>() as u32,
-            lpfnWndProc: Some(wndproc),
-            hInstance: instance.into(),
-            hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
-            lpszClassName: CLASS,
-            ..Default::default()
-        };
-        if RegisterClassExW(&wc) == 0 {
-            return Err(CaptureError::Os("RegisterClassExW failed".into()));
-        }
-    }
-    REGISTERED.with(|r| r.set(true));
-    Ok(())
+    // Classes belong to the process, even when devices/windows are created on different threads (including tests).
+    static REGISTERED: OnceLock<windows::core::Result<()>> = OnceLock::new();
+    REGISTERED
+        .get_or_init(|| {
+            // SAFETY: a static class name and a window procedure with the required signature.
+            unsafe {
+                let instance = GetModuleHandleW(None)?;
+                let wc = WNDCLASSEXW {
+                    cbSize: size_of::<WNDCLASSEXW>() as u32,
+                    lpfnWndProc: Some(wndproc),
+                    hInstance: instance.into(),
+                    hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
+                    lpszClassName: CLASS,
+                    ..Default::default()
+                };
+                if RegisterClassExW(&wc) == 0 {
+                    return Err(windows::core::Error::from_thread());
+                }
+            }
+            Ok(())
+        })
+        .as_ref()
+        .copied()
+        .map_err(os("register frozen window class"))
 }
 
 fn set_bool_attribute(hwnd: HWND, attribute: windows::Win32::Graphics::Dwm::DWMWINDOWATTRIBUTE, on: bool) {
@@ -214,8 +220,8 @@ fn start(gpu: &Gpu, monitor: &MonitorInfo, cursor: bool) -> Result<Pending, Capt
     Ok(pending)
 }
 
-/// Waits for the first frame and copies it into a new shared texture.
-fn finish(gpu: &Gpu, pending: &Pending, deadline: Instant) -> Result<ID3D11Texture2D, CaptureError> {
+/// Waits for the first frame and copies it into the already prepared shared texture.
+fn finish(gpu: &Gpu, pending: &Pending, deadline: Instant, screen: &Screen) -> Result<(), CaptureError> {
     pending
         .arrived
         .recv_timeout(deadline.saturating_duration_since(Instant::now()))
@@ -225,54 +231,62 @@ fn finish(gpu: &Gpu, pending: &Pending, deadline: Instant) -> Result<ID3D11Textu
     let access: IDirect3DDxgiInterfaceAccess = surface.cast().map_err(os("surface access"))?;
     // SAFETY: the surface is backed by a D3D11 texture on our device.
     let source: ID3D11Texture2D = unsafe { access.GetInterface() }.map_err(os("GetInterface"))?;
-    let texture = shared_copy(gpu, &source)?;
+    let result = copy_frame(gpu, &source, &screen.texture);
     let _ = frame.Close();
-    Ok(texture)
+    result
 }
 
-/// A copy of `source` in a new texture that can be shared.
-fn shared_copy(gpu: &Gpu, source: &ID3D11Texture2D) -> Result<ID3D11Texture2D, CaptureError> {
-    let mut desc = D3D11_TEXTURE2D_DESC::default();
-    // SAFETY: `desc` is a valid out-pointer.
-    unsafe { source.GetDesc(&mut desc) };
-    desc.MipLevels = 1;
-    desc.ArraySize = 1;
-    desc.SampleDesc = DXGI_SAMPLE_DESC { Count: 1, Quality: 0 };
-    desc.Usage = D3D11_USAGE_DEFAULT;
-    desc.BindFlags = (D3D11_BIND_SHADER_RESOURCE.0 | D3D11_BIND_RENDER_TARGET.0) as u32;
-    desc.CPUAccessFlags = 0;
-    desc.MiscFlags = SHARED_FLAGS;
-    let mut texture = None;
-    // SAFETY: a plain texture description; the out-pointer is valid.
-    unsafe { gpu.device.CreateTexture2D(&desc, None, Some(&raw mut texture)) }.map_err(os("CreateTexture2D"))?;
-    let texture = texture.ok_or_else(|| CaptureError::Os("no shared texture".into()))?;
-    // SAFETY: same device, size and format.
-    unsafe { gpu.context.CopyResource(&texture, source) };
-    Ok(texture)
+/// A display mode change must not copy a differently sized/formatted frame into a prepared texture.
+fn copy_frame(gpu: &Gpu, source: &ID3D11Texture2D, destination: &ID3D11Texture2D) -> Result<(), CaptureError> {
+    let (mut from, mut to) = (D3D11_TEXTURE2D_DESC::default(), D3D11_TEXTURE2D_DESC::default());
+    // SAFETY: live textures and valid out-pointers.
+    unsafe {
+        source.GetDesc(&mut from);
+        destination.GetDesc(&mut to);
+    }
+    if (from.Width, from.Height, from.Format) != (to.Width, to.Height, to.Format) {
+        return Err(CaptureError::Os("the display mode changed during capture".into()));
+    }
+    // SAFETY: same device, size and format; neither texture is mapped.
+    unsafe { gpu.context.CopyResource(destination, source) };
+    Ok(())
 }
 
-/// A monitor's picture on its way: duplicated already, or captured once its frame comes.
+/// Sessions are created for every monitor before any frame is waited for.
+enum Started {
+    Duplicating(crate::dda::Pending),
+    Capturing(Pending),
+}
+
+/// A monitor's picture on its way: copied already, or captured once its frame comes.
 enum Source {
-    Duplicated(crate::dda::Frame),
+    Copied,
     Captured(Pending),
 }
 
-/// A hidden (cloaked) top-most window over `monitor`, showing `texture` when `show` (otherwise it only receives
+/// A hidden (cloaked) top-most window over `monitor`, ready for a picture when `show` (otherwise it only receives
 /// [`THAW_MESSAGE`] and the safety timer).
 ///
 /// The window must stay an ordinary window for the compositor. One that covers a monitor exactly with a flip-model swap
 /// chain is taken for a full-screen game: the screen switches to "independent flip" (a flash, and variable refresh that
 /// follows our single frame). So an SDR screen uses a "blt" swap chain, which the compositor always composes, and the
 /// window is one pixel taller than the monitor when no monitor lies below. HDR content needs the flip model.
-fn show_screen(
+fn prepare_screen(
     gpu: &Gpu,
     monitor: &MonitorInfo,
     monitors: &[MonitorInfo],
-    texture: ID3D11Texture2D,
     show: bool,
-) -> Result<(Screen, FrozenScreen), CaptureError> {
+) -> Result<Screen, CaptureError> {
     let r = monitor.rect;
     let hdr = monitor.hdr.is_some();
+    let texture = vixeeny_platform::d3d::texture(
+        &gpu.device,
+        (r.width, r.height),
+        if hdr { DXGI_FORMAT_R16G16B16A16_FLOAT } else { DXGI_FORMAT_B8G8R8A8_UNORM },
+        (D3D11_BIND_SHADER_RESOURCE.0 | D3D11_BIND_RENDER_TARGET.0) as u32,
+        SHARED_FLAGS,
+        None,
+    )?;
     let bottom = r.y + r.height as i32;
     let below_is_free = !monitors.iter().any(|m| {
         m.rect.y <= bottom
@@ -301,44 +315,48 @@ fn show_screen(
         )
     }
     .map_err(os("CreateWindowExW"))?;
+    let mut screen = Screen { window, swap_chain: None, texture, id: next_shared_id(), shared: None };
     set_bool_attribute(window, DWMWA_TRANSITIONS_FORCEDISABLED, true);
     set_bool_attribute(window, DWMWA_CLOAK, true);
     // SAFETY: our own window. Kept out of captures, so a capture never sees a frozen screen.
     let _ = unsafe { SetWindowDisplayAffinity(window, WDA_EXCLUDEFROMCAPTURE) };
-    let mut screen = Screen { window, swap_chain: None, _texture: texture.clone(), shared: None };
-    let mut desc = D3D11_TEXTURE2D_DESC::default();
-    // SAFETY: `desc` is a valid out-pointer.
-    unsafe { texture.GetDesc(&mut desc) };
+    screen.shared = Some(share(&screen.texture, screen.id)?);
     if show {
-        present(gpu, &mut screen, &texture, &desc, hdr, extra)?;
+        screen.swap_chain = Some(swap_chain(gpu, window, r.width, r.height + extra, hdr)?);
+        // SAFETY: shown while cloaked, before capture. Hidden windows' frames would be dropped by Present.
+        let _ = unsafe { ShowWindow(window, SW_SHOWNOACTIVATE) };
     }
-    let id = next_shared_id();
-    screen.shared = Some(share(&texture, id)?);
+    Ok(screen)
+}
+
+fn show_screen(gpu: &Gpu, screen: &mut Screen, monitor: &MonitorInfo) -> Result<FrozenScreen, CaptureError> {
+    let r = monitor.rect;
+    if let Some(chain) = &screen.swap_chain {
+        // SAFETY: a live swap chain, with the captured texture's format and size (plus possibly one row).
+        unsafe {
+            let back: ID3D11Texture2D = chain.GetBuffer(0).map_err(os("GetBuffer"))?;
+            gpu.context.CopySubresourceRegion(&back, 0, 0, 0, 0, &screen.texture, 0, None);
+            gpu.veil.draw(&gpu.device, &gpu.context, &back, r.width, r.height)?;
+            chain.Present(0, DXGI_PRESENT(0)).ok().map_err(os("Present"))?;
+        }
+    }
     let shared = FrozenScreen {
         x: r.x,
         y: r.y,
-        width: desc.Width,
-        height: desc.Height,
-        texture: id,
-        hdr,
-        window: window.0 as usize as u64,
+        width: r.width,
+        height: r.height,
+        texture: screen.id,
+        hdr: monitor.hdr.is_some(),
+        window: screen.window.0 as usize as u64,
     };
-    Ok((screen, shared))
+    Ok(shared)
 }
 
-/// Gives `screen`'s window a swap chain showing `texture` (still cloaked).
-fn present(
-    gpu: &Gpu,
-    screen: &mut Screen,
-    texture: &ID3D11Texture2D,
-    desc: &D3D11_TEXTURE2D_DESC,
-    hdr: bool,
-    extra: u32,
-) -> Result<(), CaptureError> {
-    let window = screen.window;
+/// Creates the expensive window resources before sampling the desktop, shortening the age of the frame at display.
+fn swap_chain(gpu: &Gpu, window: HWND, width: u32, height: u32, hdr: bool) -> Result<IDXGISwapChain1, CaptureError> {
     let chain_desc = DXGI_SWAP_CHAIN_DESC1 {
-        Width: desc.Width,
-        Height: desc.Height + extra,
+        Width: width,
+        Height: height,
         Format: if hdr { DXGI_FORMAT_R16G16B16A16_FLOAT } else { DXGI_FORMAT_B8G8R8A8_UNORM },
         SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
         BufferUsage: DXGI_USAGE_RENDER_TARGET_OUTPUT,
@@ -358,16 +376,7 @@ fn present(
             let _ = unsafe { chain3.SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709) };
         }
     }
-    // SAFETY: the back buffer has the texture's format and holds it (plus the extra row). Shown (still cloaked) first:
-    // a hidden window's frames are dropped.
-    unsafe {
-        let _ = ShowWindow(window, SW_SHOWNOACTIVATE);
-        let back: ID3D11Texture2D = chain.GetBuffer(0).map_err(os("GetBuffer"))?;
-        gpu.context.CopySubresourceRegion(&back, 0, 0, 0, 0, texture, 0, None);
-        chain.Present(0, DXGI_PRESENT(0)).ok().map_err(os("Present"))?;
-    }
-    screen.swap_chain = Some(chain);
-    Ok(())
+    Ok(chain)
 }
 
 /// Freezes every monitor. Must run on a thread with a message loop (the windows live there). The screens go on
@@ -383,36 +392,50 @@ pub fn hold(gpu: &Gpu, monitors: &[MonitorInfo], cursor: bool) -> Result<Frozen,
 }
 
 fn take(gpu: &Gpu, monitors: &[MonitorInfo], show: bool, cursor: bool) -> Result<Frozen, CaptureError> {
+    let began = Instant::now();
     thaw();
     register_class()?;
+    let mut screens = monitors.iter().map(|m| prepare_screen(gpu, m, monitors, show)).collect::<Result<Vec<_>, _>>()?;
+    let prepared = began.elapsed();
+    let capture_started = Instant::now();
     // Duplicated when they can be (without the pointer); every capture starts before any is waited for: they run side
     // by side.
-    let pending = monitors
+    let started = monitors
         .iter()
         .map(|m| {
-            let frame = (!cursor).then(|| crate::dda::frame(&gpu.device, m, m.hdr.is_some())).flatten();
-            match frame {
-                Some(frame) => Ok(Source::Duplicated(frame)),
-                None => start(gpu, m, cursor).map(Source::Captured),
+            let duplication = (!cursor).then(|| crate::dda::start(&gpu.device, m, m.hdr.is_some())).flatten();
+            match duplication {
+                Some(duplication) => Ok(Started::Duplicating(duplication)),
+                None => start(gpu, m, cursor).map(Started::Capturing),
             }
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let deadline = Instant::now() + FRAME_TIMEOUT;
-    let textures = pending
-        .iter()
-        .map(|p| match p {
-            Source::Duplicated(frame) => shared_copy(gpu, &frame.texture),
-            Source::Captured(p) => finish(gpu, p, deadline),
+    let duplication_deadline = Instant::now() + crate::dda::DESKTOP_WAIT;
+    // Start every WGC fallback before waiting for any WGC frame too. Copy a duplication while it is owned, before
+    // releasing it; waiting for another monitor must never invalidate that source texture.
+    let pending = started
+        .into_iter()
+        .zip(monitors.iter().zip(&screens))
+        .map(|(source, (monitor, screen))| match source {
+            Started::Capturing(p) => Ok(Source::Captured(p)),
+            Started::Duplicating(p) => match p.finish(duplication_deadline) {
+                Some(frame) => copy_frame(gpu, &frame.texture, &screen.texture).map(|()| Source::Copied),
+                None => start(gpu, monitor, cursor).map(Source::Captured),
+            },
         })
         .collect::<Result<Vec<_>, _>>()?;
-    drop(pending);
+    let deadline = Instant::now() + FRAME_TIMEOUT;
+    pending.iter().zip(&screens).try_for_each(|(p, screen)| match p {
+        Source::Copied => Ok(()),
+        Source::Captured(p) => finish(gpu, p, deadline, screen),
+    })?;
+    let captured = capture_started.elapsed();
+    let duplicated = pending.iter().filter(|p| matches!(p, Source::Copied)).count();
+    let present_started = Instant::now();
 
-    let mut screens = Vec::with_capacity(monitors.len());
     let mut shared = Vec::with_capacity(monitors.len());
-    for (monitor, texture) in monitors.iter().zip(textures) {
-        let (screen, frozen) = show_screen(gpu, monitor, monitors, texture, show)?;
-        screens.push(screen);
-        shared.push(frozen);
+    for (monitor, screen) in monitors.iter().zip(&mut screens) {
+        shared.push(show_screen(gpu, screen, monitor)?);
     }
     // SAFETY: plain call: the copies reach the GPU before the app reads them.
     unsafe { gpu.context.Flush() };
@@ -430,6 +453,21 @@ fn take(gpu: &Gpu, monitors: &[MonitorInfo], show: bool, cursor: bool) -> Result
     }
     ACTIVE.with(|a| *a.borrow_mut() = screens);
     MADE_ON.with(|m| *m.borrow_mut() = Some(gpu.device.clone()));
+    tracing::debug!(
+        screens = monitors.len(),
+        cursor,
+        show,
+        duplicated,
+        wgc = monitors.len() - duplicated,
+        ?prepared,
+        ?captured,
+        present = ?present_started.elapsed(),
+        total = ?began.elapsed(),
+        "frozen screens submitted to the compositor"
+    );
+    // Closing WGC sessions can block. The frozen windows must be visible before that cleanup, rather than showing
+    // a picture that has aged while the live desktop kept moving.
+    drop(pending);
     Ok(Frozen { adapter: gpu.adapter, screens: shared })
 }
 

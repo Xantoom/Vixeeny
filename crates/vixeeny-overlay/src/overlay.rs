@@ -390,9 +390,11 @@ impl Shared {
         }
         drop(ui);
         self.update_pointer(view.cursor);
-        self.follow(&view);
         // SAFETY: plain call.
-        unsafe { self.gfx.dcomp.Commit() }
+        unsafe { self.gfx.dcomp.Commit()? };
+        // Make live/frozen changes visible before opening or closing capture sessions for the effects.
+        self.follow(&view);
+        Ok(())
     }
 
     /// Draws the annotations again where they changed, over the screens under them.
@@ -794,7 +796,7 @@ impl Shared {
             }
             WM_KEYDOWN | WM_SYSKEYDOWN => {
                 let vk = windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY(wparam.0 as u16);
-                if !self.key(vk) && msg == WM_SYSKEYDOWN {
+                if !self.key(vk, lparam.0 & (1 << 30) != 0) && msg == WM_SYSKEYDOWN {
                     return None; // Alt+F4 and the like
                 }
             }
@@ -1097,7 +1099,7 @@ impl Shared {
     }
 
     /// A key went down; `false` when it was not for the editor.
-    fn key(&self, vk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY) -> bool {
+    fn key(&self, vk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY, repeated: bool) -> bool {
         let alt = key_down(VK_MENU);
         let held_ctrl = key_down(VK_CONTROL);
         // AltGr reaches programs as Ctrl+Alt: it types characters (€, @…), it is no shortcut.
@@ -1126,9 +1128,11 @@ impl Shared {
         }
         // Space or K: the screen live or frozen, as a video plays or pauses.
         if !ctrl && !alt && (vk == VK_SPACE || vk.0 == u16::from(b'K')) && self.can_live() {
-            let live = !self.session.borrow().is_live();
-            self.set_live(live);
-            self.refresh();
+            if !repeated {
+                let live = !self.session.borrow().is_live();
+                self.set_live(live);
+                self.refresh();
+            }
             return true;
         }
         let key = match vk {
@@ -1293,7 +1297,13 @@ impl Shared {
     /// Follows, live, the part of the screens the annotations take their pixels from.
     fn follow(&self, view: &View) {
         let area = if view.live && self.excluded.get() && !self.closing.get() {
-            self.session.borrow().live_area()
+            let session = self.session.borrow();
+            // Keep the monitor sessions and their last full frames during a selection gesture. Only the crop
+            // changes when it ends; closing/reopening WGC on every move adds latency and loses static frames.
+            if session.in_gesture() && session.live_area().is_none() {
+                return;
+            }
+            session.live_area()
         } else {
             None
         };
@@ -1352,27 +1362,21 @@ impl Shared {
 
     /// Shows the screens live, or freezes them as they are now.
     fn set_live(&self, live: bool) {
-        if live {
-            let mut excluded = true;
-            for p in &self.panes {
-                excluded &= window::set_excluded(p.hwnd, true);
-            }
-            self.excluded.set(excluded);
-        } else {
-            self.thaw();
-            for p in &self.panes {
-                window::set_excluded(p.hwnd, false);
-            }
-            self.excluded.set(false);
+        let started = std::time::Instant::now();
+        if !live && !self.thaw() {
+            // A failed recapture must not bring back the stale image from the first Print Screen press.
+            return;
         }
         self.session.borrow_mut().set_live(live);
+        self.live_shown.set(None);
+        tracing::debug!(live, elapsed = ?started.elapsed(), "editor live mode changed");
     }
 
     /// Takes a fresh picture of the screens, the windows hidden meanwhile when they are not left out of captures.
-    fn thaw(&self) {
+    fn thaw(&self) -> bool {
         let screens = self.screens.borrow();
         let Some(screens) = screens.as_ref() else {
-            return;
+            return false;
         };
         let hide = !self.excluded.get();
         if hide {
@@ -1392,7 +1396,7 @@ impl Shared {
             }
         }
         let Some(picture) = picture else {
-            return;
+            return false;
         };
         if self.session.borrow_mut().replace_base(picture) {
             // Older than the picture just taken.
@@ -1401,8 +1405,13 @@ impl Shared {
             for pane in &self.panes {
                 if let Err(e) = upload_frozen(&self.gfx, pane, session.base()) {
                     tracing::warn!("editor picture: {e}");
+                    return false;
                 }
             }
+            true
+        } else {
+            tracing::warn!("the desktop size changed while refreezing the editor");
+            false
         }
     }
 
@@ -1412,8 +1421,10 @@ impl Shared {
             return false;
         }
         let exports = matches!(command, Command::Copy | Command::CopyText | Command::Save | Command::SaveAs);
-        if exports && self.session.borrow().is_live() {
-            self.thaw();
+        let live = self.session.borrow().is_live();
+        if exports && live && !self.thaw() {
+            self.busy.set(false);
+            return false;
         }
         // A system dialog (Save as) must be able to appear above the overlay.
         let dialog = command == Command::SaveAs;
@@ -1554,6 +1565,13 @@ impl Overlay {
     /// Lets the user show the screens live, from `screens`: a fresh picture of them is exported, and the blurred or
     /// pixelated parts follow them.
     pub fn set_screens(&self, screens: impl Screens + 'static) {
+        // Set affinity while the editor is still hidden, and keep it through toggles. Repeated affinity changes
+        // invalidate compositor capture state and can put our UI into an effect's last in-flight frame.
+        let mut excluded = true;
+        for p in &self.shared.panes {
+            excluded &= window::set_excluded(p.hwnd, true);
+        }
+        self.shared.excluded.set(excluded);
         *self.shared.screens.borrow_mut() = Some(Box::new(screens));
         self.shared.refresh();
     }
@@ -1591,6 +1609,16 @@ impl Overlay {
                 && cursor.1 < p.position.1 + p.size.1 as i32
         });
         shared.ui.borrow_mut().pointer_pane = under_cursor;
+        // The daemon already shows a dimmed freeze. Commit the same veil before exposing the editor, so the
+        // handoff never brightens the picture or waits for a second fade-in.
+        let dim = shared.session.borrow().dim;
+        // SAFETY: plain property/commit calls on the panes' composition device.
+        unsafe {
+            for p in &shared.panes {
+                p.veil_effect.SetOpacity2(dim)?;
+            }
+            shared.gfx.dcomp.Commit()?;
+        }
         // SAFETY: plain call; everything built so far reaches the compositor before the windows appear.
         unsafe { shared.gfx.dcomp.WaitForCommitCompletion()? };
         if !self.headless {
@@ -1617,18 +1645,6 @@ impl Overlay {
         }
         if let Some(f) = self.first_frame.take() {
             f(self.handles());
-        }
-        // The veil fades in now that the screen shows exactly what it showed.
-        let dim = shared.session.borrow().dim;
-        for p in &shared.panes {
-            // SAFETY: plain property calls with an animation of the same device.
-            unsafe {
-                if shared.theme.animations {
-                    p.veil_effect.SetOpacity(&scene::ease_out(&shared.gfx, 0.0, dim, 0.16)?)?;
-                } else {
-                    p.veil_effect.SetOpacity2(dim)?;
-                }
-            }
         }
         shared.refresh();
 
