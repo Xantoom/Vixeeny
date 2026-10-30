@@ -688,6 +688,8 @@ enum Ended {
     Lost(String),
     /// The application closed.
     Exited,
+    /// Windows picked another default device: the stream follows it at once.
+    Moved,
 }
 
 fn capture_loop(stream: &Stream, kind: &SourceKind, sink: &mut dyn AudioSink, stop: &Event, changed: &Event) -> Ended {
@@ -701,7 +703,7 @@ fn capture_loop(stream: &Stream, kind: &SourceKind, sink: &mut dyn AudioSink, st
             1 => return Ended::Stopped,
             2 => {
                 if stream.follow == Follow::Default && default_changed(stream, kind) {
-                    return Ended::Lost("default device changed".into());
+                    return Ended::Moved;
                 }
                 // A device that went away fails here.
                 // SAFETY: a started client.
@@ -821,6 +823,11 @@ fn run(kind: &SourceKind, max_channels: usize, mut sink: Box<dyn AudioSink>, sto
                 }
                 match capture_loop(&stream, kind, sink.as_mut(), stop, &listening.changed) {
                     Ended::Stopped => return,
+                    // The change that said so is spent: waiting for another would leave the track silent.
+                    Ended::Moved => {
+                        tracing::info!("audio source {kind:?}: the default device changed, following it");
+                        continue;
+                    }
                     ended => ended,
                 }
             }
