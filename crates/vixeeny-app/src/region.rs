@@ -554,20 +554,8 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
     tracing::debug!("screen read ({}x{}) after {:?}", base.width, base.height, started.elapsed());
 
     let scale = vixeeny_platform::monitor_at(&monitors, cursor.0, cursor.1).map_or(1.0, |m| m.scale_factor() as f32);
-    // One overlay window per monitor, each showing its part of the frozen desktop. The monitors in image pixels: the
-    // toolbar stays on one of them.
-    let monitor_areas: Vec<Rect> = monitors
-        .iter()
-        .map(|m| {
-            Rect::new(
-                (m.rect.x - bounds.x) as f32,
-                (m.rect.y - bounds.y) as f32,
-                m.rect.width as f32,
-                m.rect.height as f32,
-            )
-        })
-        .collect();
-    // One window per monitor, exactly over it. Its content is a DirectComposition tree (no swap chain), so Windows
+    // One overlay window per monitor, exactly over it, each showing its part of the frozen desktop (`area`, in image
+    // pixels: the toolbar stays on one of them). Its content is a DirectComposition tree (no swap chain), so Windows
     // never takes it for a full-screen game.
     let screens: Vec<vixeeny_overlay::Screen> = monitors
         .iter()
@@ -582,6 +570,7 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
             ),
         })
         .collect();
+    let monitor_areas = screens.iter().map(|s| s.area).collect();
     let scroll_snapshot = Snapshot { monitors: monitors.clone(), cursor, foreground: foreground.clone() };
     let live_monitors = monitors.clone();
     let snapshot = Snapshot { monitors, cursor, foreground };
