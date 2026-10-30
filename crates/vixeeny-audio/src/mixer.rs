@@ -17,6 +17,9 @@ const BLOCK_FRAMES: u64 = 960;
 const LATENCY_NS: i64 = 150_000_000;
 /// 10 ms.
 const RESYNC_FRAMES: i64 = 480;
+/// A chunk dated further ahead of what was emitted than this is a wrong date, not sound to wait for: kept, it would
+/// fill the queue with as much silence (10 s).
+const AHEAD_FRAMES: i64 = 480_000;
 
 /// A run of mixed, gapless samples: the next ones of the track.
 #[derive(Debug, Clone, PartialEq)]
@@ -119,6 +122,9 @@ impl Mixer {
             Some(e) if (at - e as i64).abs() <= RESYNC_FRAMES => e as i64,
             _ => at,
         };
+        if start - next as i64 > AHEAD_FRAMES {
+            return;
+        }
         s.expected = Some((start + frames as i64).max(0) as u64);
         let channels = self.channels;
         let mut skip = 0;
@@ -262,6 +268,19 @@ mod tests {
 
     fn collect(blocks: &[Block]) -> Vec<f32> {
         blocks.iter().flat_map(|b| b.samples.iter().copied()).collect()
+    }
+
+    #[test]
+    fn a_chunk_dated_far_ahead_is_left_out() {
+        let mut m = Mixer::new(&[1.0], 0);
+        m.push(0, &chunk(0, 960, |_| 0.5));
+        // A driver's wrong date: an hour ahead. Kept, it would queue an hour of silence.
+        m.push(0, &chunk(3600 * S, 960, |_| 0.9));
+        assert!(m.sources[0].buf.len() <= 960 * CHANNELS);
+        // The sound that follows still lands where it belongs.
+        m.push(0, &chunk(20 * MS, 960, |_| 0.25));
+        let all = collect(&m.finish(40 * MS));
+        assert_eq!((all[0], all[960 * CHANNELS]), (0.5, 0.25));
     }
 
     #[test]

@@ -17,16 +17,16 @@ use std::thread::JoinHandle;
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, PROPERTYKEY, WAIT_OBJECT_0};
 use windows::Win32::Media::Audio::{
-    AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
-    AUDCLNT_STREAMFLAGS_EVENTCALLBACK, AUDCLNT_STREAMFLAGS_LOOPBACK, AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
-    AUDIOCLIENT_ACTIVATION_PARAMS, AUDIOCLIENT_ACTIVATION_PARAMS_0, AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK,
-    AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS, ActivateAudioInterfaceAsync, DEVICE_STATE, DEVICE_STATE_ACTIVE, EDataFlow,
-    ERole, IActivateAudioInterfaceAsyncOperation, IActivateAudioInterfaceCompletionHandler,
-    IActivateAudioInterfaceCompletionHandler_Impl, IAudioCaptureClient, IAudioClient, IAudioSessionControl,
-    IAudioSessionControl2, IAudioSessionManager2, IAudioSessionNotification, IAudioSessionNotification_Impl, IMMDevice,
-    IMMDeviceEnumerator, IMMNotificationClient, IMMNotificationClient_Impl, MMDeviceEnumerator,
-    PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE, VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, WAVEFORMATEX,
-    WAVEFORMATEXTENSIBLE, WAVEFORMATEXTENSIBLE_0, eCapture, eConsole, eRender,
+    AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_BUFFERFLAGS_TIMESTAMP_ERROR, AUDCLNT_SHAREMODE_SHARED,
+    AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM, AUDCLNT_STREAMFLAGS_EVENTCALLBACK, AUDCLNT_STREAMFLAGS_LOOPBACK,
+    AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, AUDIOCLIENT_ACTIVATION_PARAMS, AUDIOCLIENT_ACTIVATION_PARAMS_0,
+    AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK, AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS, ActivateAudioInterfaceAsync,
+    DEVICE_STATE, DEVICE_STATE_ACTIVE, EDataFlow, ERole, IActivateAudioInterfaceAsyncOperation,
+    IActivateAudioInterfaceCompletionHandler, IActivateAudioInterfaceCompletionHandler_Impl, IAudioCaptureClient,
+    IAudioClient, IAudioSessionControl, IAudioSessionControl2, IAudioSessionManager2, IAudioSessionNotification,
+    IAudioSessionNotification_Impl, IMMDevice, IMMDeviceEnumerator, IMMNotificationClient, IMMNotificationClient_Impl,
+    MMDeviceEnumerator, PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE, VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK,
+    WAVEFORMATEX, WAVEFORMATEXTENSIBLE, WAVEFORMATEXTENSIBLE_0, eCapture, eConsole, eRender,
 };
 use windows::Win32::System::Com::StructuredStorage::{PROPVARIANT, PROPVARIANT_0_0};
 use windows::Win32::System::Com::{
@@ -695,6 +695,8 @@ enum Ended {
 fn capture_loop(stream: &Stream, kind: &SourceKind, sink: &mut dyn AudioSink, stop: &Event, changed: &Event) -> Ended {
     let mut handles = vec![stream.event, stop.0, changed.0];
     handles.extend(stream.process);
+    // Where the next packet starts, for one the driver could not date.
+    let mut next_ns: Option<i64> = None;
     loop {
         // SAFETY: live handles, owned by the stream, the source and the listener.
         let waited = unsafe { WaitForMultipleObjects(&handles, false, INFINITE) };
@@ -746,7 +748,11 @@ fn capture_loop(stream: &Stream, kind: &SourceKind, sink: &mut dyn AudioSink, st
                     std::slice::from_raw_parts(data.cast::<f32>(), count).to_vec()
                 };
                 let _ = stream.capture.ReleaseBuffer(frames);
-                AudioChunk { time_ns: (qpc as i64).saturating_mul(100), channels: stream.channels, samples }
+                let dated = (qpc as i64).saturating_mul(100);
+                let undated = flags & (AUDCLNT_BUFFERFLAGS_TIMESTAMP_ERROR.0 as u32) != 0 || qpc == 0;
+                let time_ns = next_ns.filter(|_| undated).unwrap_or(dated);
+                next_ns = Some(time_ns + i64::from(frames) * 1_000_000_000 / i64::from(SAMPLE_RATE));
+                AudioChunk { time_ns, channels: stream.channels, samples }
             };
             sink.on_audio(step);
         }
