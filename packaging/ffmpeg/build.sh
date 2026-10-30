@@ -11,7 +11,9 @@
 # runs this (cached until this script changes) and hands the zip to the Windows jobs.
 set -euo pipefail
 
-IMAGE="ghcr.io/btbn/ffmpeg-builds/win64-gpl-shared-9.0@sha256:97fa8df115ad339c2f2c671867d8d74ecbe9589cc32e3e8253902c9387ac942c"
+# BtbN's win64-gpl-shared-9.0 of 2026-10-30, copied to this repository's packages by
+# `.github/workflows/ffmpeg-image.yml` (BtbN keeps only its latest build).
+IMAGE="ghcr.io/xantoom/vixeeny-ffmpeg-build@sha256:17ca6a3a4332acf1a9eda216457fc127ad24234ab244deeb70bb812417e9929e"
 # release/9.0 after 9.0.2 (n9.0.2-33-g4cf298e66a): its fixes, among them D3D11VA decoding on
 # several threads and the AAC decoder.
 export FFMPEG_COMMIT="4cf298e66a20dd90e8b7c62333ab5812596835ec"
