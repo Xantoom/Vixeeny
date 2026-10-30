@@ -103,12 +103,15 @@ pub fn recognize(width: u32, height: u32, bgra: &[u8]) -> Result<String, OcrErro
             OcrEngine::TryCreateFromLanguage(&languages.GetAt(0)?)?
         }
     };
-    let (width, height, pixels) = match resize_for(width, height, OcrEngine::MaxImageDimension()?) {
-        Resize::Double => (width * 2, height * 2, double(width, height, bgra)),
-        Resize::Keep => (width, height, bgra[..width as usize * height as usize * 4].to_vec()),
-        Resize::Shrink(factor) => shrink(width, height, bgra, factor),
+    // The buffer is a copy: a picture kept as it is goes in without one more.
+    let resized = match resize_for(width, height, OcrEngine::MaxImageDimension()?) {
+        Resize::Double => Some((width * 2, height * 2, double(width, height, bgra))),
+        Resize::Keep => None,
+        Resize::Shrink(factor) => Some(shrink(width, height, bgra, factor)),
     };
-    let buffer = CryptographicBuffer::CreateFromByteArray(&pixels)?;
+    let kept = (width, height, &bgra[..width as usize * height as usize * 4]);
+    let (width, height, pixels) = resized.as_ref().map_or(kept, |(w, h, p)| (*w, *h, &p[..]));
+    let buffer = CryptographicBuffer::CreateFromByteArray(pixels)?;
     let bitmap = SoftwareBitmap::CreateCopyFromBuffer(&buffer, BitmapPixelFormat::Bgra8, width as i32, height as i32)?;
     let result = engine.RecognizeAsync(&bitmap)?.join()?;
     let mut lines = Vec::new();
