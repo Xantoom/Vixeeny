@@ -70,21 +70,23 @@ pub struct AppInfo {
     pub active: bool,
 }
 
-pub(crate) struct ComGuard;
+/// COM for this thread while it lives. A thread that already has it in another apartment model (a window's thread)
+/// keeps it as it is: nothing to undo then, or COM would go from under that thread.
+pub(crate) struct ComGuard(bool);
 
 impl ComGuard {
     pub(crate) fn new() -> Self {
-        // SAFETY: balanced by `CoUninitialize` in `Drop`; an already initialised thread (S_FALSE) is fine, a different
-        // apartment model (an error) leaves COM usable as it is.
-        let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
-        Self
+        // SAFETY: balanced by `CoUninitialize` in `Drop` when it succeeds (S_OK, or S_FALSE when already initialised).
+        Self(unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }.is_ok())
     }
 }
 
 impl Drop for ComGuard {
     fn drop(&mut self) {
-        // SAFETY: matches the `CoInitializeEx` of `new`.
-        unsafe { CoUninitialize() };
+        if self.0 {
+            // SAFETY: matches the successful `CoInitializeEx` of `new`.
+            unsafe { CoUninitialize() };
+        }
     }
 }
 
