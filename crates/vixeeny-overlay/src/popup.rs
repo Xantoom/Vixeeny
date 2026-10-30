@@ -86,7 +86,17 @@ pub struct Popup {
 impl Popup {
     /// A hidden window over `geometry` (physical pixels); see [`window::create_popup`].
     pub fn new(gfx: &Gfx, geometry: PhysicalRect, focus: Focus, capture: Capture) -> Result<Self> {
-        let hwnd = window::create_popup(wndproc, geometry, focus, capture)?;
+        Self::composed(gfx, window::create_popup(wndproc, geometry, focus, capture)?, focus)
+    }
+
+    /// A window of its own (taskbar, Alt+Tab) over `geometry`, titled `title`; see [`window::create_app_window`]. It
+    /// takes the keyboard when shown.
+    pub fn new_window(gfx: &Gfx, geometry: PhysicalRect, title: &str) -> Result<Self> {
+        Self::composed(gfx, window::create_app_window(wndproc, geometry, title)?, Focus::Take)
+    }
+
+    /// `hwnd` with a visual tree of its own; the window goes if that cannot be made.
+    fn composed(gfx: &Gfx, hwnd: HWND, focus: Focus) -> Result<Self> {
         // SAFETY: plain creation calls for a window of this thread.
         let made = unsafe {
             gfx.dcomp.CreateTargetForHwnd(hwnd, true).and_then(|target| {
@@ -97,28 +107,6 @@ impl Popup {
         };
         match made {
             Ok((target, root)) => Ok(Self { hwnd, _target: target, root, focus }),
-            Err(e) => {
-                // SAFETY: the window was created above by this thread.
-                let _ = unsafe { DestroyWindow(hwnd) };
-                Err(e)
-            }
-        }
-    }
-
-    /// A window of its own (taskbar, Alt+Tab) over `geometry`, titled `title`; see [`window::create_app_window`]. It
-    /// takes the keyboard when shown.
-    pub fn new_window(gfx: &Gfx, geometry: PhysicalRect, title: &str) -> Result<Self> {
-        let hwnd = window::create_app_window(wndproc, geometry, title)?;
-        // SAFETY: plain creation calls for a window of this thread.
-        let made = unsafe {
-            gfx.dcomp.CreateTargetForHwnd(hwnd, true).and_then(|target| {
-                let root = scene::visual(gfx)?;
-                target.SetRoot(&root)?;
-                Ok((target, root))
-            })
-        };
-        match made {
-            Ok((target, root)) => Ok(Self { hwnd, _target: target, root, focus: Focus::Take }),
             Err(e) => {
                 // SAFETY: the window was created above by this thread.
                 let _ = unsafe { DestroyWindow(hwnd) };
