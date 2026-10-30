@@ -16,17 +16,17 @@ use vixeeny_platform::{HdrInfo, MonitorInfo};
 
 use crate::still::{self, Destination, Snapshot};
 
-/// RGBA → BGRA (the layout of the image and clipboard APIs).
-fn to_bgra(img: &RgbaImage) -> Vec<u8> {
-    let mut out = Vec::with_capacity(img.data.len());
-    for px in img.data.as_chunks::<4>().0 {
-        out.extend_from_slice(&[px[2], px[1], px[0], px[3]]);
+/// RGBA → BGRA (the layout of the image and clipboard APIs), in place.
+fn to_bgra(img: RgbaImage) -> Vec<u8> {
+    let mut data = img.data;
+    for px in data.as_chunks_mut::<4>().0 {
+        px.swap(0, 2);
     }
-    out
+    data
 }
 
 /// Copies the editor's picture under the name it would be saved under.
-fn copy_to_clipboard(config: &Config, snap: &Snapshot, action: ActionId, img: &RgbaImage) -> anyhow::Result<()> {
+fn copy_to_clipboard(config: &Config, snap: &Snapshot, action: ActionId, img: RgbaImage) -> anyhow::Result<()> {
     let now = vixeeny_platform::local_time();
     let dest = Destination {
         dir: std::path::Path::new(""),
@@ -39,13 +39,9 @@ fn copy_to_clipboard(config: &Config, snap: &Snapshot, action: ActionId, img: &R
         after_save: None,
     };
     let name = still::file_stem(action, snap, &dest, &vixeeny_platform::exe_metadata, (img.width, img.height));
+    let (width, height) = (img.width, img.height);
     let bgra = to_bgra(img);
-    copy_bgra(
-        &config.image.for_action(action),
-        &Bgra::new(img.width, img.height, img.width as usize * 4, &bgra),
-        None,
-        &name,
-    )
+    copy_bgra(&config.image.for_action(action), &Bgra::new(width, height, width as usize * 4, &bgra), None, &name)
 }
 
 pub use crate::clipboard::copy_bgra;
@@ -54,12 +50,13 @@ fn save(
     config: &Config,
     snap: &Snapshot,
     action: ActionId,
-    img: &RgbaImage,
+    img: RgbaImage,
     hdr: Option<&HdrCapture>,
     chosen: Option<PathBuf>,
 ) -> anyhow::Result<PathBuf> {
+    let (width, height) = (img.width, img.height);
     let bgra = to_bgra(img);
-    let bitmap = Bgra::new(img.width, img.height, img.width as usize * 4, &bgra);
+    let bitmap = Bgra::new(width, height, width as usize * 4, &bgra);
     save_bgra(config, snap, action, &bitmap, hdr, chosen)
 }
 
@@ -116,9 +113,9 @@ pub fn output_command(
                 let mut saving = config.clone();
                 saving.image.get_mut(vixeeny_common::config::ImageKind::for_action(action)).copy_to_clipboard = true;
                 let hdr = hdr.and_then(|desktop| annotated_hdr(session, &img, desktop));
-                save(&saving, snapshot, action, &img, hdr.as_ref(), None).map(|_| ())
+                save(&saving, snapshot, action, img, hdr.as_ref(), None).map(|_| ())
             } else {
-                copy_to_clipboard(config, snapshot, action, &img)
+                copy_to_clipboard(config, snapshot, action, img)
             };
             Some(match result {
                 Ok(()) => true,
@@ -130,7 +127,7 @@ pub fn output_command(
         }
         Command::CopyText => {
             let img = session.export()?;
-            copy_text(config, &img);
+            copy_text(config, img);
             Some(true)
         }
         Command::Save | Command::SaveAs => {
@@ -147,7 +144,7 @@ pub fn output_command(
             let hdr = hdr.and_then(|desktop| annotated_hdr(session, &img, desktop));
             let mut saving = config.clone();
             saving.image.get_mut(vixeeny_common::config::ImageKind::for_action(action)).keep_copy = true;
-            Some(match save(&saving, snapshot, action, &img, hdr.as_ref(), chosen) {
+            Some(match save(&saving, snapshot, action, img, hdr.as_ref(), chosen) {
                 Ok(path) => {
                     tracing::debug!("saved {}", path.display());
                     true
@@ -163,13 +160,14 @@ pub fn output_command(
 }
 
 /// Reads the text of `img` and puts it on the clipboard; a card says what was copied, or why nothing was.
-fn copy_text(config: &Config, img: &RgbaImage) {
+fn copy_text(config: &Config, img: RgbaImage) {
     use crate::toast::{Failed, Toast, notify};
     use vixeeny_common::i18n::{Key, tr};
     use vixeeny_platform::ocr::{OcrError, recognize};
 
     let lang = crate::lang(&config.general.language);
-    let toast = match recognize(img.width, img.height, &to_bgra(img)) {
+    let (width, height) = (img.width, img.height);
+    let toast = match recognize(width, height, &to_bgra(img)) {
         Ok(text) if text.trim().is_empty() => Toast::Failed(Failed::NoText, String::new()),
         Ok(text) => match vixeeny_platform::clipboard::copy_text(&text) {
             Ok(()) => Toast::TextCopied(text),
