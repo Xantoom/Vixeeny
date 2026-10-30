@@ -395,9 +395,9 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
             Ok(config) if config == self.config => {}
             Ok(config) => {
                 let old = std::mem::replace(&mut self.config, config);
-                // The replay turned on or off, or other games: the game in front counts again, and a running app
-                // follows (its buffer goes when the replay is off).
-                if old.replay != self.config.replay {
+                // The replay turned on or off, or other games, or the cards of games turned on: the game in front
+                // counts again, and a running app follows (its buffer goes when the replay is off).
+                if old.replay != self.config.replay || watches_games(&old) != watches_games(&self.config) {
                     self.last_game = None;
                     if !self.look_for_game(None) && self.core.app_running() {
                         self.dispatch(Event::Action(ActionId::ReplayWatch));
@@ -560,6 +560,40 @@ mod tests {
             let expected = if watched { vec![(1, ActionId::ReplayWatch)] } else { Vec::new() };
             assert_eq!(*spawned.lock().unwrap(), expected, "{enabled} {notify}");
         }
+    }
+
+    #[test]
+    fn turning_the_game_cards_on_watches_the_games_at_once() {
+        let dir = std::env::temp_dir().join(format!("vixeeny-cards-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        let mut config = Config::default();
+        config.notifications.game_start = "none".into();
+        config.save(&path).unwrap();
+        let (tx, rx) = channel();
+        let spawned: Spawned = Arc::default();
+        let mut rt = Runtime::new(
+            config.clone(),
+            Some(path.clone()),
+            None,
+            FakeTray::default(),
+            Box::new(FakeHotkeys::default()),
+            FakeSpawner { fail: false, spawned: spawned.clone() },
+            AppLink::default(),
+            EventTx::new(tx, Arc::new(NoWake)),
+            rx,
+        )
+        .with_games(Box::new(FakeGames(Arc::new(Mutex::new(true)))));
+        rt.start_replay_if_configured();
+        rt.pump();
+        assert!(spawned.lock().unwrap().is_empty());
+        // The replay still off, the card of a game turned on: the game in front is told.
+        config.notifications.game_start = "both".into();
+        config.save(&path).unwrap();
+        rt.reload_config();
+        rt.pump();
+        assert_eq!(*spawned.lock().unwrap(), vec![(1, ActionId::ReplayWatch)]);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     /// The process in front (a game when set); process 8 is part of game 7 (its web pages).
