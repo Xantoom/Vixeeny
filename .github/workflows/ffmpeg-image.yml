@@ -1,0 +1,22 @@
+name: FFmpeg image
+# Copies the BtbN image that `packaging/ffmpeg/build.sh` builds FFmpeg in to this repository's
+# packages: BtbN keeps only its latest build, so a digest pinned from it soon names nothing. Runs
+# when this file changes; the digest it prints goes in build.sh. To move to a newer image, change
+# the tag below.
+on:
+  push:
+    branches: ["1.0"]
+    paths: [".github/workflows/ffmpeg-image.yml"]
+permissions:
+  packages: write
+jobs:
+  copy:
+    runs-on: ubuntu-26.04
+    env:
+      FROM: ghcr.io/btbn/ffmpeg-builds/win64-gpl-shared-9.0:latest
+      TO: ghcr.io/xantoom/vixeeny-ffmpeg-build:9.0-2026-10-30
+    steps:
+      - run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      # The same manifests and layers: the copy has the digest of the image it copies.
+      - run: docker buildx imagetools create --tag "$TO" "$FROM"
+      - run: docker buildx imagetools inspect "$TO" | tee -a "$GITHUB_STEP_SUMMARY"
