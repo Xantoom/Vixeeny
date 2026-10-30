@@ -543,36 +543,26 @@ impl Card {
         }
     }
 
-    /// Shrinks the card clicked a little more while it fades; `false` when it cannot (no animations).
-    fn shrink_out(&self, gfx: &Gfx) -> Result<bool> {
+    /// Takes the card off the screen while it fades: clicked, it shrinks a little more; otherwise it slides out to the
+    /// side it came from. `false` when it cannot (no animations): it goes at once then.
+    fn go_out(&self, gfx: &Gfx, clicked: bool) -> Result<bool> {
         let Some(effect) = self.piece.effect.as_ref().filter(|_| self.animate) else {
             return Ok(false);
         };
         // SAFETY: plain property and timer calls, with animations of the same device, on a window of this thread.
         unsafe {
-            let shrink = scene::ease_out(gfx, PRESSED, CLICKED, LEAVE)?;
-            self.press_scale.SetScaleX(&shrink)?;
-            self.press_scale.SetScaleY(&shrink)?;
-            effect.SetOpacity(&scene::ease_out(gfx, 1.0, 0.0, LEAVE)?)?;
-            gfx.dcomp.Commit()?;
-            SetTimer(Some(self.popup.hwnd), LEAVE_TIMER, (LEAVE * 1000.0) as u32, None);
-        }
-        Ok(true)
-    }
-
-    /// Slides the card out to the side it came from while it fades; `false` when it cannot (no animations): it goes at
-    /// once then.
-    fn slide_out(&self, gfx: &Gfx) -> Result<bool> {
-        let Some(effect) = self.piece.effect.as_ref().filter(|_| self.animate) else {
-            return Ok(false);
-        };
-        let (w, h) = (self.layout.size.0 as f32, self.layout.size.1 as f32);
-        let (ax, ay) = self.content.place.away();
-        // SAFETY: plain property and timer calls, with animations of the same device, on a window of this thread.
-        unsafe {
-            self.piece.visual.SetOffsetX(&scene::ease_in(gfx, 0.0, ax * w, LEAVE)?)?;
-            self.piece.visual.SetOffsetY(&scene::ease_in(gfx, 0.0, ay * h, LEAVE)?)?;
-            effect.SetOpacity(&scene::ease_in(gfx, 1.0, 0.0, LEAVE)?)?;
+            if clicked {
+                let shrink = scene::ease_out(gfx, PRESSED, CLICKED, LEAVE)?;
+                self.press_scale.SetScaleX(&shrink)?;
+                self.press_scale.SetScaleY(&shrink)?;
+                effect.SetOpacity(&scene::ease_out(gfx, 1.0, 0.0, LEAVE)?)?;
+            } else {
+                let (w, h) = (self.layout.size.0 as f32, self.layout.size.1 as f32);
+                let (ax, ay) = self.content.place.away();
+                self.piece.visual.SetOffsetX(&scene::ease_in(gfx, 0.0, ax * w, LEAVE)?)?;
+                self.piece.visual.SetOffsetY(&scene::ease_in(gfx, 0.0, ay * h, LEAVE)?)?;
+                effect.SetOpacity(&scene::ease_in(gfx, 1.0, 0.0, LEAVE)?)?;
+            }
             gfx.dcomp.Commit()?;
             SetTimer(Some(self.popup.hwnd), LEAVE_TIMER, (LEAVE * 1000.0) as u32, None);
         }
@@ -624,14 +614,7 @@ impl Shared {
     fn leave(&self, id: u64, card: &Card, event: Option<ToastEvent>) {
         card.set_timer(&self.gfx, false);
         card.leaving.set(Some(event));
-        match card.slide_out(&self.gfx) {
-            Ok(true) => {}
-            Ok(false) => self.finish(id, event),
-            Err(e) => {
-                tracing::warn!("notification: {e}");
-                self.finish(id, event);
-            }
-        }
+        self.go_out(id, card, false, event);
     }
 
     /// The user chose `event` on the card `id`: it is done at once, while the card shrinks and fades away.
@@ -642,13 +625,17 @@ impl Shared {
         if let Some(done) = done {
             done(event);
         }
-        match card.shrink_out(&self.gfx) {
-            Ok(true) => {}
-            Ok(false) => self.finish(id, None),
-            Err(e) => {
-                tracing::warn!("notification: {e}");
-                self.finish(id, None);
-            }
+        self.go_out(id, card, true, None);
+    }
+
+    /// Takes the card `id` off the screen (see [`Card::go_out`]), or finishes with it at once when that cannot be shown.
+    fn go_out(&self, id: u64, card: &Card, clicked: bool, event: Option<ToastEvent>) {
+        let shown = card.go_out(&self.gfx, clicked).unwrap_or_else(|e| {
+            tracing::warn!("notification: {e}");
+            false
+        });
+        if !shown {
+            self.finish(id, event);
         }
     }
 

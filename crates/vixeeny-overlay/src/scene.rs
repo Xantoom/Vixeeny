@@ -98,35 +98,26 @@ pub fn handle_centres(zone: Px) -> [(f32, f32); 8] {
 /// The rising of a value from `from` to `to` over `seconds`, decelerating (1 − (1 − t)³), as an animation the
 /// compositor runs on its own.
 pub fn ease_out(gfx: &Gfx, from: f32, to: f32, seconds: f64) -> Result<IDCompositionAnimation> {
-    let d = seconds as f32;
-    let delta = to - from;
-    // SAFETY: plain calls on a new animation object.
-    unsafe {
-        let a = gfx.dcomp.CreateAnimation()?;
-        a.AddCubic(0.0, from, 3.0 * delta / d, -3.0 * delta / (d * d), delta / (d * d * d))?;
-        a.End(seconds, to)?;
-        Ok(a)
-    }
+    let (d, delta) = (seconds as f32, to - from);
+    cubic(gfx, from, to, seconds, [3.0 * delta / d, -3.0 * delta / (d * d), delta / (d * d * d)])
 }
 
 /// The same, accelerating (t³): for what leaves.
 pub fn ease_in(gfx: &Gfx, from: f32, to: f32, seconds: f64) -> Result<IDCompositionAnimation> {
-    let d = seconds as f32;
-    // SAFETY: plain calls on a new animation object.
-    unsafe {
-        let a = gfx.dcomp.CreateAnimation()?;
-        a.AddCubic(0.0, from, 0.0, 0.0, (to - from) / (d * d * d))?;
-        a.End(seconds, to)?;
-        Ok(a)
-    }
+    cubic(gfx, from, to, seconds, [0.0, 0.0, (to - from) / (seconds as f32).powi(3)])
 }
 
 /// The same at an even pace: for what follows a value that keeps moving.
 pub fn linear(gfx: &Gfx, from: f32, to: f32, seconds: f64) -> Result<IDCompositionAnimation> {
+    cubic(gfx, from, to, seconds, [(to - from) / seconds as f32, 0.0, 0.0])
+}
+
+/// `from` + b·t + c·t² + d·t³ until `seconds`, then `to`.
+fn cubic(gfx: &Gfx, from: f32, to: f32, seconds: f64, [b, c, d]: [f32; 3]) -> Result<IDCompositionAnimation> {
     // SAFETY: plain calls on a new animation object.
     unsafe {
         let a = gfx.dcomp.CreateAnimation()?;
-        a.AddCubic(0.0, from, (to - from) / seconds as f32, 0.0, 0.0)?;
+        a.AddCubic(0.0, from, b, c, d)?;
         a.End(seconds, to)?;
         Ok(a)
     }
