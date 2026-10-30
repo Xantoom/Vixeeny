@@ -74,13 +74,11 @@ fn perform(action: ActionId, config: &Config, frozen: Option<ipc::Frozen>) {
             if let Err(e) = region::run(config, region::Mode::Editor, frozen) {
                 tracing::error!("editor failed: {e:#}");
             }
-            vixeeny_capture::freeze::trim_reader();
         }
         ActionId::CaptureScrolling => {
             if let Err(e) = region::run(config, region::Mode::Scroll, frozen) {
                 tracing::error!("scrolling capture failed: {e:#}");
             }
-            vixeeny_capture::freeze::trim_reader();
         }
         CaptureFullscreen | CaptureWindow | CaptureAllMonitors => match direct_capture(action, config, frozen) {
             Ok(None) => tracing::debug!("no window chosen"),
@@ -373,6 +371,10 @@ impl<W: std::io::Write> Actions<'_, W> {
         while let Some(action) = next {
             next = run_action(action, None, self.config, self.recording);
         }
+        // The windows of the actions are gone: what their drawing kept goes too (the replay can keep this process for
+        // hours).
+        vixeeny_overlay::gfx::release_shared();
+        vixeeny_capture::freeze::trim_reader();
         BUSY.store(false, Ordering::Release);
         self.recording.report(self.send, self.config)
     }

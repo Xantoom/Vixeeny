@@ -144,6 +144,15 @@ pub fn warm() {
     }
 }
 
+/// [`Gfx::release`] for the devices of this thread, if it made them: once its windows are gone.
+pub fn release_shared() {
+    SHARED.with(|s| {
+        if let Some(gfx) = s.borrow().as_ref() {
+            gfx.release();
+        }
+    });
+}
+
 /// A device already made (the one that read the frozen screens): the windows of this thread use it rather than making
 /// their own, unless they have one.
 pub fn offer_device(device: ID3D11Device) {
@@ -187,9 +196,9 @@ impl Gfx {
         Ok(gfx)
     }
 
-    /// Gives back what the graphics card and the system keep for this process while nothing is on screen; the next
-    /// drawing takes again what it needs. For a process that waits.
-    pub fn trim(&self) {
+    /// Gives back what Direct2D and the graphics card keep of the drawings (the effects' intermediate surfaces, the
+    /// glyphs) while nothing is on screen; the next drawing takes again what it needs.
+    pub fn release(&self) {
         // SAFETY: plain calls; nothing is being drawn (the caller shows nothing).
         unsafe {
             self.d2d.ClearResources(0);
@@ -200,6 +209,14 @@ impl Gfx {
             if let Ok(dxgi) = self.d3d.cast::<IDXGIDevice3>() {
                 dxgi.Trim();
             }
+        }
+    }
+
+    /// [`release`](Self::release), and the system's memory of the process too. For a process that waits.
+    pub fn trim(&self) {
+        self.release();
+        // SAFETY: plain calls on this process.
+        unsafe {
             let _ = windows::Win32::System::ProcessStatus::EmptyWorkingSet(
                 windows::Win32::System::Threading::GetCurrentProcess(),
             );
