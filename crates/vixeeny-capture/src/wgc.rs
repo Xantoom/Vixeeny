@@ -14,12 +14,11 @@ use windows::Foundation::TypedEventHandler;
 use windows::Graphics::Capture::{Direct3D11CaptureFramePool, GraphicsCaptureItem, GraphicsCaptureSession};
 use windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;
 use windows::Graphics::DirectX::DirectXPixelFormat;
-use windows::Win32::Foundation::{HMODULE, HWND};
-use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_UNKNOWN};
+use windows::Win32::Foundation::HWND;
+use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_BOX, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE,
-    D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11CreateDevice, ID3D11Device,
-    ID3D11DeviceContext, ID3D11Texture2D,
+    D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION, D3D11_TEXTURE2D_DESC, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::Graphics::Dxgi::{IDXGIAdapter, IDXGIDevice};
@@ -386,28 +385,7 @@ pub(crate) fn frame_handler(tx: Sender<()>) -> FrameHandler {
 
 /// A hardware Direct3D 11 device, on `adapter` or the default one.
 pub(crate) fn d3d_device(adapter: Option<&IDXGIAdapter>) -> Result<(ID3D11Device, ID3D11DeviceContext), CaptureError> {
-    let mut device = None;
-    let mut context = None;
-    // An explicit adapter needs the "unknown" driver type.
-    let driver = if adapter.is_some() { D3D_DRIVER_TYPE_UNKNOWN } else { D3D_DRIVER_TYPE_HARDWARE };
-    // SAFETY: out-pointers are valid; no feature-level list or software module.
-    unsafe {
-        D3D11CreateDevice(
-            adapter,
-            driver,
-            HMODULE::default(),
-            D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-            None,
-            D3D11_SDK_VERSION,
-            Some(&raw mut device),
-            None,
-            Some(&raw mut context),
-        )
-    }
-    .map_err(os("D3D11CreateDevice"))?;
-    let device = device.ok_or_else(|| CaptureError::Os("no D3D11 device".into()))?;
-    let context = context.ok_or_else(|| CaptureError::Os("no D3D11 context".into()))?;
-    Ok((device, context))
+    Ok(vixeeny_platform::d3d::device(adapter, D3D_DRIVER_TYPE_HARDWARE, D3D11_CREATE_DEVICE_BGRA_SUPPORT)?)
 }
 
 /// The WinRT wrapper Windows Graphics Capture wants.

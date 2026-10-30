@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Direct3D 11 helpers shared by the shaders of the capture and of the encoder.
 
+use windows::Win32::Foundation::{E_FAIL, HMODULE};
 use windows::Win32::Graphics::Direct3D::Fxc::{D3DCOMPILE_OPTIMIZATION_LEVEL3, D3DCompile};
-use windows::Win32::Graphics::Direct3D::ID3DBlob;
+use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE, D3D_DRIVER_TYPE_UNKNOWN, ID3DBlob};
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11_CPU_ACCESS_READ, D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, D3D11_USAGE_STAGING,
-    ID3D11Device, ID3D11Texture2D,
+    D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_FLAG, D3D11_SDK_VERSION, D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE2D_DESC,
+    D3D11_USAGE_DEFAULT, D3D11_USAGE_STAGING, D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
 };
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT, DXGI_SAMPLE_DESC};
-use windows::core::{PCSTR, s};
+use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIAdapter, IDXGIAdapter1, IDXGIFactory1};
+use windows::core::{Interface, PCSTR, s};
 
 /// A Direct3D step that failed.
 #[derive(Debug, Clone, thiserror::Error)]
@@ -26,6 +28,15 @@ pub enum D3dError {
     /// A shader that does not compile, with the compiler's messages.
     #[error("D3DCompile: {0}")]
     Compile(String),
+}
+
+impl From<D3dError> for windows::core::Error {
+    fn from(e: D3dError) -> Self {
+        match e {
+            D3dError::Call { source, .. } => source,
+            other => Self::new(E_FAIL, other.to_string()),
+        }
+    }
 }
 
 /// Turns the error of `call` into a [`D3dError`], for `map_err`.
@@ -66,6 +77,47 @@ pub fn compile(source: &str, entry: PCSTR, target: PCSTR) -> Result<Vec<u8>, D3d
             errors.map(|e| String::from_utf8_lossy(blob_bytes(&e)).into_owned()).unwrap_or_default()
         ))),
     }
+}
+
+/// The `index`-th graphics card of the vendor `vendor_id` (its PCI id).
+pub fn adapter(vendor_id: u32, index: usize) -> Option<IDXGIAdapter> {
+    // SAFETY: plain DXGI enumeration; every call is checked.
+    let factory: IDXGIFactory1 = unsafe { CreateDXGIFactory1() }.ok()?;
+    (0..)
+        // SAFETY: `factory` is live; the index runs until the enumeration reports the end.
+        .map_while(|i| unsafe { factory.EnumAdapters1(i) }.ok())
+        // SAFETY: a live adapter.
+        .filter(|a: &IDXGIAdapter1| unsafe { a.GetDesc1() }.is_ok_and(|d| d.VendorId == vendor_id))
+        .nth(index)
+        .and_then(|a| a.cast().ok())
+}
+
+/// A Direct3D 11 device made with `flags`, and its immediate context: of `driver`, or on `adapter` when given.
+pub fn device(
+    adapter: Option<&IDXGIAdapter>,
+    driver: D3D_DRIVER_TYPE,
+    flags: D3D11_CREATE_DEVICE_FLAG,
+) -> Result<(ID3D11Device, ID3D11DeviceContext), D3dError> {
+    let (mut device, mut context) = (None, None);
+    // An explicit adapter needs the "unknown" driver type.
+    let driver = if adapter.is_some() { D3D_DRIVER_TYPE_UNKNOWN } else { driver };
+    // SAFETY: out-pointers are valid; the adapter (when given) outlives the call; no feature-level list or software
+    // module.
+    unsafe {
+        D3D11CreateDevice(
+            adapter,
+            driver,
+            HMODULE::default(),
+            flags,
+            None,
+            D3D11_SDK_VERSION,
+            Some(&raw mut device),
+            None,
+            Some(&raw mut context),
+        )
+    }
+    .map_err(call("D3D11CreateDevice"))?;
+    Ok((device.ok_or(D3dError::Missing("no D3D11 device"))?, context.ok_or(D3dError::Missing("no D3D11 context"))?))
 }
 
 /// A staging texture the processor reads a copy of `texture` from: its format, and its size or `size`.

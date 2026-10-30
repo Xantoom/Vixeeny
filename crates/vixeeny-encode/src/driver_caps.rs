@@ -10,10 +10,7 @@ use std::ffi::c_void;
 
 use windows::Win32::Foundation::HMODULE;
 use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_UNKNOWN;
-use windows::Win32::Graphics::Direct3D11::{
-    D3D11_CREATE_DEVICE_VIDEO_SUPPORT, D3D11_SDK_VERSION, D3D11CreateDevice, ID3D11Device,
-};
-use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIAdapter, IDXGIAdapter1, IDXGIFactory1};
+use windows::Win32::Graphics::Direct3D11::{D3D11_CREATE_DEVICE_VIDEO_SUPPORT, ID3D11Device};
 use windows::Win32::System::LibraryLoader::{
     GetProcAddress, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, LOAD_LIBRARY_SEARCH_SYSTEM32, LoadLibraryExW,
 };
@@ -87,34 +84,11 @@ unsafe fn symbol<F>(module: HMODULE, name: PCSTR) -> Result<F, CapsError> {
 /// A D3D11 device on the `index`-th GPU of `vendor_id` (the order of DXGI, like [`Adapter::index`]).
 fn device(adapter: &Adapter) -> Result<ID3D11Device, CapsError> {
     // SAFETY: plain DXGI enumeration; every call is checked.
-    let factory: IDXGIFactory1 = unsafe { CreateDXGIFactory1() }.map_err(os("DXGI factory"))?;
-    let gpu: IDXGIAdapter = (0..)
-        // SAFETY: `factory` is live; the index runs until the enumeration reports the end.
-        .map_while(|i| unsafe { factory.EnumAdapters1(i) }.ok())
-        .filter(|a: &IDXGIAdapter1| {
-            // SAFETY: `a` is a live adapter.
-            unsafe { a.GetDesc1() }.is_ok_and(|d| d.VendorId == adapter.vendor_id)
-        })
-        .nth(adapter.index as usize)
-        .and_then(|a| a.cast().ok())
+    let gpu = vixeeny_platform::d3d::adapter(adapter.vendor_id, adapter.index as usize)
         .ok_or_else(|| CapsError::Runtime(format!("{} is gone", adapter.name)))?;
-    let mut device = None;
-    // SAFETY: out-pointer is valid; the adapter outlives the call.
-    unsafe {
-        D3D11CreateDevice(
-            &gpu,
-            D3D_DRIVER_TYPE_UNKNOWN,
-            HMODULE::default(),
-            D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
-            None,
-            D3D11_SDK_VERSION,
-            Some(&raw mut device),
-            None,
-            None,
-        )
-    }
-    .map_err(os("D3D11 device"))?;
-    device.ok_or_else(|| CapsError::Runtime("no D3D11 device".into()))
+    vixeeny_platform::d3d::device(Some(&gpu), D3D_DRIVER_TYPE_UNKNOWN, D3D11_CREATE_DEVICE_VIDEO_SUPPORT)
+        .map(|(device, _)| device)
+        .map_err(|e| CapsError::Runtime(format!("D3D11 device: {e}")))
 }
 
 fn caps(family: Family, ten_bit: bool, chroma: Vec<Chroma>, max: (u32, u32)) -> DriverCaps {

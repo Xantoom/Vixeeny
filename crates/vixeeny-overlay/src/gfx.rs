@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use vixeeny_editor::RgbaImage;
-use windows::Win32::Foundation::{E_INVALIDARG, HMODULE, POINT, RECT};
+use windows::Win32::Foundation::{E_INVALIDARG, POINT, RECT};
 use windows::Win32::Graphics::Direct2D::Common::{
     D2D_RECT_F, D2D_SIZE_U, D2D1_ALPHA_MODE, D2D1_ALPHA_MODE_IGNORE, D2D1_ALPHA_MODE_PREMULTIPLIED,
     D2D1_BEZIER_SEGMENT, D2D1_COLOR_F, D2D1_COMPOSITE_MODE_SOURCE_OVER, D2D1_FIGURE_BEGIN_FILLED,
@@ -28,7 +28,7 @@ use windows::Win32::Graphics::Direct2D::{
 use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE, D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP};
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE,
-    D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING, D3D11CreateDevice, ID3D11Device, ID3D11Texture2D,
+    D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING, ID3D11Device, ID3D11Texture2D,
 };
 use windows::Win32::Graphics::DirectComposition::{
     DCompositionCreateDevice2, IDCompositionDesktopDevice, IDCompositionSurface,
@@ -99,22 +99,7 @@ pub struct Gfx {
 }
 
 pub(crate) fn d3d_device(driver: D3D_DRIVER_TYPE) -> Result<ID3D11Device> {
-    let mut device = None;
-    // SAFETY: the out-pointer is valid for the call; no adapter, default feature levels.
-    unsafe {
-        D3D11CreateDevice(
-            None,
-            driver,
-            HMODULE::default(),
-            D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-            None,
-            D3D11_SDK_VERSION,
-            Some(&raw mut device),
-            None,
-            None,
-        )?;
-    }
-    device.ok_or_else(|| windows::core::Error::from_hresult(windows::Win32::Foundation::E_FAIL))
+    Ok(vixeeny_platform::d3d::device(None, driver, D3D11_CREATE_DEVICE_BGRA_SUPPORT)?.0)
 }
 
 /// The Inter font as a DirectWrite collection (from the bytes in the binary).

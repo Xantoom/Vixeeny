@@ -4,25 +4,23 @@
 //! output texture goes to the hardware encoder as it is (see `gpu`).
 
 use vixeeny_platform::d3d::{D3dError, call};
-use windows::Win32::Foundation::{HMODULE, RECT};
-use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_UNKNOWN};
+use windows::Win32::Foundation::RECT;
+use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_CREATE_DEVICE_VIDEO_SUPPORT, D3D11_SDK_VERSION, D3D11_TEX2D_ARRAY_VPOV,
-    D3D11_TEX2D_VPIV, D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE, D3D11_VIDEO_PROCESSOR_CONTENT_DESC,
+    D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_CREATE_DEVICE_VIDEO_SUPPORT, D3D11_TEX2D_ARRAY_VPOV, D3D11_TEX2D_VPIV,
+    D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE, D3D11_VIDEO_PROCESSOR_CONTENT_DESC,
     D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_OUTPUT, D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC,
     D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC_0, D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC,
     D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC_0, D3D11_VIDEO_PROCESSOR_STREAM, D3D11_VIDEO_USAGE_PLAYBACK_NORMAL,
-    D3D11_VPIV_DIMENSION_TEXTURE2D, D3D11_VPOV_DIMENSION_TEXTURE2DARRAY, D3D11CreateDevice, ID3D11Device,
-    ID3D11DeviceContext, ID3D11Multithread, ID3D11Texture2D, ID3D11VideoContext1, ID3D11VideoDevice,
-    ID3D11VideoProcessor, ID3D11VideoProcessorEnumerator, ID3D11VideoProcessorInputView,
-    ID3D11VideoProcessorOutputView,
+    D3D11_VPIV_DIMENSION_TEXTURE2D, D3D11_VPOV_DIMENSION_TEXTURE2DARRAY, ID3D11Device, ID3D11DeviceContext,
+    ID3D11Multithread, ID3D11Texture2D, ID3D11VideoContext1, ID3D11VideoDevice, ID3D11VideoProcessor,
+    ID3D11VideoProcessorEnumerator, ID3D11VideoProcessorInputView, ID3D11VideoProcessorOutputView,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709, DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709, DXGI_COLOR_SPACE_TYPE,
     DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709, DXGI_COLOR_SPACE_YCBCR_STUDIO_G2084_LEFT_P2020, DXGI_FORMAT,
     DXGI_RATIONAL,
 };
-use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIAdapter, IDXGIAdapter1, IDXGIFactory1};
 use windows::core::Interface;
 
 /// The types the GPU path exchanges, for callers that do not depend on `windows` themselves.
@@ -86,38 +84,9 @@ fn view<V: Clone>(
 /// A D3D11 device on the adapter of `vendor_id` (the encoder's GPU) or the default adapter, with video support and
 /// multithread protection (capture and encoder threads share it).
 pub fn create_device(vendor_id: Option<u32>) -> Result<(ID3D11Device, ID3D11DeviceContext), D3dError> {
-    let adapter: Option<IDXGIAdapter> = vendor_id.and_then(|vendor| {
-        // SAFETY: plain DXGI enumeration; every call is checked.
-        let factory: IDXGIFactory1 = unsafe { CreateDXGIFactory1() }.ok()?;
-        (0..)
-            // SAFETY: `factory` is live; the index runs until the enumeration reports the end.
-            .map_while(|i| unsafe { factory.EnumAdapters1(i) }.ok())
-            .find(|a: &IDXGIAdapter1| {
-                // SAFETY: `a` is a live adapter.
-                unsafe { a.GetDesc1() }.is_ok_and(|d| d.VendorId == vendor)
-            })
-            .and_then(|a| a.cast().ok())
-    });
-    let mut device = None;
-    let mut context = None;
+    let adapter = vendor_id.and_then(|vendor| vixeeny_platform::d3d::adapter(vendor, 0));
     let flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT;
-    // SAFETY: out-pointers are valid; the adapter (when given) outlives the call.
-    unsafe {
-        D3D11CreateDevice(
-            adapter.as_ref(),
-            if adapter.is_some() { D3D_DRIVER_TYPE_UNKNOWN } else { D3D_DRIVER_TYPE_HARDWARE },
-            HMODULE::default(),
-            flags,
-            None,
-            D3D11_SDK_VERSION,
-            Some(&raw mut device),
-            None,
-            Some(&raw mut context),
-        )
-    }
-    .map_err(call("D3D11CreateDevice"))?;
-    let device = device.ok_or(D3dError::Missing("no D3D11 device"))?;
-    let context = context.ok_or(D3dError::Missing("no D3D11 context"))?;
+    let (device, context) = vixeeny_platform::d3d::device(adapter.as_ref(), D3D_DRIVER_TYPE_HARDWARE, flags)?;
     if let Ok(mt) = device.cast::<ID3D11Multithread>() {
         // SAFETY: a live interface of the device.
         let _ = unsafe { mt.SetMultithreadProtected(true) };
