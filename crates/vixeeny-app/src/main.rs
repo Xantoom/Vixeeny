@@ -705,7 +705,7 @@ fn run() -> anyhow::Result<()> {
             return probe::warm();
         }
         // The recording widget, a process of its own (see `widget`).
-        Some("--widget") => return widget::run_child(&args[1..]),
+        Some("--widget") => return widget::run_child(&config, &args[1..]),
         // The settings window and gallery, a process of its own (see `settings`).
         Some("--settings") => return settings::run_child(config, &args[1..]),
         // A notification card (see `toast`).

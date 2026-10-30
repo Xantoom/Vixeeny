@@ -92,7 +92,7 @@ impl Drop for Widget {
 
 /// `--widget <x> <y> <width> <height> <always|fade|alerts> <dpi> <across> <down>`: the widget process (`across`,
 /// `down`: where it is on the screen, 0 left or top to 1 right or bottom).
-pub fn run_child(args: &[String]) -> anyhow::Result<()> {
+pub fn run_child(config: &vixeeny_common::config::Config, args: &[String]) -> anyhow::Result<()> {
     use std::rc::Rc;
     use vixeeny_overlay::widget::{Display, Widget as Bar, WidgetEvent};
 
@@ -106,11 +106,8 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
     let anchor = (fraction(6), fraction(7));
 
     vixeeny_platform::ensure_dpi_aware();
-    let config = vixeeny_common::paths::config_file()
-        .and_then(|p| vixeeny_common::config::Config::load(&p).ok())
-        .unwrap_or_default();
     let look = vixeeny_overlay::Look::new(
-        crate::dark(&config),
+        crate::dark(config),
         vixeeny_platform::system_accent(),
         vixeeny_platform::animations_enabled(),
     );
