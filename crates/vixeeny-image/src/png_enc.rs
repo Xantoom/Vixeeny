@@ -263,6 +263,33 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_filter_chosen_is_the_one_whose_bytes_add_up_to_the_least() {
+        let mut seed = 0x9e37_79b9_u32;
+        let mut byte = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            (seed >> 8) as u8
+        };
+        for (n, bpp) in [(3, 3), (6, 3), (33, 3), (300, 3), (6, 6), (600, 6)] {
+            for smooth in [false, true] {
+                let mut row = |k: usize| -> Vec<u8> {
+                    (0..n).map(|i| if smooth { (i * (k + 1)) as u8 / 4 } else { byte() }).collect()
+                };
+                let (up, cur) = (row(1), row(2));
+                let mut out = vec![0; n];
+                let cost = |kind: u8, out: &mut Vec<u8>| -> u64 {
+                    apply(kind, &cur, &up, bpp, out);
+                    out.iter().map(|&v| u64::from(v.cast_signed().unsigned_abs())).sum()
+                };
+                let costs: Vec<u64> = (0..5).map(|kind| cost(kind, &mut out)).collect();
+                let least = costs.iter().position(|c| c == costs.iter().min().unwrap()).unwrap() as u8;
+                assert_eq!(best_filter(&cur, &up, bpp), least, "{n} bytes, {bpp} a pixel, smooth {smooth}");
+            }
+        }
+    }
+
+    #[test]
     fn adler_of_pieces_is_the_adler_of_the_whole() {
         let data: Vec<u8> = (0..200_000u32).map(|i| (i * 7 % 251) as u8).collect();
         let adler = |d: &[u8]| {
