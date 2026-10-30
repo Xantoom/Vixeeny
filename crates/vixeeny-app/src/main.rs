@@ -718,7 +718,7 @@ fn run() -> anyhow::Result<()> {
         // The daily update check, and the installation (see `update`).
         Some("--update") => return update::run_child(&args[1..]),
         // What changed, at the first start after an update (see `whats_new`).
-        Some("--whats-new") => return whats_new::run_child(config),
+        Some("--whats-new") => return whats_new::run_child(&config),
         // The administrator's rights (see `admin`).
         Some("--admin") => return admin::run_child(&args[1..]),
         Some("--system-info") => {
