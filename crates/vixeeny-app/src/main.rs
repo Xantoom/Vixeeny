@@ -210,7 +210,8 @@ fn direct_capture(
     }
     let path = match result {
         Some(result) => result?,
-        None => {
+        // Vixeeny's own windows in the picture as the settings say (as in the held screens).
+        None => vixeeny_platform::own_windows::while_captured(image_settings.show_own_windows, || {
             let mut backend = capture_backend::Lent::take()?;
             let mut result = run(&mut *backend);
             if backend.kept
@@ -224,8 +225,8 @@ fn direct_capture(
             if matches!(result, Err(still::StillError::Capture(_))) {
                 backend.discard();
             }
-            result?
-        }
+            anyhow::Ok(result?)
+        })?,
     };
     tracing::info!("screenshot taken in {:?}", started.elapsed());
     let thumb = thumb.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -797,12 +798,15 @@ fn run() -> anyhow::Result<()> {
                 continue;
             }
             // Frozen while another action runs: they would hide it, and the action that waits for its turn captures the
-            // screen itself.
-            if let DaemonToApp::RunAction { frozen, .. } = &mut msg
+            // screen itself (Vixeeny's own windows go on meanwhile).
+            if let DaemonToApp::RunAction { action, frozen } = &mut msg
                 && BUSY.load(std::sync::atomic::Ordering::Acquire)
                 && let Some(frozen) = frozen.take()
             {
                 vixeeny_capture::freeze::release(&frozen);
+                if action.freezes_screen() {
+                    vixeeny_platform::own_windows::hold(false);
+                }
             }
             if tx.send(Wake::Daemon(msg)).is_err() {
                 break;
@@ -862,8 +866,8 @@ fn run() -> anyhow::Result<()> {
             // Idle for long enough: the memory goes back to the system.
             Err(RecvTimeoutError::Timeout) => {
                 ipc::write_msg(&mut send, &AppToDaemon::Idle)?;
-                // An action the daemon sent before it read `Idle` (a shortcut pressed then, the screens frozen for
-                // it) is still this process's to run; it stays if the action keeps it busy.
+                // An action the daemon sent before it read `Idle` (a shortcut pressed then, the screens frozen for it)
+                // is still this process's to run; it stays if the action keeps it busy.
                 let mut ran = false;
                 while let Ok(Wake::Daemon(DaemonToApp::RunAction { action, frozen })) = rx.recv_timeout(IDLE_GRACE) {
                     if let Some(fresh) = Config::read_current() {

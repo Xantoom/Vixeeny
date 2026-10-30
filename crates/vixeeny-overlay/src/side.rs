@@ -912,8 +912,8 @@ impl SidePanel {
         let theme = Theme::new(Look::new(state.dark, vixeeny_platform::system_accent(), state.animate));
         let entries = entries(texts, state);
         let layout = StripLayout::new(state.edge, &entries, dpi, (geometry.width, geometry.height));
-        // Never in a capture: nor in a recording, a replay or a screen share.
-        let popup = Popup::new(&gfx, geometry, Focus::Take, Capture::Hidden)?;
+        // Out of captures unless the settings want Vixeeny's windows in them.
+        let popup = Popup::new(&gfx, geometry, Focus::Take, Capture::Own)?;
         let strip = Piece::new(&gfx, true)?;
         scene::add(&popup.root, &strip.visual)?;
         let tip = Piece::new(&gfx, true)?;

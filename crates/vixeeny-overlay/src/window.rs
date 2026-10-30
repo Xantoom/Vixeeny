@@ -115,6 +115,9 @@ pub enum Capture {
     Shown,
     /// Left out of every screen capture from its creation (Windows 10 2004 or later).
     Hidden,
+    /// One of Vixeeny's floating windows (a notification card, the side bar, the recording bar): left out of screen
+    /// captures unless the settings want them in (see [`vixeeny_platform::own_windows`]).
+    Own,
 }
 
 /// A cloaked, hidden popup over `geometry` (physical pixels).
@@ -127,10 +130,18 @@ pub fn create_popup(proc: WndProc, geometry: PhysicalRect, focus: Focus, capture
         Focus::Never => WS_EX_NOACTIVATE,
     };
     let hwnd = popup_window(POPUP_CLASS, ex, geometry)?;
-    if capture == Capture::Hidden {
-        // SAFETY: plain call on the window just created.
-        if let Err(e) = unsafe { SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE) } {
-            tracing::error!("a window cannot be excluded from the capture: {e}");
+    match capture {
+        Capture::Shown => {}
+        Capture::Hidden => {
+            // SAFETY: plain call on the window just created.
+            if let Err(e) = unsafe { SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE) } {
+                tracing::error!("a window cannot be excluded from the capture: {e}");
+            }
+        }
+        Capture::Own => {
+            if !vixeeny_platform::own_windows::mark(hwnd.0 as isize) {
+                tracing::error!("a window cannot be excluded from the capture");
+            }
         }
     }
     Ok(hwnd)

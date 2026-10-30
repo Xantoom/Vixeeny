@@ -466,6 +466,8 @@ struct Card {
     leaving: Cell<Option<Option<ToastEvent>>>,
     /// Its time is up while the pointer is on it: it goes when the pointer leaves.
     expired: Cell<bool>,
+    /// A zone capture shows it frozen with the screen: its time stands still until the capture is done.
+    held: Cell<bool>,
     #[cfg(test)]
     refreshes: Cell<usize>,
 }
@@ -628,7 +630,8 @@ impl Shared {
         self.go_out(id, card, true, None);
     }
 
-    /// Takes the card `id` off the screen (see [`Card::go_out`]), or finishes with it at once when that cannot be shown.
+    /// Takes the card `id` off the screen (see [`Card::go_out`]), or finishes with it at once when that cannot be
+    /// shown.
     fn go_out(&self, id: u64, card: &Card, clicked: bool, event: Option<ToastEvent>) {
         let shown = card.go_out(&self.gfx, clicked).unwrap_or_else(|e| {
             tracing::warn!("notification: {e}");
@@ -656,6 +659,13 @@ impl Shared {
         let gfx = &self.gfx;
         let (x, y) = popup::point(lparam);
         let mut look = card.look.get();
+        if msg == vixeeny_platform::own_windows::hold_message() {
+            let held = wparam.0 != 0;
+            if card.held.replace(held) != held && !card.expired.get() {
+                card.set_timer(gfx, !held);
+            }
+            return Some(LRESULT(0));
+        }
         match msg {
             WM_TIMER if wparam.0 == LIFETIME_TIMER => {
                 // SAFETY: plain timer call on a window of this thread.
@@ -804,9 +814,8 @@ impl Toasts {
         let layout = CardLayout::new(gfx, content, dpi)?;
         let u = layout.u;
         let (x, y) = corner(work, layout.size, (12.0 * u) as u32, content.place);
-        // Never in a capture or a recording: the card is about them, not part of them.
-        let popup =
-            Popup::new(gfx, PhysicalRect::new(x, y, layout.size.0, layout.size.1), Focus::Never, Capture::Hidden)?;
+        // Out of captures and recordings unless the settings want Vixeeny's windows in them.
+        let popup = Popup::new(gfx, PhysicalRect::new(x, y, layout.size.0, layout.size.1), Focus::Never, Capture::Own)?;
         let piece = Piece::new(gfx, true)?;
         scene::add(&popup.root, &piece.visual)?;
         let bitmap = |picture: &Option<RgbaImage>| match picture {
@@ -856,6 +865,7 @@ impl Toasts {
             animate,
             leaving: Cell::new(None),
             expired: Cell::new(false),
+            held: Cell::new(false),
             #[cfg(test)]
             refreshes: Cell::new(0),
         });
@@ -921,6 +931,29 @@ mod tests {
         toasts.shared.message(id, popup::WM_MOUSELEAVE, WPARAM(0), LPARAM(0));
         assert!(done.get());
         assert!(toasts.is_empty());
+    }
+
+    #[test]
+    fn a_held_card_stays_until_it_is_let_go() {
+        let toasts = Toasts::new().expect("devices");
+        toasts
+            .show(
+                &ToastContent { heading: "Test".into(), ..Default::default() },
+                PhysicalRect::new(0, 0, 800, 600),
+                96,
+                false,
+                |_| {},
+            )
+            .expect("card");
+        let (id, card) = toasts.shared.current.borrow().as_ref().expect("current").clone();
+        let hold = vixeeny_platform::own_windows::hold_message();
+        toasts.shared.message(id, hold, WPARAM(1), LPARAM(0));
+        assert!(card.held.get());
+        // Twice: still held, nothing restarted.
+        toasts.shared.message(id, hold, WPARAM(1), LPARAM(0));
+        toasts.shared.message(id, hold, WPARAM(0), LPARAM(0));
+        assert!(!card.held.get() && !card.expired.get());
+        assert!(!toasts.is_empty());
     }
 
     #[test]

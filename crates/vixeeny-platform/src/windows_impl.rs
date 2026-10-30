@@ -351,7 +351,7 @@ pub fn window_shown(id: WindowId) -> bool {
     is_capturable(hwnd) && !unsafe { IsIconic(hwnd) }.as_bool()
 }
 
-fn is_capturable(hwnd: HWND) -> bool {
+pub(crate) fn is_capturable(hwnd: HWND) -> bool {
     // SAFETY: simple queries on a window handle; stale handles just return false/errors.
     unsafe {
         if !IsWindowVisible(hwnd).as_bool() {

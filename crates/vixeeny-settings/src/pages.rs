@@ -325,6 +325,15 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
                 |c, v| c.image.region.show_cursor = v,
             ),
         ];
+        // A window's picture or a scrolled page has none of them.
+        if matches!(kind, ImageKind::Region | ImageKind::Fullscreen | ImageKind::AllMonitors) {
+            profile.push(toggle(
+                "image_own_windows",
+                t(Key::SetShowOwnWindows),
+                |c| c.image.region.show_own_windows,
+                |c, v| c.image.region.show_own_windows = v,
+            ));
+        }
         if kind == ImageKind::Window {
             profile.extend(backdrop_rows(env, &view).into_iter().filter(|r| !matches!(r.kind, Kind::Header)));
         }
@@ -828,6 +837,12 @@ fn video_settings(env: &Env, config: &Config, replay: bool) -> Vec<Row> {
         |c, v| c.video.fps = v.parse().unwrap_or(60),
     ));
     rows.push(toggle("video_cursor", t(Key::SetShowCursor), |c| c.video.show_cursor, |c, v| c.video.show_cursor = v));
+    rows.push(toggle(
+        "video_own_windows",
+        t(Key::SetShowOwnWindows),
+        |c| c.video.show_own_windows,
+        |c, v| c.video.show_own_windows = v,
+    ));
 
     // ---- the encoder
     rows.push(header("h_encoder", t(Key::GrpEncoding)));

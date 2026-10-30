@@ -852,6 +852,8 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
         if plan.window.is_some() { ", one window" } else { "" },
         options.join(" ")
     );
+    // Vixeeny's own windows in the pictures while it runs, when the settings want them.
+    let own_windows = plan.notice.video.show_own_windows.then(vixeeny_platform::own_windows::InCaptures::new);
     // The recording's time zero: video and audio timestamps are relative to it.
     let origin = vixeeny_platform::monotonic_ns();
     // Frames the GPU path could not hand over: lost, like those the encoder refuses.
@@ -964,6 +966,7 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
             sources.as_ref(),
         );
         drop(stream);
+        drop(own_windows);
         drop(keep_alive);
         thread_state.store(IDLE, Ordering::Release);
         changed();

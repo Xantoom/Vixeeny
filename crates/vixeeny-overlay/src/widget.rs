@@ -739,9 +739,8 @@ impl Inner {
         let centre = POINT { x: i32::midpoint(bar.left, bar.right), y: i32::midpoint(bar.top, bar.bottom) };
         let work = popup::work_area_at(centre).unwrap_or(bar);
         let (x, y) = tip_origin(bar, anchor, tip.size, work);
-        // Never in the video either.
-        let popup =
-            Popup::new(&self.gfx, PhysicalRect::new(x, y, tip.size.0, tip.size.1), Focus::Never, Capture::Hidden)?;
+        // In the video as the bar is.
+        let popup = Popup::new(&self.gfx, PhysicalRect::new(x, y, tip.size.0, tip.size.1), Focus::Never, Capture::Own)?;
         let piece = Piece::new(&self.gfx, false)?;
         scene::add(&popup.root, &piece.visual)?;
         piece.move_to(0.0, 0.0)?;
@@ -888,8 +887,8 @@ impl Widget {
     pub fn new(geometry: PhysicalRect, anchor: (f32, f32), dpi: u32, look: Look, display: Display) -> Result<Self> {
         let gfx = Gfx::shared()?;
         let u = dpi.max(48) as f32 / 96.0;
-        // Never in the video, never stealing the keyboard.
-        let popup = Popup::new(&gfx, geometry, Focus::Never, Capture::Hidden)?;
+        // Out of the video unless the settings want Vixeeny's windows in it; never stealing the keyboard.
+        let popup = Popup::new(&gfx, geometry, Focus::Never, Capture::Own)?;
         let group = scene::visual(&gfx)?;
         // SAFETY: plain creation and property calls on objects of this device.
         let (effect, scale) = unsafe {

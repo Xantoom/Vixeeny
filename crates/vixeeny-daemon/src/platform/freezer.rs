@@ -7,7 +7,9 @@ use std::time::Instant;
 use vixeeny_capture::freeze::{self, Gpu};
 use vixeeny_common::ipc::Frozen;
 
-use crate::runtime::Freezer;
+use vixeeny_platform::own_windows;
+
+use crate::runtime::{Freezer, Grab};
 
 pub struct GpuFreezer {
     gpu: Option<Gpu>,
@@ -24,8 +26,9 @@ impl GpuFreezer {
     }
 
     /// Freezes (`show`) or holds the screens; a second try on a new device when the old one was lost (driver update,
-    /// sleep).
-    fn take(&mut self, show: bool, cursor: bool) -> Option<Frozen> {
+    /// sleep). Vixeeny's own windows are pictured as the capture's settings say; frozen, they stand still until the app
+    /// is done with the zone.
+    fn take(&mut self, show: bool, grab: Grab) -> Option<Frozen> {
         if freeze::is_active() {
             return None;
         }
@@ -37,10 +40,18 @@ impl GpuFreezer {
                 self.gpu = Self::device();
             }
             let gpu = self.gpu.as_ref()?;
-            let taken =
-                if show { freeze::freeze(gpu, &monitors, cursor) } else { freeze::hold(gpu, &monitors, cursor) };
+            let taken = own_windows::while_captured(grab.own_windows, || {
+                if show {
+                    freeze::freeze(gpu, &monitors, grab.cursor)
+                } else {
+                    freeze::hold(gpu, &monitors, grab.cursor)
+                }
+            });
             match taken {
                 Ok(frozen) => {
+                    if show {
+                        own_windows::hold(true);
+                    }
                     tracing::debug!(
                         "{} screen(s) {} in {:?}",
                         frozen.screens.len(),
@@ -61,15 +72,21 @@ impl GpuFreezer {
 }
 
 impl Freezer for GpuFreezer {
-    fn freeze(&mut self, cursor: bool) -> Option<Frozen> {
-        self.take(true, cursor)
+    fn freeze(&mut self, grab: Grab) -> Option<Frozen> {
+        self.take(true, grab)
     }
 
-    fn hold(&mut self, cursor: bool) -> Option<Frozen> {
-        self.take(false, cursor)
+    fn hold(&mut self, grab: Grab) -> Option<Frozen> {
+        self.take(false, grab)
     }
 
+    /// No app took the frozen screens: Vixeeny's own windows go on too.
     fn thaw(&mut self) {
         freeze::thaw();
+        own_windows::hold(false);
+    }
+
+    fn app_gone(&mut self) {
+        own_windows::reset();
     }
 }

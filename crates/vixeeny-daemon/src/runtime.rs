@@ -60,24 +60,39 @@ pub trait HotkeyBackend {
     fn apply(&mut self, bindings: &[(ActionId, Hotkey)]) -> Vec<(Hotkey, String)>;
 }
 
+/// What the frozen screens picture besides the desktop: the settings of the capture asked for.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Grab {
+    pub cursor: bool,
+    /// Vixeeny's notification cards, side bar and recording bar.
+    pub own_windows: bool,
+}
+
+impl Grab {
+    fn of(image: &vixeeny_common::config::Image) -> Self {
+        Self { cursor: image.show_cursor, own_windows: image.show_own_windows }
+    }
+}
+
 /// Freezes the screens the moment a zone capture is asked for (see `vixeeny_capture::freeze`); the app takes over from
 /// the frozen screens.
 pub trait Freezer {
     /// `None` when the screens cannot be frozen, or already are.
-    fn freeze(&mut self, _cursor: bool) -> Option<Frozen>;
-    /// The screens captured for the app without being shown (with the pointer when `cursor`), as
-    /// [`freeze`](Self::freeze) otherwise.
-    fn hold(&mut self, _cursor: bool) -> Option<Frozen> {
+    fn freeze(&mut self, _grab: Grab) -> Option<Frozen>;
+    /// The screens captured for the app without being shown, as [`freeze`](Self::freeze) otherwise.
+    fn hold(&mut self, _grab: Grab) -> Option<Frozen> {
         None
     }
     fn thaw(&mut self);
+    /// The app is gone: what it asked of Vixeeny's own windows ends with it.
+    fn app_gone(&mut self) {}
 }
 
 /// No freezing: the app captures the screens itself.
 pub struct NoFreeze;
 
 impl Freezer for NoFreeze {
-    fn freeze(&mut self, _cursor: bool) -> Option<Frozen> {
+    fn freeze(&mut self, _grab: Grab) -> Option<Frozen> {
         None
     }
     fn thaw(&mut self) {}
@@ -285,20 +300,23 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
     /// The screens freeze before anything else happens for a zone capture, and are held for a full-screen one; they go
     /// when the app that should take over from them is gone (the app itself removes them otherwise).
     fn freeze_or_thaw(&mut self, event: &Event) {
+        if matches!(event, Event::AppDisconnected) {
+            self.freezer.app_gone();
+        }
         match *event {
             Event::Action(action) | Event::Control(ControlRequest::Action(action)) if action.holds_screen() => {
                 // Screens of an earlier press no action took: not this one's.
                 if self.frozen.is_some() && self.frozen_for.is_none() {
                     self.thaw();
                 }
-                if let Some(frozen) = self.freezer.hold(self.config.image.for_action(action).show_cursor) {
+                if let Some(frozen) = self.freezer.hold(Grab::of(&self.config.image.for_action(action))) {
                     self.frozen = Some(frozen);
                     self.frozen_for = None;
                 }
             }
             Event::Action(action) | Event::Control(ControlRequest::Action(action)) if action.freezes_screen() => {
                 // `None` while earlier frozen screens are still up: they serve this press.
-                if let Some(frozen) = self.freezer.freeze(self.config.image.for_action(action).show_cursor) {
+                if let Some(frozen) = self.freezer.freeze(Grab::of(&self.config.image.for_action(action))) {
                     self.frozen = Some(frozen);
                     self.frozen_for = None;
                 }
@@ -651,12 +669,12 @@ mod tests {
         log: Arc<Mutex<Vec<&'static str>>>,
     }
     impl Freezer for FakeFreezer {
-        fn freeze(&mut self, _cursor: bool) -> Option<Frozen> {
+        fn freeze(&mut self, _grab: Grab) -> Option<Frozen> {
             self.log.lock().unwrap().push("freeze");
             Some(Frozen { adapter: 1, screens: Vec::new() })
         }
-        fn hold(&mut self, cursor: bool) -> Option<Frozen> {
-            self.log.lock().unwrap().push(if cursor { "hold with cursor" } else { "hold" });
+        fn hold(&mut self, grab: Grab) -> Option<Frozen> {
+            self.log.lock().unwrap().push(if grab.cursor { "hold with cursor" } else { "hold" });
             Some(Frozen { adapter: 1, screens: Vec::new() })
         }
         fn thaw(&mut self) {

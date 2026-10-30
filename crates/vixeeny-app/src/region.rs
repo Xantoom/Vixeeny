@@ -74,8 +74,8 @@ fn annotated_hdr(session: &Session, exported: &RgbaImage, desktop: &HdrCapture) 
         return None;
     }
     let gain = desktop.info.sdr_white_nits / 80.0;
-    // Annotation channels are bytes: decode each possible value once, rather than evaluating the transfer
-    // function three times for every changed pixel of a large selection.
+    // Annotation channels are bytes: decode each possible value once, rather than evaluating the transfer function
+    // three times for every changed pixel of a large selection.
     let linear: [f32; 256] = std::array::from_fn(|v| srgb_decode(v as f32 / 255.0) * gain);
     let mut rgba = Vec::with_capacity(r.w * r.h * 4);
     for y in 0..r.h {
@@ -397,8 +397,8 @@ struct LivePart {
 struct LiveStream {
     monitor: vixeeny_platform::MonitorId,
     part: LivePart,
-    /// A static desktop may never send another frame when only the crop changes. Keep its latest full monitor.
-    /// Dropped before the stream, so a retained pool frame does not delay pool shutdown.
+    /// A static desktop may never send another frame when only the crop changes. Keep its latest full monitor. Dropped
+    /// before the stream, so a retained pool frame does not delay pool shutdown.
     latest: Option<std::sync::Arc<std::sync::Mutex<vixeeny_capture::HeldFrame>>>,
     stream: vixeeny_capture::VideoStream,
     changed: bool,
@@ -420,6 +420,7 @@ struct LiveScreens {
     origin: (i32, i32),
     keep_hdr: bool,
     show_cursor: bool,
+    own_windows: bool,
     /// The HDR picture exported along (see [`output_command`]).
     hdr: std::rc::Rc<std::cell::RefCell<Option<HdrCapture>>>,
     /// Each monitor followed: where the part followed is in the editor's image, where it is in the monitor's picture,
@@ -429,7 +430,7 @@ struct LiveScreens {
 
 impl vixeeny_overlay::Screens for LiveScreens {
     fn grab(&self) -> Option<RgbaImage> {
-        match grab_screens(&self.monitors, self.keep_hdr, self.show_cursor) {
+        match grab_screens(&self.monitors, self.keep_hdr, self.show_cursor, self.own_windows) {
             Ok((picture, hdr)) => {
                 *self.hdr.borrow_mut() = hdr;
                 Some(picture)
@@ -528,8 +529,18 @@ impl vixeeny_overlay::Screens for LiveScreens {
     }
 }
 
-/// A picture of every screen (HDR screens tone-mapped), and with `keep_hdr` the same as HDR.
+/// A picture of every screen (HDR screens tone-mapped), and with `keep_hdr` the same as HDR; Vixeeny's own windows in
+/// it as `own_windows` says.
 fn grab_screens(
+    monitors: &[MonitorInfo],
+    keep_hdr: bool,
+    show_cursor: bool,
+    own_windows: bool,
+) -> anyhow::Result<(RgbaImage, Option<HdrCapture>)> {
+    vixeeny_platform::own_windows::while_captured(own_windows, || grab_all(monitors, keep_hdr, show_cursor))
+}
+
+fn grab_all(
     monitors: &[MonitorInfo],
     keep_hdr: bool,
     show_cursor: bool,
@@ -571,6 +582,8 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
     let started = Instant::now();
     tracing::debug!("zone capture ({mode:?}) starting{}", if frozen.is_some() { " on the frozen screens" } else { "" });
     let thaw = std::rc::Rc::new(Thaw(std::cell::RefCell::new(frozen)));
+    // Vixeeny's notifications and bars stand still with the frozen screens.
+    let held = vixeeny_platform::own_windows::Held::new();
     vixeeny_platform::ensure_dpi_aware();
     let monitors = vixeeny_platform::monitors()?;
     let cursor = vixeeny_platform::cursor_position()?;
@@ -584,6 +597,7 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
     });
     let keep_hdr = crate::keep_hdr(image_settings);
     let show_cursor = image_settings.show_cursor;
+    let own_windows = image_settings.show_own_windows;
     let from_daemon = thaw.0.borrow().as_ref().and_then(|frozen| {
         frozen_desktop(frozen, &monitors, bounds, keep_hdr)
             .map_err(|e| tracing::warn!("frozen screens not used: {e:#}"))
@@ -591,7 +605,7 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
     });
     let (base, hdr) = match from_daemon {
         Some(desktop) => desktop,
-        None => grab_screens(&monitors, keep_hdr, show_cursor)?,
+        None => grab_screens(&monitors, keep_hdr, show_cursor, own_windows)?,
     };
     tracing::debug!("screen read ({}x{}) after {:?}", base.width, base.height, started.elapsed());
 
@@ -664,6 +678,7 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
             origin: (bounds.x, bounds.y),
             keep_hdr,
             show_cursor,
+            own_windows,
             hdr: live_hdr,
             streams: std::cell::RefCell::default(),
         });
@@ -684,6 +699,7 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
     let result = overlay.run(cursor);
     *OPEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     drop(thaw);
+    drop(held);
     result.map_err(|e| anyhow::anyhow!("editor window: {e}"))?;
     if let Some(zone) = scroll_zone.take() {
         let zone = vixeeny_platform::PhysicalRect::new(

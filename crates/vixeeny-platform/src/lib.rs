@@ -17,6 +17,7 @@ pub use time::{local_time, os_version, utc_offset_minutes};
 
 pub mod machine;
 pub mod ocr;
+pub mod own_windows;
 mod windows_impl;
 pub use windows_impl::{
     APP_ID, GameWindows, InstanceGuard, OutsideClicks, allow_foreground_handoff, animations_enabled, attach_console,

@@ -49,6 +49,9 @@ fn key(hwnd: HWND) -> isize {
 }
 
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if vixeeny_platform::own_windows::handle(hwnd.0 as isize, msg, wparam.0) {
+        return LRESULT(0);
+    }
     // Cloned out of the map: a handler may open or close popups.
     let handler = HANDLERS.with(|h| h.borrow().get(&key(hwnd)).cloned());
     if let Some(handler) = handler

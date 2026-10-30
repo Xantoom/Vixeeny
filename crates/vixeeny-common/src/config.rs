@@ -658,6 +658,8 @@ pub struct Image {
     pub template: String,
     pub format: String,
     pub show_cursor: bool,
+    /// Vixeeny's notification cards, side bar and recording bar in the picture (they are left out otherwise).
+    pub show_own_windows: bool,
     pub hdr: String,
     pub copy_to_clipboard: bool,
     pub keep_copy: bool,
@@ -685,6 +687,7 @@ impl Default for Image {
             template: Naming::default().template,
             format: "jpeg".into(),
             show_cursor: false,
+            show_own_windows: false,
             hdr: "tonemap_sdr".into(),
             copy_to_clipboard: true,
             keep_copy: true,
@@ -806,6 +809,8 @@ pub struct Video {
     /// Those of the other encoders, by encoder id: back when that encoder is chosen again.
     pub params_by_encoder: BTreeMap<String, BTreeMap<String, String>>,
     pub show_cursor: bool,
+    /// Vixeeny's notification cards, side bar and recording bar in the video (they are left out otherwise).
+    pub show_own_windows: bool,
     /// Variable frame rate (Matroska and WebM only).
     pub vfr: bool,
     pub split: Split,
@@ -830,6 +835,7 @@ impl Default for Video {
             params: BTreeMap::new(),
             params_by_encoder: BTreeMap::new(),
             show_cursor: false,
+            show_own_windows: false,
             vfr: false,
             split: Split::default(),
             audio: Audio::default(),
