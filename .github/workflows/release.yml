@@ -51,58 +51,38 @@ jobs:
     if: needs.version.outputs.build == 'true' || needs.version.outputs.warm == 'true'
     runs-on: windows-latest
     env:
-      FFMPEG_DIR: ${{ github.workspace }}\native\build\work\ffmpeg-prebuilt
       LIBCLANG_PATH: C:\Program Files\LLVM\bin
+      PKG_CONFIG_PATH: ${{ github.workspace }}\native\build\work\prefix\lib\pkgconfig
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
-        with:
-          toolchain: 1.99.1
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: native-cache
         with:
           path: native/build/work
           key: native-windows-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}
           restore-keys: native-windows-
-      - name: Tools (Inno Setup, pkg-config)
-        shell: pwsh
+      - uses: ./.github/actions/setup
+      - name: Tools (Inno Setup, pkg-config, and nasm for libjpeg-turbo's SIMD when the cache has no libraries)
         run: |
           # The image usually has Inno Setup: only what is missing is installed.
           $missing = @()
           if (-not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) { $missing += "innosetup" }
           if (-not (Test-Path "C:\ProgramData\chocolatey\bin\pkg-config.exe")) { $missing += "pkgconfiglite" }
+          if ("${{ steps.native-cache.outputs.cache-hit }}" -ne "true") { $missing += "nasm" }
           if ($missing) { choco install @missing -y --no-progress }
           "C:\ProgramData\chocolatey\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
-          "$env:FFMPEG_DIR\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
-          "C:\Program Files (x86)\Inno Setup 6" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
-      # Only to build the native libraries (libjpeg-turbo's SIMD), which the cache usually holds.
-      - name: Tools (nasm)
-        if: steps.native-cache.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: |
-          choco install nasm -y --no-progress
           "C:\Program Files\NASM" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: ffmpeg
-          path: native/build/work
+          "C:\Program Files (x86)\Inno Setup 6" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
       - run: cargo xtask build-native
       # One invocation: the crates the programs share are built once, side by side with the rest.
       - name: Build the programs
-        shell: pwsh
-        run: |
-          $env:PKG_CONFIG_PATH = "${{ github.workspace }}\native\build\work\prefix\lib\pkgconfig"
-          cargo build --release -p vixeeny-daemon -p xtask -p vixeeny-app --features vixeeny-app/native-codecs
+        run: cargo build --release -p vixeeny-daemon -p xtask -p vixeeny-app --features vixeeny-app/native-codecs
       # The release build of xtask, built above: its compression is many times faster.
       - name: Package (stage, update archive, portable archive)
         if: needs.version.outputs.build == 'true'
-        shell: pwsh
         run: target\release\xtask.exe dist --out dist
       - name: Installer
         if: needs.version.outputs.build == 'true'
-        shell: pwsh
         run: |
           $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"').Matches[0].Groups[1].Value
           iscc "/DAppVersion=$version" "/DStageDir=$PWD\dist\stage" "/DOutDir=$PWD\dist" packaging\windows\vixeeny.iss
@@ -136,7 +116,6 @@ jobs:
           name: xtask
           path: xtask
       - name: Idle smoke test (20 s)
-        shell: pwsh
         run: |
           Expand-Archive (Get-Item dist\*-portable.zip).FullName -DestinationPath app
           xtask\xtask.exe bench-idle --seconds 20 --daemon app\Vixeeny.exe
