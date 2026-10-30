@@ -5,8 +5,9 @@ use windows::Win32::Foundation::{E_FAIL, HMODULE};
 use windows::Win32::Graphics::Direct3D::Fxc::{D3DCOMPILE_OPTIMIZATION_LEVEL3, D3DCompile};
 use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE, D3D_DRIVER_TYPE_UNKNOWN, ID3DBlob};
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_FLAG, D3D11_SDK_VERSION, D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE2D_DESC,
-    D3D11_USAGE_DEFAULT, D3D11_USAGE_STAGING, D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
+    D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_FLAG, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE, D3D11_SDK_VERSION,
+    D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, D3D11_USAGE_STAGING, D3D11CreateDevice,
+    ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
 };
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT, DXGI_SAMPLE_DESC};
 use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIAdapter, IDXGIAdapter1, IDXGIFactory1};
@@ -118,6 +119,26 @@ pub fn device(
     }
     .map_err(call("D3D11CreateDevice"))?;
     Ok((device.ok_or(D3dError::Missing("no D3D11 device"))?, context.ok_or(D3dError::Missing("no D3D11 context"))?))
+}
+
+/// Calls `read` with the rows of `staging` (`height` of them, the stride apart) once the graphics card has written
+/// them, and gives back what it returns.
+pub fn read_staging<T>(
+    context: &ID3D11DeviceContext,
+    staging: &ID3D11Texture2D,
+    height: u32,
+    read: impl FnOnce(&[u8], usize) -> T,
+) -> Result<T, D3dError> {
+    let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+    // SAFETY: a staging texture with CPU read access; `mapped` is a valid out-pointer.
+    unsafe { context.Map(staging, 0, D3D11_MAP_READ, 0, Some(&raw mut mapped)) }.map_err(call("Map"))?;
+    let stride = mapped.RowPitch as usize;
+    // SAFETY: a mapped texture exposes `RowPitch × Height` readable bytes until `Unmap`.
+    let rows = unsafe { std::slice::from_raw_parts(mapped.pData.cast::<u8>(), stride * height as usize) };
+    let out = read(rows, stride);
+    // SAFETY: matches the successful `Map` above.
+    unsafe { context.Unmap(staging, 0) };
+    Ok(out)
 }
 
 /// A staging texture the processor reads a copy of `texture` from: its format, and its size or `size`.

@@ -19,9 +19,9 @@ use windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;
 use windows::Graphics::DirectX::DirectXPixelFormat;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HLOCAL, HWND, LPARAM, LRESULT, LUID, LocalFree, WPARAM};
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE,
-    D3D11_RESOURCE_MISC_SHARED, D3D11_RESOURCE_MISC_SHARED_NTHANDLE, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT,
-    ID3D11Device, ID3D11Device1, ID3D11DeviceContext, ID3D11Texture2D,
+    D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_RESOURCE_MISC_SHARED,
+    D3D11_RESOURCE_MISC_SHARED_NTHANDLE, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, ID3D11Device, ID3D11Device1,
+    ID3D11DeviceContext, ID3D11Texture2D,
 };
 use windows::Win32::Graphics::Dwm::{DWMWA_CLOAK, DWMWA_TRANSITIONS_FORCEDISABLED, DwmFlush, DwmSetWindowAttribute};
 use windows::Win32::Graphics::Dxgi::Common::{
@@ -602,16 +602,8 @@ pub fn read_with(
             }
         }
         for (screen, rows, staging) in staged {
-            let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-            // SAFETY: a staging texture with CPU read access; `mapped` is a valid out-pointer.
-            unsafe { context.Map(&staging, 0, D3D11_MAP_READ, 0, Some(&raw mut mapped)) }.map_err(os("Map"))?;
-            let stride = mapped.RowPitch as usize;
-            // SAFETY: a mapped texture exposes `RowPitch * Height` readable bytes until `Unmap`.
-            let data =
-                unsafe { std::slice::from_raw_parts(mapped.pData.cast::<u8>(), stride * screen.height as usize) };
-            each(screen, rows, data, stride);
-            // SAFETY: matches the successful Map above.
-            unsafe { context.Unmap(&staging, 0) };
+            let read = |data: &[u8], stride| each(screen, rows, data, stride);
+            vixeeny_platform::d3d::read_staging(&context, &staging, screen.height, read)?;
         }
         Ok(())
     })();

@@ -17,8 +17,8 @@ use windows::Graphics::DirectX::DirectXPixelFormat;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11_BOX, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE,
-    D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION, D3D11_TEXTURE2D_DESC, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
+    D3D11_BOX, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION, D3D11_TEXTURE2D_DESC,
+    ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::Graphics::Dxgi::{IDXGIAdapter, IDXGIDevice};
@@ -94,16 +94,8 @@ impl WgcBackend {
                 Ok(())
             })?;
         }
-        let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-        // SAFETY: the staging texture has CPU read access; `mapped` is a valid out-pointer.
-        unsafe { self.context.Map(&staging, 0, D3D11_MAP_READ, 0, Some(&raw mut mapped)) }.map_err(os("Map"))?;
-        let stride = mapped.RowPitch as usize;
-        // SAFETY: a mapped texture exposes `RowPitch * Height` readable bytes until `Unmap`.
-        let rows = unsafe { std::slice::from_raw_parts(mapped.pData.cast::<u8>(), stride * bounds.height as usize) };
-        let result = read(bounds.width, bounds.height, rows, stride);
-        // SAFETY: matches the successful Map above.
-        unsafe { self.context.Unmap(&staging, 0) };
-        Ok(result)
+        let rows = |rows: &[u8], stride| read(bounds.width, bounds.height, rows, stride);
+        Ok(vixeeny_platform::d3d::read_staging(&self.context, &staging, bounds.height, rows)?)
     }
 
     /// Whether the device is gone (a driver update or reset): a new backend is needed.
@@ -341,15 +333,8 @@ pub(crate) fn map(
     width: u32,
     height: u32,
 ) -> Result<RawFrame, CaptureError> {
-    let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-    // SAFETY: the staging texture has CPU read access; `mapped` is a valid out-pointer.
-    unsafe { context.Map(staging, 0, D3D11_MAP_READ, 0, Some(&raw mut mapped)) }.map_err(os("Map"))?;
-    let stride = mapped.RowPitch as usize;
-    // SAFETY: a mapped texture exposes `RowPitch * Height` readable bytes until `Unmap`.
-    let bytes = unsafe { std::slice::from_raw_parts(mapped.pData.cast::<u8>(), stride * height as usize) };
-    let data = bytes.to_vec();
-    // SAFETY: matches the successful Map above.
-    unsafe { context.Unmap(staging, 0) };
+    let (data, stride) =
+        vixeeny_platform::d3d::read_staging(context, staging, height, |rows, stride| (rows.to_vec(), stride))?;
     Ok(RawFrame { width, height, stride, data })
 }
 

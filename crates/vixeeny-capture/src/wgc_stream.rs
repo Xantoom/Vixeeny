@@ -22,8 +22,7 @@ use windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;
 use windows::Graphics::DirectX::DirectXPixelFormat;
 use windows::Graphics::SizeInt32;
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11_BOX, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE, D3D11_TEXTURE2D_DESC, ID3D11Device, ID3D11DeviceContext,
-    ID3D11Texture2D,
+    D3D11_BOX, D3D11_TEXTURE2D_DESC, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
 };
 use windows::Win32::System::WinRT::Direct3D11::IDirect3DDxgiInterfaceAccess;
 use windows::core::{IInspectable, Interface};
@@ -174,16 +173,11 @@ impl Shared {
         // SAFETY: both textures belong to this device; the box lies inside the source (it was clamped to the content
         // size) and the destination has exactly its size.
         unsafe { context.CopySubresourceRegion(staging, 0, 0, 0, 0, texture, 0, Some(&raw const source)) };
-        let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-        // SAFETY: the staging texture has CPU read access; `mapped` is a valid out-pointer.
-        unsafe { context.Map(staging, 0, D3D11_MAP_READ, 0, Some(&raw mut mapped)) }.map_err(os("Map"))?;
-        let stride = mapped.RowPitch as usize;
-        // SAFETY: a mapped texture exposes `RowPitch * Height` readable bytes until `Unmap`.
-        let pixels = unsafe { std::slice::from_raw_parts(mapped.pData.cast::<u8>(), stride * h as usize) };
-        let mut data = self.buffers.take(pixels.len());
-        data.extend_from_slice(pixels);
-        // SAFETY: matches the successful Map above.
-        unsafe { context.Unmap(staging, 0) };
+        let (data, stride) = vixeeny_platform::d3d::read_staging(&context, staging, h, |pixels, stride| {
+            let mut data = self.buffers.take(pixels.len());
+            data.extend_from_slice(pixels);
+            (data, stride)
+        })?;
         CpuFrame::from_raw(w, h, stride, data)
     }
 }

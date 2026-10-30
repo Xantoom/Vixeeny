@@ -26,10 +26,7 @@ use windows::Win32::Graphics::Direct2D::{
     ID2D1RenderTarget, ID2D1SolidColorBrush,
 };
 use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE, D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP};
-use windows::Win32::Graphics::Direct3D11::{
-    D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE,
-    D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING, ID3D11Device, ID3D11Texture2D,
-};
+use windows::Win32::Graphics::Direct3D11::{D3D11_CREATE_DEVICE_BGRA_SUPPORT, ID3D11Device, ID3D11Texture2D};
 use windows::Win32::Graphics::DirectComposition::{
     DCompositionCreateDevice2, IDCompositionDesktopDevice, IDCompositionSurface,
 };
@@ -541,35 +538,24 @@ impl Gfx {
 /// The pixels of `bitmap` (`bytes` per pixel), rows packed. Read through Direct3D, whose `Map` waits for the copy:
 /// Direct2D's could hand over rows the copy had not written yet (seen on the software renderer under load).
 pub(crate) fn read_back(bitmap: &ID2D1Bitmap1, (w, h): (u32, u32), bytes: usize) -> Result<Vec<u8>> {
-    // SAFETY: a staging copy of the bitmap's own texture, on its device; the mapped memory is read within
-    // `Map`/`Unmap`, row by row within `RowPitch × h`.
-    unsafe {
+    // SAFETY: plain calls on the bitmap's own texture and a staging copy of it, on its device.
+    let (_texture, context, staging) = unsafe {
         let texture: ID3D11Texture2D = bitmap.GetSurface()?.cast()?;
         let device = texture.GetDevice()?;
         let context = device.GetImmediateContext()?;
-        let mut desc = D3D11_TEXTURE2D_DESC::default();
-        texture.GetDesc(&mut desc);
-        desc.Usage = D3D11_USAGE_STAGING;
-        desc.BindFlags = 0;
-        desc.MiscFlags = 0;
-        desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
-        let mut staging = None;
-        device.CreateTexture2D(&desc, None, Some(&raw mut staging))?;
-        let staging = staging.ok_or_else(|| windows::core::Error::from(windows::Win32::Foundation::E_FAIL))?;
+        let staging = vixeeny_platform::d3d::staging_for(&device, &texture, None)?;
         context.CopyResource(&staging, &texture);
-        let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-        context.Map(&staging, 0, D3D11_MAP_READ, 0, Some(&raw mut mapped))?;
-        let row = w as usize * bytes;
+        (texture, context, staging)
+    };
+    let row = w as usize * bytes;
+    let packed = |rows: &[u8], stride: usize| {
         let mut out = Vec::with_capacity(row * h as usize);
         for y in 0..h as usize {
-            out.extend_from_slice(std::slice::from_raw_parts(
-                mapped.pData.cast::<u8>().add(y * mapped.RowPitch as usize),
-                row,
-            ));
+            out.extend_from_slice(&rows[y * stride..][..row]);
         }
-        context.Unmap(&staging, 0);
-        Ok(out)
-    }
+        out
+    };
+    Ok(vixeeny_platform::d3d::read_staging(&context, &staging, h, packed)?)
 }
 
 /// Laid out text and its size, in pixels.

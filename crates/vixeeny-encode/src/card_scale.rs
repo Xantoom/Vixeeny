@@ -7,8 +7,7 @@
 use ffmpeg_next::ffi;
 use windows::Win32::Foundation::RECT;
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11_BIND_RENDER_TARGET, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE, ID3D11Device, ID3D11DeviceContext,
-    ID3D11Texture2D,
+    D3D11_BIND_RENDER_TARGET, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709, DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020, DXGI_COLOR_SPACE_TYPE,
@@ -18,7 +17,7 @@ use windows::Win32::Graphics::Dxgi::Common::{
 };
 use windows::core::Interface;
 
-use vixeeny_platform::d3d::{D3dError, call, texture};
+use vixeeny_platform::d3d::{D3dError, texture};
 
 use crate::cut::ToneMap;
 use crate::d3d_convert::VideoConverter;
@@ -122,12 +121,8 @@ impl CardScaler {
             let whole = RECT { left: 0, top: 0, right: src.0 as i32, bottom: src.1 as i32 };
             converter.convert_slice(&source, slice, whole, target, 0)?;
             context.CopyResource(staging, target);
-            let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-            context.Map(staging, 0, D3D11_MAP_READ, 0, Some(&raw mut mapped)).map_err(call("Map"))?;
             let (w, h) = (size.0 as usize, size.1 as usize);
-            let stride = mapped.RowPitch as usize;
-            let rows = std::slice::from_raw_parts(mapped.pData.cast::<u8>(), stride * h);
-            match tone {
+            vixeeny_platform::d3d::read_staging(&context, staging, size.1, |rows, stride| match tone {
                 Some(tone) => tone.run_with::<4>(rows, stride, (w, h), bgra, |px| {
                     let v = u32::from_le_bytes(*px);
                     // 10-bit codes, made 16-bit.
@@ -139,9 +134,7 @@ impl CardScaler {
                         out.copy_from_slice(&rows[row * stride..][..w * 4]);
                     }
                 }
-            }
-            context.Unmap(staging, 0);
-            Ok(())
+            })
         }
     }
 }
