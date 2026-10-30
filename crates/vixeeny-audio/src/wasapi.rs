@@ -837,6 +837,8 @@ fn run(kind: &SourceKind, max_channels: usize, mut sink: Box<dyn AudioSink>, sto
                     ended => ended,
                 }
             }
+            // An application not running (yet): as one that closed, it is waited for without a word.
+            Err(AudioError::Unavailable(_)) if matches!(kind, SourceKind::Application(_)) => Ended::Exited,
             Err(e) => Ended::Lost(e.to_string()),
         };
         if !lost {
