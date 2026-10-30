@@ -9,7 +9,7 @@ inputs:
 runs:
   using: composite
   steps:
-    # The installed libraries, their stamps (a library whose stamp matches is not built again) and pkg-config: 30 MB,
+    # The installed libraries, their stamps (a library whose stamp matches is not built again) and pkg-config: 11 MB,
     # where their sources and build folders are 600 MB more, which a build only needs when it changes.
     - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       if: inputs.native == 'true'
