@@ -91,6 +91,11 @@ fn the_toolbar_buttons_answer_clicks() {
 
 const WM_CHAR: u32 = 0x0102;
 const VK_RETURN: usize = 0x0d;
+const VK_BACK: usize = 0x08;
+const VK_LEFT: usize = 0x25;
+const VK_HOME: usize = 0x24;
+const VK_END: usize = 0x23;
+const VK_DELETE: usize = 0x2e;
 
 /// Buttons of the bar (see `layout::BUTTONS`).
 const PEN: usize = 2;
@@ -139,7 +144,11 @@ fn text_is_typed_into_the_zone() {
     let (l, out) = (log.clone(), shared.clone());
     let overlay = Overlay::on_screens(session(), 1.0, &[screen], Look::default(), move |c, s| {
         l.borrow_mut().push((c, s.zone()));
-        *out.borrow_mut() = Some(s.editor().doc.items.len());
+        let first = s.editor().doc.items.first().and_then(|i| match &i.annotation {
+            vixeeny_editor::Annotation::Text { text, .. } => Some(text.clone()),
+            _ => None,
+        });
+        *out.borrow_mut() = Some((s.editor().doc.items.len(), first));
         true
     })
     .expect("overlay")
@@ -153,6 +162,10 @@ fn text_is_typed_into_the_zone() {
     for c in "Hé ✓".encode_utf16() {
         post(hwnd, WM_CHAR, usize::from(c), 0);
     }
+    // Editing keys: the last character goes, then the first.
+    for vk in [VK_BACK, VK_LEFT, VK_HOME, VK_DELETE, VK_END] {
+        post(hwnd, WM_KEYDOWN, vk, 0);
+    }
     post(hwnd, WM_KEYDOWN, VK_RETURN, 0);
     // A second text, validated by clicking elsewhere.
     post(hwnd, WM_LBUTTONDOWN, 1, at(300, 300));
@@ -165,7 +178,7 @@ fn text_is_typed_into_the_zone() {
     post(hwnd, WM_CLOSE, 0, 0);
     overlay.run((10, 10)).expect("ran");
     assert_eq!(log.borrow()[0].0, Command::Close);
-    assert_eq!(*shared.borrow(), Some(2));
+    assert_eq!(*shared.borrow(), Some((2, Some("é ".to_owned()))));
 }
 
 #[test]

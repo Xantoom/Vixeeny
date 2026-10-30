@@ -1169,24 +1169,29 @@ impl Shared {
                 drop(ui);
                 self.commit_text();
             }
-            VK_BACK if caret > 0 => {
-                ui.text.replace_range(prev..caret, "");
-                ui.caret = prev;
-            }
-            VK_DELETE if caret < ui.text.len() => {
-                ui.text.replace_range(caret..next, "");
-            }
-            VK_LEFT => ui.caret = prev,
-            VK_RIGHT => ui.caret = next,
-            VK_HOME => ui.caret = 0,
-            VK_END => ui.caret = ui.text.len(),
             _ => {
-                let _ = ctrl;
-                return;
+                match vk {
+                    VK_BACK if caret > 0 => {
+                        ui.text.replace_range(prev..caret, "");
+                        ui.caret = prev;
+                    }
+                    VK_DELETE if caret < ui.text.len() => {
+                        ui.text.replace_range(caret..next, "");
+                    }
+                    VK_LEFT => ui.caret = prev,
+                    VK_RIGHT => ui.caret = next,
+                    VK_HOME => ui.caret = 0,
+                    VK_END => ui.caret = ui.text.len(),
+                    _ => {
+                        let _ = ctrl;
+                        return;
+                    }
+                }
+                // The caret shows at once where it went (it blinks again from there).
+                ui.caret_on = true;
+                // Released before the refresh, which reads it.
+                drop(ui);
             }
-        }
-        if let Ok(mut ui) = self.ui.try_borrow_mut() {
-            ui.caret_on = true;
         }
         self.refresh();
     }
