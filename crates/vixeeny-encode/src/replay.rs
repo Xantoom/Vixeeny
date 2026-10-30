@@ -172,15 +172,21 @@ impl Segment {
         self.lock().map_or(0, |i| i.flushed + i.pending.len() as u64)
     }
 
-    fn read(&self, offset: u64, len: usize) -> io::Result<Vec<u8>> {
+    fn read_into(&self, offset: u64, data: &mut [u8]) -> io::Result<()> {
         let mut inner = self.lock()?;
-        if offset + len as u64 > inner.flushed {
-            inner.flush()?;
+        let end = offset.checked_add(data.len() as u64).ok_or_else(|| io::Error::other("packet offset overflow"))?;
+        if end > inner.flushed + inner.pending.len() as u64 {
+            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "packet exceeds replay segment"));
         }
-        inner.file.seek(SeekFrom::Start(offset))?;
-        let mut data = vec![0; len];
-        inner.file.read_exact(&mut data)?;
-        Ok(data)
+        let disk = inner.flushed.saturating_sub(offset).min(data.len() as u64) as usize;
+        if disk > 0 {
+            inner.file.seek(SeekFrom::Start(offset))?;
+            inner.file.read_exact(&mut data[..disk])?;
+        }
+        let pending = (offset + disk as u64).saturating_sub(inner.flushed) as usize;
+        let rest = data.len() - disk;
+        data[disk..].copy_from_slice(&inner.pending[pending..pending + rest]);
+        Ok(())
     }
 }
 
@@ -235,8 +241,14 @@ impl Held {
         match self {
             Self::Ram(p) => Ok(share(p)),
             Self::Disk(d) => {
-                let data = d.segment.read(d.offset, d.len)?;
-                let mut packet = Packet::copy(&data);
+                let mut packet = Packet::new(d.len);
+                if d.len > 0 {
+                    let data = packet
+                        .data_mut()
+                        .filter(|data| data.len() == d.len)
+                        .ok_or_else(|| io::Error::other("cannot allocate replay packet"))?;
+                    d.segment.read_into(d.offset, data)?;
+                }
                 packet.set_pts(d.pts);
                 packet.set_dts(d.dts);
                 packet.set_duration(d.duration);
@@ -457,6 +469,50 @@ impl Ring {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reading_pending_and_split_packets_does_not_flush_the_live_segment() {
+        let base = scratch("read-without-flush");
+        std::fs::create_dir_all(&base).unwrap();
+        let segment = Segment::create(base.join("segment.bin")).unwrap();
+        segment.append(&[1, 2, 3, 4]).unwrap();
+        let mut data = [0; 3];
+        segment.read_into(1, &mut data).unwrap();
+        assert_eq!(data, [2, 3, 4]);
+        assert_eq!(segment.lock().unwrap().flushed, 0);
+        segment.lock().unwrap().flush().unwrap();
+        segment.append(&[5, 6, 7, 8]).unwrap();
+        segment.read_into(3, &mut data).unwrap();
+        assert_eq!(data, [4, 5, 6]);
+        segment.read_into(0, &mut data).unwrap();
+        assert_eq!(data, [1, 2, 3]);
+        assert_eq!(segment.lock().unwrap().flushed, 4);
+        assert_eq!(segment.lock().unwrap().pending, [5, 6, 7, 8]);
+        assert!(segment.read_into(7, &mut data).is_err());
+        assert!(segment.read_into(u64::MAX, &mut data).is_err());
+        drop(segment);
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn an_empty_disk_packet_preserves_its_metadata() {
+        let base = scratch("empty-packet");
+        let mut ring = Ring::with_storage(10, 0, &Storage::Disk(base.clone()));
+        let mut original = Packet::empty();
+        original.set_flags(ffmpeg_next::codec::packet::Flags::KEY);
+        original.set_pts(Some(42));
+        original.set_dts(Some(40));
+        original.set_duration(2);
+        ring.push_video(0, &original);
+        let snapshot = ring.snapshot(10).unwrap();
+        let loaded = snapshot.video[0].1.load().unwrap();
+        assert_eq!(loaded.size(), 0);
+        assert_eq!((loaded.pts(), loaded.dts(), loaded.duration()), (Some(42), Some(40), 2));
+        assert!(loaded.is_key());
+        drop(snapshot);
+        drop(ring);
+        let _ = std::fs::remove_dir_all(base);
+    }
 
     #[test]
     fn the_size_of_a_replay_decides_where_it_is_kept() {

@@ -74,6 +74,15 @@ pub enum Shown {
 pub trait StillBackend {
     /// The whole monitor, physical pixels.
     fn grab_monitor(&mut self, monitor: &MonitorInfo, cursor: bool) -> Result<CpuFrame, CaptureError>;
+    /// A region of an SDR monitor; GPU backends can read back only these pixels.
+    fn grab_monitor_region(
+        &mut self,
+        monitor: &MonitorInfo,
+        rect: &PhysicalRect,
+        cursor: bool,
+    ) -> Result<CpuFrame, CaptureError> {
+        self.grab_monitor(monitor, cursor)?.crop(rect)
+    }
     /// The whole monitor as scRGB floats. Only called for monitors with `hdr` set. `area` (relative to the monitor)
     /// limits it to a part, read alone: a zone captured 15 times a second converts only its own pixels.
     fn grab_monitor_hdr(
@@ -300,7 +309,7 @@ impl<B: StillBackend> Capturer<B> {
                 if let (Some(info), Some(tonemap)) = (monitor.hdr, options.tonemap) {
                     return self.backend.grab_monitor_sdr(&monitor, Some(rect), options.show_cursor, &info, tonemap);
                 }
-                self.backend.grab_monitor(&monitor, options.show_cursor)?.crop(rect)
+                self.backend.grab_monitor_region(&monitor, rect, options.show_cursor)
             }
             CaptureTarget::Window(id) => match (self.window_hdr(*id), options.tonemap) {
                 (Some(info), Some(tonemap)) => self.backend.grab_window_sdr(*id, options.show_cursor, &info, tonemap),

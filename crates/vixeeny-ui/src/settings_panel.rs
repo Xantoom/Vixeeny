@@ -67,7 +67,12 @@ fn show_update(w: &SettingsWindow, view: &UpdateView) {
     w.set_update_progress(view.progress);
     w.set_update_action(view.action.as_str().into());
     w.set_update_notes_title(view.notes_title.as_str().into());
-    w.set_update_notes(ModelRc::from(Rc::new(VecModel::from(view.notes.clone()))));
+    let current = w.get_update_notes();
+    let same = current.row_count() == view.notes.len()
+        && current.iter().zip(&view.notes).all(|(a, b)| a.kind == b.kind && a.level == b.level && a.text == b.text);
+    if !same {
+        w.set_update_notes(ModelRc::from(Rc::new(VecModel::from(view.notes.clone()))));
+    }
 }
 
 /// A key press while a shortcut is being recorded.
@@ -822,6 +827,9 @@ impl SettingsPanel {
 
     /// What the monitors can show (HDR, refresh rate): the video page offers what fits.
     pub fn set_display(&self, display: Display) {
+        if self.state.display.get() == display {
+            return;
+        }
         self.state.display.set(display);
         self.rebuild_env();
         self.refresh();
@@ -829,6 +837,9 @@ impl SettingsPanel {
 
     /// Where Vixeeny is with the administrator's rights: the general page offers them.
     pub fn set_admin(&self, admin: Admin) {
+        if self.state.admin.get() == admin {
+            return;
+        }
         self.state.admin.set(admin);
         self.rebuild_env();
         self.refresh();
@@ -893,6 +904,9 @@ impl SettingsPanel {
     }
 
     pub fn set_audio(&self, audio: AudioDevices) {
+        if *self.state.audio.borrow() == audio {
+            return;
+        }
         *self.state.audio.borrow_mut() = audio;
         self.rebuild_env();
         self.refresh();

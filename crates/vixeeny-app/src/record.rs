@@ -1123,6 +1123,7 @@ fn record_loop(
             Ok(Ctl::TogglePause) if save_as.is_some() => {}
             Ok(Ctl::TogglePause) => {
                 paused = !paused;
+                stream.set_paused(paused);
                 if paused {
                     paused_since = now();
                 } else {

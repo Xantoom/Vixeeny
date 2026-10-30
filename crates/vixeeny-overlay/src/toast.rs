@@ -466,10 +466,14 @@ struct Card {
     leaving: Cell<Option<Option<ToastEvent>>>,
     /// Its time is up while the pointer is on it: it goes when the pointer leaves.
     expired: Cell<bool>,
+    #[cfg(test)]
+    refreshes: Cell<usize>,
 }
 
 impl Card {
     fn refresh(&self, gfx: &Gfx) {
+        #[cfg(test)]
+        self.refreshes.set(self.refreshes.get() + 1);
         let look = self.look.get();
         let size = self.layout.size;
         let drawn = self
@@ -768,8 +772,9 @@ impl Shared {
             _ => return None,
         }
         look.held = card.press.get().filter(|p| look.hover == Some(*p));
-        card.look.set(look);
-        card.refresh(gfx);
+        if card.look.replace(look) != look {
+            card.refresh(gfx);
+        }
         Some(LRESULT(0))
     }
 }
@@ -864,6 +869,8 @@ impl Toasts {
             animate,
             leaving: Cell::new(None),
             expired: Cell::new(false),
+            #[cfg(test)]
+            refreshes: Cell::new(0),
         });
         let id = shared.count.get() + 1;
         shared.count.set(id);
@@ -899,6 +906,35 @@ impl Toasts {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repeated_hover_keeps_an_expired_card_until_the_pointer_leaves() {
+        let toasts = Toasts::new().expect("devices");
+        let done = Rc::new(Cell::new(false));
+        let notified = done.clone();
+        toasts
+            .show(
+                &ToastContent { heading: "Test".into(), ..Default::default() },
+                PhysicalRect::new(0, 0, 800, 600),
+                96,
+                false,
+                move |_| notified.set(true),
+            )
+            .expect("card");
+        let (id, card) = toasts.shared.current.borrow().as_ref().expect("current").clone();
+        let before = card.refreshes.get();
+        for _ in 0..100 {
+            toasts.shared.message(id, WM_MOUSEMOVE, WPARAM(0), LPARAM(20 | (20 << 16)));
+        }
+        assert_eq!(card.refreshes.get() - before, 1, "only the first hover changes the card");
+        assert!(card.look.get().hovered);
+        toasts.shared.message(id, WM_TIMER, WPARAM(LIFETIME_TIMER), LPARAM(0));
+        assert!(card.expired.get());
+        assert!(!done.get());
+        toasts.shared.message(id, popup::WM_MOUSELEAVE, WPARAM(0), LPARAM(0));
+        assert!(done.get());
+        assert!(toasts.is_empty());
+    }
 
     #[test]
     fn the_card_sits_at_its_place() {

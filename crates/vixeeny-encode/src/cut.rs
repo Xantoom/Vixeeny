@@ -8,6 +8,7 @@
 //! the encoder of the replay and the audio copied.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use ffmpeg_next::format::Pixel;
@@ -46,7 +47,7 @@ pub struct Clip {
     /// The time base of the video stream.
     pub time_base: Rational,
     /// Every frame, in presentation order.
-    pub frames: Vec<Frame>,
+    pub frames: Arc<[Frame]>,
     pub audio_tracks: usize,
     /// The video's codec: `h264`, `hevc`, `av1`, `vp9` ([`Family::name`](crate::registry::Family::name)), or FFmpeg's
     /// name of another one.
@@ -180,7 +181,7 @@ impl Clip {
             height,
             rate: if rate.0 > 0 && rate.1 > 0 { rate } else { Rational(60, 1) },
             time_base,
-            frames,
+            frames: frames.into(),
             audio_tracks,
             codec,
             hdr,
@@ -316,7 +317,6 @@ impl Scaler {
     fn run(&mut self, src: &frame::Video, size: (u32, u32), mut bgra: Vec<u8>) -> Result<Picture, RecordError> {
         let (w, h) = (size.0.max(2), size.1.max(2));
         let len = w as usize * h as usize * 4;
-        bgra.clear();
         bgra.resize(len, 0);
         if self.tone.is_some() {
             // To 16-bit RGB, still BT.2020 and PQ (nothing converted but the matrix), then tone mapped here.
@@ -479,44 +479,44 @@ impl ToneMap {
         bgra: &mut [u8],
         codes: impl Fn(&[u8; N]) -> [u16; 3] + Sync,
     ) {
-        let threads = std::thread::available_parallelism().map_or(4, std::num::NonZero::get);
+        use rayon::prelude::*;
+        let threads = if w * h < 1 << 16 { 1 } else { rayon::current_num_threads().min(8) };
         let rows = h.div_ceil(threads).max(1);
         let codes = &codes;
         let pixels = |chunk: usize, r: usize| data[(chunk * rows + r) * stride..][..w * N].as_chunks::<N>().0.iter();
-        let brightest = std::thread::scope(|s| {
-            let parts: Vec<_> = (0..h.div_ceil(rows))
-                .map(|chunk| {
-                    s.spawn(move || {
-                        let mut top = 0.0_f32;
-                        for r in 0..rows.min(h - chunk * rows) {
-                            for px in pixels(chunk, r) {
-                                let y = colour::luminance(self.light(codes(px)));
-                                if y.is_finite() {
-                                    top = top.max(y);
-                                }
-                            }
-                        }
-                        top
-                    })
-                })
-                .collect();
-            parts.into_iter().filter_map(|p| p.join().ok()).fold(0.0, f32::max)
-        });
+        let brightest_part = |chunk| {
+            let mut top = 0.0_f32;
+            for r in 0..rows.min(h - chunk * rows) {
+                for px in pixels(chunk, r) {
+                    let y = colour::luminance(self.light(codes(px)));
+                    if y.is_finite() {
+                        top = top.max(y);
+                    }
+                }
+            }
+            top
+        };
+        let brightest = if threads == 1 {
+            brightest_part(0)
+        } else {
+            (0..h.div_ceil(rows)).into_par_iter().map(brightest_part).reduce(|| 0.0, f32::max)
+        };
         let target = colour::headroom(brightest, self.display);
         let before = f32::from_bits(self.followed.load(Ordering::Relaxed));
         let headroom = colour::follow(before, target, self.steps);
         self.followed.store(headroom.to_bits(), Ordering::Relaxed);
-        std::thread::scope(|s| {
-            for (chunk, out) in bgra.chunks_mut(rows * w * 4).enumerate() {
-                s.spawn(move || {
-                    for (r, line) in out.chunks_exact_mut(w * 4).enumerate() {
-                        for (px, dst) in pixels(chunk, r).zip(line.as_chunks_mut::<4>().0) {
-                            *dst = self.pixel(codes(px), headroom);
-                        }
-                    }
-                });
+        let map_part = |chunk, out: &mut [u8]| {
+            for (r, line) in out.chunks_exact_mut(w * 4).enumerate() {
+                for (px, dst) in pixels(chunk, r).zip(line.as_chunks_mut::<4>().0) {
+                    *dst = self.pixel(codes(px), headroom);
+                }
             }
-        });
+        };
+        if threads == 1 {
+            map_part(0, bgra);
+        } else {
+            bgra.par_chunks_mut(rows * w * 4).enumerate().for_each(|(chunk, out)| map_part(chunk, out));
+        }
     }
 }
 
@@ -766,7 +766,6 @@ impl Pictures {
             return Err(bgra);
         };
         let (w, h) = (size.0.max(2), size.1.max(2));
-        bgra.clear();
         bgra.resize(w as usize * h as usize * 4, 0);
         // SAFETY: the frame was just decoded by the card (`hw_frames_ctx` checked by the caller).
         let done = unsafe { card.run(self.decoded.as_ptr(), (w, h), &mut bgra, self.scaler.tone.as_ref()) };
@@ -1510,6 +1509,59 @@ mod tests {
             sdr_white_nits: REFERENCE_WHITE,
             video: 0,
         }
+    }
+
+    #[test]
+    fn cloned_clips_share_the_immutable_frame_index() {
+        let original = clip(&[(0, true, 0), (1, false, 1), (2, false, 2)]);
+        let worker = original.clone();
+        assert!(Arc::ptr_eq(&original.frames, &worker.frames));
+        assert_eq!(original.time(2), worker.time(2));
+        drop(original);
+        assert_eq!(worker.frames[2].pts, 2);
+    }
+
+    #[test]
+    fn reused_preview_pixels_match_fresh_buffers_across_size_changes() {
+        ffmpeg_next::init().unwrap();
+        let mut src = frame::Video::new(Pixel::BGRA, 64, 48);
+        for px in src.data_mut(0).as_chunks_mut::<4>().0 {
+            *px = [17, 89, 133, 255];
+        }
+        let mut scaler = Scaler::new(None).unwrap();
+        let mut buffer = vec![0x79; 64 * 48 * 4];
+        for size in [(64, 48), (32, 24), (64, 48)] {
+            let reused = scaler.run(&src, size, buffer).unwrap();
+            let fresh = Scaler::new(None).unwrap().run(&src, size, Vec::new()).unwrap();
+            assert_eq!(reused.bgra, fresh.bgra);
+            buffer = reused.bgra;
+            buffer.fill(0x79);
+        }
+    }
+
+    #[test]
+    fn hdr_preview_is_identical_with_one_or_multiple_pool_workers() {
+        let (w, h) = (257, 259);
+        let stride = w * 6 + 14;
+        let mut data = vec![0xff; stride * h];
+        for y in 0..h {
+            for x in 0..w {
+                for c in 0..3 {
+                    let value = (10_000 + (x * 71 + y * 37 + c * 7919) % 50_000) as u16;
+                    let at = y * stride + x * 6 + c * 2;
+                    data[at..at + 2].copy_from_slice(&value.to_le_bytes());
+                }
+            }
+        }
+        let render = |threads| {
+            let tone = ToneMap::new(240.0, 1000.0, 60.0);
+            let mut output = vec![0; w * h * 4];
+            rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap().install(|| {
+                tone.run(&data, stride, w, h, &mut output);
+            });
+            output
+        };
+        assert_eq!(render(1), render(4));
     }
 
     #[test]

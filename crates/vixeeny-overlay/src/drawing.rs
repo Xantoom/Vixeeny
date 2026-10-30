@@ -80,6 +80,7 @@ fn letters_key(a: &Annotation) -> Option<(Annotation, (f32, f32))> {
 
 /// What the drawing was last made from: the layers, the picture of the screens, live or not.
 type Made = (usize, u64, u64, bool);
+type Layers = std::rc::Rc<Vec<Annotation>>;
 
 pub struct Drawing {
     /// Whole-image pixels: x, y, width, height.
@@ -100,6 +101,8 @@ pub struct Drawing {
     letters: Vec<(Annotation, Option<Letters>)>,
     stroke: ID2D1StrokeStyle1,
     made: Option<Made>,
+    /// Area-local annotations, retained across live screen feeds; the source Rc also keeps cache identity valid.
+    translated: Option<(Layers, Layers)>,
     /// Changes each time the result is drawn again, and differs from every other drawing's: a drawing made anew (the
     /// area moved or grew) is never taken for the one before.
     pub version: u64,
@@ -262,6 +265,7 @@ impl Drawing {
             letters: Vec::new(),
             stroke,
             made: None,
+            translated: None,
             version: next_version(),
         })
     }
@@ -333,16 +337,25 @@ impl Drawing {
             return Ok(());
         }
         self.made = None;
-        self.compose(gfx, layers, live)?;
+        let local = match &self.translated {
+            Some((source, local)) if std::rc::Rc::ptr_eq(source, layers) => local.clone(),
+            _ => {
+                let (ax, ay, _, _) = self.area;
+                let local: Layers =
+                    std::rc::Rc::new(layers.iter().map(|a| a.translated(-(ax as f32), -(ay as f32))).collect());
+                self.make_letters(gfx, &local)?;
+                self.translated = Some((layers.clone(), local.clone()));
+                local
+            }
+        };
+        self.compose(gfx, &local, live)?;
         self.made = Some(made);
         self.version = next_version();
         Ok(())
     }
 
     fn compose(&mut self, gfx: &Gfx, layers: &[Annotation], live: bool) -> Result<()> {
-        let (ax, ay, w, h) = self.area;
-        let layers: Vec<Annotation> = layers.iter().map(|a| a.translated(-(ax as f32), -(ay as f32))).collect();
-        self.make_letters(gfx, &layers)?;
+        let (_, _, w, h) = self.area;
         let dc = &gfx.dc;
         let uses_below = layers
             .iter()
@@ -384,7 +397,7 @@ impl Drawing {
         })?;
         // Consecutive annotations drawn plainly share one drawing.
         let mut plain: Vec<&Annotation> = Vec::new();
-        for a in &layers {
+        for a in layers {
             let below = match a {
                 Annotation::Blur { rect, .. } | Annotation::Pixelate { rect, .. } => {
                     effect_rect(rect, w, h).map(|r| (r, a))
@@ -457,7 +470,7 @@ impl Drawing {
         }
         self.draw_plain(dc, &mut plain)?;
         if live {
-            self.make_mask(gfx, &layers, w, h)?;
+            self.make_mask(gfx, layers, w, h)?;
         }
         Ok(())
     }

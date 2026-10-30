@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Notifications: a card with the thumbnail after a capture, a recording or a replay, and a clear message with a way
 //! out when something fails. The cards are shown by a process of their own (`vixeeny-app --toast-host`), so they never
-//! hold up the next hotkey. It is started once and reads the next cards on its standard input: a card costs no new
-//! process. It ends with the process that started it (its input closes), once its card is gone. A capture's thumbnail
+//! render on the action thread. Pipe delivery can still apply backpressure. The host reads the next cards on its
+//! standard input: subsequent cards reuse the process. It ends with the process that started it (its input closes),
+//! once its card is gone. A capture's thumbnail
 //! goes along, made from the picture in memory: the card process does not read the file again.
 
 use std::path::PathBuf;
@@ -241,7 +242,7 @@ pub type Thumb = vixeeny_editor::RgbaImage;
 /// The largest side of a thumbnail sent to the card process.
 const MAX_THUMB_SIDE: u32 = 1024;
 
-/// Shows the card, unless the user turned notifications off. Never blocks.
+/// Shows the card, unless the user turned notifications off. Pipe delivery can block if the host is behind.
 pub fn notify(config: &Config, toast: &Toast) {
     notify_with(config, toast, None);
 }
@@ -377,43 +378,52 @@ fn decode_line(line: &str) -> Option<(Toast, Option<(u32, u32)>)> {
     Some((Toast::from_args(kind, &text)?, thumb))
 }
 
-/// What the card shows, in the current language and theme; `thumb`, the capture's thumbnail when it came along (else it
-/// is made from the file).
+/// Reuses supplied pixels, otherwise decodes a media file once at the size needed by its card.
+fn thumbnail_for(
+    toast: &Toast,
+    supplied: Option<Thumb>,
+    load: impl FnOnce(&std::path::Path, u32) -> Option<Thumb>,
+) -> Option<Thumb> {
+    supplied.or_else(|| match toast {
+        Toast::Saved(Saved::Image, path) => load(path, 640),
+        Toast::Saved(_, path) | Toast::Lossy(_, path, _) => load(path, 256),
+        _ => None,
+    })
+}
+
+/// Prepares the card's text, theme and CPU pixels, without creating a window or a GPU bitmap.
 fn content_of(toast: &Toast, thumb: Option<Thumb>) -> ToastContent {
     use vixeeny_common::i18n::tr;
 
     let config = vixeeny_common::paths::config_file().and_then(|p| Config::load(&p).ok()).unwrap_or_default();
     let lang = crate::lang(&config.general.language);
     let dark = crate::dark(&config);
+    let thumb = thumbnail_for(toast, thumb, crate::thumbnail::thumbnail);
     let mut content = match toast {
         // A screenshot: its picture says it all.
-        Toast::Saved(Saved::Image, path)
-            if let Some(thumb) = thumb.or_else(|| crate::thumbnail::thumbnail(path, 640)) =>
-        {
-            ToastContent {
-                heading: tr(Key::ToastImageSaved, lang).into(),
-                thumb: Some(thumb),
-                dark,
-                picture_only: true,
-                menu: [Key::ToastMenuOpen, Key::ToastMenuEdit, Key::ToastMenuReveal, Key::ToastMenuClose]
-                    .map(|k| tr(k, lang).to_owned())
-                    .to_vec(),
-                ..ToastContent::default()
-            }
-        }
+        Toast::Saved(Saved::Image, _) if let Some(thumb) = thumb => ToastContent {
+            heading: tr(Key::ToastImageSaved, lang).into(),
+            thumb: Some(thumb),
+            dark,
+            picture_only: true,
+            menu: [Key::ToastMenuOpen, Key::ToastMenuEdit, Key::ToastMenuReveal, Key::ToastMenuClose]
+                .map(|k| tr(k, lang).to_owned())
+                .to_vec(),
+            ..ToastContent::default()
+        },
         Toast::Saved(kind, path) => ToastContent {
             heading: tr(kind.title(), lang).into(),
             body: path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
-            thumb: crate::thumbnail::thumbnail(path, 256),
+            thumb,
             error: false,
             dark,
             action_label: tr(Key::ToastOpenFolder, lang).into(),
             ..ToastContent::default()
         },
-        Toast::Lossy(kind, path, lost) => ToastContent {
+        Toast::Lossy(kind, _, lost) => ToastContent {
             heading: tr(kind.title(), lang).into(),
             body: crate::widget_math::frames_lost(*lost, lang),
-            thumb: crate::thumbnail::thumbnail(path, 256),
+            thumb,
             warning: true,
             dark,
             action_label: tr(Key::ToastOpenFolder, lang).into(),
@@ -490,6 +500,11 @@ fn clickable(toast: &Toast) -> bool {
 /// Shows the card for `toast` at its place on the main monitor (see [`ToastContent::place`]); `act` runs once it is gone.
 fn show(toasts: &Toasts, toast: Toast, thumb: Option<Thumb>) -> anyhow::Result<()> {
     let content = content_of(&toast, thumb);
+    show_prepared(toasts, toast, content)
+}
+
+/// Only window/device work runs on the UI thread; file decoding and shell icons are prepared by the reader.
+fn show_prepared(toasts: &Toasts, toast: Toast, content: ToastContent) -> anyhow::Result<()> {
     let monitors = vixeeny_platform::monitors()?;
     let monitor = monitors
         .iter()
@@ -561,9 +576,9 @@ pub fn run_host() -> anyhow::Result<()> {
     // `None`: the input is closed.
     let (_mailbox, sender) = vixeeny_overlay::popup::mailbox({
         let (toasts, closed) = (toasts.clone(), closed.clone());
-        move |mail: Option<(Toast, Option<Thumb>)>| match mail {
-            Some((toast, thumb)) => {
-                if let Err(e) = show(&toasts, toast, thumb) {
+        move |mail: Option<(Toast, ToastContent)>| match mail {
+            Some((toast, content)) => {
+                if let Err(e) = show_prepared(&toasts, toast, content) {
                     tracing::error!("notification: {e:#}");
                 }
             }
@@ -593,7 +608,8 @@ pub fn run_host() -> anyhow::Result<()> {
                 }
                 None => None,
             };
-            sender.send(Some((toast, thumb)));
+            let content = content_of(&toast, thumb);
+            sender.send(Some((toast, content)));
         }
         sender.send(None);
     })?;
@@ -604,6 +620,40 @@ pub fn run_host() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn supplied_thumbnails_avoid_loading_files_for_every_saved_media_kind() {
+        for toast in [
+            Toast::Saved(Saved::Image, "a.png".into()),
+            Toast::Saved(Saved::Recording, "a.mp4".into()),
+            Toast::Lossy(Saved::Replay, "a.mkv".into(), 2),
+        ] {
+            let thumb = Thumb::filled(2, 2, vixeeny_editor::Color::rgb(12, 34, 56));
+            let expected = thumb.clone();
+            let got = thumbnail_for(&toast, Some(thumb), |_, _| panic!("must not read the file"));
+            assert_eq!(got, Some(expected));
+        }
+    }
+
+    #[test]
+    fn a_failed_thumbnail_is_loaded_only_once_and_non_media_cards_do_not_decode() {
+        for (toast, size) in [
+            (Toast::Saved(Saved::Image, "missing.png".into()), Some(640)),
+            (Toast::Saved(Saved::Recording, "missing.mp4".into()), Some(256)),
+            (Toast::Lossy(Saved::Replay, "missing.mkv".into(), 1), Some(256)),
+            (Toast::Update("new version".into()), None),
+        ] {
+            let mut calls = Vec::new();
+            assert!(
+                thumbnail_for(&toast, None, |_, side| {
+                    calls.push(side);
+                    None
+                })
+                .is_none()
+            );
+            assert_eq!(calls, size.into_iter().collect::<Vec<_>>());
+        }
+    }
 
     #[test]
     fn a_toast_reaches_the_card_process_intact() {

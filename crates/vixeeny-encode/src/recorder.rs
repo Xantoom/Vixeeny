@@ -627,7 +627,7 @@ impl Worker {
         Ok(())
     }
 
-    fn audio_in(&mut self, track: usize, mut samples: Vec<f32>) -> Result<(), RecordError> {
+    fn audio_in(&mut self, track: usize, samples: Vec<f32>) -> Result<(), RecordError> {
         let Some(t) = self.audio.get_mut(track) else {
             return Ok(());
         };
@@ -638,11 +638,11 @@ impl Worker {
         let channels = t.enc.channels();
         let skip = t.to_skip.min(samples.len() / channels);
         t.to_skip -= skip;
-        samples.drain(..skip * channels);
+        let samples = &samples[skip * channels..];
         if samples.is_empty() {
             return Ok(());
         }
-        let packets = t.enc.push(&samples)?;
+        let packets = t.enc.push(samples)?;
         t.held.extend(packets);
         self.write_ready_audio()
     }

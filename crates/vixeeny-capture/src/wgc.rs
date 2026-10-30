@@ -17,7 +17,7 @@ use windows::Graphics::DirectX::DirectXPixelFormat;
 use windows::Win32::Foundation::{HMODULE, HWND};
 use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_UNKNOWN};
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE,
+    D3D11_BOX, D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE,
     D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
     D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
 };
@@ -225,8 +225,8 @@ impl WgcBackend {
         match card {
             Ok(raw) => CpuFrame::from_raw(raw.width, raw.height, raw.stride, raw.data),
             Err(_) => {
-                let raw = read_back(&self.device, &self.context, texture)?;
-                tonemapped(&raw_hdr(&raw, area)?, info, tonemap)
+                let raw = read_back_area(&self.device, &self.context, texture, area)?;
+                tonemapped(&raw_hdr(&raw, None)?, info, tonemap)
             }
         }
     }
@@ -300,9 +300,22 @@ pub(crate) fn read_back(
     context: &ID3D11DeviceContext,
     texture: &ID3D11Texture2D,
 ) -> Result<RawFrame, CaptureError> {
+    read_back_area(device, context, texture, None)
+}
+
+/// Copy the requested pixels on the GPU before allocating or mapping CPU-visible storage.
+fn read_back_area(
+    device: &ID3D11Device,
+    context: &ID3D11DeviceContext,
+    texture: &ID3D11Texture2D,
+    area: Option<&PhysicalRect>,
+) -> Result<RawFrame, CaptureError> {
     let mut desc = D3D11_TEXTURE2D_DESC::default();
     // SAFETY: `desc` is a valid out-pointer.
     unsafe { texture.GetDesc(&mut desc) };
+    let rect = inside(area, PhysicalRect::new(0, 0, desc.Width, desc.Height))?;
+    desc.Width = rect.width;
+    desc.Height = rect.height;
     desc.Usage = D3D11_USAGE_STAGING;
     desc.BindFlags = 0;
     desc.MiscFlags = 0;
@@ -311,8 +324,23 @@ pub(crate) fn read_back(
     // SAFETY: `desc` describes a staging copy of an existing texture; the out-pointer is valid.
     unsafe { device.CreateTexture2D(&desc, None, Some(&raw mut staging)) }.map_err(os("CreateTexture2D"))?;
     let staging = staging.ok_or_else(|| CaptureError::Os("no staging texture".into()))?;
-    // SAFETY: both textures belong to this device and have identical size and format.
-    unsafe { context.CopyResource(&staging, texture) };
+    // SAFETY: the source rectangle was validated against the texture; the staging texture has exactly its size
+    // and format, on the same device. Full-frame calls retain their original copy path.
+    unsafe {
+        if area.is_none() {
+            context.CopyResource(&staging, texture);
+        } else {
+            let source = D3D11_BOX {
+                left: rect.x as u32,
+                top: rect.y as u32,
+                front: 0,
+                right: rect.x as u32 + rect.width,
+                bottom: rect.y as u32 + rect.height,
+                back: 1,
+            };
+            context.CopySubresourceRegion(&staging, 0, 0, 0, 0, texture, 0, Some(&source));
+        }
+    }
     map(context, &staging, desc.Width, desc.Height)
 }
 
@@ -409,6 +437,17 @@ pub(crate) fn monitor_item(monitor: &MonitorInfo) -> Result<GraphicsCaptureItem,
 }
 
 impl StillBackend for WgcBackend {
+    fn grab_monitor_region(
+        &mut self,
+        monitor: &MonitorInfo,
+        rect: &PhysicalRect,
+        cursor: bool,
+    ) -> Result<CpuFrame, CaptureError> {
+        self.start_monitor(monitor, cursor, false)?.finish(|t| {
+            let raw = read_back_area(&self.device, &self.context, t, Some(rect))?;
+            CpuFrame::from_raw(raw.width, raw.height, raw.stride, raw.data)
+        })
+    }
     fn grab_monitor(&mut self, monitor: &MonitorInfo, cursor: bool) -> Result<CpuFrame, CaptureError> {
         self.start_monitor(monitor, cursor, false)?.finish(|t| self.read_sdr(t))
     }
@@ -420,8 +459,8 @@ impl StillBackend for WgcBackend {
         cursor: bool,
     ) -> Result<HdrFrame, CaptureError> {
         self.start_monitor(monitor, cursor, true)?.finish(|t| {
-            let raw = read_back(&self.device, &self.context, t)?;
-            raw_hdr(&raw, area)
+            let raw = read_back_area(&self.device, &self.context, t, area)?;
+            raw_hdr(&raw, None)
         })
     }
 
@@ -531,6 +570,43 @@ fn window_item(window: WindowId) -> Result<GraphicsCaptureItem, CaptureError> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn gpu_region_readback_matches_full_readback_for_bytes_and_halves() {
+        use super::*;
+        use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_R16G16B16A16_FLOAT;
+        let Ok((device, context)) = d3d_device(None) else {
+            vixeeny_common::skip_test("no graphics device");
+            return;
+        };
+        for (format, bpp) in [(DXGI_FORMAT_B8G8R8A8_UNORM, 4), (DXGI_FORMAT_R16G16B16A16_FLOAT, 8)] {
+            let data: Vec<u8> = (0..73 * 59 * bpp).map(|i| (i * 71 % 251) as u8).collect();
+            let texture =
+                vixeeny_platform::d3d::texture(&device, (73, 59), format, 8, 0, Some((&data, (73 * bpp) as u32)))
+                    .unwrap();
+            let full = read_back(&device, &context, &texture).unwrap();
+            for area in
+                [PhysicalRect::new(11, 7, 19, 23), PhysicalRect::new(72, 58, 1, 1), PhysicalRect::new(0, 0, 73, 59)]
+            {
+                let part = read_back_area(&device, &context, &texture, Some(&area)).unwrap();
+                assert_eq!((part.width, part.height), (area.width, area.height));
+                for y in 0..area.height as usize {
+                    let src = (area.y as usize + y) * full.stride + area.x as usize * bpp;
+                    assert_eq!(
+                        &part.data[y * part.stride..y * part.stride + area.width as usize * bpp],
+                        &full.data[src..src + area.width as usize * bpp]
+                    );
+                }
+            }
+            for area in [PhysicalRect::new(-1, 0, 2, 2), PhysicalRect::new(72, 58, 2, 2), PhysicalRect::new(0, 0, 0, 1)]
+            {
+                assert!(matches!(
+                    read_back_area(&device, &context, &texture, Some(&area)),
+                    Err(CaptureError::InvalidRegion)
+                ));
+            }
+        }
+    }
+
     #[test]
     fn padded_rows_of_halves() {
         // Two pixels per row, a 4-byte row padding.

@@ -17,6 +17,11 @@ impl BufferPool {
     pub fn take(&self, len: usize) -> Vec<u8> {
         let spare = self.0.lock().ok().and_then(|mut spare| spare.pop());
         let mut buffer = spare.unwrap_or_default();
+        // A resized window must not retain two full-screen allocations for the rest of a recording. Hysteresis
+        // avoids reallocating for small size changes; take(0), used to inspect a spare, keeps its allocation.
+        if len > 0 && buffer.capacity() > len.saturating_mul(4).max(1 << 20) {
+            buffer = Vec::new();
+        }
         buffer.clear();
         buffer.reserve(len);
         buffer
@@ -35,6 +40,20 @@ impl BufferPool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_much_smaller_stream_releases_oversized_spares_but_small_changes_reuse_them() {
+        let pool = BufferPool::default();
+        let large = pool.take(8 << 20);
+        let address = large.as_ptr();
+        pool.give(large);
+        let similar = pool.take(4 << 20);
+        assert_eq!(similar.as_ptr(), address);
+        pool.give(similar);
+        let small = pool.take(64 << 10);
+        assert!(small.capacity() >= 64 << 10);
+        assert!(small.capacity() <= 1 << 20);
+    }
 
     #[test]
     fn a_stream_of_frames_reuses_the_same_memory_and_keeps_little() {

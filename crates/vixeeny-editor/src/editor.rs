@@ -174,11 +174,12 @@ impl Editor {
 
     pub fn pointer_move(&mut self, p: Point, mods: Modifiers) {
         let clamp = self.clamp_to_image(p);
+        let freehand = matches!(self.tool, Tool::Pen | Tool::Highlighter);
         match &mut self.drag {
             Some(Drag::Draw { points, current, shift, .. }) => {
                 *current = clamp;
                 *shift = mods.shift;
-                if points.last().is_none_or(|last| last.distance(clamp) >= 1.0) {
+                if freehand && points.last().is_none_or(|last| last.distance(clamp) >= 1.0) {
                     points.push(clamp);
                 }
             }
@@ -289,7 +290,7 @@ impl Editor {
         if self.doc.items.is_empty() {
             return;
         }
-        let items = self.doc.items.clone();
+        let items = std::mem::take(&mut self.doc.items);
         self.history.commit(&mut self.doc, Edit::Clear { items });
         self.selection = None;
     }
@@ -320,13 +321,13 @@ impl Editor {
 
     pub fn undo(&mut self) {
         self.drag = None;
-        self.history.undo(&mut self.doc);
+        self.history.undo_in_place(&mut self.doc);
         self.drop_stale_selection();
     }
 
     pub fn redo(&mut self) {
         self.drag = None;
-        self.history.redo(&mut self.doc);
+        self.history.redo_in_place(&mut self.doc);
         self.drop_stale_selection();
     }
 
@@ -353,6 +354,34 @@ mod tests {
 
     const NO: Modifiers = Modifiers { shift: false };
     const SHIFT: Modifiers = Modifiers { shift: true };
+
+    #[test]
+    fn shape_drags_keep_constant_storage_and_freehand_keeps_its_path() {
+        for tool in [
+            Tool::Rect,
+            Tool::Ellipse,
+            Tool::Line,
+            Tool::Arrow,
+            Tool::Blur,
+            Tool::Pixelate,
+            Tool::Pen,
+            Tool::Highlighter,
+        ] {
+            let mut ed = Editor::new(2000, 100);
+            ed.tool = tool;
+            ed.pointer_down(Point::new(10.0, 10.0), NO, None);
+            for x in 11..1011 {
+                ed.pointer_move(Point::new(x as f32, 50.0), NO);
+            }
+            let Some(Drag::Draw { points, .. }) = &ed.drag else {
+                panic!("draw");
+            };
+            assert_eq!(points.len(), if matches!(tool, Tool::Pen | Tool::Highlighter) { 1001 } else { 1 });
+            let preview = ed.preview().unwrap();
+            ed.pointer_up(Point::new(1010.0, 50.0), NO);
+            assert_eq!(ed.doc.items[0].annotation, preview);
+        }
+    }
 
     fn p(x: f32, y: f32) -> Point {
         Point::new(x, y)

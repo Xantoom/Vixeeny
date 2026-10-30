@@ -52,13 +52,12 @@ impl CpuFrame {
         }
         let (x, y) = (rect.x as usize, rect.y as usize);
         let row_bytes = rect.width as usize * BYTES_PER_PIXEL;
-        let mut out = Self::new(rect.width, rect.height);
+        let mut data = Vec::with_capacity(row_bytes * rect.height as usize);
         for row in 0..rect.height as usize {
             let src = (y + row) * self.stride + x * BYTES_PER_PIXEL;
-            let dst = row * out.stride;
-            out.data[dst..dst + row_bytes].copy_from_slice(&self.data[src..src + row_bytes]);
+            data.extend_from_slice(&self.data[src..src + row_bytes]);
         }
-        Ok(out)
+        Ok(Self { width: rect.width, height: rect.height, stride: row_bytes, data })
     }
 
     /// Draws `src` with its top-left corner at (`x`, `y`); parts outside `self` are clipped.

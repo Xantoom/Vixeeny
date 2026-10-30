@@ -594,6 +594,44 @@ fn every_page_of_the_settings_renders() {
 }
 
 #[test]
+fn identical_host_data_preserves_the_settings_page_model() {
+    let (panel, _) = settings_panel();
+    panel.select_section(vixeeny_settings::Section::Recording);
+    let before = panel.window().get_groups();
+    panel.set_display(vixeeny_settings::Display::default());
+    panel.set_admin(vixeeny_settings::Admin::default());
+    panel.set_audio(vixeeny_settings::AudioDevices::default());
+    assert_eq!(panel.window().get_groups(), before);
+    panel.set_display(vixeeny_settings::Display { hdr: true, max_refresh: 144 });
+    assert_ne!(panel.window().get_groups(), before);
+}
+
+#[test]
+fn download_progress_keeps_the_notes_model_until_the_notes_change() {
+    use settings_panel::{UpdateStage, UpdateView};
+    use vixeeny_ui::slint::Model;
+    let (panel, _) = settings_panel();
+    let mut view = UpdateView {
+        stage: UpdateStage::Downloading,
+        notes: vec![NoteLine { kind: 2, level: 0, text: "A release note".into() }],
+        ..Default::default()
+    };
+    panel.set_update(&view);
+    let before = panel.window().get_update_notes();
+    view.progress = 0.5;
+    panel.set_update(&view);
+    assert_eq!(panel.window().get_update_notes(), before);
+    assert_eq!(panel.window().get_update_progress(), 0.5);
+    view.notes[0].text = "Changed release note".into();
+    panel.set_update(&view);
+    assert_ne!(panel.window().get_update_notes(), before);
+    assert_eq!(panel.window().get_update_notes().row_data(0).unwrap().text, "Changed release note");
+    view.notes.clear();
+    panel.set_update(&view);
+    assert_eq!(panel.window().get_update_notes().row_count(), 0);
+}
+
+#[test]
 fn the_updates_and_about_pages_show_what_the_host_gives_them() {
     use settings_panel::Line;
     use vixeeny_settings::Section;

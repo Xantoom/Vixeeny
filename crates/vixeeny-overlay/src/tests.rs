@@ -545,6 +545,45 @@ fn live_pictures_are_copied_in_on_the_graphics_card() {
 }
 
 #[test]
+fn new_screen_feeds_refresh_the_background_without_stale_annotations() {
+    use crate::drawing::Drawing;
+    use vixeeny_editor::{Annotation, Rect, Style};
+    let gfx = Gfx::new().expect("graphics devices");
+    let base = RgbaImage::filled(64, 64, Color::rgb(0, 0, 0));
+    let layers = std::rc::Rc::new(vec![Annotation::Rect {
+        rect: Rect::new(8.0, 8.0, 16.0, 16.0),
+        style: Style { color: Color::rgb(255, 0, 0), width: 2.0 },
+        filled: true,
+    }]);
+    let mut drawing = Drawing::new(&gfx, (0, 0, 64, 64), &base, 0).expect("drawing");
+    drawing.update(&gfx, &layers, false).expect("drawn");
+    let version = drawing.version;
+    drawing.update(&gfx, &layers, false).expect("unchanged");
+    assert_eq!(drawing.version, version);
+    let fresh = RgbaImage::filled(64, 64, Color::rgb(5, 170, 60));
+    drawing.set_screens(&gfx, &fresh, 1).expect("new screen");
+    drawing.update(&gfx, &layers, false).expect("refreshed");
+    assert_ne!(drawing.version, version);
+    let pixels = gfx
+        .render(64, 64, |c| {
+            drawing.draw(c, (0.0, 0.0), false);
+            Ok(())
+        })
+        .expect("rendered");
+    let at = |x: usize, y: usize| &pixels[(y * 64 + x) * 4..(y * 64 + x) * 4 + 3];
+    assert_eq!(at(40, 40), [60, 170, 5]);
+    assert_eq!(at(16, 16), [0, 0, 255]);
+    drawing.update(&gfx, &std::rc::Rc::new(Vec::new()), false).expect("removed annotations");
+    let cleared = gfx
+        .render(64, 64, |c| {
+            drawing.draw(c, (0.0, 0.0), false);
+            Ok(())
+        })
+        .expect("rendered");
+    assert_eq!(&cleared[(16 * 64 + 16) * 4..(16 * 64 + 16) * 4 + 3], &[60, 170, 5]);
+}
+
+#[test]
 fn a_drawing_made_anew_is_never_taken_for_the_one_before() {
     use crate::drawing::Drawing;
     use vixeeny_editor::{Annotation, Color, Rect, Style};

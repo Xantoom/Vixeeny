@@ -7,6 +7,42 @@ use std::time::Instant;
 use vixeeny_capture::{CaptureOptions, CaptureTarget, Capturer, WgcBackend};
 
 #[test]
+fn captures_small_regions_with_and_without_the_cursor() {
+    vixeeny_platform::ensure_dpi_aware();
+    let Ok(monitors) = vixeeny_platform::monitors() else {
+        vixeeny_common::skip_test("no monitors");
+        return;
+    };
+    let Ok(backend) = WgcBackend::new() else {
+        vixeeny_common::skip_test("no capture device");
+        return;
+    };
+    let mut capturer = Capturer::new(backend, monitors.clone());
+    for monitor in monitors.iter().filter(|m| m.rect.width >= 337 && m.rect.height >= 223) {
+        for show_cursor in [false, true] {
+            let target = CaptureTarget::Region {
+                monitor: monitor.id,
+                rect: vixeeny_platform::PhysicalRect::new(17, 23, 320, 200),
+            };
+            let start = Instant::now();
+            match capturer.grab(&target, CaptureOptions { show_cursor, ..Default::default() }) {
+                Ok(frame) => {
+                    assert_eq!((frame.width, frame.height), (320, 200));
+                    assert!(frame.data.len() < monitor.rect.width as usize * monitor.rect.height as usize * 4);
+                    eprintln!(
+                        "region {} cursor={show_cursor}: {:?}, {} bytes read back",
+                        monitor.name,
+                        start.elapsed(),
+                        frame.data.len()
+                    );
+                }
+                Err(e) => vixeeny_common::skip_test(format!("capture unavailable: {e}")),
+            }
+        }
+    }
+}
+
+#[test]
 fn grabs_every_monitor_at_physical_size() {
     vixeeny_platform::ensure_dpi_aware();
     let monitors = match vixeeny_platform::monitors() {

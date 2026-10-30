@@ -7,6 +7,7 @@
 //! encoders take each frame as a texture ([`GpuCapture`]), and a viewer on the graphics card takes the newest one when
 //! it can ([`VideoStream::start_held`]).
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TrySendError, sync_channel};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -138,6 +139,7 @@ struct Shared {
     hdr: bool,
     sink: Option<Mutex<TextureSink>>,
     gate: Option<Arc<dyn Gate>>,
+    paused: AtomicBool,
     /// Called once a CPU frame is queued, or a frame is held.
     notify: Option<Notify>,
     /// Where the newest frame waits (see [`VideoStream::start_held`]).
@@ -434,6 +436,7 @@ impl VideoStream {
             hdr,
             sink,
             gate: pacing.as_ref().map(|p| Arc::clone(&p.gate)),
+            paused: AtomicBool::new(false),
             notify,
             held: held.clone(),
             last_size: Mutex::new(size),
@@ -462,6 +465,11 @@ impl VideoStream {
     /// Where the pixels of the CPU frames come from: hand them back once used.
     pub fn buffers(&self) -> BufferPool {
         self.buffers.clone()
+    }
+
+    /// Discards incoming frames before readback or GPU conversion, including variable-rate recordings.
+    pub fn set_paused(&self, paused: bool) {
+        self.shared.paused.store(paused, Ordering::Release);
     }
 
     /// The next frame; `Ok(None)` when none arrived within `timeout` (nothing changed on screen).
@@ -512,6 +520,9 @@ fn deliver(
     content: SizeInt32,
 ) -> windows::core::Result<()> {
     let time_ns = frame.SystemRelativeTime()?.Duration.saturating_mul(100);
+    if shared.paused.load(Ordering::Acquire) {
+        return Ok(());
+    }
     // A frame the recording would drop is neither read nor converted.
     if let Some(gate) = &shared.gate
         && !gate.wanted(time_ns)
@@ -586,6 +597,35 @@ fn within(texture: &ID3D11Texture2D, content: SizeInt32) -> (u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paused_streams_drop_new_session_frames_and_resume_without_a_rate_gate() {
+        vixeeny_platform::ensure_dpi_aware();
+        let Some(monitor) = vixeeny_platform::monitors().ok().and_then(|m| m.into_iter().next()) else {
+            vixeeny_common::skip_test("no monitor");
+            return;
+        };
+        let target = StreamTarget::Monitor(monitor);
+        let Ok(stream) = VideoStream::start(&target, false, false) else {
+            vixeeny_common::skip_test("no capture stream");
+            return;
+        };
+        if stream.recv(Duration::from_secs(2)).ok().flatten().is_none() {
+            vixeeny_common::skip_test("no initial frame");
+            return;
+        }
+        stream.set_paused(true);
+        // Allow an already in-flight frame from before the pause to finish, then drain it.
+        std::thread::sleep(Duration::from_millis(50));
+        while stream.recv(Duration::ZERO).expect("stream alive").is_some() {}
+        *stream.shared.staging.lock().expect("staging") = None;
+        stream.retarget(&target).expect("new paused session");
+        assert!(stream.recv(Duration::from_millis(200)).expect("stream alive").is_none());
+        assert!(stream.shared.staging.lock().expect("staging").is_none(), "no paused readback texture");
+        stream.set_paused(false);
+        stream.retarget(&target).expect("new resumed session");
+        assert!(stream.recv(Duration::from_secs(2)).expect("stream alive").is_some());
+    }
 
     #[test]
     fn refused_cpu_frames_return_their_pixels_to_the_pool() {

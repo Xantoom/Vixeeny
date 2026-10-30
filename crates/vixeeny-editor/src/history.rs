@@ -29,13 +29,17 @@ pub enum Edit {
 }
 
 impl Edit {
-    fn inverse(&self) -> Self {
+    fn apply_inverse(&self, doc: &mut Document) {
         match self {
-            Self::Add { index, item } => Self::Remove { index: *index, item: item.clone() },
-            Self::Remove { index, item } => Self::Add { index: *index, item: item.clone() },
-            Self::Replace { id, old, new } => Self::Replace { id: *id, old: new.clone(), new: old.clone() },
-            Self::Clear { items } => Self::Restore { items: items.clone() },
-            Self::Restore { items } => Self::Clear { items: items.clone() },
+            Self::Add { item, .. } => doc.items.retain(|i| i.id != item.id),
+            Self::Remove { index, item } => doc.items.insert((*index).min(doc.items.len()), item.clone()),
+            Self::Replace { id, old, .. } => {
+                if let Some(item) = doc.items.iter_mut().find(|i| i.id == *id) {
+                    item.annotation = old.clone();
+                }
+            }
+            Self::Clear { items } => doc.items.clone_from(items),
+            Self::Restore { .. } => doc.items.clear(),
         }
     }
 
@@ -73,19 +77,32 @@ impl History {
 
     /// Returns the edit undone, if any.
     pub fn undo(&mut self, doc: &mut Document) -> Option<Edit> {
-        let edit = self.undo.pop()?;
-        edit.inverse().apply(doc);
+        self.undo_in_place(doc).then(|| self.redo.last().cloned()).flatten()
+    }
+
+    /// The editor needs the document update, not another owned copy of the full edit.
+    pub(crate) fn undo_in_place(&mut self, doc: &mut Document) -> bool {
+        let Some(edit) = self.undo.pop() else {
+            return false;
+        };
+        edit.apply_inverse(doc);
         self.revision += 1;
-        self.redo.push(edit.clone());
-        Some(edit)
+        self.redo.push(edit);
+        true
     }
 
     pub fn redo(&mut self, doc: &mut Document) -> Option<Edit> {
-        let edit = self.redo.pop()?;
+        self.redo_in_place(doc).then(|| self.undo.last().cloned()).flatten()
+    }
+
+    pub(crate) fn redo_in_place(&mut self, doc: &mut Document) -> bool {
+        let Some(edit) = self.redo.pop() else {
+            return false;
+        };
         edit.apply(doc);
         self.revision += 1;
-        self.undo.push(edit.clone());
-        Some(edit)
+        self.undo.push(edit);
+        true
     }
 
     pub fn revision(&self) -> u64 {

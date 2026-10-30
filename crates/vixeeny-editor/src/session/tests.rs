@@ -3,6 +3,26 @@ use crate::model::Annotation;
 
 const NO: Modifiers = Modifiers { shift: false };
 
+#[test]
+fn layer_coverage_follows_edits_undo_and_selection_changes() {
+    let mut s = session();
+    s.select_all();
+    s.choose_tool(Some(Tool::Rect));
+    drag(&mut s, p(20.0, 20.0), p(60.0, 60.0));
+    let first = s.view();
+    assert!(first.layers_area.is_some());
+    assert_eq!(s.view().layers_area, first.layers_area);
+    s.undo();
+    assert_eq!(s.view().layers_area, None);
+    s.redo();
+    assert_eq!(s.view().layers_area, first.layers_area);
+    s.choose_tool(None);
+    s.selection.reset();
+    assert_eq!(s.view().layers_area, None);
+    s.select_all();
+    assert_eq!(s.view().layers_area, first.layers_area);
+}
+
 fn p(x: f32, y: f32) -> Point {
     Point::new(x, y)
 }

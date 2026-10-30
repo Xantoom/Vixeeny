@@ -77,6 +77,9 @@ fn annotated_hdr(session: &Session, exported: &RgbaImage, desktop: &HdrCapture) 
         return None;
     }
     let gain = desktop.info.sdr_white_nits / 80.0;
+    // Annotation channels are bytes: decode each possible value once, rather than evaluating the transfer
+    // function three times for every changed pixel of a large selection.
+    let linear: [f32; 256] = std::array::from_fn(|v| srgb_decode(v as f32 / 255.0) * gain);
     let mut rgba = Vec::with_capacity(r.w * r.h * 4);
     for y in 0..r.h {
         for x in 0..r.w {
@@ -85,7 +88,7 @@ fn annotated_hdr(session: &Session, exported: &RgbaImage, desktop: &HdrCapture) 
             if shown == &base.data[b..b + 4] {
                 rgba.extend_from_slice(&desktop.frame.rgba[b..b + 4]);
             } else {
-                let c = |i: usize| srgb_decode(f32::from(shown[i]) / 255.0) * gain;
+                let c = |i: usize| linear[usize::from(shown[i])];
                 rgba.extend_from_slice(&[c(0), c(1), c(2), 1.0]);
             }
         }
@@ -787,6 +790,23 @@ mod tests {
     use vixeeny_editor::{Modifiers, Point, Tool};
 
     use super::*;
+
+    #[test]
+    fn hdr_annotation_channels_match_the_transfer_function_for_every_byte() {
+        let mut session = Session::new(RgbaImage::filled(256, 1, vixeeny_editor::Color::rgb(0, 0, 0)), Vec::new());
+        session.select_all();
+        let desktop = HdrCapture {
+            frame: HdrFrame { width: 256, height: 1, rgba: [2.0, 3.0, 4.0, 1.0].repeat(256) },
+            info: HdrInfo { sdr_white_nits: 240.0, peak_nits: 1000.0 },
+        };
+        let exported = RgbaImage::new(256, 1, (0..=255u8).flat_map(|v| [v, v, v, 255]).collect()).unwrap();
+        let hdr = annotated_hdr(&session, &exported, &desktop).unwrap();
+        assert_eq!(&hdr.frame.rgba[..4], &desktop.frame.rgba[..4]);
+        for v in 1..=255usize {
+            let expected = vixeeny_common::colour::srgb_decode(v as f32 / 255.0) * 3.0;
+            assert_eq!(&hdr.frame.rgba[v * 4..v * 4 + 4], &[expected, expected, expected, 1.0]);
+        }
+    }
 
     #[test]
     fn every_tip_of_the_toolbar_has_its_text() {

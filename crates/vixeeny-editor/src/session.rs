@@ -143,6 +143,8 @@ pub struct Session {
     /// The layers last given (see [`View::layers`]), and what they were made from: the document's revision, the
     /// annotation hidden and the gesture in progress.
     layers: RefCell<(Rc<Vec<Annotation>>, Option<LayersKey>)>,
+    /// Bounds of the immutable layer list: pointer motion must not rescan every stroke or lay out every text.
+    coverage: RefCell<(Rc<Vec<Annotation>>, Option<Rect>)>,
     /// The last layers area given, and the zone it was for (see [`View::layers_area`]).
     area: RefCell<Option<(Area, Area)>>,
     base_version: u64,
@@ -168,6 +170,7 @@ impl Session {
             ui_scale: 1.0,
             screens: vec![bounds],
             layers: RefCell::default(),
+            coverage: RefCell::default(),
             area: RefCell::new(None),
             base_version: 0,
             live: false,
@@ -577,10 +580,14 @@ impl Session {
         last.0.clone()
     }
 
-    fn layers_area(&self, layers: &[Annotation]) -> Option<Area> {
+    fn layers_area(&self, layers: &Rc<Vec<Annotation>>) -> Option<Area> {
         let mut kept = self.area.borrow_mut();
         let zone = self.zone_px();
-        let needed = zone.and_then(|zone| Self::needed_area(zone, layers));
+        let mut coverage = self.coverage.borrow_mut();
+        if !Rc::ptr_eq(&coverage.0, layers) {
+            *coverage = (layers.clone(), layers.iter().map(Annotation::bounds).reduce(|a, b| a.union(&b)));
+        }
+        let needed = zone.and_then(|zone| Self::needed_area(zone, coverage.1));
         let (Some(zone), Some(needed)) = (zone, needed) else {
             *kept = None;
             return None;
@@ -594,8 +601,8 @@ impl Session {
     }
 
     /// What `layers` cover in `zone`, by blocks.
-    fn needed_area((zx, zy, zw, zh): Area, layers: &[Annotation]) -> Option<Area> {
-        let covered = layers.iter().map(Annotation::bounds).reduce(|a, b| a.union(&b))?.inflate(LAYER_MARGIN);
+    fn needed_area((zx, zy, zw, zh): Area, covered: Option<Rect>) -> Option<Area> {
+        let covered = covered?.inflate(LAYER_MARGIN);
         let block = LAYER_BLOCK as f32;
         let x0 = ((covered.x / block).floor() * block).max(zx as f32) as u32;
         let y0 = ((covered.y / block).floor() * block).max(zy as f32) as u32;
@@ -639,7 +646,8 @@ impl Session {
                 (text, at)
             }),
             toolbar,
-            drawing: self.target == Some(Target::Editor) && self.editor.preview().is_some(),
+            drawing: self.target == Some(Target::Editor)
+                && self.layers.borrow().1.as_ref().is_some_and(|key| key.2.is_some()),
             selected: self.selected(),
             brush: self.brush(),
             pointer: self.cursor,
