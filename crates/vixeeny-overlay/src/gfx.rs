@@ -54,8 +54,8 @@ use crate::theme::Rgba;
 
 /// The font of the interface: Segoe UI Variable (Windows 11), which falls back to Segoe UI.
 const UI_FONT: &str = "Segoe UI Variable Text";
-/// The font the editor draws text annotations with (also in `vixeeny-editor`).
-static INTER: &[u8] = include_bytes!("../../../assets/fonts/Inter-Regular.ttf");
+/// The font the editor draws text annotations with, embedded once by `vixeeny-editor`.
+static INTER: &[u8] = vixeeny_editor::text::FONT_BYTES;
 const INTER_FAMILY: &str = "Inter";
 
 pub fn color(c: Rgba) -> D2D1_COLOR_F {

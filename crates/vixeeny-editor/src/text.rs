@@ -6,7 +6,8 @@ use std::sync::OnceLock;
 
 use fontdue::{Font, FontSettings};
 
-static FONT_BYTES: &[u8] = include_bytes!("../../../assets/fonts/Inter-Regular.ttf");
+/// Inter, the font of the annotations; the overlay draws them with it too.
+pub static FONT_BYTES: &[u8] = include_bytes!("../../../assets/fonts/Inter-Regular.ttf");
 
 /// The editor font. Parsed once.
 pub fn font() -> &'static Font {
