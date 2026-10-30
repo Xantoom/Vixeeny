@@ -3,10 +3,6 @@
 //! encoder (downloaded for a software encoder, as it is for NVENC when this machine has one) and the decoded file holds
 //! the BT.709 limited-range values of that colour, like the CPU path. Needs the native build:
 //! `cargo xtask build-native ffmpeg`.
-#![allow(clippy::unwrap_used, clippy::expect_used, reason = "test helpers fail the test")]
-
-mod common;
-
 use std::path::Path;
 use std::sync::Arc;
 
@@ -19,7 +15,7 @@ use vixeeny_encode::registry::{Chroma, PresetName, Registry};
 use windows::Win32::Graphics::Direct3D11::{D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, ID3D11Texture2D};
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 
-use common::{namer, scratch};
+use crate::common::{namer, scratch};
 
 const W: u32 = 320;
 const H: u32 = 180;
@@ -123,7 +119,7 @@ fn record_gpu_with(
             return None;
         }
     };
-    let cfg = RecordConfig { depth, chroma, ..common::config(&registry, id, preset) };
+    let cfg = RecordConfig { depth, chroma, ..crate::common::config(&registry, id, preset) };
     let name = format!("{id}-{depth}-{}-{preset:?}", chroma.name());
     Some(record_texture(cfg, pipeline, &texture(device), &name))
 }
@@ -153,8 +149,8 @@ fn a_software_encoder_records_downloaded_gpu_frames_with_the_right_colours() {
     // The CPU path gives the same colour.
     let registry = Registry::builtin().unwrap();
     let dir = scratch("cpu");
-    let rec =
-        Recorder::start(common::config(&registry, "libx264", PresetName::Performance), namer(&dir, "mkv")).unwrap();
+    let rec = Recorder::start(crate::common::config(&registry, "libx264", PresetName::Performance), namer(&dir, "mkv"))
+        .unwrap();
     for i in 0..10 {
         let frame = VideoFrame {
             width: W,
@@ -289,7 +285,7 @@ fn record_hdr(
             return None;
         }
     };
-    let cfg = RecordConfig { depth, hdr: keep_hdr, ..common::config(&registry, id, PresetName::Performance) };
+    let cfg = RecordConfig { depth, hdr: keep_hdr, ..crate::common::config(&registry, id, PresetName::Performance) };
     // Tests run side by side: each recording has its own folder.
     static RUN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let run = RUN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

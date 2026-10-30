@@ -2,10 +2,6 @@
 //! Cutting a recording to the frame: the list of frames, the preview's pictures and sound, and the two ways of writing
 //! a part (packets copied from a key frame, or the video encoded again). Needs the native build:
 //! `cargo xtask build-native ffmpeg`.
-#![allow(clippy::unwrap_used, clippy::expect_used, reason = "test helpers fail the test")]
-
-mod common;
-
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
@@ -17,7 +13,7 @@ use vixeeny_encode::cut::{Clip, Next, Pictures, Reencode, Sound, export};
 use vixeeny_encode::recorder::{FrameFormat, OutputContainer, RecordConfig, Recorder, VideoFrame};
 use vixeeny_encode::registry::{PresetName, Registry};
 
-use common::scratch;
+use crate::common::scratch;
 
 const MS: i64 = 1_000_000;
 const FPS: usize = 30;
@@ -48,7 +44,7 @@ fn recording_with(dir: &Path, seconds: usize, hdr: bool) -> PathBuf {
 fn recording_of(dir: &Path, seconds: usize, hdr: bool, extra: &[(&str, &str)]) -> PathBuf {
     let registry = Registry::builtin().unwrap();
     let id = if hdr { "libx265" } else { "libx264" };
-    let mut cfg = common::config(&registry, id, PresetName::Performance);
+    let mut cfg = crate::common::config(&registry, id, PresetName::Performance);
     cfg.options.extend(extra.iter().map(|&(k, v)| (k.to_owned(), v.to_owned())));
     let track = |title: &str| AudioTrackConfig {
         title: title.into(),
@@ -108,7 +104,7 @@ fn number(bgra: &[u8]) -> usize {
 
 fn reencode() -> Reencode {
     let registry = Registry::builtin().unwrap();
-    let RecordConfig { encoder, options, .. } = common::config(&registry, "libx264", PresetName::Performance);
+    let RecordConfig { encoder, options, .. } = crate::common::config(&registry, "libx264", PresetName::Performance);
     Reencode::new(encoder, options, 8)
 }
 

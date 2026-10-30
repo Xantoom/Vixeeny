@@ -2,8 +2,6 @@
 //! The encoder settings of the registry against the real encoders: the custom preset of each encoder in every rate
 //! mode, every declared pixel format and every option value (the hardware encoders when this machine has them). The
 //! recordings themselves are tested in `recorder.rs`. Needs the native build: `cargo xtask build-native ffmpeg`.
-#![allow(clippy::unwrap_used, clippy::expect_used, reason = "test helpers fail the test")]
-
 use std::path::PathBuf;
 
 use ffmpeg::format::Pixel;

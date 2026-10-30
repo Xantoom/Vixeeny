@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! What the recording tests share. Each test program uses a part of it.
-#![allow(dead_code, clippy::unwrap_used, reason = "helpers shared by test files that each use some")]
-
+//! What the recording tests share.
 use std::path::{Path, PathBuf};
 
 use vixeeny_encode::clock::Fps;

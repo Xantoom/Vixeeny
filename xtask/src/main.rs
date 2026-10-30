@@ -27,7 +27,16 @@ fn verify_registry() -> Result<()> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let work = root.join("native/build/work");
     let mut cmd = std::process::Command::new("cargo");
-    cmd.current_dir(&root).args(["test", "-p", "vixeeny-encode", "--test", "verify_registry", "--", "--nocapture"]);
+    cmd.current_dir(&root).args([
+        "test",
+        "-p",
+        "vixeeny-encode",
+        "--test",
+        "encode",
+        "verify_registry::",
+        "--",
+        "--nocapture",
+    ]);
     let ffmpeg = work.join("ffmpeg-prebuilt");
     let bin = ffmpeg.join("bin");
     let path = std::env::var_os("PATH").unwrap_or_default();

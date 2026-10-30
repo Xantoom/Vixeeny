@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! `cargo xtask verify-registry`: the registry against the real encoders of the linked FFmpeg, and the probe against
 //! the software encoders. Needs the native build: `cargo xtask build-native ffmpeg`.
-#![allow(clippy::unwrap_used, clippy::expect_used, reason = "test helpers fail the test")]
-
 use vixeeny_encode::ffmpeg_probe::{FfmpegProber, verify};
 use vixeeny_encode::probe::probe;
 use vixeeny_encode::registry::{Chroma, Registry};
@@ -42,7 +40,7 @@ fn the_probe_finds_the_software_encoders() {
 
 #[test]
 fn the_verifier_catches_wrong_data() {
-    let text = include_str!("../codecs/registry.toml");
+    let text = include_str!("../../codecs/registry.toml");
     let wrong_option =
         Registry::parse(&text.replacen("ffmpeg_option = \"rc-lookahead\"", "ffmpeg_option = \"lookaheadx\"", 1))
             .unwrap();

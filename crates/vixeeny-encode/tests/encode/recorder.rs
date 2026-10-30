@@ -2,10 +2,6 @@
 //! The recording pipeline end to end with synthetic frames and a simulated clock: crash-safe hybrid MP4, pause, every
 //! software encoder × every allowed container gives a readable file, constant frame rate, scaling, splitting. Needs the
 //! native build: `cargo xtask build-native ffmpeg`.
-#![allow(clippy::unwrap_used, clippy::expect_used, reason = "test helpers fail the test")]
-
-mod common;
-
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -15,7 +11,7 @@ use vixeeny_encode::ffmpeg::{codec, format, media};
 use vixeeny_encode::recorder::{FrameFormat, OutputContainer, RecordConfig, Recorder, Split, VideoFrame};
 use vixeeny_encode::registry::{Chroma, PresetName, Registry};
 
-use common::{Scratch, namer, scratch};
+use crate::common::{Scratch, namer, scratch};
 
 const MS: i64 = 1_000_000;
 
@@ -36,7 +32,7 @@ fn frame(w: u32, h: u32, i: usize) -> VideoFrame {
 }
 
 fn config(registry: &Registry, id: &str, container: OutputContainer, fps: u32) -> RecordConfig {
-    let mut cfg = common::config(registry, id, PresetName::Performance);
+    let mut cfg = crate::common::config(registry, id, PresetName::Performance);
     // Faster than the user presets: this is a test.
     match id {
         "libsvtav1" => {
