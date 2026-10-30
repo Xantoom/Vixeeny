@@ -1248,6 +1248,16 @@ impl Config {
         }
     }
 
+    /// The user's settings file as it is now; `None` when there is no settings folder or the file cannot be read.
+    pub fn read_current() -> Option<Self> {
+        crate::paths::config_file().and_then(|path| Self::load(&path).ok())
+    }
+
+    /// The user's settings, or the defaults when they cannot be read.
+    pub fn current() -> Self {
+        Self::read_current().unwrap_or_default()
+    }
+
     /// Writes the config whole or not at all ([`crate::paths::write_atomic`]).
     pub fn save(&self, path: &Path) -> Result<(), ConfigError> {
         let io = |source| ConfigError::Io { path: path.display().to_string(), source };

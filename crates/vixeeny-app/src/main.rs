@@ -369,10 +369,6 @@ impl<W: std::io::Write> Actions<'_, W> {
     fn run(&mut self, action: ActionId, frozen: Option<ipc::Frozen>) -> anyhow::Result<()> {
         use std::sync::atomic::Ordering;
         BUSY.store(true, Ordering::Release);
-        // The app may run for long (the replay): each action reads the settings as they are now.
-        if let Some(config) = vixeeny_common::paths::config_file().and_then(|path| Config::load(&path).ok()) {
-            *self.config = config;
-        }
         let mut next = run_action(action, frozen, self.config, self.recording);
         while let Some(action) = next {
             next = run_action(action, None, self.config, self.recording);
@@ -682,9 +678,8 @@ fn game_lists(config: &Config) -> vixeeny_platform::games::Lists<'_> {
 }
 
 /// Light or dark, the system accent, the title-bar styling: what every window of this process starts from.
-fn init_look() {
-    let config = vixeeny_common::paths::config_file().and_then(|path| Config::load(&path).ok()).unwrap_or_default();
-    vixeeny_ui::theme::set_default(settings::look_of(&config));
+fn init_look(config: &Config) {
+    vixeeny_ui::theme::set_default(settings::look_of(config));
     vixeeny_ui::theme::set_dresser(|handle, look| {
         let id = vixeeny_platform::WindowId(handle);
         // Slint's icon does not reach the taskbar: the executable's own does.
@@ -698,7 +693,8 @@ fn run() -> anyhow::Result<()> {
     if let Err(e) = vixeeny_platform::set_app_id() {
         tracing::warn!("{e}");
     }
-    init_look();
+    let mut config = Config::current();
+    init_look(&config);
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         // The probe child: prints TOML on stdout (see `vixeeny_encode::probe::run_child`).
@@ -711,26 +707,24 @@ fn run() -> anyhow::Result<()> {
         // The recording widget, a process of its own (see `widget`).
         Some("--widget") => return widget::run_child(&args[1..]),
         // The settings window and gallery, a process of its own (see `settings`).
-        Some("--settings") => return settings::run_child(&args[1..]),
+        Some("--settings") => return settings::run_child(config, &args[1..]),
         // A notification card (see `toast`).
         Some("--toast") => return toast::run_child(&args[1..]),
         Some("--toast-host") => return toast::run_host(),
         // The video editor of the replays (see `cut`).
-        Some("--cut") => return cut::run_child(&args[1..]),
+        Some("--cut") => return cut::run_child(config, &args[1..]),
         // A saved picture in the zone editor (see `region`).
-        Some("--edit") => return region::run_edit(&args[1..]),
+        Some("--edit") => return region::run_edit(config, &args[1..]),
         // The daily update check, and the installation (see `update`).
         Some("--update") => return update::run_child(&args[1..]),
         // What changed, at the first start after an update (see `whats_new`).
-        Some("--whats-new") => return whats_new::run_child(),
+        Some("--whats-new") => return whats_new::run_child(config),
         // The administrator's rights (see `admin`).
         Some("--admin") => return admin::run_child(&args[1..]),
         Some("--system-info") => {
             vixeeny_platform::attach_console();
             // The displays in physical pixels, as the settings window reports them.
             vixeeny_platform::ensure_dpi_aware();
-            let config =
-                vixeeny_common::paths::config_file().and_then(|path| Config::load(&path).ok()).unwrap_or_default();
             let probe = probe::current(false).ok();
             print!("{}", sysinfo::format(&sysinfo::collect(&config, probe.as_ref())));
             return Ok(());
@@ -758,7 +752,6 @@ fn run() -> anyhow::Result<()> {
     {
         capture_backend::warm();
     }
-    let mut config = vixeeny_common::paths::config_file().and_then(|path| Config::load(&path).ok()).unwrap_or_default();
     let idle = config.general.app_idle_exit_seconds;
     let idle = Duration::from_secs(u64::from(idle));
 
@@ -836,6 +829,10 @@ fn run() -> anyhow::Result<()> {
         match woken {
             Ok(Wake::Daemon(DaemonToApp::RunAction { action, frozen })) => {
                 idle_from = std::time::Instant::now();
+                // The app may run for long (the replay): each action reads the settings as they are now.
+                if let Some(fresh) = Config::read_current() {
+                    config = fresh;
+                }
                 Actions { config: &mut config, recording: &mut recording, send: &mut send }.run(action, frozen)?;
                 recording.report(&mut send, &config)?;
             }

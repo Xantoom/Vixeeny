@@ -395,7 +395,7 @@ fn thumbnail_for(
 fn content_of(toast: &Toast, thumb: Option<Thumb>) -> ToastContent {
     use vixeeny_common::i18n::tr;
 
-    let config = vixeeny_common::paths::config_file().and_then(|p| Config::load(&p).ok()).unwrap_or_default();
+    let config = Config::current();
     let lang = crate::lang(&config.general.language);
     let dark = crate::dark(&config);
     let thumb = thumbnail_for(toast, thumb, crate::thumbnail::thumbnail);
@@ -534,7 +534,7 @@ fn act(event: Option<ToastEvent>, toast: &Toast) {
             let _ = vixeeny_platform::open_path("ms-settings:regionlanguage");
         }
         (Some(_), Toast::Failed(Failed::Crash, _)) => {
-            let config = vixeeny_common::paths::config_file().and_then(|p| Config::load(&p).ok()).unwrap_or_default();
+            let config = Config::current();
             if let Err(e) = crate::report::create(&config) {
                 tracing::error!("report: {e:#}");
             }

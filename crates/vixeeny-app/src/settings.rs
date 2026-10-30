@@ -33,10 +33,6 @@ pub fn spawn(updates: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn load_config() -> Config {
-    vixeeny_common::paths::config_file().and_then(|path| Config::load(&path).ok()).unwrap_or_default()
-}
-
 /// The settings file as this window last read or wrote it.
 struct OnDisk {
     config: Config,
@@ -51,7 +47,7 @@ impl OnDisk {
     }
 
     fn read() -> Self {
-        Self { stamp: Self::stamp(), config: load_config() }
+        Self { stamp: Self::stamp(), config: Config::current() }
     }
 
     /// Reads the file again if another program wrote it (one that cannot be read is ignored).
@@ -61,7 +57,7 @@ impl OnDisk {
             return;
         }
         self.stamp = stamp;
-        if let Some(config) = vixeeny_common::paths::config_file().and_then(|path| Config::load(&path).ok()) {
+        if let Some(config) = Config::read_current() {
             self.config = config;
         }
     }
@@ -395,11 +391,10 @@ fn about_lines(lang: Lang) -> Vec<Line> {
 }
 
 /// `--settings [--updates]`: the window, until it is closed.
-pub fn run_child(args: &[String]) -> anyhow::Result<()> {
+pub fn run_child(config: Config, args: &[String]) -> anyhow::Result<()> {
     // `--about` came from versions before 0.9.11.
     let open_updates = args.iter().any(|a| a == "--updates" || a == "--about");
     vixeeny_platform::ensure_dpi_aware();
-    let config = load_config();
     let lang = crate::lang(&config.general.language);
     // One window per session: a second launch brings the first one forward.
     let Some(_guard) = vixeeny_platform::single_instance("Vixeeny.Settings") else {
@@ -501,7 +496,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
         let handle = handle.clone();
         let weak = panel.window().as_weak();
         panel.on_section(move |section| {
-            let lang = weak.upgrade().map_or(lang, |_| crate::lang(&load_config().general.language));
+            let lang = weak.upgrade().map_or(lang, |_| crate::lang(&Config::current().general.language));
             match section {
                 Section::About => {
                     handle.set_lines(about_lines(lang));
@@ -524,7 +519,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
         let handle = handle;
         let pending = Rc::clone(&unsaved);
         panel.on_page_action(move |section, action, value| {
-            let lang = crate::lang(&load_config().general.language);
+            let lang = crate::lang(&Config::current().general.language);
             match (section, action) {
                 (Section::Updates, "update-check") => check_for_update(handle.clone(), lang),
                 (Section::Updates, "update-download") => {
@@ -539,7 +534,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
                 (Section::Updates, "update-restart") => restart_for_update(&handle, lang),
                 (Section::General, "admin") => grant_admin(&handle, lang),
                 (Section::Overlay, "preview_side" | "preview_widget") => {
-                    let config = pending.borrow().clone().unwrap_or_else(load_config);
+                    let config = pending.borrow().clone().unwrap_or_else(Config::current);
                     preview_overlay(config, action == "preview_widget");
                 }
                 (Section::Notifications, id)
@@ -555,7 +550,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
                     let handle = handle.clone();
                     // The hardware probe may need a few seconds the first time.
                     std::thread::spawn(move || {
-                        let message = match crate::report::create(&load_config()) {
+                        let message = match crate::report::create(&Config::current()) {
                             Ok(_) => tr(Key::AboutReportReady, lang).to_owned(),
                             Err(e) => format!("{e:#}"),
                         };
@@ -616,7 +611,7 @@ pub fn run_child(args: &[String]) -> anyhow::Result<()> {
                 if matches!(window.get_update_state(), 1 | 3 | 6) {
                     return;
                 }
-                let lang = crate::lang(&load_config().general.language);
+                let lang = crate::lang(&Config::current().general.language);
                 update_handle.set_update(update_view(lang));
             }
         });

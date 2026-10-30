@@ -51,10 +51,6 @@ pub fn open(path: &Path) {
     }
 }
 
-fn load_config() -> Config {
-    vixeeny_common::paths::config_file().and_then(|path| Config::load(&path).ok()).unwrap_or_default()
-}
-
 fn texts(lang: Lang, path: &Path) -> CutterTexts {
     let t = |k| tr(k, lang).to_owned();
     CutterTexts {
@@ -220,10 +216,9 @@ fn limit(clip: &Clip, choice: &ExportChoice) -> Option<f64> {
 }
 
 /// `--cut <file>`.
-pub fn run_child(args: &[String]) -> anyhow::Result<()> {
+pub fn run_child(config: Config, args: &[String]) -> anyhow::Result<()> {
     let path = PathBuf::from(args.first().context("no file to edit")?);
     vixeeny_platform::ensure_dpi_aware();
-    let config = load_config();
     let lang = crate::lang(&config.general.language);
     let clip = Clip::open(&path).with_context(|| format!("cannot open {}", path.display()))?;
     if clip.frames.is_empty() {

@@ -688,9 +688,8 @@ fn place_picture(picture: (u32, u32), bounds: &Rect, monitor: &Rect) -> Option<(
 
 /// `--edit <file>`: the picture in the editor, over a dark backdrop, the zone around it: crop it, annotate it, then
 /// copy it or save it as a new capture (the file itself is kept).
-pub fn run_edit(args: &[String]) -> anyhow::Result<()> {
+pub fn run_edit(config: Config, args: &[String]) -> anyhow::Result<()> {
     let path = PathBuf::from(args.first().context("usage: --edit <file>")?);
-    let config = vixeeny_common::paths::config_file().and_then(|p| Config::load(&p).ok()).unwrap_or_default();
     let bytes = std::fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
     let picture = vixeeny_image::decode(&bytes)?;
     vixeeny_platform::ensure_dpi_aware();

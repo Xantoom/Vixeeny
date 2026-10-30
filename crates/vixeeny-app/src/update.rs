@@ -59,7 +59,7 @@ fn pending() -> anyhow::Result<()> {
         }
         // Nothing to install: this version runs, perhaps for the first time.
         None => {
-            let config = vixeeny_common::paths::config_file().and_then(|p| Config::load(&p).ok()).unwrap_or_default();
+            let config = Config::current();
             crate::whats_new::on_start(&config);
             Ok(())
         }
@@ -68,7 +68,7 @@ fn pending() -> anyhow::Result<()> {
 
 fn background() -> anyhow::Result<()> {
     client::clean_up();
-    let config = vixeeny_common::paths::config_file().and_then(|p| Config::load(&p).ok()).unwrap_or_default();
+    let config = Config::current();
     if !config.general.check_updates {
         return Ok(());
     }

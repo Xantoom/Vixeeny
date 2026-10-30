@@ -51,8 +51,7 @@ fn lines_model(lines: Vec<vixeeny_ui::NoteLine>) -> vixeeny_ui::slint::ModelRc<v
     vixeeny_ui::slint::ModelRc::from(std::rc::Rc::new(vixeeny_ui::slint::VecModel::from(lines)))
 }
 
-pub fn run_child() -> anyhow::Result<()> {
-    let config = vixeeny_common::paths::config_file().and_then(|p| Config::load(&p).ok()).unwrap_or_default();
+pub fn run_child(config: Config) -> anyhow::Result<()> {
     let lang = crate::lang(&config.general.language);
     let window = vixeeny_ui::WhatsNewWindow::new().map_err(|e| anyhow::anyhow!("window: {e}"))?;
     vixeeny_ui::theme::apply(&window, vixeeny_ui::theme::default_look());
