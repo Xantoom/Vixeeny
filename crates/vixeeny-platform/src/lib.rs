@@ -10,6 +10,7 @@ pub mod d3d;
 pub mod elevation;
 pub mod games;
 mod geometry;
+mod registry;
 mod time;
 pub use geometry::{PhysicalRect, virtual_bounds};
 pub use time::{local_time, os_version, utc_offset_minutes};

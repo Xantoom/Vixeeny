@@ -8,8 +8,7 @@ use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::ERROR_SUCCESS;
 use windows::Win32::System::Registry::{
-    HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, RRF_RT_REG_SZ, RegCloseKey, RegEnumKeyExW, RegGetValueW,
-    RegOpenKeyExW,
+    HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, RegCloseKey, RegEnumKeyExW, RegOpenKeyExW,
 };
 use windows::core::{HSTRING, PWSTR};
 
@@ -290,7 +289,7 @@ fn specific_enough(folder: &str) -> bool {
 
 /// `steamapps\common` of every Steam library.
 fn steam_folders() -> Vec<String> {
-    let Some(steam) = string_value(HKEY_CURRENT_USER, r"Software\Valve\Steam", "SteamPath") else {
+    let Some(steam) = crate::registry::string(HKEY_CURRENT_USER, r"Software\Valve\Steam", "SteamPath") else {
         return Vec::new();
     };
     let steam = PathBuf::from(steam);
@@ -387,17 +386,17 @@ fn publisher_folders() -> Vec<String> {
     ] {
         for sub in subkeys(root, key) {
             let path = format!(r"{key}\{sub}");
-            let publisher = string_value(root, &path, "Publisher").unwrap_or_default();
+            let publisher = crate::registry::string(root, &path, "Publisher").unwrap_or_default();
             let publisher = publisher.to_lowercase();
             if !GAME_PUBLISHERS.iter().any(|p| publisher.contains(p)) {
                 continue;
             }
             // Some installers leave the location out: the folder of their icon then.
-            let folder = string_value(root, &path, "InstallLocation")
+            let folder = crate::registry::string(root, &path, "InstallLocation")
                 .map(|f| f.trim_matches('"').to_owned())
                 .filter(|f| !f.is_empty())
                 .or_else(|| {
-                    let icon = string_value(root, &path, "DisplayIcon")?;
+                    let icon = crate::registry::string(root, &path, "DisplayIcon")?;
                     let icon = icon.trim_matches('"');
                     let file = icon.split(',').next().unwrap_or(icon);
                     Some(Path::new(file).parent()?.to_string_lossy().into_owned())
@@ -406,28 +405,6 @@ fn publisher_folders() -> Vec<String> {
         }
     }
     folders
-}
-
-/// A string value of a registry key.
-fn string_value(root: HKEY, key: &str, value: &str) -> Option<String> {
-    let (key, value) = (HSTRING::from(key), HSTRING::from(value));
-    let mut bytes = 0u32;
-    // SAFETY: a size query: no buffer, `bytes` receives the size.
-    let status = unsafe { RegGetValueW(root, &key, &value, RRF_RT_REG_SZ, None, None, Some(&raw mut bytes)) };
-    if status != ERROR_SUCCESS || bytes == 0 {
-        return None;
-    }
-    let mut buffer = vec![0u16; (bytes as usize).div_ceil(2)];
-    // SAFETY: `buffer` holds `bytes` bytes; RRF_RT_REG_SZ checks the type.
-    let status = unsafe {
-        RegGetValueW(root, &key, &value, RRF_RT_REG_SZ, None, Some(buffer.as_mut_ptr().cast()), Some(&raw mut bytes))
-    };
-    if status != ERROR_SUCCESS {
-        return None;
-    }
-    let len = buffer.iter().position(|c| *c == 0).unwrap_or(buffer.len());
-    let text = String::from_utf16_lossy(&buffer[..len]);
-    (!text.trim().is_empty()).then_some(text)
 }
 
 /// The names of the subkeys of a registry key.
@@ -458,7 +435,7 @@ fn subkeys(root: HKEY, key: &str) -> Vec<String> {
 
 /// `value` of every subkey of `key`.
 fn subkey_strings(root: HKEY, key: &str, value: &str) -> Vec<String> {
-    subkeys(root, key).iter().filter_map(|sub| string_value(root, &format!(r"{key}\{sub}"), value)).collect()
+    subkeys(root, key).iter().filter_map(|sub| crate::registry::string(root, &format!(r"{key}\{sub}"), value)).collect()
 }
 
 #[cfg(test)]

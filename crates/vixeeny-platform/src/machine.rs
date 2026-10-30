@@ -25,13 +25,13 @@ use windows::Win32::System::Ioctl::{
     PropertyStandardQuery, STORAGE_DEVICE_DESCRIPTOR, STORAGE_DEVICE_NUMBER, STORAGE_PROPERTY_QUERY,
     StorageDeviceProperty,
 };
-use windows::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RegGetValueW};
+use windows::Win32::System::Registry::HKEY_LOCAL_MACHINE;
 use windows::Win32::System::SystemInformation::{
     GetLogicalProcessorInformationEx, GetPhysicallyInstalledSystemMemory, GetSystemFirmwareTable, GlobalMemoryStatusEx,
     MEMORYSTATUSEX, RSMB, RelationProcessorCore,
 };
 use windows::Win32::System::WindowsProgramming::DRIVE_FIXED;
-use windows::core::{HSTRING, PCWSTR, w};
+use windows::core::{HSTRING, PCWSTR};
 
 use vixeeny_common::machine::{Cpu, Disk, Gpu, Machine, Module, Screen};
 
@@ -40,26 +40,11 @@ pub fn machine() -> Machine {
     Machine { cpu: cpu(), ram_bytes: ram_bytes(), modules: modules(), gpus: gpus(), disks: disks(), screens: screens() }
 }
 
+/// The key of the first processor.
+const PROCESSOR: &str = r"HARDWARE\DESCRIPTION\System\CentralProcessor\0";
+
 fn cpu() -> Option<Cpu> {
-    let mut buffer = [0u16; 256];
-    let mut size = size_of_val(&buffer) as u32;
-    // SAFETY: `buffer` holds `size` bytes; the value is a string, which RRF_RT_REG_SZ checks.
-    let status = unsafe {
-        RegGetValueW(
-            HKEY_LOCAL_MACHINE,
-            w!(r"HARDWARE\DESCRIPTION\System\CentralProcessor\0"),
-            w!("ProcessorNameString"),
-            RRF_RT_REG_SZ,
-            None,
-            Some(buffer.as_mut_ptr().cast()),
-            Some(&raw mut size),
-        )
-    };
-    if status != ERROR_SUCCESS {
-        return None;
-    }
-    let len = buffer.iter().position(|c| *c == 0).unwrap_or(buffer.len());
-    let name = String::from_utf16_lossy(&buffer[..len]);
+    let name = crate::registry::string(HKEY_LOCAL_MACHINE, PROCESSOR, "ProcessorNameString")?;
     // Some processors pad their name with spaces.
     let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
     let threads = std::thread::available_parallelism().map_or(0, |n| n.get() as u32);
@@ -70,21 +55,7 @@ fn cpu() -> Option<Cpu> {
 /// `(base, boost)` in MHz. Windows gives the base; only Intel processors tell their maximum (CPUID leaf 0x16), AMD
 /// keeps it in registers a program cannot read.
 fn frequencies() -> (u32, u32) {
-    let mut mhz = 0u32;
-    let mut size = size_of::<u32>() as u32;
-    // SAFETY: `mhz` holds `size` bytes; RRF_RT_REG_DWORD checks the type.
-    let status = unsafe {
-        RegGetValueW(
-            HKEY_LOCAL_MACHINE,
-            w!(r"HARDWARE\DESCRIPTION\System\CentralProcessor\0"),
-            w!("~MHz"),
-            RRF_RT_REG_DWORD,
-            None,
-            Some((&raw mut mhz).cast()),
-            Some(&raw mut size),
-        )
-    };
-    let base = if status == ERROR_SUCCESS { mhz } else { 0 };
+    let base = crate::registry::dword(HKEY_LOCAL_MACHINE, PROCESSOR, "~MHz").unwrap_or(0);
     #[cfg(target_arch = "x86_64")]
     {
         use std::arch::x86_64::__cpuid;

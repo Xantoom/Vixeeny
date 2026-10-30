@@ -361,23 +361,9 @@ pub fn top_level_windows() -> Result<Vec<WindowInfo>> {
 
 /// `true` when the user chose the dark theme for apps (`AppsUseLightTheme` = 0).
 pub fn system_prefers_dark() -> bool {
-    use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
-    use windows::core::w;
-    let mut data = 1_u32;
-    let mut size = std::mem::size_of::<u32>() as u32;
-    // SAFETY: `data` and `size` are valid for the call; a missing value leaves `data` at 1.
-    let status = unsafe {
-        RegGetValueW(
-            HKEY_CURRENT_USER,
-            w!(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"),
-            w!("AppsUseLightTheme"),
-            RRF_RT_REG_DWORD,
-            None,
-            Some((&raw mut data).cast()),
-            Some(&raw mut size),
-        )
-    };
-    status.is_ok() && data == 0
+    use windows::Win32::System::Registry::HKEY_CURRENT_USER;
+    let key = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
+    crate::registry::dword(HKEY_CURRENT_USER, key, "AppsUseLightTheme") == Some(0)
 }
 
 /// `false` when the user turned off animations in Windows ("Show animations in Windows").
@@ -845,24 +831,10 @@ pub fn wallpaper() -> crate::Wallpaper {
 
 /// The accent colour the user chose in Windows (`[r, g, b]`).
 pub fn system_accent() -> Option<[u8; 3]> {
-    use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
-    use windows::core::w;
-    let mut data = 0_u32;
-    let mut size = std::mem::size_of::<u32>() as u32;
-    // SAFETY: `data` and `size` are valid for the call; a missing value leaves `data` at 0.
-    let status = unsafe {
-        RegGetValueW(
-            HKEY_CURRENT_USER,
-            w!(r"Software\Microsoft\Windows\DWM"),
-            w!("AccentColor"),
-            RRF_RT_REG_DWORD,
-            None,
-            Some((&raw mut data).cast()),
-            Some(&raw mut size),
-        )
-    };
+    use windows::Win32::System::Registry::HKEY_CURRENT_USER;
     // 0xAABBGGRR
-    (status.is_ok() && data != 0).then_some([data as u8, (data >> 8) as u8, (data >> 16) as u8])
+    let data = crate::registry::dword(HKEY_CURRENT_USER, r"Software\Microsoft\Windows\DWM", "AccentColor")?;
+    (data != 0).then_some([data as u8, (data >> 8) as u8, (data >> 16) as u8])
 }
 
 /// Dresses a normal window the Windows 11 way: the title bar follows the theme and takes the colour of the window, so
