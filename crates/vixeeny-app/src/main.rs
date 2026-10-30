@@ -471,18 +471,23 @@ impl Recording {
             return;
         }
         if let Some((pid, exe, window)) = &self.replay_game {
-            let never = config.replay.never.contains(exe);
-            if !config.replay.enabled || never || !vixeeny_platform::process_alive(*pid) {
+            let never = config.replay.never.iter().any(|e| e.eq_ignore_ascii_case(exe));
+            let (pid, window) = (*pid, *window);
+            let closed = !vixeeny_platform::process_alive(pid);
+            if !config.replay.enabled || never || closed {
                 tracing::info!("the game closed (or the replay was turned off): replay stopped");
                 if never {
-                    self.declined = Some(*pid);
+                    self.declined = Some(pid);
                 }
                 self.replay_game = None;
                 self.stop_replay();
-                return;
+                // Closed with the replay on: another game may already be in front (it came there while this one still
+                // showed), and nothing else will say so.
+                if !closed || never || !config.replay.enabled {
+                    return;
+                }
             }
             // A launcher that started the game and hid its window, still running: the replay goes to the game in front.
-            let (pid, window) = (*pid, *window);
             if vixeeny_platform::window_shown(window)
                 || self.games.game_in_front(game_lists(config)).is_none_or(|game| game.pid == pid)
             {

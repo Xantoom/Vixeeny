@@ -63,10 +63,11 @@ pub struct Lists<'a> {
 
 /// Whether `exe` (the executable's file name, lower case) is a game, from the `facts` and the user's lists.
 pub fn is_game(exe: &str, facts: Facts, lists: Lists<'_>) -> bool {
-    if !facts.full_screen || lists.never.iter().any(|e| e == exe) {
+    let listed = |list: &[String]| list.iter().any(|e| e.eq_ignore_ascii_case(exe));
+    if !facts.full_screen || listed(lists.never) {
         return false;
     }
-    if lists.always.iter().any(|e| e == exe) {
+    if listed(lists.always) {
         return true;
     }
     !LAUNCHERS.contains(&exe) && (facts.exclusive || facts.installed_game || facts.protected)
@@ -542,5 +543,10 @@ mod tests {
         assert!(!is_game("hades.exe", facts(true, true, true), lists));
         // Still in full screen only.
         assert!(!is_game("indie.exe", facts(false, false, false), lists));
+        // A list written by hand, in any case.
+        let (always, never) = (["Indie.EXE".to_owned()], ["HADES.exe".to_owned()]);
+        let lists = Lists { always: &always, never: &never };
+        assert!(is_game("indie.exe", facts(true, false, false), lists));
+        assert!(!is_game("hades.exe", facts(true, true, true), lists));
     }
 }

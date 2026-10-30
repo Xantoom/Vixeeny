@@ -171,6 +171,11 @@ pub fn foreground_window() -> Result<Option<WindowInfo>> {
 /// Visible frame of the window. DWM excludes the invisible resize border that `GetWindowRect` includes on Windows
 /// 10/11.
 fn frame_rect(hwnd: HWND) -> Option<PhysicalRect> {
+    frame(hwnd).map(rect_of)
+}
+
+/// The visible frame of `hwnd` (without the invisible borders of a normal window), as Windows gives it.
+fn frame(hwnd: HWND) -> Option<RECT> {
     let mut r = RECT::default();
     // SAFETY: `r` is a RECT and the size passed matches it.
     let dwm = unsafe {
@@ -185,7 +190,7 @@ fn frame_rect(hwnd: HWND) -> Option<PhysicalRect> {
         // SAFETY: `r` is a valid out-pointer.
         unsafe { GetWindowRect(hwnd, &mut r) }.ok()?;
     }
-    Some(rect_of(r))
+    Some(r)
 }
 
 /// The full path of the executable of process `pid`, when it can be read.
@@ -455,20 +460,17 @@ pub fn covers(window: &RECT, monitor: &RECT) -> bool {
         && window.bottom >= monitor.bottom
 }
 
-/// Whether `hwnd` covers its whole monitor.
+/// Whether `hwnd` covers its whole monitor, measured as the game detection measures it (the visible frame, not the
+/// invisible borders that make a maximised window overflow its screen).
 fn fills_its_monitor(hwnd: HWND) -> bool {
     use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONULL, MONITORINFO, MonitorFromWindow};
-    use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
-    let mut window = RECT::default();
     let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
-    // SAFETY: valid out-pointers; a window that is gone makes the calls fail.
+    // SAFETY: a valid out-pointer; a window that is gone makes the calls fail.
     let known = unsafe {
         let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL);
-        !monitor.is_invalid()
-            && GetWindowRect(hwnd, &mut window).is_ok()
-            && GetMonitorInfoW(monitor, &mut info).as_bool()
+        !monitor.is_invalid() && GetMonitorInfoW(monitor, &mut info).as_bool()
     };
-    known && covers(&window, &info.rcMonitor)
+    known && frame(hwnd).is_some_and(|window| covers(&window, &info.rcMonitor))
 }
 
 /// Calls `changed` with the window concerned, on a thread of its own, each time a window comes to the foreground and
