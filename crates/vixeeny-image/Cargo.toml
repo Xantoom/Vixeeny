@@ -15,7 +15,8 @@ image = { version = "0.25.10", default-features = false, features = ["png", "jpe
 imagequant = "4.4.1"
 jxl-oxide = { version = "0.12.6", features = ["moxcms"] }
 libwebp-sys = "0.14.4"
-moxcms = "0.9.1"
+# The version `image` and `jxl-oxide` use: one copy in the program.
+moxcms = "0.8.1"
 oxipng = { version = "10.2.1", default-features = false, features = ["parallel"] }
 png.workspace = true
 rayon.workspace = true
