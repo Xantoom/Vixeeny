@@ -15,9 +15,9 @@ concurrency:
 jobs:
   ffmpeg:
     uses: ./.github/workflows/ffmpeg.yml
-  # Lint (with the image codecs, built natively) and tests run side by side (the repository is
-  # public: the minutes cost nothing). The idle measurement, which needs a release build, runs
-  # with the releases.
+  # Lint and tests run side by side (the repository is public: the minutes cost nothing), both
+  # with the image codecs built natively, as for a release. The idle measurement, which needs a
+  # release build, runs with the releases.
   lint:
     needs: ffmpeg
     runs-on: windows-latest
@@ -25,39 +25,15 @@ jobs:
       # No debug information: less to write, link and cache.
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
-      LIBCLANG_PATH: C:\Program Files\LLVM\bin
-      PKG_CONFIG_PATH: ${{ github.workspace }}\native\build\work\prefix\lib\pkgconfig
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # libjxl and jpegli built with MSVC, as for a release.
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        id: native-cache
-        with:
-          path: native/build/work
-          key: native-windows-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}
-          restore-keys: native-windows-
       - uses: ./.github/actions/setup
-      - run: cargo fmt --check
-      - name: Tools (pkg-config, and nasm for libjpeg-turbo's SIMD when the cache has no libraries)
-        run: |
-          $tools = @("pkgconfiglite")
-          if ("${{ steps.native-cache.outputs.cache-hit }}" -ne "true") { $tools += "nasm" }
-          choco install @tools -y --no-progress
-          "C:\ProgramData\chocolatey\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
-          "C:\Program Files\NASM" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
-      - run: cargo xtask build-native
-      # Saved only when the libraries changed: an unchanged copy (750 MB) would only push the
-      # other caches out of the 10 GB GitHub keeps per repository.
-      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: steps.native-cache.outputs.cache-hit != 'true'
         with:
-          path: native/build/work
-          key: native-windows-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Clippy with the image codecs
-        run: cargo clippy -p vixeeny-app --features native-codecs --all-targets -- -D warnings
-      - name: Image codecs (JPEG, Ultra HDR, JPEG XL)
-        run: cargo test -p vixeeny-image --features native-codecs --all-targets
+          native: true
+      - run: cargo fmt --check
+      # The targets of `--all-targets` but the benchmarks (there are none): that option also
+      # checks vixeeny-ui's library as a test, though its `test = false` says it has none.
+      - run: cargo clippy --workspace --lib --bins --tests --examples --features vixeeny-app/native-codecs -- -D warnings
   test:
     needs: ffmpeg
     runs-on: windows-latest
@@ -70,12 +46,23 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup
-      # `--all-targets`: the crates have no documentation tests, whose pass costs a rustdoc run each.
-      - run: cargo test --workspace --all-targets
-      # Already run above; again for its output. The same targets and features: nothing is built
-      # again (`-p` alone would rebuild the crate and its dependencies).
+        with:
+          native: true
+      # `--tests`, not `--all-targets`: that one also builds vixeeny-ui's library as a test, though
+      # its `test = false` says it has none, and the code generated from the .slint files is the
+      # bulk of the build. No documentation tests either: the crates have none, and their pass costs
+      # a rustdoc run each. The examples are checked by clippy.
+      - run: cargo test --workspace --tests --features vixeeny-app/native-codecs
+      # Already run above; again for its output. The same features: nothing is built again (`-p`
+      # alone would rebuild the crate and its dependencies).
       - name: Real capture smoke test (output only)
-        run: cargo test --workspace --test wgc_smoke -- --nocapture
+        run: cargo test --workspace --features vixeeny-app/native-codecs --test wgc_smoke -- --nocapture
+  caches:
+    needs: [lint, test]
+    if: always() && github.ref == 'refs/heads/1.0'
+    permissions:
+      actions: write
+    uses: ./.github/workflows/caches.yml
   installer:
     # The installer script compiles; otherwise its code is only compiled by a release.
     runs-on: windows-latest

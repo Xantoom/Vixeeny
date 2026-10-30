@@ -1,13 +1,31 @@
 name: Setup
 description: >-
   For the Windows jobs: the Rust of rust-toolchain.toml, the build cache, the MSVC tools and FFmpeg (the `ffmpeg`
-  artifact of the run, on the PATH for the tests).
+  artifact of the run, on the PATH for the tests); with `native`, the image libraries as well.
+inputs:
+  native:
+    description: libjxl and jpegli built with MSVC, as for a release, for `--features vixeeny-app/native-codecs`.
+    default: "false"
 runs:
   using: composite
   steps:
+    # Before FFmpeg: the saved folder holds a copy of it, which the artifact of the run replaces.
+    - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      if: inputs.native == 'true'
+      id: native-cache
+      with:
+        path: native/build/work
+        key: native-windows-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}
+        restore-keys: native-windows-
     - shell: pwsh
       run: rustup toolchain install --profile minimal
+    # Every CARGO*, RUST*, CC*, CFLAGS*, CXX* and CMAKE* variable of the job is part of the key, which no input narrows:
+    # one added, removed or changed (by the workflow or by an action) means a build from nothing. Saved from the 1.0
+    # branch only, whose caches its pull requests read: another branch's would only push them out of the 10 GB GitHub
+    # keeps.
     - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      with:
+        save-if: ${{ github.ref == 'refs/heads/1.0' }}
     - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
     - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
       with:
@@ -20,3 +38,25 @@ runs:
         $dir = "$PWD\native\build\work\ffmpeg-prebuilt"
         "FFMPEG_DIR=$dir" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
         "$dir\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+    - name: Image libraries (pkg-config, and nasm for libjpeg-turbo's SIMD when the cache has none)
+      if: inputs.native == 'true'
+      shell: pwsh
+      run: |
+        $missing = @()
+        if (-not (Test-Path "C:\ProgramData\chocolatey\bin\pkg-config.exe")) { $missing += "pkgconfiglite" }
+        if ("${{ steps.native-cache.outputs.cache-hit }}" -ne "true") { $missing += "nasm" }
+        if ($missing) { choco install @missing -y --no-progress }
+        $env:PATH = "C:\ProgramData\chocolatey\bin;C:\Program Files\NASM;$env:PATH"
+        $env:LIBCLANG_PATH = "C:\Program Files\LLVM\bin"
+        $env:PKG_CONFIG_PATH = "$PWD\native\build\work\prefix\lib\pkgconfig"
+        cargo xtask build-native
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        "C:\ProgramData\chocolatey\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+        "LIBCLANG_PATH=$env:LIBCLANG_PATH" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+        "PKG_CONFIG_PATH=$env:PKG_CONFIG_PATH" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+    # Saved only when the libraries changed: an unchanged copy (750 MB) would only push the other caches out.
+    - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      if: inputs.native == 'true' && steps.native-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/1.0'
+      with:
+        path: native/build/work
+        key: native-windows-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}

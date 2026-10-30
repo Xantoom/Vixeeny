@@ -50,30 +50,16 @@ jobs:
     needs: [version, ffmpeg]
     if: needs.version.outputs.build == 'true' || needs.version.outputs.warm == 'true'
     runs-on: windows-latest
-    env:
-      LIBCLANG_PATH: C:\Program Files\LLVM\bin
-      PKG_CONFIG_PATH: ${{ github.workspace }}\native\build\work\prefix\lib\pkgconfig
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        id: native-cache
-        with:
-          path: native/build/work
-          key: native-windows-${{ hashFiles('native/versions.toml', 'xtask/src/native.rs') }}
-          restore-keys: native-windows-
       - uses: ./.github/actions/setup
-      - name: Tools (Inno Setup, pkg-config, and nasm for libjpeg-turbo's SIMD when the cache has no libraries)
+        with:
+          native: true
+      - name: Inno Setup
         run: |
-          # The image usually has Inno Setup: only what is missing is installed.
-          $missing = @()
-          if (-not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) { $missing += "innosetup" }
-          if (-not (Test-Path "C:\ProgramData\chocolatey\bin\pkg-config.exe")) { $missing += "pkgconfiglite" }
-          if ("${{ steps.native-cache.outputs.cache-hit }}" -ne "true") { $missing += "nasm" }
-          if ($missing) { choco install @missing -y --no-progress }
-          "C:\ProgramData\chocolatey\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
-          "C:\Program Files\NASM" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          # The image usually has it.
+          if (-not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
           "C:\Program Files (x86)\Inno Setup 6" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
-      - run: cargo xtask build-native
       # One invocation: the crates the programs share are built once, side by side with the rest.
       - name: Build the programs
         run: cargo build --release -p vixeeny-daemon -p xtask -p vixeeny-app --features vixeeny-app/native-codecs
@@ -99,6 +85,12 @@ jobs:
           name: xtask
           path: target/release/xtask.exe
           retention-days: 1
+  caches:
+    needs: windows
+    if: always() && github.ref == 'refs/heads/1.0' && needs.windows.result != 'skipped'
+    permissions:
+      actions: write
+    uses: ./.github/workflows/caches.yml
   # Idle CPU and wake-ups of the daemon being released (informational), on a machine of its own:
   # the release does not wait for it.
   idle:

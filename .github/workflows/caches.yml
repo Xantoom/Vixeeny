@@ -1,0 +1,23 @@
+name: Caches
+# Deletes the caches of the branch that a newer one with the same name has replaced (a key less
+# its hashes: `v0-rust-test-Windows_NT-x64-1fd131b7-24480042` is `v0-rust-test-Windows_NT-x64`),
+# called once the jobs that save some are done. GitHub only evicts past 10 GB per repository, and
+# the build caches take 2.5 GB a set.
+on:
+  workflow_call:
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh cache list --ref "$GITHUB_REF" --limit 1000 --json id,key,createdAt --jq '
+            group_by(.key | sub("(-[0-9a-f]{8,})+$"; ""))
+            | map(sort_by(.createdAt) | .[:-1][] | "\(.id) \(.key)")[]' |
+          while read -r id key; do
+            echo "$key"
+            # A run of the other workflow may have deleted it first.
+            gh cache delete "$id" || true
+          done
