@@ -273,8 +273,6 @@ keys! {
     ToastDiskLow => "Disk almost full", "Disque presque plein";
     ToastReplayDiskLow => "{size} free on the replays disk: the next replays may fail.",
         "{size} libres sur le disque des replays : les prochains peuvent échouer.";
-    SetWidgetPlaceHint => "Click anywhere on the screen for a place of your own.",
-        "Cliquez n'importe où sur l'écran pour une position personnalisée.";
     UpdateChecked => "Last checked: {when}", "Dernière vérification : {when}";
     PcLocalDisk => "Local Disk", "Disque local";
     ActReplayEdit => "Save and edit the replay", "Sauvegarder et éditer le replay";
@@ -325,7 +323,6 @@ keys! {
     GrpWidget => "Recording widget", "Widget d'enregistrement";
     GrpLocation => "Location", "Emplacement";
     GrpEncoding => "Encoding", "Encodage";
-    GrpCapture => "Capture", "Capture";
     GrpPicture => "Picture", "Image";
     GrpFile => "File", "Fichier";
     GrpPcSound => "Computer sound", "Son du PC";
@@ -362,7 +359,6 @@ keys! {
     SetCustomName => "Custom file name", "Nom personnalisé";
     SetPreview => "Show preview", "Afficher un aperçu";
     SetKeepCopy => "Keep a copy", "Garder une copie";
-    SetImageEncoding => "Encoding settings", "Paramètres d’encodage";
     GrpCaptureRegion => "Region capture", "Capture de zone";
     GrpCaptureFullscreen => "Screen capture", "Capture d’écran";
     GrpCaptureAllMonitors => "All screens capture", "Capture de tous les écrans";
