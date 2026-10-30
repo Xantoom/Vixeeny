@@ -11,14 +11,11 @@ repository.workspace = true
 vixeeny-common = { path = "../vixeeny-common" }
 thiserror.workspace = true
 windows = { workspace = true, features = [
-    "Data_Xml_Dom",
-    "Foundation_Collections",
     "Globalization",
     "Graphics_Imaging",
     "Media_Ocr",
     "Security_Cryptography",
     "Storage_Streams",
-    "UI_Notifications",
     "Win32_Devices_Display",
     "Win32_Foundation",
     "Win32_Globalization",
@@ -51,7 +48,6 @@ windows = { workspace = true, features = [
     "Win32_System_SystemInformation",
     "Win32_System_TaskScheduler",
     "Win32_System_WindowsProgramming",
-    "Win32_System_WinRT",
     "Win32_System_Threading",
     "Win32_System_Time",
     "Win32_System_Variant",
