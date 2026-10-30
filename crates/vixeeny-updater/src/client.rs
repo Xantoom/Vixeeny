@@ -30,7 +30,11 @@ const START_TIMEOUT: Duration = Duration::from_secs(20);
 const CURRENT: &str = env!("CARGO_PKG_VERSION");
 
 fn agent() -> ureq::Agent {
+    use ureq::tls::{RootCerts, TlsConfig, TlsProvider};
     ureq::Agent::config_builder()
+        .tls_config(
+            TlsConfig::builder().provider(TlsProvider::NativeTls).root_certs(RootCerts::PlatformVerifier).build(),
+        )
         .timeout_connect(Some(Duration::from_secs(15)))
         .timeout_recv_body(Some(Duration::from_secs(60)))
         .user_agent(concat!("Vixeeny/", env!("CARGO_PKG_VERSION")))

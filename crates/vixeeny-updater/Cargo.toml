@@ -14,7 +14,9 @@ serde.workspace = true
 serde_json.workspace = true
 semver = "1.0.28"
 minisign-verify = "0.3.0"
-ureq = { version = "3.5.0", optional = true }
+# Windows' own TLS (SChannel) and certificate store: no TLS library or root certificates of its own in the program. The
+# archives are trusted for their minisign signature, not for the connection.
+ureq = { version = "3.5.0", optional = true, default-features = false, features = ["native-tls-no-default", "gzip"] }
 zip.workspace = true
 vixeeny-common = { path = "../vixeeny-common" }
 vixeeny-platform = { path = "../vixeeny-platform", optional = true }
