@@ -393,6 +393,13 @@ pub fn system_prefers_dark() -> bool {
     crate::registry::dword(HKEY_CURRENT_USER, key, "AppsUseLightTheme") == Some(0)
 }
 
+/// Whether Windows 11 opens its Snipping Tool with the Print Screen key (Settings → Accessibility → Keyboard): the key
+/// alone then never reaches another program's shortcut.
+pub fn print_screen_opens_snipping_tool() -> bool {
+    use windows::Win32::System::Registry::HKEY_CURRENT_USER;
+    crate::registry::dword(HKEY_CURRENT_USER, r"Control Panel\Keyboard", "PrintScreenKeyForSnippingEnabled") == Some(1)
+}
+
 /// `false` when the user turned off animations in Windows ("Show animations in Windows").
 pub fn animations_enabled() -> bool {
     use windows::Win32::UI::WindowsAndMessaging::{

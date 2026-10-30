@@ -23,9 +23,10 @@ pub use windows_impl::{
     cursor_position, ensure_dpi_aware, exclude_from_capture, exe_icon, exe_metadata, focus_tagged_window,
     foreground_window, game_page_in_front, gpu_adapters, harden_dll_search, hdr_active, hdr_info, max_refresh_hz, mica,
     monitor_layout, monitors, monotonic_ns, on_click_outside, on_dir_change, on_foreground_change, on_game_windows,
-    on_process_exit, open_path, process_alive, process_ancestors, process_name, process_path, reveal,
-    run_in_background, set_app_id, set_exe_icon, single_instance, style_window, system_accent, system_prefers_dark,
-    tag_window, top_level_windows, user_locale, wait_for_composition, wallpaper, window_info, window_shown,
+    on_process_exit, open_path, print_screen_opens_snipping_tool, process_alive, process_ancestors, process_name,
+    process_path, reveal, run_in_background, set_app_id, set_exe_icon, single_instance, style_window, system_accent,
+    system_prefers_dark, tag_window, top_level_windows, user_locale, wait_for_composition, wallpaper, window_info,
+    window_shown,
 };
 
 /// A graphics adapter as the OS reports it (the encoder probe derives its own view from it).

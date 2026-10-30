@@ -62,6 +62,9 @@ impl HotkeyBackend for Hotkeys {
         };
         actions.clear();
         let mut failures = Vec::new();
+        // Windows takes the Print Screen key alone for its Snipping Tool when told to: the shortcut then never fires
+        // (it is registered all the same, for when the user turns that off), and the user is told why.
+        let snipping = vixeeny_platform::print_screen_opens_snipping_tool();
         for (action, hotkey) in bindings {
             let result = to_global(hotkey)
                 .and_then(|global| self.manager.register(global).map(|()| global).map_err(|e| e.to_string()));
@@ -69,6 +72,9 @@ impl HotkeyBackend for Hotkeys {
                 Ok(global) => {
                     actions.insert(global.id(), *action);
                     self.registered.push(global);
+                    if snipping && hotkey.code == "PrintScreen" && hotkey.mods == Default::default() {
+                        failures.push((hotkey.clone(), format!("{action:?}: Windows opens its Snipping Tool with it")));
+                    }
                 }
                 Err(e) => failures.push((hotkey.clone(), format!("{action:?}: {e}"))),
             }

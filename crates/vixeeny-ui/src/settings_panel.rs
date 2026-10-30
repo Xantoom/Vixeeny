@@ -173,6 +173,8 @@ struct State {
     audio_source: RefCell<Option<AudioFn>>,
     display: Cell<Display>,
     admin: Cell<Admin>,
+    /// Windows opens its Snipping Tool with the Print Screen key alone: that shortcut is Windows'.
+    print_screen_kept: Cell<bool>,
     /// The shortcut being recorded: `(row, slot)`.
     recording: Cell<Option<(usize, usize)>>,
     chord: RefCell<Chord>,
@@ -768,6 +770,7 @@ impl SettingsPanel {
             audio_source: RefCell::default(),
             display: Cell::default(),
             admin: Cell::default(),
+            print_screen_kept: Cell::new(false),
             recording: Cell::new(None),
             chord: RefCell::default(),
             on_recording: RefCell::new(Box::new(|_| {})),
@@ -836,6 +839,14 @@ impl SettingsPanel {
     }
 
     /// Where Vixeeny is with the administrator's rights: the general page offers them.
+    /// Whether Windows keeps the Print Screen key alone for its Snipping Tool.
+    pub fn set_print_screen_kept(&self, kept: bool) {
+        self.state.print_screen_kept.set(kept);
+        if self.current_section() == Section::Shortcuts {
+            self.refresh_shortcuts(&[]);
+        }
+    }
+
     pub fn set_admin(&self, admin: Admin) {
         if self.state.admin.get() == admin {
             return;
@@ -1137,7 +1148,10 @@ impl SettingsPanel {
             .enumerate()
             .map(|(i, (action, slots))| {
                 // Kept by Windows, or refused by the OS when the daemon registered it.
-                let windows = |text: &str| shortcuts::kept_by_windows(text);
+                let print_screen = self.state.print_screen_kept.get();
+                let windows = |text: &str| {
+                    shortcuts::kept_by_windows(text) || print_screen && shortcuts::same(text, "PrintScreen")
+                };
                 let other = |text: &str| taken.iter().any(|t| shortcuts::same(t, text));
                 let keys: Vec<ShortcutKey> = slots
                     .iter()

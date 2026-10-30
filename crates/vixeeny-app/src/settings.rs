@@ -412,6 +412,7 @@ pub fn run_child(config: Config, args: &[String]) -> anyhow::Result<()> {
         max_refresh: vixeeny_platform::max_refresh_hz(),
     });
     panel.set_admin(admin_state());
+    panel.set_print_screen_kept(vixeeny_platform::print_screen_opens_snipping_tool());
     panel.on_recording(pause_hotkeys);
     start_probe_watch(&panel);
     let handle = panel.handle();
