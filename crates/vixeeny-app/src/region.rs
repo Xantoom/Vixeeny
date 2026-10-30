@@ -196,7 +196,7 @@ pub fn save_bgra(
     let image_settings = &config.image.for_action(action);
     let (default_format, settings) = crate::image_output(image_settings);
     // Once saved, the image goes to the clipboard as well when the settings say so.
-    let copy = |image: &Bgra<'_>, encoded: Option<&[u8]>, name: &str| {
+    let copy = |image: &Bgra<'_>, encoded: Option<still::Encoded<'_>>, name: &str| {
         if image_settings.copy_to_clipboard
             && let Err(e) = copy_bgra(image_settings, image, encoded, name)
         {
@@ -232,7 +232,7 @@ pub fn save_bgra(
             };
             still::write_atomic(&path, &bytes)?;
             if same {
-                copy(bitmap, Some(&bytes), &name);
+                copy(bitmap, Some(still::Encoded { bytes: &bytes, file: Some(&path) }), &name);
             }
             Ok(path)
         });

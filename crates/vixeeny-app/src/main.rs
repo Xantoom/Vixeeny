@@ -167,7 +167,7 @@ fn direct_capture(
     // The notification's thumbnail is made from the picture saved, not from the file.
     let thumb = std::sync::Mutex::new(None);
     let card = image_settings.keep_copy && config.notifications.enabled && config.notifications.image_saved;
-    let after = |image: &vixeeny_image::Bgra<'_>, encoded: Option<&[u8]>, name: &str| {
+    let after = |image: &vixeeny_image::Bgra<'_>, encoded: Option<still::Encoded<'_>>, name: &str| {
         if card && let Ok(mut slot) = thumb.lock() {
             *slot = Some(thumbnail::scaled(image, 640));
         }

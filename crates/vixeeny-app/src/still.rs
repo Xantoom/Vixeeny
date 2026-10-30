@@ -104,7 +104,14 @@ pub struct Destination<'a> {
 
 /// What [`Destination::after_save`] calls: the image, the file's bytes when they are it, and the file's name (without
 /// the folder or the extension). It may be called from another thread, while the file is written.
-pub type AfterSave<'a> = dyn Fn(&Bgra<'_>, Option<&[u8]>, &str) + Sync + 'a;
+pub type AfterSave<'a> = dyn Fn(&Bgra<'_>, Option<Encoded<'_>>, &str) + Sync + 'a;
+
+/// The image as encoded for its file, and that file once written (a copy for the clipboard alone writes none).
+#[derive(Clone, Copy)]
+pub struct Encoded<'a> {
+    pub bytes: &'a [u8],
+    pub file: Option<&'a Path>,
+}
 
 /// Display name of the application a capture is attributed to.
 pub(crate) fn app_name(
@@ -277,7 +284,8 @@ pub fn save_image(
     let bytes = vixeeny_image::encode(output.format, image, output.settings)?;
     let path = write_named(action, snap, dest, output.format, metadata, (image.width, image.height), &bytes)?;
     if let Some(after) = dest.after_save {
-        after(image, Some(&bytes), &stem_of(&path));
+        let file = dest.keep_copy.then_some(path.as_path());
+        after(image, Some(Encoded { bytes: &bytes, file }), &stem_of(&path));
     }
     Ok(path)
 }
@@ -312,7 +320,8 @@ pub fn save_hdr(
         let path = write_named(action, snap, dest, output.format, metadata, size, &bytes)?;
         let sdr = sdr.and_then(|done| done.join().ok());
         if let (true, Some(after), Some(sdr)) = (reuse, dest.after_save, sdr) {
-            after(&Bgra::new(size.0, size.1, size.0 as usize * 4, &sdr), Some(&bytes), &stem_of(&path));
+            let encoded = Encoded { bytes: &bytes, file: dest.keep_copy.then_some(path.as_path()) };
+            after(&Bgra::new(size.0, size.1, size.0 as usize * 4, &sdr), Some(encoded), &stem_of(&path));
         }
         Ok(path)
     })
@@ -491,8 +500,10 @@ mod tests {
         let names = BTreeMap::new();
         let now = now();
         let copied = std::sync::Mutex::new(None);
-        let after = |image: &Bgra<'_>, encoded: Option<&[u8]>, name: &str| {
-            *copied.lock().unwrap() = Some((image.width, image.height, encoded.unwrap().to_vec(), name.to_owned()));
+        let after = |image: &Bgra<'_>, encoded: Option<Encoded<'_>>, name: &str| {
+            let encoded = encoded.unwrap();
+            assert!(encoded.file.is_none());
+            *copied.lock().unwrap() = Some((image.width, image.height, encoded.bytes.to_vec(), name.to_owned()));
         };
         let dest = Destination {
             keep_copy: false,
@@ -668,9 +679,10 @@ mod tests {
         let copied = std::sync::Mutex::new(None);
         // The file's bytes, when the clipboard can take them as they are.
         let encoded = std::sync::Mutex::new(None);
-        let copy = |image: &Bgra<'_>, bytes: Option<&[u8]>, _: &str| {
+        let copy = |image: &Bgra<'_>, file: Option<Encoded<'_>>, _: &str| {
             *copied.lock().unwrap() = Some((image.width, image.data[0]));
-            *encoded.lock().unwrap() = bytes.map(<[u8]>::to_vec);
+            // The file written holds the bytes it comes with.
+            *encoded.lock().unwrap() = file.map(|f| (f.bytes.to_vec(), std::fs::read(f.file.unwrap()).unwrap()));
         };
         let copied = || copied.lock().unwrap().take();
         let encoded = || encoded.lock().unwrap().take();
@@ -707,14 +719,14 @@ mod tests {
             let jpeg = shoot(ImageFormat::Jpeg, true);
             let (_, first) = copied().unwrap();
             assert!((150..250).contains(&first), "{first}");
-            assert_eq!(encoded(), Some(jpeg));
+            assert_eq!(encoded(), Some((jpeg.clone(), jpeg)));
         }
         // Converted when asked, and always for WebP.
         let sdr = shoot(ImageFormat::Png, false);
         assert!(!sdr.windows(4).any(|c| c == b"cICP"));
         assert_eq!(copied().unwrap().1, 7);
         // The SDR file is the clipboard's image: not encoded a second time.
-        assert_eq!(encoded(), Some(sdr));
+        assert_eq!(encoded(), Some((sdr.clone(), sdr)));
         let webp = shoot(ImageFormat::WebP, true);
         assert_eq!(&webp[8..12], b"WEBP");
         assert_eq!(copied().unwrap().1, 7);
