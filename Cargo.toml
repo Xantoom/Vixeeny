@@ -74,10 +74,11 @@ codegen-units = 1
 strip = true
 panic = "abort"
 
-# The interface's generated code is not where the time goes: built in parallel, it compiles in
-# half the time for a slightly larger program.
+# The interface's generated code is not where the time goes (Slint's renderer is, optimized for
+# speed): built in parallel and for size, it compiles in half the time and is a third smaller.
 [profile.release.package.vixeeny-ui]
 codegen-units = 16
+opt-level = "s"
 
 # For trying a change in the real app: optimized like a release, without its link-time optimization and with the
 # crates built in parallel and incrementally; a few times faster to rebuild. Releases keep `release`.
