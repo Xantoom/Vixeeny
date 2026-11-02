@@ -3,13 +3,15 @@
 //! ms), where Windows Graphics Capture waits for its session and the next composed frame (about 36 ms each). The same
 //! pixels, and windows excluded from capture stay out of it too.
 //!
-//! It leaves out the pointer, and is made only for an unrotated monitor of the device's adapter, in the format the
-//! monitor composes in; the caller captures through Windows Graphics Capture otherwise, and whenever this fails (a
-//! secure desktop, a UAC prompt, too many duplications of the screen at once).
+//! It leaves out the pointer the graphics card lays over the screen, and is made only for an unrotated monitor of the
+//! device's adapter, in the format the monitor composes in; the caller captures through Windows Graphics Capture
+//! otherwise, and whenever this fails (a secure desktop, a UAC prompt, too many duplications of the screen at once). A
+//! pointer Windows draws into the picture itself (one too large or too colourful for the card, as some games set) is in
+//! the duplicated picture: the screen is then captured through Windows Graphics Capture too, which leaves it out.
 
 use std::time::{Duration, Instant};
 
-use vixeeny_platform::MonitorInfo;
+use vixeeny_platform::{MonitorInfo, PhysicalRect};
 use windows::Win32::Graphics::Direct3D11::{ID3D11Device, ID3D11Texture2D};
 use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_MODE_ROTATION_IDENTITY,
@@ -18,6 +20,7 @@ use windows::Win32::Graphics::Dxgi::Common::{
 use windows::Win32::Graphics::Dxgi::{
     DXGI_OUTDUPL_FRAME_INFO, IDXGIDevice, IDXGIOutput5, IDXGIOutputDuplication, IDXGIResource,
 };
+use windows::Win32::UI::WindowsAndMessaging::{CURSOR_SHOWING, CURSORINFO, GetCursorInfo};
 use windows::core::Interface;
 
 /// How long the first picture may take before Windows Graphics Capture is used instead.
@@ -40,7 +43,11 @@ impl Drop for Frame {
 }
 
 /// A duplication session started before any monitor is waited for.
-pub(crate) struct Pending(IDXGIOutputDuplication);
+pub(crate) struct Pending {
+    duplication: IDXGIOutputDuplication,
+    /// The monitor's desktop area, to tell whether the pointer is on it.
+    rect: PhysicalRect,
+}
 
 /// `monitor`'s picture on `device`, 8-bit BGRA for an SDR monitor and scRGB half floats for an HDR one (`hdr`: which is
 /// asked for); `None` when Desktop Duplication cannot give it.
@@ -71,24 +78,36 @@ pub(crate) fn start(device: &ID3D11Device, monitor: &MonitorInfo, hdr: bool) -> 
         if desc.ModeDesc.Format != format || desc.DesktopImageInSystemMemory.as_bool() {
             return None;
         }
-        Some(Pending(duplication))
+        Some(Pending { duplication, rect: r })
     }
 }
 
 impl Pending {
+    /// The picture, `None` when it is not there by `deadline` or holds the pointer.
     pub fn finish(self, deadline: Instant) -> Option<Frame> {
-        let duplication = self.0;
+        let Self { duplication, rect } = self;
+        // Whether the card lays the pointer over this screen; a new duplication tells it with its first frame.
+        let mut overlaid = false;
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
             let mut info = DXGI_OUTDUPL_FRAME_INFO::default();
             let mut resource: Option<IDXGIResource> = None;
             // SAFETY: a live duplication and valid out-pointers. All monitors share the same deadline.
             unsafe { duplication.AcquireNextFrame(left.as_millis() as u32, &raw mut info, &raw mut resource) }.ok()?;
+            if info.LastMouseUpdateTime != 0 {
+                overlaid = info.PointerPosition.Visible.as_bool();
+            }
             // The first frames may carry only the pointer: no picture yet.
             if info.LastPresentTime != 0
                 && let Some(texture) = resource.and_then(|r| r.cast::<ID3D11Texture2D>().ok())
             {
-                return Some(Frame { duplication, texture });
+                let frame = Frame { duplication, texture };
+                // A pointer shown here but not laid over is drawn into the picture (dropping the frame releases it).
+                if !overlaid && pointer_shown_in(&rect) {
+                    tracing::debug!(?rect, "pointer drawn into the duplicated screen: captured instead");
+                    return None;
+                }
+                return Some(frame);
             }
             // SAFETY: the acquired pointer-only frame is released before the next acquisition.
             let _ = unsafe { duplication.ReleaseFrame() };
@@ -97,6 +116,15 @@ impl Pending {
             }
         }
     }
+}
+
+/// Whether the pointer is shown within `rect`.
+fn pointer_shown_in(rect: &PhysicalRect) -> bool {
+    let mut info = CURSORINFO { cbSize: size_of::<CURSORINFO>() as u32, ..Default::default() };
+    // SAFETY: `info` is a valid out-pointer with its size set.
+    unsafe { GetCursorInfo(&raw mut info) }.is_ok()
+        && info.flags.0 & CURSOR_SHOWING.0 != 0
+        && rect.contains(info.ptScreenPos.x, info.ptScreenPos.y)
 }
 
 #[cfg(test)]
