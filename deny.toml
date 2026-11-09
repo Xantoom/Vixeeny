@@ -9,6 +9,10 @@ ignore = [
   # ttf-parser is unmaintained but only parses the bundled font (fontdue) and winit's window
   # decorations; revisit when fontdue or winit move to skrifa.
   "RUSTSEC-2026-0192",
+  # pin-utils is archived, with no release to move to. Only spin_on uses it, inside Slint's compiler
+  # (slint-build, slint-macros): it runs while Vixeeny is built and is in neither program. Revisit
+  # when Slint drops spin_on.
+  "RUSTSEC-2026-0441",
 ]
 
 [licenses]
