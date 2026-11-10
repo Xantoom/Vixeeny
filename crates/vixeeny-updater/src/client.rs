@@ -178,6 +178,14 @@ fn install_dir() -> anyhow::Result<PathBuf> {
     Ok(exe.parent().context("no install folder")?.to_owned())
 }
 
+/// Whether the last check is old enough for another (see [`State::due`]); `true` when that cannot be read.
+pub fn due() -> bool {
+    let Ok(path) = state_path() else {
+        return true;
+    };
+    State::load(&path).due(now())
+}
+
 /// Asks GitHub for the latest release and records the answer. `Some` when it is newer than this version.
 pub fn check() -> anyhow::Result<Option<Release>> {
     let path = state_path()?;

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! `vixeeny-app --update background`: the check the daemon starts after its own start and each wake from sleep. With
-//! automatic updates on, a new version is downloaded and verified without a word, and installed at the next start of
-//! Vixeeny (or by the Restart button of the settings); otherwise the user is told once.
+//! `vixeeny-app --update background`: the check the daemon starts after its own start and each wake from sleep, which
+//! asks GitHub when the last answer is 12 hours old. With automatic updates on, a new version is downloaded and
+//! verified without a word, and installed at the next start of Vixeeny (or by the Restart button of the settings);
+//! otherwise the user is told once.
 //!
 //! `vixeeny-app --update pending`: run by the daemon as it starts; undoes an install cut short, or installs a
 //! downloaded version (the daemon stops, the new one starts), or else tells what changed when this version is new since
@@ -69,7 +70,8 @@ fn pending() -> anyhow::Result<()> {
 fn background() -> anyhow::Result<()> {
     client::clean_up();
     let config = Config::current();
-    if !config.general.check_updates {
+    // Every 12 hours at most: a laptop that wakes often does not ask each time.
+    if !config.general.check_updates || !client::due() {
         return Ok(());
     }
     let Some(release) = client::check()? else {
