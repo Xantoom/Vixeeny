@@ -53,6 +53,8 @@ The installer asks who Vixeeny is for:
 > [!NOTE]
 > The installer is not signed with a paid certificate, so SmartScreen may warn the first time:
 > **More info → Run anyway**. Updates are verified with [minisign](packaging/minisign.pub).
+> Smart App Control, on by itself on some fresh Windows 11 installs, has no such choice: see
+> [Limitations](docs/LIMITATIONS.md#not-signed-with-a-certificate).
 
 ## Build from source
 

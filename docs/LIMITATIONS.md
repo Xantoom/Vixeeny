@@ -26,3 +26,9 @@ target. The licences are listed in `THIRD-PARTY-LICENSES.txt` inside every packa
 The installer and the programs carry no Authenticode signature (it costs money every year), so
 SmartScreen may warn the first time: "More info" → "Run anyway". Updates are verified with
 minisign before anything is replaced.
+
+Smart App Control is stricter. Windows 11 turns it on by itself on some fresh installs (22H2 and
+later), and it blocks programs without a signature it knows, with no button to run them anyway:
+Vixeeny then starts only with Smart App Control turned off (Windows Security → App & browser
+control → Smart App Control settings). That lowers the protection for every program, and a
+Windows 11 without its April 2026 update cannot turn it back on without being reinstalled.
