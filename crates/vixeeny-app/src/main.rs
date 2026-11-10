@@ -341,6 +341,20 @@ fn parse_action() -> anyhow::Result<(ActionId, Option<ipc::Frozen>)> {
     Ok((action, frozen))
 }
 
+/// The settings as they are now, when the file was written since `read_at` (then updated); `None` when it was not. A
+/// file whose time cannot be read is read every time.
+fn fresh_config(read_at: &mut Option<std::time::SystemTime>) -> Option<Config> {
+    let stamp = vixeeny_common::paths::config_file()
+        .and_then(|path| std::fs::metadata(path).ok())
+        .and_then(|meta| meta.modified().ok());
+    if stamp.is_some() && stamp == *read_at {
+        return None;
+    }
+    let fresh = Config::read_current()?;
+    *read_at = stamp;
+    Some(fresh)
+}
+
 /// How long an app that said it is idle still listens for an action the daemon sent before it knew.
 const IDLE_GRACE: Duration = Duration::from_millis(500);
 
@@ -837,6 +851,8 @@ fn run() -> anyhow::Result<()> {
     let mut actions = Actions { config: &mut config, recording: &mut recording, send: &mut send };
     actions.run(first_action, first_frozen)?;
     let mut idle_from = std::time::Instant::now();
+    // When the settings were last read: unknown for those read as the process started, so the next action reads them.
+    let mut config_read_at = None;
     loop {
         // While recording, or while the replay runs with a game, the app stays: it sleeps until it is told something
         // (the daemon, the recording, Windows). Otherwise it ends once idle for a while; the daemon, which watches for
@@ -851,8 +867,9 @@ fn run() -> anyhow::Result<()> {
         match woken {
             Ok(Wake::Daemon(DaemonToApp::RunAction { action, frozen })) => {
                 idle_from = std::time::Instant::now();
-                // The app may run for long (the replay): each action reads the settings as they are now.
-                if let Some(fresh) = Config::read_current() {
+                // The app may run for long (the replay): each action has the settings as they are now, read again once
+                // the file changed.
+                if let Some(fresh) = fresh_config(&mut config_read_at) {
                     config = fresh;
                 }
                 Actions { config: &mut config, recording: &mut recording, send: &mut send }.run(action, frozen)?;
@@ -878,7 +895,7 @@ fn run() -> anyhow::Result<()> {
                 // is still this process's to run; it stays if the action keeps it busy.
                 let mut ran = false;
                 while let Ok(Wake::Daemon(DaemonToApp::RunAction { action, frozen })) = rx.recv_timeout(IDLE_GRACE) {
-                    if let Some(fresh) = Config::read_current() {
+                    if let Some(fresh) = fresh_config(&mut config_read_at) {
                         config = fresh;
                     }
                     Actions { config: &mut config, recording: &mut recording, send: &mut send }.run(action, frozen)?;
