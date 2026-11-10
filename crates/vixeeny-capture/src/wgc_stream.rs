@@ -220,12 +220,26 @@ struct Settings {
     min_interval: Option<i64>,
 }
 
+/// What the stream's queue carries: a frame, or `Ok(None)` when it is only woken (see [`VideoStream::waker`]).
+type Delivery = Result<Option<CapturedFrame>, CaptureError>;
+
+/// Wakes the [`VideoStream::recv`] waiting, which returns `Ok(None)` as if its time were up.
+#[derive(Clone)]
+pub struct StreamWaker(SyncSender<Delivery>);
+
+impl StreamWaker {
+    pub fn wake(&self) {
+        // A full queue wakes the receiver anyway.
+        let _ = self.0.try_send(Ok(None));
+    }
+}
+
 pub struct VideoStream {
     session: Mutex<Session>,
     shared: Arc<Shared>,
     settings: Settings,
-    tx: SyncSender<Result<CapturedFrame, CaptureError>>,
-    rx: Receiver<Result<CapturedFrame, CaptureError>>,
+    tx: SyncSender<Delivery>,
+    rx: Receiver<Delivery>,
     buffers: BufferPool,
     held: Option<Held>,
 }
@@ -243,7 +257,7 @@ fn item_of(target: &StreamTarget) -> Result<(GraphicsCaptureItem, Option<Physica
 fn open_session(
     item: GraphicsCaptureItem,
     shared: &Arc<Shared>,
-    tx: &SyncSender<Result<CapturedFrame, CaptureError>>,
+    tx: &SyncSender<Delivery>,
     settings: &Settings,
 ) -> Result<Session, CaptureError> {
     let size = item.Size().map_err(os("item size"))?;
@@ -408,10 +422,16 @@ impl VideoStream {
         self.shared.paused.store(paused, Ordering::Release);
     }
 
-    /// The next frame; `Ok(None)` when none arrived within `timeout` (nothing changed on screen).
+    /// Something that ends a [`Self::recv`] waiting, from another thread.
+    pub fn waker(&self) -> StreamWaker {
+        StreamWaker(self.tx.clone())
+    }
+
+    /// The next frame; `Ok(None)` when none arrived within `timeout` (nothing changed on screen) or the stream was
+    /// woken.
     pub fn recv(&self, timeout: Duration) -> Result<Option<CapturedFrame>, CaptureError> {
         match self.rx.recv_timeout(timeout) {
-            Ok(frame) => frame.map(Some),
+            Ok(frame) => frame,
             Err(RecvTimeoutError::Timeout) => Ok(None),
             Err(RecvTimeoutError::Disconnected) => Err(CaptureError::Os("capture stopped".into())),
         }
@@ -420,7 +440,7 @@ impl VideoStream {
 
 fn frame_handler(
     shared: Arc<Shared>,
-    tx: SyncSender<Result<CapturedFrame, CaptureError>>,
+    tx: SyncSender<Delivery>,
 ) -> TypedEventHandler<Direct3D11CaptureFramePool, IInspectable> {
     TypedEventHandler::new(move |pool: windows::core::Ref<'_, Direct3D11CaptureFramePool>, _| {
         let Some(pool) = pool.as_ref() else {
@@ -451,7 +471,7 @@ fn frame_handler(
 /// Hands `frame` over: held, to the sink, or read into RAM and queued.
 fn deliver(
     shared: &Shared,
-    tx: &SyncSender<Result<CapturedFrame, CaptureError>>,
+    tx: &SyncSender<Delivery>,
     frame: Direct3D11CaptureFrame,
     content: SizeInt32,
 ) -> windows::core::Result<()> {
@@ -504,15 +524,11 @@ fn deliver(
 }
 
 /// Hands read-back pixels over, or recycles their allocation when the consumer cannot take them.
-fn queue_cpu(
-    tx: &SyncSender<Result<CapturedFrame, CaptureError>>,
-    result: Result<CapturedFrame, CaptureError>,
-    buffers: &BufferPool,
-) -> bool {
-    match tx.try_send(result) {
+fn queue_cpu(tx: &SyncSender<Delivery>, result: Result<CapturedFrame, CaptureError>, buffers: &BufferPool) -> bool {
+    match tx.try_send(result.map(Some)) {
         Ok(()) => true,
         Err(TrySendError::Full(result) | TrySendError::Disconnected(result)) => {
-            if let Ok(captured) = result {
+            if let Ok(Some(captured)) = result {
                 buffers.give(captured.frame.data);
             }
             false
@@ -562,6 +578,33 @@ mod tests {
         stream.set_paused(false);
         stream.retarget(&target).expect("new resumed session");
         assert!(stream.recv(Duration::from_secs(2)).expect("stream alive").is_some());
+    }
+
+    #[test]
+    fn a_waker_ends_the_wait_of_a_still_stream() {
+        let _screen = crate::REAL_SCREEN.lock();
+        vixeeny_platform::ensure_dpi_aware();
+        let Some(monitor) = vixeeny_platform::monitors().ok().and_then(|m| m.into_iter().next()) else {
+            vixeeny_common::skip_test("no monitor");
+            return;
+        };
+        let Ok(stream) = VideoStream::start(&StreamTarget::Monitor(monitor), false, false) else {
+            vixeeny_common::skip_test("no capture stream");
+            return;
+        };
+        // Paused: no frame comes, as on a still screen.
+        stream.set_paused(true);
+        std::thread::sleep(Duration::from_millis(50));
+        while stream.recv(Duration::ZERO).expect("stream alive").is_some() {}
+        let waker = stream.waker();
+        let waking = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            waker.wake();
+        });
+        let started = std::time::Instant::now();
+        assert!(stream.recv(Duration::from_secs(30)).expect("stream alive").is_none());
+        assert!(started.elapsed() < Duration::from_secs(5), "woken, not timed out");
+        waking.join().unwrap();
     }
 
     #[test]

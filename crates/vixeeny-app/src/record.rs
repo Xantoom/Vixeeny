@@ -106,9 +106,33 @@ const IDLE: u8 = 0;
 const RECORDING: u8 = 1;
 const PAUSED: u8 = 2;
 
+/// Sends to the recording's thread and wakes it: a still screen brings no frame to end its wait.
+#[derive(Clone)]
+struct Control {
+    ctl: Sender<Ctl>,
+    wake: Wake,
+}
+
+#[derive(Clone)]
+enum Wake {
+    Cpu(vixeeny_capture::StreamWaker),
+    Gpu(std::sync::mpsc::SyncSender<Option<(i64, HwFrame)>>),
+}
+
+impl Control {
+    fn send(&self, ctl: Ctl) {
+        let _ = self.ctl.send(ctl);
+        match &self.wake {
+            Wake::Cpu(waker) => waker.wake(),
+            // A full queue wakes the thread anyway.
+            Wake::Gpu(frames) => drop(frames.try_send(None)),
+        }
+    }
+}
+
 /// A running recording.
 pub struct Handle {
-    ctl: Sender<Ctl>,
+    ctl: Control,
     state: Arc<AtomicU8>,
     thread: Option<JoinHandle<()>>,
     reported: RecState,
@@ -116,26 +140,26 @@ pub struct Handle {
 
 impl Handle {
     pub fn pause_toggle(&self) {
-        let _ = self.ctl.send(Ctl::TogglePause);
+        self.ctl.send(Ctl::TogglePause);
     }
 
     pub fn stop(&self) {
-        let _ = self.ctl.send(Ctl::Stop);
+        self.ctl.send(Ctl::Stop);
     }
 
     /// Replay only: writes the buffer's last seconds to a new file.
     pub fn save(&self) {
-        let _ = self.ctl.send(Ctl::Save(false));
+        self.ctl.send(Ctl::Save(false));
     }
 
     /// Replay only: writes the buffer's last seconds to a new file, then opens it in the video editor.
     pub fn save_and_edit(&self) {
-        let _ = self.ctl.send(Ctl::Save(true));
+        self.ctl.send(Ctl::Save(true));
     }
 
     /// Replay only: films the game's screen (`true`, one of the game's windows shows over it) or its window alone.
     pub fn film_screen(&self, screen: bool) {
-        let _ = self.ctl.send(Ctl::Screen(screen));
+        self.ctl.send(Ctl::Screen(screen));
     }
 
     /// The session is over: its thread ended, or is ending (it tells the change just before).
@@ -160,7 +184,7 @@ impl Handle {
 impl Drop for Handle {
     fn drop(&mut self) {
         if let Some(thread) = self.thread.take() {
-            let _ = self.ctl.send(Ctl::Stop);
+            self.ctl.send(Ctl::Stop);
             let _ = thread.join();
         }
     }
@@ -877,7 +901,9 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
         let (stream, gpu_frames) = match &plan.gpu {
             None => (vixeeny_capture::VideoStream::start_with(&target, plan.cursor, plan.hdr, None, pacing())?, None),
             Some(gpu) => {
-                let (tx, rx) = std::sync::mpsc::sync_channel::<(i64, HwFrame)>(GPU_BACKLOG);
+                // `None` only wakes the recording's thread (see `Control`).
+                let (tx, rx) = std::sync::mpsc::sync_channel::<Option<(i64, HwFrame)>>(GPU_BACKLOG);
+                let wake = tx.clone();
                 let pipeline = Arc::clone(&gpu.pipeline);
                 let lost = Arc::clone(&gpu_lost);
                 let reading = Arc::clone(&reading);
@@ -891,7 +917,8 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
                         bottom: (top + height) as i32,
                     };
                     // A refused conversion (pool exhausted, GPU busy) is a dropped frame.
-                    let sent = pipeline.convert(texture, rect).is_ok_and(|frame| tx.try_send((time_ns, frame)).is_ok());
+                    let sent =
+                        pipeline.convert(texture, rect).is_ok_and(|frame| tx.try_send(Some((time_ns, frame))).is_ok());
                     if !sent && reading.load(Ordering::Acquire) {
                         lost.fetch_add(1, Ordering::Relaxed);
                     }
@@ -901,7 +928,7 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
                     vixeeny_capture::GpuCapture { device: gpu.device.clone(), context: gpu.context.clone(), sink };
                 (
                     vixeeny_capture::VideoStream::start_with(&target, plan.cursor, plan.hdr, Some(capture), pacing())?,
-                    Some(rx),
+                    Some((rx, wake)),
                 )
             }
         };
@@ -912,11 +939,16 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
     config.buffers = stream.buffers();
     let recorder = Recorder::start(config, plan.namer)?;
     let (ctl, rx) = channel();
+    let (gpu_frames, wake) = match gpu_frames {
+        Some((frames, wake)) => (Some(frames), Wake::Gpu(wake)),
+        None => (None, Wake::Cpu(stream.waker())),
+    };
+    let ctl = Control { ctl, wake };
     // The widget is a nicety: without it the recording goes on (hotkeys still work).
     let widget = plan.widget.as_ref().and_then(|settings| {
         let presses = ctl.clone();
         crate::widget::Widget::spawn(settings, &plan.monitor, move |press| {
-            let _ = presses.send(match press {
+            presses.send(match press {
                 FromWidget::TogglePause => Ctl::TogglePause,
                 FromWidget::Stop => Ctl::Stop,
             });
@@ -1059,7 +1091,7 @@ fn save_replay(recorder: &Recorder, next_path: &mut SaveNamer, notice: &Config, 
 #[expect(clippy::too_many_arguments, reason = "the parts of one recording, made by its caller")]
 fn record_loop(
     stream: &Video,
-    gpu_frames: Option<&std::sync::mpsc::Receiver<(i64, HwFrame)>>,
+    gpu_frames: Option<&std::sync::mpsc::Receiver<Option<(i64, HwFrame)>>>,
     pacer: Option<&Pacer>,
     recorder: Recorder,
     mut rig: Option<Rig>,
@@ -1200,12 +1232,12 @@ fn record_loop(
                 break;
             }
             match frames.recv_timeout(TICK) {
-                Ok((time_ns, frame)) => {
+                Ok(Some((time_ns, frame))) => {
                     if !paused {
                         recorder.push_hw((time_ns - origin).max(0), frame);
                     }
                 }
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                Ok(None) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                     if !paused {
                         recorder.tick(now());
                     }
