@@ -536,6 +536,7 @@ mod tests {
 
     #[test]
     fn paused_streams_drop_new_session_frames_and_resume_without_a_rate_gate() {
+        let _screen = crate::REAL_SCREEN.lock();
         vixeeny_platform::ensure_dpi_aware();
         let Some(monitor) = vixeeny_platform::monitors().ok().and_then(|m| m.into_iter().next()) else {
             vixeeny_common::skip_test("no monitor");
@@ -600,6 +601,7 @@ mod tests {
     /// monitor, and is replaced rather than queued.
     #[test]
     fn a_held_stream_keeps_the_newest_frame_on_the_device_given() {
+        let _screen = crate::REAL_SCREEN.lock();
         vixeeny_platform::ensure_dpi_aware();
         let Some(monitor) = vixeeny_platform::monitors().ok().and_then(|m| m.into_iter().next()) else {
             vixeeny_common::skip_test("no monitor");
@@ -647,6 +649,7 @@ mod tests {
     /// source. A part of a monitor cannot change.
     #[test]
     fn a_stream_changes_what_it_captures_and_goes_on() {
+        let _screen = crate::REAL_SCREEN.lock();
         vixeeny_platform::ensure_dpi_aware();
         let Some(monitor) = vixeeny_platform::monitors().ok().and_then(|m| m.into_iter().next()) else {
             vixeeny_common::skip_test("no monitor");

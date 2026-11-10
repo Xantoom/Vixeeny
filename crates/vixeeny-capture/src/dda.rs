@@ -135,6 +135,7 @@ mod tests {
     /// A duplicated screen is the picture Windows Graphics Capture gives (the pointer left out of both).
     #[test]
     fn a_duplicated_screen_is_the_captured_one() {
+        let _screen = crate::REAL_SCREEN.lock();
         vixeeny_platform::ensure_dpi_aware();
         let (Ok(mut backend), Ok(monitors)) = (crate::WgcBackend::new(), vixeeny_platform::monitors()) else {
             vixeeny_common::skip_test("no Direct3D device");

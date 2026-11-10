@@ -25,6 +25,12 @@ pub use wgc_stream::{
 };
 use windows::Win32::Graphics::Direct3D11::ID3D11Device;
 
+/// Taken by the tests that capture a real screen, which run side by side otherwise: while a capture session films a
+/// screen, Windows draws the pointer into its picture, and a duplication of that screen is then given up for a capture
+/// (as it must be). A test that expects a duplicated screen would meet another one's session.
+#[cfg(test)]
+pub(crate) static REAL_SCREEN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum CaptureTarget {
     Monitor(MonitorId),

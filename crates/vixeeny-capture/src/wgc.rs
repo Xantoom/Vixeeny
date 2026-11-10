@@ -604,6 +604,7 @@ mod tests {
     #[test]
     fn the_desktop_is_assembled_as_its_monitors() {
         use crate::{CaptureOptions, CaptureTarget, Capturer};
+        let _screen = crate::REAL_SCREEN.lock();
         vixeeny_platform::ensure_dpi_aware();
         let (Ok(mut backend), Ok(monitors)) = (super::WgcBackend::new(), vixeeny_platform::monitors()) else {
             vixeeny_common::skip_test("no Direct3D device");

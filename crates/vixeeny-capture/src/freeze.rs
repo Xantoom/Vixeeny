@@ -778,6 +778,7 @@ mod tests {
     fn held_screens_are_read_back() {
         use crate::StillBackend;
         let _reading = READING.lock();
+        let _screen = crate::REAL_SCREEN.lock();
         // Physical pixels, as the daemon and the app see the monitors.
         vixeeny_platform::ensure_dpi_aware();
         let (Ok(gpu), Ok(monitors)) = (Gpu::new(), vixeeny_platform::monitors()) else {
