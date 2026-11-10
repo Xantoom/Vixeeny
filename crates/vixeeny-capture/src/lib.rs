@@ -65,6 +65,9 @@ pub enum CaptureError {
     NoMonitor,
     #[error("the capture produced no frame in time")]
     Timeout,
+    /// The window captured went (its program closed it, or made another in its place).
+    #[error("the captured window was closed")]
+    Closed,
     #[error("not supported on this platform yet")]
     Unsupported,
     #[error("{0}")]

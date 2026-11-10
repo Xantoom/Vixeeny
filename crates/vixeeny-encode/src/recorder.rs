@@ -89,10 +89,11 @@ impl OutputContainer {
         }
     }
 
-    fn header_options(self) -> Dictionary<'static> {
+    /// `live`: a file written as the recording goes, whose every packet reaches the disk at once (what a crash leaves
+    /// behind is what was written). A replay's copy is written in one go: the system writes it as it sees fit.
+    fn header_options(self, live: bool) -> Dictionary<'static> {
         let mut d = Dictionary::new();
-        // Every packet reaches the disk at once: what a crash leaves behind is what was written.
-        d.set("flush_packets", "1");
+        d.set("flush_packets", if live { "1" } else { "0" });
         match self {
             // Tags of its own (the SDR white of an HDR recording) are written too.
             Self::Mp4Fragmented => d.set("movflags", "frag_keyframe+empty_moov+default_base_moof+use_metadata_tags"),
@@ -223,7 +224,46 @@ enum Cmd {
     Pause(i64),
     Resume(i64),
     Stop(i64),
-    Save(PathBuf, SyncSender<Result<ReplaySave, RecordError>>),
+    Save(SyncSender<Result<ReplayTake, RecordError>>),
+}
+
+/// How the streams of a file are made: the encoders' parameters, which a replay's copy takes to another thread.
+#[derive(Clone)]
+struct Layout {
+    container: OutputContainer,
+    video: codec::Parameters,
+    /// Each audio track's parameters and title.
+    audio: Vec<(codec::Parameters, String)>,
+    /// The SDR white of an HDR recording, in nits, tagged in the file.
+    sdr_white: Option<f32>,
+    /// The video encoder's time base.
+    enc_tb: Rational,
+}
+
+/// The replay's last seconds, taken from the ring, and what writing them into a file needs.
+pub struct ReplayTake {
+    snapshot: Snapshot,
+    layout: Layout,
+}
+
+impl ReplayTake {
+    /// Seconds of media in the copy.
+    pub fn seconds(&self) -> f64 {
+        let last = self.snapshot.video.last().map_or(self.snapshot.start, |(t, _)| *t);
+        (last - self.snapshot.start) as f64 / f64::from(SAMPLE_RATE)
+    }
+
+    /// Writes the copy to `path` (its folder is made).
+    pub fn write(&self, path: &std::path::Path) -> Result<(), RecordError> {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| RecordError::Io(e.to_string()))?;
+        }
+        let octx = format::output_as(path, self.layout.container.muxer())?;
+        let mut out = open_output(&self.layout, octx, false)?;
+        write_snapshot(&mut out, &self.snapshot, self.layout.enc_tb)?;
+        out.octx.write_trailer()?;
+        Ok(())
+    }
 }
 
 /// A replay being written (on a thread of its own, so the recording is not held up).
@@ -344,9 +384,22 @@ impl Recorder {
     /// Writes the replay buffer's last seconds to `path` without re-encoding. Returns once the packets are picked (the
     /// buffer keeps running); the file is complete after [`ReplaySave::wait`].
     pub fn save_replay(&self, path: PathBuf) -> Result<ReplaySave, RecordError> {
+        let take = self.take_replay()?.recv().map_err(|_| RecordError::Worker)??;
+        let seconds = take.seconds();
+        let target = path.clone();
+        let join = std::thread::Builder::new()
+            .name("vixeeny-replay-save".into())
+            .spawn(move || take.write(&target))
+            .map_err(|e| RecordError::Io(e.to_string()))?;
+        Ok(ReplaySave { path, seconds, join })
+    }
+
+    /// Asks for the replay buffer's last seconds without waiting: they are taken in turn with the other commands, so
+    /// before a stop sent after. The answer comes on the receiver.
+    pub fn take_replay(&self) -> Result<Receiver<Result<ReplayTake, RecordError>>, RecordError> {
         let (reply, answer) = sync_channel(1);
-        self.tx.send(Cmd::Save(path, reply)).map_err(|_| RecordError::Worker)?;
-        answer.recv().map_err(|_| RecordError::Worker)?
+        self.tx.send(Cmd::Save(reply)).map_err(|_| RecordError::Worker)?;
+        Ok(answer)
     }
 
     /// Finishes the files and returns what was written.
@@ -464,7 +517,6 @@ fn samples_of(tb: Rational, pts: i64) -> i64 {
 /// An audio track on its way to the file.
 struct AudioTrack {
     enc: AudioEncoder,
-    codec: ffmpeg_next::Codec,
     title: String,
     /// Samples that arrived before the first video frame fixed the time zero.
     pending: Vec<f32>,
@@ -481,7 +533,6 @@ struct Worker {
     cfr: Cfr,
     vfr: Vfr,
     encoder: encoder::Video,
-    codec: ffmpeg_next::Codec,
     pix: Pixel,
     enc_tb: Rational,
     /// HDR10 metadata, written on every frame (AMF and Quick Sync read it there).
@@ -573,7 +624,6 @@ impl Worker {
             namer,
             stats,
             encoder,
-            codec,
             pix,
             enc_tb,
             hdr10,
@@ -595,10 +645,8 @@ impl Worker {
             .map(|seconds| Ring::with_storage(seconds, worker.cfg.audio.len(), &worker.cfg.replay_storage));
         for track in &worker.cfg.audio {
             let enc = AudioEncoder::open(track, global)?;
-            let codec = enc.codec;
             worker.audio.push(AudioTrack {
                 enc,
-                codec,
                 title: track.title.clone(),
                 pending: Vec::new(),
                 to_skip: 0,
@@ -709,35 +757,24 @@ impl Worker {
         Ok(())
     }
 
-    /// The streams of a file (video, then the audio tracks) and its header.
-    fn new_output(&self, mut octx: format::context::Output) -> Result<Output, RecordError> {
-        let mut stream = octx.add_stream(self.codec)?;
-        stream.set_parameters(&self.encoder);
-        for track in &self.audio {
-            let mut stream = octx.add_stream(track.codec)?;
-            stream.set_parameters(&track.enc.encoder);
-            let mut meta = Dictionary::new();
-            meta.set("title", &track.title);
-            // MP4 keeps a stream's name in the handler, not in a title tag.
-            meta.set("handler_name", &track.title);
-            stream.set_metadata(meta);
+    /// The streams of this recording's files.
+    fn layout(&self) -> Layout {
+        Layout {
+            container: self.cfg.container,
+            video: codec::Parameters::from(&self.encoder),
+            audio: self.audio.iter().map(|t| (codec::Parameters::from(&t.enc.encoder), t.title.clone())).collect(),
+            sdr_white: self.cfg.hdr.then_some(self.cfg.sdr_white_nits),
+            enc_tb: self.enc_tb,
         }
-        if self.cfg.hdr {
-            let mut tags = Dictionary::new();
-            let white = self.cfg.sdr_white_nits.clamp(1.0, 10_000.0).round();
-            tags.set(crate::hdr::SDR_WHITE_TAG, &white.to_string());
-            octx.set_metadata(tags);
-        }
-        octx.write_header_with(self.cfg.container.header_options())?;
-        let stream_tb = octx.stream(0).map_or(self.enc_tb, |s| s.time_base());
-        let audio_tb = (0..self.audio.len())
-            .map(|i| octx.stream(1 + i).map_or(Rational(1, SAMPLE_RATE as i32), |s| s.time_base()))
-            .collect();
-        Ok(Output { octx, stream_tb, offset: None, first_pts: 0, packets: 0, bytes: 0, audio_tb, audio_cut: 0 })
     }
 
-    /// Picks the packets of a save and hands them to a thread that writes the file.
-    fn save_replay(&mut self, path: PathBuf) -> Result<ReplaySave, RecordError> {
+    /// A file of this recording, written as it goes.
+    fn new_output(&self, octx: format::context::Output) -> Result<Output, RecordError> {
+        open_output(&self.layout(), octx, true)
+    }
+
+    /// The packets of a save and what writing them needs: the file is written by whoever asked, not here.
+    fn take_replay(&self) -> Result<ReplayTake, RecordError> {
         let seconds =
             self.cfg.replay_seconds.ok_or_else(|| RecordError::Config("this recording has no replay buffer".into()))?;
         let snapshot = self
@@ -745,23 +782,7 @@ impl Worker {
             .as_ref()
             .and_then(|r| r.snapshot(seconds))
             .ok_or_else(|| RecordError::Config("the replay buffer is still empty".into()))?;
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir).map_err(|e| RecordError::Io(e.to_string()))?;
-        }
-        let octx = format::output_as(&path, self.cfg.container.muxer())?;
-        let mut out = self.new_output(octx)?;
-        let enc_tb = self.enc_tb;
-        let last = snapshot.video.last().map_or(snapshot.start, |(t, _)| *t);
-        let span = (last - snapshot.start) as f64 / f64::from(SAMPLE_RATE);
-        let join = std::thread::Builder::new()
-            .name("vixeeny-replay-save".into())
-            .spawn(move || {
-                write_snapshot(&mut out, &snapshot, enc_tb)?;
-                out.octx.write_trailer()?;
-                Ok(())
-            })
-            .map_err(|e| RecordError::Io(e.to_string()))?;
-        Ok(ReplaySave { path, seconds: span, join })
+        Ok(ReplayTake { snapshot, layout: self.layout() })
     }
 
     fn run(mut self, rx: &Receiver<Cmd>) -> Result<Summary, RecordError> {
@@ -803,8 +824,8 @@ impl Worker {
                     self.cfr.resume(t);
                     continue;
                 }
-                Cmd::Save(path, reply) => {
-                    let _ = reply.send(self.save_replay(path));
+                Cmd::Save(reply) => {
+                    let _ = reply.send(self.take_replay());
                     continue;
                 }
                 Cmd::Stop(t) => {
@@ -1042,6 +1063,33 @@ impl Worker {
             dropped_by_queue: self.stats.queue_dropped.load(Ordering::Relaxed),
         })
     }
+}
+
+/// The streams of a file (video, then the audio tracks) and its header; `live` as in
+/// [`OutputContainer::header_options`].
+fn open_output(layout: &Layout, mut octx: format::context::Output, live: bool) -> Result<Output, RecordError> {
+    let mut stream = octx.add_stream(None::<ffmpeg_next::Codec>)?;
+    stream.set_parameters(layout.video.clone());
+    for (parameters, title) in &layout.audio {
+        let mut stream = octx.add_stream(None::<ffmpeg_next::Codec>)?;
+        stream.set_parameters(parameters.clone());
+        let mut meta = Dictionary::new();
+        meta.set("title", title);
+        // MP4 keeps a stream's name in the handler, not in a title tag.
+        meta.set("handler_name", title);
+        stream.set_metadata(meta);
+    }
+    if let Some(white) = layout.sdr_white {
+        let mut tags = Dictionary::new();
+        tags.set(crate::hdr::SDR_WHITE_TAG, &white.clamp(1.0, 10_000.0).round().to_string());
+        octx.set_metadata(tags);
+    }
+    octx.write_header_with(layout.container.header_options(live))?;
+    let stream_tb = octx.stream(0).map_or(layout.enc_tb, |s| s.time_base());
+    let audio_tb = (0..layout.audio.len())
+        .map(|i| octx.stream(1 + i).map_or(Rational(1, SAMPLE_RATE as i32), |s| s.time_base()))
+        .collect();
+    Ok(Output { octx, stream_tb, offset: None, first_pts: 0, packets: 0, bytes: 0, audio_tb, audio_cut: 0 })
 }
 
 /// Writes a replay: the packets of `snapshot`, video and audio merged by time, each stream starting at zero.

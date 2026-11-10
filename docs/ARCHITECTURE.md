@@ -70,7 +70,9 @@ Slint windows are rendered in the tests by the software renderer.
 - **Audio**: every source delivers 48 kHz float chunks; one `Mixer` per track puts them on the
   master clock (gaps become silence, drift is corrected), then the recorder encodes the track.
 - **Replay buffer**: the same pipeline writes encoded packets into a ring cut by key frames;
-  saving remuxes the ring.
+  saving takes the ring's last seconds on the recording thread and remuxes them on a thread of
+  its own. When the game's window closes, the replay pauses and keeps its seconds until the
+  game shows its next window or ends.
 
 ## Updates
 

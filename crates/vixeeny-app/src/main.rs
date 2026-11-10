@@ -484,8 +484,7 @@ impl Recording {
     /// replay's game closed. With the replay on: starts it for the game in front, stops it when that game closes (or
     /// the replay was turned off). Tells about each game in a notification, the replay on or off.
     fn watch(&mut self, config: &Config) {
-        // The capture ended by itself (the game's window went, it may have made another): the replay starts again with
-        // the game in front.
+        // The capture ended by itself (it failed): the replay starts again with the game in front.
         if self.replay.as_ref().is_some_and(record::Handle::finished) {
             tracing::info!("the replay's capture ended");
             self.replay = None;
@@ -513,11 +512,19 @@ impl Recording {
                     return;
                 }
             }
-            // A launcher that started the game and hid its window, still running: the replay goes to the game in front.
-            if vixeeny_platform::window_shown(window)
-                || self.games.game_in_front(game_lists(config)).is_none_or(|game| game.pid == pid)
-            {
+            if vixeeny_platform::window_shown(window) {
                 return;
+            }
+            match self.games.game_in_front(game_lists(config)) {
+                None => return,
+                // The game made a new window in place of its last one.
+                Some(game) if game.pid == pid => {
+                    self.film_window(&game);
+                    return;
+                }
+                // A launcher that started the game and hid its window, still running: the replay goes to the game in
+                // front.
+                Some(_) => {}
             }
             tracing::info!("the replay's window went, another game is in front: the replay moves to it");
             self.replay_game = None;
@@ -579,7 +586,7 @@ impl Recording {
                     })
                     .map(|watch| (watch, false))
                 });
-                self.follow_pages();
+                self.follow_pages(config);
                 if let Some(look) = self.look.clone() {
                     vixeeny_platform::on_process_exit(game.pid, move || {
                         let _ = look.send(Wake::Look);
@@ -598,7 +605,16 @@ impl Recording {
 
     /// Has the replay film the game's screen while one of the game's own windows shows over it (an in-game web page,
     /// its shop), and the game's window alone otherwise: another program over the game stays out of the replay.
-    fn follow_pages(&mut self) {
+    fn follow_pages(&mut self, config: &Config) {
+        // The game's window went and a new one of the game is in front: the replay films it from now on.
+        if let Some((pid, _, window)) = &self.replay_game
+            && !vixeeny_platform::window_shown(*window)
+        {
+            let pid = *pid;
+            if let Some(game) = self.games.game_in_front(game_lists(config)).filter(|game| game.pid == pid) {
+                self.film_window(&game);
+            }
+        }
         let (Some(replay), Some((pid, _, window)), Some((_, screen))) =
             (&self.replay, &self.replay_game, &mut self.pages)
         else {
@@ -611,12 +627,24 @@ impl Recording {
         }
     }
 
-    /// Stops the buffer: its memory is freed, its files on disk removed.
+    /// Has the replay film `game`, the game's window in place of the one it closed or hid.
+    fn film_window(&mut self, game: &vixeeny_platform::WindowInfo) {
+        if let (Some(replay), Some((_, _, window))) = (&self.replay, &mut self.replay_game)
+            && *window != game.id
+        {
+            tracing::info!("the game made a new window: the replay films it");
+            *window = game.id;
+            replay.film_window(game.id);
+        }
+    }
+
+    /// Stops the buffer: its memory is freed, its files on disk removed. Ends aside: a recording asked meanwhile starts
+    /// at once.
     fn stop_replay(&mut self) {
         self.pages = None;
         if let Some(replay) = self.replay.take() {
-            drop(replay);
-            tracing::info!("replay stopped, its buffer released");
+            replay.end_aside();
+            tracing::info!("replay stopped, its buffer released once it ends");
         }
     }
 
@@ -876,7 +904,7 @@ fn run() -> anyhow::Result<()> {
                 recording.report(&mut send, &config)?;
             }
             Ok(Wake::Look) => recording.watch(&config),
-            Ok(Wake::Pages) => recording.follow_pages(),
+            Ok(Wake::Pages) => recording.follow_pages(&config),
             Ok(Wake::Recording) => {
                 recording.report(&mut send, &config)?;
                 if recording.replay.as_ref().is_some_and(record::Handle::finished) {

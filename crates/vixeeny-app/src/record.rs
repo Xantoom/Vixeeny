@@ -5,9 +5,9 @@
 
 use crate::toast::{Failed, Saved, Toast, failure_text};
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -29,7 +29,7 @@ use vixeeny_encode::replay;
 use vixeeny_encode::validate::{self, Context as ValidateContext, Severity};
 
 /// The capture stream, and what it hands over.
-use vixeeny_capture::VideoStream as Video;
+use vixeeny_capture::{CaptureError, VideoStream as Video};
 
 /// How often a still screen gets its frame repeated.
 const TICK: Duration = Duration::from_millis(100);
@@ -41,6 +41,8 @@ enum Ctl {
     Stop,
     /// Replay only: films the game's screen (`true`: a window of the game shows over it), or its window again.
     Screen(bool),
+    /// Replay only: films the game's new window (its last one closed, or another shows in its place).
+    Window(vixeeny_platform::WindowId),
 }
 
 /// Told each time a recording changes state (paused, resumed, ended): the app reports it then, instead of looking.
@@ -160,6 +162,22 @@ impl Handle {
     /// Replay only: films the game's screen (`true`, one of the game's windows shows over it) or its window alone.
     pub fn film_screen(&self, screen: bool) {
         self.ctl.send(Ctl::Screen(screen));
+    }
+
+    /// Replay only: films the game's new window, in place of the one it closed or hid.
+    pub fn film_window(&self, window: vixeeny_platform::WindowId) {
+        self.ctl.send(Ctl::Window(window));
+    }
+
+    /// Ends the session on a thread of its own, so the caller goes on at once: the encoder's last frames, a save asked
+    /// before, are written meanwhile. The app ends only after (see [`SavesDone`]).
+    pub fn end_aside(self) {
+        let saving = Saving::start();
+        // Not started: the closure is dropped here, and the session with it.
+        let _ = std::thread::Builder::new().name("recording-end".into()).spawn(move || {
+            drop(self);
+            drop(saving);
+        });
     }
 
     /// The session is over: its thread ended, or is ending (it tells the change just before).
@@ -769,6 +787,8 @@ struct Watcher {
     measured: Option<u64>,
     /// When the frames lost changed, and their count since: what a replay's saved seconds lost.
     losses: std::collections::VecDeque<(i64, u64)>,
+    /// The count before the first change kept: at the start, then that of the last change forgotten.
+    floor: u64,
 }
 
 /// The changes of the frames lost a replay remembers (older ones are forgotten first).
@@ -783,27 +803,22 @@ impl Watcher {
             lost: None,
             measured: None,
             losses: std::collections::VecDeque::new(),
+            floor: 0,
         }
     }
 
-    /// The alert, when it changed since the last call. Only what changed is looked at again: the frames lost (two
-    /// counters), the free space once enough more is written.
-    fn check(&mut self, recorder: &Recorder, now_ns: i64) -> Option<(Alert, String)> {
+    /// The alert, when it changed since the last call. Only what changed is looked at again: the frames lost (three
+    /// counters, `dropped` the capture's), the free space once enough more is written.
+    fn check(&mut self, recorder: &Recorder, dropped: u64, now_ns: i64) -> Option<(Alert, String)> {
         let stats = recorder.stats();
-        let lost = stats.queue_dropped.load(Ordering::Relaxed) + self.watch.gpu_lost.load(Ordering::Relaxed);
+        let lost = stats.queue_dropped.load(Ordering::Relaxed) + self.watch.gpu_lost.load(Ordering::Relaxed) + dropped;
         let written = stats.written.load(Ordering::Relaxed);
         let disk_due = self.watch.disk_percent > 0
             && self.measured.is_none_or(|at| written.saturating_sub(at) >= DISK_EVERY_BYTES);
         if self.lost == Some(lost) && !disk_due {
             return None;
         }
-        if self.lost.is_some_and(|before| before != lost) {
-            if self.losses.len() == LOSSES_KEPT {
-                self.losses.pop_front();
-            }
-            self.losses.push_back((now_ns, lost));
-        }
-        self.lost = Some(lost);
+        self.count(lost, now_ns);
         self.health.lost_frames = lost;
         if disk_due {
             self.measured = Some(written);
@@ -820,15 +835,27 @@ impl Watcher {
         Some(alert)
     }
 
-    /// The frames lost since `since_ns`.
+    /// Notes the frames lost so far, `lost`, at `now_ns`.
+    fn count(&mut self, lost: u64, now_ns: i64) {
+        match self.lost {
+            None => self.floor = lost,
+            Some(before) if before != lost => {
+                if self.losses.len() == LOSSES_KEPT
+                    && let Some((_, forgotten)) = self.losses.pop_front()
+                {
+                    self.floor = forgotten;
+                }
+                self.losses.push_back((now_ns, lost));
+            }
+            Some(_) => {}
+        }
+        self.lost = Some(lost);
+    }
+
+    /// The frames lost since `since_ns` (at most: from the oldest change kept, when `since_ns` is before it).
     fn lost_since(&self, since_ns: i64) -> u64 {
-        let now = self.lost.unwrap_or(0);
-        let before = self.losses.iter().rev().find(|(t, _)| *t <= since_ns).map_or_else(
-            // Every change came after: what was lost before the first one.
-            || self.losses.front().map_or(now, |_| 0),
-            |(_, n)| *n,
-        );
-        now.saturating_sub(before)
+        let before = self.losses.iter().rev().find(|(t, _)| *t <= since_ns).map_or(self.floor, |(_, n)| *n);
+        self.lost.unwrap_or(0).saturating_sub(before)
     }
 
     /// The disk is under the alert's share of free space.
@@ -995,7 +1022,7 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
             &rx,
             &thread_state,
             &notice,
-            sources.as_ref(),
+            sources,
         );
         drop(stream);
         drop(own_windows);
@@ -1041,51 +1068,57 @@ struct Sources {
     screen: vixeeny_capture::StreamTarget,
 }
 
-/// Starts writing the replay; the file is finished (and reported) by a thread of its own, so the recording goes on, and
-/// a second save right after does not wait for the first. `lost`: the frames lost in the seconds saved.
-fn save_replay(recorder: &Recorder, next_path: &mut SaveNamer, notice: &Config, edit: bool, lost: u64) {
+/// Takes the replay's seconds now, in turn with the frames; the file is named, written and reported by a thread of its
+/// own, so the capture goes on meanwhile. `lost`: the frames lost in the seconds saved.
+fn save_replay(recorder: &Recorder, namer: &Arc<Mutex<SaveNamer>>, notice: &Config, edit: bool, lost: u64) {
     let started = std::time::Instant::now();
-    let save = next_path().and_then(|path| Ok(recorder.save_replay(path)?));
-    match save {
-        Ok(save) => {
-            let seconds = save.seconds;
-            let notice = notice.clone();
-            let saving = Saving::start();
-            let spawned = std::thread::Builder::new().name("replay-save".into()).spawn(move || {
-                let written = save.wait();
-                // The file is complete: the app may end from now on (it is told to look again).
-                drop(saving);
-                changed();
-                match written {
-                    Ok(path) => {
-                        tracing::info!(
-                            "replay saved ({seconds:.1} s, {:.2} s to write, {lost} frame(s) \
-                             lost)",
-                            started.elapsed().as_secs_f64()
-                        );
-                        if edit {
-                            crate::cut::open(&path);
-                        } else {
-                            crate::toast::notify(&notice, &Toast::saved(Saved::Replay, path, lost));
-                        }
-                    }
-                    Err(e) => {
-                        tracing::error!("cannot save the replay: {e}");
-                        let text = failure_text(&anyhow::anyhow!("{e}"), crate::lang(&notice.general.language));
-                        crate::toast::notify(&notice, &Toast::Failed(Failed::Replay, text));
-                    }
-                }
-            });
-            if let Err(e) = spawned {
-                tracing::error!("cannot follow the replay being saved: {e}");
-            }
-        }
+    let take = match recorder.take_replay() {
+        Ok(take) => take,
         Err(e) => {
-            tracing::error!("cannot save the replay: {e:#}");
-            let text = failure_text(&e, crate::lang(&notice.general.language));
-            crate::toast::notify(notice, &Toast::Failed(Failed::Replay, text));
+            replay_failed(notice, &anyhow::anyhow!("{e}"));
+            return;
         }
+    };
+    let namer = Arc::clone(namer);
+    let told = notice.clone();
+    // The app does not end before the file is complete.
+    let saving = Saving::start();
+    let spawned = std::thread::Builder::new().name("replay-save".into()).spawn(move || {
+        let written = (|| -> anyhow::Result<(PathBuf, f64)> {
+            let take = take.recv().map_err(|_| anyhow::anyhow!("the recording stopped"))??;
+            // Two saves never take one name: each names its file and writes it before the next.
+            let mut namer = namer.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let path = namer()?;
+            take.write(&path)?;
+            Ok((path, take.seconds()))
+        })();
+        // The file is complete: the app may end from now on (it is told to look again).
+        drop(saving);
+        changed();
+        match written {
+            Ok((path, seconds)) => {
+                tracing::info!(
+                    "replay saved ({seconds:.1} s, {:.2} s to write, {lost} frame(s) lost)",
+                    started.elapsed().as_secs_f64()
+                );
+                if edit {
+                    crate::cut::open(&path);
+                } else {
+                    crate::toast::notify(&told, &Toast::saved(Saved::Replay, path, lost));
+                }
+            }
+            Err(e) => replay_failed(&told, &e),
+        }
+    });
+    if let Err(e) = spawned {
+        replay_failed(notice, &anyhow::anyhow!("{e}"));
     }
+}
+
+fn replay_failed(notice: &Config, e: &anyhow::Error) {
+    tracing::error!("cannot save the replay: {e:#}");
+    let text = failure_text(e, crate::lang(&notice.general.language));
+    crate::toast::notify(notice, &Toast::Failed(Failed::Replay, text));
 }
 
 #[expect(clippy::too_many_arguments, reason = "the parts of one recording, made by its caller")]
@@ -1097,14 +1130,15 @@ fn record_loop(
     mut rig: Option<Rig>,
     mut widget: Option<crate::widget::Widget>,
     watch: Option<Watch>,
-    mut save_as: Option<SaveNamer>,
+    save_as: Option<SaveNamer>,
     origin: i64,
     ctl: &Receiver<Ctl>,
     state: &AtomicU8,
     notice: &Config,
-    sources: Option<&Sources>,
+    mut sources: Option<Sources>,
 ) -> anyhow::Result<vixeeny_encode::recorder::Summary> {
     let now = || vixeeny_platform::monotonic_ns() - origin;
+    let save_as = save_as.map(|namer| Arc::new(Mutex::new(namer)));
     let mut watch = watch.map(Watcher::new);
     // What a replay save keeps: its seconds, and those after the shortcut.
     let kept_ns =
@@ -1127,21 +1161,25 @@ fn record_loop(
     let after = Duration::from_secs(u64::from(notice.replay.after()));
     // When the waiting save is written, and whether it is then edited.
     let mut save_at: Option<(std::time::Instant, bool)> = None;
+    // A pause or a resume to make: asked by the user, or, for a replay, by its game's window going and coming back.
+    let mut pause_to: Option<bool> = None;
+    // A replay films its game's screen, not its window (see `Ctl::Screen`).
+    let mut on_screen = false;
     let buffers = stream.buffers();
     loop {
         if let Some((at, edit)) = save_at
             && std::time::Instant::now() >= at
         {
             save_at = None;
-            if let Some(next_path) = &mut save_as {
-                save_replay(&recorder, next_path, notice, edit, lost_in_save(&watch, now()));
+            if let Some(namer) = &save_as {
+                save_replay(&recorder, namer, notice, edit, lost_in_save(&watch, now()));
             }
         }
         match ctl.try_recv() {
             Ok(Ctl::Save(edit)) => {
-                if let Some(next_path) = &mut save_as {
+                if let Some(namer) = &save_as {
                     if after.is_zero() {
-                        save_replay(&recorder, next_path, notice, edit, lost_in_save(&watch, now()));
+                        save_replay(&recorder, namer, notice, edit, lost_in_save(&watch, now()));
                     } else if let Some((_, editing)) = &mut save_at {
                         // A second press while it waits only asks for the editor.
                         *editing |= edit;
@@ -1151,68 +1189,83 @@ fn record_loop(
                 }
             }
             Ok(Ctl::Screen(screen)) => {
-                if let Some(sources) = sources {
+                if let Some(sources) = &sources {
                     let target = if screen { &sources.screen } else { &sources.window };
                     match stream.retarget(target) {
                         Ok(()) => {
+                            on_screen = screen;
                             tracing::info!("the replay films the game's {}", if screen { "screen" } else { "window" })
                         }
                         Err(e) => tracing::warn!("the replay cannot change what it films: {e}"),
                     }
                 }
             }
-            // A replay has no pause: it always keeps the last seconds.
-            Ok(Ctl::TogglePause) if save_as.is_some() => {}
-            Ok(Ctl::TogglePause) => {
-                paused = !paused;
-                stream.set_paused(paused);
-                if paused {
-                    paused_since = now();
-                } else {
-                    paused_ns += now() - paused_since;
-                }
-                if let Some(w) = &mut widget {
-                    w.state(paused, elapsed(paused, now(), paused_ns, paused_since));
-                }
-                if let Some(pacer) = pacer {
-                    if paused {
-                        pacer.pause(now());
-                    } else {
-                        pacer.resume(now());
+            Ok(Ctl::Window(window)) => {
+                if let Some(sources) = &mut sources {
+                    let target = vixeeny_capture::StreamTarget::Window(window);
+                    // On the screen, the new window is filmed once the game's pages go.
+                    match if on_screen { Ok(()) } else { stream.retarget(&target) } {
+                        Ok(()) => {
+                            tracing::info!("the replay follows the game's new window");
+                            sources.window = target;
+                            pause_to = Some(false);
+                        }
+                        Err(e) => tracing::warn!("the replay cannot film the game's new window: {e}"),
                     }
-                }
-                if paused {
-                    recorder.pause(now());
-                    if let Some(rig) = &mut rig {
-                        rig.pause(now());
-                    }
-                    state.store(PAUSED, Ordering::Release);
-                    changed();
-                } else {
-                    recorder.resume(now());
-                    if let Some(rig) = &mut rig {
-                        rig.resume(now(), &recorder);
-                    }
-                    state.store(RECORDING, Ordering::Release);
-                    changed();
                 }
             }
+            // A replay has no pause: it always keeps the last seconds.
+            Ok(Ctl::TogglePause) if save_as.is_some() => {}
+            Ok(Ctl::TogglePause) => pause_to = Some(!paused),
             Ok(Ctl::Stop) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                 // The game closed while a save waited: what there is is saved now.
                 if let Some((_, edit)) = save_at.take()
-                    && let Some(next_path) = &mut save_as
+                    && let Some(namer) = &save_as
                 {
-                    save_replay(&recorder, next_path, notice, edit, lost_in_save(&watch, now()));
+                    save_replay(&recorder, namer, notice, edit, lost_in_save(&watch, now()));
                 }
                 break;
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => {}
         }
+        if let Some(to) = pause_to.take().filter(|to| *to != paused) {
+            paused = to;
+            stream.set_paused(paused);
+            if paused {
+                paused_since = now();
+            } else {
+                paused_ns += now() - paused_since;
+            }
+            if let Some(w) = &mut widget {
+                w.state(paused, elapsed(paused, now(), paused_ns, paused_since));
+            }
+            if let Some(pacer) = pacer {
+                if paused {
+                    pacer.pause(now());
+                } else {
+                    pacer.resume(now());
+                }
+            }
+            if paused {
+                recorder.pause(now());
+                if let Some(rig) = &mut rig {
+                    rig.pause(now());
+                }
+                state.store(PAUSED, Ordering::Release);
+            } else {
+                recorder.resume(now());
+                if let Some(rig) = &mut rig {
+                    rig.resume(now(), &recorder);
+                }
+                state.store(RECORDING, Ordering::Release);
+            }
+            changed();
+        }
         if let Some(rig) = &mut rig {
             rig.pump(now(), &recorder);
         }
         if let Some(watcher) = &mut watch
-            && let Some((level, text)) = watcher.check(&recorder, now())
+            && let Some((level, text)) = watcher.check(&recorder, stream.dropped(), now())
         {
             if let Some(w) = &mut widget {
                 w.alert(level, &text);
@@ -1227,9 +1280,13 @@ fn record_loop(
         }
         if let Some(frames) = gpu_frames {
             // The stream only reports its end; the frames arrive through the sink's channel.
-            if let Err(e) = stream.recv(Duration::ZERO) {
-                failure = Some(e);
-                break;
+            match stream.recv(Duration::ZERO) {
+                Err(CaptureError::Closed) if sources.is_some() => pause_to = Some(window_closed()),
+                Err(e) => {
+                    failure = Some(e);
+                    break;
+                }
+                Ok(_) => {}
             }
             match frames.recv_timeout(TICK) {
                 Ok(Some((time_ns, frame))) => {
@@ -1270,6 +1327,7 @@ fn record_loop(
                     recorder.tick(now());
                 }
             }
+            Err(CaptureError::Closed) if sources.is_some() => pause_to = Some(window_closed()),
             Err(e) => {
                 failure = Some(e);
                 break;
@@ -1279,11 +1337,23 @@ fn record_loop(
     if let Some(rig) = &mut rig {
         rig.finish(now(), &recorder);
     }
-    let summary = recorder.stop(now())?;
+    let mut summary = recorder.stop(now())?;
+    // Frames the capture left out while this thread was behind: the encoder's queue was full.
+    summary.dropped_by_queue += stream.dropped();
     match failure {
-        Some(e) => Err(anyhow::anyhow!("capture stopped: {e}")).context(format!("{summary:?}")),
+        Some(e) => {
+            tracing::info!("{summary:?}");
+            Err(anyhow::anyhow!("capture stopped: {e}"))
+        }
         None => Ok(summary),
     }
+}
+
+/// A replay's game window went: it closes, or makes another in its place (a new display mode, the end of its loading).
+/// The replay keeps its seconds, paused, until the game's next window (see `Ctl::Window`) or its end. Gives the pause.
+fn window_closed() -> bool {
+    tracing::info!("the game's window closed: the replay waits for the next one");
+    true
 }
 
 /// Where the replay keeps its packets: in RAM, or in temporary files (`[replay] storage`). `auto` keeps it in RAM when
@@ -1329,14 +1399,32 @@ mod tests {
             lang: vixeeny_common::i18n::Lang::En,
             gpu_lost: Arc::new(AtomicU64::new(0)),
         });
-        watcher.lost = Some(0);
+        watcher.count(0, 0);
         assert_eq!(watcher.lost_since(0), 0);
         // 3 frames lost at 10 s, 2 more at 50 s.
-        watcher.losses.extend([(10, 3), (50, 5)]);
-        watcher.lost = Some(5);
+        watcher.count(3, 10);
+        watcher.count(5, 50);
         assert_eq!(watcher.lost_since(0), 5);
         assert_eq!(watcher.lost_since(20), 2);
         assert_eq!(watcher.lost_since(60), 0);
+    }
+
+    #[test]
+    fn a_replay_save_does_not_count_the_frames_lost_before_the_changes_it_forgot() {
+        let mut watcher = Watcher::new(Watch {
+            folder: None,
+            disk_percent: 0,
+            lang: vixeeny_common::i18n::Lang::En,
+            gpu_lost: Arc::new(AtomicU64::new(0)),
+        });
+        // 2 frames lost before the replay was watched, then 1 each second, more often than it remembers.
+        watcher.count(2, 0);
+        for n in 1..=(LOSSES_KEPT as u64 + 10) {
+            watcher.count(2 + n, n as i64);
+        }
+        // The seconds saved start before the oldest change kept: from it, not from the start.
+        assert_eq!(watcher.lost_since(5), LOSSES_KEPT as u64);
+        assert_eq!(watcher.lost_since(LOSSES_KEPT as i64), 10);
     }
 
     #[test]

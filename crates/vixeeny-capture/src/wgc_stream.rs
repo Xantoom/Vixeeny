@@ -7,7 +7,7 @@
 //! encoders take each frame as a texture ([`GpuCapture`]), and a viewer on the graphics card takes the newest one when
 //! it can ([`VideoStream::start_held`]).
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TrySendError, sync_channel};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -139,6 +139,8 @@ struct Shared {
     held: Option<Held>,
     last_size: Mutex<SizeInt32>,
     buffers: BufferPool,
+    /// CPU frames read but not queued: the consumer was behind.
+    dropped: AtomicU64,
 }
 
 // SAFETY: a D3D11 device is free-threaded; the immediate context and the staging texture are only used under their
@@ -270,7 +272,7 @@ fn open_session(
     let closing = tx.clone();
     let closed = item
         .Closed(&TypedEventHandler::new(move |_, _| {
-            let _ = closing.try_send(Err(CaptureError::Os("the captured window was closed".into())));
+            let _ = closing.try_send(Err(CaptureError::Closed));
             Ok(())
         }))
         .map_err(os("Closed"))?;
@@ -391,6 +393,7 @@ impl VideoStream {
             held: held.clone(),
             last_size: Mutex::new(size),
             buffers: buffers.clone(),
+            dropped: AtomicU64::new(0),
         });
         let (tx, rx) = sync_channel(BACKLOG);
         let settings = Settings { cursor, min_interval };
@@ -420,6 +423,11 @@ impl VideoStream {
     /// Discards incoming frames before readback or GPU conversion, including variable-rate recordings.
     pub fn set_paused(&self, paused: bool) {
         self.shared.paused.store(paused, Ordering::Release);
+    }
+
+    /// The CPU frames read and left out because the consumer was behind (the queue was full).
+    pub fn dropped(&self) -> u64 {
+        self.shared.dropped.load(Ordering::Relaxed)
     }
 
     /// Something that ends a [`Self::recv`] waiting, from another thread.
@@ -519,6 +527,8 @@ fn deliver(
         if let Some(notify) = &shared.notify {
             notify();
         }
+    } else if read {
+        shared.dropped.fetch_add(1, Ordering::Relaxed);
     }
     Ok(())
 }
