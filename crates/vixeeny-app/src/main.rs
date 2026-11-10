@@ -165,15 +165,23 @@ fn direct_capture(
     // The notification's thumbnail is made from the picture saved, not from the file.
     let thumb = std::sync::Mutex::new(None);
     let card = image_settings.keep_copy && config.notifications.enabled && config.notifications.image_saved;
+    // The clipboard does not wait for the thumbnail: both are made side by side.
     let after = |image: &vixeeny_image::Bgra<'_>, encoded: Option<still::Encoded<'_>>, name: &str| {
-        if card && let Ok(mut slot) = thumb.lock() {
-            *slot = Some(thumbnail::scaled(image, 640));
-        }
-        if image_settings.copy_to_clipboard
-            && let Err(e) = clipboard::copy_bgra(image_settings, image, encoded, name)
-        {
-            tracing::warn!("clipboard: {e:#}");
-        }
+        std::thread::scope(|scope| {
+            if card {
+                scope.spawn(|| {
+                    let scaled = thumbnail::scaled(image, 640);
+                    if let Ok(mut slot) = thumb.lock() {
+                        *slot = Some(scaled);
+                    }
+                });
+            }
+            if image_settings.copy_to_clipboard
+                && let Err(e) = clipboard::copy_bgra(image_settings, image, encoded, name)
+            {
+                tracing::warn!("clipboard: {e:#}");
+            }
+        });
     };
     let destination =
         still::Destination { after_save: (image_settings.copy_to_clipboard || card).then_some(&after), ..destination };
