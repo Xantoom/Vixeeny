@@ -45,7 +45,7 @@ runtime (`runtime.rs`); the platform layer (`platform/`) is a message-only windo
 | `vixeeny-ui` | Slint files and their Rust bindings | no |
 | `vixeeny-updater` | release check, download with progress, minisign verification, file swap with rollback | no |
 | `vixeeny-app`, `vixeeny-daemon` | the two programs | yes |
-| `xtask` | `build-native`, `dist`, `icons`, `verify-registry`, `bench-idle` | no |
+| `xtask` | `build-native`, `dist`, `icons`, `verify-registry`, `bench-idle`, `symbolize` | no |
 
 Rule of thumb: logic that can be pure is pure and tested without a display, a GPU or an OS (the
 editor, the stitcher, the settings, the mixer, the replay ring, the codec rules); the OS crates
@@ -102,3 +102,7 @@ keeps everything in a `data` folder. Nothing is sent anywhere except the GitHub 
 writes the update archive and the portable archive; Inno Setup (`packaging/windows/vixeeny.iss`)
 builds the installer. Releases are built by `.github/workflows/release.yml`; the
 portable archive is signed with minisign and the public key is embedded in `vixeeny-updater`.
+
+The programs ship without debug information. A release build writes the linker's map of each
+program (the function at each address); `dist` puts them in `Vixeeny-<version>-symbols.zip`, kept
+with the release, and `cargo xtask symbolize` names the addresses of a crash note with it.

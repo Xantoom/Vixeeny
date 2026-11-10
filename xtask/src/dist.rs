@@ -4,7 +4,8 @@
 //! `dist` expects `cargo build --release` to have produced the two programs, and gathers them with the FFmpeg DLLs and
 //! the licences into `<out>/stage` (what the installer packs), then writes the update archive
 //! `Vixeeny-<version>-windows-x64.zip` and the portable archive `Vixeeny-<version>-windows-x64-portable.zip` (the same
-//! files plus `portable.flag`).
+//! files plus `portable.flag`), and `Vixeeny-<version>-symbols.zip`, the linker's maps of the two programs
+//! ([`crate::symbols`]).
 
 use std::fmt::Write as _;
 use std::io::Write as _;
@@ -191,6 +192,22 @@ pub fn dist(args: &[String]) -> Result<()> {
     let update = out.join(format!("{base}.zip"));
     write_zip(&stage, &update)?;
     extend_zip(&update, &[("portable.flag", b"")], &out.join(format!("{base}-portable.zip")))?;
+
+    // The maps of this very build, kept with the release: no other build names the addresses of its crashes.
+    let maps = out.join("symbols");
+    let _ = std::fs::remove_dir_all(&maps);
+    std::fs::create_dir_all(&maps)?;
+    for program in PROGRAMS {
+        let name = crate::symbols::map_name(program);
+        let text = std::fs::read_to_string(release.join(&name))
+            .with_context(|| format!("{name} is missing: a release build of {program} writes it (its build.rs)"))?;
+        if !crate::symbols::Map::parse(&text).with_context(|| name.clone())?.names("vixeeny") {
+            bail!("{name} names no function of Vixeeny");
+        }
+        std::fs::write(maps.join(&name), text)?;
+    }
+    write_zip(&maps, &out.join(format!("Vixeeny-{version}-symbols.zip")))?;
+    std::fs::remove_dir_all(&maps)?;
     println!("wrote {}", out.display());
     Ok(())
 }

@@ -57,3 +57,8 @@ the images (`cargo test -p vixeeny-ui`).
 Use **Settings → About → Report a problem**: it opens the bug form with the system info and
 selects the report file (logs of the last days) to drop in it. Without the app:
 `vixeeny-app --system-info`. See [docs/BETA.md](docs/BETA.md).
+
+A crash is written as addresses (`vixeeny-app.exe+0x1a2b3c`): the programs carry no debug
+information. Each release has a `Vixeeny-<version>-symbols.zip`, and
+`cargo xtask symbolize <that archive> <report or crash note>` prints the text with the function
+at each address. Use the archive of the version that crashed.

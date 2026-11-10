@@ -13,6 +13,7 @@ fn main() {
             println!("cargo:rustc-link-arg-bins=/DELAYLOAD:{dll}");
         }
         println!("cargo:rustc-link-arg-bins=delayimp.lib");
+        link_map("Vixeeny.map");
     }
     println!("cargo:rerun-if-changed=../../packaging/icons/vixeeny.ico");
     println!("cargo:rerun-if-changed=../../packaging/icons/vixeeny-recording.ico");
@@ -26,5 +27,17 @@ fn main() {
         .set("LegalCopyright", "GPL-3.0-or-later");
     if let Err(e) = resource.compile() {
         println!("cargo:warning=cannot embed the Windows resource: {e}");
+    }
+}
+
+/// A release build also writes the linker's map of the program beside it: the function at each address, which names the
+/// addresses of a crash note (`cargo xtask symbolize`). The program is the same with or without it.
+fn link_map(name: &str) {
+    // `<target>/release/build/<crate>-<hash>/out`.
+    let out = std::env::var_os("OUT_DIR").map(std::path::PathBuf::from);
+    if let Some(profile) = out.as_deref().and_then(|out| out.ancestors().nth(3))
+        && profile.file_name().is_some_and(|name| name == "release")
+    {
+        println!("cargo:rustc-link-arg-bins=/MAP:{}", profile.join(name).display());
     }
 }

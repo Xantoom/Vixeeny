@@ -6,6 +6,7 @@ mod dist;
 mod icons;
 mod native;
 mod pe;
+mod symbols;
 
 use anyhow::{Result, bail};
 
@@ -17,7 +18,11 @@ fn main() -> Result<()> {
         Some("verify-registry") => verify_registry(),
         Some("dist") => dist::dist(&args.collect::<Vec<_>>()),
         Some("icons") => icons::run(),
-        _ => bail!("usage: cargo xtask <build-native [lib…]|dist [--out dir]|icons|verify-registry|bench-idle>"),
+        Some("symbolize") => symbols::symbolize(&args.collect::<Vec<_>>()),
+        _ => bail!(
+            "usage: cargo xtask <build-native [lib…]|dist [--out dir]|icons|verify-registry|bench-idle|symbolize \
+             <symbols> <crash note>>"
+        ),
     }
 }
 

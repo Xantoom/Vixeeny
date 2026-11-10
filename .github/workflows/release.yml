@@ -64,7 +64,7 @@ jobs:
       - name: Build the programs
         run: cargo build --release -p vixeeny-daemon -p xtask -p vixeeny-app --features vixeeny-app/native-codecs
       # The release build of xtask, built above: its compression is many times faster.
-      - name: Package (stage, update archive, portable archive)
+      - name: Package (stage, update archive, portable archive, symbols)
         if: needs.version.outputs.build == 'true'
         run: target\release\xtask.exe dist --out dist
       - name: Installer
@@ -172,7 +172,7 @@ jobs:
           done
           rm "$key"
           # The update archive is what the portable one is made from: not published.
-          find dist -maxdepth 1 -name '*.zip' ! -name '*-portable.zip' -delete
+          find dist -maxdepth 1 -name '*.zip' ! -name '*-portable.zip' ! -name '*-symbols.zip' -delete
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: vixeeny-windows
@@ -191,6 +191,9 @@ jobs:
           run=$(gh run list --workflow ci.yml --commit "${{ github.sha }}" --limit 1 --json databaseId --jq '.[0].databaseId')
           if [ -z "$run" ]; then echo "::error::CI did not run on this commit."; exit 1; fi
           gh run watch "$run" --interval 10 --exit-status
+      # The symbols (the linker's maps of this build) stay with the release: the programs carry
+      # no debug information, and only these maps name the addresses of a crash of this version
+      # (`cargo xtask symbolize`).
       - name: Draft release
         if: github.event_name == 'push' || inputs.release
         env:
@@ -198,4 +201,4 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           version=$(ls dist/Vixeeny-*-setup.exe | sed 's/.*Vixeeny-\(.*\)-setup\.exe/\1/')
-          gh release create "v$version" --title "Vixeeny $version" --target "${{ github.sha }}" --draft --notes-file dist/notes.md dist/*-setup.exe dist/*-portable.zip
+          gh release create "v$version" --title "Vixeeny $version" --target "${{ github.sha }}" --draft --notes-file dist/notes.md dist/*-setup.exe dist/*-portable.zip dist/*-symbols.zip

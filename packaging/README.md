@@ -28,6 +28,7 @@ secrets `MINISIGN_KEY` (the content of `vixeeny.key`) and `MINISIGN_PASSWORD`.
 |---|---|
 | `Vixeeny-<v>-setup.exe` | Installer; its signature is in the notes too (Settings → General downloads it to move an install to Program Files) |
 | `Vixeeny-<v>-windows-x64-portable.zip` | Portable: the programs plus `portable.flag` (settings in `data\`); also what an update downloads |
+| `Vixeeny-<v>-symbols.zip` | Not for users: the linker's maps of the two programs, which name the addresses of a crash of this version (`cargo xtask symbolize`) |
 
 The minisign signature of the portable archive is in the release notes, in a comment the page
 does not show (`<!-- minisign <file name>` … `-->`): keep it when the notes are edited.
