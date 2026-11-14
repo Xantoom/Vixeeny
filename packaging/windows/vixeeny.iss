@@ -155,6 +155,7 @@ Type: filesandordirs; Name: "{app}\.update-staged"
 Type: filesandordirs; Name: "{app}\.update-backup"
 Type: filesandordirs; Name: "{app}\.update-download"
 Type: files; Name: "{app}\.update-lock"
+Type: files; Name: "{app}\.update-download-turn"
 
 [Code]
 const

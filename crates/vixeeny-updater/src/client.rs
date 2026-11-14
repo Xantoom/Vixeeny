@@ -25,6 +25,8 @@ const BACKUP: &str = ".update-backup";
 const DOWNLOAD: &str = ".update-download";
 /// Held while the files are swapped (see [`lock`]).
 const LOCK: &str = ".update-lock";
+/// Held while the archive downloads (see [`Turn`]).
+const DOWNLOAD_TURN: &str = ".update-download-turn";
 /// The new daemon must answer within this long, else the old version comes back.
 const START_TIMEOUT: Duration = Duration::from_secs(20);
 const CURRENT: &str = env!("CARGO_PKG_VERSION");
@@ -234,6 +236,8 @@ pub fn ready() -> Option<String> {
 /// is called as the bytes arrive. Returns the version.
 pub fn download(progress: &mut dyn FnMut(u64, u64)) -> anyhow::Result<String> {
     let path = state_path()?;
+    let _turn = wait_turn(&install_dir()?.join(DOWNLOAD_TURN))?;
+    // Read after the turn: a download that just ended (another window, the background update) made it ready.
     let mut state = State::load(&path);
     let release = state.newer_than(CURRENT).cloned().context("no update is available")?;
     if ready().as_deref() == Some(release.version.as_str()) {
@@ -379,6 +383,7 @@ pub fn download_setup(progress: &mut dyn FnMut(u64, u64)) -> anyhow::Result<Setu
     let release = Release::parse(std::str::from_utf8(&json)?)?.context("no version is published")?;
     let (setup, signature) = release.setup().context("the latest version has no signed installer")?;
     let folder = setup_dir();
+    let _turn = wait_turn(&folder.with_extension("turn"))?;
     let _ = std::fs::remove_dir_all(&folder);
     std::fs::create_dir_all(&folder)?;
     let path = folder.join(&setup.name);
@@ -406,6 +411,20 @@ pub fn restart_daemon(limit: Duration, reopen: Option<ControlRequest>) -> anyhow
 /// Sends `request` to the running daemon.
 pub fn tell_daemon(request: ControlRequest) -> std::io::Result<()> {
     control(request)
+}
+
+/// One download at a time of a file: two at once (a second click, another window, the background update) would write
+/// into each other's file. Waits for the one before to end; Windows lets it go when its process ends, however it ends.
+/// The file stays, like [`LOCK`]: removed, a third download would make a new one and not wait for the second.
+fn wait_turn(path: &Path) -> anyhow::Result<std::fs::File> {
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)
+        .with_context(|| format!("cannot open {}", path.display()))?;
+    file.lock().with_context(|| format!("cannot lock {}", path.display()))?;
+    Ok(file)
 }
 
 /// Held while the files are swapped, so that nothing else takes the backup for one to clean or to undo. Windows lets it
@@ -555,6 +574,26 @@ pub fn clean_up() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_second_download_waits_for_the_first_to_end() {
+        let path = std::env::temp_dir().join(format!("vixeeny-turn-{}", std::process::id()));
+        let first = wait_turn(&path).unwrap();
+        let (done, waited) = std::sync::mpsc::channel();
+        let second = {
+            let path = path.clone();
+            std::thread::spawn(move || {
+                let turn = wait_turn(&path).unwrap();
+                done.send(()).unwrap();
+                drop(turn);
+            })
+        };
+        assert!(waited.recv_timeout(Duration::from_millis(300)).is_err(), "the second ran during the first");
+        drop(first);
+        waited.recv_timeout(Duration::from_secs(5)).expect("the second never ran");
+        second.join().unwrap();
+        let _ = std::fs::remove_file(&path);
+    }
 
     #[test]
     fn a_download_of_this_version_is_already_installed() {
