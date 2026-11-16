@@ -143,13 +143,13 @@ fn update_card(state: &UpdateState, current: &str, lang: Lang) -> UpdateView {
             ..UpdateView::default()
         };
     }
-    // An error only matters while its version is still to be installed (a newer Vixeeny, installed since, by hand for
-    // instance, forgets it).
-    if let Some(error) = state.error.as_ref().filter(|_| state.newer_than(current).is_some()) {
+    // An error only matters while its version is still the one offered (a newer release, or a newer Vixeeny installed
+    // since, by hand for instance, forgets it).
+    if let Some(error) = state.error_for(current) {
         return UpdateView {
             stage: UpdateStage::Failed,
             title: tr(Key::UpdateFailedShort, lang).into(),
-            detail: error.clone(),
+            detail: error.to_owned(),
             progress: 0.0,
             action: tr(Key::UiRetry, lang).into(),
             ..UpdateView::default()
@@ -309,7 +309,7 @@ fn download_update(handle: PanelHandle, lang: Lang) {
             tracing::error!("update download: {e:#}");
             if let Some(path) = vixeeny_updater::state::file() {
                 let mut state = UpdateState::load(&path);
-                state.error = Some(format!("{e:#}"));
+                state.fail(format!("{e:#}"));
                 let _ = state.save(&path);
             }
         }
@@ -527,7 +527,7 @@ pub fn run_child(config: Config, args: &[String]) -> anyhow::Result<()> {
                     // A failed attempt is forgotten when the user tries again.
                     if let Some(path) = vixeeny_updater::state::file() {
                         let mut state = UpdateState::load(&path);
-                        state.error = None;
+                        state.clear_error();
                         let _ = state.save(&path);
                     }
                     download_update(handle.clone(), lang);

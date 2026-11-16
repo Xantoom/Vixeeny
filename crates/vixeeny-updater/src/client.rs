@@ -275,7 +275,7 @@ pub fn download(progress: &mut dyn FnMut(u64, u64)) -> anyhow::Result<String> {
     anyhow::ensure!(staged.join(DAEMON).exists(), "the archive does not have the expected layout");
     let _ = std::fs::remove_dir_all(&folder);
     state.ready = Some(release.version.clone());
-    state.error = None;
+    state.clear_error();
     state.save(&path)?;
     log(&format!("{} is ready", release.version));
     Ok(release.version)
@@ -450,7 +450,7 @@ pub fn install(reopen: Option<ControlRequest>) -> anyhow::Result<()> {
         }
         Err(e) => {
             log(&format!("update failed: {e:#}"));
-            state.error = Some(format!("{e:#}"));
+            state.fail(format!("{e:#}"));
             // Not installed again by itself: only by hand.
             if let Some(version) = state.ready.take() {
                 state.failed = Some(version);
@@ -531,7 +531,7 @@ pub fn recover() -> anyhow::Result<bool> {
     }
     let path = state_path()?;
     let mut state = State::load(&path);
-    state.error = Some("the install was cut short".into());
+    state.fail("the install was cut short".into());
     if let Some(version) = state.ready.take() {
         state.failed = Some(version);
     }

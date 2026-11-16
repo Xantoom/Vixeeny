@@ -37,6 +37,9 @@ pub struct State {
     pub ready: Option<String>,
     /// Why the last attempt to install failed (cleared by a new attempt or a success).
     pub error: Option<String>,
+    /// The version [`error`](Self::error) is about: an error of another version is not shown.
+    #[serde(default)]
+    pub error_version: Option<String>,
     /// The version whose install failed: not downloaded and installed again by itself.
     #[serde(default)]
     pub failed: Option<String>,
@@ -65,6 +68,23 @@ impl State {
     /// The release to offer, if it is newer than `current`.
     pub fn newer_than(&self, current: &str) -> Option<&Release> {
         self.available.as_ref().filter(|r| crate::release::is_newer(current, &r.version))
+    }
+
+    /// Records why installing the release offered failed.
+    pub fn fail(&mut self, error: String) {
+        self.error_version = self.available.as_ref().map(|r| r.version.clone());
+        self.error = Some(error);
+    }
+
+    pub fn clear_error(&mut self) {
+        self.error = None;
+        self.error_version = None;
+    }
+
+    /// Why installing the release offered to `current` failed, if it did.
+    pub fn error_for(&self, current: &str) -> Option<&str> {
+        let release = self.newer_than(current)?;
+        self.error.as_deref().filter(|_| self.error_version.as_deref() == Some(release.version.as_str()))
     }
 
     /// What changed in `version`, when its release is known.
@@ -117,6 +137,7 @@ mod tests {
             notified: Some("1.0.0".into()),
             ready: Some("1.0.0".into()),
             error: Some("boom".into()),
+            error_version: Some("1.0.0".into()),
             failed: Some("0.9.0".into()),
             installed: None,
             last_run: Some("0.9.0".into()),
@@ -153,6 +174,25 @@ mod tests {
         assert!(state.arrived("1.1.0"));
         assert_eq!(state.notes_of("1.1.0"), Some("- New"));
         assert_eq!(state.notes_of("1.0.0"), None);
+    }
+
+    #[test]
+    fn a_failure_is_shown_only_while_its_version_is_offered() {
+        let offer = |version: &str| Some(Release { version: version.into(), ..Release::default() });
+        let mut state = State { available: offer("1.1.0"), ..State::default() };
+        state.fail("the signature is invalid".into());
+        assert_eq!(state.error_for("1.0.0"), Some("the signature is invalid"));
+        // Installed since, by hand.
+        assert_eq!(state.error_for("1.1.0"), None);
+        // A newer release is offered.
+        state.available = offer("1.2.0");
+        assert_eq!(state.error_for("1.0.0"), None);
+        // Written by a version that did not say which release failed.
+        let old = State { available: offer("1.2.0"), error: Some("boom".into()), ..State::default() };
+        assert_eq!(old.error_for("1.0.0"), None);
+        state.available = offer("1.1.0");
+        state.clear_error();
+        assert_eq!(state.error_for("1.0.0"), None);
     }
 
     #[test]
