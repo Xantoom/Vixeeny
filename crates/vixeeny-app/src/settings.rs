@@ -522,8 +522,11 @@ pub fn run_child(config: Config, args: &[String]) -> anyhow::Result<()> {
         panel.on_page_action(move |section, action, value| {
             let lang = crate::lang(&Config::current().general.language);
             match (section, action) {
-                (Section::Updates, "update-check") => check_for_update(handle.clone(), lang),
-                (Section::Updates, "update-download") => {
+                // The card's button: after a failed update, it tries that update again; otherwise it checks.
+                (Section::Updates, "update-check") if update_state().error_for(env!("CARGO_PKG_VERSION")).is_none() => {
+                    check_for_update(handle.clone(), lang);
+                }
+                (Section::Updates, "update-check" | "update-download") => {
                     // A failed attempt is forgotten when the user tries again.
                     if let Some(path) = vixeeny_updater::state::file() {
                         let mut state = UpdateState::load(&path);
