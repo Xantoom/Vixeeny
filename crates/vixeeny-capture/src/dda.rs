@@ -8,10 +8,15 @@
 //! otherwise, and whenever this fails (a secure desktop, a UAC prompt, too many duplications of the screen at once). A
 //! pointer Windows draws into the picture itself (one too large or too colourful for the card, as some games set) is in
 //! the duplicated picture: the screen is then captured through Windows Graphics Capture too, which leaves it out.
+//!
+//! A new duplication's picture is whole only when its first frame marks all of the screen as changed. Over a
+//! full-screen game in independent flip, it holds only what the game redrew since the duplication began, black
+//! elsewhere: such a screen is captured through Windows Graphics Capture too.
 
 use std::time::{Duration, Instant};
 
 use vixeeny_platform::{MonitorInfo, PhysicalRect};
+use windows::Win32::Foundation::RECT;
 use windows::Win32::Graphics::Direct3D11::{ID3D11Device, ID3D11Texture2D};
 use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_MODE_ROTATION_IDENTITY,
@@ -102,6 +107,10 @@ impl Pending {
                 && let Some(texture) = resource.and_then(|r| r.cast::<ID3D11Texture2D>().ok())
             {
                 let frame = Frame { duplication, texture };
+                if !whole(&frame.duplication, &info, &rect) {
+                    tracing::debug!(?rect, "duplicated screen only partly drawn: captured instead");
+                    return None;
+                }
                 // A pointer shown here but not laid over is drawn into the picture (dropping the frame releases it).
                 if !overlaid && pointer_shown_in(&rect) {
                     tracing::debug!(?rect, "pointer drawn into the duplicated screen: captured instead");
@@ -118,6 +127,58 @@ impl Pending {
     }
 }
 
+/// Whether the acquired frame of `duplication` (`info`) marks all of the `monitor` area as changed: only then does its
+/// picture hold the whole screen.
+fn whole(duplication: &IDXGIOutputDuplication, info: &DXGI_OUTDUPL_FRAME_INFO, monitor: &PhysicalRect) -> bool {
+    let capacity = info.TotalMetadataBufferSize as usize / size_of::<RECT>();
+    let mut rects = vec![RECT::default(); capacity];
+    let mut used = 0u32;
+    // SAFETY: a frame of this duplication is held; the buffer has room for `TotalMetadataBufferSize` bytes of rects.
+    let read = unsafe {
+        duplication.GetFrameDirtyRects((capacity * size_of::<RECT>()) as u32, rects.as_mut_ptr(), &raw mut used)
+    };
+    if read.is_err() {
+        return false;
+    }
+    rects.truncate(used as usize / size_of::<RECT>());
+    covered(&rects, monitor.width as i32, monitor.height as i32)
+}
+
+/// Whether `rects` together cover all of a `width` × `height` area.
+fn covered(rects: &[RECT], width: i32, height: i32) -> bool {
+    let clipped: Vec<RECT> = rects
+        .iter()
+        .map(|r| RECT {
+            left: r.left.max(0),
+            top: r.top.max(0),
+            right: r.right.min(width),
+            bottom: r.bottom.min(height),
+        })
+        .filter(|r| r.left < r.right && r.top < r.bottom)
+        .collect();
+    // Usually one rect, all of the screen.
+    if clipped.iter().any(|r| (r.left, r.top, r.right, r.bottom) == (0, 0, width, height)) {
+        return true;
+    }
+    let mut xs: Vec<i32> = clipped.iter().flat_map(|r| [r.left, r.right]).chain([0, width]).collect();
+    xs.sort_unstable();
+    xs.dedup();
+    // Each column between two edges must be covered from top to bottom.
+    xs.windows(2).all(|column| {
+        let mut spans: Vec<(i32, i32)> =
+            clipped.iter().filter(|r| r.left <= column[0] && column[1] <= r.right).map(|r| (r.top, r.bottom)).collect();
+        spans.sort_unstable();
+        let mut reached = 0;
+        for (top, bottom) in spans {
+            if top > reached {
+                return false;
+            }
+            reached = reached.max(bottom);
+        }
+        reached >= height
+    })
+}
+
 /// Whether the pointer is shown within `rect`.
 fn pointer_shown_in(rect: &PhysicalRect) -> bool {
     let mut info = CURSORINFO { cbSize: size_of::<CURSORINFO>() as u32, ..Default::default() };
@@ -131,6 +192,23 @@ fn pointer_shown_in(rect: &PhysicalRect) -> bool {
 mod tests {
     use super::*;
     use crate::StillBackend;
+
+    fn rect(left: i32, top: i32, right: i32, bottom: i32) -> RECT {
+        RECT { left, top, right, bottom }
+    }
+
+    /// Only changed rects that add up to the whole screen make a whole picture.
+    #[test]
+    fn a_screen_is_whole_when_its_changes_cover_it() {
+        assert!(covered(&[rect(0, 0, 1920, 1080)], 1920, 1080));
+        assert!(covered(&[rect(-5, -5, 2000, 1100)], 1920, 1080));
+        assert!(covered(&[rect(0, 0, 1920, 600), rect(0, 500, 1000, 1080), rect(1000, 540, 1920, 1080)], 1920, 1080));
+        assert!(!covered(&[], 1920, 1080));
+        // The menus of a game that redraws only them.
+        assert!(!covered(&[rect(280, 950, 1720, 1110), rect(600, 210, 1720, 860)], 2000, 1125));
+        assert!(!covered(&[rect(0, 0, 1920, 600), rect(0, 601, 1920, 1080)], 1920, 1080));
+        assert!(!covered(&[rect(0, 0, 1919, 1080)], 1920, 1080));
+    }
 
     /// A duplicated screen is the picture Windows Graphics Capture gives (the pointer left out of both).
     #[test]
