@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The frozen screen of a zone capture, done on the GPU by the daemon the moment the shortcut is pressed: every monitor
-//! is captured at once (Desktop Duplication, or Windows Graphics Capture where it cannot), the frame is copied into a
-//! texture shared with the app and shown 1:1 under a black veil by a borderless top-most window (HDR monitors keep
-//! their HDR content: half floats in scRGB). Only the displayed copy is dimmed. Nothing goes through the CPU. The app
-//! reads the textures, builds its editor windows hidden, and asks the frozen screens to go once its own windows cover them
-//! ([`THAW_MESSAGE`]), so the screen never flickers.
+//! is captured at once (Windows Graphics Capture), the frame is copied into a texture shared with the app and shown 1:1
+//! under a black veil by a borderless top-most window (HDR monitors keep their HDR content: half floats in scRGB). Only
+//! the displayed copy is dimmed. Nothing goes through the CPU. The app reads the textures, builds its editor windows
+//! hidden, and asks the frozen screens to go once its own windows cover them ([`THAW_MESSAGE`]), so the screen never
+//! flickers.
 
 use std::cell::RefCell;
 use std::sync::mpsc::channel;
@@ -252,18 +252,6 @@ fn copy_frame(gpu: &Gpu, source: &ID3D11Texture2D, destination: &ID3D11Texture2D
     Ok(())
 }
 
-/// Sessions are created for every monitor before any frame is waited for.
-enum Started {
-    Duplicating(crate::dda::Pending),
-    Capturing(Pending),
-}
-
-/// A monitor's picture on its way: copied already, or captured once its frame comes.
-enum Source {
-    Copied,
-    Captured(Pending),
-}
-
 /// A hidden (cloaked) top-most window over `monitor`, ready for a picture when `show` (otherwise it only receives
 /// [`THAW_MESSAGE`] and the safety timer).
 ///
@@ -398,39 +386,11 @@ fn take(gpu: &Gpu, monitors: &[MonitorInfo], show: bool, cursor: bool) -> Result
     let mut screens = monitors.iter().map(|m| prepare_screen(gpu, m, monitors, show)).collect::<Result<Vec<_>, _>>()?;
     let prepared = began.elapsed();
     let capture_started = Instant::now();
-    // Duplicated when they can be (without the pointer); every capture starts before any is waited for: they run side
-    // by side.
-    let started = monitors
-        .iter()
-        .map(|m| {
-            let duplication = (!cursor).then(|| crate::dda::start(&gpu.device, m, m.hdr.is_some())).flatten();
-            match duplication {
-                Some(duplication) => Ok(Started::Duplicating(duplication)),
-                None => start(gpu, m, cursor).map(Started::Capturing),
-            }
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let duplication_deadline = Instant::now() + crate::dda::DESKTOP_WAIT;
-    // Start every WGC fallback before waiting for any WGC frame too. Copy a duplication while it is owned, before
-    // releasing it; waiting for another monitor must never invalidate that source texture.
-    let pending = started
-        .into_iter()
-        .zip(monitors.iter().zip(&screens))
-        .map(|(source, (monitor, screen))| match source {
-            Started::Capturing(p) => Ok(Source::Captured(p)),
-            Started::Duplicating(p) => match p.finish(duplication_deadline) {
-                Some(frame) => copy_frame(gpu, &frame.texture, &screen.texture).map(|()| Source::Copied),
-                None => start(gpu, monitor, cursor).map(Source::Captured),
-            },
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    // Every capture starts before any is waited for: they run side by side.
+    let pending = monitors.iter().map(|m| start(gpu, m, cursor)).collect::<Result<Vec<_>, _>>()?;
     let deadline = Instant::now() + FRAME_TIMEOUT;
-    pending.iter().zip(&screens).try_for_each(|(p, screen)| match p {
-        Source::Copied => Ok(()),
-        Source::Captured(p) => finish(gpu, p, deadline, screen),
-    })?;
+    pending.iter().zip(&screens).try_for_each(|(p, screen)| finish(gpu, p, deadline, screen))?;
     let captured = capture_started.elapsed();
-    let duplicated = pending.iter().filter(|p| matches!(p, Source::Copied)).count();
     let present_started = Instant::now();
 
     let mut shared = Vec::with_capacity(monitors.len());
@@ -457,16 +417,14 @@ fn take(gpu: &Gpu, monitors: &[MonitorInfo], show: bool, cursor: bool) -> Result
         screens = monitors.len(),
         cursor,
         show,
-        duplicated,
-        wgc = monitors.len() - duplicated,
         ?prepared,
         ?captured,
         present = ?present_started.elapsed(),
         total = ?began.elapsed(),
         "frozen screens submitted to the compositor"
     );
-    // Closing WGC sessions can block. The frozen windows must be visible before that cleanup, rather than showing
-    // a picture that has aged while the live desktop kept moving.
+    // Closing WGC sessions can block. The frozen windows must be visible before that cleanup, rather than showing a
+    // picture that has aged while the live desktop kept moving.
     drop(pending);
     Ok(Frozen { adapter: gpu.adapter, screens: shared })
 }
@@ -778,7 +736,6 @@ mod tests {
     fn held_screens_are_read_back() {
         use crate::StillBackend;
         let _reading = READING.lock();
-        let _screen = crate::REAL_SCREEN.lock();
         // Physical pixels, as the daemon and the app see the monitors.
         vixeeny_platform::ensure_dpi_aware();
         let (Ok(gpu), Ok(monitors)) = (Gpu::new(), vixeeny_platform::monitors()) else {

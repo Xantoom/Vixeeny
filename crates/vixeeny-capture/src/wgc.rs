@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Windows Graphics Capture, single-frame mode: create a capture session on a monitor or a window, wait for the first
-//! frame, copy it to CPU memory and tear the session down. A monitor is taken through Desktop Duplication first, which
-//! gives it without the wait (see [`crate::dda`]).
+//! frame, copy it to CPU memory and tear the session down.
 //!
 //! Own windows are kept out of monitor captures by `WDA_EXCLUDEFROMCAPTURE`, set by the windows' owner (see
 //! `vixeeny_overlay::popup`), not here.
@@ -127,15 +126,11 @@ impl WgcBackend {
         self.start(item, cursor, pixel_format)?.finish(read)
     }
 
-    /// `monitor`'s picture, as scRGB half floats when `hdr`: duplicated when it can be (not with the pointer), captured
-    /// otherwise.
-    fn start_monitor(&self, monitor: &MonitorInfo, cursor: bool, hdr: bool) -> Result<Grab, CaptureError> {
-        if !cursor && let Some(frame) = crate::dda::frame(&self.device, monitor, hdr) {
-            return Ok(Grab::Duplicated(frame));
-        }
+    /// `monitor`'s picture, as scRGB half floats when `hdr`.
+    fn start_monitor(&self, monitor: &MonitorInfo, cursor: bool, hdr: bool) -> Result<Started, CaptureError> {
         let format =
             if hdr { DirectXPixelFormat::R16G16B16A16Float } else { DirectXPixelFormat::B8G8R8A8UIntNormalized };
-        Ok(Grab::Captured(self.start(&monitor_item(monitor)?, cursor, format)?))
+        self.start(&monitor_item(monitor)?, cursor, format)
     }
 
     /// Every monitor's picture, as [`start_monitor`](Self::start_monitor) with `hdr` for each: every capture starts
@@ -145,36 +140,8 @@ impl WgcBackend {
         monitors: &[MonitorInfo],
         cursor: bool,
         hdr: impl Fn(&MonitorInfo) -> bool,
-    ) -> Result<Vec<Grab>, CaptureError> {
-        enum Pending {
-            Duplication(crate::dda::Pending),
-            Capture(Started),
-        }
-        let capture = |m: &MonitorInfo| {
-            let format =
-                if hdr(m) { DirectXPixelFormat::R16G16B16A16Float } else { DirectXPixelFormat::B8G8R8A8UIntNormalized };
-            self.start(&monitor_item(m)?, cursor, format)
-        };
-        let pending = monitors
-            .iter()
-            .map(|m| match (!cursor).then(|| crate::dda::start(&self.device, m, hdr(m))).flatten() {
-                Some(p) => Ok(Pending::Duplication(p)),
-                None => capture(m).map(Pending::Capture),
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        // Refreezing a live editor uses this path too: do not accumulate a separate 100 ms wait per display.
-        let deadline = std::time::Instant::now() + crate::dda::DESKTOP_WAIT;
-        pending
-            .into_iter()
-            .zip(monitors)
-            .map(|(pending, monitor)| match pending {
-                Pending::Capture(p) => Ok(Grab::Captured(p)),
-                Pending::Duplication(p) => match p.finish(deadline) {
-                    Some(frame) => Ok(Grab::Duplicated(frame)),
-                    None => capture(monitor).map(Grab::Captured),
-                },
-            })
-            .collect()
+    ) -> Result<Vec<Started>, CaptureError> {
+        monitors.iter().map(|m| self.start_monitor(m, cursor, hdr(m))).collect()
     }
 
     /// A capture of `item` under way: its first frame is waited for by [`Started::finish`].
@@ -251,22 +218,6 @@ impl WgcBackend {
     }
 }
 
-/// A monitor's picture on its way: duplicated already, or captured once its frame comes.
-enum Grab {
-    Duplicated(crate::dda::Frame),
-    Captured(Started),
-}
-
-impl Grab {
-    /// The picture, handed to `read` while it is held.
-    fn finish<T>(self, read: impl FnOnce(&ID3D11Texture2D) -> Result<T, CaptureError>) -> Result<T, CaptureError> {
-        match self {
-            Self::Duplicated(frame) => read(&frame.texture),
-            Self::Captured(started) => started.finish(read),
-        }
-    }
-}
-
 /// A capture session waiting for its first frame; closed when dropped.
 struct Started {
     pool: Direct3D11CaptureFramePool,
@@ -334,8 +285,8 @@ fn read_back_area(
     unsafe { texture.GetDesc(&mut desc) };
     let rect = inside(area, PhysicalRect::new(0, 0, desc.Width, desc.Height))?;
     let staging = vixeeny_platform::d3d::staging_for(device, texture, Some((rect.width, rect.height)))?;
-    // SAFETY: the source rectangle was validated against the texture; the staging texture has exactly its size
-    // and format, on the same device. Full-frame calls retain their original copy path.
+    // SAFETY: the source rectangle was validated against the texture; the staging texture has exactly its size and
+    // format, on the same device. Full-frame calls retain their original copy path.
     unsafe {
         if area.is_none() {
             context.CopyResource(&staging, texture);
@@ -604,7 +555,6 @@ mod tests {
     #[test]
     fn the_desktop_is_assembled_as_its_monitors() {
         use crate::{CaptureOptions, CaptureTarget, Capturer};
-        let _screen = crate::REAL_SCREEN.lock();
         vixeeny_platform::ensure_dpi_aware();
         let (Ok(mut backend), Ok(monitors)) = (super::WgcBackend::new(), vixeeny_platform::monitors()) else {
             vixeeny_common::skip_test("no Direct3D device");
