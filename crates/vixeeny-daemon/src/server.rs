@@ -109,13 +109,39 @@ pub fn serve(listener: &Listener, tx: &EventTx, link: &AppLink) {
     }
 }
 
+/// The processes whose end gives the shortcuts back: one wait each, however many times they release them.
+static PAUSERS: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+
+/// Gives the shortcuts back when process `pid`, which released them, ends: a settings window that crashes while a
+/// shortcut is recorded never asks for them again. Windows tells when it ends.
+fn watch_pauser(pid: u32, tx: &EventTx) {
+    let mut pausers = PAUSERS.lock().unwrap_or_else(PoisonError::into_inner);
+    if pausers.contains(&pid) {
+        return;
+    }
+    let tx = tx.clone();
+    let watching = vixeeny_platform::on_process_exit(pid, move || {
+        PAUSERS.lock().unwrap_or_else(PoisonError::into_inner).retain(|p| *p != pid);
+        tx.send(Event::PauserExited);
+    });
+    if watching {
+        pausers.push(pid);
+    }
+}
+
 fn connection(stream: Stream, id: u64, tx: &EventTx, link: &AppLink) -> Result<(), IpcError> {
+    let peer = vixeeny_common::ipc::StreamCommon::peer_creds(&stream).ok().and_then(|c| c.pid());
     let (mut recv, mut send) = stream.split();
     let Some(hello) = ipc::read_msg::<_, Hello>(&mut recv)? else {
         return Ok(());
     };
     match hello {
         Hello::Control(request) => {
+            if request == ipc::ControlRequest::PauseHotkeys(true)
+                && let Some(pid) = peer
+            {
+                watch_pauser(pid, tx);
+            }
             tx.send(Event::Control(request));
             let reply = if request == ipc::ControlRequest::QuitForUpdate {
                 ControlReply::Quitting { pid: std::process::id() }

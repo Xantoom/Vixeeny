@@ -27,6 +27,8 @@ pub enum Event {
         success: bool,
     },
     TrayQuit,
+    /// The process that released the shortcuts ended (the settings window, closed without giving them back: a crash).
+    PauserExited,
     /// A window (its handle) came to the foreground, or the one there went full screen or left it (the runtime looks
     /// for a game).
     Foreground(u64),
@@ -65,6 +67,8 @@ pub struct Core {
     queued: Vec<ActionId>,
     /// An update asked to quit during a recording: quit when it ends.
     update_waiting: bool,
+    /// The shortcuts are released (a shortcut is being recorded in the settings).
+    hotkeys_paused: bool,
 }
 
 impl Core {
@@ -91,8 +95,14 @@ impl Core {
             Event::Control(ControlRequest::ReloadConfig) => fx.push(Effect::ReloadConfig),
             Event::Control(ControlRequest::QuitForUpdate) => self.update_waiting = true,
             Event::Control(ControlRequest::PauseHotkeys(paused)) => {
+                self.hotkeys_paused = paused;
                 fx.push(Effect::PauseHotkeys(paused));
             }
+            Event::PauserExited if self.hotkeys_paused => {
+                self.hotkeys_paused = false;
+                fx.push(Effect::PauseHotkeys(false));
+            }
+            Event::PauserExited => {}
             Event::Control(ControlRequest::Ping) => {}
             Event::Control(ControlRequest::Action(action)) => self.run(action, &mut fx),
             Event::Action(action) => self.run(action, &mut fx),
@@ -318,5 +328,18 @@ mod tests {
             a.handle(Event::Control(ControlRequest::Action(ActionId::CaptureRegion))),
             b.handle(Event::Action(ActionId::CaptureRegion)),
         );
+    }
+
+    #[test]
+    fn the_shortcuts_come_back_when_the_window_that_released_them_ends() {
+        let mut core = Core::new();
+        assert!(core.handle(Event::PauserExited).is_empty());
+        assert_eq!(core.handle(Event::Control(ControlRequest::PauseHotkeys(true))), vec![Effect::PauseHotkeys(true)]);
+        assert_eq!(core.handle(Event::PauserExited), vec![Effect::PauseHotkeys(false)]);
+        assert!(core.handle(Event::PauserExited).is_empty());
+        // Given back by the window itself: its end changes nothing.
+        core.handle(Event::Control(ControlRequest::PauseHotkeys(true)));
+        assert_eq!(core.handle(Event::Control(ControlRequest::PauseHotkeys(false))), vec![Effect::PauseHotkeys(false)]);
+        assert!(core.handle(Event::PauserExited).is_empty());
     }
 }

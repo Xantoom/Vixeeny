@@ -119,6 +119,8 @@ pub enum Failed {
     Ocr,
     /// The app stopped unexpectedly (sent by the daemon); a click prepares a report.
     Crash,
+    /// The settings window could not write the settings.
+    Settings,
 }
 
 impl Saved {
@@ -150,6 +152,7 @@ impl Failed {
             Self::NoText => "no-text",
             Self::Ocr => "ocr",
             Self::Crash => "crash",
+            Self::Settings => "settings",
         }
     }
 
@@ -163,6 +166,7 @@ impl Failed {
             Self::NoText => Key::ToastNoText,
             Self::Ocr => Key::ToastOcrFailed,
             Self::Crash => Key::AppCrashed,
+            Self::Settings => Key::ToastSettingsNotSaved,
         }
     }
 }
@@ -209,6 +213,7 @@ impl Toast {
             "failed-no-text" => failed(Failed::NoText),
             "failed-ocr" => failed(Failed::Ocr),
             "failed-crash" => failed(Failed::Crash),
+            "failed-settings" => failed(Failed::Settings),
             "text-copied" => Some(Self::TextCopied(text.to_owned())),
             "update" => Some(Self::Update(text.to_owned())),
             "sample" => Sample::from_name(text).map(Self::Sample),
@@ -497,7 +502,8 @@ fn clickable(toast: &Toast) -> bool {
     }
 }
 
-/// Shows the card for `toast` at its place on the main monitor (see [`ToastContent::place`]); `act` runs once it is gone.
+/// Shows the card for `toast` at its place on the main monitor (see [`ToastContent::place`]); `act` runs once it is
+/// gone.
 fn show(toasts: &Toasts, toast: Toast, thumb: Option<Thumb>) -> anyhow::Result<()> {
     let content = content_of(&toast, thumb);
     show_prepared(toasts, toast, content)
@@ -673,6 +679,7 @@ Merci"
             ),
             Toast::Failed(Failed::NoText, String::new()),
             Toast::Failed(Failed::Ocr, "no language".into()),
+            Toast::Failed(Failed::Settings, "access denied".into()),
             Toast::Replay(true, PathBuf::from(r"D:\Games\Hades\Hades.exe"), "Hades".into()),
             Toast::Replay(false, PathBuf::from("Client-Win64-Shipping.exe"), "Wuthering | Waves".into()),
             Toast::Sample(Sample::Image),

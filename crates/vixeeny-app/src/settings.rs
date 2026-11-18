@@ -35,6 +35,8 @@ pub fn spawn(updates: bool) -> anyhow::Result<()> {
 
 /// The settings file as this window last read or wrote it.
 struct OnDisk {
+    /// The settings the window's own were last made from (read, or saved by it): what its changes are made against.
+    shown: Config,
     config: Config,
     /// Its time and size then, to notice another program writing it.
     stamp: Option<(std::time::SystemTime, u64)>,
@@ -47,7 +49,8 @@ impl OnDisk {
     }
 
     fn read() -> Self {
-        Self { stamp: Self::stamp(), config: Config::current() }
+        let config = Config::current();
+        Self { stamp: Self::stamp(), shown: config.clone(), config }
     }
 
     /// Reads the file again if another program wrote it (one that cannot be read is ignored).
@@ -62,27 +65,31 @@ impl OnDisk {
         }
     }
 
-    /// Saves `ours` over what the file holds now: the changes made elsewhere since it was read stay, unless `ours`
-    /// changed the same settings.
+    /// Saves `ours` over what the file holds now: the changes made elsewhere since the window last took the settings
+    /// stay, unless `ours` changed the same settings.
     fn write(&mut self, ours: &Config) {
-        let base = self.config.clone();
         self.refresh();
-        let merged = vixeeny_common::config::merge(&base, ours, &self.config);
-        save(&merged);
-        self.config = merged;
-        self.stamp = Self::stamp();
+        let merged = vixeeny_common::config::merge(&self.shown, ours, &self.config);
+        if save(&merged) {
+            self.config = merged;
+            self.shown = ours.clone();
+            self.stamp = Self::stamp();
+        }
     }
 }
 
-/// Writes the settings, then tells the daemon to reload them (off the UI thread).
-pub fn save(config: &Config) {
+/// Writes the settings, then tells the daemon to reload them (off the UI thread). `false`: not written (a failure card
+/// says so).
+pub fn save(config: &Config) -> bool {
     let Some(path) = vixeeny_common::paths::config_file() else {
         tracing::error!("no settings folder: the change is not saved");
-        return;
+        return false;
     };
     if let Err(e) = config.save(&path) {
         tracing::error!("cannot save the settings: {e}");
-        return;
+        let text = crate::toast::failure_text(&e.into(), crate::lang(&config.general.language));
+        crate::toast::notify(config, &crate::toast::Toast::Failed(crate::toast::Failed::Settings, text));
+        return false;
     }
     // The replay's folder exists from the moment the replay is on, not before.
     if config.replay.enabled {
@@ -102,6 +109,7 @@ pub fn save(config: &Config) {
     if let Ok(mut last) = TELLING.lock() {
         *last = Some(telling);
     }
+    true
 }
 
 /// The thread telling the daemon about the last save.
@@ -461,7 +469,11 @@ pub fn run_child(config: Config, args: &[String]) -> anyhow::Result<()> {
                 }
                 let mut file = file.borrow_mut();
                 file.refresh();
-                (file.config != *shown).then(|| file.config.clone())
+                if file.config == *shown {
+                    return None;
+                }
+                file.shown = file.config.clone();
+                Some(file.config.clone())
             }
         },
         &config_changed,

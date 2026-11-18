@@ -1319,6 +1319,10 @@ pub fn merge(base: &Config, ours: &Config, theirs: &Config) -> Config {
         match (base, ours, theirs) {
             (toml::Value::Table(b), toml::Value::Table(o), toml::Value::Table(t)) => {
                 let mut out = t.clone();
+                // What ours removed (a setting back to its default, an entry deleted) goes, as a change of ours.
+                for key in b.keys().filter(|k| !o.contains_key(*k)) {
+                    out.remove(key);
+                }
                 for (key, mine) in o {
                     let merged = match (b.get(key), t.get(key)) {
                         (Some(b), Some(t)) => walk(b, mine, t),
@@ -1394,6 +1398,23 @@ mod tests {
         assert_eq!(merge(&base, &ours, &theirs).recording_widget.corner, "bottom_right");
         // Nothing changed on our side: theirs as it is.
         assert_eq!(merge(&base, &base, &theirs), theirs);
+    }
+
+    #[test]
+    fn a_merge_keeps_what_ours_removed() {
+        let mut base = Config::default();
+        base.video.audio.volumes.insert("mic".into(), 0.5);
+        base.video.params.insert("cq".into(), "20".into());
+        // The microphone back to 100 % (no entry) and the encoder option reset; elsewhere, the theme changed.
+        let mut ours = base.clone();
+        ours.video.audio.volumes.clear();
+        ours.video.params.clear();
+        let mut theirs = base.clone();
+        theirs.general.theme = "dark".into();
+        let merged = merge(&base, &ours, &theirs);
+        assert!(merged.video.audio.volumes.is_empty());
+        assert!(merged.video.params.is_empty());
+        assert_eq!(merged.general.theme, "dark");
     }
 
     #[test]

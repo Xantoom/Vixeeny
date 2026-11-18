@@ -88,7 +88,7 @@ pub fn run_child(config: &Config) -> anyhow::Result<()> {
         match Config::load(&path) {
             Ok(mut config) => {
                 config.general.whats_new = on;
-                crate::settings::save(&config);
+                let _ = crate::settings::save(&config);
             }
             Err(e) => tracing::warn!("cannot read the settings: {e}"),
         }

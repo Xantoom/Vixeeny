@@ -411,6 +411,8 @@ keys! {
     ToastSampleText => "Text read from the selected area.", "Texte lu dans la zone choisie.";
     ToastSampleGame => "Your game", "Votre jeu";
     SetShowOwnWindows => "Include Vixeeny's notifications and bars", "Inclure les notifications et barres de Vixeeny";
+    ToastSettingsNotSaved => "Settings could not be saved", "Enregistrement des réglages impossible";
+    ScrollLost => "Too fast: scroll back a little", "Trop rapide : remontez un peu";
 }
 
 impl Lang {
