@@ -5,6 +5,8 @@ import { Theme, Icons, Button, Card } from "controls.slint";
 // buttons. The capture runs from the start.
 export component ScrollWindow inherits Window {
     in property <string> status;
+    // The status is a warning (the height limit, the content lost).
+    in property <bool> caution;
     in property <image> preview;
     in property <string> finish-label: "Finish";
     in property <string> cancel-label: "Cancel";
@@ -53,7 +55,7 @@ export component ScrollWindow inherits Window {
 
             Text {
                 text: root.status;
-                color: Theme.text-2;
+                color: root.caution ? Theme.warning : Theme.text-2;
                 font-size: 12px;
                 wrap: word-wrap;
             }

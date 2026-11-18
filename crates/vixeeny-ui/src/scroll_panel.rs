@@ -33,18 +33,31 @@ pub struct ScrollHandle {
 }
 
 impl ScrollHandle {
-    /// `rgba` is `width * height * 4` bytes. Silently ignored once the window is gone.
-    pub fn show_preview(&self, width: u32, height: u32, rgba: Vec<u8>, status: String) {
+    /// `rgba` is `width * height * 4` bytes. `caution`: the status is a warning. Silently ignored once the window is
+    /// gone.
+    pub fn show_preview(&self, width: u32, height: u32, rgba: Vec<u8>, status: String, caution: bool) {
         let _ = self.window.upgrade_in_event_loop(move |w| {
             if let Some(buffer) = pixel_buffer(width, height, &rgba) {
                 w.set_preview(Image::from_rgba8(buffer));
             }
             w.set_status(status.into());
+            w.set_caution(caution);
         });
     }
 
-    pub fn show_status(&self, status: String) {
-        let _ = self.window.upgrade_in_event_loop(move |w| w.set_status(status.into()));
+    /// `caution`: the status is a warning.
+    pub fn show_status(&self, status: String, caution: bool) {
+        let _ = self.window.upgrade_in_event_loop(move |w| {
+            w.set_status(status.into());
+            w.set_caution(caution);
+        });
+    }
+
+    /// Closes the window (the capture stopped by itself).
+    pub fn close(&self) {
+        let _ = self.window.upgrade_in_event_loop(|w| {
+            let _ = w.hide();
+        });
     }
 }
 

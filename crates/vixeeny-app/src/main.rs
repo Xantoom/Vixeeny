@@ -78,6 +78,8 @@ fn perform(action: ActionId, config: &Config, frozen: Option<ipc::Frozen>) {
         ActionId::CaptureScrolling => {
             if let Err(e) = region::run(config, region::Mode::Scroll, frozen) {
                 tracing::error!("scrolling capture failed: {e:#}");
+                let text = toast::failure_text(&e, lang(&config.general.language));
+                toast::notify(config, &toast::Toast::Failed(toast::Failed::Capture, text));
             }
         }
         CaptureFullscreen | CaptureWindow | CaptureAllMonitors => match direct_capture(action, config, frozen) {

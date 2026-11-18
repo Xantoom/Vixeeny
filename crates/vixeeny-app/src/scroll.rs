@@ -211,6 +211,8 @@ fn capture_loop(
     let buffers = stream.buffers();
     let mut stitcher = Stitcher::new(vixeeny_stitch::Config { max_height, ..Default::default() });
     let mut warned_full = false;
+    // The last frame could not be placed: the content went by too fast.
+    let mut lost = false;
     // The preview is shown at most this often; the last change always shows.
     let mut shown: Option<Instant> = None;
     let mut unshown = false;
@@ -231,9 +233,14 @@ fn capture_loop(
                 Push::Full if !warned_full => {
                     warned_full = true;
                     let msg = tr(Key::ScrollTruncated, lang).replace("{height}", &stitcher.height().to_string());
-                    preview.show_status(msg);
+                    preview.show_status(msg, true);
                 }
-                // A frame that cannot be placed is found again as soon as it can.
+                // A frame that cannot be placed is found again as soon as it can; the user is told meanwhile.
+                Push::Lost if !lost && !warned_full => {
+                    lost = true;
+                    preview.show_status(tr(Key::ScrollLost, lang).to_owned(), true);
+                }
+                Push::Added { .. } => lost = false,
                 _ => {}
             }
             changed = true;
@@ -247,8 +254,12 @@ fn capture_loop(
             unshown = false;
             shown = Some(Instant::now());
             if let Some(p) = stitcher.preview(preview_box.0, preview_box.1) {
-                let status = tr(Key::ScrollCapturing, lang).replace("{height}", &stitcher.height().to_string());
-                preview.show_preview(p.width, p.height, to_rgba(&p), status);
+                let status = if lost {
+                    tr(Key::ScrollLost, lang).to_owned()
+                } else {
+                    tr(Key::ScrollCapturing, lang).replace("{height}", &stitcher.height().to_string())
+                };
+                preview.show_preview(p.width, p.height, to_rgba(&p), status, lost);
             }
         }
         // A preview held back shows once its time comes, even if nothing else arrives.
@@ -295,9 +306,14 @@ pub fn run(config: &Config, snapshot: Snapshot, zone: PhysicalRect, scale: f32) 
             max_height: config.scrolling.max_height.max(100),
             show_cursor: config.image.scrolling.show_cursor,
         };
-        std::thread::Builder::new()
-            .name("scroll-capture".into())
-            .spawn(move || capture_loop(&shared, settings, lang, &handle, preview_box))?
+        std::thread::Builder::new().name("scroll-capture".into()).spawn(move || {
+            let result = capture_loop(&shared, settings, lang, &handle, preview_box);
+            // The capture stopped by itself: the window goes, and the failure is told once it has.
+            if result.is_err() {
+                handle.close();
+            }
+            result
+        })?
     };
 
     let events = shared.clone();
