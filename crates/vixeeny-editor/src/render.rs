@@ -404,6 +404,33 @@ pub fn render_region<'a>(
     Some(flatten(base.crop(r), moved.iter()))
 }
 
+/// Which pixels of `region` (as [`render_region`] crops it) the annotations leave showing the base, row by row. Found
+/// by drawing them over a pattern no annotation reproduces: a pixel that still shows the pattern is the base's,
+/// whatever the base holds there (an opaque shape the colour of what it covers, a blur over an even area, are not).
+pub fn untouched_region<'a>(
+    base: &RgbaImage,
+    annotations: impl Iterator<Item = &'a Annotation>,
+    region: &Rect,
+) -> Option<Vec<bool>> {
+    let r = Region::clamp(region, base.width as usize, base.height as usize)?;
+    let (dx, dy) = (-(r.x as f32), -(r.y as f32));
+    let moved: Vec<Annotation> = annotations.map(|a| a.translated(dx, dy)).collect();
+    let (w, h) = (r.w, r.h);
+    let mut data = Vec::with_capacity(w * h * 4);
+    for y in 0..h {
+        for x in 0..w {
+            // A hash of the position: neighbours differ, so a blur or a pixelation changes every pixel.
+            let v =
+                ((x as u32).wrapping_mul(0x9E37_79B9) ^ (y as u32).wrapping_mul(0x85EB_CA6B)).wrapping_mul(0xC2B2_AE35);
+            let [a, b, c, _] = v.to_le_bytes();
+            data.extend_from_slice(&[a, b, c, 255]);
+        }
+    }
+    let pattern = RgbaImage { width: w as u32, height: h as u32, data };
+    let drawn = flatten(pattern.clone(), moved.iter());
+    Some(drawn.data.as_chunks::<4>().0.iter().zip(pattern.data.as_chunks::<4>().0).map(|(d, p)| d == p).collect())
+}
+
 /// Renders the document over `base`: annotations bottom to top.
 pub fn render(base: &RgbaImage, doc: &Document) -> RgbaImage {
     flatten(base.clone(), doc.items.iter().map(|i| &i.annotation))

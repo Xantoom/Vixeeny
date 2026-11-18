@@ -198,7 +198,9 @@ impl Stitcher {
         let sigs = signatures(frame);
         if self.size.is_none() {
             self.size = Some(got);
-            for i in 0..frame.height as usize {
+            let kept = (frame.height as usize).min(self.config.max_height as usize);
+            self.truncated = kept < frame.height as usize;
+            for i in 0..kept {
                 let row = self.row(frame, layer, &sigs, i);
                 self.canvas.below.push(row);
             }
@@ -491,8 +493,8 @@ fn spread(rows: Vec<usize>) -> Vec<usize> {
 fn signatures(frame: &Frame) -> Vec<Sig> {
     let w = frame.width as usize;
     let bands = BANDS.min(w);
-    // Sum contiguous bands, so the inner loop has no scatter or dependency on a per-column index. The boundaries
-    // are the inverse of floor(x * bands / w), including widths not divisible by the number of bands.
+    // Sum contiguous bands, so the inner loop has no scatter or dependency on a per-column index. The boundaries are
+    // the inverse of floor(x * bands / w), including widths not divisible by the number of bands.
     let edges: [usize; BANDS + 1] = std::array::from_fn(|k| (k.min(bands) * w).div_ceil(bands));
     (0..frame.height as usize)
         .map(|y| {
@@ -505,8 +507,8 @@ fn signatures(frame: &Frame) -> Vec<Sig> {
         .collect()
 }
 
-/// The sum of each channel of BGRA `pixels`. Sixteen bytes are added at once in 16-bit lanes, which the compiler
-/// turns into vector additions: a 4K frame's signatures take a third of the time of a pixel at a time.
+/// The sum of each channel of BGRA `pixels`. Sixteen bytes are added at once in 16-bit lanes, which the compiler turns
+/// into vector additions: a 4K frame's signatures take a third of the time of a pixel at a time.
 fn channel_sums(pixels: &[u8]) -> [u32; 4] {
     let mut sums = [0_u32; 4];
     // 256 additions of a byte stay within 16 bits.

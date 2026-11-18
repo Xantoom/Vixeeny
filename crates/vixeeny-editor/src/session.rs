@@ -548,6 +548,13 @@ impl Session {
         render_region(&self.base, self.editor.doc.items.iter().map(|i| &i.annotation), &zone)
     }
 
+    /// Which pixels of [`export`](Self::export) the annotations leave showing the base, row by row (see
+    /// [`untouched_region`](crate::render::untouched_region)).
+    pub fn untouched(&self) -> Option<Vec<bool>> {
+        let zone = self.selection.rect()?;
+        crate::render::untouched_region(&self.base, self.editor.doc.items.iter().map(|i| &i.annotation), &zone)
+    }
+
     /// Where the pointer is, to pick the cursor shape.
     pub fn cursor_hint(&self) -> CursorHint {
         match (self.tool, self.selection.rect()) {
@@ -608,7 +615,7 @@ impl Session {
         let y0 = ((covered.y / block).floor() * block).max(zy as f32) as u32;
         let x1 = (((covered.x + covered.w) / block).ceil() * block).min((zx + zw) as f32) as u32;
         let y1 = (((covered.y + covered.h) / block).ceil() * block).min((zy + zh) as f32) as u32;
-        (x1 > x0 && y1 > y0).then_some((x0, y0, x1 - x0, y1 - y0))
+        (x1 > x0 && y1 > y0).then(|| (x0, y0, x1 - x0, y1 - y0))
     }
 
     /// The zone in whole image pixels (x, y, width, height), rounded outwards and clamped.

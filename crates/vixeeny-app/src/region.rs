@@ -73,6 +73,7 @@ fn annotated_hdr(session: &Session, exported: &RgbaImage, desktop: &HdrCapture) 
     if !same_size {
         return None;
     }
+    let untouched = session.untouched()?;
     let gain = desktop.info.sdr_white_nits / 80.0;
     // Annotation channels are bytes: decode each possible value once, rather than evaluating the transfer function
     // three times for every changed pixel of a large selection.
@@ -82,7 +83,7 @@ fn annotated_hdr(session: &Session, exported: &RgbaImage, desktop: &HdrCapture) 
         for x in 0..r.w {
             let b = ((r.y + y) * bw + r.x + x) * 4;
             let shown = &exported.data[(y * r.w + x) * 4..][..4];
-            if shown == &base.data[b..b + 4] {
+            if untouched[y * r.w + x] && shown == &base.data[b..b + 4] {
                 rgba.extend_from_slice(&desktop.frame.rgba[b..b + 4]);
             } else {
                 let c = |i: usize| linear[usize::from(shown[i])];

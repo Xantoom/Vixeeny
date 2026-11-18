@@ -161,9 +161,12 @@ pub fn output_path(
 ) -> PathBuf {
     let dir = if per_app_subfolder { dir.join(sanitize(&vars.app)) } else { dir.to_path_buf() };
     let has_counter = template.contains("{counter}");
+    // The stems tried: a counter cut off by the length limit gives the same one again, which then takes ` (n)`.
+    let mut tried = std::collections::HashSet::new();
     for n in 1u32.. {
         let stem = expand_template(template, vars, n);
-        let name = if has_counter || n == 1 { stem } else { format!("{stem} ({n})") };
+        let fresh = tried.insert(stem.clone());
+        let name = if (has_counter && fresh) || n == 1 { stem } else { format!("{stem} ({n})") };
         let path = dir.join(format!("{name}.{ext}"));
         if !exists(&path) {
             return path;
@@ -316,5 +319,14 @@ mod tests {
         let taken = |p: &Path| p.ends_with("shot_1.png") || p.ends_with("shot_2.png");
         let p = output_path(Path::new("d"), false, "shot_{counter}", &vars(), "png", taken);
         assert_eq!(p, Path::new("d").join("shot_3.png"));
+    }
+
+    #[test]
+    fn a_counter_cut_off_by_the_length_limit_still_finds_a_free_name() {
+        let mut v = vars();
+        v.app = "a".repeat(MAX_NAME_CHARS);
+        let first = Path::new("d").join(format!("{}.png", v.app));
+        let p = output_path(Path::new("d"), false, "{app}_{counter}", &v, "png", |p| p == first);
+        assert_eq!(p, Path::new("d").join(format!("{} (2).png", v.app)));
     }
 }

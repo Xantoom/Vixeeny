@@ -181,6 +181,17 @@ fn height_limit_truncates() {
 }
 
 #[test]
+fn height_limit_applies_to_the_first_frame() {
+    let p = page(600, &[]);
+    let s = screen(&p, 200, 0, 0);
+    let mut st = Stitcher::new(Config { max_height: 100, ..Config::default() });
+    st.push(&s.frame(0)).unwrap();
+    let out = st.finish().unwrap();
+    assert!(out.truncated);
+    assert_eq!(out.frame.height, 100);
+}
+
+#[test]
 fn size_change_is_an_error() {
     let p = page(300, &[]);
     let s = screen(&p, 100, 0, 0);

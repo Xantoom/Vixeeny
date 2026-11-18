@@ -338,3 +338,22 @@ fn the_letters_of_a_text_are_drawn_alone_where_the_export_puts_them() {
     let (image, ..) = letters(&marker).expect("a number");
     assert!(image.data.as_chunks::<4>().0.iter().any(|p| p[3] > 0 && p[0] == 0));
 }
+
+#[test]
+fn untouched_pixels_are_found_whatever_the_base_shows() {
+    let base = RgbaImage::filled(40, 30, WHITE);
+    let annotations = [
+        Annotation::Rect { rect: Rect::new(2.0, 2.0, 10.0, 10.0), style: style(WHITE, 1.0), filled: true },
+        Annotation::Blur { rect: Rect::new(20.0, 2.0, 10.0, 10.0), radius: 3.0 },
+    ];
+    let zone = Rect::new(0.0, 0.0, 40.0, 30.0);
+    let mask = untouched_region(&base, annotations.iter(), &zone).unwrap();
+    assert_eq!(mask.len(), 40 * 30);
+    // The white shape on white and the blur of an even area change nothing visible, yet they cover the base.
+    assert!(!mask[5 * 40 + 5]);
+    assert!(!mask[5 * 40 + 25]);
+    assert!(mask[25 * 40 + 5]);
+    let shifted = untouched_region(&base, annotations.iter(), &Rect::new(10.0, 0.0, 20.0, 30.0)).unwrap();
+    assert!(!shifted[5 * 20]);
+    assert!(shifted[25 * 20]);
+}

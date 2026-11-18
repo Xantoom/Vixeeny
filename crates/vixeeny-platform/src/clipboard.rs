@@ -65,6 +65,42 @@ type Put<'a> = dyn Fn(u32, usize, &dyn Fn(&mut [u8])) -> crate::Result<()> + 'a;
 
 /// Opens the clipboard, empties it, lets `fill` add formats, closes it.
 fn with_clipboard(fill: impl FnOnce(&Put<'_>) -> crate::Result<()>) -> crate::Result<()> {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DestroyWindow, HWND_MESSAGE, WINDOW_EX_STYLE, WINDOW_STYLE,
+    };
+
+    // The clipboard's owner: opened without a window, `EmptyClipboard` leaves it without one, and Windows may then
+    // refuse `SetClipboardData`. A message-only window of a system class, gone once the data is set (the data stays).
+    // SAFETY: a window of a registered system class, without parent but the message-only one; destroyed below.
+    let owner = unsafe {
+        CreateWindowExW(
+            WINDOW_EX_STYLE(0),
+            windows::core::w!("STATIC"),
+            None,
+            WINDOW_STYLE(0),
+            0,
+            0,
+            0,
+            0,
+            Some(HWND_MESSAGE),
+            None,
+            None,
+            None,
+        )
+    }
+    .ok();
+    let result = with_open_clipboard(owner, fill);
+    if let Some(owner) = owner {
+        // SAFETY: made above on this thread.
+        let _ = unsafe { DestroyWindow(owner) };
+    }
+    result
+}
+
+fn with_open_clipboard(
+    owner: Option<windows::Win32::Foundation::HWND>,
+    fill: impl FnOnce(&Put<'_>) -> crate::Result<()>,
+) -> crate::Result<()> {
     use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL};
     use windows::Win32::System::DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData};
     use windows::Win32::System::Memory::{GMEM_MOVEABLE, GMEM_ZEROINIT, GlobalAlloc, GlobalLock, GlobalUnlock};
@@ -76,8 +112,8 @@ fn with_clipboard(fill: impl FnOnce(&Put<'_>) -> crate::Result<()>) -> crate::Re
     // Clipboard owners hold it briefly; retry a few times before giving up.
     let mut opened = false;
     for _ in 0..10 {
-        // SAFETY: no window handle: the clipboard is then owned by the current task.
-        if unsafe { OpenClipboard(None) }.is_ok() {
+        // SAFETY: `owner` is a live window of this thread, or none (the clipboard is then owned by the current task).
+        if unsafe { OpenClipboard(owner) }.is_ok() {
             opened = true;
             break;
         }
@@ -213,8 +249,8 @@ mod tests {
 
     #[test]
     fn header_and_bottom_up_rows() {
-        // 2×2, top row (1,2,3,255)(4,5,6,255), bottom row (7,8,9,255)(10,11,12,255)
-        // rows 12 bytes apart: 4 bytes of padding each
+        // 2×2, top row (1,2,3,255)(4,5,6,255), bottom row (7,8,9,255)(10,11,12,255) rows 12 bytes apart: 4 bytes of
+        // padding each
         let px = [1, 2, 3, 255, 4, 5, 6, 255, 0, 0, 0, 0, 7, 8, 9, 255, 10, 11, 12, 255];
         let mut d = vec![0xaa; 124 + 16];
         dibv5(2, 2, 12, &px, &mut d);
