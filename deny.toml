@@ -13,6 +13,9 @@ ignore = [
   # (slint-build, slint-macros): it runs while Vixeeny is built and is in neither program. Revisit
   # when Slint drops spin_on.
   "RUSTSEC-2026-0441",
+  # chrono is unmaintained, with no release to move to. Only Slint's runtime (i-slint-core) uses it,
+  # up to Slint 1.19; Vixeeny does not. Revisit when Slint drops it.
+  "RUSTSEC-2026-0543",
 ]
 
 [licenses]
