@@ -267,6 +267,8 @@ pub fn download(progress: &mut dyn FnMut(u64, u64)) -> anyhow::Result<String> {
         let _ = std::fs::remove_file(&part);
         return Err(e.into());
     }
+    // The files ready to install are replaced only while no install reads them.
+    let _installing = lock(&install_dir()?).context("an update is being installed")?;
     let staged = install_dir()?.join(STAGED);
     let _ = std::fs::remove_dir_all(&staged);
     held.seek(SeekFrom::Start(0))?;
@@ -482,13 +484,18 @@ fn install_inner(reopen: Option<ControlRequest>) -> anyhow::Result<()> {
     };
     let _lock = lock(&dir).context("another update is running")?;
     let (staged, backup) = (dir.join(STAGED), dir.join(BACKUP));
-    // A backup left by an earlier update: its files were still in use then, or it was cut short and never undone.
-    if swap::unconfirmed(&backup) {
-        let _ = swap::rollback(&dir, &backup);
-    }
-    let _ = std::fs::remove_dir_all(&backup);
     stop_daemon(None)?;
-    // From here Vixeeny is stopped: every way out starts a version again.
+    // From here Vixeeny is stopped: every way out starts a version again. A backup left by an earlier update cut short
+    // and never undone: undone first. The files it holds are the only copy of that version: kept when they cannot be
+    // put back.
+    if swap::unconfirmed(&backup)
+        && let Err(e) = swap::rollback(&dir, &backup)
+    {
+        restart(&dir, reopen);
+        return Err(e).context("an earlier update could not be undone");
+    }
+    // What is left is a confirmed backup (files that were still in use then).
+    let _ = std::fs::remove_dir_all(&backup);
     if let Err(e) = swap::install(&staged, &dir, &backup) {
         // The files are as they were.
         restart(&dir, reopen);

@@ -216,12 +216,56 @@ begin
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM Vixeeny.exe /IM vixeeny-app.exe', '', SW_HIDE, ewWaitUntilTerminated, Code);
 end;
 
-// Removes the install for the user alone: its folder, its Start menu entry and its uninstall
+// Removes the files of the install for the user alone: those its list (files.txt) names, its
+// uninstaller and what its updates left; without a list (an old version), its programs and
+// libraries. Its folders go once empty: what the user put there stays.
+procedure RemoveUserFiles();
+var
+  Files: TStringList;
+  I: Integer;
+  Name: String;
+begin
+  if FileExists(UserDir + '\files.txt') then
+  begin
+    Files := TStringList.Create;
+    try
+      Files.LoadFromFile(UserDir + '\files.txt');
+      for I := 0 to Files.Count - 1 do
+      begin
+        Name := Trim(Files[I]);
+        // Only a path inside the folder.
+        if (Name <> '') and (Pos('..', Name) = 0) and (Pos(':', Name) = 0) and (Pos('/', Name) <> 1) then
+        begin
+          StringChangeEx(Name, '/', '\', True);
+          DeleteFile(UserDir + '\' + Name);
+        end;
+      end;
+    finally
+      Files.Free;
+    end;
+    DeleteFile(UserDir + '\files.txt');
+  end
+  else
+  begin
+    DelTree(UserDir + '\*.exe', False, True, False);
+    DelTree(UserDir + '\*.dll', False, True, False);
+  end;
+  DelTree(UserDir + '\unins*.*', False, True, False);
+  DelTree(UserDir + '\.update-staged', True, True, True);
+  DelTree(UserDir + '\.update-backup', True, True, True);
+  DelTree(UserDir + '\.update-download', True, True, True);
+  DeleteFile(UserDir + '\.update-lock');
+  DeleteFile(UserDir + '\.update-download-turn');
+  // The folders left empty, the user's own files kept.
+  DelTree(UserDir, True, False, True);
+end;
+
+// Removes the install for the user alone: its files, its Start menu entry and its uninstall
 // entry. Its settings stay (they are not in its folder); the autostart entry follows the
 // program on its next start.
 procedure RemoveUserInstall();
 begin
-  DelTree(UserDir, True, True, True);
+  RemoveUserFiles();
   DeleteFile(ExpandConstant('{userprograms}\Vixeeny.lnk'));
   if UserGroup <> '' then
     DelTree(ExpandConstant('{userprograms}\') + UserGroup, True, True, True);
