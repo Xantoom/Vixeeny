@@ -642,8 +642,7 @@ impl Listening {
         let Ok(notify) = self.changes.cast::<IAudioSessionNotification>() else {
             return;
         };
-        // SAFETY: live enumerator and collection; each manager is unregistered later. Windows only reports new sessions
-        // once the session list was asked for.
+        // SAFETY: live enumerator and collection; each manager is unregistered later.
         unsafe {
             let Ok(devices) = self.enumerator.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE) else {
                 return;
@@ -655,8 +654,11 @@ impl Listening {
                 let Ok(manager) = device.Activate::<IAudioSessionManager2>(CLSCTX_ALL, None) else {
                     continue;
                 };
-                let _ = manager.GetSessionEnumerator();
                 if manager.RegisterSessionNotification(&notify).is_ok() {
+                    // The notifications start once the list was counted (`GetCount`), not merely asked for.
+                    if let Ok(list) = manager.GetSessionEnumerator() {
+                        let _ = list.GetCount();
+                    }
                     self.sessions.push(manager);
                 }
             }

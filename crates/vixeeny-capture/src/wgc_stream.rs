@@ -199,6 +199,8 @@ struct Session {
     item: GraphicsCaptureItem,
     arrived: i64,
     closed: i64,
+    /// The item closed while the queue was full: its `Closed` could not be queued, [`VideoStream::recv`] tells it.
+    lost_close: Arc<AtomicBool>,
 }
 
 impl Drop for Session {
@@ -270,9 +272,13 @@ fn open_session(
         .map_err(os("CreateFreeThreaded"))?;
     let arrived = pool.FrameArrived(&frame_handler(Arc::clone(shared), tx.clone())).map_err(os("FrameArrived"))?;
     let closing = tx.clone();
+    let lost_close = Arc::new(AtomicBool::new(false));
+    let lost = Arc::clone(&lost_close);
     let closed = item
         .Closed(&TypedEventHandler::new(move |_, _| {
-            let _ = closing.try_send(Err(CaptureError::Closed));
+            if closing.try_send(Err(CaptureError::Closed)).is_err() {
+                lost.store(true, Ordering::Release);
+            }
             Ok(())
         }))
         .map_err(os("Closed"))?;
@@ -283,7 +289,7 @@ fn open_session(
         let _ = session.SetMinUpdateInterval(windows::Foundation::TimeSpan { Duration: ticks });
     }
     session.StartCapture().map_err(os("StartCapture"))?;
-    Ok(Session { pool, session, item, arrived, closed })
+    Ok(Session { pool, session, item, arrived, closed, lost_close })
 }
 
 impl VideoStream {
@@ -440,7 +446,10 @@ impl VideoStream {
     pub fn recv(&self, timeout: Duration) -> Result<Option<CapturedFrame>, CaptureError> {
         match self.rx.recv_timeout(timeout) {
             Ok(frame) => frame,
-            Err(RecvTimeoutError::Timeout) => Ok(None),
+            Err(RecvTimeoutError::Timeout) => {
+                let lost = self.session.lock().is_ok_and(|s| s.lost_close.swap(false, Ordering::AcqRel));
+                if lost { Err(CaptureError::Closed) } else { Ok(None) }
+            }
             Err(RecvTimeoutError::Disconnected) => Err(CaptureError::Os("capture stopped".into())),
         }
     }

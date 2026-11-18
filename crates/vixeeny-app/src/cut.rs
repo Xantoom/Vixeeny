@@ -708,12 +708,19 @@ impl Host {
         self.clip.lossless(s.from, s.to) && reshape(&self.clip, &cutter.export_choice(), 0.0).is_none()
     }
 
-    /// The extension of a copy: MP4 for a network (what each one plays), else the clip's.
+    /// The extension of a copy: MP4 for a network (what each one plays), else the clip's, unless it cannot hold the
+    /// codec chosen (H.264 or HEVC from a WebM clip: MP4 then).
     fn extension(&self, cutter: &Cutter) -> String {
-        if share::target(&cutter.export_choice().preset).is_some() {
+        let choice = cutter.export_choice();
+        if share::target(&choice.preset).is_some() {
             return "mp4".into();
         }
-        self.clip.path.extension().map_or_else(|| "mp4".to_owned(), |e| e.to_string_lossy().into_owned())
+        let own = self.clip.path.extension().map_or_else(|| "mp4".to_owned(), |e| e.to_string_lossy().into_owned());
+        let written = reshape(&self.clip, &choice, 0.0).map(|r| r.family);
+        if own.eq_ignore_ascii_case("webm") && written.is_some_and(|f| !matches!(f, Family::Vp9 | Family::Av1)) {
+            return "mp4".into();
+        }
+        own
     }
 
     /// Keeps `choice` for the next part.

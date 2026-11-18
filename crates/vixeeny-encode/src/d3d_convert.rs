@@ -81,10 +81,18 @@ fn view<V: Clone>(
     Ok(v)
 }
 
-/// A D3D11 device on the adapter of `vendor_id` (the encoder's GPU) or the default adapter, with video support and
-/// multithread protection (capture and encoder threads share it).
+/// A D3D11 device on the first adapter of `vendor_id` (the encoder's GPU) or the default adapter, with video support
+/// and multithread protection (capture and encoder threads share it).
 pub fn create_device(vendor_id: Option<u32>) -> Result<(ID3D11Device, ID3D11DeviceContext), D3dError> {
-    let adapter = vendor_id.and_then(|vendor| vixeeny_platform::d3d::adapter(vendor, 0));
+    create_device_at(vendor_id.map(|vendor| (vendor, 0)))
+}
+
+/// [`create_device`] on the `index`-th adapter of the vendor of `gpu` (`(vendor, index)`, the order of DXGI): with two
+/// GPUs of one vendor, the one whose encoder was found able.
+pub fn create_device_at(gpu: Option<(u32, usize)>) -> Result<(ID3D11Device, ID3D11DeviceContext), D3dError> {
+    let adapter = gpu.and_then(|(vendor, index)| {
+        vixeeny_platform::d3d::adapter(vendor, index).or_else(|| vixeeny_platform::d3d::adapter(vendor, 0))
+    });
     let flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT;
     let (device, context) = vixeeny_platform::d3d::device(adapter.as_ref(), D3D_DRIVER_TYPE_HARDWARE, flags)?;
     if let Ok(mt) = device.cast::<ID3D11Multithread>() {

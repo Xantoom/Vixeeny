@@ -259,21 +259,80 @@ pub fn validate(profile: &Video, ctx: &Context<'_>) -> Vec<Issue> {
     issues
 }
 
-/// The encoder `auto` stands for: the best hardware encoder the probe validated for 8-bit 4:2:0 that takes pictures of
-/// `size` (when known), else libx264. Order: those of `family` first when there are (the codec a profile keeps to),
-/// then AV1 (the smallest files for the quality), HEVC, H.264; NVIDIA, AMD, Intel… (the `preference` of each).
+/// What a profile asks of the encoder `auto` stands for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Needs {
+    /// The container it writes into (`None`: any).
+    pub container: Option<Container>,
+    pub chroma: Chroma,
+    /// HDR kept: 10 bits, HEVC or AV1.
+    pub hdr: bool,
+}
+
+impl Default for Needs {
+    fn default() -> Self {
+        Self { container: None, chroma: Chroma::C420, hdr: false }
+    }
+}
+
+impl Needs {
+    /// What `profile` asks, `hdr` when the source is HDR and the profile keeps it.
+    pub fn of(profile: &Video, hdr: bool) -> Self {
+        Self {
+            container: Container::from_setting(&profile.container),
+            chroma: Chroma::from_setting(&profile.chroma).unwrap_or(Chroma::C420),
+            hdr,
+        }
+    }
+
+    fn depth(self) -> u8 {
+        if self.hdr { 10 } else { 8 }
+    }
+
+    /// Whether `encoder` can write what is asked, as far as the encoder itself says.
+    pub fn met_by(self, encoder: &Encoder) -> bool {
+        self.container.is_none_or(|c| encoder.containers.contains(&c))
+            && encoder.supports_format(self.depth(), self.chroma)
+            && (!self.hdr || (matches!(encoder.family, Family::Hevc | Family::Av1) && encoder.hdr))
+    }
+}
+
+/// [`pick_auto_for`] an 8-bit 4:2:0 picture in any container.
 pub fn pick_auto<'a>(
     registry: &'a Registry,
     probe: Option<&ProbeResult>,
     size: Option<(u32, u32)>,
     family: Option<Family>,
 ) -> Option<&'a Encoder> {
+    pick_auto_for(registry, probe, size, family, Needs::default())
+}
+
+/// The encoder `auto` stands for: the best hardware encoder the probe validated for what `needs` asks that takes
+/// pictures of `size` (when known), else libx264, else the software encoder that can. Order: those of `family` first
+/// when there are (the codec a profile keeps to), then AV1 (the smallest files for the quality), HEVC, H.264; NVIDIA,
+/// AMD, Intel… (the `preference` of each).
+pub fn pick_auto_for<'a>(
+    registry: &'a Registry,
+    probe: Option<&ProbeResult>,
+    size: Option<(u32, u32)>,
+    family: Option<Family>,
+    needs: Needs,
+) -> Option<&'a Encoder> {
     let best = probe.and_then(|probe| {
         registry
             .encoders()
-            .filter(|e| e.kind == Kind::Hardware && probe.supports(&e.id, 8, Chroma::C420, false))
+            .filter(|e| {
+                e.kind == Kind::Hardware
+                    && needs.met_by(e)
+                    && probe.supports(&e.id, needs.depth(), needs.chroma, needs.hdr)
+            })
             .filter(|e| size.is_none_or(|size| probe.fits(&e.id, size)))
             .min_by_key(|e| (Some(e.family) != family, e.family.preference(), e.vendor.preference()))
     });
-    best.or_else(|| registry.get("libx264"))
+    best.or_else(|| registry.get("libx264").filter(|e| needs.met_by(e))).or_else(|| {
+        registry
+            .encoders()
+            .filter(|e| e.kind == Kind::Software && needs.met_by(e))
+            .min_by_key(|e| (Some(e.family) != family, e.family.preference()))
+    })
 }

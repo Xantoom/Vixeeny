@@ -373,6 +373,12 @@ impl Recorder {
         let _ = self.tx.try_send(Cmd::Tick(t));
     }
 
+    /// The encoder stopped by itself (it failed: a write error, a full disk…): nothing is recorded any more, and
+    /// [`stop`](Self::stop) gives the reason.
+    pub fn ended(&self) -> bool {
+        self.join.is_finished()
+    }
+
     pub fn pause(&self, t: i64) {
         let _ = self.tx.send(Cmd::Pause(t));
     }

@@ -24,7 +24,7 @@ use vixeeny_encode::gpu::{Feed, GpuPipeline, HwFrame, Source as GpuSource};
 use vixeeny_encode::probe::ProbeResult;
 use vixeeny_encode::recorder::{FrameFormat, OutputContainer, RecordConfig, Recorder, Split, VideoFrame};
 use vixeeny_encode::registry::Vendor;
-use vixeeny_encode::registry::{Chroma, Encoder, Family, Kind, PresetName, Registry};
+use vixeeny_encode::registry::{Chroma, Container, Encoder, Family, Kind, PresetName, Registry};
 use vixeeny_encode::replay;
 use vixeeny_encode::validate::{self, Context as ValidateContext, Severity};
 
@@ -239,26 +239,29 @@ fn with_target(audio: &config::Audio) -> config::Audio {
     audio
 }
 
-/// The encoder a profile asks for: its own, or the best detected one for `auto` that takes pictures of `size`.
+/// The encoder a profile asks for: its own, or the best detected one for `auto` that takes pictures of `size` and does
+/// what `needs` says.
 fn choose_encoder<'a>(
     registry: &'a Registry,
     profile: &config::Video,
     probe: Option<&ProbeResult>,
     size: (u32, u32),
+    needs: validate::Needs,
 ) -> anyhow::Result<&'a Encoder> {
     if profile.encoder == "auto" {
+        let family = Family::from_name(&profile.auto_codec);
         // The kind the user chose: software never picks a GPU encoder.
         if profile.encoder_kind == "software" {
-            return registry.get("libx264").context("no encoder available");
+            return validate::pick_auto_for(registry, None, Some(size), family, needs).context("no encoder available");
         }
-        let family = Family::from_name(&profile.auto_codec);
-        return validate::pick_auto(registry, probe, Some(size), family).context("no encoder available");
+        return validate::pick_auto_for(registry, probe, Some(size), family, needs).context("no encoder available");
     }
     registry.get(&profile.encoder).with_context(|| format!("unknown encoder `{}`", profile.encoder))
 }
 
-/// The encoders that can write a cut part of `clip` again, best first: the one the video settings record with, then the
-/// software one of its family (a GPU encoder may be busy).
+/// The encoders that can write a cut part of `clip` again, best first: one of the clip's codec that its container takes
+/// (the one the video settings record with when it is), then the software one of its family (a GPU encoder may be
+/// busy).
 pub fn reencoders(config: &Config, clip: &vixeeny_encode::cut::Clip) -> Vec<Reencode> {
     let Ok(registry) = Registry::builtin() else {
         return Vec::new();
@@ -266,7 +269,18 @@ pub fn reencoders(config: &Config, clip: &vixeeny_encode::cut::Clip) -> Vec<Reen
     let profile = &config.video;
     let probe = crate::probe::current(false).ok();
     let size = (clip.width & !1, clip.height & !1);
-    let chosen = choose_encoder(&registry, profile, probe.as_ref(), size).ok();
+    let family = Family::from_name(&clip.codec);
+    let needs = validate::Needs {
+        container: clip.path.extension().and_then(|e| Container::from_setting(&e.to_string_lossy().to_lowercase())),
+        chroma: Chroma::C420,
+        hdr: clip.hdr,
+    };
+    let same_codec = |e: &&Encoder| family.is_none_or(|f| e.family == f);
+    let chosen = choose_encoder(&registry, profile, probe.as_ref(), size, needs)
+        .ok()
+        .filter(|e| same_codec(e) && needs.met_by(e))
+        .or_else(|| validate::pick_auto_for(&registry, probe.as_ref(), Some(size), family, needs).filter(same_codec))
+        .or_else(|| validate::pick_auto_for(&registry, probe.as_ref(), Some(size), family, needs));
     let software =
         chosen.and_then(|chosen| registry.encoders().find(|e| e.family == chosen.family && e.kind == Kind::Software));
     let fps = clip.fps();
@@ -380,6 +394,8 @@ struct Plan {
     /// `None`: the whole monitor.
     window: Option<vixeeny_platform::WindowId>,
     cursor: bool,
+    /// Vixeeny's own windows in the pictures (the recording's or the replay's setting).
+    own_windows: bool,
     /// Frames are captured as scRGB half floats: the monitor shows HDR, and the profile keeps it or the GPU path tone
     /// maps it.
     hdr: bool,
@@ -440,6 +456,7 @@ fn try_gpu(
     source: (u32, u32),
     source_hdr: Option<vixeeny_encode::card_hdr::Levels>,
     made: Option<JoinHandle<MadeDevice>>,
+    gpu_at: Option<(u32, usize)>,
 ) -> Option<GpuParts> {
     let feed = vixeeny_encode::gpu::feed(encoder)?;
     // 4:2:2 and 4:4:4 come back packed from the GPU, for a software encoder to unpack.
@@ -449,10 +466,9 @@ fn try_gpu(
     {
         return None;
     }
-    let vendor = vendor_of(encoder);
     let made = std::cell::Cell::new(made.and_then(|thread| thread.join().ok()).map(|m| m.0));
     let build = |feed: Feed| {
-        let device = made.take().unwrap_or_else(|| d3d::create_device(vendor));
+        let device = made.take().unwrap_or_else(|| d3d::create_device_at(gpu_at));
         let device = device.map_err(|source| vixeeny_encode::recorder::RecordError::Gpu { what: "device", source });
         device.and_then(|(device, context)| {
             GpuPipeline::new(
@@ -522,17 +538,24 @@ fn plan(
     let (_, _, cw, ch) = validate::center_crop(source, crop);
     let (w, h) = validate::output_size(&profile.resolution, (cw, ch)).context("bad resolution")?;
     let output_size = (w.max(2) & !1, h.max(2) & !1);
-    let encoder = choose_encoder(&registry, profile, probe.as_ref(), output_size)?.clone();
+    let keeps_hdr = monitor.hdr.is_some() && matches!(profile.hdr.as_str(), "keep_hdr" | "hdr");
+    let needs = validate::Needs::of(profile, keeps_hdr);
+    let encoder = choose_encoder(&registry, profile, probe.as_ref(), output_size, needs)?.clone();
+    // The GPU the probe found able to do it: with two of one vendor, not always the first.
+    let index = probe
+        .as_ref()
+        .and_then(|p| p.adapter_of(&encoder.id, if keeps_hdr { 10 } else { 8 }, needs.chroma, keeps_hdr))
+        .unwrap_or(0);
+    let gpu_at = vendor_of(&encoder).map(|vendor| (vendor, index as usize));
     // The replay runs beside a game: without a hardware encoder, none.
     if replay && encoder.kind == Kind::Software {
         anyhow::bail!("the replay needs a hardware encoder");
     }
     let made = (allow_gpu && vixeeny_encode::gpu::feed(&encoder).is_some())
         .then(|| {
-            let vendor = vendor_of(&encoder);
             std::thread::Builder::new()
                 .name("encoder-device".into())
-                .spawn(move || MadeDevice(d3d::create_device(vendor)))
+                .spawn(move || MadeDevice(d3d::create_device_at(gpu_at)))
                 .ok()
         })
         .flatten();
@@ -559,7 +582,7 @@ fn plan(
         u64::from(output_size.0) * u64::from(output_size.1) * u64::from(profile.fps.max(1)),
     );
     // An SDR monitor has nothing to preserve: such a recording stays SDR.
-    let hdr = monitor.hdr.is_some() && matches!(profile.hdr.as_str(), "keep_hdr" | "hdr");
+    let hdr = keeps_hdr;
     let depth = validate::depth(&encoder, chroma, hdr, probe.as_ref());
     encoder.fit_depth(&mut options, depth);
     let options: Vec<(String, String)> = options.into_iter().collect();
@@ -625,7 +648,7 @@ fn plan(
     let levels = monitor
         .hdr
         .map(|h| vixeeny_encode::card_hdr::Levels { sdr_white_nits: h.sdr_white_nits, peak_nits: h.peak_nits });
-    let gpu = if allow_gpu { try_gpu(&record.encoder, &record, source, levels, made) } else { None };
+    let gpu = if allow_gpu { try_gpu(&record.encoder, &record, source, levels, made, gpu_at) } else { None };
     let capture_hdr = if gpu.is_some() { levels.is_some() } else { hdr };
     {
         record.gpu = gpu.as_ref().map(|g| Arc::clone(&g.pipeline));
@@ -639,17 +662,26 @@ fn plan(
     let (namer, save_as): (Namer, Option<SaveNamer>) = if replay {
         let config = config.clone();
         let monitor = monitor.clone();
-        let save: SaveNamer = Box::new(move || output_file(&config, true, &monitor, output_size, extension));
+        // Named after its game, as it was at the start: at the save, another window may be in front, or the game gone.
+        let game = game.cloned();
+        let save: SaveNamer = Box::new(move || output_file(&config, game.as_ref(), &monitor, output_size, extension));
         (Box::new(|_| PathBuf::new()), Some(save))
     } else {
-        let first = output_file(config, false, &monitor, output_size, extension)?;
+        let first = output_file(config, None, &monitor, output_size, extension)?;
         folder = first.parent().map(PathBuf::from);
         let namer = Box::new(move |part: u32| {
             if part == 0 {
                 return first.clone();
             }
             let stem = first.file_stem().and_then(|s| s.to_str()).unwrap_or("video");
-            first.with_file_name(format!("{stem}_part{}.{extension}", part + 1))
+            // A file of that name already there is not written over.
+            (1u32..)
+                .map(|n| {
+                    let suffix = if n == 1 { String::new() } else { format!(" ({n})") };
+                    first.with_file_name(format!("{stem}_part{}{suffix}.{extension}", part + 1))
+                })
+                .find(|path| !path.exists())
+                .unwrap_or_default()
         });
         (namer, None)
     };
@@ -658,6 +690,7 @@ fn plan(
         monitor,
         window: game.map(|g| g.id),
         cursor: profile.show_cursor,
+        own_windows: profile.show_own_windows,
         hdr: capture_hdr,
         namer,
         save_as,
@@ -670,21 +703,22 @@ fn plan(
     })
 }
 
-/// A new file in the videos (or replays) folder, named by the user's template.
+/// A new file in the videos folder, or the replays folder for a replay of `game`, named by the user's template.
 fn output_file(
     config: &Config,
-    replay: bool,
+    game: Option<&vixeeny_platform::WindowInfo>,
     monitor: &vixeeny_platform::MonitorInfo,
     size: (u32, u32),
     extension: &str,
 ) -> anyhow::Result<PathBuf> {
-    let (folder, fallback, per_app, naming, action) = if replay {
+    let (folder, fallback, per_app, naming, action) = if game.is_some() {
         (
             &config.paths.replays,
             vixeeny_common::paths::DEFAULT_REPLAYS,
             config.paths.per_app_subfolder.replays,
             &config.paths.naming.replays,
-            vixeeny_common::ipc::ActionId::ReplaySave,
+            // The game is named as a window is: it is the replay's, wherever it is now.
+            vixeeny_common::ipc::ActionId::CaptureWindow,
         )
     } else {
         (
@@ -701,7 +735,10 @@ fn output_file(
     let snapshot = crate::still::Snapshot {
         monitors: monitors.clone(),
         cursor: vixeeny_platform::cursor_position()?,
-        foreground: vixeeny_platform::foreground_window()?,
+        foreground: match game {
+            Some(game) => Some(game.clone()),
+            None => vixeeny_platform::foreground_window()?,
+        },
     };
     let destination = crate::still::Destination {
         keep_copy: true,
@@ -904,7 +941,7 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
         options.join(" ")
     );
     // Vixeeny's own windows in the pictures while it runs, when the settings want them.
-    let own_windows = plan.notice.video.show_own_windows.then(vixeeny_platform::own_windows::InCaptures::new);
+    let own_windows = plan.own_windows.then(vixeeny_platform::own_windows::InCaptures::new);
     // The recording's time zero: video and audio timestamps are relative to it.
     let origin = vixeeny_platform::monotonic_ns();
     // Frames the GPU path could not hand over: lost, like those the encoder refuses.
@@ -1189,7 +1226,14 @@ fn record_loop(
                 }
             }
             Ok(Ctl::Screen(screen)) => {
-                if let Some(sources) = &sources {
+                if let Some(sources) = &mut sources {
+                    // The screen the game is on now: it may have moved since the replay started.
+                    if screen
+                        && let vixeeny_capture::StreamTarget::Window(window) = &sources.window
+                        && let Some(now_on) = screen_of(*window)
+                    {
+                        sources.screen = now_on;
+                    }
                     let target = if screen { &sources.screen } else { &sources.window };
                     match stream.retarget(target) {
                         Ok(()) => {
@@ -1290,13 +1334,16 @@ fn record_loop(
             }
             match frames.recv_timeout(TICK) {
                 Ok(Some((time_ns, frame))) => {
-                    if !paused {
-                        recorder.push_hw((time_ns - origin).max(0), frame);
+                    if !paused && !recorder.push_hw((time_ns - origin).max(0), frame) && recorder.ended() {
+                        break;
                     }
                 }
                 Ok(None) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                     if !paused {
                         recorder.tick(now());
+                    }
+                    if recorder.ended() {
+                        break;
                     }
                 }
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
@@ -1308,7 +1355,7 @@ fn record_loop(
                 if !paused {
                     let f = captured.frame;
                     let t = (captured.time_ns - origin).max(0);
-                    recorder.push_frame(
+                    let pushed = recorder.push_frame(
                         t,
                         VideoFrame {
                             width: f.width,
@@ -1318,6 +1365,9 @@ fn record_loop(
                             data: f.data,
                         },
                     );
+                    if !pushed && recorder.ended() {
+                        break;
+                    }
                 } else {
                     buffers.give(captured.frame.data);
                 }
@@ -1325,6 +1375,9 @@ fn record_loop(
             Ok(None) => {
                 if !paused {
                     recorder.tick(now());
+                }
+                if recorder.ended() {
+                    break;
                 }
             }
             Err(CaptureError::Closed) if sources.is_some() => pause_to = Some(window_closed()),
@@ -1347,6 +1400,14 @@ fn record_loop(
         }
         None => Ok(summary),
     }
+}
+
+/// The screen most of `window` is on.
+fn screen_of(window: vixeeny_platform::WindowId) -> Option<vixeeny_capture::StreamTarget> {
+    let rect = vixeeny_platform::window_info(window).ok()??.rect;
+    let monitors = vixeeny_platform::monitors().ok()?;
+    let (x, y) = (rect.x + (rect.width / 2) as i32, rect.y + (rect.height / 2) as i32);
+    vixeeny_platform::monitor_at(&monitors, x, y).cloned().map(vixeeny_capture::StreamTarget::Monitor)
 }
 
 /// A replay's game window went: it closes, or makes another in its place (a new display mode, the end of its loading).

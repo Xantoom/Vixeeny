@@ -20,7 +20,7 @@ use vixeeny_common::colour;
 
 use crate::hdr::Hdr10;
 use crate::recorder::RecordError;
-use crate::registry::{Chroma, Encoder};
+use crate::registry::{Chroma, Encoder, Family};
 
 /// The rate and layout of the sound handed to the speakers: 48 kHz, stereo, 32-bit floats.
 pub const SOUND_RATE: u32 = 48_000;
@@ -1027,7 +1027,9 @@ pub fn export(
     if !lossless && reencode.is_none() {
         return Err(RecordError::Config("this cut needs an encoder".into()));
     }
-    let tmp = dest.with_extension("part.tmp");
+    // Its own: two copies to the same name (two editors) never write into each other's file.
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    let tmp = dest.with_extension(format!("{}-{}.part.tmp", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
     let result = write_cut(clip, (from, to), &tmp, dest, (!lossless).then_some(reencode).flatten(), progress, cancel);
     match result {
         Ok(()) => std::fs::rename(&tmp, dest).map_err(|e| RecordError::Io(e.to_string())),
@@ -1056,6 +1058,53 @@ struct VideoOut {
     pix: Pixel,
     time_base: Rational,
     hdr10: Option<Hdr10>,
+    /// An HDR clip written in SDR.
+    sdr: Option<ToSdr>,
+}
+
+/// The frames of an HDR clip written in SDR (H.264, 8 bits: what every player and network reads): tone mapped to BGRA
+/// as the preview is, then turned into the encoder's format.
+struct ToSdr {
+    tone: Scaler,
+    bgra: Vec<u8>,
+}
+
+impl ToSdr {
+    /// `decoded` into `out` (of the encoder's size and format), through `scaler`.
+    fn convert(
+        &mut self,
+        decoded: &frame::Video,
+        scaler: &mut Scaler,
+        out: &mut frame::Video,
+    ) -> Result<(), RecordError> {
+        let (w, h) = (out.width(), out.height());
+        let picture = self.tone.run(decoded, (w, h), std::mem::take(&mut self.bgra))?;
+        let mut mapped = picture.bgra;
+        let mut src = frame::Video::empty();
+        // SAFETY: a frame of no buffers of its own, pointing at `mapped` (alive, `w` × `h` × 4 bytes, until the call
+        // returns); its pointers are cleared before it is dropped, so nothing frees `mapped`.
+        unsafe {
+            let o = &mut *src.as_mut_ptr();
+            o.format = ffi::AVPixelFormat::AV_PIX_FMT_BGRA as i32;
+            o.width = picture.width as i32;
+            o.height = picture.height as i32;
+            o.data[0] = mapped.as_mut_ptr();
+            o.linesize[0] = (picture.width * 4) as i32;
+            o.colorspace = ffi::AVColorSpace::AVCOL_SPC_RGB;
+            o.color_range = ffi::AVColorRange::AVCOL_RANGE_JPEG;
+            o.color_primaries = ffi::AVColorPrimaries::AVCOL_PRI_BT709;
+            o.color_trc = ffi::AVColorTransferCharacteristic::AVCOL_TRC_BT709;
+        }
+        let scaled = scaler.scale_into(out, &src);
+        // SAFETY: as above.
+        unsafe {
+            let o = &mut *src.as_mut_ptr();
+            o.data[0] = std::ptr::null_mut();
+            o.linesize[0] = 0;
+        }
+        self.bgra = mapped;
+        scaled
+    }
 }
 
 fn open_encoder(
@@ -1069,6 +1118,12 @@ fn open_encoder(
     let rate = out_rate(clip, reencode);
     let gop = (f64::from(rate.0) / f64::from(rate.1)).round() * 2.0;
     let (width, height) = reencode.size.unwrap_or((clip.width & !1, clip.height & !1));
+    // HDR stays HDR in 10-bit HEVC or AV1; in anything else it is tone mapped to SDR.
+    let hdr_out = clip.hdr && reencode.depth >= 10 && matches!(reencode.encoder.family, Family::Hevc | Family::Av1);
+    let sdr = match ToneMap::of(clip).filter(|_| !hdr_out) {
+        Some(tone) => Some(ToSdr { tone: Scaler::new(Some(tone))?.smooth(reencode.size.is_some()), bgra: Vec::new() }),
+        None => None,
+    };
     let encoder = crate::recorder::open_video(&reencode.options, |options| {
         let mut ctx = codec::context::Context::new_with_codec(codec).encoder().video()?;
         ctx.set_width(width);
@@ -1078,7 +1133,7 @@ fn open_encoder(
         ctx.set_frame_rate(Some(rate));
         ctx.set_gop(gop.max(1.0) as u32);
         ctx.set_color_range(color::Range::MPEG);
-        if clip.hdr {
+        if hdr_out {
             ctx.set_colorspace(color::Space::BT2020NCL);
             ctx.set_color_primaries(color::Primaries::BT2020);
             ctx.set_color_transfer_characteristic(color::TransferCharacteristic::SMPTE2084);
@@ -1105,7 +1160,8 @@ fn open_encoder(
             frame: None,
             pix,
             time_base: clip.time_base,
-            hdr10: clip.hdr10,
+            hdr10: clip.hdr10.filter(|_| hdr_out),
+            sdr,
         },
         codec,
     ))
@@ -1124,13 +1180,22 @@ impl VideoOut {
                 return Err(ffmpeg_next::Error::from(code).into());
             }
             let o = out.as_mut_ptr();
-            (*o).colorspace = (*decoded.as_ptr()).colorspace;
             (*o).color_range = ffi::AVColorRange::AVCOL_RANGE_MPEG;
+            if self.sdr.is_some() {
+                (*o).colorspace = ffi::AVColorSpace::AVCOL_SPC_BT709;
+                (*o).color_primaries = ffi::AVColorPrimaries::AVCOL_PRI_BT709;
+                (*o).color_trc = ffi::AVColorTransferCharacteristic::AVCOL_TRC_BT709;
+            } else {
+                (*o).colorspace = (*decoded.as_ptr()).colorspace;
+            }
             if let Some(meta) = self.hdr10 {
                 meta.attach_to_frame(o);
             }
         }
-        let scaled = self.scaler.scale_into(&mut out, decoded);
+        let scaled = match &mut self.sdr {
+            Some(sdr) => sdr.convert(decoded, &mut self.scaler, &mut out),
+            None => self.scaler.scale_into(&mut out, decoded),
+        };
         out.set_pts(Some(pts));
         let sent = scaled.and_then(|()| Ok(self.encoder.send_frame(&out)?));
         self.frame = Some(out);

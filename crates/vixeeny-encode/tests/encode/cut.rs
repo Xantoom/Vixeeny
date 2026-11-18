@@ -344,7 +344,12 @@ fn a_part_from_a_key_frame_is_copied_and_another_one_encoded_again() {
     let stop = AtomicBool::new(true);
     assert!(export(&clip, (10, 40), &cancelled, Some(&reencode()), &|_| {}, &stop).is_err());
     assert!(!cancelled.exists());
-    assert!(!cancelled.with_extension("part.tmp").exists());
+    let left: Vec<_> = std::fs::read_dir(&*dir)
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().ends_with(".part.tmp"))
+        .collect();
+    assert!(left.is_empty(), "{left:?}");
 }
 
 #[test]

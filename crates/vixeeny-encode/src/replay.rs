@@ -108,6 +108,10 @@ pub fn clamp_seconds(seconds: u32) -> u32 {
     (seconds.clamp(5, 1800) + 2) / 5 * 5
 }
 
+/// The RAM a ring meant for the disk takes at most once the disk failed: it was on the disk because the replay did not
+/// fit well in RAM, so the oldest seconds go first beyond this.
+const FALLBACK_RAM_BYTES: usize = 1 << 30;
+
 /// Where the packets of a ring are kept.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Storage {
@@ -352,6 +356,8 @@ pub struct Ring {
     bytes: usize,
     newest: i64,
     store: Option<DiskStore>,
+    /// The disk failed: the packets go to RAM, up to [`FALLBACK_RAM_BYTES`].
+    fallback: bool,
 }
 
 impl Ring {
@@ -374,6 +380,7 @@ impl Ring {
             bytes: 0,
             newest: i64::MIN,
             store,
+            fallback: false,
         }
     }
 
@@ -383,8 +390,11 @@ impl Ring {
             match store.store(packet, may_roll) {
                 Ok(held) => return held,
                 Err(e) => {
-                    tracing::warn!("replay on disk failed, using RAM from now on: {e}");
+                    tracing::warn!(
+                        "replay on disk failed, using RAM from now on (at most {FALLBACK_RAM_BYTES} bytes): {e}"
+                    );
                     self.store = None;
+                    self.fallback = true;
                 }
             }
         }
@@ -428,9 +438,12 @@ impl Ring {
         self.trim();
     }
 
-    /// Drops the oldest key frame interval while the next one is still old enough to start from.
+    /// Drops the oldest key frame interval while the next one is still old enough to start from, or while a ring that
+    /// fell back to RAM holds too much.
     fn trim(&mut self) {
-        while self.gops.len() >= 2 && self.newest - self.gops[1].start >= self.keep {
+        while self.gops.len() >= 2
+            && (self.newest - self.gops[1].start >= self.keep || (self.fallback && self.bytes > FALLBACK_RAM_BYTES))
+        {
             if let Some(old) = self.gops.pop_front() {
                 self.bytes -= old.bytes;
             }

@@ -131,6 +131,16 @@ impl ProbeResult {
             .any(|e| e.formats.iter().any(|f| f.depth == depth && f.chroma == chroma && (!hdr || f.hdr)))
     }
 
+    /// The GPU (its index among those of its vendor) where `encoder` writes `depth`-bit `chroma` pictures (HDR when
+    /// `hdr`): the first that can, else the first that has it.
+    pub fn adapter_of(&self, encoder: &str, depth: u8, chroma: Chroma, hdr: bool) -> Option<u32> {
+        let mine = || self.encoders.iter().filter(|e| e.id == encoder);
+        mine()
+            .find(|e| e.formats.iter().any(|f| f.depth == depth && f.chroma == chroma && (!hdr || f.hdr)))
+            .or_else(|| mine().next())
+            .and_then(|e| e.adapter)
+    }
+
     /// Whether `encoder` takes pictures of `size` on a GPU that has it (always when its driver does not say how large).
     pub fn fits(&self, encoder: &str, (width, height): (u32, u32)) -> bool {
         self.encoders
