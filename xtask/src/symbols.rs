@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The linker's maps of the release programs (`Vixeeny.map`, `vixeeny-app.map`, written by their build scripts): which
-//! function is at which address. `dist` gathers them into `Vixeeny-<version>-symbols.zip`, kept with the release, and
-//! `cargo xtask symbolize <that archive, or a folder of maps> <crash note>` prints the note with a function's name
-//! after each `program.exe+0x…` address. The programs ship without debug information: without the maps of their own
-//! build, the addresses of a crash say nothing.
+//! function is at which address. `dist` gathers them into `Vixeeny-<version>-symbols.zip`, kept in the files of its
+//! Release run, and `cargo xtask symbolize <that archive, or a folder of maps> <crash note>` prints the note with a
+//! function's name after each `program.exe+0x…` address. The programs ship without debug information: without the maps
+//! of their own build, the addresses of a crash say nothing.
 
 use std::io::Read as _;
 use std::path::Path;
