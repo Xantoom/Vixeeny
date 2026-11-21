@@ -107,13 +107,11 @@ english.OpenVixeeny=Open Vixeeny
 english.KeepSettings=Keep your settings for a later install?
 english.AutoUpdate=Install updates automatically
 english.AutoUpdateNote=Vixeeny connects to github.com only to check for and download its updates. Nothing else leaves your PC.
-english.PrintScreenForVixeeny=Print Screen key for Vixeeny, not the Snipping Tool
 french.StartWithWindows=Démarrer Vixeeny avec Windows
 french.OpenVixeeny=Ouvrir Vixeeny
 french.KeepSettings=Conserver vos paramètres pour une prochaine installation ?
 french.AutoUpdate=Installer les mises à jour automatiquement
 french.AutoUpdateNote=Vixeeny se connecte à github.com uniquement pour vérifier et télécharger ses mises à jour. Rien d'autre ne quitte votre PC.
-french.PrintScreenForVixeeny=Touche Impr. écran pour Vixeeny, pas pour l'Outil Capture d'écran
 
 [Files]
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -133,8 +131,9 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 Filename: "{app}\vixeeny-app.exe"; Parameters: "--admin register"; Flags: runhidden waituntilterminated; Check: IsAdminInstallMode
 ; Updates declined on the folder's page: the user's settings say so before the first start.
 Filename: "{app}\vixeeny-app.exe"; Parameters: "--update off"; Flags: runhidden waituntilterminated runasoriginaluser; Check: UpdatesDeclined
-; The Print Screen key given back by Windows' Snipping Tool, in the user's own settings.
-Filename: "{app}\vixeeny-app.exe"; Parameters: "--print-screen take"; Flags: runhidden waituntilterminated runasoriginaluser; Check: PrintScreenChosen
+; Windows' Snipping Tool no longer opens with the Print Screen key over Vixeeny's capture, in the
+; user's own settings (Settings, Accessibility, Keyboard). Vixeeny also does it once at its start.
+Filename: "{app}\vixeeny-app.exe"; Parameters: "--print-screen take"; Flags: runhidden waituntilterminated runasoriginaluser
 ; Started as the user (without the rights: the task gives them).
 Filename: "{app}\Vixeeny.exe"; Description: "{cm:OpenVixeeny}"; Flags: nowait postinstall skipifsilent runasoriginaluser
 ; Moved from the user's folders by the settings' button (a silent install): it starts again.
@@ -177,21 +176,6 @@ var
   AutostartBox: TNewCheckBox;
   UpdateBox: TNewCheckBox;
   UpdateNote: TNewStaticText;
-  // Shown only when Windows keeps the Print Screen key for its Snipping Tool.
-  PrintScreenBox: TNewCheckBox;
-
-// Windows 11 opens its Snipping Tool with the Print Screen key (Settings, Accessibility,
-// Keyboard), at the same time as a program's shortcut of Print Screen alone. Since build
-// 22621 it does by default, the value then never written.
-function SnippingKeepsPrintScreen(): Boolean;
-var
-  On: Cardinal;
-begin
-  if RegQueryDWordValue(HKCU, 'Control Panel\Keyboard', 'PrintScreenKeyForSnippingEnabled', On) then
-    Result := On <> 0
-  else
-    Result := (GetWindowsVersion and $FFFF) >= 22621;
-end;
 
 // Stops a running Vixeeny the way an update does: a recording ends first, and nothing is
 // killed. The program of the installed version asks; a version too old to know how does
@@ -335,23 +319,6 @@ begin
   UpdateNote.Width := UpdateBox.Width - ScaleX(18);
   UpdateNote.Height := ScaleY(30);
   UpdateNote.Enabled := False;
-  if SnippingKeepsPrintScreen() then
-  begin
-    PrintScreenBox := TNewCheckBox.Create(WizardForm);
-    PrintScreenBox.Parent := WizardForm.SelectDirPage;
-    PrintScreenBox.Caption := CustomMessage('PrintScreenForVixeeny');
-    PrintScreenBox.Checked := True;
-    PrintScreenBox.Left := UpdateBox.Left;
-    PrintScreenBox.Top := UpdateNote.Top + UpdateNote.Height + ScaleY(10);
-    PrintScreenBox.Width := UpdateBox.Width;
-    PrintScreenBox.Height := UpdateBox.Height;
-  end;
-end;
-
-// The first install only, shown and ticked.
-function PrintScreenChosen(): Boolean;
-begin
-  Result := (WizardForm.PrevAppDir = '') and not WizardSilent and (PrintScreenBox <> nil) and PrintScreenBox.Checked;
 end;
 
 // The first install only, as the start with Windows.

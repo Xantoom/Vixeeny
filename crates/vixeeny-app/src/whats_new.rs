@@ -17,6 +17,7 @@ pub fn on_start(config: &Config) {
     };
     let mut state = State::load(&path);
     let arrived = state.arrived(CURRENT);
+    take_print_screen_once(&mut state);
     if let Err(e) = state.save(&path) {
         tracing::warn!("update state: {e}");
         return;
@@ -28,6 +29,26 @@ pub fn on_start(config: &Config) {
         {
             tracing::warn!("cannot show what's new: {e}");
         }
+    }
+}
+
+/// Once per user, whatever installed Vixeeny (the installer does it too, an update or a portable copy does not): the
+/// Print Screen key opens Windows' Snipping Tool no more, over Vixeeny's own capture. Tried again at the next start
+/// when Windows refused.
+fn take_print_screen_once(state: &mut State) {
+    if state.print_screen_taken {
+        return;
+    }
+    if !vixeeny_platform::print_screen_opens_snipping_tool() {
+        state.print_screen_taken = true;
+        return;
+    }
+    match vixeeny_platform::take_print_screen() {
+        Ok(()) => {
+            tracing::info!("the Print Screen key no longer opens Windows' Snipping Tool");
+            state.print_screen_taken = true;
+        }
+        Err(e) => tracing::warn!("cannot turn off the Snipping Tool's Print Screen key: {e}"),
     }
 }
 

@@ -46,6 +46,10 @@ pub struct State {
     /// The release of the version running, once known (for what changed in it).
     #[serde(default)]
     pub installed: Option<Release>,
+    /// Windows' Snipping Tool was stopped from opening with the Print Screen key, once (see
+    /// `vixeeny_platform::take_print_screen`): turned back on by the user, it stays so.
+    #[serde(default)]
+    pub print_screen_taken: bool,
     /// The version that ran last: another one now means Vixeeny was updated.
     #[serde(default)]
     pub last_run: Option<String>,
@@ -140,6 +144,7 @@ mod tests {
             error_version: Some("1.0.0".into()),
             failed: Some("0.9.0".into()),
             installed: None,
+            print_screen_taken: true,
             last_run: Some("0.9.0".into()),
         };
         state.save(&path).unwrap();
@@ -147,6 +152,9 @@ mod tests {
         // Saved in place: nothing else is left in the folder.
         let files = std::fs::read_dir(dir.path()).map_or(0, Iterator::count);
         assert_eq!(files, 1);
+        // A file from before the field: the key is not taken yet.
+        std::fs::write(&path, r#"{"checked_at":5,"available":null,"notified":null,"error":null}"#).unwrap();
+        assert!(!State::load(&path).print_screen_taken);
         std::fs::write(&path, "{broken").unwrap();
         assert_eq!(State::load(&path), State::default());
     }
