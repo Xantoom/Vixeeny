@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-26.04
     env:
       FROM: ghcr.io/btbn/ffmpeg-builds/win64-gpl-shared-9.0:latest
-      TO: ghcr.io/xantoom/vixeeny-ffmpeg-build:9.0-2026-10-30
+      TO: ghcr.io/xantoom/vixeeny-ffmpeg-build:9.0-2026-11-21
     steps:
       - run: echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
         env:
