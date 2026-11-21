@@ -31,7 +31,7 @@ use vixeeny_encode::validate::{self, Context as ValidateContext, Severity};
 /// The capture stream, and what it hands over.
 use vixeeny_capture::{CaptureError, VideoStream as Video};
 
-/// How often a still screen gets its frame repeated.
+/// How often a still screen gets its frame repeated (in batches: the encoder writes every slot since the last).
 const TICK: Duration = Duration::from_millis(100);
 /// Longer than this between two turns of the recording loop (which turns every [`TICK`]): the machine slept.
 const SLEPT_NS: i64 = 5_000_000_000;
@@ -1346,6 +1346,8 @@ fn record_loop(
                 crate::toast::notify(notice, &Toast::Failed(Failed::DiskLow, text));
             }
         }
+        // At most a `TICK`, and no later than a replay save that waits.
+        let wait = save_at.map_or(TICK, |(at, _)| TICK.min(at.saturating_duration_since(std::time::Instant::now())));
         if let Some(frames) = gpu_frames {
             // The stream only reports its end; the frames arrive through the sink's channel.
             match stream.recv(Duration::ZERO) {
@@ -1356,7 +1358,7 @@ fn record_loop(
                 }
                 Ok(_) => {}
             }
-            match frames.recv_timeout(TICK) {
+            match frames.recv_timeout(wait) {
                 Ok(Some((time_ns, frame))) => {
                     if !paused && !recorder.push_hw((time_ns - origin).max(0), frame) && recorder.ended() {
                         break;
@@ -1374,7 +1376,7 @@ fn record_loop(
             }
             continue;
         }
-        match stream.recv(TICK) {
+        match stream.recv(wait) {
             Ok(Some(captured)) => {
                 if !paused {
                     let f = captured.frame;
