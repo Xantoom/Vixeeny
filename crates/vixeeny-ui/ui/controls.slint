@@ -298,6 +298,8 @@ export component TextBox inherits Rectangle {
             height: parent.height;
             clip: true;
         input := TextInput {
+            // Its field speaks for it to a screen reader.
+            accessible-role: none;
             property <length> offset;
             x: min(0px, max(parent.width - self.width - 2px, self.offset));
             width: max(parent.width - 2px, self.preferred-width);
@@ -560,6 +562,8 @@ export component NumberBox inherits Rectangle {
             accept
         }
         input := TextInput {
+            // Its field speaks for it to a screen reader.
+            accessible-role: none;
             x: 10px;
             width: parent.width - 20px - (root.unit != "" ? unit.preferred-width + 8px : 0px);
             height: parent.height;
@@ -1472,6 +1476,8 @@ export component SearchBox inherits Rectangle {
         mouse-cursor: MouseCursor.text;
         clicked => { input.focus(); }
         input := TextInput {
+            // Its field speaks for it to a screen reader.
+            accessible-role: none;
             x: 38px;
             width: parent.width - 38px - 32px;
             height: parent.height;

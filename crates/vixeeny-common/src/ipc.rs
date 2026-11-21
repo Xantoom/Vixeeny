@@ -9,7 +9,7 @@ use std::io::{self, Read, Write};
 /// Transport types, re-exported so that users of this module need no `interprocess` dependency.
 pub use interprocess::local_socket::traits::{Listener as ListenerTrait, Stream as StreamTrait, StreamCommon};
 use interprocess::local_socket::{GenericNamespaced, ListenerOptions, Name, ToNsName};
-pub use interprocess::local_socket::{Listener, RecvHalf, SendHalf, Stream};
+pub use interprocess::local_socket::{Listener, Stream};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 

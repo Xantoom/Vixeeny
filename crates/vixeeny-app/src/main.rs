@@ -819,16 +819,17 @@ fn run() -> anyhow::Result<()> {
     let idle = Duration::from_secs(u64::from(idle));
 
     let stream = Endpoint::current_user().connect().context("the Vixeeny daemon is not running")?;
-    let (mut recv, mut send) = {
-        use ipc::StreamTrait;
-        stream.split()
-    };
+    // One connection, read by its own thread and written here (`&Stream` reads and writes).
+    let stream = std::sync::Arc::new(stream);
+    let mut send = &*stream;
     ipc::write_msg(&mut send, &Hello::App { pid: std::process::id() })?;
     ipc::write_msg(&mut send, &AppToDaemon::Ready)?;
+    let reading = std::sync::Arc::clone(&stream);
 
     let (tx, rx) = channel();
     let look = tx.clone();
     std::thread::Builder::new().name("ipc-read".into()).spawn(move || {
+        let mut recv = &*reading;
         while let Ok(Some(mut msg)) = ipc::read_msg::<_, DaemonToApp>(&mut recv) {
             // The overlay's shortcut again while the strip is open: it closes, nothing waits to open it once more.
             if let DaemonToApp::RunAction { action: ActionId::OverlayToggle, frozen } = &mut msg

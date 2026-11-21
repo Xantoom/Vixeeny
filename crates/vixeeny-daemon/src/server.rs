@@ -8,8 +8,7 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use vixeeny_common::ipc::{
-    self, AppToDaemon, ControlReply, DaemonToApp, Hello, IpcError, Listener, ListenerTrait, SendHalf, Stream,
-    StreamTrait,
+    self, AppToDaemon, ControlReply, DaemonToApp, Hello, IpcError, Listener, ListenerTrait, Stream,
 };
 
 use crate::core::Event;
@@ -41,7 +40,8 @@ impl EventTx {
 
 struct Active {
     id: u64,
-    send: SendHalf,
+    /// The connection, shared with the thread reading it (`&Stream` reads and writes).
+    send: Arc<Stream>,
 }
 
 /// The write side of the connection to the running app, if any.
@@ -55,7 +55,7 @@ impl AppLink {
         self.active.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn install(&self, id: u64, send: SendHalf) {
+    fn install(&self, id: u64, send: Arc<Stream>) {
         *self.lock() = Some(Active { id, send });
     }
 
@@ -77,7 +77,7 @@ impl AppLink {
     /// Sends a message to the app; `Ok(false)` if no app is connected.
     pub fn send(&self, msg: &DaemonToApp) -> Result<bool, IpcError> {
         match self.lock().as_mut() {
-            Some(active) => ipc::write_msg(&mut active.send, msg).map(|()| true),
+            Some(active) => ipc::write_msg(&mut &*active.send, msg).map(|()| true),
             None => Ok(false),
         }
     }
@@ -131,7 +131,8 @@ fn watch_pauser(pid: u32, tx: &EventTx) {
 
 fn connection(stream: Stream, id: u64, tx: &EventTx, link: &AppLink) -> Result<(), IpcError> {
     let peer = vixeeny_common::ipc::StreamCommon::peer_creds(&stream).ok().and_then(|c| c.pid());
-    let (mut recv, mut send) = stream.split();
+    let stream = Arc::new(stream);
+    let mut recv = &*stream;
     let Some(hello) = ipc::read_msg::<_, Hello>(&mut recv)? else {
         return Ok(());
     };
@@ -148,11 +149,11 @@ fn connection(stream: Stream, id: u64, tx: &EventTx, link: &AppLink) -> Result<(
             } else {
                 ControlReply::Ok
             };
-            ipc::write_msg(&mut send, &reply)
+            ipc::write_msg(&mut &*stream, &reply)
         }
         Hello::App { pid } => {
             tracing::debug!("app connected (pid {pid}, connection {id})");
-            link.install(id, send);
+            link.install(id, Arc::clone(&stream));
             tx.send(Event::AppConnected);
             let result = loop {
                 match ipc::read_msg::<_, AppToDaemon>(&mut recv) {
