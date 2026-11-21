@@ -45,9 +45,13 @@ fn main() {
 /// A release build also writes the linker's map of the program beside it: the function at each address, which names the
 /// addresses of a crash note (`cargo xtask symbolize`). The program is the same with or without it.
 fn link_map(name: &str) {
-    // `<target>/release/build/<crate>-<hash>/out`.
+    // `<target>/release/build/<crate>/<hash>/out` (`build/<crate>-<hash>/out` before Cargo 1.100): the folder above
+    // `build`.
     let out = std::env::var_os("OUT_DIR").map(std::path::PathBuf::from);
-    if let Some(profile) = out.as_deref().and_then(|out| out.ancestors().nth(3))
+    let profile = out.as_deref().and_then(|out| {
+        out.ancestors().find(|dir| dir.file_name().is_some_and(|name| name == "build")).and_then(|build| build.parent())
+    });
+    if let Some(profile) = profile
         && profile.file_name().is_some_and(|name| name == "release")
     {
         println!("cargo:rustc-link-arg-bins=/MAP:{}", profile.join(name).display());
