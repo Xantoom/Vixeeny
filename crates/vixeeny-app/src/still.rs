@@ -46,11 +46,22 @@ pub fn target_for(action: ActionId, snap: &Snapshot) -> Result<CaptureTarget, St
             Ok(CaptureTarget::Monitor(monitor.id))
         }
         ActionId::CaptureWindow => {
-            snap.foreground.as_ref().map(|w| CaptureTarget::Window(w.id)).ok_or(StillError::NoWindow)
+            let window = snap.foreground.as_ref().ok_or(StillError::NoWindow)?;
+            Ok(screen_filled_by(window, &snap.monitors)
+                .map_or(CaptureTarget::Window(window.id), |m| CaptureTarget::Monitor(m.id)))
         }
         ActionId::CaptureAllMonitors => Ok(CaptureTarget::AllMonitors),
         other => Err(StillError::NotADirectCapture(other)),
     }
+}
+
+/// The one screen `window` fills (a game in full screen), whose capture shows what is seen. A window's own capture
+/// shows the window as Windows composes it: a game that changed the display's resolution can be drawn there shifted
+/// or cut, though its screen is right. `None` for a window among others, or one spread over several screens.
+fn screen_filled_by<'a>(window: &WindowInfo, monitors: &'a [MonitorInfo]) -> Option<&'a MonitorInfo> {
+    let mut filled = monitors.iter().filter(|m| is_full_screen(window, std::slice::from_ref(*m)));
+    let monitor = filled.next()?;
+    filled.next().is_none().then_some(monitor)
 }
 
 /// Writes next to the destination then renames, so a crash never leaves a truncated file.
@@ -446,6 +457,20 @@ mod tests {
         assert_eq!(target_for(ActionId::CaptureWindow, &s).unwrap(), CaptureTarget::Window(WindowId(77)));
         s.foreground = None;
         assert!(matches!(target_for(ActionId::CaptureWindow, &s), Err(StillError::NoWindow)));
+    }
+
+    #[test]
+    fn a_window_filling_one_screen_is_captured_as_that_screen() {
+        let mut s = snapshot();
+        let second = s.monitors[1].clone();
+        let window = s.foreground.as_mut().unwrap();
+        window.rect = second.rect;
+        assert_eq!(target_for(ActionId::CaptureWindow, &s).unwrap(), CaptureTarget::Monitor(second.id));
+        // Over every screen: the window itself.
+        let left = s.monitors.iter().map(|m| m.rect.x).min().unwrap();
+        let right = s.monitors.iter().map(|m| m.rect.x + m.rect.width as i32).max().unwrap();
+        s.foreground.as_mut().unwrap().rect = PhysicalRect::new(left, 0, (right - left) as u32, 100);
+        assert_eq!(target_for(ActionId::CaptureWindow, &s).unwrap(), CaptureTarget::Window(WindowId(77)));
     }
 
     fn no_metadata(_: &str) -> ExeMetadata {
