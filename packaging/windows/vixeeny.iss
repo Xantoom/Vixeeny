@@ -203,16 +203,21 @@ begin
   begin
     UserDir := Dir;
     RegQueryStringValue(HKCU, UserInstallKey, 'Inno Setup: Icon Group', UserGroup);
+    // A folder of the Start menu, by its name: never a path out of it.
+    if (Pos('..', UserGroup) <> 0) or (Pos(':', UserGroup) <> 0) or (Pos('/', UserGroup) <> 0)
+      or (Pos('\', UserGroup) = 1) then
+      UserGroup := '';
   end;
 end;
 
 // Stops the Vixeeny of the user's folders, as `StopVixeeny` does; what does not stop is ended
-// (its files are removed next).
+// (its files are removed next). Its program runs with the user's own rights: its folder is
+// the user's to change, and nothing from there gets the administrator's.
 procedure StopUserVixeeny();
 var
   Code: Integer;
 begin
-  Exec(UserDir + '\vixeeny-app.exe', '--update quit', '', SW_HIDE, ewWaitUntilTerminated, Code);
+  ExecAsOriginalUser(UserDir + '\vixeeny-app.exe', '--update quit', '', SW_HIDE, ewWaitUntilTerminated, Code);
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM Vixeeny.exe /IM vixeeny-app.exe', '', SW_HIDE, ewWaitUntilTerminated, Code);
 end;
 
@@ -234,7 +239,8 @@ begin
       begin
         Name := Trim(Files[I]);
         // Only a path inside the folder.
-        if (Name <> '') and (Pos('..', Name) = 0) and (Pos(':', Name) = 0) and (Pos('/', Name) <> 1) then
+        if (Name <> '') and (Pos('..', Name) = 0) and (Pos(':', Name) = 0) and (Pos('/', Name) <> 1)
+          and (Pos('\', Name) <> 1) then
         begin
           StringChangeEx(Name, '/', '\', True);
           DeleteFile(UserDir + '\' + Name);

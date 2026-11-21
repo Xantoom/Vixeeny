@@ -533,8 +533,11 @@ impl Speaker {
 
     /// Seconds of the clip heard now, once the sound of the last play has started.
     fn heard(&self) -> Option<f64> {
+        // The epoch first: the sound thread writes the clock before it, so a clock read after a current epoch is at
+        // least as new.
+        let current = self.heard_epoch.load(Ordering::SeqCst) == self.epoch.load(Ordering::SeqCst);
         let clock = f64::from_bits(self.clock.load(Ordering::SeqCst));
-        (self.heard_epoch.load(Ordering::SeqCst) == self.epoch.load(Ordering::SeqCst)).then_some(clock)
+        current.then_some(clock)
     }
 
     fn works(&self) -> bool {

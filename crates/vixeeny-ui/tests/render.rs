@@ -171,6 +171,7 @@ fn image_profiles_and_shortcut_groups_render_in_french() {
     }
     window.invoke_row_chosen("image:window:image_format".into(), 0);
     window.invoke_row_number("image:region:jpeg_quality".into(), 61);
+    slint::platform::update_timers_and_animations();
     assert_eq!(panel.config().image.region.jpeg.quality, 61);
     assert_eq!(panel.config().image.window.format, "png");
     assert_eq!(panel.config().image.fullscreen.format, "jpeg");

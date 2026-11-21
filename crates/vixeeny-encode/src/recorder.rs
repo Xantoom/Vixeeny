@@ -1076,9 +1076,13 @@ impl Worker {
 fn open_output(layout: &Layout, mut octx: format::context::Output, live: bool) -> Result<Output, RecordError> {
     let mut stream = octx.add_stream(None::<ffmpeg_next::Codec>)?;
     stream.set_parameters(layout.video.clone());
+    // The encoder's time base: without one, MP4 takes 1/90000, where a frame of 59.94 or 165 fps is not a whole number
+    // of ticks (the muxer may still pick a finer one).
+    stream.set_time_base(layout.enc_tb);
     for (parameters, title) in &layout.audio {
         let mut stream = octx.add_stream(None::<ffmpeg_next::Codec>)?;
         stream.set_parameters(parameters.clone());
+        stream.set_time_base(Rational(1, SAMPLE_RATE as i32));
         let mut meta = Dictionary::new();
         meta.set("title", title);
         // MP4 keeps a stream's name in the handler, not in a title tag.

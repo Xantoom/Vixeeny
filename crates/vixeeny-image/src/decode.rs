@@ -53,6 +53,18 @@ fn bad(e: impl std::fmt::Display) -> ImageError {
     ImageError::Decode(e.to_string())
 }
 
+/// The largest picture read, in pixels: what `image` allows by default (512 MiB of RGBA), for every format. A file
+/// announcing more is refused before anything is allocated for it.
+const MAX_PIXELS: u64 = (512 << 20) / 4;
+
+/// Refuses a picture of `width` × `height` larger than [`MAX_PIXELS`].
+pub(crate) fn check_size(width: u64, height: u64) -> Result<(), ImageError> {
+    if width.saturating_mul(height) > MAX_PIXELS {
+        return Err(bad(format!("{width}×{height} is too large")));
+    }
+    Ok(())
+}
+
 pub fn decode(bytes: &[u8]) -> Result<Decoded, ImageError> {
     match SourceFormat::sniff(bytes).ok_or_else(|| bad("unrecognised image format"))? {
         SourceFormat::Jxl => decode_jxl(bytes),
@@ -89,6 +101,7 @@ fn decode_png_pq(bytes: &[u8]) -> Result<Option<Decoded>, ImageError> {
     if !pq {
         return Ok(None);
     }
+    check_size(u64::from(reader.info().width), u64::from(reader.info().height))?;
     let mut buf = vec![0; reader.output_buffer_size().ok_or_else(|| bad("image too large"))?];
     let info = reader.next_frame(&mut buf).map_err(bad)?;
     let (width, height) = (info.width, info.height);
@@ -120,6 +133,7 @@ fn decode_png_pq(bytes: &[u8]) -> Result<Option<Decoded>, ImageError> {
 fn decode_jxl(bytes: &[u8]) -> Result<Decoded, ImageError> {
     use jxl_oxide::{EnumColourEncoding, JxlImage, Moxcms, RenderingIntent};
     let mut image = JxlImage::builder().read(Cursor::new(bytes)).map_err(bad)?;
+    check_size(u64::from(image.width()), u64::from(image.height()))?;
     image.set_cms(Moxcms);
     image.request_color_encoding(EnumColourEncoding::srgb(RenderingIntent::Relative));
     let render = image.render_frame(0).map_err(bad)?;
@@ -129,7 +143,7 @@ fn decode_jxl(bytes: &[u8]) -> Result<Decoded, ImageError> {
     let mut rgba = Vec::with_capacity(w * h * 4);
     for px in fb.buf().chunks_exact(channels) {
         match channels {
-            1 => rgba.extend_from_slice(&[quantise(px[0]); 3]),
+            1 => rgba.extend_from_slice(&[quantise(px[0]), quantise(px[0]), quantise(px[0]), 255]),
             2 => rgba.extend_from_slice(&[quantise(px[0]), quantise(px[0]), quantise(px[0]), quantise(px[1])]),
             3 => rgba.extend_from_slice(&[quantise(px[0]), quantise(px[1]), quantise(px[2]), 255]),
             4 => rgba.extend_from_slice(&[quantise(px[0]), quantise(px[1]), quantise(px[2]), quantise(px[3])]),

@@ -1452,9 +1452,15 @@ impl SettingsPanel {
             let edit = edit.clone();
             move |id, on| edit(&id, Value::Bool(on))
         });
+        // Also sent when the field loses the focus, which happens while the page is rebuilt: as `row-text`.
         w.on_row_number({
             let edit = edit.clone();
-            move |id, n| edit(&id, Value::Int(i64::from(n)))
+            move |id, n| {
+                let edit = edit.clone();
+                slint::Timer::single_shot(std::time::Duration::ZERO, move || {
+                    edit(&id, Value::Int(i64::from(n)));
+                });
+            }
         });
         // One colour of a colour row changed: the row's value with it in its place.
         let recolour = {

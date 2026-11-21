@@ -122,7 +122,12 @@ impl Speakers {
         // exactly that is copied, then released.
         unsafe {
             let data = self.render.GetBuffer(frames as u32).map_err(os("GetBuffer"))?;
-            std::ptr::copy_nonoverlapping(samples.as_ptr(), data.cast::<f32>(), frames * CHANNELS);
+            if data.is_null() {
+                let _ = self.render.ReleaseBuffer(0, 0);
+                return Err(AudioError::Os("GetBuffer: no buffer".into()));
+            }
+            // Copied as bytes: Windows does not promise the buffer is aligned for floats.
+            std::ptr::copy_nonoverlapping(samples.as_ptr().cast::<u8>(), data, frames * CHANNELS * 4);
             self.render.ReleaseBuffer(frames as u32, 0).map_err(os("ReleaseBuffer"))?;
         }
         self.start()?;

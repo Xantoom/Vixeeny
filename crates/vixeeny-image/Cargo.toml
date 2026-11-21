@@ -20,6 +20,7 @@ moxcms = "0.8.1"
 oxipng = { version = "10.2.1", default-features = false, features = ["parallel"] }
 png.workspace = true
 rayon.workspace = true
+tracing.workspace = true
 simd-adler32 = "0.3.10"
 thiserror.workspace = true
 vixeeny-common = { path = "../vixeeny-common" }

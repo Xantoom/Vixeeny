@@ -3,8 +3,8 @@
 //! SVT-AV1 when this FFmpeg has no libaom), the `avif` muxer writes the file, dav1d decodes. The colours are described
 //! by the file's `nclx` box: sRGB, BT.601 matrix, full range.
 
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::io::{Cursor, Seek, SeekFrom, Write};
+use std::sync::{Arc, Mutex};
 
 use ffmpeg_next::format::Pixel;
 use ffmpeg_next::util::color::{Primaries, Range, Space, TransferCharacteristic};
@@ -18,24 +18,34 @@ fn err(what: &str) -> impl FnOnce(ffmpeg_next::Error) -> ImageError + '_ {
     move |e| ImageError::Avif(format!("{what}: {e}"))
 }
 
-/// FFmpeg reads and writes files: a private one in the temporary folder, removed on drop.
-struct Scratch(PathBuf);
+/// What the muxer writes, kept in memory: the `avif` muxer seeks back to fill in sizes, so it needs a seekable stream.
+/// Shared, as FFmpeg owns the writer until the output is closed.
+#[derive(Clone, Default)]
+struct Memory(Arc<Mutex<Cursor<Vec<u8>>>>);
 
-impl Scratch {
-    fn new() -> Self {
-        static NEXT: AtomicU32 = AtomicU32::new(0);
-        let n = NEXT.fetch_add(1, Ordering::Relaxed);
-        Self(std::env::temp_dir().join(format!("vixeeny-{}-{n}.avif", std::process::id())))
+impl Memory {
+    fn cursor(&self) -> std::sync::MutexGuard<'_, Cursor<Vec<u8>>> {
+        self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    fn path(&self) -> &Path {
-        &self.0
+    fn take(&self) -> Vec<u8> {
+        std::mem::take(self.cursor().get_mut())
     }
 }
 
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
+impl Write for Memory {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.cursor().write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Seek for Memory {
+    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+        self.cursor().seek(pos)
     }
 }
 
@@ -142,8 +152,9 @@ fn write(
 ) -> Result<Vec<u8>, ImageError> {
     let (av1, codec) = Av1::find()?;
     yuv.set_pts(Some(0));
-    let scratch = Scratch::new();
-    let mut octx = format::output_as(scratch.path(), "avif").map_err(err("muxer"))?;
+    let memory = Memory::default();
+    let io = format::context::StreamIo::from_write_seek(memory.clone()).map_err(err("muxer"))?;
+    let mut octx = format::output_to_stream(io, None, Some("avif")).map_err(err("muxer"))?;
     let mut ctx = codec::Context::new_with_codec(codec).encoder().video().map_err(err("encoder"))?;
     ctx.set_width(yuv.width());
     ctx.set_height(yuv.height());
@@ -193,7 +204,7 @@ fn write(
     }
     octx.write_trailer().map_err(err("trailer"))?;
     drop(octx);
-    std::fs::read(scratch.path()).map_err(|e| ImageError::Avif(format!("read back: {e}")))
+    Ok(memory.take())
 }
 
 /// A box of an ISO BMFF file: its type and where it starts, its contents start and it ends.
@@ -341,11 +352,16 @@ pub(crate) struct Decoded {
 
 pub(crate) fn decode(bytes: &[u8]) -> Result<Decoded, ImageError> {
     ffmpeg_next::init().map_err(err("init"))?;
-    let scratch = Scratch::new();
-    std::fs::write(scratch.path(), bytes).map_err(|e| ImageError::Avif(e.to_string()))?;
-    let mut input = format::input(scratch.path()).map_err(err("open"))?;
+    let io = format::context::StreamIo::from_read_seek(Cursor::new(bytes.to_vec())).map_err(err("open"))?;
+    let mut input = format::input_from_stream(io, None, None).map_err(err("open"))?;
     let stream = input.streams().best(media::Type::Video).ok_or_else(|| ImageError::Avif("no picture".into()))?;
     let index = stream.index();
+    // SAFETY: the parameters of a live stream.
+    let (w, h) = unsafe {
+        let p = stream.parameters().as_ptr();
+        ((*p).width, (*p).height)
+    };
+    crate::decode::check_size(u64::try_from(w).unwrap_or(0), u64::try_from(h).unwrap_or(0))?;
     let ctx = codec::Context::from_parameters(stream.parameters()).map_err(err("decoder"))?;
     // dav1d, never the AV1 decoder of FFmpeg itself, which needs the graphics card.
     let dav1d = decoder::find_by_name("libdav1d").ok_or_else(|| ImageError::Avif("no dav1d in this FFmpeg".into()))?;

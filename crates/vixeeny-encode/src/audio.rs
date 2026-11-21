@@ -108,12 +108,52 @@ impl AudioEncoder {
         let channels = if matches!(cfg.channels, 1 | 2 | 6 | 8) { cfg.channels } else { 2 };
         // The setting is for a stereo pair: surround gets its share per extra pair.
         let kbps = cfg.bitrate_kbps as usize * channels.max(2) / 2;
-        let codec = cfg
-            .codec
-            .encoder_names(kbps)
-            .iter()
-            .find_map(|n| encoder::find_by_name(n))
-            .ok_or_else(|| RecordError::Config(format!("no encoder for {:?} in this FFmpeg", cfg.codec)))?;
+        // The first encoder this FFmpeg has that opens: Media Foundation's AAC is missing from Windows N without its
+        // Media Feature Pack, though FFmpeg knows its name.
+        let mut failure = None;
+        let mut found = None;
+        for name in cfg.codec.encoder_names(kbps) {
+            let Some(codec) = encoder::find_by_name(name) else {
+                continue;
+            };
+            match Self::open_codec(codec, cfg, channels, kbps, global_header) {
+                Ok(opened) => {
+                    found = Some(opened);
+                    break;
+                }
+                Err(e) => failure = Some(e),
+            }
+        }
+        let (codec, opened, format, layout) = match (found, failure) {
+            (Some(found), _) => found,
+            (None, Some(e)) => return Err(e),
+            (None, None) => {
+                return Err(RecordError::Config(format!("no encoder for {:?} in this FFmpeg", cfg.codec)));
+            }
+        };
+        let resampler = resampling::Context::get(
+            Sample::F32(SampleType::Packed),
+            layout,
+            SAMPLE_RATE,
+            format,
+            layout,
+            SAMPLE_RATE,
+        )?;
+        let frame_samples = match opened.frame_size() as usize {
+            0 => 960,
+            n => n,
+        };
+        Ok(Self { encoder: opened, codec, resampler, fifo: Vec::new(), frame_samples, channels, next_pts: 0 })
+    }
+
+    /// `codec` opened for `cfg`, with the sample format and the layout it takes.
+    fn open_codec(
+        codec: ffmpeg_next::Codec,
+        cfg: &AudioTrackConfig,
+        channels: usize,
+        kbps: usize,
+        global_header: bool,
+    ) -> Result<(ffmpeg_next::Codec, encoder::Audio, Sample, ChannelLayout), RecordError> {
         let mut ctx = codec::context::Context::new_with_codec(codec).encoder().audio()?;
         let format = codec
             .audio()
@@ -139,19 +179,7 @@ impl AudioEncoder {
             _ => {}
         }
         let opened = ctx.open_with(options)?;
-        let resampler = resampling::Context::get(
-            Sample::F32(SampleType::Packed),
-            layout,
-            SAMPLE_RATE,
-            format,
-            layout,
-            SAMPLE_RATE,
-        )?;
-        let frame_samples = match opened.frame_size() as usize {
-            0 => 960,
-            n => n,
-        };
-        Ok(Self { encoder: opened, codec, resampler, fifo: Vec::new(), frame_samples, channels, next_pts: 0 })
+        Ok((codec, opened, format, layout))
     }
 
     pub(crate) fn channels(&self) -> usize {

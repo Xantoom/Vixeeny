@@ -807,6 +807,9 @@ impl Pictures {
             if code < 0 {
                 return Err(ffmpeg_next::Error::from(code).into());
             }
+            // The properties add the source's side data to what the copy holds: the last frame's goes first, or every
+            // frame of an HDR clip would add its own.
+            ffi::av_frame_side_data_free(&raw mut (*dst).side_data, &raw mut (*dst).nb_side_data);
             ffi::av_frame_copy_props(dst, src);
         }
         Ok(())

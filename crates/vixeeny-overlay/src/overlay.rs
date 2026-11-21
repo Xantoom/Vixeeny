@@ -1652,7 +1652,7 @@ impl Overlay {
         while !shared.closing.get() {
             // SAFETY: `msg` is valid for the calls; messages of this thread.
             unsafe {
-                if !GetMessageW(&mut msg, None, 0, 0).as_bool() {
+                if GetMessageW(&mut msg, None, 0, 0).0 <= 0 {
                     break;
                 }
                 let _ = TranslateMessage(&msg);

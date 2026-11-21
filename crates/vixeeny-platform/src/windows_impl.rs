@@ -606,7 +606,7 @@ pub fn on_foreground_change(changed: impl Fn(WindowId) + Send + 'static) -> bool
             WATCH.with(|w| *w.borrow_mut() = Some(watch));
             let mut msg = MSG::default();
             // SAFETY: a plain message loop on this thread.
-            while unsafe { GetMessageW(&mut msg, None, 0, 0) }.as_bool() {
+            while unsafe { GetMessageW(&mut msg, None, 0, 0) }.0 > 0 {
                 // SAFETY: `msg` was filled by `GetMessageW`.
                 unsafe { DispatchMessageW(&msg) };
             }
@@ -741,7 +741,7 @@ pub fn on_game_windows(pid: u32, changed: impl Fn() + Send + 'static) -> Option<
             let _ = tx.send(Some(unsafe { GetCurrentThreadId() }));
             let mut msg = MSG::default();
             // SAFETY: a plain message loop on this thread, until `WM_QUIT`.
-            while unsafe { GetMessageW(&mut msg, None, 0, 0) }.as_bool() {
+            while unsafe { GetMessageW(&mut msg, None, 0, 0) }.0 > 0 {
                 // SAFETY: `msg` was filled by `GetMessageW`.
                 unsafe { DispatchMessageW(&msg) };
             }
@@ -983,11 +983,11 @@ pub fn set_app_id() -> Result<()> {
 pub fn set_exe_icon(id: WindowId) {
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::UI::WindowsAndMessaging::{
-        GetSystemMetrics, ICON_BIG, ICON_SMALL, IMAGE_ICON, LR_DEFAULTCOLOR, LoadImageW, SM_CXICON, SM_CXSMICON,
-        SendMessageW, WM_SETICON,
+        GetSystemMetrics, ICON_BIG, ICON_SMALL, IMAGE_ICON, LR_DEFAULTCOLOR, LR_SHARED, LoadImageW, SM_CXICON,
+        SM_CXSMICON, SendMessageW, WM_SETICON,
     };
-    // SAFETY: the resource is read from this executable; a missing one makes the call fail. The icons stay loaded for
-    // the life of the process (the window keeps using them).
+    // SAFETY: the resource is read from this executable; a missing one makes the call fail. Shared icons are loaded
+    // once per size and stay for the life of the process: every window uses the same ones.
     unsafe {
         let Ok(module) = GetModuleHandleW(None) else {
             return;
@@ -1001,7 +1001,7 @@ pub fn set_exe_icon(id: WindowId) {
                 IMAGE_ICON,
                 size,
                 size,
-                LR_DEFAULTCOLOR,
+                LR_DEFAULTCOLOR | LR_SHARED,
             );
             if let Ok(icon) = icon {
                 SendMessageW(hwnd_of(id), WM_SETICON, Some(WPARAM(kind as usize)), Some(LPARAM(icon.0 as isize)));

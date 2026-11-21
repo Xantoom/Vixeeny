@@ -116,6 +116,9 @@ fn write(samples: &Samples<'_>, colour: &ffi::JxlColorEncoding, settings: &JxlSe
         check(ffi::JxlEncoderSetColorEncoding(enc.0, colour), "colour encoding")?;
 
         let frame = ffi::JxlEncoderFrameSettingsCreate(enc.0, ptr::null());
+        if frame.is_null() {
+            return Err(ImageError::Jxl("frame settings".into()));
+        }
         check(
             ffi::JxlEncoderFrameSettingsSetOption(
                 frame,

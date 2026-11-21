@@ -28,9 +28,22 @@ unsafe extern "C" {
 
 /// libjpeg reports fatal errors through this callback and expects it not to return. Unwinding through C++ frames is not
 /// an option, so a failure ends the process; inputs are validated beforehand (size, channels), which keeps this a last
-/// resort.
-unsafe extern "C" fn fatal(_: *mut crate::native::jpeg_common_struct) {
-    eprintln!("vixeeny: fatal jpegli error");
+/// resort. jpegli's message goes to the log first, so the crash report says what failed.
+unsafe extern "C" fn fatal(cinfo: *mut crate::native::jpeg_common_struct) {
+    // JMSG_LENGTH_MAX
+    let mut message = [0 as std::ffi::c_char; 200];
+    // SAFETY: libjpeg passes its live structure, whose error manager has `format_message` from `jpegli_std_error`;
+    // the buffer has the length libjpeg writes at most, NUL included.
+    let text = unsafe {
+        match (*cinfo).err.as_ref().and_then(|e| e.format_message) {
+            Some(format) => {
+                format(cinfo, message.as_mut_ptr());
+                std::ffi::CStr::from_ptr(message.as_ptr()).to_string_lossy().into_owned()
+            }
+            None => String::new(),
+        }
+    };
+    tracing::error!("jpegli: fatal error: {text}");
     std::process::abort();
 }
 

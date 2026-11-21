@@ -123,8 +123,11 @@ pub fn display_dir(template: &str) -> String {
 /// renamed over it. A power cut leaves the old file or the new one, never an empty one; two processes writing at once
 /// do not mix their files.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    // The process and a counter: two threads may write the same file at once.
+    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let mut name = path.as_os_str().to_owned();
-    name.push(format!(".{}.tmp", std::process::id()));
+    name.push(format!(".{}-{n}.tmp", std::process::id()));
     let tmp = PathBuf::from(name);
     let written = std::fs::File::create(&tmp).and_then(|mut file| {
         file.write_all(bytes)?;

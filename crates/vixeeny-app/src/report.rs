@@ -241,21 +241,32 @@ impl Private {
 }
 
 fn replace_ignoring_case(text: &str, word: &str, by: &str) -> String {
-    let lower = text.to_lowercase();
-    let needle = word.to_lowercase();
-    // Lower-casing can change lengths outside ASCII: then only the exact spelling is replaced.
-    if lower.len() != text.len() || needle.len() != word.len() {
-        return text.replace(word, by);
+    // Letter by letter, on the text itself: lower-casing the whole text can change its length (`İ`, `ẞ`), and the
+    // places found in a copy would not be the text's.
+    let same = |a: char, b: char| a == b || a.to_lowercase().eq(b.to_lowercase());
+    let matches_at = |at: usize| -> Option<usize> {
+        let mut chars = text[at..].char_indices();
+        for w in word.chars() {
+            let (_, c) = chars.next()?;
+            if !same(c, w) {
+                return None;
+            }
+        }
+        Some(chars.next().map_or(text.len(), |(i, _)| at + i))
+    };
+    if word.is_empty() {
+        return text.to_owned();
     }
     let mut out = String::with_capacity(text.len());
-    let mut rest = 0;
-    for (at, _) in lower.match_indices(&needle) {
-        if at < rest {
-            continue;
+    let (mut rest, mut at) = (0, 0);
+    while at < text.len() {
+        if let Some(end) = matches_at(at) {
+            out.push_str(&text[rest..at]);
+            out.push_str(by);
+            (rest, at) = (end, end);
+        } else {
+            at += text[at..].chars().next().map_or(1, char::len_utf8);
         }
-        out.push_str(&text[rest..at]);
-        out.push_str(by);
-        rest = at + needle.len();
     }
     out.push_str(&text[rest..]);
     out
@@ -264,6 +275,13 @@ fn replace_ignoring_case(text: &str, word: &str, by: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn letters_whose_lower_case_is_longer_or_shorter_move_nothing() {
+        // `İ` lower-cases to three bytes, `ẞ` to two: the same total length, every place shifted between them.
+        let text = "İ window ÉLODIE then ẞ, élodie";
+        assert_eq!(replace_ignoring_case(text, "Élodie", "<user>"), "İ window <user> then ẞ, <user>");
+    }
 
     #[test]
     fn the_user_cannot_be_recognised() {

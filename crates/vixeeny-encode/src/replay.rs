@@ -275,6 +275,12 @@ impl DiskStore {
         // Folders left by a crash are removed once they are a day old.
         if let Ok(entries) = std::fs::read_dir(base) {
             for entry in entries.flatten() {
+                // Only the rings' own folders (never a link): the base may be shared.
+                let ours = entry.file_name().to_string_lossy().starts_with("ring-")
+                    && entry.file_type().is_ok_and(|t| t.is_dir());
+                if !ours {
+                    continue;
+                }
                 let old = entry
                     .metadata()
                     .and_then(|m| m.modified())
@@ -379,8 +385,9 @@ impl Ring {
             audio: (0..tracks).map(|_| VecDeque::new()).collect(),
             bytes: 0,
             newest: i64::MIN,
+            // A disk that could not be used from the start is one that failed: RAM has the same bound.
+            fallback: store.is_none() && matches!(storage, Storage::Disk(_)),
             store,
-            fallback: false,
         }
     }
 

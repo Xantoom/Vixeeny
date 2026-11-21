@@ -152,8 +152,8 @@ pub fn create_popup(proc: WndProc, geometry: PhysicalRect, focus: Focus, capture
 pub fn create_app_window(proc: WndProc, rect: PhysicalRect, title: &str) -> Result<HWND> {
     use windows::Win32::Graphics::Dwm::DWMWA_WINDOW_CORNER_PREFERENCE;
     use windows::Win32::UI::WindowsAndMessaging::{
-        GetSystemMetrics, ICON_BIG, ICON_SMALL, IMAGE_ICON, LR_DEFAULTCOLOR, LoadImageW, SM_CXICON, SM_CXSMICON,
-        SendMessageW, WM_SETICON, WS_EX_APPWINDOW, WS_MINIMIZEBOX, WS_SYSMENU,
+        GetSystemMetrics, ICON_BIG, ICON_SMALL, IMAGE_ICON, LR_DEFAULTCOLOR, LR_SHARED, LoadImageW, SM_CXICON,
+        SM_CXSMICON, SendMessageW, WM_SETICON, WS_EX_APPWINDOW, WS_MINIMIZEBOX, WS_SYSMENU,
     };
     if !register(POPUP_CLASS, proc, &POPUP_DONE) {
         return Err(windows::core::Error::from_thread());
@@ -168,12 +168,12 @@ pub fn create_app_window(proc: WndProc, rect: PhysicalRect, title: &str) -> Resu
     )?;
     // SAFETY: attributes are set on the window just created.
     unsafe {
-        // The executable's icon, for the taskbar and Alt+Tab (the class has none).
+        // The executable's icon, for the taskbar and Alt+Tab (the class has none): shared, loaded once per size.
         for (kind, metric) in [(ICON_BIG, SM_CXICON), (ICON_SMALL, SM_CXSMICON)] {
             let size = GetSystemMetrics(metric);
             // MAKEINTRESOURCE(1).
             let name = PCWSTR(std::ptr::without_provenance(1));
-            if let Ok(icon) = LoadImageW(Some(instance()), name, IMAGE_ICON, size, size, LR_DEFAULTCOLOR) {
+            if let Ok(icon) = LoadImageW(Some(instance()), name, IMAGE_ICON, size, size, LR_DEFAULTCOLOR | LR_SHARED) {
                 SendMessageW(hwnd, WM_SETICON, Some(WPARAM(kind as usize)), Some(LPARAM(icon.0 as isize)));
             }
         }

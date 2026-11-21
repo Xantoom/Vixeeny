@@ -644,8 +644,9 @@ pub fn run_child(config: Config, args: &[String]) -> anyhow::Result<()> {
     panel.flush();
     if let Some(config) = unsaved.borrow_mut().take() {
         file.borrow_mut().write(&config);
-        finish_saving();
     }
+    // Also after a save of the timer: the daemon must have been told before the process ends.
+    finish_saving();
     result
 }
 

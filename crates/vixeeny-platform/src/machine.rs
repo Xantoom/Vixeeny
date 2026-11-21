@@ -355,6 +355,8 @@ fn disk_number(letter: char) -> Option<u32> {
     }
     .ok()?;
     let mut number = STORAGE_DEVICE_NUMBER::default();
+    // Required without an OVERLAPPED.
+    let mut returned = 0u32;
     // SAFETY: the output buffer is passed with its size and outlives the call.
     let asked = unsafe {
         DeviceIoControl(
@@ -364,7 +366,7 @@ fn disk_number(letter: char) -> Option<u32> {
             0,
             Some((&raw mut number).cast()),
             size_of::<STORAGE_DEVICE_NUMBER>() as u32,
-            None,
+            Some(&raw mut returned),
             None,
         )
     };
@@ -396,6 +398,8 @@ fn physical_disk(n: u32) -> Option<(String, u64)> {
     };
     let mut descriptor = vec![0u64; 128];
     let mut geometry = DISK_GEOMETRY_EX::default();
+    // Required without an OVERLAPPED.
+    let (mut described_len, mut measured_len) = (0u32, 0u32);
     // SAFETY: each buffer is passed with its own size and outlives the call.
     let described = unsafe {
         DeviceIoControl(
@@ -405,7 +409,7 @@ fn physical_disk(n: u32) -> Option<(String, u64)> {
             size_of::<STORAGE_PROPERTY_QUERY>() as u32,
             Some(descriptor.as_mut_ptr().cast()),
             (descriptor.len() * 8) as u32,
-            None,
+            Some(&raw mut described_len),
             None,
         )
     };
@@ -418,7 +422,7 @@ fn physical_disk(n: u32) -> Option<(String, u64)> {
             0,
             Some((&raw mut geometry).cast()),
             size_of::<DISK_GEOMETRY_EX>() as u32,
-            None,
+            Some(&raw mut measured_len),
             None,
         )
     };
@@ -431,8 +435,9 @@ fn physical_disk(n: u32) -> Option<(String, u64)> {
     }
     let model = described.ok().map_or_else(String::new, |()| {
         let raw: &[u8] =
-            // SAFETY: the buffer is `descriptor.len() * 8` bytes, all initialised.
+            // SAFETY: the buffer is `descriptor.len() * 8` bytes, all initialised; only what the driver wrote is read.
             unsafe { std::slice::from_raw_parts(descriptor.as_ptr().cast(), descriptor.len() * 8) };
+        let raw = &raw[..(described_len as usize).min(raw.len())];
         // SAFETY: the buffer starts with the descriptor (u64-aligned, large enough).
         let head = unsafe { descriptor.as_ptr().cast::<STORAGE_DEVICE_DESCRIPTOR>().read() };
         let text = |offset: u32| {

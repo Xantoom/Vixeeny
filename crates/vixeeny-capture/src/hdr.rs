@@ -53,7 +53,7 @@ impl HdrFrame {
     }
 
     /// Writes BGRA rows (`stride` bytes apart) of `size` with their top-left corner at `(x, y)`, their white at
-    /// `white_nits`. They must fit in the frame.
+    /// `white_nits`. What falls outside the frame is left out.
     pub fn put_bgra(&mut self, x: u32, y: u32, size: (u32, u32), stride: usize, data: &[u8], white_nits: f32) {
         static LINEAR: OnceLock<[f32; 256]> = OnceLock::new();
         let linear = LINEAR.get_or_init(|| std::array::from_fn(|i| colour::srgb_decode(i as f32 / 255.0)));
@@ -80,22 +80,24 @@ impl HdrFrame {
         });
     }
 
-    /// The parts of the rows that `size` at `(x, y)` covers.
+    /// The parts of the rows that `size` at `(x, y)` covers, cut to the frame (a screen whose resolution changed
+    /// during the capture may come larger than its place).
     fn rows_at(&mut self, x: u32, y: u32, (w, h): (u32, u32)) -> impl IndexedParallelIterator<Item = &mut [f32]> {
-        let (x, w) = (x as usize * 4, w as usize * 4);
-        self.rgba
-            .par_chunks_mut(self.width as usize * 4)
-            .skip(y as usize)
-            .take(h as usize)
-            .map(move |row| &mut row[x..x + w])
+        let row_len = self.width as usize * 4;
+        let start = (x as usize * 4).min(row_len);
+        let end = (start + w as usize * 4).min(row_len);
+        self.rgba.par_chunks_mut(row_len.max(4)).skip(y as usize).take(h as usize).map(move |row| &mut row[start..end])
     }
 
     /// Multiplies the light by `gain`.
     pub fn scale(&mut self, gain: f32) {
         if gain != 1.0 {
             self.rgba.par_chunks_mut(4 * 4096).for_each(|chunk| {
-                for c in chunk {
-                    *c *= gain;
+                // The light only: alpha stays.
+                for px in chunk.as_chunks_mut::<4>().0 {
+                    px[0] *= gain;
+                    px[1] *= gain;
+                    px[2] *= gain;
                 }
             });
         }

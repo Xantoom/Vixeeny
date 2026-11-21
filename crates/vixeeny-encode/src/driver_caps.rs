@@ -103,7 +103,7 @@ mod nvenc {
     /// The API version FFmpeg's NVENC is built with (`nv-codec-headers` of the pinned build). A driver that cannot open
     /// a session at this version is one FFmpeg refuses too.
     const MAJOR: u32 = 13;
-    const MINOR: u32 = 1;
+    const MINOR: u32 = 0;
     const VERSION: u32 = MAJOR | (MINOR << 24);
     const fn struct_version(v: u32) -> u32 {
         VERSION | (v << 16) | (0x7 << 28)

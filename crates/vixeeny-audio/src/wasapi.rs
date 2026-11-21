@@ -291,10 +291,11 @@ fn mix_channels(client: &IAudioClient) -> Option<usize> {
     }
 }
 
-/// Completion handler of `ActivateAudioInterfaceAsync`: signals an event.
+/// Completion handler of `ActivateAudioInterfaceAsync`: signals an event, shared with the waiting thread (which may
+/// give up before the handler runs: the event is closed once both are done with it).
 #[implement(IActivateAudioInterfaceCompletionHandler, windows::Win32::System::Com::IAgileObject)]
 struct ActivateHandler {
-    done: HANDLE,
+    done: Arc<Event>,
 }
 
 impl IActivateAudioInterfaceCompletionHandler_Impl for ActivateHandler_Impl {
@@ -302,8 +303,8 @@ impl IActivateAudioInterfaceCompletionHandler_Impl for ActivateHandler_Impl {
         &self,
         _operation: windows::core::Ref<'_, IActivateAudioInterfaceAsyncOperation>,
     ) -> windows::core::Result<()> {
-        // SAFETY: `done` is a live event handle owned by the waiting thread.
-        unsafe { windows::Win32::System::Threading::SetEvent(self.done) }
+        self.done.set();
+        Ok(())
     }
 }
 
@@ -314,7 +315,7 @@ impl windows::Win32::System::Com::IAgileObject_Impl for ActivateHandler_Impl {}
 struct Stream {
     client: IAudioClient,
     capture: IAudioCaptureClient,
-    event: HANDLE,
+    event: Event,
     /// The endpoint it was opened on (to notice a change of default device).
     device_id: Option<String>,
     follow: Follow,
@@ -329,7 +330,6 @@ impl Drop for Stream {
         // SAFETY: the client was started by `open`; the handles are ours.
         unsafe {
             let _ = self.client.Stop();
-            let _ = CloseHandle(self.event);
             if let Some(process) = self.process {
                 let _ = CloseHandle(process);
             }
@@ -361,7 +361,7 @@ struct Endpoint {
 }
 
 /// Initialises `client` for event-driven float capture.
-fn initialise(client: &IAudioClient, read: Read, channels: usize) -> Result<HANDLE, AudioError> {
+fn initialise(client: &IAudioClient, read: Read, channels: usize) -> Result<Event, AudioError> {
     let format = wave_format(channels);
     let mut flags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK
         | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM
@@ -374,8 +374,8 @@ fn initialise(client: &IAudioClient, read: Read, channels: usize) -> Result<HAND
         client
             .Initialize(AUDCLNT_SHAREMODE_SHARED, flags, 2_000_000, 0, (&raw const format).cast::<WAVEFORMATEX>(), None)
             .map_err(os("Initialize"))?;
-        let event = CreateEventW(None, false, false, PCWSTR::null()).map_err(os("CreateEvent"))?;
-        client.SetEventHandle(event).map_err(os("SetEventHandle"))?;
+        let event = Event::new(false)?;
+        client.SetEventHandle(event.0).map_err(os("SetEventHandle"))?;
         Ok(event)
     }
 }
@@ -427,9 +427,8 @@ fn open_process_loopback(pid: u32) -> Result<Stream, AudioError> {
         inner.Anonymous.blob.cbSize = size_of::<AUDIOCLIENT_ACTIVATION_PARAMS>() as u32;
         inner.Anonymous.blob.pBlobData = (&raw const params).cast_mut().cast();
     }
-    // SAFETY: a manual-reset-free event, closed below.
-    let done = unsafe { CreateEventW(None, false, false, PCWSTR::null()) }.map_err(os("CreateEvent"))?;
-    let handler: IActivateAudioInterfaceCompletionHandler = ActivateHandler { done }.into();
+    let done = Arc::new(Event::new(false)?);
+    let handler: IActivateAudioInterfaceCompletionHandler = ActivateHandler { done: done.clone() }.into();
     let iid: GUID = IAudioClient::IID;
     // SAFETY: the parameters live until the wait below ends; the handler is agile.
     let result = unsafe {
@@ -440,20 +439,10 @@ fn open_process_loopback(pid: u32) -> Result<Stream, AudioError> {
             &handler,
         )
     };
-    let operation = match result {
-        Ok(op) => op,
-        Err(e) => {
-            // SAFETY: the event is ours and not in use any more.
-            unsafe {
-                let _ = CloseHandle(done);
-            }
-            return Err(AudioError::Os(format!("ActivateAudioInterfaceAsync: {e}")));
-        }
-    };
+    let operation = result.map_err(|e| AudioError::Os(format!("ActivateAudioInterfaceAsync: {e}")))?;
     // SAFETY: wait for the completion handler, then read the activation result.
     let client = unsafe {
-        let waited = WaitForSingleObject(done, 5_000);
-        let _ = CloseHandle(done);
+        let waited = WaitForSingleObject(done.0, 5_000);
         if waited != WAIT_OBJECT_0 {
             return Err(AudioError::Os("process loopback activation timed out".into()));
         }
@@ -695,7 +684,7 @@ enum Ended {
 }
 
 fn capture_loop(stream: &Stream, kind: &SourceKind, sink: &mut dyn AudioSink, stop: &Event, changed: &Event) -> Ended {
-    let mut handles = vec![stream.event, stop.0, changed.0];
+    let mut handles = vec![stream.event.0, stop.0, changed.0];
     handles.extend(stream.process);
     // Where the next packet starts, for one the driver could not date.
     let mut next_ns: Option<i64> = None;
@@ -743,11 +732,21 @@ fn capture_loop(stream: &Stream, kind: &SourceKind, sink: &mut dyn AudioSink, st
                         Ended::Lost(e.message())
                     };
                 }
+                // A packet announced but gone by now (AUDCLNT_S_BUFFER_EMPTY, a success): nothing to release.
+                if frames == 0 {
+                    break;
+                }
                 let count = frames as usize * stream.channels;
                 let samples = if flags & (AUDCLNT_BUFFERFLAGS_SILENT.0 as u32) != 0 || data.is_null() {
                     vec![0.0f32; count]
                 } else {
-                    std::slice::from_raw_parts(data.cast::<f32>(), count).to_vec()
+                    // Read as bytes: Windows does not promise the buffer is aligned for floats.
+                    std::slice::from_raw_parts(data, count * 4)
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .map(|b| f32::from_ne_bytes(*b))
+                        .collect()
                 };
                 let _ = stream.capture.ReleaseBuffer(frames);
                 let dated = (qpc as i64).saturating_mul(100);
