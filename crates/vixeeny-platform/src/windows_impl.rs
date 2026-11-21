@@ -492,6 +492,11 @@ pub fn covers(window: &RECT, monitor: &RECT) -> bool {
 /// Whether `hwnd` covers its whole monitor, measured as the game detection measures it (the visible frame, not the
 /// invisible borders that make a maximised window overflow its screen).
 fn fills_its_monitor(hwnd: HWND) -> bool {
+    monitor_of(hwnd).is_some_and(|monitor| frame(hwnd).is_some_and(|window| covers(&window, &monitor)))
+}
+
+/// The screen rectangle of `hwnd`'s monitor.
+fn monitor_of(hwnd: HWND) -> Option<RECT> {
     use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONULL, MONITORINFO, MonitorFromWindow};
     let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
     // SAFETY: a valid out-pointer; a window that is gone makes the calls fail.
@@ -499,7 +504,33 @@ fn fills_its_monitor(hwnd: HWND) -> bool {
         let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL);
         !monitor.is_invalid() && GetMonitorInfoW(monitor, &mut info).as_bool()
     };
-    known && frame(hwnd).is_some_and(|window| covers(&window, &info.rcMonitor))
+    known.then_some(info.rcMonitor)
+}
+
+/// Whether a capture of `window` shows what its screen does. A window filling its screen whose drawing area does not
+/// (a game left with a frame of the wrong size by its changes of resolution) is shown whole on the screen, but
+/// composed by Windows, as a window capture takes it, shifted and cut. `true` for a window among others, or one gone.
+pub fn captured_as_seen(window: WindowId) -> bool {
+    use windows::Win32::Graphics::Gdi::ClientToScreen;
+    use windows::Win32::UI::WindowsAndMessaging::GetClientRect;
+    let hwnd = hwnd_of(window);
+    let Some(monitor) = monitor_of(hwnd).filter(|_| fills_its_monitor(hwnd)) else {
+        return true;
+    };
+    let mut client = RECT::default();
+    let mut origin = POINT::default();
+    // SAFETY: valid out-pointers; a window that is gone makes the calls fail.
+    let known = unsafe { GetClientRect(hwnd, &mut client).is_ok() && ClientToScreen(hwnd, &mut origin).as_bool() };
+    if !known {
+        return true;
+    }
+    let drawn = RECT {
+        left: origin.x,
+        top: origin.y,
+        right: origin.x + client.right - client.left,
+        bottom: origin.y + client.bottom - client.top,
+    };
+    covers(&drawn, &monitor)
 }
 
 /// Calls `changed` with the window concerned, on a thread of its own, each time a window comes to the foreground and
@@ -1438,6 +1469,15 @@ fn utf16z(text: &str) -> Vec<u16> {
 
 #[cfg(test)]
 mod tests {
+    /// A window that is gone is left as it is asked; a window among others, the desktop's, shows as it is.
+    #[test]
+    fn a_window_gone_or_among_others_is_captured_as_seen() {
+        assert!(super::captured_as_seen(crate::WindowId(0x7fff_fff0)));
+        // SAFETY: no arguments.
+        let shell = unsafe { windows::Win32::UI::WindowsAndMessaging::GetShellWindow() };
+        assert!(super::captured_as_seen(crate::WindowId(shell.0 as usize as u64)));
+    }
+
     /// A window that is gone does not show; the one in front does.
     #[test]
     fn a_window_shows_while_it_is_there() {

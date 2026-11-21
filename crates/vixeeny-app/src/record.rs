@@ -960,9 +960,10 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
         })
     };
     let (stream, gpu_frames) = {
+        let screen = vixeeny_capture::StreamTarget::Monitor(plan.monitor.clone());
         let target = match plan.window {
-            Some(window) => vixeeny_capture::StreamTarget::Window(window),
-            None => vixeeny_capture::StreamTarget::Monitor(plan.monitor.clone()),
+            Some(window) => window_or_its_screen(window, &screen),
+            None => screen,
         };
         let (stream, gpu_frames) = match &plan.gpu {
             None => (vixeeny_capture::VideoStream::start_with(&target, plan.cursor, plan.hdr, None, pacing())?, None),
@@ -1258,8 +1259,14 @@ fn record_loop(
                     {
                         sources.screen = now_on;
                     }
-                    let target = if screen { &sources.screen } else { &sources.window };
-                    match stream.retarget(target) {
+                    let target = match (screen, &sources.window) {
+                        (true, _) => sources.screen.clone(),
+                        (false, vixeeny_capture::StreamTarget::Window(window)) => {
+                            window_or_its_screen(*window, &sources.screen)
+                        }
+                        (false, other) => other.clone(),
+                    };
+                    match stream.retarget(&target) {
                         Ok(()) => {
                             on_screen = screen;
                             tracing::info!("the replay films the game's {}", if screen { "screen" } else { "window" })
@@ -1270,12 +1277,12 @@ fn record_loop(
             }
             Ok(Ctl::Window(window)) => {
                 if let Some(sources) = &mut sources {
-                    let target = vixeeny_capture::StreamTarget::Window(window);
+                    let target = window_or_its_screen(window, &sources.screen);
                     // On the screen, the new window is filmed once the game's pages go.
                     match if on_screen { Ok(()) } else { stream.retarget(&target) } {
                         Ok(()) => {
                             tracing::info!("the replay follows the game's new window");
-                            sources.window = target;
+                            sources.window = vixeeny_capture::StreamTarget::Window(window);
                             pause_to = Some(false);
                         }
                         Err(e) => tracing::warn!("the replay cannot film the game's new window: {e}"),
@@ -1426,6 +1433,19 @@ fn record_loop(
         }
         None => Ok(summary),
     }
+}
+
+/// `window`, or the screen it fills when a capture of the window would not show what that screen does (see
+/// [`vixeeny_platform::captured_as_seen`]); `screen` when its screen is not found.
+fn window_or_its_screen(
+    window: vixeeny_platform::WindowId,
+    screen: &vixeeny_capture::StreamTarget,
+) -> vixeeny_capture::StreamTarget {
+    if vixeeny_platform::captured_as_seen(window) {
+        return vixeeny_capture::StreamTarget::Window(window);
+    }
+    tracing::info!("the game's window is composed off its screen: its screen is filmed");
+    screen_of(window).unwrap_or_else(|| screen.clone())
 }
 
 /// The screen most of `window` is on.
