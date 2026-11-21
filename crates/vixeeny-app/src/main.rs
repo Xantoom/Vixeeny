@@ -792,6 +792,10 @@ fn run() -> anyhow::Result<()> {
             print!("{}", sysinfo::format(&sysinfo::collect(&config, probe.as_ref())));
             return Ok(());
         }
+        // The installer's choice: the Print Screen key for Vixeeny rather than Windows' Snipping Tool.
+        Some("--print-screen") if args.get(1).is_some_and(|a| a == "take") => {
+            return vixeeny_platform::take_print_screen().map_err(Into::into);
+        }
         Some("--probe-report") => return probe::report(args.iter().any(|a| a == "--force")),
         _ => {}
     }

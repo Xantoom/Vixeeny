@@ -393,11 +393,31 @@ pub fn system_prefers_dark() -> bool {
     crate::registry::dword(HKEY_CURRENT_USER, key, "AppsUseLightTheme") == Some(0)
 }
 
+/// Where Windows keeps whether the Print Screen key opens its Snipping Tool.
+const SNIPPING_KEY: &str = r"Control Panel\Keyboard";
+const SNIPPING_VALUE: &str = "PrintScreenKeyForSnippingEnabled";
+
 /// Whether Windows 11 opens its Snipping Tool with the Print Screen key (Settings → Accessibility → Keyboard): the key
-/// alone then never reaches another program's shortcut.
+/// alone then never reaches another program's shortcut. Windows 11 does it by default since 22H2 (build 22621): a
+/// value never written means on there, off before.
 pub fn print_screen_opens_snipping_tool() -> bool {
+    use windows::Win32::System::Registry::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    match crate::registry::dword(HKEY_CURRENT_USER, SNIPPING_KEY, SNIPPING_VALUE) {
+        Some(on) => on != 0,
+        None => crate::registry::string(
+            HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\Microsoft\Windows NT\CurrentVersion",
+            "CurrentBuildNumber",
+        )
+        .and_then(|build| build.parse::<u32>().ok())
+        .is_some_and(|build| build >= 22_621),
+    }
+}
+
+/// Gives the Print Screen key back to programs' shortcuts, as turning off the switch in Windows' settings does.
+pub fn take_print_screen() -> Result<()> {
     use windows::Win32::System::Registry::HKEY_CURRENT_USER;
-    crate::registry::dword(HKEY_CURRENT_USER, r"Control Panel\Keyboard", "PrintScreenKeyForSnippingEnabled") == Some(1)
+    crate::registry::set_dword(HKEY_CURRENT_USER, SNIPPING_KEY, SNIPPING_VALUE, 0).map_err(PlatformError::Os)
 }
 
 /// `false` when the user turned off animations in Windows ("Show animations in Windows").
