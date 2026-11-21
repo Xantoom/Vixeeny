@@ -1,5 +1,5 @@
 # Pinned native libraries.
-# Every library is fetched by exact commit; `tag` is informational. Versions resolved 2026-10-21.
+# Every library is fetched by exact commit; `tag` is informational. Versions resolved 2026-11-21.
 #
 # `cargo xtask build-native` reads this file, so keep the keys stable.
 
@@ -21,22 +21,22 @@ license = "BSD-3-Clause"
 
 [libjxl]
 url = "https://github.com/libjxl/libjxl"
-tag = "v0.12.0"
-commit = "a7a9c787341cf703dede03c2009fa460cae5e5df"
+tag = "v0.13.0"
+commit = "5a7da83447212fe4900fc29ce97430b881caa67e"
 license = "BSD-3-Clause"
 
 [jpegli]
 url = "https://github.com/google/jpegli"
-tag = "HEAD as of 2026-10-01 (no release tags)"
-commit = "031a0077f5799a6041004267fc12b956c1f52a20"
+tag = "HEAD as of 2026-11-18 (no release tags)"
+commit = "c7d342c25d3587ac0110c915989ad94f414b6c8d"
 license = "BSD-3-Clause"
 
 [libjpeg-turbo]
 # The libjpeg of libultrahdr (decoding the SDR picture, encoding the gain map). The JPEG
 # screenshots themselves are jpegli's.
 url = "https://github.com/libjpeg-turbo/libjpeg-turbo"
-tag = "3.2.0"
-commit = "c85e6b905bf237038faa936dab160ebfc5da0344"
+tag = "3.2.1"
+commit = "7b4993786d856cbccabfc0ed2f923ba000e326cc"
 license = "IJG, BSD-3-Clause and zlib"
 
 [libultrahdr]
