@@ -1,2 +1,7 @@
 [alias]
 xtask = "run --package xtask --"
+
+# `cargo update` and new dependencies take only versions published three days ago or more: a hijacked release is
+# usually found and yanked within hours. The lock file is honoured as it is.
+[registry]
+global-min-publish-age = "3 days"
