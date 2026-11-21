@@ -13,6 +13,7 @@ use windows::Foundation::TypedEventHandler;
 use windows::Graphics::Capture::{Direct3D11CaptureFramePool, GraphicsCaptureItem, GraphicsCaptureSession};
 use windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;
 use windows::Graphics::DirectX::DirectXPixelFormat;
+use windows::Graphics::SizeInt32;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
 use windows::Win32::Graphics::Direct3D11::{
@@ -158,7 +159,8 @@ impl WgcBackend {
         let handler = frame_handler(tx);
         let token = pool.FrameArrived(&handler).map_err(os("FrameArrived"))?;
         let session = pool.CreateCaptureSession(item).map_err(os("CreateCaptureSession"))?;
-        let started = Started { pool, session, token, arrived: rx };
+        let started =
+            Started { pool, session, token, arrived: rx, device: self.device.clone(), context: self.context.clone() };
         // The cursor and border switches need recent Windows builds; ignore their absence.
         let _ = started.session.SetIsCursorCaptureEnabled(cursor);
         let _ = started.session.SetIsBorderRequired(false);
@@ -226,6 +228,8 @@ struct Started {
     session: GraphicsCaptureSession,
     token: i64,
     arrived: Receiver<()>,
+    device: ID3D11Device,
+    context: ID3D11DeviceContext,
 }
 
 impl Started {
@@ -237,7 +241,26 @@ impl Started {
         let access: IDirect3DDxgiInterfaceAccess = surface.cast().map_err(os("surface access"))?;
         // SAFETY: the surface is backed by a D3D11 texture on our device.
         let texture: ID3D11Texture2D = unsafe { access.GetInterface() }.map_err(os("GetInterface"))?;
-        read(&texture)
+        let content = frame.ContentSize().map_err(os("ContentSize"))?;
+        read(&self.content_of(texture, content)?)
+    }
+
+    /// The `content` of a frame: the frame keeps the size of the pool, made a moment before, and a window that
+    /// shrank since leaves the rest of it undefined (garbage or black at the right and bottom).
+    fn content_of(&self, texture: ID3D11Texture2D, content: SizeInt32) -> Result<ID3D11Texture2D, CaptureError> {
+        let mut desc = D3D11_TEXTURE2D_DESC::default();
+        // SAFETY: `desc` is a valid out-pointer.
+        unsafe { texture.GetDesc(&mut desc) };
+        let (width, height) = (content.Width.max(1) as u32, content.Height.max(1) as u32);
+        if width >= desc.Width && height >= desc.Height {
+            return Ok(texture);
+        }
+        let (width, height) = (width.min(desc.Width), height.min(desc.Height));
+        let part = vixeeny_platform::d3d::texture(&self.device, (width, height), desc.Format, desc.BindFlags, 0, None)?;
+        let source = D3D11_BOX { left: 0, top: 0, front: 0, right: width, bottom: height, back: 1 };
+        // SAFETY: both textures are on our device, in the same format; the box lies in the source.
+        unsafe { self.context.CopySubresourceRegion(&part, 0, 0, 0, 0, &texture, 0, Some(&source)) };
+        Ok(part)
     }
 }
 
