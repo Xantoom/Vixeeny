@@ -162,6 +162,8 @@ impl WgcBackend {
         // The cursor and border switches need recent Windows builds; ignore their absence.
         let _ = started.session.SetIsCursorCaptureEnabled(cursor);
         let _ = started.session.SetIsBorderRequired(false);
+        // A window's menus, tooltips and dialogs with it (Windows 11 24H2 and later; a monitor has them anyway).
+        let _ = started.session.SetIncludeSecondaryWindows(true);
         started.session.StartCapture().map_err(os("StartCapture"))?;
         Ok(started)
     }

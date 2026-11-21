@@ -283,6 +283,8 @@ fn open_session(
     let session = pool.CreateCaptureSession(&item).map_err(os("CreateCaptureSession"))?;
     let _ = session.SetIsCursorCaptureEnabled(settings.cursor);
     let _ = session.SetIsBorderRequired(false);
+    // A window's menus, tooltips and dialogs with it (Windows 11 24H2 and later; a monitor has them anyway).
+    let _ = session.SetIncludeSecondaryWindows(true);
     if let Some(ticks) = settings.min_interval {
         let _ = session.SetMinUpdateInterval(windows::Foundation::TimeSpan { Duration: ticks });
     }
