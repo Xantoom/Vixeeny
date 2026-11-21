@@ -414,7 +414,8 @@ pub fn print_screen_opens_snipping_tool() -> bool {
     }
 }
 
-/// Gives the Print Screen key back to programs' shortcuts, as turning off the switch in Windows' settings does.
+/// Gives the Print Screen key back to programs' shortcuts, as turning off the switch in Windows' settings does. Windows
+/// reads the value at each press: the next one already goes to the shortcut, without signing out.
 pub fn take_print_screen() -> Result<()> {
     use windows::Win32::System::Registry::HKEY_CURRENT_USER;
     crate::registry::set_dword(HKEY_CURRENT_USER, SNIPPING_KEY, SNIPPING_VALUE, 0).map_err(PlatformError::Os)
