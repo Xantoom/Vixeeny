@@ -464,3 +464,27 @@ fn the_layers_are_drawn_over_what_they_cover_by_blocks() {
     s.undo();
     assert_eq!(s.view().layers_area, Some((10, 10, 630, 374)));
 }
+
+#[test]
+fn a_tool_chosen_while_drawing_leaves_the_stroke_as_it_began() {
+    let mut s = session();
+    drag(&mut s, p(20.0, 20.0), p(120.0, 80.0));
+    s.choose_tool(Some(Tool::Rect));
+    s.pointer_down(p(30.0, 30.0), NO);
+    s.pointer_move(p(60.0, 60.0), NO);
+    s.choose_tool(Some(Tool::Arrow));
+    assert!(!s.in_gesture());
+    s.pointer_up(p(80.0, 70.0), NO);
+    assert_eq!(s.editor().doc.items.len(), 1);
+    assert!(matches!(s.editor().doc.items[0].annotation, Annotation::Rect { .. }));
+}
+
+#[test]
+fn select_all_while_drawing_a_zone_keeps_the_whole_image() {
+    let mut s = session();
+    s.pointer_down(p(20.0, 20.0), NO);
+    s.pointer_move(p(60.0, 60.0), NO);
+    s.select_all();
+    s.pointer_up(p(80.0, 70.0), NO);
+    assert_eq!(s.view().selection, Some(Rect::new(0.0, 0.0, 200.0, 100.0)));
+}

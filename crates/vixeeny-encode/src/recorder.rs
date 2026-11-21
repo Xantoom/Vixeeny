@@ -45,6 +45,17 @@ pub enum RecordError {
     },
 }
 
+/// Whether `receive_packet` gave a packet: `false` once the encoder wants more input or is drained. Any other answer is
+/// the encoder failing (a lost device), not the end of its packets.
+pub(crate) fn received(result: Result<(), ffmpeg_next::Error>) -> Result<bool, RecordError> {
+    match result {
+        Ok(()) => Ok(true),
+        Err(ffmpeg_next::Error::Eof) => Ok(false),
+        Err(ffmpeg_next::Error::Other { errno }) if errno == ffmpeg_next::util::error::EAGAIN => Ok(false),
+        Err(e) => Err(e.into()),
+    }
+}
+
 impl From<ffmpeg_next::Error> for RecordError {
     fn from(e: ffmpeg_next::Error) -> Self {
         Self::Ffmpeg(e.to_string())
@@ -1014,7 +1025,7 @@ impl Worker {
 
     fn drain(&mut self) -> Result<(), RecordError> {
         let mut packet = Packet::empty();
-        while self.encoder.receive_packet(&mut packet).is_ok() {
+        while received(self.encoder.receive_packet(&mut packet))? {
             self.write(&mut packet)?;
         }
         Ok(())

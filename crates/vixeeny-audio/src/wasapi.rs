@@ -820,10 +820,13 @@ fn run(kind: &SourceKind, max_channels: usize, mut sink: Box<dyn AudioSink>, sto
         }
     };
     let mut lost = false;
+    // The sessions of an application are followed since the last open.
+    let mut followed = false;
     loop {
         let ended = match open(kind, max_channels) {
             Ok(stream) => {
                 listening.forget_sessions();
+                followed = false;
                 if lost {
                     sink.on_event(SourceEvent::Back);
                     lost = false;
@@ -856,14 +859,19 @@ fn run(kind: &SourceKind, max_channels: usize, mut sink: Box<dyn AudioSink>, sto
             lost = true;
         }
         // Try again when a device comes or goes, or (for an application) a session starts.
-        if matches!(kind, SourceKind::Application(_)) {
+        if matches!(kind, SourceKind::Application(_)) && !followed {
             listening.follow_sessions();
+            followed = true;
+            // Tried once more: a session that started before it was followed is told by no notification.
+            continue;
         }
         // SAFETY: live events.
         let waited = unsafe { WaitForMultipleObjects(&[stop.0, listening.changed.0], false, INFINITE) };
         if waited.0 != WAIT_OBJECT_0.0 + 1 {
             return;
         }
+        // A device that came has sessions of its own to follow.
+        followed = false;
     }
 }
 

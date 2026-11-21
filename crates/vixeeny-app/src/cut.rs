@@ -578,33 +578,38 @@ fn sound_thread(
     let rate = f64::from(vixeeny_encode::cut::SOUND_RATE);
     let mut play: Option<SoundPlay> = None;
     loop {
-        let ask = if play.is_some() {
+        let mut asks = Vec::new();
+        if play.is_some() {
             // Woken by the speakers taking samples, or by a new ask.
             wake.wait();
-            match rx.try_recv() {
-                Ok(ask) => Some(ask),
-                Err(std::sync::mpsc::TryRecvError::Empty) => None,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => return Ok(()),
-            }
         } else {
             match rx.recv() {
-                Ok(ask) => Some(ask),
+                Ok(ask) => asks.push(ask),
                 Err(_) => return Ok(()),
             }
-        };
-        match ask {
-            Some(SoundAsk::Play(epoch, from, to)) => {
-                speakers.clear();
-                sound.seek(from)?;
-                let frames = ((to - from).max(0.0) * rate) as usize;
-                play = Some(SoundPlay { epoch, from, pending: VecDeque::new(), left: frames, drained: None });
+        }
+        // Every ask waiting, in order: one wake may stand for several.
+        loop {
+            match rx.try_recv() {
+                Ok(ask) => asks.push(ask),
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => return Ok(()),
             }
-            Some(SoundAsk::Stop) => {
-                speakers.clear();
-                play = None;
+        }
+        for ask in asks {
+            match ask {
+                SoundAsk::Play(epoch, from, to) => {
+                    speakers.clear();
+                    sound.seek(from)?;
+                    let frames = ((to - from).max(0.0) * rate) as usize;
+                    play = Some(SoundPlay { epoch, from, pending: VecDeque::new(), left: frames, drained: None });
+                }
+                SoundAsk::Stop => {
+                    speakers.clear();
+                    play = None;
+                }
+                SoundAsk::Volume(v) => speakers.set_volume(v),
             }
-            Some(SoundAsk::Volume(v)) => speakers.set_volume(v),
-            None => {}
         }
         let Some(SoundPlay { epoch, from, pending, left, drained }) = play.as_mut() else {
             continue;

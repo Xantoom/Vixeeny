@@ -198,24 +198,34 @@ fn moment(unix: u64, lang: Lang) -> String {
 }
 
 fn check_for_update(handle: PanelHandle, lang: Lang) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    // One check at a time: a second click while one runs waits for its answer.
+    static CHECKING: AtomicBool = AtomicBool::new(false);
+    if CHECKING.swap(true, Ordering::AcqRel) {
+        return;
+    }
     handle.set_update(UpdateView {
         stage: UpdateStage::Checking,
         title: tr(Key::UpdateChecking, lang).into(),
         detail: tr(Key::UpdateInstalled, lang).replace("{version}", env!("CARGO_PKG_VERSION")),
         ..UpdateView::default()
     });
-    std::thread::spawn(move || match client::check() {
-        Ok(_) => handle.set_update(update_view(lang)),
-        Err(e) => {
-            tracing::warn!("update check: {e:#}");
-            handle.set_update(UpdateView {
-                stage: UpdateStage::Failed,
-                title: tr(Key::UpdateCheckFailedShort, lang).into(),
-                detail: tr(Key::UpdateCheckFailed, lang).into(),
-                progress: 0.0,
-                action: tr(Key::UiRetry, lang).into(),
-                ..UpdateView::default()
-            });
+    std::thread::spawn(move || {
+        let checked = client::check();
+        CHECKING.store(false, Ordering::Release);
+        match checked {
+            Ok(_) => handle.set_update(update_view(lang)),
+            Err(e) => {
+                tracing::warn!("update check: {e:#}");
+                handle.set_update(UpdateView {
+                    stage: UpdateStage::Failed,
+                    title: tr(Key::UpdateCheckFailedShort, lang).into(),
+                    detail: tr(Key::UpdateCheckFailed, lang).into(),
+                    progress: 0.0,
+                    action: tr(Key::UiRetry, lang).into(),
+                    ..UpdateView::default()
+                });
+            }
         }
     });
 }

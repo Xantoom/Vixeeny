@@ -393,26 +393,6 @@ impl Stitcher {
         row.view = seen;
     }
 
-    fn assemble(&self) -> Option<(Frame, Option<Vec<u8>>)> {
-        let (width, _) = self.size?;
-        let mut data = Vec::with_capacity(self.canvas.len() * width as usize * 4);
-        for row in self.canvas.rows() {
-            data.extend_from_slice(&row.pixels);
-        }
-        let frame = Frame::new(width, self.canvas.len() as u32, data)?;
-        let layer = self
-            .layered
-            .then(|| {
-                let mut bytes = Vec::new();
-                for row in self.canvas.rows() {
-                    bytes.extend_from_slice(row.layer.as_deref()?);
-                }
-                Some(bytes)
-            })
-            .flatten();
-        Some((frame, layer))
-    }
-
     /// The image so far, for the live preview (downscaled to fit). Only the rows shown are read.
     pub fn preview(&self, max_width: u32, max_height: u32) -> Option<Frame> {
         let (width, _) = self.size?;
@@ -422,7 +402,21 @@ impl Stitcher {
 
     /// The final image. `None` when no frame was pushed.
     pub fn finish(self) -> Option<Stitched> {
-        let (frame, layer) = self.assemble()?;
+        let (width, _) = self.size?;
+        let height = self.canvas.len();
+        let mut data = Vec::with_capacity(height * width as usize * 4);
+        let mut layer = self.layered.then(Vec::new);
+        let Canvas { above, below } = self.canvas;
+        // Each row goes once copied: the rows and the image are never both whole in memory.
+        for row in above.into_iter().rev().chain(below) {
+            data.extend_from_slice(&row.pixels);
+            match (&mut layer, &row.layer) {
+                (Some(bytes), Some(part)) => bytes.extend_from_slice(part),
+                (Some(_), None) => layer = None,
+                (None, _) => {}
+            }
+        }
+        let frame = Frame::new(width, height as u32, data)?;
         Some(Stitched { frame, layer, truncated: self.truncated })
     }
 }

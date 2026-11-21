@@ -112,6 +112,9 @@ enum Inner {
         octx: format::context::Output,
         encoder: encoder::Video,
         time_base: Rational,
+        /// The frame each picture is copied into, and the converter to the encoder's format: made once.
+        source: frame::Video,
+        scaler: crate::avif::Scaler,
     },
 }
 
@@ -193,20 +196,18 @@ impl Animation {
                 }
                 Ok(())
             }
-            Inner::Avif { octx, encoder, time_base } => {
-                let mut source = frame::Video::new(Pixel::BGRA, w, h);
+            Inner::Avif { octx, encoder, time_base, source, scaler } => {
                 let stride = source.stride(0);
                 let row = w as usize * 4;
                 let rows = source.data_mut(0).chunks_mut(stride).take(h as usize).enumerate();
                 for (y, out) in rows {
                     out[..row].copy_from_slice(&bgra[y * row..(y + 1) * row]);
                 }
-                source.set_color_space(Space::RGB);
-                source.set_color_range(Range::JPEG);
+                // A new frame each time: the encoder may keep the one before.
                 let mut yuv = frame::Video::new(Pixel::YUV420P, w, h);
                 yuv.set_color_space(Space::BT470BG);
                 yuv.set_color_range(Range::JPEG);
-                crate::avif::scale(&source, &mut yuv)?;
+                scaler.run(source, &mut yuv)?;
                 yuv.set_pts(Some(ms as i64));
                 encoder.send_frame(&yuv).map_err(avif_err("encode"))?;
                 drain(encoder, octx, *time_base)
@@ -242,7 +243,7 @@ impl Animation {
                     std::fs::write(&self.dest, bytes).map_err(|e| ImageError::WebP(e.to_string()))
                 }
             }
-            Inner::Avif { octx, encoder, time_base } => {
+            Inner::Avif { octx, encoder, time_base, .. } => {
                 encoder.send_eof().map_err(avif_err("encode"))?;
                 drain(encoder, octx, *time_base)?;
                 octx.write_trailer().map_err(avif_err("trailer"))
@@ -382,7 +383,10 @@ fn avif_encoder(width: u32, height: u32, settings: &Settings, dest: &Path) -> Re
     stream.set_time_base(time_base);
     octx.write_header().map_err(avif_err("header"))?;
     let time_base = octx.stream(0).map_or(time_base, |s| s.time_base());
-    Ok(Inner::Avif { octx, encoder, time_base })
+    let mut source = frame::Video::new(Pixel::BGRA, width, height);
+    source.set_color_space(Space::RGB);
+    source.set_color_range(Range::JPEG);
+    Ok(Inner::Avif { octx, encoder, time_base, source, scaler: crate::avif::Scaler::new()? })
 }
 
 /// Writes what the encoder has ready.
@@ -392,7 +396,7 @@ fn drain(
     time_base: Rational,
 ) -> Result<(), ImageError> {
     let mut packet = Packet::empty();
-    while encoder.receive_packet(&mut packet).is_ok() {
+    while crate::avif::received(encoder.receive_packet(&mut packet)).map_err(avif_err("encode"))? {
         packet.set_stream(0);
         packet.rescale_ts(Rational(1, 1000), time_base);
         packet.write_interleaved(octx).map_err(avif_err("write"))?;

@@ -18,6 +18,17 @@ fn err(what: &str) -> impl FnOnce(ffmpeg_next::Error) -> ImageError + '_ {
     move |e| ImageError::Avif(format!("{what}: {e}"))
 }
 
+/// Whether `receive_packet` gave a packet: `false` once the encoder wants more input or is drained, an error when it
+/// failed (a picture cut short is not written as if whole).
+pub(crate) fn received(result: Result<(), ffmpeg_next::Error>) -> Result<bool, ffmpeg_next::Error> {
+    match result {
+        Ok(()) => Ok(true),
+        Err(ffmpeg_next::Error::Eof) => Ok(false),
+        Err(ffmpeg_next::Error::Other { errno }) if errno == ffmpeg_next::util::error::EAGAIN => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
 /// What the muxer writes, kept in memory: the `avif` muxer seeks back to fill in sizes, so it needs a seekable stream.
 /// Shared, as FFmpeg owns the writer until the output is closed.
 #[derive(Clone, Default)]
@@ -197,7 +208,7 @@ fn write(
     encoder.send_frame(&yuv).map_err(err("encode"))?;
     encoder.send_eof().map_err(err("encode"))?;
     let mut packet = Packet::empty();
-    while encoder.receive_packet(&mut packet).is_ok() {
+    while received(encoder.receive_packet(&mut packet)).map_err(err("encode"))? {
         packet.set_stream(0);
         packet.rescale_ts(Rational(1, 1), time_base);
         packet.write_interleaved(&mut octx).map_err(err("write"))?;
@@ -426,29 +437,55 @@ fn decode_hdr(picture: &frame::Video) -> Result<Decoded, ImageError> {
 /// `src` into `dst` (allocated), with the matrix and range each frame declares. Only those change: `dst` takes the
 /// primaries and transfer of `src`, or swscale would convert them too.
 pub(crate) fn scale(src: &frame::Video, dst: &mut frame::Video) -> Result<(), ImageError> {
-    // SAFETY: a fresh context, freed below on every path; both frames are live and allocated, and swscale only reads
-    // `src`.
-    unsafe {
-        let (from, to) = (src.as_ptr(), dst.as_mut_ptr());
-        (*to).color_primaries = (*from).color_primaries;
-        (*to).color_trc = (*from).color_trc;
-        let mut ctx = ffi::sws_alloc_context();
-        if ctx.is_null() {
-            return Err(ImageError::Avif("cannot allocate a scaler".into()));
+    Scaler::new()?.run(src, dst)
+}
+
+/// A colour converter, kept for many frames of the same size (an animation): made once, with its threads.
+pub(crate) struct Scaler(*mut ffi::SwsContext);
+
+impl Scaler {
+    pub(crate) fn new() -> Result<Self, ImageError> {
+        // SAFETY: a fresh context, freed by `Drop`.
+        unsafe {
+            let ctx = ffi::sws_alloc_context();
+            if ctx.is_null() {
+                return Err(ImageError::Avif("cannot allocate a scaler".into()));
+            }
+            let flags = ffi::SwsFlags::SWS_BICUBIC as u32
+                | ffi::SwsFlags::SWS_ACCURATE_RND as u32
+                | ffi::SwsFlags::SWS_FULL_CHR_H_INT as u32;
+            ffi::av_opt_set_int(ctx.cast(), c"sws_flags".as_ptr(), i64::from(flags), 0);
+            ffi::av_opt_set_int(ctx.cast(), c"threads".as_ptr(), 0, 0);
+            Ok(Self(ctx))
         }
-        let flags = ffi::SwsFlags::SWS_BICUBIC as u32
-            | ffi::SwsFlags::SWS_ACCURATE_RND as u32
-            | ffi::SwsFlags::SWS_FULL_CHR_H_INT as u32;
-        ffi::av_opt_set_int(ctx.cast(), c"sws_flags".as_ptr(), i64::from(flags), 0);
-        ffi::av_opt_set_int(ctx.cast(), c"threads".as_ptr(), 0, 0);
-        let code = ffi::sws_scale_frame(ctx, to, from);
-        ffi::sws_free_context(&raw mut ctx);
+    }
+
+    /// Converts `src` into `dst` (allocated, its format and size set). The context sets itself up again if the frames
+    /// change.
+    pub(crate) fn run(&mut self, src: &frame::Video, dst: &mut frame::Video) -> Result<(), ImageError> {
+        // SAFETY: both frames are live and allocated, and swscale only reads `src`; the context is ours.
+        let code = unsafe {
+            let (from, to) = (src.as_ptr(), dst.as_mut_ptr());
+            (*to).color_primaries = (*from).color_primaries;
+            (*to).color_trc = (*from).color_trc;
+            ffi::sws_scale_frame(self.0, to, from)
+        };
         if code < 0 {
             return Err(err("convert")(ffmpeg_next::Error::from(code)));
         }
+        Ok(())
     }
-    Ok(())
 }
+
+impl Drop for Scaler {
+    fn drop(&mut self) {
+        // SAFETY: allocated by `sws_alloc_context`, freed once.
+        unsafe { ffi::sws_free_context(&raw mut self.0) };
+    }
+}
+
+// SAFETY: the context is used by one thread at a time (through `&mut`).
+unsafe impl Send for Scaler {}
 
 /// Test helper: tightly packed RGB8.
 #[cfg(test)]

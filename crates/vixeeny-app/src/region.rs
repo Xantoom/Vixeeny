@@ -122,6 +122,7 @@ pub fn output_command(
                 Ok(()) => true,
                 Err(e) => {
                     tracing::error!("clipboard: {e:#}");
+                    tell_failure(config, &e);
                     false
                 }
             })
@@ -152,12 +153,19 @@ pub fn output_command(
                 }
                 Err(e) => {
                     tracing::error!("save failed: {e:#}");
+                    tell_failure(config, &e);
                     false
                 }
             })
         }
         Command::Scroll => None,
     }
+}
+
+/// A card saying why the picture was not kept: the editor comes back without it.
+fn tell_failure(config: &Config, e: &anyhow::Error) {
+    use crate::toast::{Failed, Toast, notify};
+    notify(config, &Toast::Failed(Failed::Capture, format!("{e:#}")));
 }
 
 /// Reads the text of `img` and puts it on the clipboard; a card says what was copied, or why nothing was.
@@ -709,7 +717,7 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
             zone.w.round() as u32,
             zone.h.round() as u32,
         );
-        return crate::scroll::run(&config_for_scroll, scroll_snapshot, zone, scale);
+        return crate::scroll::run(&config_for_scroll, scroll_snapshot, zone);
     }
     Ok(())
 }
@@ -738,6 +746,12 @@ fn place_picture(picture: (u32, u32), bounds: &Rect, monitor: &Rect) -> Option<(
 /// `--edit <file>`: the picture in the editor, over a dark backdrop, the zone around it: crop it, annotate it, then
 /// copy it or save it as a new capture (the file itself is kept).
 pub fn run_edit(config: Config, args: &[String]) -> anyhow::Result<()> {
+    // Started from a card, it has no window to tell a failure in but a card of its own.
+    let telling = config.clone();
+    edit_picture(config, args).inspect_err(|e| tell_failure(&telling, e))
+}
+
+fn edit_picture(config: Config, args: &[String]) -> anyhow::Result<()> {
     let path = PathBuf::from(args.first().context("usage: --edit <file>")?);
     let bytes = std::fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
     let picture = vixeeny_image::decode(&bytes)?;

@@ -734,6 +734,16 @@ export component ColourField inherits Rectangle {
         picker.show();
     }
     function send() { root.picked(root.editing, Colors.hsv(root.hue, root.sat, root.val)); }
+    // A colour changed from elsewhere (its code typed): the square and the bar take it. One that is what they show
+    // (picked here) leaves them, the hue of a grey with them.
+    changed colours => {
+        if root.editing < root.colours.length && root.colours[root.editing] != Colors.hsv(root.hue, root.sat, root.val) {
+            let h = root.colours[root.editing].to-hsv();
+            root.hue = h.hue;
+            root.sat = h.saturation;
+            root.val = h.value;
+        }
+    }
     function take(c: color) {
         let h = c.to-hsv();
         root.hue = h.hue;

@@ -286,20 +286,44 @@ fn enlarged(mut small: Vec<[f32; 3]>, layout: &Layout) -> Linear {
 
 /// Three box blurs of `radius` in each direction: close to a Gaussian. Edges repeat.
 fn blur_plane(plane: &mut [f32], w: usize, h: usize, radius: usize) {
+    if w == 0 || h == 0 || radius == 0 {
+        return;
+    }
     let mut line = Vec::new();
+    let (mut source, mut sums) = (Vec::new(), Vec::new());
     for _ in 0..3 {
         for y in 0..h {
             box_line(&mut plane[y * w..(y + 1) * w], radius, &mut line);
         }
-        let mut column = vec![0.0; h];
-        for x in 0..w {
-            for y in 0..h {
-                column[y] = plane[y * w + x];
-            }
-            box_line(&mut column, radius, &mut line);
-            for y in 0..h {
-                plane[y * w + x] = column[y];
-            }
+        box_columns(plane, w, h, radius, &mut source, &mut sums);
+    }
+}
+
+/// One box blur down every column at once: a running sum per column, kept row by row (the rows are read in order,
+/// not a column at a time across the whole plane).
+fn box_columns(plane: &mut [f32], w: usize, h: usize, radius: usize, source: &mut Vec<f32>, sums: &mut Vec<f32>) {
+    source.clear();
+    source.extend_from_slice(plane);
+    let row = |y: isize| {
+        let y = y.clamp(0, h as isize - 1) as usize;
+        &source[y * w..(y + 1) * w]
+    };
+    let r = radius as isize;
+    sums.clear();
+    sums.resize(w, 0.0);
+    for k in -r..=r {
+        for (s, v) in sums.iter_mut().zip(row(k)) {
+            *s += v;
+        }
+    }
+    let inverse = 1.0 / (2 * radius + 1) as f32;
+    for y in 0..h {
+        for (out, s) in plane[y * w..(y + 1) * w].iter_mut().zip(sums.iter()) {
+            *out = s * inverse;
+        }
+        let y = y as isize;
+        for ((s, add), sub) in sums.iter_mut().zip(row(y + r + 1)).zip(row(y - r)) {
+            *s += add - sub;
         }
     }
 }
@@ -312,14 +336,13 @@ fn box_line(values: &mut [f32], radius: usize, scratch: &mut Vec<f32>) {
     }
     scratch.clear();
     scratch.extend_from_slice(values);
-    let at = |i: isize| scratch[i.clamp(0, n as isize - 1) as usize];
-    let r = radius as isize;
-    let mut sum: f32 = (-r..=r).map(at).sum();
-    let width = (2 * radius + 1) as f32;
+    // Past an edge, the edge value (the indices are held in, not tested).
+    let last = n - 1;
+    let mut sum: f32 = (0..=2 * radius).map(|k| scratch[k.saturating_sub(radius).min(last)]).sum();
+    let inverse = 1.0 / (2 * radius + 1) as f32;
     for (i, v) in values.iter_mut().enumerate() {
-        *v = sum / width;
-        let i = i as isize;
-        sum += at(i + r + 1) - at(i - r);
+        *v = sum * inverse;
+        sum += scratch[(i + radius + 1).min(last)] - scratch[i.saturating_sub(radius)];
     }
 }
 

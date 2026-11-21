@@ -300,6 +300,8 @@ impl Session {
     /// `None` = adjust the zone (move, resize). Choosing a tool before a zone exists is allowed and takes effect once
     /// the zone is drawn.
     pub fn choose_tool(&mut self, tool: Option<Tool>) {
+        // A gesture running ends with the tool it began with.
+        self.interrupt();
         self.text_input = None;
         if tool == Some(Tool::Eyedropper) && self.tool != tool {
             self.before_eyedropper = self.tool;
@@ -410,9 +412,9 @@ impl Session {
                     }
                     // The colour is taken: back to the tool it is for.
                     Outcome::Picked(_) => {
+                        self.target = None;
                         let back = self.before_eyedropper.take();
                         self.choose_tool(back);
-                        self.target = None;
                     }
                     Outcome::Nothing => {}
                 }
@@ -526,6 +528,8 @@ impl Session {
 
     /// Takes the whole image as the zone.
     pub fn select_all(&mut self) {
+        // A zone being drawn would take its place once released.
+        self.interrupt();
         self.selection.select_all();
     }
 

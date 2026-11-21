@@ -267,10 +267,12 @@ fn capture_loop(
     }
 }
 
-pub fn run(config: &Config, snapshot: Snapshot, zone: PhysicalRect, scale: f32) -> anyhow::Result<()> {
+pub fn run(config: &Config, snapshot: Snapshot, zone: PhysicalRect) -> anyhow::Result<()> {
     let lang = crate::lang(&config.general.language);
     let monitor =
         vixeeny_platform::monitor_for_rect(&snapshot.monitors, &zone).context("no monitor for the zone")?.clone();
+    // The panel and the editor after it are on the zone's monitor: its scale, not the one the editor began on.
+    let scale = monitor.scale_factor() as f32;
     // The zone, relative to its monitor and clipped to it.
     let x0 = i64::from(zone.x).max(i64::from(monitor.rect.x));
     let y0 = i64::from(zone.y).max(i64::from(monitor.rect.y));

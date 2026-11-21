@@ -315,7 +315,7 @@ impl Editor {
         let Some(id) = self.selection else { return };
         if let Some(old) = self.doc.get(id).cloned() {
             let new = old.translated(dx, dy);
-            self.history.commit(&mut self.doc, Edit::Replace { id, old, new });
+            self.history.nudge(&mut self.doc, id, old, new);
         }
     }
 
@@ -500,6 +500,31 @@ mod tests {
         ed.add_text(p(20.0, 20.0), "Hello").unwrap();
         let Annotation::Text { text, .. } = only(&ed) else { panic!() };
         assert_eq!(text, "Hello");
+    }
+
+    #[test]
+    fn presses_of_the_arrow_keys_in_a_row_are_one_step_to_undo() {
+        let mut ed = Editor::new(200, 100);
+        ed.tool = Tool::Rect;
+        drag(&mut ed, p(10.0, 10.0), p(60.0, 60.0), NO);
+        for _ in 0..20 {
+            ed.nudge(1.0, 0.0);
+        }
+        let Annotation::Rect { rect, .. } = only(&ed) else { panic!() };
+        assert_eq!(rect.x, 30.0);
+        ed.undo();
+        let Annotation::Rect { rect, .. } = only(&ed) else { panic!() };
+        assert_eq!(rect.x, 10.0);
+        ed.redo();
+        let Annotation::Rect { rect, .. } = only(&ed) else { panic!() };
+        assert_eq!(rect.x, 30.0);
+        // After an undo, a press is a step of its own.
+        ed.undo();
+        ed.redo();
+        ed.nudge(0.0, 1.0);
+        ed.undo();
+        let Annotation::Rect { rect, .. } = only(&ed) else { panic!() };
+        assert_eq!((rect.x, rect.y), (30.0, 10.0));
     }
 
     #[test]

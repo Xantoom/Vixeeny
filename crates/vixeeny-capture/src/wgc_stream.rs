@@ -137,7 +137,6 @@ struct Shared {
     notify: Option<Notify>,
     /// Where the newest frame waits (see [`VideoStream::start_held`]).
     held: Option<Held>,
-    last_size: Mutex<SizeInt32>,
     buffers: BufferPool,
     /// CPU frames read but not queued: the consumer was behind.
     dropped: AtomicU64,
@@ -199,8 +198,9 @@ struct Session {
     item: GraphicsCaptureItem,
     arrived: i64,
     closed: i64,
-    /// The item closed while the queue was full: its `Closed` could not be queued, [`VideoStream::recv`] tells it.
-    lost_close: Arc<AtomicBool>,
+    /// The item closed: [`VideoStream::recv`] tells it while this session is the current one. Kept with the session, a
+    /// close of the one before [`VideoStream::retarget`] is never told.
+    closed_item: Arc<AtomicBool>,
 }
 
 impl Drop for Session {
@@ -265,20 +265,18 @@ fn open_session(
     settings: &Settings,
 ) -> Result<Session, CaptureError> {
     let size = item.Size().map_err(os("item size"))?;
-    if let Ok(mut last) = shared.last_size.lock() {
-        *last = size;
-    }
     let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(&shared.winrt_device, pixel_format(shared.hdr), 2, size)
         .map_err(os("CreateFreeThreaded"))?;
-    let arrived = pool.FrameArrived(&frame_handler(Arc::clone(shared), tx.clone())).map_err(os("FrameArrived"))?;
-    let closing = tx.clone();
-    let lost_close = Arc::new(AtomicBool::new(false));
-    let lost = Arc::clone(&lost_close);
+    let arrived =
+        pool.FrameArrived(&frame_handler(Arc::clone(shared), tx.clone(), size)).map_err(os("FrameArrived"))?;
+    let waking = tx.clone();
+    let closed_item = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&closed_item);
     let closed = item
         .Closed(&TypedEventHandler::new(move |_, _| {
-            if closing.try_send(Err(CaptureError::Closed)).is_err() {
-                lost.store(true, Ordering::Release);
-            }
+            flag.store(true, Ordering::Release);
+            // A full queue wakes the receiver anyway.
+            let _ = waking.try_send(Ok(None));
             Ok(())
         }))
         .map_err(os("Closed"))?;
@@ -289,7 +287,7 @@ fn open_session(
         let _ = session.SetMinUpdateInterval(windows::Foundation::TimeSpan { Duration: ticks });
     }
     session.StartCapture().map_err(os("StartCapture"))?;
-    Ok(Session { pool, session, item, arrived, closed, lost_close })
+    Ok(Session { pool, session, item, arrived, closed, closed_item })
 }
 
 impl VideoStream {
@@ -366,7 +364,6 @@ impl VideoStream {
             return Err(CaptureError::Os("Windows Graphics Capture is not available".into()));
         }
         let (item, region) = item_of(target)?;
-        let size = item.Size().map_err(os("item size"))?;
 
         let mut held = None;
         let (device, context, sink) = match source {
@@ -397,7 +394,6 @@ impl VideoStream {
             paused: AtomicBool::new(false),
             notify,
             held: held.clone(),
-            last_size: Mutex::new(size),
             buffers: buffers.clone(),
             dropped: AtomicU64::new(0),
         });
@@ -445,11 +441,11 @@ impl VideoStream {
     /// woken.
     pub fn recv(&self, timeout: Duration) -> Result<Option<CapturedFrame>, CaptureError> {
         match self.rx.recv_timeout(timeout) {
-            Ok(frame) => frame,
-            Err(RecvTimeoutError::Timeout) => {
-                let lost = self.session.lock().is_ok_and(|s| s.lost_close.swap(false, Ordering::AcqRel));
-                if lost { Err(CaptureError::Closed) } else { Ok(None) }
+            Ok(Ok(None)) | Err(RecvTimeoutError::Timeout) => {
+                let closed = self.session.lock().is_ok_and(|s| s.closed_item.swap(false, Ordering::AcqRel));
+                if closed { Err(CaptureError::Closed) } else { Ok(None) }
             }
+            Ok(delivery) => delivery,
             Err(RecvTimeoutError::Disconnected) => Err(CaptureError::Os("capture stopped".into())),
         }
     }
@@ -458,7 +454,10 @@ impl VideoStream {
 fn frame_handler(
     shared: Arc<Shared>,
     tx: SyncSender<Delivery>,
+    size: SizeInt32,
 ) -> TypedEventHandler<Direct3D11CaptureFramePool, IInspectable> {
+    // The size of this session's pool: each session has its own, the one before a retarget keeps running a moment.
+    let last_size = Mutex::new(size);
     TypedEventHandler::new(move |pool: windows::core::Ref<'_, Direct3D11CaptureFramePool>, _| {
         let Some(pool) = pool.as_ref() else {
             return Ok(());
@@ -472,7 +471,7 @@ fn frame_handler(
         let content = frame.ContentSize()?;
         // A window that was resized needs a pool of the new size, made once this frame (of the old size) is handed
         // over.
-        let resized = shared.last_size.lock().is_ok_and(|mut last| {
+        let resized = last_size.lock().is_ok_and(|mut last| {
             let changed = (last.Width, last.Height) != (content.Width, content.Height);
             *last = content;
             changed

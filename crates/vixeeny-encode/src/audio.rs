@@ -220,7 +220,7 @@ impl AudioEncoder {
             self.encode(&rest, &mut packets)?;
         }
         self.encoder.send_eof()?;
-        self.receive(&mut packets);
+        self.receive(&mut packets)?;
         Ok(packets)
     }
 
@@ -235,15 +235,15 @@ impl AudioEncoder {
         converted.set_pts(Some(self.next_pts));
         self.next_pts += frames as i64;
         self.encoder.send_frame(&converted)?;
-        self.receive(out);
-        Ok(())
+        self.receive(out)
     }
 
-    fn receive(&mut self, out: &mut Vec<Packet>) {
+    fn receive(&mut self, out: &mut Vec<Packet>) -> Result<(), RecordError> {
         let mut packet = Packet::empty();
-        while self.encoder.receive_packet(&mut packet).is_ok() {
+        while crate::recorder::received(self.encoder.receive_packet(&mut packet))? {
             out.push(std::mem::replace(&mut packet, Packet::empty()));
         }
+        Ok(())
     }
 }
 

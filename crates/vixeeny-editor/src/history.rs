@@ -64,6 +64,8 @@ pub struct History {
     redo: Vec<Edit>,
     /// Counts the changes made to the document: equal revisions, same annotations.
     revision: u64,
+    /// The last edit was a nudge: the next nudge of the same annotation joins it.
+    nudging: bool,
 }
 
 impl History {
@@ -73,6 +75,25 @@ impl History {
         self.revision += 1;
         self.undo.push(edit);
         self.redo.clear();
+        self.nudging = false;
+    }
+
+    /// Moves annotation `id` from `old` to `new` (the arrow keys): presses in a row are one step to undo, one copy of
+    /// the annotation, however long a key is held.
+    pub(crate) fn nudge(&mut self, doc: &mut Document, id: AnnotationId, old: Annotation, new: Annotation) {
+        if self.nudging
+            && let Some(Edit::Replace { id: last, new: moved, .. }) = self.undo.last_mut()
+            && *last == id
+        {
+            if let Some(item) = doc.items.iter_mut().find(|i| i.id == id) {
+                item.annotation = new.clone();
+            }
+            *moved = new;
+            self.revision += 1;
+            return;
+        }
+        self.commit(doc, Edit::Replace { id, old, new });
+        self.nudging = true;
     }
 
     /// Returns the edit undone, if any.
@@ -88,6 +109,7 @@ impl History {
         edit.apply_inverse(doc);
         self.revision += 1;
         self.redo.push(edit);
+        self.nudging = false;
         true
     }
 
@@ -102,6 +124,7 @@ impl History {
         edit.apply(doc);
         self.revision += 1;
         self.undo.push(edit);
+        self.nudging = false;
         true
     }
 
