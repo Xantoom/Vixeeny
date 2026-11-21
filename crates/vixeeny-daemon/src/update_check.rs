@@ -1,18 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The update check. The network client lives in the app: the daemon only starts `vixeeny-app --update background` (a
-//! windowed program, so nothing shows) a moment after its own start and after each wake from sleep, which Windows
-//! reports (nothing is timed in between); the app checks and downloads, or tells the user. At its start the daemon has
+//! windowed program, so nothing shows) a moment after its own start, after each wake from sleep, which Windows
+//! reports, and once a day for a computer that never sleeps (one timed wait, nothing in between); the app checks and downloads, or tells the user. At its start the daemon has
 //! the app install a version downloaded before (`--update pending`).
 
 use std::path::PathBuf;
 use std::sync::OnceLock;
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::time::Duration;
 
 use vixeeny_common::config::Config;
 
 /// The check waits this long after the start or the wake, so it never competes with it (and the network is back).
 const SETTLE: Duration = Duration::from_secs(90);
+
+/// A computer left on for days still checks once a day.
+const DAILY: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// Tells the checking thread that the computer woke up.
 static WOKE: OnceLock<Sender<()>> = OnceLock::new();
@@ -60,7 +63,8 @@ fn checks(app: &std::path::Path, config_path: Option<&std::path::Path>, wakes: &
                 Err(e) => tracing::warn!("cannot start the update check: {e}"),
             }
         }
-        if wakes.recv().is_err() {
+        // The day counts awake time only; a wake from sleep checks anyway.
+        if let Err(RecvTimeoutError::Disconnected) = wakes.recv_timeout(DAILY) {
             return;
         }
     }
