@@ -397,9 +397,9 @@ pub fn system_prefers_dark() -> bool {
 const SNIPPING_KEY: &str = r"Control Panel\Keyboard";
 const SNIPPING_VALUE: &str = "PrintScreenKeyForSnippingEnabled";
 
-/// Whether Windows 11 opens its Snipping Tool with the Print Screen key (Settings → Accessibility → Keyboard): the key
-/// alone then never reaches another program's shortcut. Windows 11 does it by default since 22H2 (build 22621): a
-/// value never written means on there, off before.
+/// Whether Windows 11 opens its Snipping Tool with the Print Screen key (Settings → Accessibility → Keyboard): a
+/// program's shortcut of the key alone still fires, and the tool opens with it. Windows 11 does it by default since
+/// 22H2 (build 22621): a value never written means on there, off before.
 pub fn print_screen_opens_snipping_tool() -> bool {
     use windows::Win32::System::Registry::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
     match crate::registry::dword(HKEY_CURRENT_USER, SNIPPING_KEY, SNIPPING_VALUE) {
@@ -414,8 +414,9 @@ pub fn print_screen_opens_snipping_tool() -> bool {
     }
 }
 
-/// Gives the Print Screen key back to programs' shortcuts, as turning off the switch in Windows' settings does. Windows
-/// reads the value at each press: the next one already goes to the shortcut, without signing out.
+/// Stops Windows opening its Snipping Tool with the Print Screen key, as turning off the switch in Windows' settings
+/// does: the key then only does what its shortcut does. Windows reads the value at each press: the next one already
+/// leaves the tool closed, without signing out.
 pub fn take_print_screen() -> Result<()> {
     use windows::Win32::System::Registry::HKEY_CURRENT_USER;
     crate::registry::set_dword(HKEY_CURRENT_USER, SNIPPING_KEY, SNIPPING_VALUE, 0).map_err(PlatformError::Os)
@@ -528,9 +529,9 @@ fn monitor_of(hwnd: HWND) -> Option<RECT> {
     known.then_some(info.rcMonitor)
 }
 
-/// Whether a capture of `window` shows what its screen does. A window filling its screen whose drawing area does not
-/// (a game left with a frame of the wrong size by its changes of resolution) is shown whole on the screen, but
-/// composed by Windows, as a window capture takes it, shifted and cut. `true` for a window among others, or one gone.
+/// Whether a capture of `window` shows what its screen does. A window filling its screen whose drawing area does not (a
+/// game left with a frame of the wrong size by its changes of resolution) is shown whole on the screen, but composed by
+/// Windows, as a window capture takes it, shifted and cut. `true` for a window among others, or one gone.
 pub fn captured_as_seen(window: WindowId) -> bool {
     use windows::Win32::Graphics::Gdi::ClientToScreen;
     use windows::Win32::UI::WindowsAndMessaging::GetClientRect;

@@ -413,6 +413,8 @@ keys! {
     SetShowOwnWindows => "Include Vixeeny's notifications and bars", "Inclure les notifications et barres de Vixeeny";
     ToastSettingsNotSaved => "Settings could not be saved", "Enregistrement des réglages impossible";
     ScrollLost => "Too fast: scroll back a little", "Trop rapide : remontez un peu";
+    ShortcutSnipping => "Windows opens its Snipping Tool with this key too",
+        "Windows ouvre aussi son Outil Capture d'écran avec cette touche";
 }
 
 impl Lang {

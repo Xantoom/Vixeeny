@@ -173,7 +173,7 @@ struct State {
     audio_source: RefCell<Option<AudioFn>>,
     display: Cell<Display>,
     admin: Cell<Admin>,
-    /// Windows opens its Snipping Tool with the Print Screen key alone: that shortcut is Windows'.
+    /// Windows opens its Snipping Tool with the Print Screen key alone, as well as the shortcut.
     print_screen_kept: Cell<bool>,
     /// The shortcut being recorded: `(row, slot)`.
     recording: Cell<Option<(usize, usize)>>,
@@ -838,8 +838,8 @@ impl SettingsPanel {
         self.refresh();
     }
 
-    /// Where Vixeeny is with the administrator's rights: the general page offers them.
-    /// Whether Windows keeps the Print Screen key alone for its Snipping Tool.
+    /// Where Vixeeny is with the administrator's rights: the general page offers them. Whether Windows opens its
+    /// Snipping Tool with the Print Screen key alone.
     pub fn set_print_screen_kept(&self, kept: bool) {
         self.state.print_screen_kept.set(kept);
         if self.current_section() == Section::Shortcuts {
@@ -1151,9 +1151,9 @@ impl SettingsPanel {
             .map(|(i, (action, slots))| {
                 // Kept by Windows, or refused by the OS when the daemon registered it.
                 let print_screen = self.state.print_screen_kept.get();
-                let windows = |text: &str| {
-                    shortcuts::kept_by_windows(text) || print_screen && shortcuts::same(text, "PrintScreen")
-                };
+                let windows = |text: &str| shortcuts::kept_by_windows(text);
+                // It still reaches Vixeeny, but opens Windows' tool at the same time.
+                let snipping = |text: &str| print_screen && shortcuts::same(text, "PrintScreen");
                 let other = |text: &str| taken.iter().any(|t| shortcuts::same(t, text));
                 let keys: Vec<ShortcutKey> = slots
                     .iter()
@@ -1164,6 +1164,8 @@ impl SettingsPanel {
                         slot: slot as i32,
                         tip: if windows(text) {
                             tr(Key::ShortcutWindows, lang)
+                        } else if snipping(text) {
+                            tr(Key::ShortcutSnipping, lang)
                         } else if other(text) {
                             tr(Key::ShortcutTaken, lang)
                         } else {

@@ -181,8 +181,8 @@ var
   PrintScreenBox: TNewCheckBox;
 
 // Windows 11 opens its Snipping Tool with the Print Screen key (Settings, Accessibility,
-// Keyboard): a shortcut of Print Screen alone never fires. Since build 22621 it does by
-// default, the value then never written.
+// Keyboard), at the same time as a program's shortcut of Print Screen alone. Since build
+// 22621 it does by default, the value then never written.
 function SnippingKeepsPrintScreen(): Boolean;
 var
   On: Cardinal;
