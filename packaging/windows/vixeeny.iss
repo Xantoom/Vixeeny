@@ -1,4 +1,4 @@
-; Vixeeny installer (Inno Setup 6). Built by the release workflow:
+; Vixeeny installer (Inno Setup 7), itself a 64-bit program. Built by the release workflow:
 ;   iscc /DAppVersion=0.5.0 /DStageDir=dist\stage /DOutDir=dist packaging\windows\vixeeny.iss
 ;   (add /ALLUSERS or /CURRENTUSER to skip the choice below).
 ; For all users (in Program Files, with the administrator's rights; Vixeeny can then have them
@@ -6,8 +6,8 @@
 ; The pages: the install mode, then one page with the folder, the start with Windows and the
 ; updates (not shown again on an update), the progress and the end. The language is the one of Windows.
 
-#if Ver < EncodeVer(6, 7, 0)
-  #error Inno Setup 6.7 or later is needed (the windows11 style, dark mode, hidebevels)
+#if Ver < EncodeVer(7, 1, 1)
+  #error Inno Setup 7.1.1 or later is needed (the 64-bit installer, the windows11 style, dark mode, hidebevels)
 #endif
 
 #ifndef AppVersion
@@ -39,6 +39,7 @@ PrivilegesRequiredOverridesAllowed=dialog commandline
 UsePreviousPrivileges=no
 ; The autostart entry and the settings are the user's own, also in an install for all users.
 UsedUserAreasWarning=no
+SetupArchitecture=x64
 ArchitecturesInstallIn64BitMode=x64compatible
 ArchitecturesAllowed=x64compatible
 ; Windows 10 1903: the first with the screen capture Vixeeny uses.

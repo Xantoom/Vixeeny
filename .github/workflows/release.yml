@@ -55,11 +55,8 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           native: true
-      - name: Inno Setup
-        run: |
-          # The image usually has it.
-          if (-not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) { choco install innosetup --version 6.7.1 -y --no-progress }
-          "C:\Program Files (x86)\Inno Setup 6" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - uses: ./.github/actions/inno-setup
+        if: needs.version.outputs.build == 'true'
       # One invocation: the crates the programs share are built once, side by side with the rest.
       - name: Build the programs
         run: cargo build --release -p vixeeny-daemon -p xtask -p vixeeny-app --features vixeeny-app/native-codecs

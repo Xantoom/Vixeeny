@@ -71,14 +71,13 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/inno-setup
       - name: Compile the installer script
         run: |
-          # The image usually has Inno Setup.
-          if (-not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) { choco install innosetup --version 6.7.1 -y --no-progress }
           New-Item -ItemType Directory dist\stage | Out-Null
           Copy-Item LICENSE dist\stage
           Set-Content dist\stage\files.txt "LICENSE"
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /Q "/DStageDir=$PWD\dist\stage" "/DOutDir=$PWD\dist" packaging\windows\vixeeny.iss
+          iscc /Q "/DStageDir=$PWD\dist\stage" "/DOutDir=$PWD\dist" packaging\windows\vixeeny.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   deny:
     # cargo-deny runs in a Linux container; it only reads the Windows dependency graph.

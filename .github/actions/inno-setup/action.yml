@@ -1,0 +1,17 @@
+name: Inno Setup
+description: >-
+  Inno Setup 7.1.1 from its GitHub release, checked against its SHA-256, with ISCC on the PATH. The runner images
+  and Chocolatey only have Inno Setup 6.
+runs:
+  using: composite
+  steps:
+    - shell: pwsh
+      run: |
+        $setup = "$env:RUNNER_TEMP\innosetup-7.1.1-x64.exe"
+        $dir = "$env:RUNNER_TEMP\inno-setup"
+        Invoke-WebRequest https://github.com/jrsoftware/issrc/releases/download/is-7_1_1/innosetup-7.1.1-x64.exe -OutFile $setup
+        $hash = (Get-FileHash $setup -Algorithm SHA256).Hash
+        if ($hash -ne '8A5A6711C3766A6E5FB74F280BA0E3551E719CE94538D901FDBD1F8F9920B3F0') { throw "Inno Setup: unexpected SHA-256 $hash" }
+        Start-Process $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/CURRENTUSER', "/DIR=$dir" -Wait
+        if (-not (Test-Path "$dir\ISCC.exe")) { throw "Inno Setup: ISCC.exe missing in $dir" }
+        $dir | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
