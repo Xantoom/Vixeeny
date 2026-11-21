@@ -11,12 +11,12 @@
 # runs this (cached until this script changes) and hands the zip to the Windows jobs.
 set -euo pipefail
 
-# BtbN's win64-gpl-shared-9.0 of 2026-10-30, copied to this repository's packages by
+# BtbN's win64-gpl-shared-9.0 of 2026-11-21 (SVT-AV1 4.3, x265 4.3, libaom 3.15.2, libvpx 1.17, dav1d 1.5.4, the
+# AMF 1.5.3 and oneVPL 2.17 headers), copied to this repository's packages by
 # `.github/workflows/ffmpeg-image.yml` (BtbN keeps only its latest build).
-IMAGE="ghcr.io/xantoom/vixeeny-ffmpeg-build@sha256:17ca6a3a4332acf1a9eda216457fc127ad24234ab244deeb70bb812417e9929e"
-# release/9.0 after 9.0.2 (n9.0.2-33-g4cf298e66a): its fixes, among them D3D11VA decoding on
-# several threads and the AAC decoder.
-export FFMPEG_COMMIT="4cf298e66a20dd90e8b7c62333ab5812596835ec"
+IMAGE="ghcr.io/xantoom/vixeeny-ffmpeg-build@sha256:49e23d45202a3399249129ebeb42bc2afd91de642e8d9cea27de43b3ac9051d7"
+# FFmpeg 9.1 "Gauss" (tag n9.1, 2026-11-20). BtbN has no 9.1 image yet; its 9.0 one holds the same libraries.
+export FFMPEG_COMMIT="74e4393595cf2b5857f0da925c4e0dd74ea306e5"
 # The NVENC headers of SDK 13.0 (driver 570+) instead of the image's 13.1, which asks for driver
 # 610+ while NVIDIA stopped at 580 for the GTX 900 and 10. FFmpeg uses 13.1 only for hierarchical
 # B-frames in AV1 and a timecode detail, neither of which Vixeeny sets.
