@@ -38,6 +38,9 @@ fn agent() -> ureq::Agent {
             TlsConfig::builder().provider(TlsProvider::NativeTls).root_certs(RootCerts::PlatformVerifier).build(),
         )
         .timeout_connect(Some(Duration::from_secs(15)))
+        // A server that takes the request and never answers must not hold the check or the download forever.
+        .timeout_send_request(Some(Duration::from_secs(30)))
+        .timeout_recv_response(Some(Duration::from_secs(30)))
         .timeout_recv_body(Some(Duration::from_secs(60)))
         .user_agent(concat!("Vixeeny/", env!("CARGO_PKG_VERSION")))
         .build()
@@ -76,8 +79,10 @@ struct Part {
 
 impl Part {
     fn open(path: &Path) -> std::io::Result<Self> {
-        let file = std::fs::OpenOptions::new().create(true).append(true).open(path)?;
-        let len = file.metadata()?.len();
+        // Written, not appended: Windows opens a file for appending without the right to truncate it, which
+        // `restart` needs.
+        let mut file = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(path)?;
+        let len = std::io::Seek::seek(&mut file, std::io::SeekFrom::End(0))?;
         Ok(Self { file, len })
     }
 }
@@ -89,6 +94,7 @@ impl Sink for Part {
 
     fn restart(&mut self) -> std::io::Result<()> {
         self.file.set_len(0)?;
+        std::io::Seek::seek(&mut self.file, std::io::SeekFrom::Start(0))?;
         self.len = 0;
         Ok(())
     }
@@ -383,6 +389,12 @@ pub fn download_setup(progress: &mut dyn FnMut(u64, u64)) -> anyhow::Result<Setu
     let agent = agent();
     let json = get(&agent, &check_url(REPOSITORY), 4 << 20)?;
     let release = Release::parse(std::str::from_utf8(&json)?)?.context("no version is published")?;
+    // This version or a newer one: an older installer, signed all the same, would take Vixeeny back.
+    anyhow::ensure!(
+        release.version == CURRENT || is_newer(CURRENT, &release.version),
+        "the latest version ({}) is older than this one",
+        release.version
+    );
     let (setup, signature) = release.setup().context("the latest version has no signed installer")?;
     let folder = setup_dir();
     let _turn = wait_turn(&folder.with_extension("turn"))?;
@@ -448,7 +460,9 @@ pub fn install(reopen: Option<ControlRequest>) -> anyhow::Result<()> {
     match &result {
         Ok(()) => {
             log("update done");
-            state = State { checked_at: state.checked_at, ..State::default() };
+            // Read after the new version started: what it may have written already (the version that ran last, the
+            // release of what changed) stays; only the update's own traces go.
+            state = State { ready: None, error: None, error_version: None, failed: None, ..state };
         }
         Err(e) => {
             log(&format!("update failed: {e:#}"));

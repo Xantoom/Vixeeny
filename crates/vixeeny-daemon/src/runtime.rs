@@ -325,6 +325,13 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
             Event::AppExited { id, .. } if self.frozen_for == Some(FrozenFor::Spawn(id)) => {
                 self.thaw();
             }
+            // Screens frozen while this app was starting, for an action it was to get once ready: the action goes with
+            // it, so do they.
+            Event::AppExited { id, .. }
+                if self.frozen.is_some() && self.frozen_for.is_none() && self.core.is_current(id) =>
+            {
+                self.thaw();
+            }
             _ => {}
         }
     }
@@ -725,6 +732,25 @@ mod tests {
         tx.send(Event::AppExited { id: 2, success: false });
         rt.pump();
         assert_eq!(*freezer.log.lock().unwrap(), vec!["freeze", "thaw"]);
+    }
+
+    #[test]
+    fn screens_frozen_for_a_starting_app_go_if_it_dies_before_it_is_ready() {
+        let (rt, tx, _, spawned) = runtime(false, Config::default());
+        let freezer = FakeFreezer::default();
+        let mut rt = rt.with_freezer(Box::new(freezer.clone()));
+        tx.send(Event::Action(ActionId::OpenSettings));
+        rt.pump();
+        // A zone capture while that app starts: frozen now, the action queued until it is ready.
+        tx.send(Event::Action(ActionId::CaptureRegion));
+        rt.pump();
+        assert_eq!(*freezer.log.lock().unwrap(), vec!["freeze"]);
+        assert_eq!(spawned.lock().unwrap().len(), 1);
+        assert!(rt.frozen.is_some());
+        tx.send(Event::AppExited { id: 1, success: false });
+        rt.pump();
+        assert_eq!(*freezer.log.lock().unwrap(), vec!["freeze", "thaw"]);
+        assert!(rt.frozen.is_none());
     }
 
     #[test]

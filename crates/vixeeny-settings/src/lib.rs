@@ -16,7 +16,7 @@ use vixeeny_encode::probe::ProbeResult;
 
 pub use encoders::{EncoderInfo, param_label};
 pub use machine::Machine;
-pub use pages::REPLAY_PREFIX;
+pub use pages::{REPLAY_PREFIX, main_screen};
 
 /// The sections of the settings window, in the order of the sidebar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

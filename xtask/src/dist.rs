@@ -164,6 +164,8 @@ pub fn dist(args: &[String]) -> Result<()> {
     let _ = std::fs::remove_dir_all(&stage);
     std::fs::create_dir_all(&stage)?;
     let release = root.join("target/release");
+    // The FFmpeg libraries the programs load when they first need them: each must be in the package.
+    let mut needed = Vec::new();
     for program in PROGRAMS {
         std::fs::copy(release.join(program), stage.join(program))
             .with_context(|| format!("{program} is missing: run `cargo build --release` first"))?;
@@ -172,17 +174,25 @@ pub fn dist(args: &[String]) -> Result<()> {
         if let Some(dll) = imports.at_start.iter().find(|d| is_ffmpeg(d)) {
             bail!("{program} loads {dll} when it starts: FFmpeg must be delay-loaded (FFMPEG_DIR)");
         }
+        needed.extend(imports.delayed.iter().filter(|d| is_ffmpeg(d)).map(|d| d.to_ascii_lowercase()));
     }
+    // The programs load FFmpeg when they first need it: without its libraries, the package would install and then
+    // fail at the first recording.
     let ffmpeg_bin = root.join("native/build/work/ffmpeg-prebuilt/bin");
-    if let Ok(entries) = std::fs::read_dir(&ffmpeg_bin) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
-            // libavdevice (cameras, screen grabbers) is used by no program of Vixeeny.
-            if name.ends_with(".dll") && !name.starts_with("avdevice") {
-                std::fs::copy(&path, stage.join(entry.file_name()))?;
-            }
+    let entries = std::fs::read_dir(&ffmpeg_bin)
+        .with_context(|| format!("no FFmpeg in {} (`cargo xtask build-native ffmpeg`)", ffmpeg_bin.display()))?;
+    let mut copied = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+        // libavdevice (cameras, screen grabbers) is used by no program of Vixeeny.
+        if name.ends_with(".dll") && !name.starts_with("avdevice") {
+            std::fs::copy(&path, stage.join(entry.file_name()))?;
+            copied.push(name);
         }
+    }
+    if let Some(missing) = needed.iter().find(|dll| !copied.contains(dll)) {
+        bail!("{missing} is not in {}", ffmpeg_bin.display());
     }
     std::fs::copy(root.join("LICENSE"), stage.join("LICENSE"))?;
     std::fs::write(stage.join("THIRD-PARTY-LICENSES.txt"), third_party_licenses()?)?;

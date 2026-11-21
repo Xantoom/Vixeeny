@@ -113,8 +113,12 @@ pub fn install(staged: &Path, target: &Path, backup: &Path) -> io::Result<Journa
     std::fs::create_dir_all(backup)?;
     let files = files_under(staged)?;
     // Read before the new manifest replaces it.
+    // Names compared as Windows does, without case: a file whose name only changes case is replaced, not removed and
+    // then missing.
+    let key = |p: &Path| p.to_string_lossy().to_lowercase();
+    let kept: std::collections::HashSet<String> = files.iter().map(|f| key(f)).collect();
     let removed: Vec<PathBuf> =
-        listed(target).into_iter().filter(|old| !files.contains(old) && target.join(old).is_file()).collect();
+        listed(target).into_iter().filter(|old| !kept.contains(&key(old)) && target.join(old).is_file()).collect();
     let (replaced, added) = files.iter().cloned().partition(|relative| target.join(relative).exists());
     let journal = Journal { replaced, added, removed, locked: true };
     let text = serde_json::to_string(&journal).map_err(io::Error::other)?;
@@ -138,7 +142,11 @@ pub fn install(staged: &Path, target: &Path, backup: &Path) -> io::Result<Journa
     match moved {
         Ok(()) => Ok(journal),
         Err(e) => {
-            let _ = undo(&journal, target, backup);
+            // Undone here: the journal goes with the backup, or the next start would take it for an install cut
+            // short and undo it again. What could not be put back keeps both, for that next start.
+            if undo(&journal, target, backup).is_ok() {
+                let _ = std::fs::remove_dir_all(backup);
+            }
             Err(e)
         }
     }
@@ -149,14 +157,19 @@ fn undo(journal: &Journal, target: &Path, backup: &Path) -> io::Result<()> {
     for relative in &journal.added {
         let _ = std::fs::remove_file(target.join(relative));
     }
+    // Every file is put back that can be: one held by a program does not keep the others away. The first failure is
+    // returned (the backup then stays, for another attempt).
+    let mut failure = None;
     for relative in journal.replaced.iter().chain(&journal.removed) {
         let saved = backup.join(relative);
         if saved.is_file() {
             let _ = std::fs::remove_file(target.join(relative));
-            move_file(&saved, &target.join(relative))?;
+            if let Err(e) = move_file(&saved, &target.join(relative)) {
+                failure.get_or_insert(e);
+            }
         }
     }
-    Ok(())
+    failure.map_or(Ok(()), Err)
 }
 
 /// Whether `backup` holds an install not yet known to work (or cut short): [`rollback`] undoes it, [`commit`] keeps it.
@@ -259,6 +272,20 @@ mod tests {
         assert!(install(&staged, &target, &backup).is_err());
         assert_eq!(read(&target, "aaa.txt").as_deref(), Some("old"));
         assert_eq!(read(&target, "vixeeny-daemon.exe").as_deref(), Some("old daemon"));
+        // Undone already: the next start has nothing to undo.
+        assert!(!unconfirmed(&backup));
+    }
+
+    #[test]
+    fn a_file_whose_name_only_changes_case_is_replaced() {
+        let (_dir, staged, target, backup) = setup();
+        put(&target, "Old.dll", "old library");
+        put(&target, MANIFEST, "vixeeny-daemon.exe\nOld.dll\n");
+        put(&staged, "old.dll", "new library");
+        put(&staged, MANIFEST, "vixeeny-daemon.exe\nold.dll\n");
+        let journal = install(&staged, &target, &backup).unwrap();
+        assert!(journal.removed.is_empty());
+        assert_eq!(read(&target, "old.dll").as_deref(), Some("new library"));
     }
 
     #[test]

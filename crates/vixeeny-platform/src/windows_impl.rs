@@ -754,13 +754,18 @@ pub fn on_game_windows(pid: u32, changed: impl Fn() + Send + 'static) -> Option<
     rx.recv().ok().flatten().map(|thread| GameWindows { thread })
 }
 
-/// Calls `ended` on a thread of its own when process `pid` ends (at once if it already has). `false` when no thread
-/// could be started.
+/// Calls `ended` on a thread of its own when process `pid` ends (at once if it already has). `false` when it cannot be
+/// watched: no thread, or a process that runs but may not be opened (a protected one) — `ended` is then never called.
 pub fn on_process_exit(pid: u32, ended: impl FnOnce() + Send + 'static) -> bool {
+    use windows::Win32::Foundation::ERROR_INVALID_PARAMETER;
     use windows::Win32::System::Threading::{INFINITE, PROCESS_SYNCHRONIZE, WaitForSingleObject};
     // SAFETY: the handle is waited on, then closed, by the thread that receives it.
-    let process = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, false, pid) }.ok();
-    let process = process.map(|h| h.0 as usize);
+    let process = match unsafe { OpenProcess(PROCESS_SYNCHRONIZE, false, pid) } {
+        Ok(handle) => Some(handle.0 as usize),
+        // No such process: it has already ended.
+        Err(e) if e.code() == ERROR_INVALID_PARAMETER.to_hresult() => None,
+        Err(_) => return false,
+    };
     std::thread::Builder::new()
         .name("process-exit".into())
         .spawn(move || {

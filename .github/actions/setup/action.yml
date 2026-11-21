@@ -64,10 +64,9 @@ runs:
       run: |
         # pkg-config-lite is one program, kept in the cache: Chocolatey takes 15 s to install it.
         $tools = "$PWD\native\build\work\tools"
-        $missing = @()
-        if (-not (Test-Path "$tools\pkg-config.exe")) { $missing += "pkgconfiglite" }
-        if ("${{ steps.native-cache.outputs.cache-hit }}" -ne "true") { $missing += "nasm" }
-        if ($missing) { choco install @missing -y --no-progress }
+        # Pinned versions: Chocolatey checks each against the checksum its package holds.
+        if (-not (Test-Path "$tools\pkg-config.exe")) { choco install pkgconfiglite --version 0.28 -y --no-progress }
+        if ("${{ steps.native-cache.outputs.cache-hit }}" -ne "true") { choco install nasm --version 3.2.0 -y --no-progress }
         if (-not (Test-Path "$tools\pkg-config.exe")) {
           New-Item -ItemType Directory -Force $tools | Out-Null
           Copy-Item (Get-ChildItem C:\ProgramData\chocolatey\lib\pkgconfiglite -Recurse -Filter pkg-config.exe)[0].FullName $tools

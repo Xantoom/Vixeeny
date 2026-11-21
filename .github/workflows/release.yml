@@ -58,7 +58,7 @@ jobs:
       - name: Inno Setup
         run: |
           # The image usually has it.
-          if (-not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+          if (-not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) { choco install innosetup --version 6.7.1 -y --no-progress }
           "C:\Program Files (x86)\Inno Setup 6" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
       # One invocation: the crates the programs share are built once, side by side with the rest.
       - name: Build the programs
@@ -127,15 +127,9 @@ jobs:
         with:
           name: vixeeny-windows-unsigned
           path: dist
-      # Built from crates.io once per version; the cache of this branch is written only by its
-      # own workflows.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        id: rsign
-        with:
-          path: ~/.cargo/bin/rsign
-          key: rsign2-0.6.7-${{ runner.os }}
+      # Built from crates.io (its pinned dependencies) by this job: a program restored from a cache
+      # that other jobs can write would hold the signing key.
       - name: Install rsign2
-        if: steps.rsign.outputs.cache-hit != 'true'
         run: cargo install rsign2 --version 0.6.7 --locked
       # The release holds the installer and the portable archive, which updates install too;
       # their signatures go in the notes, in comments the page does not show (the updater reads
@@ -152,6 +146,9 @@ jobs:
             echo "::warning::No MINISIGN_KEY secret: the files are not signed."; exit 0
           fi
           key="$RUNNER_TEMP/minisign.key"
+          # Readable by this user only, and gone however the step ends.
+          umask 077
+          trap 'rm -f "$key"' EXIT
           printf '%s\n' "$MINISIGN_KEY" > "$key"
           sign() {
             if [ -n "$MINISIGN_PASSWORD" ]; then

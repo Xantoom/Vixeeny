@@ -21,6 +21,8 @@ export FFMPEG_COMMIT="4cf298e66a20dd90e8b7c62333ab5812596835ec"
 # 610+ while NVIDIA stopped at 580 for the GTX 900 and 10. FFmpeg uses 13.1 only for hierarchical
 # B-frames in AV1 and a timecode detail, neither of which Vixeeny sets.
 export NV_HEADERS="n13.0.19.0"
+# The commit of that tag: a tag can be moved, the commit cannot.
+export NV_HEADERS_COMMIT="e844e5b26f46bb77479f063029595293aa8f812d"
 
 OUT="$(realpath -m "${1:?usage: build.sh <out.zip>}")"
 WORK="$(mktemp -d)"
@@ -44,6 +46,7 @@ cat > "$WORK/build.sh" <<'SCRIPT'
 set -xe
 cd /work
 git clone -q --depth 1 --branch $NV_HEADERS https://github.com/FFmpeg/nv-codec-headers.git nv
+test "$(git -C nv rev-parse HEAD)" = "$NV_HEADERS_COMMIT"
 make -C nv install PREFIX=/work/nv-prefix
 export PKG_CONFIG_LIBDIR="/work/nv-prefix/lib/pkgconfig:$PKG_CONFIG_LIBDIR"
 pkg-config --modversion ffnvcodec | grep -q '^13\.0\.'
@@ -82,7 +85,7 @@ cp /work/ffmpeg/COPYING.GPLv3 /work/out/LICENSE.txt
 SCRIPT
 
 docker run --rm -u "$(id -u):$(id -g)" -v "$WORK":/work \
-    -e FFMPEG_COMMIT -e NV_HEADERS -e ENCODERS -e DECODERS -e MUXERS -e DEMUXERS -e PARSERS -e FILTERS -e HWACCELS \
+    -e FFMPEG_COMMIT -e NV_HEADERS -e NV_HEADERS_COMMIT -e ENCODERS -e DECODERS -e MUXERS -e DEMUXERS -e PARSERS -e FILTERS -e HWACCELS \
     "$IMAGE" bash /work/build.sh
 ls -la "$WORK/out/bin" "$WORK/out/lib"
 rm -f "$OUT"

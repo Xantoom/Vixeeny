@@ -33,6 +33,8 @@ use vixeeny_capture::{CaptureError, VideoStream as Video};
 
 /// How often a still screen gets its frame repeated.
 const TICK: Duration = Duration::from_millis(100);
+/// Longer than this between two turns of the recording loop (which turns every [`TICK`]): the machine slept.
+const SLEPT_NS: i64 = 5_000_000_000;
 
 enum Ctl {
     /// Writes the replay; `true`: then opens it in the video editor.
@@ -1203,7 +1205,29 @@ fn record_loop(
     // A replay films its game's screen, not its window (see `Ctl::Screen`).
     let mut on_screen = false;
     let buffers = stream.buffers();
+    // When the loop last turned: it turns at least every `TICK`, so a much longer time away is the machine asleep.
+    let mut last_turn = now();
     loop {
+        // Back from sleep: the time away is left out, as a pause would leave it, rather than written at once as hours
+        // of repeated frames and silence.
+        let turn = now();
+        if !paused && turn - last_turn > SLEPT_NS {
+            tracing::info!("back after {} s away: left out of the recording", (turn - last_turn) / 1_000_000_000);
+            if let Some(pacer) = pacer {
+                pacer.pause(last_turn);
+                pacer.resume(turn);
+            }
+            recorder.pause(last_turn);
+            if let Some(rig) = &mut rig {
+                rig.pause(last_turn);
+            }
+            recorder.resume(turn);
+            if let Some(rig) = &mut rig {
+                rig.resume(turn, &recorder);
+            }
+            paused_ns += turn - last_turn;
+        }
+        last_turn = turn;
         if let Some((at, edit)) = save_at
             && std::time::Instant::now() >= at
         {

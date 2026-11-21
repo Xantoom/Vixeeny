@@ -416,6 +416,10 @@ impl Recorder {
     }
 }
 
+/// How far behind the capture time the sound of a variable frame rate recording may be written while the screen is still:
+/// the frames the encoder still holds (its look-ahead) are within it.
+const VFR_AUDIO_LAG_NS: i64 = 1_000_000_000;
+
 /// Time stamping of a variable-rate recording: microseconds from the first frame, pauses cut out, strictly increasing.
 #[derive(Debug, Default)]
 struct Vfr {
@@ -445,9 +449,19 @@ impl Vfr {
     }
 
     fn resume(&mut self, t: i64) {
-        if let Some(at) = self.paused_at.take() {
+        // A pause before the first frame is not media time: the first frame is zero whenever it comes (counted, it
+        // would squeeze the next frames a microsecond apart until real time caught up).
+        if let Some(at) = self.paused_at.take()
+            && self.origin.is_some()
+        {
             self.paused_total += (t - at).max(0);
         }
+    }
+
+    /// The media time (µs) of capture time `t`, while running.
+    fn media_us(&self, t: i64) -> Option<i64> {
+        let origin = self.origin?;
+        self.paused_at.is_none().then_some((t - origin - self.paused_total) / 1000)
     }
 }
 
@@ -733,8 +747,11 @@ impl Worker {
         let Some(pts) = packet.pts().map(|p| p - out.audio_cut) else {
             return Ok(());
         };
-        if pts < 0 {
-            return Ok(()); // belongs to the previous part
+        // Packets wholly before the cut belong to the previous part. The one that reaches the cut is kept: it is the
+        // encoder's priming at the start of a recording and the overlap the decoder needs at the start of a later
+        // part; its time before zero is left out of playback by the container.
+        if pts + packet.duration() < 0 {
+            return Ok(());
         }
         packet.set_pts(Some(pts));
         packet.set_dts(packet.dts().map(|d| d - out.audio_cut));
@@ -809,7 +826,19 @@ impl Worker {
                     }
                     continue;
                 }
-                Cmd::Tick(_) if self.cfg.vfr => continue,
+                // A still screen sends no frame: the sound must not wait for the next one to be written (nor to
+                // reach the replay). Frames come in time order, so none will start before `t` less the time the
+                // encoder may still hold: the sound before that goes.
+                Cmd::Tick(t) if self.cfg.vfr => {
+                    if let Some(media) = self.vfr.media_us(t - VFR_AUDIO_LAG_NS) {
+                        let reached = self.pts_to_samples(media);
+                        if reached > self.horizon {
+                            self.horizon = reached;
+                            self.write_ready_audio()?;
+                        }
+                    }
+                    continue;
+                }
                 Cmd::Pause(t) if self.cfg.vfr => {
                     self.vfr.pause(t);
                     continue;

@@ -515,9 +515,17 @@ impl Inner {
 
     /// Puts the window on screen, coming in from its screen edge.
     fn appear(&self) -> Result<()> {
-        if self.leaving.take().is_some() {
-            self.timer(LEAVE_TIMER, None);
-            self.shown.set(false);
+        match self.leaving.take() {
+            // Closing: it stays closing (an alert coming then must not keep a widget no one will close again).
+            Some(Then::Close) => {
+                self.leaving.set(Some(Then::Close));
+                return Ok(());
+            }
+            Some(Then::Withdraw) => {
+                self.timer(LEAVE_TIMER, None);
+                self.shown.set(false);
+            }
+            None => {}
         }
         if self.shown.replace(true) {
             return Ok(());

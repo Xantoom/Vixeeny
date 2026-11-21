@@ -24,6 +24,8 @@ use crate::registry::{Chroma, Encoder, Family};
 
 /// The rate and layout of the sound handed to the speakers: 48 kHz, stereo, 32-bit floats.
 pub const SOUND_RATE: u32 = 48_000;
+/// Two seconds of sound, interleaved: a track this far behind the others has ended (see [`Sound::read`]).
+const TRACK_ENDED_SAMPLES: usize = 2 * SOUND_RATE as usize * SOUND_CHANNELS;
 pub const SOUND_CHANNELS: usize = 2;
 
 /// One frame of the clip, in the order it is shown.
@@ -77,6 +79,11 @@ fn indexed_frames(input: &mut format::context::Input, video: usize) -> Option<Ve
         let stream = *(*input.as_ptr()).streams.add(video);
         let count = ffi::avformat_index_get_entries_count(stream);
         if count <= 0 || i64::from(count) != (*stream).nb_frames {
+            return None;
+        }
+        // A stream whose header allows reordered frames (B-frames) may start without any and reorder later, past
+        // what the first packets show: its frames are read from the packets.
+        if (*(*stream).codecpar).video_delay > 0 {
             return None;
         }
         let mut frames = Vec::with_capacity(count as usize);
@@ -861,7 +868,9 @@ impl Sound {
             return Ok(None);
         }
         let first = clip.frames.first().map_or(0, |f| f.pts);
-        Ok(Some(Self { input, tracks, origin: seconds(first, clip.time_base), from: 0.0, eof: false }))
+        let origin = seconds(first, clip.time_base);
+        // The sound before the first frame is not heard, as after a seek to zero.
+        Ok(Some(Self { input, tracks, origin, from: origin, eof: false }))
     }
 
     /// The next [`Sound::read`] starts at `t` seconds of the clip.
@@ -894,6 +903,15 @@ impl Sound {
                 Some(n) if n > 0 => return Ok(Some(self.mix(n))),
                 Some(_) => {}
             }
+            // A track far behind the others has ended before them (the file interleaves its tracks much closer): it
+            // is silent from there, rather than the whole rest of the file read into memory waiting for it.
+            let most = self.tracks.iter().map(|t| t.pending.len()).max().unwrap_or(0);
+            if most >= TRACK_ENDED_SAMPLES {
+                for track in &mut self.tracks {
+                    track.pending.resize(most, 0.0);
+                }
+                continue;
+            }
             if self.eof {
                 for track in &mut self.tracks {
                     if track.pending.is_empty() {
@@ -913,6 +931,12 @@ impl Sound {
                 for (o, s) in out.iter_mut().zip(track.pending.drain(..n)) {
                     *o += s;
                 }
+            }
+        }
+        // Tracks added together can go past full scale: clipped, as the speakers would.
+        if self.tracks.len() > 1 {
+            for o in &mut out {
+                *o = o.clamp(-1.0, 1.0);
             }
         }
         out
@@ -958,8 +982,17 @@ impl Sound {
                 let Some(resampler) = track.resampler.as_mut() else {
                     continue;
                 };
-                let mut out = frame::Audio::empty();
+                // Room for all the frame gives at the new rate and what the resampler kept from the last one: with
+                // as many samples as came in (what an empty frame gets), a 44.1 kHz clip would leave some behind every
+                // time and its sound would fall further and further behind.
+                let rate = u64::from(decoded.rate().max(1));
+                let room = (decoded.samples() as u64 * u64::from(SOUND_RATE)).div_ceil(rate) as usize + 4096;
+                let mut out = frame::Audio::new(Sample::F32(SampleType::Packed), room, ChannelLayout::STEREO);
+                out.set_rate(SOUND_RATE);
                 resampler.run(&decoded, &mut out)?;
+                if out.samples() == 0 {
+                    continue;
+                }
                 let samples = out.samples() * SOUND_CHANNELS;
                 let bytes = &out.data(0)[..samples * 4];
                 // What comes before the seek target is dropped.
@@ -1352,6 +1385,9 @@ fn write_cut(
     let key_pts = clip.frames[clip.key_before(from)].pts;
     let key_decode = clip.frames[clip.key_before(from)].decode;
     seek(&mut input, clip.video, key_pts)?;
+    // Where each packet is in decoding order, from its time: the seek may land on an earlier key frame than asked (a
+    // file without an exact index), and counting from the one asked would then take the wrong packets.
+    let by_time: std::collections::HashMap<i64, usize> = clip.frames.iter().map(|f| (f.pts, f.decode)).collect();
     let mut decode_index = key_decode;
     let mut decoder = match video_out {
         // On the processor: the frames go to the encoder from memory.
@@ -1415,8 +1451,8 @@ fn write_cut(
             continue;
         };
         if index == clip.video {
-            let this = decode_index;
-            decode_index += 1;
+            let this = packet.pts().or(packet.dts()).and_then(|t| by_time.get(&t).copied()).unwrap_or(decode_index);
+            decode_index = this + 1;
             if video_done {
                 if copies_sound {
                     continue;

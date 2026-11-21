@@ -8,6 +8,9 @@ on:
     paths-ignore: ["**.md", "docs/**", "LICENSE"]
   pull_request:
     paths-ignore: ["**.md", "docs/**", "LICENSE"]
+# Read only, unless a job asks for more.
+permissions:
+  contents: read
 # A newer push to the same branch makes the running check obsolete.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -71,7 +74,7 @@ jobs:
       - name: Compile the installer script
         run: |
           # The image usually has Inno Setup.
-          if (-not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+          if (-not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) { choco install innosetup --version 6.7.1 -y --no-progress }
           New-Item -ItemType Directory dist\stage | Out-Null
           Copy-Item LICENSE dist\stage
           Set-Content dist\stage\files.txt "LICENSE"

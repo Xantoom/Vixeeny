@@ -78,8 +78,10 @@ pub fn build(only: &[String]) -> Result<()> {
     normalize_msvc_libs(&ctx)
 }
 
-/// Downloads the pinned prebuilt FFmpeg (shared, GPL) into `work/ffmpeg-prebuilt`, verifying its SHA-256. `FFMPEG_DIR`
-/// must point there for `ffmpeg-sys-next`, and `bin` must be on PATH.
+/// Unpacks the FFmpeg that `packaging/ffmpeg/build.sh` built (shared, GPL; `work/ffmpeg.zip`) into
+/// `work/ffmpeg-prebuilt`. The archive's SHA-256 is kept there to tell when it changed: it is built from pinned
+/// sources, not downloaded, so there is no published digest to compare it with. `FFMPEG_DIR` must point there for
+/// `ffmpeg-sys-next`, and `bin` must be on PATH.
 fn ffmpeg_prebuilt(ctx: &Ctx) -> Result<()> {
     let dest = ctx.work.join("ffmpeg-prebuilt");
     let stamp = dest.join(".sha256");

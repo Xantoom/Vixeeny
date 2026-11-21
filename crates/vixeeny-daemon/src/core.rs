@@ -81,6 +81,11 @@ impl Core {
         self.current.is_some()
     }
 
+    /// `id` is the app process the daemon is waiting for (or talking to).
+    pub fn is_current(&self, id: SpawnId) -> bool {
+        self.current == Some(id)
+    }
+
     pub fn recording_state(&self) -> RecState {
         self.recording.unwrap_or(RecState::Idle)
     }

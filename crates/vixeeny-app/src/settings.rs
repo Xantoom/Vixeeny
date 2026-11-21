@@ -428,6 +428,8 @@ pub fn run_child(config: Config, args: &[String]) -> anyhow::Result<()> {
     // The shortcuts the daemon could not register (it registers them again after each change). Windows tells when the
     // settings file or the taken shortcuts change.
     let (config_changed, taken_changed) = (vixeeny_ui::bell::Bell::new(), vixeeny_ui::bell::Bell::new());
+    // Closed with the window: what listens to them holds the window's state, which goes then.
+    let mut bells = vec![config_changed.clone(), taken_changed.clone()];
     if let (Some(config_dir), Some(taken)) =
         (vixeeny_common::paths::config_dir(), vixeeny_common::paths::hotkeys_taken_file())
         && let Some(taken_dir) = taken.parent()
@@ -606,6 +608,7 @@ pub fn run_child(config: Config, args: &[String]) -> anyhow::Result<()> {
     panel.set_update(&update_view(lang));
     if let Some(path) = vixeeny_updater::state::file() {
         let changed = vixeeny_ui::bell::Bell::new();
+        bells.push(changed.clone());
         if let Some(dir) = path.parent() {
             let bell = changed.clone();
             if !vixeeny_platform::on_dir_change(&[dir.to_path_buf()], move |_| bell.ring()) {
@@ -640,6 +643,9 @@ pub fn run_child(config: Config, args: &[String]) -> anyhow::Result<()> {
         }
     });
     let result = panel.window().run().map_err(|e| anyhow::anyhow!("{e}"));
+    for bell in &bells {
+        bell.close();
+    }
     resume_hotkeys();
     panel.flush();
     if let Some(config) = unsaved.borrow_mut().take() {

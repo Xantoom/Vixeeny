@@ -1083,7 +1083,8 @@ pub(crate) fn pixel_rate(env: &Env, config: &Config) -> u64 {
     u64::from(w) * u64::from(h) * u64::from(config.video.fps.max(1))
 }
 
-pub(crate) fn main_screen(env: &Env) -> (u32, u32) {
+/// The size of the main screen, the one recordings are checked against.
+pub fn main_screen(env: &Env) -> (u32, u32) {
     let screens = &env.machine.screens;
     screens.iter().find(|s| s.primary).or_else(|| screens.first()).map_or((1920, 1080), |s| (s.width, s.height))
 }

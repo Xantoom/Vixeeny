@@ -922,20 +922,32 @@ fn run() -> anyhow::Result<()> {
             Err(RecvTimeoutError::Timeout) => {
                 ipc::write_msg(&mut send, &AppToDaemon::Idle)?;
                 // An action the daemon sent before it read `Idle` (a shortcut pressed then, the screens frozen for it)
-                // is still this process's to run; it stays if the action keeps it busy.
-                let mut ran = false;
-                while let Ok(Wake::Daemon(DaemonToApp::RunAction { action, frozen })) = rx.recv_timeout(IDLE_GRACE) {
-                    if let Some(fresh) = fresh_config(&mut config_read_at) {
-                        config = fresh;
+                // is still this process's to run. It says first that it stays: the shortcuts pressed while the action
+                // runs come here again, instead of starting a second app next to this one.
+                let deadline = std::time::Instant::now() + IDLE_GRACE;
+                let stays = loop {
+                    match rx.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())) {
+                        Ok(Wake::Daemon(DaemonToApp::RunAction { action, frozen })) => {
+                            ipc::write_msg(&mut send, &AppToDaemon::Ready)?;
+                            if let Some(fresh) = fresh_config(&mut config_read_at) {
+                                config = fresh;
+                            }
+                            Actions { config: &mut config, recording: &mut recording, send: &mut send }
+                                .run(action, frozen)?;
+                            recording.report(&mut send, &config)?;
+                            break true;
+                        }
+                        Ok(Wake::Daemon(DaemonToApp::Shutdown)) | Err(RecvTimeoutError::Disconnected) => {
+                            return Ok(());
+                        }
+                        // Nothing an idle app acts on: the grace goes on.
+                        Ok(_) => {}
+                        Err(RecvTimeoutError::Timeout) => break false,
                     }
-                    Actions { config: &mut config, recording: &mut recording, send: &mut send }.run(action, frozen)?;
-                    ran = true;
-                }
-                let busy = recording.handle.is_some() || recording.replay.is_some() || record::saving();
-                if !(ran && busy) {
+                };
+                if !stays {
                     return Ok(());
                 }
-                ipc::write_msg(&mut send, &AppToDaemon::Ready)?;
                 idle_from = std::time::Instant::now();
             }
         }

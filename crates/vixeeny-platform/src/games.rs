@@ -355,7 +355,23 @@ fn json_string(json: &str, field: &str) -> Option<String> {
 
 /// `X:\XboxGames` on every drive (where the Xbox app installs PC Game Pass games).
 fn xbox_folders() -> Vec<String> {
-    ('C'..='Z').map(|d| format!(r"{d}:\XboxGames")).filter(|f| Path::new(f).is_dir()).collect()
+    use windows::Win32::Storage::FileSystem::{GetDriveTypeW, GetLogicalDrives};
+    // DRIVE_FIXED: the Xbox app installs on local disks only. A network drive is never asked: one that is gone would
+    // keep this thread waiting for its time-out.
+    const FIXED: u32 = 3;
+    // SAFETY: plain call.
+    let drives = unsafe { GetLogicalDrives() };
+    ('C'..='Z')
+        .filter(|d| drives & (1 << (*d as u32 - 'A' as u32)) != 0)
+        .filter(|d| {
+            let root = windows::core::HSTRING::from(format!(r"{d}:\"));
+            // SAFETY: a NUL-terminated root path.
+            let kind = unsafe { GetDriveTypeW(&root) };
+            kind == FIXED
+        })
+        .map(|d| format!(r"{d}:\XboxGames"))
+        .filter(|f| Path::new(f).is_dir())
+        .collect()
 }
 
 /// The publishers whose installed programs are games (their launchers are told apart by name).
