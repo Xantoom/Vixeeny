@@ -35,17 +35,26 @@ pub enum ActionId {
     /// Not a shortcut: keeps the app running while the replay is on, to start it during full-screen games (the daemon
     /// sends it at startup and when the settings change).
     ReplayWatch,
+    /// Captures the zone of the last zone capture again, straight to its file (no editor).
+    CaptureLastRegion,
+    /// Starts a recording of a zone picked on the screen, or stops the recording.
+    RecordRegion,
+    /// Starts a recording of a window picked on the screen, or stops the recording.
+    RecordWindow,
 }
 
 impl ActionId {
     /// All actions, in a stable order.
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 16] = [
         Self::CaptureRegion,
+        Self::CaptureLastRegion,
         Self::CaptureWindow,
         Self::CaptureFullscreen,
         Self::CaptureAllMonitors,
         Self::CaptureScrolling,
         Self::RecordToggle,
+        Self::RecordRegion,
+        Self::RecordWindow,
         Self::RecordPause,
         Self::ReplayToggle,
         Self::ReplaySave,
@@ -71,6 +80,9 @@ impl ActionId {
             Self::OverlayToggle => "overlay-toggle",
             Self::OpenSettings => "open-settings",
             Self::ReplayWatch => "replay-watch",
+            Self::CaptureLastRegion => "capture-last-region",
+            Self::RecordRegion => "record-region",
+            Self::RecordWindow => "record-window",
         }
     }
 
@@ -83,7 +95,13 @@ impl ActionId {
                 | Self::CaptureFullscreen
                 | Self::CaptureAllMonitors
                 | Self::CaptureScrolling
+                | Self::CaptureLastRegion
         )
+    }
+
+    /// Start or stop a recording.
+    pub const fn toggles_recording(self) -> bool {
+        matches!(self, Self::RecordToggle | Self::RecordRegion | Self::RecordWindow)
     }
 
     /// Actions that start on the frozen screen (a zone is picked on it).
@@ -93,7 +111,7 @@ impl ActionId {
 
     /// The daemon captures the screens the moment the shortcut is pressed, for the app to save (they are not shown).
     pub const fn holds_screen(self) -> bool {
-        matches!(self, Self::CaptureFullscreen | Self::CaptureAllMonitors)
+        matches!(self, Self::CaptureFullscreen | Self::CaptureAllMonitors | Self::CaptureLastRegion)
     }
 
     pub fn from_cli_name(name: &str) -> Option<Self> {

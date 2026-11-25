@@ -422,6 +422,10 @@ keys! {
     SetCaptureDelay => "Delay before the capture", "Délai avant la capture";
     OptNoDelay => "None", "Aucun";
     OptDelaySeconds => "{n} s", "{n} s";
+    ActCaptureLastRegion => "Capture the last region again", "Recapturer la dernière zone";
+    ActRecordRegion => "Record a region / stop", "Enregistrer une zone / arrêter";
+    ActRecordWindow => "Record a window / stop", "Enregistrer une fenêtre / arrêter";
+    ToastNoLastRegion => "No region captured yet", "Aucune zone capturée pour l’instant";
 }
 
 impl Lang {

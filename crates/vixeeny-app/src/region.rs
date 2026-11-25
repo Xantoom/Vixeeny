@@ -298,6 +298,8 @@ pub enum Mode {
     Editor,
     /// Pick the zone of a scrolling capture.
     Scroll,
+    /// Pick the zone of a recording.
+    Record,
 }
 
 /// The screens the daemon froze for this capture. They go once the editor covers them, or when this is dropped
@@ -594,6 +596,46 @@ pub fn dismiss_open() -> bool {
 }
 
 pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Result<()> {
+    match (mode, pick(config, mode, frozen)?) {
+        (Mode::Scroll, Some((zone, snapshot))) => crate::scroll::run(config, snapshot, zone),
+        _ => Ok(()),
+    }
+}
+
+/// The zone of a recording, picked on the screens; `None` when the user gives up.
+pub fn pick_zone(config: &Config) -> anyhow::Result<Option<vixeeny_platform::PhysicalRect>> {
+    Ok(pick(config, Mode::Record, None)?.map(|(zone, _)| zone))
+}
+
+/// Remembers the zone of a capture, for the shortcut that takes it again. A failure only costs that shortcut.
+fn remember_zone(zone: vixeeny_platform::PhysicalRect) {
+    let Some(path) = vixeeny_common::paths::last_zone_file() else {
+        return;
+    };
+    let text = vixeeny_common::paths::zone_text((zone.x, zone.y, zone.width, zone.height));
+    let written = path
+        .parent()
+        .map_or(Ok(()), std::fs::create_dir_all)
+        .and_then(|()| vixeeny_common::paths::write_atomic(&path, text.as_bytes()));
+    if let Err(e) = written {
+        tracing::warn!("the zone is not remembered: {e}");
+    }
+}
+
+/// The zone of the last zone capture, if one was remembered.
+pub fn last_zone() -> Option<vixeeny_platform::PhysicalRect> {
+    let text = std::fs::read_to_string(vixeeny_common::paths::last_zone_file()?).ok()?;
+    let (x, y, w, h) = vixeeny_common::paths::parse_zone(&text)?;
+    Some(vixeeny_platform::PhysicalRect::new(x, y, w, h))
+}
+
+/// Opens the zone editor; in the modes that only pick a zone, returns the zone picked (physical pixels of the desktop)
+/// with what the OS said at the press.
+fn pick(
+    config: &Config,
+    mode: Mode,
+    frozen: Option<Frozen>,
+) -> anyhow::Result<Option<(vixeeny_platform::PhysicalRect, Snapshot)>> {
     let started = Instant::now();
     tracing::debug!("zone capture ({mode:?}) starting{}", if frozen.is_some() { " on the frozen screens" } else { "" });
     let thaw = std::rc::Rc::new(Thaw(std::cell::RefCell::new(frozen)));
@@ -609,6 +651,7 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
     let image_settings = &config.image.for_action(match mode {
         Mode::Editor => ActionId::CaptureRegion,
         Mode::Scroll => ActionId::CaptureScrolling,
+        Mode::Record => ActionId::RecordRegion,
     });
     let keep_hdr = crate::keep_hdr(image_settings);
     let show_cursor = image_settings.show_cursor;
@@ -642,15 +685,14 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
         })
         .collect();
     let monitor_areas = screens.iter().map(|s| s.area).collect();
-    let scroll_snapshot = Snapshot { monitors: monitors.clone(), cursor, foreground: foreground.clone() };
+    let picked = Snapshot { monitors: monitors.clone(), cursor, foreground: foreground.clone(), zone: None };
     let live_monitors = monitors.clone();
-    let snapshot = Snapshot { monitors, cursor, foreground };
+    let snapshot = Snapshot { monitors, cursor, foreground, zone: None };
     // Live, the export takes a fresh picture of the screens: its HDR twin replaces this one.
     let hdr = std::rc::Rc::new(std::cell::RefCell::new(hdr));
     let live_hdr = hdr.clone();
     let config = config.clone();
     let tips = toolbar_tips(crate::lang(&config.general.language));
-    let config_for_scroll = config.clone();
 
     let scroll_zone: std::rc::Rc<std::cell::Cell<Option<Rect>>> = std::rc::Rc::default();
     let scroll_slot = scroll_zone.clone();
@@ -660,14 +702,22 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
     session.dim = vixeeny_common::look::CAPTURE_DIM;
     match mode {
         Mode::Editor => {}
-        Mode::Scroll => session = session.with_auto_command(Command::Scroll),
+        // Only a zone is wanted: it is taken once drawn.
+        Mode::Scroll | Mode::Record => session = session.with_auto_command(Command::Scroll),
     }
+    let origin = (bounds.x, bounds.y);
     let mut overlay = vixeeny_overlay::Overlay::on_screens(
         session,
         scale,
         &screens,
         vixeeny_ui::theme::default_look(),
         move |command, session| {
+            // The zone copied or saved is the one the shortcut of the last zone takes again.
+            if matches!(command, Command::Copy | Command::CopyText | Command::Save | Command::SaveAs)
+                && let Some(zone) = session.zone()
+            {
+                remember_zone(desktop_zone(origin, zone));
+            }
             if let Some(close) =
                 output_command(&config, &snapshot, ActionId::CaptureRegion, command, session, hdr.borrow().as_ref())
             {
@@ -716,16 +766,17 @@ pub fn run(config: &Config, mode: Mode, frozen: Option<Frozen>) -> anyhow::Resul
     drop(thaw);
     drop(held);
     result.map_err(|e| anyhow::anyhow!("editor window: {e}"))?;
-    if let Some(zone) = scroll_zone.take() {
-        let zone = vixeeny_platform::PhysicalRect::new(
-            bounds.x + zone.x.round() as i32,
-            bounds.y + zone.y.round() as i32,
-            zone.w.round() as u32,
-            zone.h.round() as u32,
-        );
-        return crate::scroll::run(&config_for_scroll, scroll_snapshot, zone);
-    }
-    Ok(())
+    Ok(scroll_zone.take().map(|zone| (desktop_zone(origin, zone), picked)))
+}
+
+/// A zone of the editor's image on the desktop whose top left corner is `origin` (physical pixels).
+fn desktop_zone(origin: (i32, i32), zone: Rect) -> vixeeny_platform::PhysicalRect {
+    vixeeny_platform::PhysicalRect::new(
+        origin.0 + zone.x.round() as i32,
+        origin.1 + zone.y.round() as i32,
+        zone.w.round() as u32,
+        zone.h.round() as u32,
+    )
 }
 
 /// Opens the editor on a picture already saved (`--edit <file>`), in a process of its own.
@@ -803,7 +854,7 @@ fn edit_picture(config: Config, args: &[String]) -> anyhow::Result<()> {
         picture.width as f32,
         picture.height as f32,
     ));
-    let snapshot = Snapshot { monitors, cursor, foreground: None };
+    let snapshot = Snapshot { monitors, cursor, foreground: None, zone: None };
     let tips = toolbar_tips(crate::lang(&config.general.language));
     let overlay = vixeeny_overlay::Overlay::on_screens(
         session,

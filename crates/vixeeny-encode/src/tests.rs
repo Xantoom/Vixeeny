@@ -625,6 +625,20 @@ fn a_wide_screen_is_cropped_in_its_middle() {
 }
 
 #[test]
+fn a_zone_is_recorded_alone_inside_the_screen() {
+    use crate::validate::{aspect, crop_rect};
+    // No zone: the screen, as before.
+    assert_eq!(crop_rect((1920, 1080), None, None), (0, 0, 1920, 1080));
+    assert_eq!(crop_rect((1920, 1200), None, aspect("16:9")), (0, 60, 1920, 1080));
+    // A zone, its sizes made even.
+    assert_eq!(crop_rect((1920, 1080), Some((100, 50, 801, 601)), None), (100, 50, 800, 600));
+    // Past the edge: cut at the edge.
+    assert_eq!(crop_rect((1920, 1080), Some((1800, 1000, 400, 400)), None), (1800, 1000, 120, 80));
+    // A ratio on top: the middle of the zone.
+    assert_eq!(crop_rect((1920, 1080), Some((0, 0, 1000, 1000)), aspect("16:9")), (0, 219, 1000, 562));
+}
+
+#[test]
 fn simple_presets_follow_the_resolution_and_frame_rate() {
     use crate::registry::PresetName;
     let r = registry();

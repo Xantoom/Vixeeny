@@ -450,11 +450,14 @@ impl Default for General {
 #[serde(default)]
 pub struct Hotkeys {
     pub capture_region: Vec<String>,
+    pub capture_last_region: Vec<String>,
     pub capture_window: Vec<String>,
     pub capture_fullscreen: Vec<String>,
     pub capture_all_monitors: Vec<String>,
     pub capture_scrolling: Vec<String>,
     pub record_toggle: Vec<String>,
+    pub record_region: Vec<String>,
+    pub record_window: Vec<String>,
     pub record_pause: Vec<String>,
     pub replay_toggle: Vec<String>,
     pub replay_save: Vec<String>,
@@ -464,14 +467,17 @@ pub struct Hotkeys {
 
 impl Hotkeys {
     /// Every action with the shortcuts configured for it, in [`ActionId::ALL`] order.
-    pub fn bindings(&self) -> [(ActionId, &[String]); 11] {
+    pub fn bindings(&self) -> [(ActionId, &[String]); 14] {
         [
             (ActionId::CaptureRegion, &self.capture_region),
+            (ActionId::CaptureLastRegion, &self.capture_last_region),
             (ActionId::CaptureWindow, &self.capture_window),
             (ActionId::CaptureFullscreen, &self.capture_fullscreen),
             (ActionId::CaptureAllMonitors, &self.capture_all_monitors),
             (ActionId::CaptureScrolling, &self.capture_scrolling),
             (ActionId::RecordToggle, &self.record_toggle),
+            (ActionId::RecordRegion, &self.record_region),
+            (ActionId::RecordWindow, &self.record_window),
             (ActionId::RecordPause, &self.record_pause),
             (ActionId::ReplayToggle, &self.replay_toggle),
             (ActionId::ReplaySave, &self.replay_save),
@@ -486,11 +492,15 @@ impl Default for Hotkeys {
         let one = |s: &str| vec![s.to_owned()];
         Self {
             capture_region: one("PrintScreen"),
+            // Free by default, as the zone and window recordings: a shortcut of their own when the user wants one.
+            capture_last_region: Vec::new(),
             capture_window: one("Alt+PrintScreen"),
             capture_fullscreen: one("Ctrl+PrintScreen"),
             capture_all_monitors: one(NEW_SHORTCUTS[0].1),
             capture_scrolling: one("Shift+PrintScreen"),
             record_toggle: one("Ctrl+F9"),
+            record_region: Vec::new(),
+            record_window: Vec::new(),
             record_pause: one("Ctrl+F10"),
             // Three keys: turning the replay off by mistake would lose the moment to keep.
             replay_toggle: one(NEW_SHORTCUTS[1].1),
@@ -593,6 +603,7 @@ impl ImageKind {
             ActionId::CaptureFullscreen => Self::Fullscreen,
             ActionId::CaptureAllMonitors => Self::AllMonitors,
             ActionId::CaptureScrolling => Self::Scrolling,
+            // The last zone again is a zone capture, with its settings.
             _ => Self::Region,
         }
     }

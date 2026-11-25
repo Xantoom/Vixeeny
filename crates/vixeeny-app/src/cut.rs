@@ -1136,6 +1136,7 @@ mod tests {
             encoder.presets.get(PresetName::Performance).iter().map(|(k, v)| (k.clone(), v.to_ffmpeg())).collect();
         let cfg = RecordConfig {
             crop: None,
+            zone: None,
             encoder,
             options,
             container: OutputContainer::Mp4Hybrid,

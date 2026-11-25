@@ -134,6 +134,8 @@ pub struct RecordConfig {
     pub output_size: (u32, u32),
     /// Keep only the middle of the picture with this ratio (`None`: all of it). GPU frames come cropped already.
     pub crop: Option<(u32, u32)>,
+    /// Keep only this part of the picture (`left, top, width, height`, before `crop`; `None`: all of it).
+    pub zone: Option<(u32, u32, u32, u32)>,
     pub fps: Fps,
     pub depth: u8,
     pub chroma: Chroma,
@@ -427,8 +429,8 @@ impl Recorder {
     }
 }
 
-/// How far behind the capture time the sound of a variable frame rate recording may be written while the screen is still:
-/// the frames the encoder still holds (its look-ahead) are within it.
+/// How far behind the capture time the sound of a variable frame rate recording may be written while the screen is
+/// still: the frames the encoder still holds (its look-ahead) are within it.
 const VFR_AUDIO_LAG_NS: i64 = 1_000_000_000;
 
 /// Time stamping of a variable-rate recording: microseconds from the first frame, pauses cut out, strictly increasing.
@@ -759,8 +761,8 @@ impl Worker {
             return Ok(());
         };
         // Packets wholly before the cut belong to the previous part. The one that reaches the cut is kept: it is the
-        // encoder's priming at the start of a recording and the overlap the decoder needs at the start of a later
-        // part; its time before zero is left out of playback by the container.
+        // encoder's priming at the start of a recording and the overlap the decoder needs at the start of a later part;
+        // its time before zero is left out of playback by the container.
         if pts + packet.duration() < 0 {
             return Ok(());
         }
@@ -837,9 +839,9 @@ impl Worker {
                     }
                     continue;
                 }
-                // A still screen sends no frame: the sound must not wait for the next one to be written (nor to
-                // reach the replay). Frames come in time order, so none will start before `t` less the time the
-                // encoder may still hold: the sound before that goes.
+                // A still screen sends no frame: the sound must not wait for the next one to be written (nor to reach
+                // the replay). Frames come in time order, so none will start before `t` less the time the encoder may
+                // still hold: the sound before that goes.
                 Cmd::Tick(t) if self.cfg.vfr => {
                     if let Some(media) = self.vfr.media_us(t - VFR_AUDIO_LAG_NS) {
                         let reached = self.pts_to_samples(media);
@@ -953,7 +955,8 @@ impl Worker {
 
     fn convert(&mut self, src: &VideoFrame) -> Result<frame::Video, RecordError> {
         let (ow, oh) = self.cfg.output_size;
-        let (left, top, width, height) = crate::validate::center_crop((src.width, src.height), self.cfg.crop);
+        let (left, top, width, height) =
+            crate::validate::crop_rect((src.width, src.height), self.cfg.zone, self.cfg.crop);
         // Half-float HDR frames become 16-bit PQ RGB first; swscale does the rest.
         let (format, bytes, stride, bpp) = match src.format {
             FrameFormat::Bgra8 => (Pixel::BGRA, &src.data[..], src.stride, 4),

@@ -93,8 +93,8 @@ fn the_side_bar_shortcut_follows_the_overlay_switch() {
     panel.window().invoke_row_toggled("overlay_enabled".into(), false);
     panel.select_section(Section::Shortcuts);
     let rows = panel.window().get_shortcuts();
-    assert!(!rows.row_data(10).unwrap().enabled);
-    assert!((0..10).all(|i| rows.row_data(i).unwrap().enabled));
+    assert!(!rows.row_data(13).unwrap().enabled);
+    assert!((0..13).all(|i| rows.row_data(i).unwrap().enabled));
     settings_render_at(&panel, "shortcuts-overlay-disabled", (1040, 1100));
     panel.select_section(Section::Overlay);
     panel.window().invoke_row_toggled("overlay_enabled".into(), true);
@@ -479,26 +479,26 @@ fn shortcuts_are_edited_in_place_and_conflicts_are_explained() {
     panel.select_section(Section::Shortcuts);
     settings_render(&panel, "9-settings-shortcuts");
     let w = panel.window();
-    // Row 7 is the replay toggle, row 8 the replay save (Ctrl+F11). Keys are recorded, never typed.
+    // Row 10 is the replay toggle, row 11 the replay save (Ctrl+F11). Keys are recorded, never typed.
     let record = |row: i32, slot: i32, keys: &str| {
         w.invoke_shortcut_record(row, slot);
         panel.captured(settings_panel::Captured::Combination(keys.into()));
     };
-    record(7, 0, "Ctrl+Shift+F7");
+    record(10, 0, "Ctrl+Shift+F7");
     assert_eq!(panel.config().hotkeys.replay_toggle, ["Ctrl+Shift+F7"]);
     assert_eq!(seen.borrow().len(), 1);
-    record(7, 1, "Ctrl+F11");
+    record(10, 1, "Ctrl+F11");
     assert_eq!(panel.config().hotkeys.replay_toggle.len(), 1, "refused");
-    let row = w.get_shortcuts().row_data(7).unwrap();
+    let row = w.get_shortcuts().row_data(10).unwrap();
     assert!(row.error.contains("Save the replay"), "{}", row.error);
     assert_eq!(seen.borrow().len(), 1, "a refusal is not a change");
     // Leaving the window stops the recording without touching anything.
-    w.invoke_shortcut_record(7, 1);
+    w.invoke_shortcut_record(10, 1);
     assert!(panel.captured(settings_panel::Captured::Cancel));
     assert!(!panel.captured(settings_panel::Captured::Cancel), "nothing is recording any more");
     assert_eq!(seen.borrow().len(), 1);
     // The keys show while held, in the order pressed; letting go saves them.
-    w.invoke_shortcut_record(7, 1);
+    w.invoke_shortcut_record(10, 1);
     for code in ["ShiftLeft", "ControlRight", "ShiftRight", "F6"] {
         assert!(panel.key(code, true));
     }
@@ -507,7 +507,7 @@ fn shortcuts_are_edited_in_place_and_conflicts_are_explained() {
     assert_eq!(panel.config().hotkeys.replay_toggle, ["Ctrl+Shift+F7", "Shift+Ctrl+F6"]);
     assert!(!panel.key("ShiftLeft", false), "recorded: the keys are free again");
     // Escape cancels: the slot keeps its shortcut.
-    w.invoke_shortcut_record(7, 0);
+    w.invoke_shortcut_record(10, 0);
     assert!(panel.key("Escape", true));
     assert_eq!(panel.config().hotkeys.replay_toggle, ["Ctrl+Shift+F7", "Shift+Ctrl+F6"]);
 }

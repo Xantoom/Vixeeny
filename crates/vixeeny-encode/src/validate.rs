@@ -145,6 +145,24 @@ pub fn center_crop(size: (u32, u32), aspect: Option<(u32, u32)>) -> (u32, u32, u
     ((w - cw.min(w)) / 2, (h - ch.min(h)) / 2, cw.min(w), ch.min(h))
 }
 
+/// The part of a `size` picture that is recorded: `zone` (`left, top, width, height`, kept inside the picture; all of
+/// it without one), then its middle with the `aspect` ratio. Even sizes within a zone.
+pub fn crop_rect(
+    size: (u32, u32),
+    zone: Option<(u32, u32, u32, u32)>,
+    aspect: Option<(u32, u32)>,
+) -> (u32, u32, u32, u32) {
+    let Some((x, y, w, h)) = zone else {
+        return center_crop(size, aspect);
+    };
+    let x = x.min(size.0.saturating_sub(2));
+    let y = y.min(size.1.saturating_sub(2));
+    let even = |n: u32, room: u32| n.min(room).max(2) & !1;
+    let (w, h) = (even(w, size.0 - x), even(h, size.1 - y));
+    let (left, top, cw, ch) = center_crop((w, h), aspect);
+    (x + left, y + top, cw, ch)
+}
+
 /// Whether an audio codec fits a container; `None` for an unknown codec.
 fn audio_ok(codec: &str, container: Container) -> Option<bool> {
     Some(match codec {

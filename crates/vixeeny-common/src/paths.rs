@@ -48,6 +48,28 @@ pub fn hotkeys_taken_file() -> Option<PathBuf> {
     cache_dir().map(|d| d.join("hotkeys-taken.txt"))
 }
 
+/// The zone of the last zone capture (physical pixels of the desktop), for the shortcut that takes it again.
+pub fn last_zone_file() -> Option<PathBuf> {
+    cache_dir().map(|d| d.join("last-zone.txt"))
+}
+
+/// The text of [`last_zone_file`]: `x,y,width,height`.
+pub fn zone_text((x, y, width, height): (i32, i32, u32, u32)) -> String {
+    format!("{x},{y},{width},{height}\n")
+}
+
+/// Reads [`zone_text`] back; `None` for anything else or an empty zone.
+pub fn parse_zone(text: &str) -> Option<(i32, i32, u32, u32)> {
+    let mut parts = text.trim().split(',');
+    let zone = (
+        parts.next()?.trim().parse().ok()?,
+        parts.next()?.trim().parse().ok()?,
+        parts.next()?.trim().parse().ok()?,
+        parts.next()?.trim().parse().ok()?,
+    );
+    (parts.next().is_none() && zone.2 > 0 && zone.3 > 0).then_some(zone)
+}
+
 /// Directory for data that can be rebuilt (the clipboard's file, the shortcuts taken).
 pub fn cache_dir() -> Option<PathBuf> {
     if let Some(dir) = portable_dir() {
@@ -141,6 +163,15 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_last_zone_reads_back_and_nothing_else_does() {
+        let zone = (-1920, 40, 800, 600);
+        assert_eq!(parse_zone(&zone_text(zone)), Some(zone));
+        for bad in ["", "1,2,3", "1,2,3,4,5", "a,2,3,4", "1,2,0,4", "1,2,-3,4"] {
+            assert_eq!(parse_zone(bad), None, "{bad}");
+        }
+    }
 
     #[test]
     fn an_atomic_write_replaces_the_file_and_leaves_no_temporary_one() {

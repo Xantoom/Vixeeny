@@ -39,6 +39,7 @@ pub fn config(registry: &Registry, id: &str, preset: PresetName) -> RecordConfig
     let options = encoder.presets.get(preset).iter().map(|(k, v)| (k.clone(), v.to_ffmpeg())).collect();
     RecordConfig {
         crop: None,
+        zone: None,
         encoder,
         options,
         container: OutputContainer::Mkv,

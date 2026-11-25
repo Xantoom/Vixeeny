@@ -19,11 +19,14 @@ pub enum Refusal {
 fn list_mut(hotkeys: &mut Hotkeys, action: ActionId) -> Option<&mut Vec<String>> {
     Some(match action {
         ActionId::CaptureRegion => &mut hotkeys.capture_region,
+        ActionId::CaptureLastRegion => &mut hotkeys.capture_last_region,
         ActionId::CaptureWindow => &mut hotkeys.capture_window,
         ActionId::CaptureFullscreen => &mut hotkeys.capture_fullscreen,
         ActionId::CaptureAllMonitors => &mut hotkeys.capture_all_monitors,
         ActionId::CaptureScrolling => &mut hotkeys.capture_scrolling,
         ActionId::RecordToggle => &mut hotkeys.record_toggle,
+        ActionId::RecordRegion => &mut hotkeys.record_region,
+        ActionId::RecordWindow => &mut hotkeys.record_window,
         ActionId::RecordPause => &mut hotkeys.record_pause,
         ActionId::ReplayToggle => &mut hotkeys.replay_toggle,
         ActionId::ReplaySave => &mut hotkeys.replay_save,
@@ -130,8 +133,11 @@ mod tests {
         let config = Config::default();
         let table = table(&config);
         // Every action but the settings (the tray icon opens them) and the watch for games.
-        assert_eq!(table.len(), 11);
+        assert_eq!(table.len(), 14);
         assert!(!table.iter().any(|(a, _)| *a == ActionId::OpenSettings));
+        // The newer ones start free.
+        let last = table.iter().find(|(a, _)| *a == ActionId::CaptureLastRegion).unwrap();
+        assert_eq!(last.1, [String::new(), String::new()]);
         let save = table.iter().find(|(a, _)| *a == ActionId::ReplaySave).unwrap();
         assert_eq!(save.1, ["Ctrl+F11".to_owned(), String::new()]);
     }

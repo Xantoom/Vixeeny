@@ -12,7 +12,7 @@ use vixeeny_common::time::LocalTime;
 use vixeeny_image::backdrop::{self, Backdrop, Linear};
 use vixeeny_image::{Bgra, Hdr, ImageError, ImageFormat, Settings};
 use vixeeny_overlay::backdrop as card;
-use vixeeny_platform::{ExeMetadata, MonitorInfo, WindowInfo, monitor_at};
+use vixeeny_platform::{ExeMetadata, MonitorInfo, PhysicalRect, WindowInfo, monitor_at};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StillError {
@@ -22,6 +22,8 @@ pub enum StillError {
     NoMonitor,
     #[error("no window has the focus")]
     NoWindow,
+    #[error("the zone is on no screen")]
+    NoZone,
     #[error(transparent)]
     Capture(#[from] CaptureError),
     #[error(transparent)]
@@ -36,6 +38,8 @@ pub struct Snapshot {
     pub monitors: Vec<MonitorInfo>,
     pub cursor: (i32, i32),
     pub foreground: Option<WindowInfo>,
+    /// The zone of the last zone capture (physical pixels of the desktop), for the capture that takes it again.
+    pub zone: Option<PhysicalRect>,
 }
 
 pub fn target_for(action: ActionId, snap: &Snapshot) -> Result<CaptureTarget, StillError> {
@@ -50,7 +54,8 @@ pub fn target_for(action: ActionId, snap: &Snapshot) -> Result<CaptureTarget, St
             Ok(screen_filled_by(window, &snap.monitors)
                 .map_or(CaptureTarget::Window(window.id), |m| CaptureTarget::Monitor(m.id)))
         }
-        ActionId::CaptureAllMonitors => Ok(CaptureTarget::AllMonitors),
+        // Every screen, the zone cut from them (see `zone_part`).
+        ActionId::CaptureAllMonitors | ActionId::CaptureLastRegion => Ok(CaptureTarget::AllMonitors),
         other => Err(StillError::NotADirectCapture(other)),
     }
 }
@@ -62,6 +67,23 @@ fn screen_filled_by<'a>(window: &WindowInfo, monitors: &'a [MonitorInfo]) -> Opt
     let mut filled = monitors.iter().filter(|m| is_full_screen(window, std::slice::from_ref(*m)));
     let monitor = filled.next()?;
     filled.next().is_none().then_some(monitor)
+}
+
+/// The part of the picture of every screen that the last zone again takes: `(left, top, width, height)` in it, for a
+/// picture of `size` laid out like the monitors. `None` for the other captures.
+fn zone_part(action: ActionId, snap: &Snapshot, size: (u32, u32)) -> Result<Option<(u32, u32, u32, u32)>, StillError> {
+    if action != ActionId::CaptureLastRegion {
+        return Ok(None);
+    }
+    let bounds =
+        vixeeny_platform::virtual_bounds(snap.monitors.iter().map(|m| &m.rect)).ok_or(StillError::NoMonitor)?;
+    let part = snap.zone.and_then(|zone| zone.intersection(&bounds)).ok_or(StillError::NoZone)?;
+    let (x, y) = ((part.x - bounds.x) as u32, (part.y - bounds.y) as u32);
+    let (w, h) = (part.width.min(size.0.saturating_sub(x)), part.height.min(size.1.saturating_sub(y)));
+    if w == 0 || h == 0 {
+        return Err(StillError::NoZone);
+    }
+    Ok(Some((x, y, w, h)))
 }
 
 /// Writes next to the destination then renames, so a crash never leaves a truncated file.
@@ -134,7 +156,7 @@ pub(crate) fn app_name(
     metadata: &dyn Fn(&str) -> ExeMetadata,
 ) -> String {
     // A zone and every screen at once are Vixeeny's, whatever is on them.
-    if matches!(action, ActionId::CaptureRegion | ActionId::CaptureAllMonitors) {
+    if matches!(action, ActionId::CaptureRegion | ActionId::CaptureAllMonitors | ActionId::CaptureLastRegion) {
         return naming::DEFAULT_APP_NAME.to_owned();
     }
     let window = match action {
@@ -229,6 +251,14 @@ pub fn run<B: std::ops::DerefMut<Target: StillBackend>>(
     });
     let path = if let Some(mut capture) = hdr {
         let grabbed = started.elapsed();
+        if let Some((x, y, w, h)) = zone_part(action, snap, (capture.frame.width, capture.frame.height))? {
+            let row = capture.frame.width as usize * 4;
+            let rgba = (y as usize..(y + h) as usize)
+                .flat_map(|r| &capture.frame.rgba[r * row + x as usize * 4..r * row + (x + w) as usize * 4])
+                .copied()
+                .collect();
+            capture.frame = HdrFrame { width: w, height: h, rgba };
+        }
         if let Some((make, scale)) = backdrop {
             let b = make();
             let (w, h) = (capture.frame.width, capture.frame.height);
@@ -274,9 +304,14 @@ pub fn run<B: std::ops::DerefMut<Target: StillBackend>>(
                 }
             }
         });
-        let image = match &set {
-            Some((w, h, bgra)) => Bgra::new(*w, *h, *w as usize * 4, bgra),
-            None => Bgra::new(frame.width, frame.height, frame.stride, &frame.data),
+        let part = zone_part(action, snap, (frame.width, frame.height))?;
+        let image = match (&set, part) {
+            (Some((w, h, bgra)), _) => Bgra::new(*w, *h, *w as usize * 4, bgra),
+            // The zone, read in place.
+            (None, Some((x, y, w, h))) => {
+                Bgra::new(w, h, frame.stride, &frame.data[y as usize * frame.stride + x as usize * 4..])
+            }
+            (None, None) => Bgra::new(frame.width, frame.height, frame.stride, &frame.data),
         };
         let path = save_image(action, snap, dest, output, metadata, &image)?;
         tracing::info!("grabbed in {grabbed:?}, encoded and written in {:?}", started.elapsed() - grabbed);
@@ -451,6 +486,7 @@ mod tests {
                 pid: 1,
                 exe_path: None,
             }),
+            zone: None,
         }
     }
 
@@ -668,6 +704,44 @@ mod tests {
         let saved = vixeeny_image::decode(&std::fs::read(&path).unwrap()).unwrap();
         assert_eq!((saved.width, saved.height), (80, 50));
         assert_eq!(copied.lock().unwrap().take(), Some((80, 50)));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_last_zone_is_cut_from_every_screen() {
+        let dir = temp_dir("last-zone");
+        let names = BTreeMap::new();
+        let now = now();
+        let dest = Destination {
+            keep_copy: true,
+            dir: &dir,
+            template: "{app}_{width}x{height}",
+            per_app_subfolder: false,
+            use_foreground_app: false,
+            app_names: &names,
+            now: &now,
+            after_save: None,
+        };
+        let settings = Settings::default();
+        let output =
+            Output { format: ImageFormat::Png, settings: &settings, keep_hdr: false, backdrop: None, scale: 100 };
+        let shoot = |zone| {
+            let snap = Snapshot { zone, ..snapshot() };
+            let mut capturer = Capturer::new(Box::<FakeBackend>::default(), snap.monitors.clone());
+            let options = CaptureOptions::default();
+            run(ActionId::CaptureLastRegion, &snap, &mut capturer, &dest, options, output, &no_metadata)
+        };
+        // Across both screens.
+        let path = shoot(Some(PhysicalRect::new(190, 10, 30, 20))).unwrap();
+        assert_eq!(path.file_name().unwrap(), "Vixeeny_30x20.png");
+        let saved = vixeeny_image::decode(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!((saved.width, saved.height), (30, 20));
+        // Partly off the screens: what is on them.
+        let path = shoot(Some(PhysicalRect::new(-10, -10, 30, 20))).unwrap();
+        assert_eq!(path.file_name().unwrap(), "Vixeeny_20x10.png");
+        // Off them, or none.
+        assert!(matches!(shoot(Some(PhysicalRect::new(-100, -100, 30, 20))), Err(StillError::NoZone)));
+        assert!(matches!(shoot(None), Err(StillError::NoZone)));
         let _ = std::fs::remove_dir_all(dir);
     }
 

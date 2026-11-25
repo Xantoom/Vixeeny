@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Screen recording: the capture stream feeds the recorder, on a thread of its own so the action loop keeps answering
 //! the daemon. Frames are converted on the GPU when possible (see `try_gpu`), on the CPU otherwise; a recording films
-//! the monitor under the cursor, the replay the game's window alone.
+//! the monitor under the cursor, a window or a zone of it, the replay the game's window alone.
 
 use crate::toast::{Failed, Saved, Toast, failure_text};
 use std::path::PathBuf;
@@ -506,23 +506,56 @@ fn try_gpu(
     }
 }
 
+/// What a recording films.
+#[derive(Debug, Clone)]
+pub enum Film {
+    /// The screen under the pointer.
+    Screen,
+    /// One window alone, not what covers it.
+    Window(vixeeny_platform::WindowInfo),
+    /// A part of the desktop (physical pixels), on the screen that holds its middle.
+    Zone(vixeeny_platform::PhysicalRect),
+}
+
+/// The middle of `rect`.
+fn middle(rect: &vixeeny_platform::PhysicalRect) -> (i32, i32) {
+    (rect.x + (rect.width / 2) as i32, rect.y + (rect.height / 2) as i32)
+}
+
+/// The plan of the replay of `game`, or of a recording of `film`.
 fn plan(
     config: &Config,
     allow_gpu: bool,
-    replay: bool,
     game: Option<&vixeeny_platform::WindowInfo>,
+    film: &Film,
 ) -> anyhow::Result<Plan> {
     vixeeny_platform::ensure_dpi_aware();
+    let replay = game.is_some();
     let monitors = vixeeny_platform::monitors()?;
-    // The game's monitor, or the one under the cursor.
-    let (x, y) = match game {
-        Some(g) => (g.rect.x + (g.rect.width / 2) as i32, g.rect.y + (g.rect.height / 2) as i32),
-        None => vixeeny_platform::cursor_position()?,
+    let window = game.or(match film {
+        Film::Window(window) => Some(window),
+        _ => None,
+    });
+    // The window's monitor, the zone's, or the one under the cursor.
+    let (x, y) = match (window, film) {
+        (Some(w), _) => middle(&w.rect),
+        (None, Film::Zone(zone)) => middle(zone),
+        _ => vixeeny_platform::cursor_position()?,
     };
     let monitor =
         vixeeny_platform::monitor_at(&monitors, x, y).or_else(|| monitors.first()).context("no monitor")?.clone();
-    let source = match game {
-        Some(g) if g.rect.width >= 2 && g.rect.height >= 2 => (g.rect.width, g.rect.height),
+    // The zone in the monitor's picture; what is past its edges is not filmed.
+    let zone = match film {
+        Film::Zone(zone) if window.is_none() => {
+            let part = zone.intersection(&monitor.rect).context("the zone is on no screen")?;
+            anyhow::ensure!(part.width >= 2 && part.height >= 2, "the zone is too small");
+            Some(((part.x - monitor.rect.x) as u32, (part.y - monitor.rect.y) as u32, part.width, part.height))
+        }
+        _ => None,
+    };
+    let source = match (window, zone) {
+        (Some(w), _) if w.rect.width >= 2 && w.rect.height >= 2 => (w.rect.width, w.rect.height),
+        (_, Some((_, _, w, h))) => (w & !1, h & !1),
         _ => (monitor.rect.width, monitor.rect.height),
     };
 
@@ -623,6 +656,7 @@ fn plan(
         container,
         output_size,
         crop,
+        zone,
         fps: Fps::whole(profile.fps.clamp(1, 240)),
         depth,
         chroma,
@@ -666,10 +700,11 @@ fn plan(
         let monitor = monitor.clone();
         // Named after its game, as it was at the start: at the save, another window may be in front, or the game gone.
         let game = game.cloned();
-        let save: SaveNamer = Box::new(move || output_file(&config, game.as_ref(), &monitor, output_size, extension));
+        let save: SaveNamer =
+            Box::new(move || output_file(&config, game.as_ref(), None, &monitor, output_size, extension));
         (Box::new(|_| PathBuf::new()), Some(save))
     } else {
-        let first = output_file(config, None, &monitor, output_size, extension)?;
+        let first = output_file(config, None, window, &monitor, output_size, extension)?;
         folder = first.parent().map(PathBuf::from);
         let namer = Box::new(move |part: u32| {
             if part == 0 {
@@ -690,7 +725,7 @@ fn plan(
     Ok(Plan {
         config: record,
         monitor,
-        window: game.map(|g| g.id),
+        window: window.map(|w| w.id),
         cursor: profile.show_cursor,
         own_windows: profile.show_own_windows,
         hdr: capture_hdr,
@@ -705,10 +740,12 @@ fn plan(
     })
 }
 
-/// A new file in the videos folder, or the replays folder for a replay of `game`, named by the user's template.
+/// A new file in the videos folder, or the replays folder for a replay of `game`, named by the user's template; a
+/// recording of a `filmed` window is named after its application.
 fn output_file(
     config: &Config,
     game: Option<&vixeeny_platform::WindowInfo>,
+    filmed: Option<&vixeeny_platform::WindowInfo>,
     monitor: &vixeeny_platform::MonitorInfo,
     size: (u32, u32),
     extension: &str,
@@ -728,7 +765,11 @@ fn output_file(
             vixeeny_common::paths::DEFAULT_VIDEOS,
             config.paths.per_app_subfolder.videos,
             &config.paths.naming.videos,
-            vixeeny_common::ipc::ActionId::RecordToggle,
+            if filmed.is_some() {
+                vixeeny_common::ipc::ActionId::CaptureWindow
+            } else {
+                vixeeny_common::ipc::ActionId::RecordToggle
+            },
         )
     };
     let dir = vixeeny_common::paths::ready_dir(folder, fallback).context("cannot make the videos folder")?;
@@ -737,10 +778,11 @@ fn output_file(
     let snapshot = crate::still::Snapshot {
         monitors: monitors.clone(),
         cursor: vixeeny_platform::cursor_position()?,
-        foreground: match game {
-            Some(game) => Some(game.clone()),
+        foreground: match game.or(filmed) {
+            Some(window) => Some(window.clone()),
             None => vixeeny_platform::foreground_window()?,
         },
+        zone: None,
     };
     let destination = crate::still::Destination {
         keep_copy: true,
@@ -774,19 +816,18 @@ fn output_file(
 
 /// Starts a recording on its own thread; fails early (bad profile, no encoder, no capture) so the caller can tell the
 /// user. The GPU path is tried first; if it cannot start, the same recording starts on the CPU path.
-pub fn start(config: &Config) -> anyhow::Result<Handle> {
-    start_session(config, None)
+pub fn start(config: &Config, film: &Film) -> anyhow::Result<Handle> {
+    start_session(config, None, film)
 }
 
 /// Starts the replay buffer for `game`'s window: the same encoder, nothing written until a save.
 pub fn start_replay(config: &Config, game: &vixeeny_platform::WindowInfo) -> anyhow::Result<Handle> {
-    start_session(config, Some(game))
+    start_session(config, Some(game), &Film::Screen)
 }
 
-fn start_session(config: &Config, game: Option<&vixeeny_platform::WindowInfo>) -> anyhow::Result<Handle> {
-    let replay = game.is_some();
+fn start_session(config: &Config, game: Option<&vixeeny_platform::WindowInfo>, film: &Film) -> anyhow::Result<Handle> {
     let started = std::time::Instant::now();
-    let first = plan(config, true, replay, game)?;
+    let first = plan(config, true, game, film)?;
     let planned = started.elapsed();
     let handle = if first.gpu.is_none() {
         launch(first)?
@@ -795,7 +836,7 @@ fn start_session(config: &Config, game: Option<&vixeeny_platform::WindowInfo>) -
             Ok(handle) => handle,
             Err(e) => {
                 tracing::warn!("GPU recording failed to start ({e:#}); using the CPU path");
-                launch(plan(config, false, replay, game)?)?
+                launch(plan(config, false, game, film)?)?
             }
         }
     };
@@ -974,9 +1015,9 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
                 let pipeline = Arc::clone(&gpu.pipeline);
                 let lost = Arc::clone(&gpu_lost);
                 let reading = Arc::clone(&reading);
-                let crop = plan.config.crop;
+                let (crop, zone) = (plan.config.crop, plan.config.zone);
                 let sink: vixeeny_capture::TextureSink = Box::new(move |texture, content, time_ns| {
-                    let (left, top, width, height) = validate::center_crop(content, crop);
+                    let (left, top, width, height) = validate::crop_rect(content, zone, crop);
                     let rect = d3d::Rect {
                         left: left as i32,
                         top: top as i32,

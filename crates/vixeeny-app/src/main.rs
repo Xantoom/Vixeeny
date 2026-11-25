@@ -68,8 +68,17 @@ fn lang(setting: &str) -> vixeeny_common::i18n::Lang {
 
 /// Runs one action. Failures are logged, not fatal: the app stays available for the next one.
 fn perform(action: ActionId, config: &Config, frozen: Option<ipc::Frozen>) {
-    use ActionId::{CaptureAllMonitors, CaptureFullscreen, CaptureWindow};
+    use ActionId::{CaptureAllMonitors, CaptureFullscreen, CaptureLastRegion, CaptureWindow};
     match action {
+        // Nothing to take again yet: said rather than a capture of nothing.
+        CaptureLastRegion if region::last_zone().is_none() => {
+            if let Some(held) = &frozen {
+                vixeeny_capture::freeze::release(held);
+            }
+            let text =
+                vixeeny_common::i18n::tr(vixeeny_common::i18n::Key::ToastNoLastRegion, lang(&config.general.language));
+            toast::notify(config, &toast::Toast::Failed(toast::Failed::Capture, text.to_owned()));
+        }
         ActionId::CaptureRegion => {
             if let Err(e) = region::run(config, region::Mode::Editor, frozen) {
                 tracing::error!("editor failed: {e:#}");
@@ -82,22 +91,24 @@ fn perform(action: ActionId, config: &Config, frozen: Option<ipc::Frozen>) {
                 toast::notify(config, &toast::Toast::Failed(toast::Failed::Capture, text));
             }
         }
-        CaptureFullscreen | CaptureWindow | CaptureAllMonitors => match direct_capture(action, config, frozen) {
-            Ok(None) => tracing::debug!("no window chosen"),
-            Ok(Some((path, thumb))) => {
-                tracing::debug!("saved {}", path.display());
-                if config.image.for_action(action).keep_copy {
-                    let saved = toast::Toast::Saved(toast::Saved::Image, path);
-                    toast::notify_with(config, &saved, thumb);
+        CaptureFullscreen | CaptureWindow | CaptureAllMonitors | CaptureLastRegion => {
+            match direct_capture(action, config, frozen) {
+                Ok(None) => tracing::debug!("no window chosen"),
+                Ok(Some((path, thumb))) => {
+                    tracing::debug!("saved {}", path.display());
+                    if config.image.for_action(action).keep_copy {
+                        let saved = toast::Toast::Saved(toast::Saved::Image, path);
+                        toast::notify_with(config, &saved, thumb);
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("capture failed: {e:#}");
+                    let lang = lang(&config.general.language);
+                    let text = toast::failure_text(&e, lang);
+                    toast::notify(config, &toast::Toast::Failed(toast::Failed::Capture, text));
                 }
             }
-            Err(e) => {
-                tracing::error!("capture failed: {e:#}");
-                let lang = lang(&config.general.language);
-                let text = toast::failure_text(&e, lang);
-                toast::notify(config, &toast::Toast::Failed(toast::Failed::Capture, text));
-            }
-        },
+        }
         other => tracing::debug!("action {other:?} is not implemented yet"),
     }
 }
@@ -143,7 +154,8 @@ fn direct_capture(
         vixeeny_platform::foreground_window()?
     };
     let started = std::time::Instant::now();
-    let snapshot = still::Snapshot { monitors, cursor, foreground };
+    let zone = (action == ActionId::CaptureLastRegion).then(region::last_zone).flatten();
+    let snapshot = still::Snapshot { monitors, cursor, foreground, zone };
     let image_settings = &config.image.for_action(action);
     let dir = if image_settings.keep_copy {
         vixeeny_common::paths::ready_dir(&config.paths.images, vixeeny_common::paths::DEFAULT_IMAGES)
@@ -373,6 +385,8 @@ fn run_action(
 ) -> Option<ActionId> {
     match action {
         ActionId::RecordToggle
+        | ActionId::RecordRegion
+        | ActionId::RecordWindow
         | ActionId::RecordPause
         | ActionId::ReplayToggle
         | ActionId::ReplaySave
@@ -685,8 +699,34 @@ impl Recording {
             _ => {}
         }
         match (action, &self.handle) {
-            (ActionId::RecordToggle, Some(handle)) => handle.stop(),
-            (ActionId::RecordToggle, None) => {
+            (_, Some(handle)) if action.toggles_recording() => handle.stop(),
+            (_, None) if action.toggles_recording() => {
+                // What to film: the screen, or the window or the zone the user points at (giving up records nothing).
+                let film = match action {
+                    ActionId::RecordRegion => match region::pick_zone(config) {
+                        Ok(Some(zone)) => record::Film::Zone(zone),
+                        Ok(None) => return,
+                        Err(e) => {
+                            tracing::error!("cannot pick the zone to record: {e:#}");
+                            return;
+                        }
+                    },
+                    ActionId::RecordWindow => {
+                        let picked = (|| {
+                            vixeeny_platform::ensure_dpi_aware();
+                            pick_window(&vixeeny_platform::monitors()?, vixeeny_platform::cursor_position()?)
+                        })();
+                        match picked {
+                            Ok(Some(window)) => record::Film::Window(window),
+                            Ok(None) => return,
+                            Err(e) => {
+                                tracing::error!("cannot pick the window to record: {e:#}");
+                                return;
+                            }
+                        }
+                    }
+                    _ => record::Film::Screen,
+                };
                 // The replay stops while a recording runs (one capture and one encoder at a time): its buffer goes with
                 // it, and it starts again once the recording ends.
                 if self.replay.is_some() {
@@ -694,7 +734,7 @@ impl Recording {
                     self.replay_game = None;
                     self.stop_replay();
                 }
-                match record::start(config) {
+                match record::start(config, &film) {
                     Ok(handle) => self.handle = Some(handle),
                     Err(e) => {
                         tracing::error!("cannot start the recording: {e:#}");
