@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The shortcuts table: two slots per action, checked as they are typed.
 
-use vixeeny_common::config::{Config, Hotkeys};
+use vixeeny_common::config::Config;
 use vixeeny_common::hotkey::{Hotkey, HotkeyError, MAX_PER_ACTION};
 use vixeeny_common::ipc::ActionId;
 
@@ -16,36 +16,11 @@ pub enum Refusal {
     Conflict(ActionId),
 }
 
-fn list_mut(hotkeys: &mut Hotkeys, action: ActionId) -> Option<&mut Vec<String>> {
-    Some(match action {
-        ActionId::CaptureRegion => &mut hotkeys.capture_region,
-        ActionId::CaptureLastRegion => &mut hotkeys.capture_last_region,
-        ActionId::CaptureText => &mut hotkeys.capture_text,
-        ActionId::CapturePin => &mut hotkeys.capture_pin,
-        ActionId::CaptureWindow => &mut hotkeys.capture_window,
-        ActionId::CaptureFullscreen => &mut hotkeys.capture_fullscreen,
-        ActionId::CaptureAllMonitors => &mut hotkeys.capture_all_monitors,
-        ActionId::CaptureScrolling => &mut hotkeys.capture_scrolling,
-        ActionId::RecordToggle => &mut hotkeys.record_toggle,
-        ActionId::RecordRegion => &mut hotkeys.record_region,
-        ActionId::RecordWindow => &mut hotkeys.record_window,
-        ActionId::RecordPause => &mut hotkeys.record_pause,
-        ActionId::RecordDiscard => &mut hotkeys.record_discard,
-        ActionId::ReplayToggle => &mut hotkeys.replay_toggle,
-        ActionId::ReplaySave => &mut hotkeys.replay_save,
-        ActionId::ReplayEdit => &mut hotkeys.replay_edit,
-        ActionId::OverlayToggle => &mut hotkeys.overlay_toggle,
-        // Watching for games and the settings (the tray icon opens them) have no shortcut.
-        ActionId::ReplayWatch | ActionId::OpenSettings => return None,
-    })
-}
-
 /// The table: every action with its [`MAX_PER_ACTION`] slots (empty text = free slot).
 pub fn table(config: &Config) -> Vec<(ActionId, [String; MAX_PER_ACTION])> {
     config
         .hotkeys
         .bindings()
-        .into_iter()
         .map(|(action, texts)| {
             let mut slots: [String; MAX_PER_ACTION] = Default::default();
             for (slot, text) in slots.iter_mut().zip(texts) {
@@ -80,7 +55,7 @@ pub fn set(config: &mut Config, action: ActionId, slot: usize, text: &str) -> Re
         }
         *target = hotkey.in_order(text);
     }
-    if let Some(list) = list_mut(&mut config.hotkeys, action) {
+    if let Some(list) = config.hotkeys.get_mut(action) {
         *list = slots.into_iter().filter(|s| !s.is_empty()).collect();
     }
     Ok(())

@@ -338,11 +338,12 @@ fn volume(letter: char) -> Option<Disk> {
     Some(Disk { letter: format!("{letter}:"), label, model, bytes: total, free_bytes: free })
 }
 
-/// The physical disk a volume is on (`\\.\C:`, opened without read access).
-fn disk_number(letter: char) -> Option<u32> {
-    let path = HSTRING::from(format!(r"\\.\{letter}:"));
-    // SAFETY: a NUL-terminated path; the handle is closed below.
-    let handle = unsafe {
+/// A device (`\\.\C:`, `\\.\PhysicalDrive0`) opened without read access, which needs no administrator rights. The
+/// caller closes it.
+fn open_device(path: &str) -> Option<windows::Win32::Foundation::HANDLE> {
+    let path = HSTRING::from(path);
+    // SAFETY: a NUL-terminated path.
+    unsafe {
         CreateFileW(
             PCWSTR(path.as_ptr()),
             0,
@@ -353,7 +354,12 @@ fn disk_number(letter: char) -> Option<u32> {
             None,
         )
     }
-    .ok()?;
+    .ok()
+}
+
+/// The physical disk a volume is on (`\\.\C:`, opened without read access).
+fn disk_number(letter: char) -> Option<u32> {
+    let handle = open_device(&format!(r"\\.\{letter}:"))?;
     let mut number = STORAGE_DEVICE_NUMBER::default();
     // Required without an OVERLAPPED.
     let mut returned = 0u32;
@@ -377,20 +383,7 @@ fn disk_number(letter: char) -> Option<u32> {
 
 /// `\\.\PhysicalDriveN`, opened without read access (no administrator rights needed): its model and size.
 fn physical_disk(n: u32) -> Option<(String, u64)> {
-    let path = HSTRING::from(format!(r"\\.\PhysicalDrive{n}"));
-    // SAFETY: a NUL-terminated path; the handle is closed below.
-    let handle = unsafe {
-        CreateFileW(
-            PCWSTR(path.as_ptr()),
-            0,
-            FILE_SHARE_READ | FILE_SHARE_WRITE,
-            None,
-            OPEN_EXISTING,
-            FILE_FLAGS_AND_ATTRIBUTES(0),
-            None,
-        )
-    }
-    .ok()?;
+    let handle = open_device(&format!(r"\\.\PhysicalDrive{n}"))?;
     let query = STORAGE_PROPERTY_QUERY {
         PropertyId: StorageDeviceProperty,
         QueryType: PropertyStandardQuery,

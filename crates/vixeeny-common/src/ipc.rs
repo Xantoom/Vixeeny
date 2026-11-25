@@ -16,122 +16,7 @@ use serde::{Deserialize, Serialize};
 /// Hard cap on a message, so a corrupt length prefix cannot make us allocate gigabytes.
 pub const MAX_MESSAGE_BYTES: u32 = 16 * 1024 * 1024;
 
-/// Action the daemon asks the app to run.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ActionId {
-    CaptureRegion,
-    CaptureWindow,
-    CaptureFullscreen,
-    CaptureAllMonitors,
-    CaptureScrolling,
-    RecordToggle,
-    RecordPause,
-    ReplayToggle,
-    ReplaySave,
-    /// Saves the replay, then opens it in the video editor to cut it.
-    ReplayEdit,
-    OverlayToggle,
-    OpenSettings,
-    /// Not a shortcut: keeps the app running while the replay is on, to start it during full-screen games (the daemon
-    /// sends it at startup and when the settings change).
-    ReplayWatch,
-    /// Captures the zone of the last zone capture again, straight to its file (no editor).
-    CaptureLastRegion,
-    /// Starts a recording of a zone picked on the screen, or stops the recording.
-    RecordRegion,
-    /// Starts a recording of a window picked on the screen, or stops the recording.
-    RecordWindow,
-    /// Copies the text of a zone picked on the frozen screens (no editor).
-    CaptureText,
-    /// Pins a zone picked on the frozen screens over the windows (no editor).
-    CapturePin,
-    /// Stops the recording and deletes its files.
-    RecordDiscard,
-}
-
-impl ActionId {
-    /// All actions, in a stable order.
-    pub const ALL: [Self; 19] = [
-        Self::CaptureRegion,
-        Self::CaptureLastRegion,
-        Self::CaptureText,
-        Self::CapturePin,
-        Self::CaptureWindow,
-        Self::CaptureFullscreen,
-        Self::CaptureAllMonitors,
-        Self::CaptureScrolling,
-        Self::RecordToggle,
-        Self::RecordRegion,
-        Self::RecordWindow,
-        Self::RecordPause,
-        Self::RecordDiscard,
-        Self::ReplayToggle,
-        Self::ReplaySave,
-        Self::ReplayEdit,
-        Self::OverlayToggle,
-        Self::OpenSettings,
-        Self::ReplayWatch,
-    ];
-
-    /// Name used on the `vixeeny-app --action <name>` command line.
-    pub const fn cli_name(self) -> &'static str {
-        match self {
-            Self::CaptureRegion => "capture-region",
-            Self::CaptureWindow => "capture-window",
-            Self::CaptureFullscreen => "capture-fullscreen",
-            Self::CaptureAllMonitors => "capture-all-monitors",
-            Self::CaptureScrolling => "capture-scrolling",
-            Self::RecordToggle => "record-toggle",
-            Self::RecordPause => "record-pause",
-            Self::ReplayToggle => "replay-toggle",
-            Self::ReplaySave => "replay-save",
-            Self::ReplayEdit => "replay-edit",
-            Self::OverlayToggle => "overlay-toggle",
-            Self::OpenSettings => "open-settings",
-            Self::ReplayWatch => "replay-watch",
-            Self::CaptureLastRegion => "capture-last-region",
-            Self::RecordRegion => "record-region",
-            Self::RecordWindow => "record-window",
-            Self::CaptureText => "capture-text",
-            Self::CapturePin => "capture-pin",
-            Self::RecordDiscard => "record-discard",
-        }
-    }
-
-    /// The screenshots: their settings may delay them.
-    pub const fn is_capture(self) -> bool {
-        matches!(
-            self,
-            Self::CaptureRegion
-                | Self::CaptureWindow
-                | Self::CaptureFullscreen
-                | Self::CaptureAllMonitors
-                | Self::CaptureScrolling
-                | Self::CaptureLastRegion
-                | Self::CaptureText
-                | Self::CapturePin
-        )
-    }
-
-    /// Start or stop a recording.
-    pub const fn toggles_recording(self) -> bool {
-        matches!(self, Self::RecordToggle | Self::RecordRegion | Self::RecordWindow)
-    }
-
-    /// Actions that start on the frozen screen (a zone is picked on it).
-    pub const fn freezes_screen(self) -> bool {
-        matches!(self, Self::CaptureRegion | Self::CaptureScrolling | Self::CaptureText | Self::CapturePin)
-    }
-
-    /// The daemon captures the screens the moment the shortcut is pressed, for the app to save (they are not shown).
-    pub const fn holds_screen(self) -> bool {
-        matches!(self, Self::CaptureFullscreen | Self::CaptureAllMonitors | Self::CaptureLastRegion)
-    }
-
-    pub fn from_cli_name(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|a| a.cli_name() == name)
-    }
-}
+pub use crate::actions::ActionId;
 
 /// The screens the daemon froze the moment a zone capture was asked for: one GPU texture per monitor, shared with the
 /// app, and the window that shows it until the editor is up.
@@ -483,14 +368,6 @@ mod tests {
         assert!(identity::same_user(std::process::id()));
         // The System process.
         assert!(!identity::same_user(4));
-    }
-
-    #[test]
-    fn action_cli_names_roundtrip() {
-        for action in ActionId::ALL {
-            assert_eq!(ActionId::from_cli_name(action.cli_name()), Some(action));
-        }
-        assert_eq!(ActionId::from_cli_name("nope"), None);
     }
 
     fn frozen() -> Frozen {

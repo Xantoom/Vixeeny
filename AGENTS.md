@@ -23,6 +23,10 @@ cargo build --profile quick
 - After `cargo update -p …`, read the whole `git diff Cargo.lock`: it can also move range dependencies.
 - New dependencies must pass `cargo deny check`. Native libraries are recorded in `native/versions.toml`.
 - `cargo test -p vixeeny-ui` renders every window without a display; `VIXEENY_SCREENSHOTS=<folder>` keeps the images.
+- The exhaustive encoder tests (every encoder, container and option value) are `#[ignore]`d: after a change to
+  `vixeeny-encode`, FFmpeg or the native libraries, run them with `-- --ignored` (the CI does it for such pushes).
+- A new shortcut action is one line of the table in `crates/vixeeny-common/src/actions.rs`, one in `ActionId::ALL`, its
+  labels in `i18n.rs` and what it does in the app.
 
 ## Layout
 

@@ -89,6 +89,23 @@ pub fn srgb_decode(v: f32) -> f32 {
     if v <= 0.040_45 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
 }
 
+/// The `peak` kernel shared by the shaders that follow the brightest pixel: it reads `src`, `size` and `scale` and
+/// raises `brightest[0]`, which the shader declares before it (it goes after the shader's own code).
+pub const HLSL_PEAK: &str = r"
+groupshared uint group_brightest;
+
+// Positive floats order as their bits do.
+[numthreads(16, 16, 1)]
+void peak(uint3 id : SV_DispatchThreadID, uint index : SV_GroupIndex) {
+    if (index == 0) group_brightest = 0;
+    GroupMemoryBarrierWithGroupSync();
+    if (id.x < size.x && id.y < size.y)
+        InterlockedMax(group_brightest, asuint(brightness(src[id.xy].rgb, scale)));
+    GroupMemoryBarrierWithGroupSync();
+    if (index == 0) InterlockedMax(brightest[0], group_brightest);
+}
+";
+
 /// The tone mapper and the PQ coding of this module in HLSL, line for line, for the shaders that run them on the
 /// graphics card (stills and recordings): the same steps and the same numbers.
 pub const HLSL: &str = r"

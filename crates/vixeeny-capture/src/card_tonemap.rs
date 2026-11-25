@@ -30,18 +30,6 @@ RWTexture2D<uint> dst : register(u0);
 RWStructuredBuffer<uint> brightest : register(u1);
 cbuffer Params : register(b0) { float scale; float display; uint2 size; };
 
-groupshared uint group_brightest;
-
-// Positive floats order as their bits do.
-[numthreads(16, 16, 1)]
-void peak(uint3 id : SV_DispatchThreadID, uint index : SV_GroupIndex) {
-    if (index == 0) group_brightest = 0;
-    GroupMemoryBarrierWithGroupSync();
-    if (id.x < size.x && id.y < size.y)
-        InterlockedMax(group_brightest, asuint(brightness(src[id.xy].rgb, scale)));
-    GroupMemoryBarrierWithGroupSync();
-    if (index == 0) InterlockedMax(brightest[0], group_brightest);
-}
 
 uint q(float v) { return (uint)(v * 255.0 + 0.5); }
 
@@ -63,7 +51,7 @@ type Code = (Vec<u8>, Vec<u8>);
 fn bytecode() -> Result<&'static Code, CaptureError> {
     static CODE: OnceLock<Result<Code, D3dError>> = OnceLock::new();
     CODE.get_or_init(|| {
-        let source = format!("{}{SHADER}", vixeeny_common::colour::HLSL);
+        let source = format!("{}{SHADER}{}", vixeeny_common::colour::HLSL, vixeeny_common::colour::HLSL_PEAK);
         let cs = s!("cs_5_0");
         Ok((compile(&source, s!("peak"), cs)?, compile(&source, s!("main"), cs)?))
     })

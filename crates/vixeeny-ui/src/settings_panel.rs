@@ -292,29 +292,7 @@ fn ui_texts(lang: Lang) -> UiTexts {
 
 /// The label of an action in the shortcuts table.
 pub fn action_label(action: ActionId, lang: Lang) -> &'static str {
-    tr(
-        match action {
-            ActionId::CaptureRegion => Key::ActCaptureRegion,
-            ActionId::CaptureLastRegion => Key::ActCaptureLastRegion,
-            ActionId::CaptureText => Key::ActCaptureText,
-            ActionId::CapturePin => Key::ActCapturePin,
-            ActionId::CaptureWindow => Key::ActCaptureWindow,
-            ActionId::CaptureFullscreen => Key::ActCaptureFullscreen,
-            ActionId::CaptureAllMonitors => Key::ActCaptureAll,
-            ActionId::CaptureScrolling => Key::ActCaptureScrolling,
-            ActionId::RecordToggle => Key::ActRecordToggle,
-            ActionId::RecordRegion => Key::ActRecordRegion,
-            ActionId::RecordWindow => Key::ActRecordWindow,
-            ActionId::RecordPause => Key::ActRecordPause,
-            ActionId::RecordDiscard => Key::ActRecordDiscard,
-            ActionId::ReplayToggle | ActionId::ReplayWatch => Key::ActReplayToggle,
-            ActionId::ReplaySave => Key::ActReplaySave,
-            ActionId::ReplayEdit => Key::ActReplayEdit,
-            ActionId::OverlayToggle => Key::ActOverlay,
-            ActionId::OpenSettings => Key::ActSettings,
-        },
-        lang,
-    )
+    tr(action.label(), lang)
 }
 
 /// A group of rows under its title (empty: none).

@@ -469,78 +469,7 @@ impl Default for General {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Hotkeys {
-    pub capture_region: Vec<String>,
-    pub capture_last_region: Vec<String>,
-    pub capture_text: Vec<String>,
-    pub capture_pin: Vec<String>,
-    pub capture_window: Vec<String>,
-    pub capture_fullscreen: Vec<String>,
-    pub capture_all_monitors: Vec<String>,
-    pub capture_scrolling: Vec<String>,
-    pub record_toggle: Vec<String>,
-    pub record_region: Vec<String>,
-    pub record_window: Vec<String>,
-    pub record_pause: Vec<String>,
-    pub record_discard: Vec<String>,
-    pub replay_toggle: Vec<String>,
-    pub replay_save: Vec<String>,
-    pub replay_edit: Vec<String>,
-    pub overlay_toggle: Vec<String>,
-}
-
-impl Hotkeys {
-    /// Every action with the shortcuts configured for it, in [`ActionId::ALL`] order.
-    pub fn bindings(&self) -> [(ActionId, &[String]); 17] {
-        [
-            (ActionId::CaptureRegion, &self.capture_region),
-            (ActionId::CaptureLastRegion, &self.capture_last_region),
-            (ActionId::CaptureText, &self.capture_text),
-            (ActionId::CapturePin, &self.capture_pin),
-            (ActionId::CaptureWindow, &self.capture_window),
-            (ActionId::CaptureFullscreen, &self.capture_fullscreen),
-            (ActionId::CaptureAllMonitors, &self.capture_all_monitors),
-            (ActionId::CaptureScrolling, &self.capture_scrolling),
-            (ActionId::RecordToggle, &self.record_toggle),
-            (ActionId::RecordRegion, &self.record_region),
-            (ActionId::RecordWindow, &self.record_window),
-            (ActionId::RecordPause, &self.record_pause),
-            (ActionId::RecordDiscard, &self.record_discard),
-            (ActionId::ReplayToggle, &self.replay_toggle),
-            (ActionId::ReplaySave, &self.replay_save),
-            (ActionId::ReplayEdit, &self.replay_edit),
-            (ActionId::OverlayToggle, &self.overlay_toggle),
-        ]
-    }
-}
-
-impl Default for Hotkeys {
-    fn default() -> Self {
-        let one = |s: &str| vec![s.to_owned()];
-        Self {
-            capture_region: one("PrintScreen"),
-            capture_last_region: one(MORE_SHORTCUTS[0].1),
-            capture_text: one(MORE_SHORTCUTS[1].1),
-            capture_pin: one(MORE_SHORTCUTS[2].1),
-            capture_window: one("Alt+PrintScreen"),
-            capture_fullscreen: one("Ctrl+PrintScreen"),
-            capture_all_monitors: one(NEW_SHORTCUTS[0].1),
-            capture_scrolling: one("Shift+PrintScreen"),
-            record_toggle: one("Ctrl+F9"),
-            record_region: one(MORE_SHORTCUTS[3].1),
-            record_window: one(MORE_SHORTCUTS[4].1),
-            record_pause: one("Ctrl+F10"),
-            record_discard: one(MORE_SHORTCUTS[5].1),
-            // Three keys: turning the replay off by mistake would lose the moment to keep.
-            replay_toggle: one(NEW_SHORTCUTS[1].1),
-            replay_save: one("Ctrl+F11"),
-            replay_edit: one("Ctrl+F12"),
-            overlay_toggle: one("Ctrl+F8"),
-        }
-    }
-}
+pub use crate::actions::Hotkeys;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]

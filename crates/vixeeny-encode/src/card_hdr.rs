@@ -50,18 +50,6 @@ cbuffer Params : register(b0) {
     uint2 size; float2 out_size;
 };
 
-groupshared uint group_brightest;
-
-// Positive floats order as their bits do.
-[numthreads(16, 16, 1)]
-void peak(uint3 id : SV_DispatchThreadID, uint index : SV_GroupIndex) {
-    if (index == 0) group_brightest = 0;
-    GroupMemoryBarrierWithGroupSync();
-    if (id.x < size.x && id.y < size.y)
-        InterlockedMax(group_brightest, asuint(brightness(src[id.xy].rgb, scale)));
-    GroupMemoryBarrierWithGroupSync();
-    if (index == 0) InterlockedMax(brightest[0], group_brightest);
-}
 
 // The headroom followed (`colour::follow`): the first frame takes its own.
 [numthreads(1, 1, 1)]
@@ -123,7 +111,7 @@ struct Code {
 fn code() -> Result<&'static Code, D3dError> {
     static CODE: OnceLock<Result<Code, D3dError>> = OnceLock::new();
     CODE.get_or_init(|| {
-        let source = format!("{}{SHADERS}", vixeeny_common::colour::HLSL);
+        let source = format!("{}{SHADERS}{}", vixeeny_common::colour::HLSL, vixeeny_common::colour::HLSL_PEAK);
         let (cs, vs, ps) = (s!("cs_5_0"), s!("vs_5_0"), s!("ps_5_0"));
         Ok(Code {
             peak: compile(&source, s!("peak"), cs)?,
