@@ -39,17 +39,49 @@ fn take_print_screen_once(state: &mut State) {
     if state.print_screen_taken {
         return;
     }
-    if !vixeeny_platform::print_screen_opens_snipping_tool() {
-        state.print_screen_taken = true;
-        return;
-    }
-    match vixeeny_platform::take_print_screen() {
-        Ok(()) => {
-            tracing::info!("the Print Screen key no longer opens Windows' Snipping Tool");
-            state.print_screen_taken = true;
-        }
+    match take_print_screen(state) {
+        Ok(()) => state.print_screen_taken = true,
         Err(e) => tracing::warn!("cannot turn off the Snipping Tool's Print Screen key: {e}"),
     }
+}
+
+/// Takes the Print Screen key from Windows' Snipping Tool when it has it, and records that it had it (the uninstaller
+/// gives it back, see [`give_print_screen`]).
+fn take_print_screen(state: &mut State) -> Result<(), vixeeny_platform::PlatformError> {
+    if !vixeeny_platform::print_screen_opens_snipping_tool() {
+        return Ok(());
+    }
+    vixeeny_platform::take_print_screen()?;
+    tracing::info!("the Print Screen key no longer opens Windows' Snipping Tool");
+    state.print_screen_was_on = true;
+    Ok(())
+}
+
+/// `vixeeny-app --print-screen take`, run by the installer.
+pub fn take_print_screen_now() -> anyhow::Result<()> {
+    let path = state::file().ok_or_else(|| anyhow::anyhow!("no settings folder"))?;
+    let mut state = State::load(&path);
+    take_print_screen(&mut state)?;
+    state.print_screen_taken = true;
+    state.save(&path)?;
+    Ok(())
+}
+
+/// `vixeeny-app --print-screen give`, run by the uninstaller: the Print Screen key opens the Snipping Tool again when
+/// it did before Vixeeny took it.
+pub fn give_print_screen() -> anyhow::Result<()> {
+    let Some(path) = state::file() else {
+        return Ok(());
+    };
+    let mut state = State::load(&path);
+    if !state.print_screen_was_on {
+        return Ok(());
+    }
+    vixeeny_platform::give_print_screen()?;
+    state.print_screen_was_on = false;
+    state.print_screen_taken = false;
+    state.save(&path)?;
+    Ok(())
 }
 
 /// Markdown release notes as the windows show them.
@@ -76,11 +108,15 @@ pub fn run_child(config: &Config) -> anyhow::Result<()> {
     let lang = crate::lang(&config.general.language);
     let window = vixeeny_ui::WhatsNewWindow::new().map_err(|e| anyhow::anyhow!("window: {e}"))?;
     vixeeny_ui::theme::apply(&window, vixeeny_ui::theme::default_look());
+    vixeeny_ui::theme::watch(&window);
     window.set_heading(tr(Key::WhatsNewTitle, lang).replace("{version}", CURRENT).into());
     window.set_show_label(tr(Key::SetWhatsNew, lang).into());
     window.set_ok_label(tr(Key::UiOk, lang).into());
     window.set_show_again(config.general.whats_new);
-    let known = state::file().map(|p| State::load(&p)).and_then(|s| s.notes_of(CURRENT).map(str::to_owned));
+    // Built into the program; else kept when it was downloaded; else asked for.
+    let known = vixeeny_updater::changelog::running(lang)
+        .map(str::to_owned)
+        .or_else(|| state::file().map(|p| State::load(&p)).and_then(|s| s.notes_of(CURRENT, lang).map(str::to_owned)));
     match known {
         Some(notes) => window.set_notes(lines_model(ui_notes(&notes))),
         // Not known yet (the version before this one kept none): asked for while the window shows.
@@ -88,7 +124,7 @@ pub fn run_child(config: &Config) -> anyhow::Result<()> {
             window.set_message(tr(Key::WhatsNewLoading, lang).into());
             let weak = window.as_weak();
             std::thread::spawn(move || {
-                let (lines, message) = match vixeeny_updater::client::notes(CURRENT) {
+                let (lines, message) = match vixeeny_updater::client::notes(CURRENT, lang) {
                     Ok(notes) => (ui_notes(&notes), String::new()),
                     Err(e) => {
                         tracing::warn!("what's new: {e:#}");

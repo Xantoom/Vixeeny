@@ -10,6 +10,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::{Context, bail};
 use vixeeny_common::ipc::{self, ControlReply, ControlRequest, Endpoint, Hello};
 
+use crate::release::{Manifest, manifest_url};
 use crate::state::{self, State, log};
 use crate::{Release, check_url, is_newer, swap, verify};
 
@@ -27,8 +28,9 @@ const DOWNLOAD: &str = ".update-download";
 const LOCK: &str = ".update-lock";
 /// Held while the archive downloads (see [`Turn`]).
 const DOWNLOAD_TURN: &str = ".update-download-turn";
-/// The new daemon must answer within this long, else the old version comes back.
-const START_TIMEOUT: Duration = Duration::from_secs(20);
+/// The new daemon must answer within this long, else the old version comes back. A daemon that fails ends at once (its
+/// output closes): this only bounds one that hangs. Generous: on a hard disk, the antivirus reads every new file first.
+const START_TIMEOUT: Duration = Duration::from_secs(180);
 const CURRENT: &str = env!("CARGO_PKG_VERSION");
 
 fn agent() -> ureq::Agent {
@@ -79,8 +81,8 @@ struct Part {
 
 impl Part {
     fn open(path: &Path) -> std::io::Result<Self> {
-        // Written, not appended: Windows opens a file for appending without the right to truncate it, which
-        // `restart` needs.
+        // Written, not appended: Windows opens a file for appending without the right to truncate it, which `restart`
+        // needs.
         let mut file = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(path)?;
         let len = std::io::Seek::seek(&mut file, std::io::SeekFrom::End(0))?;
         Ok(Self { file, len })
@@ -194,15 +196,29 @@ pub fn due() -> bool {
     State::load(&path).due(now())
 }
 
+/// The latest release: from its manifest (GitHub's download servers), else from GitHub's API (a release without a
+/// manifest, or the servers out of reach). `None` when nothing is published yet.
+fn latest(agent: &ureq::Agent) -> anyhow::Result<Option<Release>> {
+    let manifest = get(agent, &manifest_url(REPOSITORY), 1 << 20).and_then(|json| {
+        let manifest: Manifest = serde_json::from_slice(&json)?;
+        Ok(manifest.release(REPOSITORY))
+    });
+    match manifest {
+        Ok(release) => return Ok(Some(release)),
+        Err(e) => log(&format!("no manifest ({e:#}): asking the API")),
+    }
+    // 404: nothing is published yet (drafts are invisible to the API).
+    match get(agent, &check_url(REPOSITORY), 4 << 20) {
+        Ok(json) => Ok(Release::parse(std::str::from_utf8(&json)?)?),
+        Err(e) if is_not_found(&e) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
 /// Asks GitHub for the latest release and records the answer. `Some` when it is newer than this version.
 pub fn check() -> anyhow::Result<Option<Release>> {
     let path = state_path()?;
-    // 404: nothing is published yet (drafts are invisible to the API).
-    let release = match get(&agent(), &check_url(REPOSITORY), 4 << 20) {
-        Ok(json) => Release::parse(std::str::from_utf8(&json)?)?,
-        Err(e) if is_not_found(&e) => None,
-        Err(e) => return Err(e),
-    };
+    let release = latest(&agent())?;
     let mut state = State::load(&path);
     state.checked_at = now();
     // The release of the version running: kept for what changed in it.
@@ -215,8 +231,8 @@ pub fn check() -> anyhow::Result<Option<Release>> {
     Ok(state.available)
 }
 
-/// What changed in `version`, as written in its release (Markdown).
-pub fn notes(version: &str) -> anyhow::Result<String> {
+/// What changed in `version`, as written in its release (Markdown), in `lang` when the release has it.
+pub fn notes(version: &str, lang: vixeeny_common::i18n::Lang) -> anyhow::Result<String> {
     let json = get(&agent(), &crate::release::tag_url(REPOSITORY, version), 4 << 20)?;
     let release = Release::parse(std::str::from_utf8(&json)?)?.context("no such release")?;
     // Kept for the next time.
@@ -227,7 +243,7 @@ pub fn notes(version: &str) -> anyhow::Result<String> {
             let _ = state.save(&path);
         }
     }
-    Ok(release.notes)
+    Ok(release.notes_in(lang).to_owned())
 }
 
 /// The version that is downloaded, verified and ready to be installed, if any.
@@ -336,7 +352,8 @@ fn start_daemon(dir: &Path, stop_silent: bool) -> std::io::Result<bool> {
         }
         return Ok(false);
     };
-    // Its first line, or the end of its output if it stops first.
+    // Its first line, or the end of its output if it stops first (a daemon that fails to start ends: its output
+    // closes).
     let (said, heard) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let mut line = String::new();
@@ -387,8 +404,7 @@ fn read_only(path: &Path) -> std::io::Result<std::fs::File> {
 pub fn download_setup(progress: &mut dyn FnMut(u64, u64)) -> anyhow::Result<Setup> {
     anyhow::ensure!(verify::has_key(), "this build cannot verify the installer");
     let agent = agent();
-    let json = get(&agent, &check_url(REPOSITORY), 4 << 20)?;
-    let release = Release::parse(std::str::from_utf8(&json)?)?.context("no version is published")?;
+    let release = latest(&agent)?.context("no version is published")?;
     // This version or a newer one: an older installer, signed all the same, would take Vixeeny back.
     anyhow::ensure!(
         release.version == CURRENT || is_newer(CURRENT, &release.version),

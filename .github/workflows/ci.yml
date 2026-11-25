@@ -79,6 +79,14 @@ jobs:
           Set-Content dist\stage\files.txt "LICENSE"
           iscc /Q "/DStageDir=$PWD\dist\stage" "/DOutDir=$PWD\dist" packaging\windows\vixeeny.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      # The installer compares the version installed with its own (update, repair or older).
+      - name: Order of versions in the installer
+        run: |
+          iscc /Q packaging\windows\versions-test.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Start-Process dist\versions-test.exe -ArgumentList '/VERYSILENT', "/RESULT=$PWD\dist\versions.txt" -Wait
+          $result = (Get-Content dist\versions.txt -Raw).Trim()
+          if ($result -ne 'ok') { throw "versions.iss: $result" }
   deny:
     # cargo-deny runs in a Linux container; it only reads the Windows dependency graph.
     runs-on: ubuntu-26.04

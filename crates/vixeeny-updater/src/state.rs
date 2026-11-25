@@ -50,6 +50,9 @@ pub struct State {
     /// `vixeeny_platform::take_print_screen`): turned back on by the user, it stays so.
     #[serde(default)]
     pub print_screen_taken: bool,
+    /// The Snipping Tool opened with the Print Screen key until Vixeeny took the key: the uninstaller gives it back.
+    #[serde(default)]
+    pub print_screen_was_on: bool,
     /// The version that ran last: another one now means Vixeeny was updated.
     #[serde(default)]
     pub last_run: Option<String>,
@@ -91,13 +94,13 @@ impl State {
         self.error.as_deref().filter(|_| self.error_version.as_deref() == Some(release.version.as_str()))
     }
 
-    /// What changed in `version`, when its release is known.
-    pub fn notes_of(&self, version: &str) -> Option<&str> {
+    /// What changed in `version`, in `lang` when the release has it, when its release is known.
+    pub fn notes_of(&self, version: &str, lang: vixeeny_common::i18n::Lang) -> Option<&str> {
         [&self.available, &self.installed]
             .into_iter()
             .flatten()
             .find(|r| r.version == version && !r.notes.is_empty())
-            .map(|r| r.notes.as_str())
+            .map(|r| r.notes_in(lang))
     }
 
     /// Records that `current` runs; `true` when it was updated to since the last run. With no run recorded (a version
@@ -137,6 +140,7 @@ mod tests {
                 assets: Vec::new(),
                 signatures: [("a.zip".to_owned(), "sig".to_owned())].into(),
                 notes: "- Things".into(),
+                notes_fr: "- Des choses".into(),
             }),
             notified: Some("1.0.0".into()),
             ready: Some("1.0.0".into()),
@@ -145,6 +149,7 @@ mod tests {
             failed: Some("0.9.0".into()),
             installed: None,
             print_screen_taken: true,
+            print_screen_was_on: true,
             last_run: Some("0.9.0".into()),
         };
         state.save(&path).unwrap();
@@ -180,8 +185,8 @@ mod tests {
         // From a version that kept no record: the release this file offered.
         let mut state = State { available: Some(release), ..State::default() };
         assert!(state.arrived("1.1.0"));
-        assert_eq!(state.notes_of("1.1.0"), Some("- New"));
-        assert_eq!(state.notes_of("1.0.0"), None);
+        assert_eq!(state.notes_of("1.1.0", vixeeny_common::i18n::Lang::En), Some("- New"));
+        assert_eq!(state.notes_of("1.0.0", vixeeny_common::i18n::Lang::En), None);
     }
 
     #[test]

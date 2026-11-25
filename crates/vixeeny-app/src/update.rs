@@ -60,10 +60,25 @@ fn pending() -> anyhow::Result<()> {
         }
         // Nothing to install: this version runs, perhaps for the first time.
         None => {
+            sync_installed_apps();
             let config = Config::current();
             crate::whats_new::on_start(&config);
             Ok(())
         }
+    }
+}
+
+/// Windows' installed apps show the version running: an update replaces the files without the installer, which wrote
+/// the version there. Without the administrator's rights an entry for all users stays as it is (no update could have
+/// changed the files then).
+fn sync_installed_apps() {
+    let Some(dir) = std::env::current_exe().ok().and_then(|exe| exe.parent().map(std::path::Path::to_path_buf)) else {
+        return;
+    };
+    match vixeeny_platform::registry::sync_uninstall_version(&dir, env!("CARGO_PKG_VERSION")) {
+        Ok(true) => tracing::info!("installed apps now show {}", env!("CARGO_PKG_VERSION")),
+        Ok(false) => {}
+        Err(e) => tracing::debug!("installed apps: {e}"),
     }
 }
 
@@ -107,9 +122,46 @@ fn background() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// `vixeeny-app --first-install autostart=on|off updates=on|off`: run by the installer on a first install, as the user
+/// who installs (not the administrator who gave the rights, who may be another account): the choices of its page go
+/// into this user's settings, and the start with Windows into this user's registry, before Vixeeny first starts.
+pub fn first_install(args: &[String]) -> anyhow::Result<()> {
+    let choice = |name: &str| install_choice(args, name);
+    let path = vixeeny_common::paths::config_file().ok_or_else(|| anyhow::anyhow!("no settings folder"))?;
+    let mut config = Config::load(&path).unwrap_or_default();
+    if let Some(on) = choice("autostart") {
+        config.general.autostart = on;
+        let daemon = std::env::current_exe()?.with_file_name(client::DAEMON);
+        vixeeny_platform::autostart::apply(&daemon, on)?;
+    }
+    if let Some(on) = choice("updates") {
+        config.general.check_updates = on;
+        config.general.auto_update = on;
+    }
+    config.save(&path)?;
+    Ok(())
+}
+
+/// `name=on` or `name=off` among the installer's `args`.
+fn install_choice(args: &[String], name: &str) -> Option<bool> {
+    args.iter().find_map(|a| a.strip_prefix(name)?.strip_prefix('=')).map(|v| v == "on")
+}
+
 /// Starts the installation in a process of its own (the settings window closes meanwhile and comes back with the new
 /// version).
 pub fn spawn_install() -> anyhow::Result<()> {
     std::process::Command::new(std::env::current_exe()?).args(["--update", "install", "--settings"]).spawn()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_installer_choices_are_read_one_by_one() {
+        let args: Vec<String> = ["autostart=off", "updates=on"].map(String::from).to_vec();
+        assert_eq!(super::install_choice(&args, "autostart"), Some(false));
+        assert_eq!(super::install_choice(&args, "updates"), Some(true));
+        assert_eq!(super::install_choice(&args, "auto"), None);
+        assert_eq!(super::install_choice(&[], "updates"), None);
+    }
 }

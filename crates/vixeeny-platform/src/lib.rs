@@ -4,13 +4,14 @@
 //! All coordinates are **physical pixels** in the virtual desktop. Callers must have called [`ensure_dpi_aware`] first,
 //! otherwise Windows hands out scaled (virtualised) values.
 
+pub mod autostart;
 pub mod clipboard;
 pub mod crash;
 pub mod d3d;
 pub mod elevation;
 pub mod games;
 mod geometry;
-mod registry;
+pub mod registry;
 mod time;
 pub use geometry::{PhysicalRect, virtual_bounds};
 pub use time::{local_time, os_version, utc_offset_minutes};
@@ -22,13 +23,13 @@ mod windows_impl;
 pub use windows_impl::{
     APP_ID, GameWindows, InstanceGuard, LockGuard, OutsideClicks, acquire_lock, allow_foreground_handoff,
     animations_enabled, attach_console, captured_as_seen, cursor_position, ensure_dpi_aware, exclude_from_capture,
-    exe_icon, exe_metadata, focus_tagged_window, foreground_window, game_page_in_front, gpu_adapters,
-    harden_dll_search, hdr_active, hdr_info, max_refresh_hz, mica, monitor_layout, monitors, monotonic_ns,
-    on_click_outside, on_dir_change, on_foreground_change, on_game_windows, on_process_exit, open_path,
-    print_screen_opens_snipping_tool, process_alive, process_ancestors, process_name, process_path, reveal,
-    run_in_background, set_app_id, set_exe_icon, single_instance, style_window, system_accent, system_prefers_dark,
-    tag_window, take_print_screen, top_level_windows, user_locale, wait_for_composition, wallpaper, window_info,
-    window_shown,
+    exe_icon, exe_metadata, focus_tagged_window, foreground_handle, foreground_window, game_page_in_front,
+    give_print_screen, gpu_adapters, harden_dll_search, hdr_active, hdr_info, max_refresh_hz, mica, monitor_layout,
+    monitors, monotonic_ns, on_click_outside, on_colour_change, on_dir_change, on_foreground_change, on_game_windows,
+    on_process_exit, open_path, print_screen_opens_snipping_tool, process_alive, process_ancestors, process_name,
+    process_path, reveal, run_in_background, set_app_id, set_exe_icon, single_instance, style_window, system_accent,
+    system_prefers_dark, tag_window, take_print_screen, top_level_windows, transparency_effects, user_locale,
+    wait_for_composition, wallpaper, window_info, window_shown,
 };
 
 /// A graphics adapter as the OS reports it (the encoder probe derives its own view from it).

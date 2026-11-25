@@ -74,21 +74,28 @@ Slint windows are rendered in the tests by the software renderer.
 
 ## Updates
 
-`Vixeeny.exe` starts `vixeeny-app --update background` shortly after it starts and after each
-wake from sleep. That process asks GitHub for the latest release, at most every 12 hours, and,
-when automatic updates are on, downloads the portable archive into `.update-download` (a
-download cut short goes on from there), checks it against the minisign signature written in the release notes, which must name
-the archive of that version,
-unpacks it into `.update-staged`, and installs it at the next start; otherwise it shows a toast
-once. Settings → About shows the same steps with a progress bar and a restart button.
+`Vixeeny.exe` starts `vixeeny-app --update background` when it starts, after each wake from sleep and
+when the computer gets a new network address (events Windows reports; no timer). That process asks
+GitHub for the latest release, at most every 12 hours: first `latest.json` from the release's files
+(GitHub's download servers, without the API's limit of 60 requests an hour), else the API. When
+automatic updates are on, it downloads the portable archive into `.update-download` (a download cut
+short goes on from there), checks it against its minisign signature, which must name the archive of
+that version, unpacks it into `.update-staged`, and installs it at the next start; otherwise it
+shows a toast once. Settings → About shows the same steps with a progress bar and a restart button,
+and the notes of the version offered.
+
+What changed in a version (`changelog/<version>/en.md` and `fr.md`) is built into its programs
+(`vixeeny-updater::changelog`): the window after an update and Settings → About show it at once, in
+the user's language, without the network.
 
 Installing writes a journal of every move into `.update-backup`, renames the running files there
 (Windows allows renaming a running program), moves the new ones in, restarts `Vixeeny.exe` only,
-and puts the old files back if the new version does not answer within 20 seconds; every failure
+and puts the old files back if the new version ends without answering, or stays silent for 3 minutes; every failure
 starts the previous version again. An install cut short (power cut) is undone from the journal
 at the next start. A version that failed is not installed again by itself. A recording in
 progress delays the restart until it ends. The installer stops Vixeeny the same way
-(`vixeeny-app --update quit`) before it replaces or removes files.
+(`vixeeny-app --update quit`) before it replaces or removes files. The new version writes its
+number into Windows' installed apps as it starts (the entry the installer made).
 
 ## Files and data
 

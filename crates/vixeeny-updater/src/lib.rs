@@ -2,6 +2,7 @@
 //! Update check, download, verification and replacement. The pure parts (versions, release metadata, signatures, file
 //! swap with rollback) are tested on their own; `client` wires them to the network and to the running programs.
 
+pub mod changelog;
 #[cfg(feature = "net")]
 pub mod client;
 pub mod release;

@@ -59,7 +59,8 @@ cargo build --profile quick
   `fix: …`, `docs: …`).
 - Comments and docs describe the code as it is: no plans, milestones or review notes in the repository.
 - Releases start from a version bump in `Cargo.toml` on branch `1.0`. Release notes are short user-facing bullets under
-  headings such as `## Settings` and `## Fixes`.
+  headings such as `## Settings` and `## Fixes`, in `changelog/<version>/en.md` and `fr.md` (built into the programs;
+  GitHub shows the English ones).
 
 ## Rules of the interface
 

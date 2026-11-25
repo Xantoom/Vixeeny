@@ -35,6 +35,13 @@ jobs:
         run: |
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
           if [ "${{ github.event_name }}" = workflow_dispatch ] || ! gh release view "v$version" >/dev/null 2>&1; then
+            # The notes are built into the programs and make the release's: both languages first.
+            for lang in en fr; do
+              if [ ! -s "changelog/$version/$lang.md" ]; then
+                echo "::error::changelog/$version/$lang.md is missing: a release needs its notes in English and French."
+                exit 1
+              fi
+            done
             echo build=true >> "$GITHUB_OUTPUT"
           elif gh api "repos/$GH_REPO/compare/$BEFORE...${{ github.sha }}" --jq '.files[].filename' | grep -qx Cargo.lock; then
             echo "v$version already has a release; the dependencies changed: build only, for the cache."
@@ -124,13 +131,22 @@ jobs:
         with:
           name: vixeeny-windows-unsigned
           path: dist
+      # The notes only (files to read, nothing that runs).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: changelog
+          sparse-checkout-cone-mode: true
+          path: source
       # Built from crates.io (its pinned dependencies) by this job: a program restored from a cache
       # that other jobs can write would hold the signing key.
       - name: Install rsign2
         run: cargo install rsign2 --version 0.6.7 --locked
       # The release holds the installer and the portable archive, which updates install too;
       # their signatures go in the notes, in comments the page does not show (the updater reads
-      # them there: the installer's for the move to Program Files).
+      # them there: the installer's for the move to Program Files). The notes are the English
+      # ones of changelog/<version>/; the French ones go in a comment too. `latest.json` holds
+      # the same (version, notes, files, signatures) for the updater, which reads it from
+      # GitHub's download servers rather than from its API (limited to 60 requests an hour).
       - name: Sign (minisign)
         env:
           MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
@@ -154,7 +170,16 @@ jobs:
               rsign sign -W -s "$key" -x "$1.minisig" "$1"
             fi
           }
-          : > dist/notes.md
+          version=$(ls dist/Vixeeny-*-setup.exe | sed 's/.*Vixeeny-\(.*\)-setup\.exe/\1/')
+          en="source/changelog/$version/en.md"
+          fr="source/changelog/$version/fr.md"
+          {
+            cat "$en"
+            printf '\n<!-- notes fr\n'
+            cat "$fr"
+            printf '\n-->\n'
+          } > dist/notes.md
+          files='[]'
           for file in dist/*-portable.zip dist/*-setup.exe; do
             sign "$file"
             {
@@ -162,9 +187,13 @@ jobs:
               cat "$file.minisig"
               printf '\n-->\n'
             } >> dist/notes.md
+            files=$(jq --arg name "$(basename "$file")" --argjson size "$(stat -c %s "$file")" \
+              --rawfile signature "$file.minisig" '. + [{name: $name, size: $size, signature: $signature}]' <<< "$files")
             rm "$file.minisig"
           done
           rm "$key"
+          jq -n --arg version "$version" --rawfile en "$en" --rawfile fr "$fr" --argjson files "$files" \
+            '{version: $version, notes: {en: $en, fr: $fr}, files: $files}' > dist/latest.json
           # The update archive is what the portable one is made from: not published.
           find dist -maxdepth 1 -name '*.zip' ! -name '*-portable.zip' ! -name '*-symbols.zip' -delete
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -174,6 +203,7 @@ jobs:
             dist/*.zip
             dist/*.exe
             dist/notes.md
+            dist/latest.json
       # The tests of this commit ran in CI, side by side with this build: a release waits for
       # them to pass.
       - name: CI passed on this commit
@@ -195,4 +225,4 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           version=$(ls dist/Vixeeny-*-setup.exe | sed 's/.*Vixeeny-\(.*\)-setup\.exe/\1/')
-          gh release create "v$version" --title "Vixeeny $version" --target "${{ github.sha }}" --draft --notes-file dist/notes.md dist/*-setup.exe dist/*-portable.zip
+          gh release create "v$version" --title "Vixeeny $version" --target "${{ github.sha }}" --draft --notes-file dist/notes.md dist/*-setup.exe dist/*-portable.zip dist/latest.json

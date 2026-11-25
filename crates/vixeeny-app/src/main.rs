@@ -796,8 +796,15 @@ fn init_look(config: &Config) {
         // Slint's icon does not reach the taskbar: the executable's own does.
         vixeeny_platform::set_exe_icon(id);
         let _ = vixeeny_platform::style_window(id, look.dark, look.caption());
-        vixeeny_platform::mica(id)
+        // With Windows' transparency effects off, Windows draws a plain colour instead: the window draws its own.
+        vixeeny_platform::transparency_effects() && vixeeny_platform::mica(id)
     });
+    vixeeny_ui::theme::set_foreground(vixeeny_platform::foreground_handle);
+    vixeeny_ui::theme::set_colour_watcher(|handle, f| {
+        vixeeny_platform::on_colour_change(vixeeny_platform::WindowId(handle), f);
+    });
+    // The settings as they are on the disk now: the theme `system` follows Windows.
+    vixeeny_ui::theme::set_look_source(|| settings::look_of(&Config::current()));
 }
 
 fn run() -> anyhow::Result<()> {
@@ -842,10 +849,14 @@ fn run() -> anyhow::Result<()> {
             print!("{}", sysinfo::format(&sysinfo::collect(&config, probe.as_ref())));
             return Ok(());
         }
-        // The installer's choice: the Print Screen key for Vixeeny rather than Windows' Snipping Tool.
+        // The choices of the installer's page, on a first install.
+        Some("--first-install") => return update::first_install(&args[1..]),
+        // The installer's choice: the Print Screen key for Vixeeny rather than Windows' Snipping Tool; the uninstaller
+        // gives it back.
         Some("--print-screen") if args.get(1).is_some_and(|a| a == "take") => {
-            return vixeeny_platform::take_print_screen().map_err(Into::into);
+            return whats_new::take_print_screen_now();
         }
+        Some("--print-screen") if args.get(1).is_some_and(|a| a == "give") => return whats_new::give_print_screen(),
         Some("--probe-report") => return probe::report(args.iter().any(|a| a == "--force")),
         _ => {}
     }

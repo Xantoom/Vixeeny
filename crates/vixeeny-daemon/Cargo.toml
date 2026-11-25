@@ -23,6 +23,9 @@ tray-icon.workspace = true
 windows = { workspace = true, features = [
     "Win32_Foundation",
     "Win32_Globalization",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_Networking_WinSock",
     "Win32_System_LibraryLoader",
     "Win32_System_Power",
     "Win32_System_Registry",

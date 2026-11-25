@@ -159,6 +159,12 @@ fn hwnd_of(id: WindowId) -> HWND {
     HWND(id.0 as usize as *mut c_void)
 }
 
+/// The handle of the window in front (0 when there is none).
+pub fn foreground_handle() -> u64 {
+    // SAFETY: no arguments; returns NULL when there is no foreground window.
+    unsafe { GetForegroundWindow() }.0 as usize as u64
+}
+
 pub fn foreground_window() -> Result<Option<WindowInfo>> {
     // SAFETY: no arguments; returns NULL when there is no foreground window.
     let hwnd = unsafe { GetForegroundWindow() };
@@ -397,6 +403,78 @@ pub fn system_prefers_dark() -> bool {
     crate::registry::dword(HKEY_CURRENT_USER, key, "AppsUseLightTheme") == Some(0)
 }
 
+/// What [`on_colour_change`] calls, by window (of the thread that runs it).
+type ColourChange = Box<dyn Fn()>;
+
+thread_local! {
+    static COLOUR_CHANGES: std::cell::RefCell<std::collections::HashMap<isize, std::rc::Rc<ColourChange>>> =
+        std::cell::RefCell::default();
+}
+
+/// Calls `f` on the window's thread each time Windows' colours change (light or dark, the accent, the transparency
+/// effects), as Windows tells the window itself (`WM_SETTINGCHANGE` "ImmersiveColorSet", the accent's colour). Called
+/// again for the same window, the new `f` replaces the old one. `f` runs inside the window's message handling: it
+/// should only schedule its work. The window must belong to the calling thread.
+pub fn on_colour_change(id: WindowId, f: ColourChange) -> bool {
+    use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
+    // Only the subclass functions of comctl32 5.8 (`GetWindowSubclass` is in version 6 only, which the program does not
+    // ask for: a program that imports it does not start).
+    use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
+    use windows::Win32::UI::WindowsAndMessaging::{WM_DWMCOLORIZATIONCOLORCHANGED, WM_NCDESTROY, WM_SETTINGCHANGE};
+    const ID: usize = 0x5649_5843; // "VIXC"
+    unsafe extern "system" fn proc(
+        hwnd: HWND,
+        msg: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+        id: usize,
+        _: usize,
+    ) -> LRESULT {
+        let colours = match msg {
+            WM_DWMCOLORIZATIONCOLORCHANGED => true,
+            // SAFETY: for this message, a non-null `lparam` is a NUL-terminated wide string of the system.
+            WM_SETTINGCHANGE if lparam.0 != 0 => unsafe {
+                windows::core::PCWSTR(lparam.0 as *const u16).to_string().is_ok_and(|area| area == "ImmersiveColorSet")
+            },
+            _ => false,
+        };
+        let key = hwnd.0 as isize;
+        if colours {
+            // Taken out of the map before the call: the call may register again.
+            let f = COLOUR_CHANGES.with(|map| map.borrow().get(&key).cloned());
+            if let Some(f) = f {
+                f();
+            }
+        }
+        if msg == WM_NCDESTROY {
+            COLOUR_CHANGES.with(|map| map.borrow_mut().remove(&key));
+            // SAFETY: the window goes: its subclass goes with it.
+            let _ = unsafe { RemoveWindowSubclass(hwnd, Some(proc), id) };
+        }
+        // SAFETY: the window's own handling goes on.
+        unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
+    }
+    let hwnd = hwnd_of(id);
+    let key = hwnd.0 as isize;
+    let had = COLOUR_CHANGES.with(|map| map.borrow_mut().insert(key, std::rc::Rc::new(f)).is_some());
+    if had {
+        return true;
+    }
+    // SAFETY: a live window of this thread; the subclass holds no data of its own.
+    let done = unsafe { SetWindowSubclass(hwnd, Some(proc), ID, 0) }.as_bool();
+    if !done {
+        COLOUR_CHANGES.with(|map| map.borrow_mut().remove(&key));
+    }
+    done
+}
+
+/// Whether Windows' transparency effects are on (Settings → Personalization → Colors), as they are unless turned off.
+pub fn transparency_effects() -> bool {
+    use windows::Win32::System::Registry::HKEY_CURRENT_USER;
+    let key = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
+    crate::registry::dword(HKEY_CURRENT_USER, key, "EnableTransparency") != Some(0)
+}
+
 /// Where Windows keeps whether the Print Screen key opens its Snipping Tool.
 const SNIPPING_KEY: &str = r"Control Panel\Keyboard";
 const SNIPPING_VALUE: &str = "PrintScreenKeyForSnippingEnabled";
@@ -424,6 +502,12 @@ pub fn print_screen_opens_snipping_tool() -> bool {
 pub fn take_print_screen() -> Result<()> {
     use windows::Win32::System::Registry::HKEY_CURRENT_USER;
     crate::registry::set_dword(HKEY_CURRENT_USER, SNIPPING_KEY, SNIPPING_VALUE, 0).map_err(PlatformError::Os)
+}
+
+/// Gives the Print Screen key back to Windows' Snipping Tool (Vixeeny is uninstalled).
+pub fn give_print_screen() -> Result<()> {
+    use windows::Win32::System::Registry::HKEY_CURRENT_USER;
+    crate::registry::set_dword(HKEY_CURRENT_USER, SNIPPING_KEY, SNIPPING_VALUE, 1).map_err(PlatformError::Os)
 }
 
 /// `false` when the user turned off animations in Windows ("Show animations in Windows").
@@ -1069,8 +1153,8 @@ impl Drop for LockGuard {
     }
 }
 
-/// Waits up to `timeout` for the per-session named mutex `name`. Returns `None` if waiting timed out or the mutex
-/// could not be opened.
+/// Waits up to `timeout` for the per-session named mutex `name`. Returns `None` if waiting timed out or the mutex could
+/// not be opened.
 pub fn acquire_lock(name: &str, timeout: std::time::Duration) -> Option<LockGuard> {
     use windows::Win32::Foundation::{WAIT_ABANDONED, WAIT_OBJECT_0};
     use windows::Win32::System::Threading::{CreateMutexW, WaitForSingleObject};

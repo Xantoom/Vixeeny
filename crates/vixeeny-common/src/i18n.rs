@@ -429,6 +429,7 @@ keys! {
     TipPin => "Pin over the windows (CTRL + P)", "Épingler par-dessus les fenêtres (CTRL + P)";
     PinCopy => "Copy", "Copier";
     PinClose => "Close", "Fermer";
+    UpdateNotesOf => "What's new in {version}", "Nouveautés de la version {version}";
 }
 
 impl Lang {

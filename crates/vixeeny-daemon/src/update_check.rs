@@ -1,24 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The update check. The network client lives in the app: the daemon only starts `vixeeny-app --update background` (a
-//! windowed program, so nothing shows) a moment after its own start, after each wake from sleep, which Windows
-//! reports, and once a day for a computer that never sleeps (one timed wait, nothing in between); the app checks and downloads, or tells the user. At its start the daemon has
-//! the app install a version downloaded before (`--update pending`).
+//! windowed program, so nothing shows, at the lowest priority) when something may have changed, as Windows reports it:
+//! the daemon's own start, each wake from sleep, and each new network address (a connection that comes back, after a
+//! start or a wake without one). No timer: the app asks GitHub only when its last answer is 12 hours old. At its start
+//! the daemon has the app install a version downloaded before (`--update pending`).
 
 use std::path::PathBuf;
 use std::sync::OnceLock;
-use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
-use std::time::Duration;
+use std::sync::mpsc::{Receiver, Sender, channel};
 
 use vixeeny_common::config::Config;
 
-/// The check waits this long after the start or the wake, so it never competes with it (and the network is back).
-const SETTLE: Duration = Duration::from_secs(90);
-
-/// A computer left on for days still checks once a day.
-const DAILY: Duration = Duration::from_secs(24 * 60 * 60);
-
-/// Tells the checking thread that the computer woke up.
-static WOKE: OnceLock<Sender<()>> = OnceLock::new();
+/// Tells the checking thread that a check may be due (a wake from sleep, a new network address).
+static NUDGE: OnceLock<Sender<()>> = OnceLock::new();
 
 fn app_next_to_daemon() -> Option<PathBuf> {
     let path = std::env::current_exe().ok()?.with_file_name("vixeeny-app.exe");
@@ -30,19 +24,22 @@ pub fn spawn(config_path: Option<PathBuf>) {
     let Some(app) = app_next_to_daemon() else {
         return;
     };
-    let (woke, wakes) = channel();
-    let _ = WOKE.set(woke);
+    let (nudge, nudges) = channel();
+    let _ = NUDGE.set(nudge);
     let result = std::thread::Builder::new()
         .name("update-check".into())
         .stack_size(128 * 1024)
-        .spawn(move || checks(&app, config_path.as_deref(), &wakes));
+        .spawn(move || checks(&app, config_path.as_deref(), &nudges));
     match result {
-        Ok(_) => on_wake(),
+        Ok(_) => {
+            on_wake();
+            on_network();
+        }
         Err(e) => tracing::warn!("cannot start the update check: {e}"),
     }
 }
 
-fn checks(app: &std::path::Path, config_path: Option<&std::path::Path>, wakes: &Receiver<()>) {
+fn checks(app: &std::path::Path, config_path: Option<&std::path::Path>, nudges: &Receiver<()>) {
     // A version downloaded before goes in now (this daemon stops, the new one starts).
     match std::process::Command::new(app).args(["--update", "pending"]).spawn() {
         Ok(mut child) => {
@@ -51,9 +48,6 @@ fn checks(app: &std::path::Path, config_path: Option<&std::path::Path>, wakes: &
         Err(e) => tracing::warn!("cannot start the pending update: {e}"),
     }
     loop {
-        std::thread::sleep(SETTLE);
-        // Wakes that came meanwhile count as this one.
-        while wakes.try_recv().is_ok() {}
         let enabled = config_path.and_then(|p| Config::load(p).ok()).is_none_or(|c| c.general.check_updates);
         if enabled {
             match std::process::Command::new(app).args(["--update", "background"]).spawn() {
@@ -63,10 +57,17 @@ fn checks(app: &std::path::Path, config_path: Option<&std::path::Path>, wakes: &
                 Err(e) => tracing::warn!("cannot start the update check: {e}"),
             }
         }
-        // The day counts awake time only; a wake from sleep checks anyway.
-        if let Err(RecvTimeoutError::Disconnected) = wakes.recv_timeout(DAILY) {
+        // Blocked until Windows reports something; what came during the check counts as done.
+        while nudges.try_recv().is_ok() {}
+        if nudges.recv().is_err() {
             return;
         }
+    }
+}
+
+fn nudge() {
+    if let Some(nudge) = NUDGE.get() {
+        let _ = nudge.send(());
     }
 }
 
@@ -76,10 +77,8 @@ fn on_wake() {
     use windows::Win32::System::Power::{DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS, PowerRegisterSuspendResumeNotification};
     use windows::Win32::UI::WindowsAndMessaging::{DEVICE_NOTIFY_CALLBACK, PBT_APMRESUMEAUTOMATIC};
     unsafe extern "system" fn woke(_: *const std::ffi::c_void, kind: u32, _: *const std::ffi::c_void) -> u32 {
-        if kind == PBT_APMRESUMEAUTOMATIC
-            && let Some(woke) = WOKE.get()
-        {
-            let _ = woke.send(());
+        if kind == PBT_APMRESUMEAUTOMATIC {
+            nudge();
         }
         0
     }
@@ -97,5 +96,29 @@ fn on_wake() {
     };
     if status.is_err() {
         tracing::warn!("no wake-from-sleep notifications: the update check runs at start only");
+    }
+}
+
+/// Has Windows report each new network address to the checking thread: a connection that comes back.
+fn on_network() {
+    use windows::Win32::Foundation::{HANDLE, NO_ERROR};
+    use windows::Win32::NetworkManagement::IpHelper::{
+        MIB_NOTIFICATION_TYPE, MIB_UNICASTIPADDRESS_ROW, MibAddInstance, NotifyUnicastIpAddressChange,
+    };
+    use windows::Win32::Networking::WinSock::AF_UNSPEC;
+    unsafe extern "system" fn changed(
+        _: *const std::ffi::c_void,
+        _: *const MIB_UNICASTIPADDRESS_ROW,
+        kind: MIB_NOTIFICATION_TYPE,
+    ) {
+        if kind == MibAddInstance {
+            nudge();
+        }
+    }
+    let mut handle = HANDLE::default();
+    // SAFETY: a callback that lives as long as the process; the registration is never undone.
+    let status = unsafe { NotifyUnicastIpAddressChange(AF_UNSPEC, Some(changed), None, false, &raw mut handle) };
+    if status != NO_ERROR {
+        tracing::warn!("no network notifications: the update check runs at start and wake only");
     }
 }

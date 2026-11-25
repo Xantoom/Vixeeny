@@ -19,6 +19,13 @@
 #ifndef OutDir
   #define OutDir "..\..\dist"
 #endif
+; The version without its pre-release part (1.0.0-RC.2 gives 1.0.0), for the file's version
+; resource, which takes numbers only.
+#if Pos("-", AppVersion) > 0
+  #define NumericVersion Copy(AppVersion, 1, Pos("-", AppVersion) - 1)
+#else
+  #define NumericVersion AppVersion
+#endif
 
 [Setup]
 AppId={{C3B9682C-A50C-4D2D-A615-DB8FE7EC4EFD}
@@ -26,6 +33,16 @@ AppName=Vixeeny
 AppVersion={#AppVersion}
 AppPublisher=Xantoom
 AppPublisherURL=https://github.com/Xantoom/Vixeeny
+AppSupportURL=https://github.com/Xantoom/Vixeeny/issues
+AppUpdatesURL=https://github.com/Xantoom/Vixeeny/releases
+; The entry in Windows' installed apps: the name alone, the version in its own field (by default
+; Inno Setup writes "Vixeeny version 1.0.0" as the name). Vixeeny's own updates keep the version
+; field in line (see `vixeeny_platform::registry::sync_uninstall_version`).
+UninstallDisplayName=Vixeeny
+VersionInfoVersion={#NumericVersion}
+VersionInfoProductVersion={#NumericVersion}
+VersionInfoProductTextVersion={#AppVersion}
+VersionInfoDescription=Vixeeny Setup
 DefaultDirName={autopf}\Vixeeny
 ; Only to find the Start menu folder of older versions (see [InstallDelete]): the entry is now
 ; at the top of the Start menu, without a folder.
@@ -104,12 +121,38 @@ french.ConfirmUninstall=Désinstaller %1 ?
 [CustomMessages]
 english.StartWithWindows=Start Vixeeny with Windows
 english.OpenVixeeny=Open Vixeeny
-english.KeepSettings=Keep your settings for a later install?
+english.KeepSettingsTitle=Keep your settings?
+english.KeepSettingsText=Your settings, shortcuts and Vixeeny's logs can stay for a later install. Your captures and recordings are never removed.
+english.KeepSettingsYes=Keep my settings
+english.KeepSettingsNo=Remove everything
+english.MaintenanceTitle=Vixeeny is already installed
+english.MaintenanceOlder=Version %1 is installed. What do you want to do?
+english.MaintenanceSame=This version (%1) is installed. What do you want to do?
+english.MaintenanceNewer=A newer version (%1) is installed. What do you want to do?
+english.ActionUpdate=Update to version %1
+english.ActionRepair=Repair: install the files of version %1 again
+english.ActionDowngrade=Install version %1 over it
+english.ActionUninstall=Uninstall Vixeeny
+english.StoppingVixeeny=Closing Vixeeny
+english.StoppingVixeenyText=A recording in progress ends and is saved first.
 english.AutoUpdate=Install updates automatically
 english.AutoUpdateNote=Vixeeny connects to github.com only to check for and download its updates. Nothing else leaves your PC.
 french.StartWithWindows=Démarrer Vixeeny avec Windows
 french.OpenVixeeny=Ouvrir Vixeeny
-french.KeepSettings=Conserver vos paramètres pour une prochaine installation ?
+french.KeepSettingsTitle=Conserver vos paramètres ?
+french.KeepSettingsText=Vos paramètres, vos raccourcis et les journaux de Vixeeny peuvent rester pour une prochaine installation. Vos captures et vos enregistrements ne sont jamais supprimés.
+french.KeepSettingsYes=Conserver mes paramètres
+french.KeepSettingsNo=Tout supprimer
+french.MaintenanceTitle=Vixeeny est déjà installé
+french.MaintenanceOlder=La version %1 est installée. Que voulez-vous faire ?
+french.MaintenanceSame=Cette version (%1) est installée. Que voulez-vous faire ?
+french.MaintenanceNewer=Une version plus récente (%1) est installée. Que voulez-vous faire ?
+french.ActionUpdate=Mettre à jour vers la version %1
+french.ActionRepair=Réparer : réinstaller les fichiers de la version %1
+french.ActionDowngrade=Installer la version %1 à la place
+french.ActionUninstall=Désinstaller Vixeeny
+french.StoppingVixeeny=Fermeture de Vixeeny
+french.StoppingVixeenyText=Un enregistrement en cours se termine et est d'abord enregistré.
 french.AutoUpdate=Installer les mises à jour automatiquement
 french.AutoUpdateNote=Vixeeny se connecte à github.com uniquement pour vérifier et télécharger ses mises à jour. Rien d'autre ne quitte votre PC.
 
@@ -121,16 +164,17 @@ Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs c
 Name: "{autoprograms}\Vixeeny"; Filename: "{app}\Vixeeny.exe"; AppUserModelID: "Xantoom.Vixeeny"
 
 [Registry]
-; The daemon keeps this entry in line with the `autostart` setting afterwards.
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Vixeeny"; ValueData: """{app}\Vixeeny.exe"""; Check: AutostartChosen; Flags: uninsdeletevalue
-; Removed on uninstall even when the setting, not this task, wrote it.
+; Written by the app as the user who installs (see [Run]), kept in line with the `autostart`
+; setting by the daemon; removed on uninstall.
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "Vixeeny"; Flags: uninsdeletevalue
 
 [Run]
 ; For all users: the user's task that starts Vixeeny with the administrator's rights.
 Filename: "{app}\vixeeny-app.exe"; Parameters: "--admin register"; Flags: runhidden waituntilterminated; Check: IsAdminInstallMode
-; Updates declined on the folder's page: the user's settings say so before the first start.
-Filename: "{app}\vixeeny-app.exe"; Parameters: "--update off"; Flags: runhidden waituntilterminated runasoriginaluser; Check: UpdatesDeclined
+; A first install: the choices of the folder's page go into the settings and the registry of the
+; user who installs (in an install for all users, the administrator who gave the rights may be
+; another account), before the first start.
+Filename: "{app}\vixeeny-app.exe"; Parameters: "--first-install {code:FirstInstallChoices}"; Flags: runhidden waituntilterminated runasoriginaluser; Check: IsFirstInstall
 ; Windows' Snipping Tool no longer opens with the Print Screen key over Vixeeny's capture, in the
 ; user's own settings (Settings, Accessibility, Keyboard). Vixeeny also does it once at its start.
 Filename: "{app}\vixeeny-app.exe"; Parameters: "--print-screen take"; Flags: runhidden waituntilterminated runasoriginaluser
@@ -163,8 +207,9 @@ Type: files; Name: "{app}\.update-download-turn"
 
 [Code]
 const
-  // Where the install for the user alone is recorded (the AppId, then `_is1`).
-  UserInstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{C3B9682C-A50C-4D2D-A615-DB8FE7EC4EFD}_is1';
+  // Where an install is recorded (the AppId, then `_is1`): under HKLM for all users, HKCU for
+  // the user alone.
+  InstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{C3B9682C-A50C-4D2D-A615-DB8FE7EC4EFD}_is1';
 
 var
   OldFiles: TStringList;
@@ -172,10 +217,24 @@ var
   // its Start menu folder.
   UserDir: String;
   UserGroup: String;
-  // On the folder's page: the start with Windows.
+  // On the folder's page: the start with Windows and the updates.
   AutostartBox: TNewCheckBox;
   UpdateBox: TNewCheckBox;
   UpdateNote: TNewStaticText;
+  // The install of the same kind already there: its version and its uninstaller ('' if none).
+  PrevVersion: String;
+  PrevUninstaller: String;
+  // What to do with it, when there is one.
+  MaintenancePage: TInputOptionWizardPage;
+  // The setup ends without installing (the user chose to uninstall).
+  Leaving: Boolean;
+  // Uninstall: the user's settings stay, and the files the installed version listed.
+  KeepSettings: Boolean;
+  ListedFiles: TStringList;
+
+#include "versions.iss"
+
+// ---- Stopping Vixeeny ----------------------------------------------------------------------
 
 // Stops a running Vixeeny the way an update does: a recording ends first, and nothing is
 // killed. The program of the installed version asks; a version too old to know how does
@@ -199,14 +258,14 @@ begin
   UserGroup := '';
   if not IsAdminInstallMode then
     Exit;
-  if not RegQueryStringValue(HKCU, UserInstallKey, 'Inno Setup: App Path', Dir) then
+  if not RegQueryStringValue(HKCU, InstallKey, 'Inno Setup: App Path', Dir) then
     Exit;
   Dir := RemoveBackslashUnlessRoot(Dir);
   // Only a Vixeeny folder, and never this install's.
   if (Dir <> '') and FileExists(Dir + '\vixeeny-app.exe') and not SameText(Dir, ExpandConstant('{app}')) then
   begin
     UserDir := Dir;
-    RegQueryStringValue(HKCU, UserInstallKey, 'Inno Setup: Icon Group', UserGroup);
+    RegQueryStringValue(HKCU, InstallKey, 'Inno Setup: Icon Group', UserGroup);
     // A folder of the Start menu, by its name: never a path out of it.
     if (Pos('..', UserGroup) <> 0) or (Pos(':', UserGroup) <> 0) or (Pos('/', UserGroup) <> 0)
       or (Pos('\', UserGroup) = 1) then
@@ -225,6 +284,64 @@ begin
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM Vixeeny.exe /IM vixeeny-app.exe', '', SW_HIDE, ewWaitUntilTerminated, Code);
 end;
 
+// ---- Files ---------------------------------------------------------------------------------
+
+// Whether a line of a list (files.txt) names a file inside the folder: a relative path that
+// never goes up.
+function InsideFolder(Name: String): Boolean;
+begin
+  Result := (Name <> '') and (Pos('..', Name) = 0) and (Pos(':', Name) = 0) and (Pos('/', Name) <> 1)
+    and (Pos('\', Name) <> 1);
+end;
+
+// The lines of `Dir`'s list (files.txt) that name a file inside it, with Windows' separators;
+// empty without one.
+function LoadList(Dir: String): TStringList;
+var
+  Lines: TStringList;
+  I: Integer;
+  Name: String;
+begin
+  // Names compared without case, as Windows does.
+  Result := TStringList.Create;
+  if not FileExists(Dir + '\files.txt') then
+    Exit;
+  Lines := TStringList.Create;
+  try
+    try
+      Lines.LoadFromFile(Dir + '\files.txt');
+    except
+      Exit;
+    end;
+    for I := 0 to Lines.Count - 1 do
+    begin
+      Name := Trim(Lines[I]);
+      StringChangeEx(Name, '/', '\', True);
+      if InsideFolder(Name) then
+        Result.Add(Name);
+    end;
+  finally
+    Lines.Free;
+  end;
+end;
+
+// Removes the folders under `Dir` (and `Dir` itself) that are empty: the user's own files stay.
+procedure RemoveEmptyFolders(Dir: String);
+begin
+  if DirExists(Dir) then
+    DelTree(Dir, True, False, True);
+end;
+
+// What updates leave in a folder: the staged version, the backup, the download, the locks.
+procedure RemoveUpdateLeftovers(Dir: String);
+begin
+  DelTree(Dir + '\.update-staged', True, True, True);
+  DelTree(Dir + '\.update-backup', True, True, True);
+  DelTree(Dir + '\.update-download', True, True, True);
+  DeleteFile(Dir + '\.update-lock');
+  DeleteFile(Dir + '\.update-download-turn');
+end;
+
 // Removes the files of the install for the user alone: those its list (files.txt) names, its
 // uninstaller and what its updates left; without a list (an old version), its programs and
 // libraries. Its folders go once empty: what the user put there stays.
@@ -232,24 +349,13 @@ procedure RemoveUserFiles();
 var
   Files: TStringList;
   I: Integer;
-  Name: String;
 begin
   if FileExists(UserDir + '\files.txt') then
   begin
-    Files := TStringList.Create;
+    Files := LoadList(UserDir);
     try
-      Files.LoadFromFile(UserDir + '\files.txt');
       for I := 0 to Files.Count - 1 do
-      begin
-        Name := Trim(Files[I]);
-        // Only a path inside the folder.
-        if (Name <> '') and (Pos('..', Name) = 0) and (Pos(':', Name) = 0) and (Pos('/', Name) <> 1)
-          and (Pos('\', Name) <> 1) then
-        begin
-          StringChangeEx(Name, '/', '\', True);
-          DeleteFile(UserDir + '\' + Name);
-        end;
-      end;
+        DeleteFile(UserDir + '\' + Files[I]);
     finally
       Files.Free;
     end;
@@ -261,13 +367,8 @@ begin
     DelTree(UserDir + '\*.dll', False, True, False);
   end;
   DelTree(UserDir + '\unins*.*', False, True, False);
-  DelTree(UserDir + '\.update-staged', True, True, True);
-  DelTree(UserDir + '\.update-backup', True, True, True);
-  DelTree(UserDir + '\.update-download', True, True, True);
-  DeleteFile(UserDir + '\.update-lock');
-  DeleteFile(UserDir + '\.update-download-turn');
-  // The folders left empty, the user's own files kept.
-  DelTree(UserDir, True, False, True);
+  RemoveUpdateLeftovers(UserDir);
+  RemoveEmptyFolders(UserDir);
 end;
 
 // Removes the install for the user alone: its files, its Start menu entry and its uninstall
@@ -279,7 +380,54 @@ begin
   DeleteFile(ExpandConstant('{userprograms}\Vixeeny.lnk'));
   if UserGroup <> '' then
     DelTree(ExpandConstant('{userprograms}\') + UserGroup, True, True, True);
-  RegDeleteKeyIncludingSubkeys(HKCU, UserInstallKey);
+  RegDeleteKeyIncludingSubkeys(HKCU, InstallKey);
+end;
+
+// ---- The wizard ----------------------------------------------------------------------------
+
+// The install of the same kind (all users, or this user alone) already there.
+procedure FindPreviousInstall();
+var
+  Uninstaller: String;
+begin
+  PrevVersion := '';
+  PrevUninstaller := '';
+  if not RegQueryStringValue(HKA, InstallKey, 'DisplayVersion', PrevVersion) then
+    PrevVersion := '';
+  if RegQueryStringValue(HKA, InstallKey, 'UninstallString', Uninstaller) then
+    PrevUninstaller := RemoveQuotes(Uninstaller);
+  if (PrevUninstaller <> '') and not FileExists(PrevUninstaller) then
+    PrevUninstaller := '';
+end;
+
+// The page that says what is installed and what this setup does with it: update an older
+// version, repair this one, put this one over a newer one, or uninstall.
+procedure CreateMaintenancePage();
+var
+  Order: Integer;
+  Text: String;
+  Action: String;
+begin
+  Order := CompareVersions(PrevVersion, '{#AppVersion}');
+  if Order < 0 then
+  begin
+    Text := FmtMessage(CustomMessage('MaintenanceOlder'), [PrevVersion]);
+    Action := FmtMessage(CustomMessage('ActionUpdate'), ['{#AppVersion}']);
+  end
+  else if Order = 0 then
+  begin
+    Text := FmtMessage(CustomMessage('MaintenanceSame'), [PrevVersion]);
+    Action := FmtMessage(CustomMessage('ActionRepair'), ['{#AppVersion}']);
+  end
+  else
+  begin
+    Text := FmtMessage(CustomMessage('MaintenanceNewer'), [PrevVersion]);
+    Action := FmtMessage(CustomMessage('ActionDowngrade'), ['{#AppVersion}']);
+  end;
+  MaintenancePage := CreateInputOptionPage(wpWelcome, CustomMessage('MaintenanceTitle'), Text, '', True, False);
+  MaintenancePage.Add(Action);
+  MaintenancePage.Add(CustomMessage('ActionUninstall'));
+  MaintenancePage.SelectedValueIndex := 0;
 end;
 
 // The folder's page only says where: the start with Windows goes under the folder, in the
@@ -319,18 +467,29 @@ begin
   UpdateNote.Width := UpdateBox.Width - ScaleX(18);
   UpdateNote.Height := ScaleY(30);
   UpdateNote.Enabled := False;
+  FindPreviousInstall();
+  if PrevVersion <> '' then
+    CreateMaintenancePage();
 end;
 
-// The first install only, as the start with Windows.
-function UpdatesDeclined(): Boolean;
+// The first install only: on an update or a repair (the folder's page is not shown) the
+// settings stay as they are.
+function IsFirstInstall(): Boolean;
 begin
-  Result := (WizardForm.PrevAppDir = '') and not UpdateBox.Checked;
+  Result := WizardForm.PrevAppDir = '';
 end;
 
-// The first install only: on an update (the page is not shown) the setting stays as it is.
-function AutostartChosen(): Boolean;
+// The choices of the folder's page, for `vixeeny-app --first-install`.
+function FirstInstallChoices(Param: String): String;
 begin
-  Result := (WizardForm.PrevAppDir = '') and AutostartBox.Checked;
+  if AutostartBox.Checked then
+    Result := 'autostart=on'
+  else
+    Result := 'autostart=off';
+  if UpdateBox.Checked then
+    Result := Result + ' updates=on'
+  else
+    Result := Result + ' updates=off';
 end;
 
 function MovedSilently(): Boolean;
@@ -338,66 +497,144 @@ begin
   Result := WizardSilent and (UserDir <> '');
 end;
 
-function PrepareToInstall(var NeedsRestart: Boolean): String;
+// Runs the uninstaller of the version installed (it asks about the settings itself), then
+// ends this setup. `True` when it ran.
+function RunPreviousUninstaller(): Boolean;
+var
+  Code: Integer;
 begin
-  StopVixeeny();
-  FindUserInstall();
-  if UserDir <> '' then
-    StopUserVixeeny();
-  Result := '';
+  Result := (PrevUninstaller <> '')
+    and Exec(PrevUninstaller, '', '', SW_SHOWNORMAL, ewWaitUntilTerminated, Code);
 end;
 
-// The files the previous version listed (files.txt) and this one no longer has are removed,
-// as an update does; files of no list (settings, portable.flag) stay.
-procedure CurStepChanged(CurStep: TSetupStep);
-var
-  NewFiles: TStringList;
-  I: Integer;
-  Name: String;
+function NextButtonClick(CurPageID: Integer): Boolean;
 begin
-  if CurStep = ssInstall then
+  Result := True;
+  if (MaintenancePage <> nil) and (CurPageID = MaintenancePage.ID) and (MaintenancePage.SelectedValueIndex = 1) then
   begin
-    OldFiles := TStringList.Create;
-    if FileExists(ExpandConstant('{app}\files.txt')) then
-      OldFiles.LoadFromFile(ExpandConstant('{app}\files.txt'));
-  end
-  else if (CurStep = ssPostInstall) and (UserDir <> '') then
-    RemoveUserInstall();
-  if (CurStep = ssPostInstall) and (OldFiles <> nil) then
-  begin
-    NewFiles := TStringList.Create;
-    try
-      NewFiles.LoadFromFile(ExpandConstant('{app}\files.txt'));
-      for I := 0 to OldFiles.Count - 1 do
-      begin
-        Name := Trim(OldFiles[I]);
-        // Only a path inside the folder.
-        if (Name <> '') and (NewFiles.IndexOf(Name) < 0) then
-          if (Pos('..', Name) = 0) and (Pos(':', Name) = 0) and (Pos('/', Name) <> 1) then
-          begin
-            StringChangeEx(Name, '/', '\', True);
-            DeleteFile(ExpandConstant('{app}\') + Name);
-          end;
-      end;
-    finally
-      NewFiles.Free;
-      OldFiles.Free;
-      OldFiles := nil;
+    Result := False;
+    if RunPreviousUninstaller() then
+    begin
+      Leaving := True;
+      WizardForm.Close;
     end;
   end;
 end;
 
+// Leaving after an uninstall is not a cancel to confirm.
+procedure CancelButtonClick(CurPageID: Integer; var Cancel, Confirm: Boolean);
+begin
+  if Leaving then
+    Confirm := False;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  Page: TOutputMarqueeProgressWizardPage;
+begin
+  Page := CreateOutputMarqueeProgressPage(CustomMessage('StoppingVixeeny'), CustomMessage('StoppingVixeenyText'));
+  Page.Show;
+  try
+    Page.Animate;
+    StopVixeeny();
+    FindUserInstall();
+    if UserDir <> '' then
+      StopUserVixeeny();
+  finally
+    Page.Hide;
+  end;
+  Result := '';
+end;
+
+// The files the previous version listed (files.txt) and this one no longer has are removed,
+// as an update does, with what updates left and the folders left empty; files of no list
+// (settings, portable.flag) stay.
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  NewFiles: TStringList;
+  I: Integer;
+begin
+  if CurStep = ssInstall then
+    OldFiles := LoadList(ExpandConstant('{app}'))
+  else if CurStep = ssPostInstall then
+  begin
+    if UserDir <> '' then
+      RemoveUserInstall();
+    if OldFiles <> nil then
+    begin
+      NewFiles := LoadList(ExpandConstant('{app}'));
+      try
+        // Without the new list (it cannot be read), nothing is taken for old.
+        if NewFiles.Count > 0 then
+          for I := 0 to OldFiles.Count - 1 do
+            if NewFiles.IndexOf(OldFiles[I]) < 0 then
+              DeleteFile(ExpandConstant('{app}\') + OldFiles[I]);
+      finally
+        NewFiles.Free;
+        OldFiles.Free;
+        OldFiles := nil;
+      end;
+    end;
+    RemoveUpdateLeftovers(ExpandConstant('{app}'));
+    RemoveEmptyFolders(ExpandConstant('{app}'));
+  end;
+end;
+
+// ---- Uninstall -----------------------------------------------------------------------------
+
+// Asked before anything is removed. A silent uninstall keeps them.
+function InitializeUninstall(): Boolean;
+begin
+  KeepSettings := True;
+  if not UninstallSilent then
+    KeepSettings := TaskDialogMsgBox(CustomMessage('KeepSettingsTitle'), CustomMessage('KeepSettingsText'),
+      mbConfirmation, MB_YESNO, [CustomMessage('KeepSettingsYes'), CustomMessage('KeepSettingsNo')], 0) <> IDNO;
+  Result := True;
+end;
+
+// Removes a folder of the user's whole.
+procedure RemoveFolder(Dir: String);
+begin
+  if (Dir <> '') and DirExists(Dir) then
+    DelTree(Dir, True, True, True);
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
-  Dir: String;
+  App: String;
+  Code: Integer;
+  I: Integer;
 begin
+  App := ExpandConstant('{app}');
   if CurUninstallStep = usUninstall then
-    StopVixeeny()
+  begin
+    UninstallProgressForm.StatusLabel.Caption := CustomMessage('StoppingVixeeny');
+    StopVixeeny();
+    // The Print Screen key goes back to Windows' Snipping Tool when Vixeeny took it from it.
+    if FileExists(App + '\vixeeny-app.exe') then
+      Exec(App + '\vixeeny-app.exe', '--print-screen give', '', SW_HIDE, ewWaitUntilTerminated, Code);
+    // Read before the uninstaller removes it: the files updates brought, which it does not know.
+    ListedFiles := LoadList(App);
+  end
   else if CurUninstallStep = usPostUninstall then
   begin
-    Dir := ExpandConstant('{userappdata}\Vixeeny');
-    // Kept in a silent uninstall.
-    if DirExists(Dir) and (SuppressibleMsgBox(CustomMessage('KeepSettings'), mbConfirmation, MB_YESNO, IDYES) = IDNO) then
-      DelTree(Dir, True, True, True);
+    if ListedFiles <> nil then
+    begin
+      for I := 0 to ListedFiles.Count - 1 do
+        DeleteFile(App + '\' + ListedFiles[I]);
+      ListedFiles.Free;
+      ListedFiles := nil;
+    end;
+    RemoveUpdateLeftovers(App);
+    RemoveEmptyFolders(App);
+    // The installer an update downloaded (to move Vixeeny to Program Files).
+    RemoveFolder(AddBackslash(GetEnv('TEMP')) + 'Vixeeny-setup');
+    DeleteFile(AddBackslash(GetEnv('TEMP')) + 'Vixeeny-setup.turn');
+    if not KeepSettings then
+    begin
+      // The settings (roaming), then the logs, the crash reports and the caches (local).
+      RemoveFolder(ExpandConstant('{userappdata}\Vixeeny'));
+      RemoveFolder(ExpandConstant('{localappdata}\Vixeeny'));
+    end;
   end;
 end;

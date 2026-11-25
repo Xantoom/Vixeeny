@@ -2,7 +2,11 @@
 //! What the GitHub Releases API says about the latest release.
 //!
 //! A release holds the installer and the portable archive, which is also what an update installs. The archive's
-//! signature is in the release notes, in a comment the page does not show (see [`signatures`]).
+//! signature is in the release notes, in a comment the page does not show (see [`signatures`]), and so are the notes in
+//! French (see [`french_notes`]): the page shows the English ones only.
+//!
+//! Each release also has `latest.json` ([`Manifest`]): the same facts in one small file that GitHub serves from its
+//! download servers, which have no limit of requests per hour, where its API does (60 an hour per address).
 
 use std::collections::BTreeMap;
 
@@ -34,6 +38,9 @@ pub struct Release {
     /// What changed, as the release page shows it (Markdown, without the signatures).
     #[serde(default)]
     pub notes: String,
+    /// The same in French; empty when the release has none.
+    #[serde(default)]
+    pub notes_fr: String,
 }
 
 #[derive(Deserialize)]
@@ -85,6 +92,22 @@ pub fn signatures(notes: &str) -> BTreeMap<String, String> {
         rest = after;
     }
     found
+}
+
+/// The comment of the notes that holds them in French: `<!-- notes fr`, the Markdown, then `-->`.
+const FRENCH_OPENING: &str = "<!-- notes fr";
+
+/// The notes in French, from their comment in the release notes; empty without one.
+pub fn french_notes(body: &str) -> String {
+    body.split_once(FRENCH_OPENING)
+        .and_then(|(_, rest)| rest.split_once("-->"))
+        .map(|(notes, _)| notes.trim().to_owned())
+        .unwrap_or_default()
+}
+
+/// The comment that holds the French `notes` in the release notes.
+pub fn french_comment(notes: &str) -> String {
+    format!("{FRENCH_OPENING}\n{}\n-->", notes.trim())
 }
 
 /// The notes as the release page shows them: without the comments (the signatures).
@@ -182,6 +205,7 @@ impl Release {
             version: api.tag_name.trim_start_matches(['v', 'V']).to_owned(),
             signatures: api.body.as_deref().map(signatures).unwrap_or_default(),
             notes: api.body.as_deref().map(shown_notes).unwrap_or_default(),
+            notes_fr: api.body.as_deref().map(french_notes).unwrap_or_default(),
             assets: api
                 .assets
                 .into_iter()
@@ -191,7 +215,15 @@ impl Release {
     }
 
     /// The archive of this version for `platform` (`windows-x64`) and its signature. The archive is found by its full
-    /// name, version included: its signature names it too, so an archive of another version is refused.
+    /// name, version included: its signature names it too, so an archive of another version is refused. What changed,
+    /// in `lang` when the release has it, else in English.
+    pub fn notes_in(&self, lang: vixeeny_common::i18n::Lang) -> &str {
+        match lang {
+            vixeeny_common::i18n::Lang::Fr if !self.notes_fr.is_empty() => &self.notes_fr,
+            _ => &self.notes,
+        }
+    }
+
     pub fn files(&self, platform: &str) -> Option<UpdateFiles<'_>> {
         let name = portable_name(&self.version, platform);
         Some(UpdateFiles {
@@ -207,7 +239,63 @@ impl Release {
     }
 }
 
-/// The installer of `version`.
+/// The installer of `version`. `latest.json`, a file of each release: its version, its notes in each language and its
+/// files with their size and signature. Written by the release workflow from the same files as the release.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Manifest {
+    pub version: String,
+    pub notes: ManifestNotes,
+    pub files: Vec<ManifestFile>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManifestNotes {
+    #[serde(default)]
+    pub en: String,
+    #[serde(default)]
+    pub fr: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManifestFile {
+    pub name: String,
+    pub size: u64,
+    /// The text of its `.minisig` file.
+    pub signature: String,
+}
+
+/// The name of the manifest among the files of a release.
+pub const MANIFEST_NAME: &str = "latest.json";
+
+/// Where the manifest of the latest release is (GitHub's download servers, not its API).
+pub fn manifest_url(repository: &str) -> String {
+    format!("{}/releases/latest/download/{MANIFEST_NAME}", repository.trim_end_matches('/'))
+}
+
+impl Manifest {
+    /// The release it describes, its files at their place in the release `v<version>` of `repository`.
+    pub fn release(self, repository: &str) -> Release {
+        let version = self.version.trim().trim_start_matches(['v', 'V']).to_owned();
+        let base = format!("{}/releases/download/v{version}", repository.trim_end_matches('/'));
+        let mut signatures = BTreeMap::new();
+        let assets = self
+            .files
+            .into_iter()
+            .map(|file| {
+                signatures.insert(file.name.clone(), file.signature.trim().to_owned());
+                Asset { url: format!("{base}/{}", file.name), name: file.name, size: file.size }
+            })
+            .collect();
+        Release {
+            version,
+            assets,
+            signatures,
+            notes: self.notes.en.trim().into(),
+            notes_fr: self.notes.fr.trim().into(),
+        }
+    }
+}
+
 pub fn setup_name(version: &str) -> String {
     format!("Vixeeny-{version}-setup.exe")
 }
@@ -304,6 +392,51 @@ mod tests {
     }
 
     #[test]
+    fn the_french_notes_come_from_their_comment_and_the_page_does_not_show_them() {
+        let body = format!(
+            "## Fixes\n- Things\n\n{}\n\n{}",
+            french_comment("## Corrections\n- Des choses"),
+            signature_comment("a.zip", SIGNATURE)
+        );
+        let json = serde_json::json!({ "tag_name": "v1.0.0", "body": body, "assets": [] }).to_string();
+        let release = Release::parse(&json).ok().flatten().expect("none");
+        assert_eq!(release.notes, "## Fixes\n- Things");
+        assert_eq!(release.notes_fr, "## Corrections\n- Des choses");
+        assert_eq!(release.notes_in(vixeeny_common::i18n::Lang::Fr), "## Corrections\n- Des choses");
+        assert_eq!(release.notes_in(vixeeny_common::i18n::Lang::En), "## Fixes\n- Things");
+        assert_eq!(release.signatures.len(), 1);
+        // Without French notes, the English ones.
+        let english = Release { notes: "- Things".into(), ..Release::default() };
+        assert_eq!(english.notes_in(vixeeny_common::i18n::Lang::Fr), "- Things");
+    }
+
+    #[test]
+    fn the_manifest_gives_the_same_release_as_the_api() {
+        let manifest: Manifest = serde_json::from_str(
+            r#"{"version": "v1.2.0", "notes": {"en": "- Things\n", "fr": "- Des choses"},
+                "files": [{"name": "Vixeeny-1.2.0-windows-x64-portable.zip", "size": 10, "signature": "SIG\n"},
+                          {"name": "Vixeeny-1.2.0-setup.exe", "size": 5, "signature": "SIG2"}]}"#,
+        )
+        .unwrap();
+        let release = manifest.release("https://github.com/Xantoom/Vixeeny/");
+        assert_eq!(release.version, "1.2.0");
+        assert_eq!(release.notes, "- Things");
+        assert_eq!(release.notes_fr, "- Des choses");
+        let files = release.files("windows-x64").expect("no files");
+        assert_eq!(
+            files.archive.url,
+            "https://github.com/Xantoom/Vixeeny/releases/download/v1.2.0/Vixeeny-1.2.0-windows-x64-portable.zip"
+        );
+        assert_eq!(files.archive.size, 10);
+        assert_eq!(files.signature, "SIG");
+        assert!(release.setup().is_some());
+        assert_eq!(
+            manifest_url("https://github.com/Xantoom/Vixeeny"),
+            "https://github.com/Xantoom/Vixeeny/releases/latest/download/latest.json"
+        );
+    }
+
+    #[test]
     fn versions_compare_as_semver() {
         assert!(is_newer("0.5.0", "v0.5.1"));
         assert!(is_newer("0.9.0", "0.10.0"));
@@ -311,5 +444,7 @@ mod tests {
         assert!(!is_newer("1.0.0", "0.9.9"));
         assert!(!is_newer("1.0.0", "garbage"));
         assert!(is_newer("1.0.0-beta.1", "1.0.0"));
+        assert!(is_newer("1.0.0-RC.2", "1.0.0-RC.10"));
+        assert!(is_newer("1.0.0-RC.2", "1.0.0-RC.2.1"));
     }
 }
