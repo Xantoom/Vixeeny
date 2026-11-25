@@ -5478,7 +5478,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vixeeny-app"
-version = "1.0.0-RC.2"
+version = "1.0.0-RC.3"
 dependencies = [
  "anyhow",
  "gif",
@@ -5504,7 +5504,7 @@ dependencies = [
 
 [[package]]
 name = "vixeeny-audio"
-version = "1.0.0-RC.2"
+version = "1.0.0-RC.3"
 dependencies = [
  "thiserror 2.0.21",
  "tracing",
@@ -5515,7 +5515,7 @@ dependencies = [
 
 [[package]]
 name = "vixeeny-capture"
-version = "1.0.0-RC.2"
+version = "1.0.0-RC.3"
 dependencies = [
  "rayon",
  "thiserror 2.0.21",
@@ -5528,7 +5528,7 @@ dependencies = [
 
 [[package]]
 name = "vixeeny-common"
-version = "1.0.0-RC.2"
+version = "1.0.0-RC.3"
 dependencies = [
  "directories",
  "interprocess",
@@ -5544,7 +5544,7 @@ dependencies = [
 
 [[package]]
 name = "vixeeny-daemon"
-version = "1.0.0-RC.2"
+version = "1.0.0-RC.3"
 dependencies = [
  "anyhow",
  "global-hotkey",
@@ -5560,7 +5560,7 @@ dependencies = [
 
 [[package]]
 name = "vixeeny-editor"
-version = "1.0.0-RC.2"
+version = "1.0.0-RC.3"
 dependencies = [
  "fontdue",
  "insta",
@@ -5570,7 +5570,7 @@ dependencies = [
 
 [[package]]
 name = "vixeeny-encode"
-version = "1.0.0-RC.2"
+version = "1.0.0-RC.3"
 dependencies = [
  "ffmpeg-next",
  "rayon",
@@ -5586,7 +5586,7 @@ dependencies = [
 
 [[package]]
 name = "vixeeny-image"
-version = "1.0.0-RC.2"
+version = "1.0.0-RC.3"
 dependencies = [
  "bindgen",
  "ffmpeg-next",
@@ -5609,7 +5609,7 @@ dependencies = [
 
 [[package]]
 name = "vixeeny-overlay"
-version = "1.0.0-RC.2"
+version = "1.0.0-RC.3"
 dependencies = [
  "png",
  "thiserror 2.0.21",
@@ -5626,7 +5626,7 @@ dependencies = [
 
 [[package]]
 name = "vixeeny-platform"
-version = "1.0.0-RC.2"
+version = "1.0.0-RC.3"
 dependencies = [
  "thiserror 2.0.21",
  "vixeeny-common",
@@ -5635,7 +5635,7 @@ dependencies = [
 
 [[package]]
 name = "vixeeny-settings"
-version = "1.0.0-RC.2"
+version = "1.0.0-RC.3"
 dependencies = [
  "vixeeny-common",
  "vixeeny-encode",
@@ -5643,14 +5643,14 @@ dependencies = [
 
 [[package]]
 name = "vixeeny-stitch"
-version = "1.0.0-RC.2"
+version = "1.0.0-RC.3"
 dependencies = [
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "vixeeny-ui"
-version = "1.0.0-RC.2"
+version = "1.0.0-RC.3"
 dependencies = [
  "png",
  "slint",
@@ -5662,7 +5662,7 @@ dependencies = [
 
 [[package]]
 name = "vixeeny-updater"
-version = "1.0.0-RC.2"
+version = "1.0.0-RC.3"
 dependencies = [
  "anyhow",
  "minisign-verify",
@@ -6567,7 +6567,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "1.0.0-RC.2"
+version = "1.0.0-RC.3"
 dependencies = [
  "anyhow",
  "rayon",
