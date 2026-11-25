@@ -430,6 +430,9 @@ keys! {
     PinCopy => "Copy", "Copier";
     PinClose => "Close", "Fermer";
     UpdateNotesOf => "What's new in {version}", "Nouveautés de la version {version}";
+    ActCaptureText => "Copy the text of a region", "Copier le texte d'une zone";
+    ActCapturePin => "Pin a region", "Épingler une zone";
+    ActRecordDiscard => "Discard the recording", "Abandonner l'enregistrement";
 }
 
 impl Lang {

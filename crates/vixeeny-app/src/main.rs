@@ -84,6 +84,14 @@ fn perform(action: ActionId, config: &Config, frozen: Option<ipc::Frozen>) {
                 tracing::error!("editor failed: {e:#}");
             }
         }
+        ActionId::CaptureText | ActionId::CapturePin => {
+            let mode = if action == ActionId::CaptureText { region::Mode::Text } else { region::Mode::Pin };
+            if let Err(e) = region::run(config, mode, frozen) {
+                tracing::error!("zone capture failed: {e:#}");
+                let text = toast::failure_text(&e, lang(&config.general.language));
+                toast::notify(config, &toast::Toast::Failed(toast::Failed::Capture, text));
+            }
+        }
         ActionId::CaptureScrolling => {
             if let Err(e) = region::run(config, region::Mode::Scroll, frozen) {
                 tracing::error!("scrolling capture failed: {e:#}");
@@ -388,6 +396,7 @@ fn run_action(
         | ActionId::RecordRegion
         | ActionId::RecordWindow
         | ActionId::RecordPause
+        | ActionId::RecordDiscard
         | ActionId::ReplayToggle
         | ActionId::ReplaySave
         | ActionId::ReplayEdit => recording.handle(action, config),
@@ -706,6 +715,8 @@ impl Recording {
             _ => {}
         }
         match (action, &self.handle) {
+            (ActionId::RecordDiscard, Some(handle)) => handle.discard(),
+            (ActionId::RecordDiscard, None) => tracing::debug!("discard ignored: nothing is recording"),
             (_, Some(handle)) if action.toggles_recording() => handle.stop(),
             (_, None) if action.toggles_recording() => {
                 // What to film: the screen, or the window or the zone the user points at (giving up records nothing).
@@ -866,7 +877,7 @@ fn run() -> anyhow::Result<()> {
     // its own, ahead too.
     if let Some(frozen) = &first_frozen {
         vixeeny_capture::freeze::warm(frozen);
-    } else if matches!(first_action, ActionId::CaptureRegion | ActionId::CaptureScrolling | ActionId::OverlayToggle) {
+    } else if first_action.freezes_screen() || first_action == ActionId::OverlayToggle {
         vixeeny_overlay::gfx::warm();
     }
     // Not for screens the daemon held: the capture device is made only if they fail.

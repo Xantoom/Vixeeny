@@ -41,13 +41,21 @@ pub enum ActionId {
     RecordRegion,
     /// Starts a recording of a window picked on the screen, or stops the recording.
     RecordWindow,
+    /// Copies the text of a zone picked on the frozen screens (no editor).
+    CaptureText,
+    /// Pins a zone picked on the frozen screens over the windows (no editor).
+    CapturePin,
+    /// Stops the recording and deletes its files.
+    RecordDiscard,
 }
 
 impl ActionId {
     /// All actions, in a stable order.
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 19] = [
         Self::CaptureRegion,
         Self::CaptureLastRegion,
+        Self::CaptureText,
+        Self::CapturePin,
         Self::CaptureWindow,
         Self::CaptureFullscreen,
         Self::CaptureAllMonitors,
@@ -56,6 +64,7 @@ impl ActionId {
         Self::RecordRegion,
         Self::RecordWindow,
         Self::RecordPause,
+        Self::RecordDiscard,
         Self::ReplayToggle,
         Self::ReplaySave,
         Self::ReplayEdit,
@@ -83,6 +92,9 @@ impl ActionId {
             Self::CaptureLastRegion => "capture-last-region",
             Self::RecordRegion => "record-region",
             Self::RecordWindow => "record-window",
+            Self::CaptureText => "capture-text",
+            Self::CapturePin => "capture-pin",
+            Self::RecordDiscard => "record-discard",
         }
     }
 
@@ -96,6 +108,8 @@ impl ActionId {
                 | Self::CaptureAllMonitors
                 | Self::CaptureScrolling
                 | Self::CaptureLastRegion
+                | Self::CaptureText
+                | Self::CapturePin
         )
     }
 
@@ -106,7 +120,7 @@ impl ActionId {
 
     /// Actions that start on the frozen screen (a zone is picked on it).
     pub const fn freezes_screen(self) -> bool {
-        matches!(self, Self::CaptureRegion | Self::CaptureScrolling)
+        matches!(self, Self::CaptureRegion | Self::CaptureScrolling | Self::CaptureText | Self::CapturePin)
     }
 
     /// The daemon captures the screens the moment the shortcut is pressed, for the app to save (they are not shown).

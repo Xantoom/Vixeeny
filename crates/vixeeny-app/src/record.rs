@@ -184,6 +184,8 @@ impl Control {
 /// A running recording.
 pub struct Handle {
     ctl: Control,
+    /// The recording's files go once it ends (see [`Handle::discard`]).
+    discard: Arc<std::sync::atomic::AtomicBool>,
     state: Arc<AtomicU8>,
     thread: Option<JoinHandle<()>>,
     reported: RecState,
@@ -195,6 +197,12 @@ impl Handle {
     }
 
     pub fn stop(&self) {
+        self.ctl.send(Ctl::Stop);
+    }
+
+    /// Stops the recording and deletes its files, without a notification.
+    pub fn discard(&self) {
+        self.discard.store(true, Ordering::Release);
         self.ctl.send(Ctl::Stop);
     }
 
@@ -1168,6 +1176,8 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
         screen: vixeeny_capture::StreamTarget::Monitor(plan.monitor.clone()),
     });
     let keep_alive = KeepAlive { _parts: plan.gpu };
+    let discard = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let discarded = Arc::clone(&discard);
     let thread = std::thread::Builder::new().name("recording".into()).spawn(move || {
         reading.store(true, Ordering::Release);
         let result = record_loop(
@@ -1191,6 +1201,10 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
         thread_state.store(IDLE, Ordering::Release);
         changed();
         match result {
+            Ok(summary) if discarded.load(Ordering::Acquire) => {
+                let failed = discard_files(&summary.files);
+                tracing::info!("recording discarded: {} file(s), {failed} not deleted", summary.files.len());
+            }
             Ok(summary) => {
                 // The file names stay out of the log at this level: they are the user's.
                 tracing::info!(
@@ -1219,7 +1233,22 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
             }
         }
     })?;
-    Ok(Handle { ctl, state, thread: Some(thread), reported: RecState::Recording })
+    Ok(Handle { ctl, discard, state, thread: Some(thread), reported: RecState::Recording })
+}
+
+/// Deletes the files of a recording thrown away; returns how many are still there.
+fn discard_files(files: &[PathBuf]) -> usize {
+    files
+        .iter()
+        .filter(|file| match std::fs::remove_file(file) {
+            Ok(()) => false,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+            Err(e) => {
+                tracing::warn!("a discarded recording's file stays: {e}");
+                true
+            }
+        })
+        .count()
 }
 
 /// What a replay films: the game's window, or the screen it is on while a window of the game shows over it (an in-game
@@ -1668,6 +1697,21 @@ mod tests {
         assert!(started.elapsed() >= std::time::Duration::from_millis(200));
         assert!(!super::saving());
         let _ = writer.join();
+    }
+
+    #[test]
+    fn a_discarded_recording_leaves_no_file() {
+        let dir = std::env::temp_dir().join(format!("vixeeny-discard-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let parts = [dir.join("a.mp4"), dir.join("a (2).mp4")];
+        for part in &parts {
+            std::fs::write(part, b"x").unwrap();
+        }
+        // A part that is already gone counts as deleted.
+        let files = [parts[0].clone(), parts[1].clone(), dir.join("missing.mp4")];
+        assert_eq!(discard_files(&files), 0);
+        assert!(parts.iter().all(|p| !p.exists()));
+        std::fs::remove_dir(&dir).unwrap();
     }
 
     #[test]

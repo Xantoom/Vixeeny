@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::ipc::ActionId;
 
 /// Schema version written by this build. Bump it and add a migration to [`MIGRATIONS`].
-pub const SCHEMA_VERSION: u32 = 12;
+pub const SCHEMA_VERSION: u32 = 13;
 
 /// `MIGRATIONS[n]` upgrades a table from schema `n + 1` to `n + 2`.
 pub type Migration = fn(&mut toml::Table);
@@ -25,6 +25,7 @@ pub const MIGRATIONS: &[Migration] = &[
     v9_settings_of_their_own,
     v10_image_per_capture,
     v11_common_image_encoding,
+    v12_more_shortcuts,
 ];
 
 /// 0.9 → 1.0: MP4 recordings are fragmented (a recording cut short still plays), and the cursor is left out of videos
@@ -260,19 +261,41 @@ fn v9_settings_of_their_own(table: &mut toml::Table) {
             }
         }
     }
-    if let Some(hotkeys) = table.get_mut("hotkeys").and_then(|h| h.as_table_mut()) {
-        for (action, shortcut) in NEW_SHORTCUTS {
-            let taken = hotkeys.values().filter_map(|v| v.as_array()).flatten().any(|v| {
-                v.as_str().is_some_and(|text| {
-                    crate::hotkey::Hotkey::parse(text).ok() == crate::hotkey::Hotkey::parse(shortcut).ok()
-                })
-            });
-            let empty = hotkeys.get(action).and_then(|v| v.as_array()).is_none_or(Vec::is_empty);
-            if empty && !taken {
-                hotkeys.insert(action.into(), toml::Value::Array(vec![shortcut.into()]));
-            }
+    give_free_shortcuts(table, &NEW_SHORTCUTS);
+}
+
+/// Gives each action of `shortcuts` its shortcut when it has none and no other action uses it.
+fn give_free_shortcuts(table: &mut toml::Table, shortcuts: &[(&str, &str)]) {
+    let Some(hotkeys) = table.get_mut("hotkeys").and_then(|h| h.as_table_mut()) else {
+        return;
+    };
+    for &(action, shortcut) in shortcuts {
+        let taken = hotkeys.values().filter_map(|v| v.as_array()).flatten().any(|v| {
+            v.as_str().is_some_and(|text| {
+                crate::hotkey::Hotkey::parse(text).ok() == crate::hotkey::Hotkey::parse(shortcut).ok()
+            })
+        });
+        let empty = hotkeys.get(action).and_then(|v| v.as_array()).is_none_or(Vec::is_empty);
+        if empty && !taken {
+            hotkeys.insert(action.into(), toml::Value::Array(vec![shortcut.into()]));
         }
     }
+}
+
+/// The shortcuts of the zone and window recordings, the last zone again, the text of a zone, a zone pinned and the
+/// recording thrown away (three keys: it deletes the recording).
+const MORE_SHORTCUTS: [(&str, &str); 6] = [
+    ("capture_last_region", "Ctrl+Shift+PrintScreen"),
+    ("capture_text", "Ctrl+Alt+PrintScreen"),
+    ("capture_pin", "Ctrl+Shift+F8"),
+    ("record_region", "Ctrl+Shift+F9"),
+    ("record_window", "Ctrl+Alt+F9"),
+    ("record_discard", "Ctrl+Shift+F10"),
+];
+
+/// The actions that started without a shortcut get one, when it is free.
+fn v12_more_shortcuts(table: &mut toml::Table) {
+    give_free_shortcuts(table, &MORE_SHORTCUTS);
 }
 
 /// Each kind of screenshot keeps the image settings used before the split.
@@ -451,6 +474,8 @@ impl Default for General {
 pub struct Hotkeys {
     pub capture_region: Vec<String>,
     pub capture_last_region: Vec<String>,
+    pub capture_text: Vec<String>,
+    pub capture_pin: Vec<String>,
     pub capture_window: Vec<String>,
     pub capture_fullscreen: Vec<String>,
     pub capture_all_monitors: Vec<String>,
@@ -459,6 +484,7 @@ pub struct Hotkeys {
     pub record_region: Vec<String>,
     pub record_window: Vec<String>,
     pub record_pause: Vec<String>,
+    pub record_discard: Vec<String>,
     pub replay_toggle: Vec<String>,
     pub replay_save: Vec<String>,
     pub replay_edit: Vec<String>,
@@ -467,10 +493,12 @@ pub struct Hotkeys {
 
 impl Hotkeys {
     /// Every action with the shortcuts configured for it, in [`ActionId::ALL`] order.
-    pub fn bindings(&self) -> [(ActionId, &[String]); 14] {
+    pub fn bindings(&self) -> [(ActionId, &[String]); 17] {
         [
             (ActionId::CaptureRegion, &self.capture_region),
             (ActionId::CaptureLastRegion, &self.capture_last_region),
+            (ActionId::CaptureText, &self.capture_text),
+            (ActionId::CapturePin, &self.capture_pin),
             (ActionId::CaptureWindow, &self.capture_window),
             (ActionId::CaptureFullscreen, &self.capture_fullscreen),
             (ActionId::CaptureAllMonitors, &self.capture_all_monitors),
@@ -479,6 +507,7 @@ impl Hotkeys {
             (ActionId::RecordRegion, &self.record_region),
             (ActionId::RecordWindow, &self.record_window),
             (ActionId::RecordPause, &self.record_pause),
+            (ActionId::RecordDiscard, &self.record_discard),
             (ActionId::ReplayToggle, &self.replay_toggle),
             (ActionId::ReplaySave, &self.replay_save),
             (ActionId::ReplayEdit, &self.replay_edit),
@@ -492,16 +521,18 @@ impl Default for Hotkeys {
         let one = |s: &str| vec![s.to_owned()];
         Self {
             capture_region: one("PrintScreen"),
-            // Free by default, as the zone and window recordings: a shortcut of their own when the user wants one.
-            capture_last_region: Vec::new(),
+            capture_last_region: one(MORE_SHORTCUTS[0].1),
+            capture_text: one(MORE_SHORTCUTS[1].1),
+            capture_pin: one(MORE_SHORTCUTS[2].1),
             capture_window: one("Alt+PrintScreen"),
             capture_fullscreen: one("Ctrl+PrintScreen"),
             capture_all_monitors: one(NEW_SHORTCUTS[0].1),
             capture_scrolling: one("Shift+PrintScreen"),
             record_toggle: one("Ctrl+F9"),
-            record_region: Vec::new(),
-            record_window: Vec::new(),
+            record_region: one(MORE_SHORTCUTS[3].1),
+            record_window: one(MORE_SHORTCUTS[4].1),
             record_pause: one("Ctrl+F10"),
+            record_discard: one(MORE_SHORTCUTS[5].1),
             // Three keys: turning the replay off by mistake would lose the moment to keep.
             replay_toggle: one(NEW_SHORTCUTS[1].1),
             replay_save: one("Ctrl+F11"),
@@ -1560,6 +1591,21 @@ mod tests {
         assert_eq!(h.capture_scrolling, ["F7"]);
         let h = read("capture_scrolling = []\nopen_settings = [\"ctrl+printscreen\"]\n");
         assert!(h.capture_scrolling.is_empty());
+    }
+
+    #[test]
+    fn the_actions_without_a_shortcut_get_theirs_when_free() {
+        let read =
+            |hotkeys: &str| Config::from_toml(&format!("schema_version = 12\n[hotkeys]\n{hotkeys}")).unwrap().hotkeys;
+        let h = read("capture_last_region = []\nrecord_region = []\nrecord_window = [\"F6\"]\n");
+        assert_eq!(h.capture_last_region, ["Ctrl+Shift+PrintScreen"]);
+        assert_eq!(h.record_region, ["Ctrl+Shift+F9"]);
+        assert_eq!(h.record_window, ["F6"]);
+        assert_eq!(h.capture_text, ["Ctrl+Alt+PrintScreen"]);
+        // Taken by another action: it stays there.
+        let h = read("record_region = []\nreplay_save = [\"shift+ctrl+f9\"]\n");
+        assert!(h.record_region.is_empty());
+        assert_eq!(h.replay_save, ["shift+ctrl+f9"]);
     }
 
     #[test]

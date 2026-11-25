@@ -364,6 +364,10 @@ pub enum Mode {
     Scroll,
     /// Pick the zone of a recording.
     Record,
+    /// Copy the text of the zone drawn.
+    Text,
+    /// Pin the zone drawn over the windows.
+    Pin,
 }
 
 /// The screens the daemon froze for this capture. They go once the editor covers them, or when this is dropped
@@ -716,6 +720,8 @@ fn pick(
         Mode::Editor => ActionId::CaptureRegion,
         Mode::Scroll => ActionId::CaptureScrolling,
         Mode::Record => ActionId::RecordRegion,
+        Mode::Text => ActionId::CaptureText,
+        Mode::Pin => ActionId::CapturePin,
     });
     let keep_hdr = crate::keep_hdr(image_settings);
     let show_cursor = image_settings.show_cursor;
@@ -768,6 +774,8 @@ fn pick(
         Mode::Editor => {}
         // Only a zone is wanted: it is taken once drawn.
         Mode::Scroll | Mode::Record => session = session.with_auto_command(Command::Scroll),
+        Mode::Text => session = session.with_auto_command(Command::CopyText),
+        Mode::Pin => session = session.with_auto_command(Command::Pin),
     }
     let origin = (bounds.x, bounds.y);
     let mut overlay = vixeeny_overlay::Overlay::on_screens(

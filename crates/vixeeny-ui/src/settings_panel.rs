@@ -296,6 +296,8 @@ pub fn action_label(action: ActionId, lang: Lang) -> &'static str {
         match action {
             ActionId::CaptureRegion => Key::ActCaptureRegion,
             ActionId::CaptureLastRegion => Key::ActCaptureLastRegion,
+            ActionId::CaptureText => Key::ActCaptureText,
+            ActionId::CapturePin => Key::ActCapturePin,
             ActionId::CaptureWindow => Key::ActCaptureWindow,
             ActionId::CaptureFullscreen => Key::ActCaptureFullscreen,
             ActionId::CaptureAllMonitors => Key::ActCaptureAll,
@@ -304,6 +306,7 @@ pub fn action_label(action: ActionId, lang: Lang) -> &'static str {
             ActionId::RecordRegion => Key::ActRecordRegion,
             ActionId::RecordWindow => Key::ActRecordWindow,
             ActionId::RecordPause => Key::ActRecordPause,
+            ActionId::RecordDiscard => Key::ActRecordDiscard,
             ActionId::ReplayToggle | ActionId::ReplayWatch => Key::ActReplayToggle,
             ActionId::ReplaySave => Key::ActReplaySave,
             ActionId::ReplayEdit => Key::ActReplayEdit,
