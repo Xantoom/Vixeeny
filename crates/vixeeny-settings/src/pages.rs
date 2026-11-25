@@ -541,6 +541,28 @@ fn image_encoding(env: &Env, config: &Config) -> Vec<Row> {
         }
         _ => {}
     }
+    let percent = |n: &str| t(Key::OptScalePercent).replace("{percent}", n);
+    rows.push(choice(
+        "image_scale",
+        t(Key::SetImageScale),
+        vec![
+            advised("100", t(Key::OptScaleFull)),
+            opt("75", percent("75")),
+            opt("50", percent("50")),
+            opt("25", percent("25")),
+        ],
+        // A size written by hand in the file shows as the nearest one offered.
+        |c| {
+            match c.image.region.scale {
+                88.. => "100",
+                63..=87 => "75",
+                38..=62 => "50",
+                _ => "25",
+            }
+            .to_owned()
+        },
+        |c, v| c.image.region.scale = v.parse().unwrap_or(100),
+    ));
     // Only when Windows shows HDR: there is nothing to keep otherwise.
     if env.display.hdr {
         let hdr = toggle(

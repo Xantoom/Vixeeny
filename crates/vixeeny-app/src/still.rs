@@ -56,8 +56,8 @@ pub fn target_for(action: ActionId, snap: &Snapshot) -> Result<CaptureTarget, St
 }
 
 /// The one screen `window` fills (a game in full screen), whose capture shows what is seen. A window's own capture
-/// shows the window as Windows composes it: a game that changed the display's resolution can be drawn there shifted
-/// or cut, though its screen is right. `None` for a window among others, or one spread over several screens.
+/// shows the window as Windows composes it: a game that changed the display's resolution can be drawn there shifted or
+/// cut, though its screen is right. `None` for a window among others, or one spread over several screens.
 fn screen_filled_by<'a>(window: &WindowInfo, monitors: &'a [MonitorInfo]) -> Option<&'a MonitorInfo> {
     let mut filled = monitors.iter().filter(|m| is_full_screen(window, std::slice::from_ref(*m)));
     let monitor = filled.next()?;
@@ -87,6 +87,8 @@ pub struct Output<'a> {
     /// A window capture is set on the background this gives, asked once the window is captured (reading the wallpaper
     /// takes a moment).
     pub backdrop: Option<&'a dyn Fn() -> Backdrop>,
+    /// The size saved, in percent of the capture (`100`: as captured).
+    pub scale: u8,
 }
 
 impl Output<'_> {
@@ -292,6 +294,8 @@ pub fn save_image(
     metadata: &dyn Fn(&str) -> ExeMetadata,
     image: &Bgra<'_>,
 ) -> Result<PathBuf, StillError> {
+    let small = vixeeny_image::scale::downscale_bgra(image, output.scale);
+    let image = &small.as_ref().map_or(*image, |(w, h, px)| Bgra::new(*w, *h, *w as usize * 4, px));
     let bytes = vixeeny_image::encode(output.format, image, output.settings)?;
     let path = write_named(action, snap, dest, output.format, metadata, (image.width, image.height), &bytes)?;
     if let Some(after) = dest.after_save {
@@ -310,7 +314,8 @@ pub fn save_hdr(
     metadata: &dyn Fn(&str) -> ExeMetadata,
     capture: &HdrCapture,
 ) -> Result<PathBuf, StillError> {
-    let image = hdr_image(capture);
+    let small = scaled_hdr(capture, output.scale);
+    let image = hdr_image(small.as_ref().unwrap_or(capture));
     let size = (image.width, image.height);
     // An Ultra HDR JPEG is a JPEG of the SDR rendering (with a gain map): the clipboard takes the file as it is. Other
     // HDR files are not the SDR rendering: it is encoded on its own, side by side with the file.
@@ -336,6 +341,13 @@ pub fn save_hdr(
         }
         Ok(path)
     })
+}
+
+/// `capture` at `percent` %, averaged in linear light; `None` when that does not make it smaller.
+pub fn scaled_hdr(capture: &HdrCapture, percent: u8) -> Option<HdrCapture> {
+    let f = &capture.frame;
+    let (width, height, rgba) = vixeeny_image::scale::downscale_rgba_f32(f.width, f.height, &f.rgba, percent)?;
+    Some(HdrCapture { frame: HdrFrame { width, height, rgba }, info: capture.info })
 }
 
 pub fn hdr_image(capture: &HdrCapture) -> Hdr<'_> {
@@ -506,7 +518,13 @@ mod tests {
             &mut capturer,
             &dest,
             CaptureOptions::default(),
-            Output { format: ImageFormat::Png, settings: &Settings::default(), keep_hdr: false, backdrop: None },
+            Output {
+                format: ImageFormat::Png,
+                settings: &Settings::default(),
+                keep_hdr: false,
+                backdrop: None,
+                scale: 100,
+            },
             metadata,
         )
         .unwrap()
@@ -547,7 +565,13 @@ mod tests {
             &mut capturer,
             &dest,
             CaptureOptions::default(),
-            Output { format: ImageFormat::Png, settings: &Settings::default(), keep_hdr: false, backdrop: None },
+            Output {
+                format: ImageFormat::Png,
+                settings: &Settings::default(),
+                keep_hdr: false,
+                backdrop: None,
+                scale: 100,
+            },
             &no_metadata,
         )
         .unwrap();
@@ -589,6 +613,7 @@ mod tests {
                     settings: &Settings::default(),
                     keep_hdr: false,
                     backdrop: Some(&|| Backdrop::Colour([0, 120, 212])),
+                    scale: 100,
                 },
                 &no_metadata,
             )
@@ -602,6 +627,62 @@ mod tests {
         let screen = shoot(ActionId::CaptureFullscreen);
         assert_eq!((screen.width, screen.height), (160, 100));
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_scaled_capture_is_saved_and_copied_smaller() {
+        let dir = temp_dir("scale");
+        let snap = Snapshot { foreground: None, ..snapshot() };
+        let names = BTreeMap::new();
+        let now = now();
+        let copied = std::sync::Mutex::new(None);
+        let copy = |image: &Bgra<'_>, _: Option<Encoded<'_>>, _: &str| {
+            *copied.lock().unwrap() = Some((image.width, image.height));
+        };
+        let dest = Destination {
+            keep_copy: true,
+            dir: &dir,
+            template: "{width}x{height}",
+            per_app_subfolder: false,
+            use_foreground_app: false,
+            app_names: &names,
+            now: &now,
+            after_save: Some(&copy),
+        };
+        let mut capturer = Capturer::new(Box::<FakeBackend>::default(), snap.monitors.clone());
+        let settings = Settings::default();
+        let output =
+            Output { format: ImageFormat::Png, settings: &settings, keep_hdr: false, backdrop: None, scale: 50 };
+        let path = run(
+            ActionId::CaptureFullscreen,
+            &snap,
+            &mut capturer,
+            &dest,
+            CaptureOptions::default(),
+            output,
+            &no_metadata,
+        )
+        .unwrap();
+        // 160 × 100 at 50 %, in the file, its name and the clipboard.
+        assert_eq!(path.file_name().unwrap(), "80x50.png");
+        let saved = vixeeny_image::decode(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!((saved.width, saved.height), (80, 50));
+        assert_eq!(copied.lock().unwrap().take(), Some((80, 50)));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn an_hdr_capture_is_scaled_in_linear_light() {
+        let info = vixeeny_platform::HdrInfo { sdr_white_nits: 200.0, peak_nits: 1000.0 };
+        let capture = HdrCapture {
+            frame: HdrFrame { width: 2, height: 2, rgba: [0.0, 0.0, 0.0, 1.0, 8.0, 8.0, 8.0, 1.0].repeat(2) },
+            info,
+        };
+        let small = scaled_hdr(&capture, 50).unwrap();
+        assert_eq!((small.frame.width, small.frame.height), (1, 1));
+        assert_eq!(small.frame.rgba, [4.0, 4.0, 4.0, 1.0]);
+        assert_eq!(small.info, info);
+        assert!(scaled_hdr(&capture, 100).is_none());
     }
 
     #[test]
@@ -725,7 +806,7 @@ mod tests {
         let options = CaptureOptions { tonemap: Some(|rgba, _| vec![7; rgba.len()]), ..CaptureOptions::default() };
         let shoot = |format, keep_hdr| {
             let mut capturer = Capturer::new(Box::<FakeBackend>::default(), snap.monitors.clone());
-            let output = Output { format, settings: &settings, keep_hdr, backdrop: None };
+            let output = Output { format, settings: &settings, keep_hdr, backdrop: None, scale: 100 };
             let path =
                 run(ActionId::CaptureFullscreen, &snap, &mut capturer, &dest, options, output, &no_metadata).unwrap();
             std::fs::read(path).unwrap()

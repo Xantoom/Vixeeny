@@ -1133,6 +1133,22 @@ mod tests {
     }
 
     #[test]
+    fn the_saved_size_is_part_of_the_encoding() {
+        let mut c = Config::default();
+        let page = rows(Section::Image, &env(), &c);
+        assert_eq!(row(&page, "image:defaults:image_scale").value(&c), Value::Text("100".into()));
+        row(&page, "image:defaults:image_scale").apply(&mut c, Value::Text("50".into())).unwrap();
+        assert_eq!(c.image.defaults.scale, 50);
+        // Every capture without encoding of its own follows it.
+        assert_eq!(c.image.for_action(vixeeny_common::ipc::ActionId::CaptureWindow).scale, 50);
+        c.image.window.custom_encoding = true;
+        assert_eq!(c.image.for_action(vixeeny_common::ipc::ActionId::CaptureWindow).scale, 100);
+        // A size written by hand shows as the nearest one offered.
+        c.image.defaults.scale = 60;
+        assert_eq!(row(&page, "image:defaults:image_scale").value(&c), Value::Text("50".into()));
+    }
+
+    #[test]
     fn each_image_format_offers_its_encoder_options() {
         let mut c = Config::default();
         let ids = |c: &Config| -> Vec<String> { rows(Section::Image, &env(), c).into_iter().map(|r| r.id).collect() };

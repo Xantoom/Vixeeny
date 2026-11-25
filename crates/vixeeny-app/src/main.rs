@@ -203,6 +203,7 @@ fn direct_capture(
                 settings: &settings,
                 keep_hdr: keep_hdr(image_settings),
                 backdrop: backdrop.as_ref().map(|b| b as &dyn Fn() -> vixeeny_image::backdrop::Backdrop),
+                scale: image_settings.scale,
             },
             &vixeeny_platform::exe_metadata,
         )

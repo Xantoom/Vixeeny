@@ -16,6 +16,7 @@ mod jpegli;
 mod jxl;
 mod pixels;
 mod png_enc;
+pub mod scale;
 pub mod tonemap;
 #[cfg(feature = "native-codecs")]
 mod ultrahdr;

@@ -188,9 +188,10 @@ keys! {
     TipBlur => "Blur", "Flouter";
     TipPixelate => "Pixelate", "Pixeliser";
     TipStyle => "Colour and size (wheel: size)", "Couleur et taille (molette : taille)";
-    TipUndo => "Undo (Ctrl+Z)", "Annuler (Ctrl+Z)";
-    TipCopy => "Copy (Ctrl+C)", "Copier (Ctrl+C)";
-    TipSave => "Save (Ctrl+S) · Save as: Ctrl+Shift+S", "Enregistrer (Ctrl+S) · Enregistrer sous : Ctrl+Maj+S";
+    TipUndo => "Undo (CTRL + Z)", "Annuler (CTRL + Z)";
+    TipCopy => "Copy (CTRL + C)", "Copier (CTRL + C)";
+    TipSave => "Save (CTRL + S) · Save as: CTRL + SHIFT + S",
+        "Enregistrer (CTRL + S) · Enregistrer sous : CTRL + SHIFT + S";
     TipClose => "Close (Esc)", "Fermer (Échap)";
     SecOverlay => "Overlay", "Overlay";
     SecImage => "Image", "Image";
@@ -299,7 +300,7 @@ keys! {
     CutNext => "Next frame (→)", "Image suivante (→)";
     CutMute => "Sound (M)", "Son (M)";
     CutClose => "Close (Esc)", "Fermer (Échap)";
-    TipCopyText => "Copy the text (Ctrl+Shift+C)", "Copier le texte (Ctrl+Maj+C)";
+    TipCopyText => "Copy the text (CTRL + SHIFT + C)", "Copier le texte (CTRL + SHIFT + C)";
     ToastTextCopied => "Text copied", "Texte copié";
     ToastNoText => "No text found", "Aucun texte trouvé";
     ToastOcrFailed => "Text could not be read", "Lecture du texte impossible";
@@ -315,7 +316,7 @@ keys! {
     OptBackdropColour => "Plain colour", "Couleur unie";
     TipLive => "Show the screens live (Space)", "Voir l'écran en direct (Espace)";
     TipFreeze => "Freeze the screens (Space)", "Figer l'écran (Espace)";
-    TipRedo => "Redo (Ctrl+Y)", "Rétablir (Ctrl+Y)";
+    TipRedo => "Redo (CTRL + Y)", "Rétablir (CTRL + Y)";
     TipClear => "Clear everything", "Tout effacer";
     TipRightClick => "Right-click: ", "Clic droit : ";
     UpdateInstalled => "Installed version: {version}", "Version installée : {version}";
@@ -415,6 +416,9 @@ keys! {
     ScrollLost => "Too fast: scroll back a little", "Trop rapide : remontez un peu";
     ShortcutSnipping => "Windows opens its Snipping Tool with this key too",
         "Windows ouvre aussi son Outil Capture d'écran avec cette touche";
+    SetImageScale => "Saved size", "Taille enregistrée";
+    OptScaleFull => "As captured", "Telle que capturée";
+    OptScalePercent => "{percent}%", "{percent} %";
 }
 
 impl Lang {

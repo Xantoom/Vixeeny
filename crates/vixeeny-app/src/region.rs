@@ -217,6 +217,7 @@ pub fn save_bgra(
         settings: &settings,
         keep_hdr: crate::keep_hdr(image_settings),
         backdrop: None,
+        scale: image_settings.scale,
     };
     if let Some(path) = chosen {
         // "Save as": the extension picks the format.
@@ -231,6 +232,11 @@ pub fn save_bgra(
         // side by side with it.
         let same = hdr.is_none() && format == default_format;
         let name = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        // At the size of the settings, as a save in the images folder.
+        let small = vixeeny_image::scale::downscale_bgra(bitmap, image_settings.scale);
+        let bitmap = &small.as_ref().map_or(*bitmap, |(w, h, px)| Bgra::new(*w, *h, *w as usize * 4, px));
+        let small_hdr = hdr.and_then(|h| still::scaled_hdr(h, image_settings.scale));
+        let hdr = small_hdr.as_ref().or(hdr);
         return std::thread::scope(|scope| {
             if !same {
                 scope.spawn(|| copy(bitmap, None, &name));
