@@ -60,12 +60,10 @@ The installer asks who Vixeeny is for:
 
 Vixeeny is written in Rust, with a [Slint](https://slint.dev) interface and FFmpeg for video.
 
-```bash
-cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
-```
-
-Release builds need the pinned native libraries (`cargo xtask build-native`). See
-[CONTRIBUTING.md](CONTRIBUTING.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+It builds for Windows only (`x86_64-pc-windows-msvc`, or `cargo xwin` from Linux) and links
+FFmpeg and pinned native libraries (`cargo xtask build-native`). The commands, with the features
+CI checks, are in [CONTRIBUTING.md](CONTRIBUTING.md); the map of the code is
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## License
 

@@ -31,6 +31,11 @@ libultrahdr; see `native/versions.toml`),
 then set `PKG_CONFIG_PATH=native\build\work\prefix\lib\pkgconfig` and build `vixeeny-app`
 with `--features native-codecs`. `cargo xtask dist` gathers the release files.
 
+CI runs clippy and the tests with those libraries
+(`cargo clippy --workspace --lib --bins --tests --examples --features vixeeny-app/native-codecs -- -D warnings`,
+`cargo test --workspace --tests --features vixeeny-app/native-codecs`): without the feature, the native image codecs
+and their generated bindings are not built, so a change can pass the commands above and fail in CI.
+
 To try a change in the real app, `cargo build --profile quick` builds it optimized like a
 release but without link-time optimization: a rebuild takes seconds instead of half a minute.
 The programs land in `target\quick`, and they need the FFmpeg DLLs beside them.
