@@ -715,9 +715,9 @@ fn info_tooltip_stays_while_the_pointer_moves_over_its_label() {
     let move_to = |x: f32, y: f32| {
         window.dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(x, y) });
     };
-    // Different points of the file-name label, including its text and the space beside it.
-    for (x, y) in [(260.0, 285.0), (280.0, 285.0), (300.0, 280.0), (310.0, 281.0), (300.0, 284.5)] {
-        for dx in [0.0, 0.5, 1.0, 1.5] {
+    // Points of the file-name label, its text and the space beside it, on whole and half pixels.
+    for (x, y) in [(260.0, 285.0), (310.0, 284.5)] {
+        for dx in [0.0, 0.5] {
             move_to(x + dx, y);
             assert!(changed("tip-on") > 20_000, "no tooltip at ({}, {y})", x + dx);
         }

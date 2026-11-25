@@ -91,6 +91,7 @@ fn count_packets(path: &PathBuf, kind: media::Type) -> usize {
 
 /// The custom preset of every software encoder opens and encodes in each of its rate modes.
 #[test]
+#[ignore = "exhaustive: run when the encoders, their options or FFmpeg change (see the CI)"]
 fn custom_rate_modes_encode() {
     ffmpeg::init().unwrap();
     let registry = vixeeny_encode::registry::Registry::builtin().unwrap();
@@ -142,6 +143,7 @@ fn try_encode(enc: &str, options: &str) -> Result<usize, ffmpeg::Error> {
 
 /// The same with the hardware encoders this machine has (the others are skipped).
 #[test]
+#[ignore = "exhaustive: run when the encoders, their options or FFmpeg change (see the CI)"]
 fn custom_rate_modes_on_this_gpu() {
     ffmpeg::init().unwrap();
     let registry = vixeeny_encode::registry::Registry::builtin().unwrap();
@@ -169,6 +171,7 @@ fn custom_rate_modes_on_this_gpu() {
 /// The probe does not try software encoders: each one offers every pixel format the registry declares, so each of them
 /// must encode.
 #[test]
+#[ignore = "exhaustive: run when the encoders, their options or FFmpeg change (see the CI)"]
 fn software_encoders_encode_every_declared_pixel_format() {
     let _ = ffmpeg::init();
     let registry = vixeeny_encode::registry::Registry::builtin().unwrap();
@@ -213,6 +216,7 @@ fn software_encoders_encode_every_declared_pixel_format() {
 /// and the hardware ones this machine has. The encoders are tried side by side, and the values of a software encoder
 /// too; a hardware encoder's values one after the other (its driver opens one session at a time anyway).
 #[test]
+#[ignore = "exhaustive: run when the encoders, their options or FFmpeg change (see the CI)"]
 fn every_option_value_encodes() {
     use rayon::prelude::*;
     use vixeeny_encode::registry::{Kind, ParamType};

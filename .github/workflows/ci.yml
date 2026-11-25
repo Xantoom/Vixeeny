@@ -18,6 +18,26 @@ concurrency:
 jobs:
   ffmpeg:
     uses: ./.github/workflows/ffmpeg.yml
+  # Whether the push touches the encoders, their options or the native libraries: only then do the exhaustive encoder
+  # tests run (every encoder, container and option value, half a minute). Unknown (a new branch) counts as touched.
+  changes:
+    runs-on: ubuntu-26.04
+    outputs:
+      encoders: ${{ steps.diff.outputs.encoders }}
+    steps:
+      - id: diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          files=$(gh api "repos/$GITHUB_REPOSITORY/compare/$BASE...$HEAD" --paginate --jq '.files[].filename' 2>/dev/null) \
+            || { echo "encoders=true" >> "$GITHUB_OUTPUT"; exit 0; }
+          if grep -qE '^(crates/vixeeny-encode/|packaging/ffmpeg/|native/|Cargo\.lock$)' <<< "$files"; then
+            echo "encoders=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "encoders=false" >> "$GITHUB_OUTPUT"
+          fi
   # Lint and tests run side by side (the repository is public: the minutes cost nothing), both
   # with the image codecs built natively, as for a release. The idle measurement, which needs a
   # release build, runs with the releases.
@@ -38,7 +58,7 @@ jobs:
       # checks vixeeny-ui's library as a test, though its `test = false` says it has none.
       - run: cargo clippy --workspace --lib --bins --tests --examples --features vixeeny-app/native-codecs -- -D warnings
   test:
-    needs: ffmpeg
+    needs: [ffmpeg, changes]
     runs-on: windows-latest
     env:
       # No debug information: less to write and link (a failing test still names its line).
@@ -56,10 +76,10 @@ jobs:
       # bulk of the build. No documentation tests either: the crates have none, and their pass costs
       # a rustdoc run each. The examples are checked by clippy.
       - run: cargo test --workspace --tests --features vixeeny-app/native-codecs
-      # Already run above; again for its output. The same features: nothing is built again (`-p`
-      # alone would rebuild the crate and its dependencies).
-      - name: Real capture smoke test (output only)
-        run: cargo test --workspace --features vixeeny-app/native-codecs --test wgc_smoke -- --nocapture
+      # The same build: nothing is compiled again.
+      - name: Exhaustive encoder tests
+        if: needs.changes.outputs.encoders != 'false'
+        run: cargo test --workspace --tests --features vixeeny-app/native-codecs -- --ignored
   caches:
     needs: [lint, test]
     if: always() && github.ref == 'refs/heads/1.0'

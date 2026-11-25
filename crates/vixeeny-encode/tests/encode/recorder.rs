@@ -88,6 +88,7 @@ fn record(cfg: RecordConfig, dir: &Path, n: usize) -> vixeeny_encode::recorder::
 }
 
 #[test]
+#[ignore = "exhaustive: run when the encoders, their options or FFmpeg change (see the CI)"]
 fn every_software_encoder_in_every_allowed_container_is_readable() {
     let registry = Registry::builtin().unwrap();
     let dir = scratch("matrix");
@@ -386,8 +387,8 @@ fn a_slow_encoder_drops_input_frames_instead_of_blocking() {
         }
     }
     assert!(refused > 0, "the queue must overflow");
-    // The pixels of a refused frame go back to the pool, for the next capture.
-    // Asked for a quarter of it: only a recycled buffer is that large.
+    // The pixels of a refused frame go back to the pool, for the next capture. Asked for a quarter of it: only a
+    // recycled buffer is that large.
     assert!(pool.take(big.data.len() / 4).capacity() >= big.data.len());
     assert_eq!(rec.stats().queue_dropped.load(std::sync::atomic::Ordering::Relaxed), refused);
     let summary = rec.stop(200 * 33 * MS).unwrap();
