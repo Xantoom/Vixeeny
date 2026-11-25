@@ -200,13 +200,17 @@ pub fn process_path(pid: u32) -> Option<String> {
 
 /// Whether the process `pid` is still running.
 pub fn process_alive(pid: u32) -> bool {
+    use windows::Win32::Foundation::ERROR_ACCESS_DENIED;
     use windows::Win32::System::Threading::GetExitCodeProcess;
     /// What `GetExitCodeProcess` reports while the process runs.
     const STILL_ACTIVE: u32 = 259;
     // SAFETY: the handle is closed on every path; `code` is a valid out-pointer.
     unsafe {
-        let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
-            return false;
+        let process = match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
+            Ok(process) => process,
+            // An anti-cheat can deny `OpenProcess` on a live game process: confirm via the process list.
+            Err(e) if e.code() == ERROR_ACCESS_DENIED.to_hresult() => return process_name(pid).is_some(),
+            Err(_) => return false,
         };
         let mut code = 0u32;
         let ok = GetExitCodeProcess(process, &raw mut code).is_ok();
@@ -676,7 +680,9 @@ const PAGE_MIN: u32 = 64;
 /// its account window, of the game's process or of another process of the game (see [`crate::games::part_of_game`]).
 /// Only while the game is in front: another program in front is not the game's.
 pub fn game_page_in_front(game: WindowId, pid: u32) -> bool {
-    use windows::Win32::UI::WindowsAndMessaging::IsIconic;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetLayeredWindowAttributes, IsIconic, LAYERED_WINDOW_ATTRIBUTES_FLAGS, LWA_ALPHA, WS_EX_LAYERED,
+    };
     let game_hwnd = hwnd_of(game);
     let pid_of = |hwnd: HWND| {
         let mut pid = 0u32;
@@ -693,12 +699,22 @@ pub fn game_page_in_front(game: WindowId, pid: u32) -> bool {
     let Some(game_rect) = frame_rect(game_hwnd) else {
         return false;
     };
-    // Shows, at a size of a page, over the game.
+    // Shows, at a size of a page, over the game. Invisible layered helper windows (alpha 0) do not count.
     let a_page = |hwnd: HWND| {
         let mut cloaked = 0u32;
         // SAFETY: plain queries on a window handle; a stale one answers false or fails.
         let shown = unsafe {
-            IsWindowVisible(hwnd).as_bool()
+            let ex = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+            let invisible_layer = if ex & WS_EX_LAYERED.0 != 0 {
+                let (mut alpha, mut flags) = (255u8, LAYERED_WINDOW_ATTRIBUTES_FLAGS(0));
+                GetLayeredWindowAttributes(hwnd, None, Some(&raw mut alpha), Some(&raw mut flags)).is_ok()
+                    && (flags.0 & LWA_ALPHA.0 != 0)
+                    && alpha == 0
+            } else {
+                false
+            };
+            !invisible_layer
+                && IsWindowVisible(hwnd).as_bool()
                 && !IsIconic(hwnd).as_bool()
                 && DwmGetWindowAttribute(
                     hwnd,
@@ -722,7 +738,22 @@ pub fn game_page_in_front(game: WindowId, pid: u32) -> bool {
     if unsafe { EnumWindows(Some(collect_window), LPARAM(&raw mut handles as isize)) }.is_err() {
         return false;
     }
-    handles.into_iter().take_while(|h| *h != game_hwnd).any(|h| a_page(h) && crate::games::part_of_game(pid_of(h), pid))
+    let own_pid = std::process::id();
+    let mut non_game_pids = Vec::new();
+    for h in handles.into_iter().take_while(|h| *h != game_hwnd) {
+        if !a_page(h) {
+            continue;
+        }
+        let h_pid = pid_of(h);
+        if h_pid == 0 || h_pid == own_pid || non_game_pids.contains(&h_pid) {
+            continue;
+        }
+        if crate::games::part_of_game(h_pid, pid) {
+            return true;
+        }
+        non_game_pids.push(h_pid);
+    }
+    false
 }
 
 /// Stops the watch of [`on_game_windows`] when dropped.
@@ -1022,6 +1053,40 @@ pub fn single_instance(name: &str) -> Option<InstanceGuard> {
         return None;
     }
     Some(InstanceGuard(handle))
+}
+
+/// Holds a per-session named mutex until dropped, releasing it for the next waiter.
+pub struct LockGuard(HANDLE);
+
+impl Drop for LockGuard {
+    fn drop(&mut self) {
+        use windows::Win32::System::Threading::ReleaseMutex;
+        // SAFETY: the mutex was acquired by `acquire_lock` on this thread and is released and closed once.
+        unsafe {
+            let _ = ReleaseMutex(self.0);
+            let _ = CloseHandle(self.0);
+        }
+    }
+}
+
+/// Waits up to `timeout` for the per-session named mutex `name`. Returns `None` if waiting timed out or the mutex
+/// could not be opened.
+pub fn acquire_lock(name: &str, timeout: std::time::Duration) -> Option<LockGuard> {
+    use windows::Win32::Foundation::{WAIT_ABANDONED, WAIT_OBJECT_0};
+    use windows::Win32::System::Threading::{CreateMutexW, WaitForSingleObject};
+    let wide: Vec<u16> = format!("Local\\{name}\0").encode_utf16().collect();
+    // SAFETY: `wide` is NUL-terminated and outlives the call.
+    let handle = unsafe { CreateMutexW(None, false, windows::core::PCWSTR(wide.as_ptr())) }.ok()?;
+    let ms = u32::try_from(timeout.as_millis()).unwrap_or(u32::MAX - 1);
+    // SAFETY: `handle` is a live mutex handle; WAIT_ABANDONED still grants ownership when a prior holder crashed.
+    let waited = unsafe { WaitForSingleObject(handle, ms) };
+    if waited == WAIT_OBJECT_0 || waited == WAIT_ABANDONED {
+        Some(LockGuard(handle))
+    } else {
+        // SAFETY: closing the handle we opened without acquiring ownership.
+        let _ = unsafe { CloseHandle(handle) };
+        None
+    }
 }
 
 /// The application identity of every Vixeeny process: their windows group under one taskbar button, with the name and
@@ -1546,5 +1611,21 @@ mod tests {
         assert!(rgba.as_chunks::<4>().0.iter().any(|p| p[3] == 0));
         assert!(rgba.as_chunks::<4>().0.iter().any(|p| p[3] == 255));
         assert!(super::exe_icon(r"C:\nowhere\nothing.exe", 48).is_none());
+    }
+
+    #[test]
+    fn acquire_lock_serializes_access_and_times_out_when_held() {
+        use std::time::Duration;
+        let name = format!("Vixeeny.TestLock.{}", std::process::id());
+        let guard = super::acquire_lock(&name, Duration::from_secs(1)).expect("initial lock");
+        let name2 = name.clone();
+        let blocked = std::thread::spawn(move || super::acquire_lock(&name2, Duration::from_millis(50)).is_some())
+            .join()
+            .unwrap();
+        assert!(!blocked, "second thread must time out while held");
+        drop(guard);
+        let acquired =
+            std::thread::spawn(move || super::acquire_lock(&name, Duration::from_secs(1)).is_some()).join().unwrap();
+        assert!(acquired, "lock is available once dropped");
     }
 }

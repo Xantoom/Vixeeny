@@ -381,7 +381,9 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
     fn execute(&mut self, effect: Effect) -> Flow {
         match effect {
             Effect::SpawnApp { id, action } => {
-                vixeeny_platform::allow_foreground_handoff();
+                if action != ActionId::ReplayWatch {
+                    vixeeny_platform::allow_foreground_handoff();
+                }
                 let frozen = self.take_frozen(action, FrozenFor::Spawn(id));
                 if let Err(e) = self.spawner.spawn(id, action, frozen.as_ref(), self.tx.clone()) {
                     tracing::error!("cannot start the app: {e}");
@@ -390,7 +392,9 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
                 }
             }
             Effect::SendToApp(DaemonToApp::RunAction { action, frozen }) => {
-                vixeeny_platform::allow_foreground_handoff();
+                if action != ActionId::ReplayWatch {
+                    vixeeny_platform::allow_foreground_handoff();
+                }
                 let frozen = frozen.or_else(|| self.take_frozen(action, FrozenFor::Link));
                 let carries_frozen = frozen.is_some();
                 let msg = DaemonToApp::RunAction { action, frozen };

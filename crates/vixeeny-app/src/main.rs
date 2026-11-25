@@ -469,6 +469,8 @@ struct Recording {
     /// Watches the replay's game for its own windows over it (an in-game web page), and whether the replay films the
     /// screen for one now.
     pages: Option<(vixeeny_platform::GameWindows, bool)>,
+    /// Coalesces bursts of game-window events into a single pending `Wake::Pages` check.
+    pages_pending: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// A game whose replay the user stopped by hand: it is not started again for it.
     declined: Option<u32>,
     /// The games announced while they run, the replay on or off: each is told once per run of the game, and again only
@@ -528,24 +530,25 @@ impl Recording {
                 if !closed || never || !config.replay.enabled {
                     return;
                 }
-            }
-            if vixeeny_platform::window_shown(window) {
-                return;
-            }
-            match self.games.game_in_front(game_lists(config)) {
-                None => return,
-                // The game made a new window in place of its last one.
-                Some(game) if game.pid == pid => {
-                    self.film_window(&game);
+            } else {
+                if vixeeny_platform::window_shown(window) {
                     return;
                 }
-                // A launcher that started the game and hid its window, still running: the replay goes to the game in
-                // front.
-                Some(_) => {}
+                match self.games.game_in_front(game_lists(config)) {
+                    None => return,
+                    // The game made a new window in place of its last one.
+                    Some(game) if game.pid == pid => {
+                        self.film_window(&game);
+                        return;
+                    }
+                    // A launcher that started the game and hid its window, still running: the replay goes to the game
+                    // in front.
+                    Some(_) => {}
+                }
+                tracing::info!("the replay's window went, another game is in front: the replay moves to it");
+                self.replay_game = None;
+                self.stop_replay();
             }
-            tracing::info!("the replay's window went, another game is in front: the replay moves to it");
-            self.replay_game = None;
-            self.stop_replay();
         }
         // Turned off in the settings: the buffer goes, its memory or files with it.
         if !config.replay.enabled {
@@ -597,9 +600,13 @@ impl Recording {
                 self.replay_game = Some((game.pid, exe, game.id));
                 self.declined = None;
                 // The game's web pages are windows of their own: the replay films the screen while one shows.
+                self.pages_pending.store(false, std::sync::atomic::Ordering::Release);
                 self.pages = self.look.clone().and_then(|look| {
+                    let pending = std::sync::Arc::clone(&self.pages_pending);
                     vixeeny_platform::on_game_windows(game.pid, move || {
-                        let _ = look.send(Wake::Pages);
+                        if !pending.swap(true, std::sync::atomic::Ordering::AcqRel) {
+                            let _ = look.send(Wake::Pages);
+                        }
                     })
                     .map(|watch| (watch, false))
                 });
@@ -954,7 +961,10 @@ fn run() -> anyhow::Result<()> {
                 recording.report(&mut send, &config)?;
             }
             Ok(Wake::Look) => recording.watch(&config),
-            Ok(Wake::Pages) => recording.follow_pages(&config),
+            Ok(Wake::Pages) => {
+                recording.pages_pending.store(false, std::sync::atomic::Ordering::Release);
+                recording.follow_pages(&config);
+            }
             Ok(Wake::Recording) => {
                 recording.report(&mut send, &config)?;
                 if recording.replay.as_ref().is_some_and(record::Handle::finished) {

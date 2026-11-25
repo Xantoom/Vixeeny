@@ -205,9 +205,9 @@ struct Session {
 
 impl Drop for Session {
     fn drop(&mut self) {
+        let _ = self.session.Close();
         let _ = self.pool.RemoveFrameArrived(self.arrived);
         let _ = self.item.RemoveClosed(self.closed);
-        let _ = self.session.Close();
         let _ = self.pool.Close();
     }
 }
@@ -220,6 +220,8 @@ unsafe impl Sync for Session {}
 /// How a session is opened: kept to open another on a new target (see [`VideoStream::retarget`]).
 struct Settings {
     cursor: bool,
+    /// Capture secondary windows (menus, tooltips, dialogs) alongside a target window.
+    secondary_windows: bool,
     /// The shortest time between two frames, in 100 ns ticks.
     min_interval: Option<i64>,
 }
@@ -260,6 +262,7 @@ fn item_of(target: &StreamTarget) -> Result<(GraphicsCaptureItem, Option<Physica
 /// Opens a session on `item`, its frames handed to `shared`.
 fn open_session(
     item: GraphicsCaptureItem,
+    is_window: bool,
     shared: &Arc<Shared>,
     tx: &SyncSender<Delivery>,
     settings: &Settings,
@@ -283,8 +286,11 @@ fn open_session(
     let session = pool.CreateCaptureSession(&item).map_err(os("CreateCaptureSession"))?;
     let _ = session.SetIsCursorCaptureEnabled(settings.cursor);
     let _ = session.SetIsBorderRequired(false);
-    // A window's menus, tooltips and dialogs with it (Windows 11 24H2 and later; a monitor has them anyway).
-    let _ = session.SetIncludeSecondaryWindows(true);
+    // A desktop window's menus, tooltips and dialogs with it (Windows 11 24H2 and later). Left off for monitors (which
+    // show them anyway) and full-screen games (which spawn transient popups during launch and follow pages explicitly).
+    if is_window && settings.secondary_windows {
+        let _ = session.SetIncludeSecondaryWindows(true);
+    }
     if let Some(ticks) = settings.min_interval {
         let _ = session.SetMinUpdateInterval(windows::Foundation::TimeSpan { Duration: ticks });
     }
@@ -307,7 +313,20 @@ impl VideoStream {
         gpu: Option<GpuCapture>,
         pacing: Option<Pacing>,
     ) -> Result<Self, CaptureError> {
-        Self::open(target, cursor, hdr, gpu, None, pacing)
+        Self::start_capture(target, cursor, hdr, true, gpu, pacing)
+    }
+
+    /// Like [`start_with`](Self::start_with), choosing whether a window capture also asks Windows 11 24H2+ for its
+    /// secondary windows (menus, tooltips, dialogs).
+    pub fn start_capture(
+        target: &StreamTarget,
+        cursor: bool,
+        hdr: bool,
+        secondary_windows: bool,
+        gpu: Option<GpuCapture>,
+        pacing: Option<Pacing>,
+    ) -> Result<Self, CaptureError> {
+        Self::open(target, cursor, hdr, secondary_windows, gpu, None, pacing)
     }
 
     /// Captures on `device` and keeps only the newest frame, on the graphics card, until [`take_held`](Self::take_held)
@@ -323,7 +342,7 @@ impl VideoStream {
     ) -> Result<Self, CaptureError> {
         let held = Held::default();
         let ticks = min_interval.map(|interval| i64::try_from(interval.as_nanos() / 100).unwrap_or(i64::MAX));
-        Self::open_with(target, cursor, false, Source::Held(device, held.clone()), Some(notify), None, ticks)
+        Self::open_with(target, cursor, false, true, Source::Held(device, held.clone()), Some(notify), None, ticks)
     }
 
     /// The newest frame, if one came since the last taken (see [`start_held`](Self::start_held)).
@@ -334,13 +353,14 @@ impl VideoStream {
     /// Like [`start`](Self::start), calling `notify` each time a frame waits in `recv`: the consumer reads them when
     /// told rather than waiting on `recv`.
     pub fn start_notify(target: &StreamTarget, cursor: bool, hdr: bool, notify: Notify) -> Result<Self, CaptureError> {
-        Self::open(target, cursor, hdr, None, Some(notify), None)
+        Self::open(target, cursor, hdr, true, None, Some(notify), None)
     }
 
     fn open(
         target: &StreamTarget,
         cursor: bool,
         hdr: bool,
+        secondary_windows: bool,
         gpu: Option<GpuCapture>,
         notify: Option<Notify>,
         pacing: Option<Pacing>,
@@ -350,13 +370,15 @@ impl VideoStream {
         // skips its other refreshes), so every period still gets a frame. Older versions refuse it and deliver every
         // refresh: the gate sorts them.
         let ticks = pacing.as_ref().map(|p| i64::from(p.fps.1) * 10_000_000 / (2 * i64::from(p.fps.0.max(1))));
-        Self::open_with(target, cursor, hdr, source, notify, pacing, ticks)
+        Self::open_with(target, cursor, hdr, secondary_windows, source, notify, pacing, ticks)
     }
 
+    #[expect(clippy::too_many_arguments, reason = "internal constructor for all stream modes")]
     fn open_with(
         target: &StreamTarget,
         cursor: bool,
         hdr: bool,
+        secondary_windows: bool,
         source: Source,
         notify: Option<Notify>,
         pacing: Option<Pacing>,
@@ -400,8 +422,9 @@ impl VideoStream {
             dropped: AtomicU64::new(0),
         });
         let (tx, rx) = sync_channel(BACKLOG);
-        let settings = Settings { cursor, min_interval };
-        let session = open_session(item, &shared, &tx, &settings)?;
+        let settings = Settings { cursor, secondary_windows, min_interval };
+        let is_window = matches!(target, StreamTarget::Window(_));
+        let session = open_session(item, is_window, &shared, &tx, &settings)?;
         Ok(Self { session: Mutex::new(session), shared, settings, tx, rx, buffers, held })
     }
 
@@ -412,7 +435,8 @@ impl VideoStream {
             return Err(CaptureError::InvalidRegion);
         }
         let (item, _) = item_of(target)?;
-        let session = open_session(item, &self.shared, &self.tx, &self.settings)?;
+        let is_window = matches!(target, StreamTarget::Window(_));
+        let session = open_session(item, is_window, &self.shared, &self.tx, &self.settings)?;
         // The session before stops once the new one runs: no gap in between.
         let old = self.session.lock().map(|mut current| std::mem::replace(&mut *current, session));
         drop(old);
@@ -453,6 +477,38 @@ impl VideoStream {
     }
 }
 
+/// Closes a [`Direct3D11CaptureFrame`] on drop unless handed over (e.g. to [`HeldFrame`]): releasing the COM pointer
+/// alone does not invoke `IClosable::Close`, which synchronously returns the buffer slot to the WGC pool.
+struct FrameGuard(Option<Direct3D11CaptureFrame>);
+
+impl FrameGuard {
+    fn new(frame: Direct3D11CaptureFrame) -> Self {
+        Self(Some(frame))
+    }
+
+    fn get(&self) -> Option<&Direct3D11CaptureFrame> {
+        self.0.as_ref()
+    }
+
+    fn take(&mut self) -> Option<Direct3D11CaptureFrame> {
+        self.0.take()
+    }
+}
+
+impl Drop for FrameGuard {
+    fn drop(&mut self) {
+        if let Some(frame) = self.0.take() {
+            let _ = frame.Close();
+        }
+    }
+}
+
+/// Whether `content` calls for recreating a capture pool sized to `last`. Minimised windows and transient display-mode
+/// switches report non-positive dimensions that `Recreate` rejects.
+fn needs_recreate(last: SizeInt32, content: SizeInt32) -> bool {
+    content.Width > 0 && content.Height > 0 && (last.Width, last.Height) != (content.Width, content.Height)
+}
+
 fn frame_handler(
     shared: Arc<Shared>,
     tx: SyncSender<Delivery>,
@@ -464,23 +520,22 @@ fn frame_handler(
         let Some(pool) = pool.as_ref() else {
             return Ok(());
         };
-        // Only the newest frame matters: drain the pool.
-        let mut newest = None;
+        // Only the newest frame matters: drain the pool, closing every skipped frame immediately.
+        let mut newest: Option<FrameGuard> = None;
         while let Ok(frame) = pool.TryGetNextFrame() {
-            newest = Some(frame);
+            newest = Some(FrameGuard::new(frame));
         }
         let Some(frame) = newest else { return Ok(()) };
-        let content = frame.ContentSize()?;
+        let content = frame.get().map(Direct3D11CaptureFrame::ContentSize).transpose()?.unwrap_or_default();
         // A window that was resized needs a pool of the new size, made once this frame (of the old size) is handed
-        // over.
-        let resized = last_size.lock().is_ok_and(|mut last| {
-            let changed = (last.Width, last.Height) != (content.Width, content.Height);
-            *last = content;
-            changed
-        });
+        // over and closed.
+        let resized = last_size.lock().is_ok_and(|last| needs_recreate(*last, content));
         let delivered = deliver(&shared, &tx, frame, content);
-        if resized {
-            let _ = pool.Recreate(&shared.winrt_device, pixel_format(shared.hdr), 2, content);
+        if resized
+            && pool.Recreate(&shared.winrt_device, pixel_format(shared.hdr), 2, content).is_ok()
+            && let Ok(mut last) = last_size.lock()
+        {
+            *last = content;
         }
         delivered
     })
@@ -490,10 +545,13 @@ fn frame_handler(
 fn deliver(
     shared: &Shared,
     tx: &SyncSender<Delivery>,
-    frame: Direct3D11CaptureFrame,
+    mut frame: FrameGuard,
     content: SizeInt32,
 ) -> windows::core::Result<()> {
-    let time_ns = frame.SystemRelativeTime()?.Duration.saturating_mul(100);
+    let Some(raw) = frame.get() else {
+        return Ok(());
+    };
+    let time_ns = raw.SystemRelativeTime()?.Duration.saturating_mul(100);
     if shared.paused.load(Ordering::Acquire) {
         return Ok(());
     }
@@ -503,13 +561,16 @@ fn deliver(
     {
         return Ok(());
     }
-    let surface = frame.Surface()?;
+    let surface = raw.Surface()?;
     let access: IDirect3DDxgiInterfaceAccess = surface.cast()?;
     // SAFETY: the surface is backed by a D3D11 texture on our device.
     let texture: ID3D11Texture2D = unsafe { access.GetInterface() }?;
     let content = within(&texture, content);
     if let Some(held) = &shared.held {
-        let frame = HeldFrame { texture, content, time_ns, frame };
+        let Some(owned) = frame.take() else {
+            return Ok(());
+        };
+        let frame = HeldFrame { texture, content, time_ns, frame: owned };
         // The frame waiting before goes back to the pool.
         let old = held.lock().ok().and_then(|mut slot| slot.replace(frame));
         drop(old);
@@ -744,5 +805,15 @@ mod tests {
         assert!(second.time_ns > first.time_ns);
         let region = StreamTarget::Region { monitor, rect: PhysicalRect::new(0, 0, 10, 10) };
         assert!(stream.retarget(&region).is_err());
+    }
+
+    #[test]
+    fn recreate_skips_empty_or_unchanged_sizes() {
+        let size = |w, h| SizeInt32 { Width: w, Height: h };
+        assert!(!needs_recreate(size(1920, 1080), size(1920, 1080)));
+        assert!(needs_recreate(size(1920, 1080), size(2560, 1440)));
+        assert!(!needs_recreate(size(1920, 1080), size(0, 0)));
+        assert!(!needs_recreate(size(1920, 1080), size(1920, 0)));
+        assert!(!needs_recreate(size(1920, 1080), size(-1, 1080)));
     }
 }

@@ -10,7 +10,9 @@ use vixeeny_encode::probe::{Adapter, ProbeResult, cached_or_probe, run_child, ve
 use vixeeny_encode::registry::Registry;
 
 /// How long the child may take before it is killed (the target is under 5 s).
-const TIMEOUT: Duration = Duration::from_secs(60);
+const TIMEOUT: Duration = Duration::from_secs(15);
+/// Serialises concurrent probes across `--warm-probe`, replay startup and settings.
+const PROBE_LOCK: &str = "Vixeeny.HwProbe";
 
 /// The GPUs of this machine; `index` counts the adapters of the same vendor.
 pub fn adapters() -> Vec<Adapter> {
@@ -45,14 +47,24 @@ pub fn child() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The probe result: cached while the GPUs and drivers are the same, else a fresh child run.
+/// The probe result: cached while the GPUs and drivers are the same, else a fresh child run. Concurrent callers share
+/// one probe through a named lock so `--warm-probe` and a game launch never probe the GPU drivers at the same time.
 pub fn current(force: bool) -> anyhow::Result<ProbeResult> {
     let path = vixeeny_common::paths::hw_cache_file().context("no cache folder")?;
+    let adapters = adapters();
+    let identity = vixeeny_encode::probe::identity();
+    if !force
+        && let Some(hit) =
+            vixeeny_encode::probe::load_cache(&path, &vixeeny_encode::probe::cache_key(&adapters, &identity))
+    {
+        return Ok(hit);
+    }
+    let _lock = vixeeny_platform::acquire_lock(PROBE_LOCK, TIMEOUT);
     if force {
         let _ = std::fs::remove_file(&path);
     }
     let exe = std::env::current_exe()?;
-    Ok(cached_or_probe(&path, &adapters(), &vixeeny_encode::probe::identity(), || run_child(&exe, TIMEOUT))?)
+    Ok(cached_or_probe(&path, &adapters, &identity, || run_child(&exe, TIMEOUT))?)
 }
 
 /// The probe result if the cache already holds it (no process is started).

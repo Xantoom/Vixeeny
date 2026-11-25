@@ -14,7 +14,7 @@ use windows::Win32::Graphics::Direct3D11::{
     D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC_0, D3D11_VIDEO_PROCESSOR_STREAM, D3D11_VIDEO_USAGE_PLAYBACK_NORMAL,
     D3D11_VPIV_DIMENSION_TEXTURE2D, D3D11_VPOV_DIMENSION_TEXTURE2DARRAY, ID3D11Device, ID3D11DeviceContext,
     ID3D11Multithread, ID3D11Texture2D, ID3D11VideoContext1, ID3D11VideoDevice, ID3D11VideoProcessor,
-    ID3D11VideoProcessorEnumerator, ID3D11VideoProcessorInputView, ID3D11VideoProcessorOutputView,
+    ID3D11VideoProcessorEnumerator, ID3D11VideoProcessorOutputView,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709, DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709, DXGI_COLOR_SPACE_TYPE,
@@ -44,22 +44,19 @@ pub struct VideoConverter {
     processor: ID3D11VideoProcessor,
     video_device: ID3D11VideoDevice,
     out: (u32, u32),
-    /// The views of the textures already met: a capture and an encoder go round the same few, so each view is made once
-    /// rather than at every frame.
+    /// Output views of the encoder's textures already met: the pool goes round the same few, so each output view is
+    /// made once. Input views are never kept: WGC frame-pool textures must be released back to the pool as soon as the
+    /// blit is queued (holding a view pins old capture textures past `Close` and `Recreate`).
     views: std::sync::Mutex<Views>,
 }
 
-/// Views by texture (its address: the view holds the texture, so no other takes the address while it is kept) and array
-/// slice.
+/// Output views by texture (its address: the view holds the texture, so no other takes the address while it is kept)
+/// and array slice.
 #[derive(Default)]
 struct Views {
-    inputs: Vec<((usize, u32), ID3D11VideoProcessorInputView)>,
     outputs: Vec<((usize, u32), ID3D11VideoProcessorOutputView)>,
 }
 
-/// Input views kept: the two textures of a capture pool. No more: a view holds its texture, and a window resized gets
-/// new ones (the old ones must go, they are large).
-const KEPT_INPUTS: usize = 2;
 /// Output views kept: the slices of the encoder's frames, one texture.
 const KEPT_OUTPUTS: usize = 32;
 
@@ -198,22 +195,21 @@ impl VideoConverter {
                 Texture2DArray: D3D11_TEX2D_ARRAY_VPOV { MipSlice: 0, FirstArraySlice: dst_slice, ArraySize: 1 },
             },
         };
+        let mut input = None;
+        // SAFETY: the descriptor and out-pointer are valid for the call; the texture belongs to the device the
+        // converter was created on. The view is released right after `VideoProcessorBlt` so transient capture textures
+        // are never pinned past the call.
+        unsafe {
+            self.video_device.CreateVideoProcessorInputView(
+                src,
+                &self.enumerator,
+                &raw const input_desc,
+                Some(&raw mut input),
+            )
+        }
+        .map_err(call("input view"))?;
+        let input = input.ok_or(D3dError::Missing("no input view"))?;
         let mut views = self.views.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let input = view(&mut views.inputs, KEPT_INPUTS, (src.as_raw() as usize, src_slice), || {
-            let mut input = None;
-            // SAFETY: the descriptor and out-pointer are valid for the call; the texture belongs to the device the
-            // converter was created on.
-            unsafe {
-                self.video_device.CreateVideoProcessorInputView(
-                    src,
-                    &self.enumerator,
-                    &raw const input_desc,
-                    Some(&raw mut input),
-                )
-            }
-            .map_err(call("input view"))?;
-            input.ok_or(D3dError::Missing("no input view"))
-        })?;
         let output = view(&mut views.outputs, KEPT_OUTPUTS, (dst.as_raw() as usize, dst_slice), || {
             let mut output = None;
             // SAFETY: as above.

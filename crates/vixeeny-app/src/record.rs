@@ -5,7 +5,7 @@
 
 use crate::toast::{Failed, Saved, Toast, failure_text};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -117,10 +117,57 @@ struct Control {
     wake: Wake,
 }
 
+/// One item on the GPU frame channel: `None` only wakes the recording thread.
+type GpuQueueItem = Option<(i64, HwFrame, QueuedSlot)>;
+
 #[derive(Clone)]
 enum Wake {
     Cpu(vixeeny_capture::StreamWaker),
-    Gpu(std::sync::mpsc::SyncSender<Option<(i64, HwFrame)>>),
+    Gpu(std::sync::mpsc::SyncSender<GpuQueueItem>),
+}
+
+/// Reserves one slot in the GPU frame backlog so the capture sink skips GPU conversion when the encoder is behind.
+struct QueuedSlot(Arc<AtomicUsize>);
+
+impl QueuedSlot {
+    fn try_acquire(queued: &Arc<AtomicUsize>, limit: usize) -> Option<Self> {
+        queued.try_update(Ordering::AcqRel, Ordering::Acquire, |n| (n < limit).then_some(n + 1)).ok()?;
+        Some(Self(Arc::clone(queued)))
+    }
+}
+
+impl Drop for QueuedSlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// Pending control commands drained in one turn of `record_loop`, coalescing repeated target changes.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct DrainedCtl {
+    stop: bool,
+    save: Option<bool>,
+    toggle_pause: bool,
+    screen: Option<bool>,
+    window: Option<vixeeny_platform::WindowId>,
+}
+
+fn drain_controls(ctl: &Receiver<Ctl>) -> DrainedCtl {
+    let mut out = DrainedCtl::default();
+    loop {
+        match ctl.try_recv() {
+            Ok(Ctl::Save(edit)) => out.save = Some(out.save.unwrap_or(false) | edit),
+            Ok(Ctl::Screen(screen)) => out.screen = Some(screen),
+            Ok(Ctl::Window(window)) => out.window = Some(window),
+            Ok(Ctl::TogglePause) => out.toggle_pause = !out.toggle_pause,
+            Ok(Ctl::Stop) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                out.stop = true;
+                break;
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => break,
+        }
+    }
+    out
 }
 
 impl Control {
@@ -948,14 +995,16 @@ impl Watcher {
 const GPU_BACKLOG: usize = 4;
 
 /// The recording's clock where frames arrive (capture times are on the OS clock, the recording's from its `origin`).
+/// Rejects frames until `reading` is set so nothing is read back or converted while the encoder is still opening.
 struct ClockGate {
     pacer: Pacer,
     origin: i64,
+    reading: Arc<AtomicBool>,
 }
 
 impl vixeeny_capture::Gate for ClockGate {
     fn wanted(&self, time_ns: i64) -> bool {
-        self.pacer.wanted((time_ns - self.origin).max(0))
+        self.reading.load(Ordering::Acquire) && self.pacer.wanted((time_ns - self.origin).max(0))
     }
 
     fn taken(&self, time_ns: i64) {
@@ -997,9 +1046,12 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
     let pacing = || {
         pacer.as_ref().map(|pacer| vixeeny_capture::Pacing {
             fps: (plan.config.fps.num, plan.config.fps.den),
-            gate: Arc::new(ClockGate { pacer: pacer.clone(), origin }),
+            gate: Arc::new(ClockGate { pacer: pacer.clone(), origin, reading: Arc::clone(&reading) }),
         })
     };
+    // Full-screen games spawn transient popups at launch and follow in-game pages explicitly: keep secondary windows
+    // off for replays, on for manual desktop window recordings.
+    let secondary_windows = plan.save_as.is_none();
     let (stream, gpu_frames) = {
         let screen = vixeeny_capture::StreamTarget::Monitor(plan.monitor.clone());
         let target = match plan.window {
@@ -1007,16 +1059,36 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
             None => screen,
         };
         let (stream, gpu_frames) = match &plan.gpu {
-            None => (vixeeny_capture::VideoStream::start_with(&target, plan.cursor, plan.hdr, None, pacing())?, None),
+            None => (
+                vixeeny_capture::VideoStream::start_capture(
+                    &target,
+                    plan.cursor,
+                    plan.hdr,
+                    secondary_windows,
+                    None,
+                    pacing(),
+                )?,
+                None,
+            ),
             Some(gpu) => {
-                // `None` only wakes the recording's thread (see `Control`).
-                let (tx, rx) = std::sync::mpsc::sync_channel::<Option<(i64, HwFrame)>>(GPU_BACKLOG);
+                // One extra slot so a wake (`None`) never competes with `GPU_BACKLOG` frames.
+                let (tx, rx) = std::sync::mpsc::sync_channel::<GpuQueueItem>(GPU_BACKLOG + 1);
                 let wake = tx.clone();
                 let pipeline = Arc::clone(&gpu.pipeline);
                 let lost = Arc::clone(&gpu_lost);
                 let reading = Arc::clone(&reading);
+                let gpu_queued = Arc::new(AtomicUsize::new(0));
                 let (crop, zone) = (plan.config.crop, plan.config.zone);
                 let sink: vixeeny_capture::TextureSink = Box::new(move |texture, content, time_ns| {
+                    if !reading.load(Ordering::Acquire) {
+                        return false;
+                    }
+                    // Skip GPU conversion when the encoder queue is already full: avoids piling extra GPU work onto a
+                    // busy card (for example during game launch shader compilation).
+                    let Some(slot) = QueuedSlot::try_acquire(&gpu_queued, GPU_BACKLOG) else {
+                        lost.fetch_add(1, Ordering::Relaxed);
+                        return false;
+                    };
                     let (left, top, width, height) = validate::crop_rect(content, zone, crop);
                     let rect = d3d::Rect {
                         left: left as i32,
@@ -1025,9 +1097,10 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
                         bottom: (top + height) as i32,
                     };
                     // A refused conversion (pool exhausted, GPU busy) is a dropped frame.
-                    let sent =
-                        pipeline.convert(texture, rect).is_ok_and(|frame| tx.try_send(Some((time_ns, frame))).is_ok());
-                    if !sent && reading.load(Ordering::Acquire) {
+                    let sent = pipeline
+                        .convert(texture, rect)
+                        .is_ok_and(|frame| tx.try_send(Some((time_ns, frame, slot))).is_ok());
+                    if !sent {
                         lost.fetch_add(1, Ordering::Relaxed);
                     }
                     sent
@@ -1035,7 +1108,14 @@ fn launch(plan: Plan) -> anyhow::Result<Handle> {
                 let capture =
                     vixeeny_capture::GpuCapture { device: gpu.device.clone(), context: gpu.context.clone(), sink };
                 (
-                    vixeeny_capture::VideoStream::start_with(&target, plan.cursor, plan.hdr, Some(capture), pacing())?,
+                    vixeeny_capture::VideoStream::start_capture(
+                        &target,
+                        plan.cursor,
+                        plan.hdr,
+                        secondary_windows,
+                        Some(capture),
+                        pacing(),
+                    )?,
                     Some((rx, wake)),
                 )
             }
@@ -1205,7 +1285,7 @@ fn replay_failed(notice: &Config, e: &anyhow::Error) {
 #[expect(clippy::too_many_arguments, reason = "the parts of one recording, made by its caller")]
 fn record_loop(
     stream: &Video,
-    gpu_frames: Option<&std::sync::mpsc::Receiver<Option<(i64, HwFrame)>>>,
+    gpu_frames: Option<&std::sync::mpsc::Receiver<GpuQueueItem>>,
     pacer: Option<&Pacer>,
     recorder: Recorder,
     mut rig: Option<Rig>,
@@ -1278,71 +1358,71 @@ fn record_loop(
                 save_replay(&recorder, namer, notice, edit, lost_in_save(&watch, now()));
             }
         }
-        match ctl.try_recv() {
-            Ok(Ctl::Save(edit)) => {
-                if let Some(namer) = &save_as {
-                    if after.is_zero() {
-                        save_replay(&recorder, namer, notice, edit, lost_in_save(&watch, now()));
-                    } else if let Some((_, editing)) = &mut save_at {
-                        // A second press while it waits only asks for the editor.
-                        *editing |= edit;
-                    } else {
-                        save_at = Some((std::time::Instant::now() + after, edit));
-                    }
-                }
+        let drained = drain_controls(ctl);
+        if let Some(edit) = drained.save
+            && let Some(namer) = &save_as
+        {
+            if after.is_zero() {
+                save_replay(&recorder, namer, notice, edit, lost_in_save(&watch, now()));
+            } else if let Some((_, editing)) = &mut save_at {
+                // A second press while it waits only asks for the editor.
+                *editing |= edit;
+            } else {
+                save_at = Some((std::time::Instant::now() + after, edit));
             }
-            Ok(Ctl::Screen(screen)) => {
-                if let Some(sources) = &mut sources {
-                    // The screen the game is on now: it may have moved since the replay started.
-                    if screen
-                        && let vixeeny_capture::StreamTarget::Window(window) = &sources.window
-                        && let Some(now_on) = screen_of(*window)
-                    {
-                        sources.screen = now_on;
-                    }
-                    let target = match (screen, &sources.window) {
-                        (true, _) => sources.screen.clone(),
-                        (false, vixeeny_capture::StreamTarget::Window(window)) => {
-                            window_or_its_screen(*window, &sources.screen)
-                        }
-                        (false, other) => other.clone(),
-                    };
-                    match stream.retarget(&target) {
-                        Ok(()) => {
-                            on_screen = screen;
-                            tracing::info!("the replay films the game's {}", if screen { "screen" } else { "window" })
-                        }
-                        Err(e) => tracing::warn!("the replay cannot change what it films: {e}"),
-                    }
-                }
+        }
+        if drained.stop {
+            // The game closed while a save waited: what there is is saved now.
+            if let Some((_, edit)) = save_at.take()
+                && let Some(namer) = &save_as
+            {
+                save_replay(&recorder, namer, notice, edit, lost_in_save(&watch, now()));
             }
-            Ok(Ctl::Window(window)) => {
-                if let Some(sources) = &mut sources {
-                    let target = window_or_its_screen(window, &sources.screen);
-                    // On the screen, the new window is filmed once the game's pages go.
-                    match if on_screen { Ok(()) } else { stream.retarget(&target) } {
-                        Ok(()) => {
-                            tracing::info!("the replay follows the game's new window");
-                            sources.window = vixeeny_capture::StreamTarget::Window(window);
-                            pause_to = Some(false);
-                        }
-                        Err(e) => tracing::warn!("the replay cannot film the game's new window: {e}"),
-                    }
+            break;
+        }
+        if let Some(window) = drained.window
+            && let Some(sources) = &mut sources
+        {
+            let target = window_or_its_screen(window, &sources.screen);
+            // If `Screen` also arrived in the same batch, let it perform the single retarget below.
+            match if on_screen || drained.screen.is_some() { Ok(()) } else { stream.retarget(&target) } {
+                Ok(()) => {
+                    tracing::info!("the replay follows the game's new window");
+                    sources.window = vixeeny_capture::StreamTarget::Window(window);
+                    pause_to = Some(false);
                 }
+                Err(e) => tracing::warn!("the replay cannot film the game's new window: {e}"),
             }
-            // A replay has no pause: it always keeps the last seconds.
-            Ok(Ctl::TogglePause) if save_as.is_some() => {}
-            Ok(Ctl::TogglePause) => pause_to = Some(!paused),
-            Ok(Ctl::Stop) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                // The game closed while a save waited: what there is is saved now.
-                if let Some((_, edit)) = save_at.take()
-                    && let Some(namer) = &save_as
-                {
-                    save_replay(&recorder, namer, notice, edit, lost_in_save(&watch, now()));
+        }
+        if let Some(screen) = drained.screen
+            && let Some(sources) = &mut sources
+            && (screen != on_screen || drained.window.is_some())
+        {
+            // The screen the game is on now: it may have moved since the replay started.
+            if screen
+                && let vixeeny_capture::StreamTarget::Window(window) = &sources.window
+                && let Some(now_on) = screen_of(*window)
+            {
+                sources.screen = now_on;
+            }
+            let target = match (screen, &sources.window) {
+                (true, _) => sources.screen.clone(),
+                (false, vixeeny_capture::StreamTarget::Window(window)) => {
+                    window_or_its_screen(*window, &sources.screen)
                 }
-                break;
+                (false, other) => other.clone(),
+            };
+            match stream.retarget(&target) {
+                Ok(()) => {
+                    on_screen = screen;
+                    tracing::info!("the replay films the game's {}", if screen { "screen" } else { "window" });
+                }
+                Err(e) => tracing::warn!("the replay cannot change what it films: {e}"),
             }
-            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+        }
+        // A replay has no pause: it always keeps the last seconds.
+        if drained.toggle_pause && save_as.is_none() {
+            pause_to = Some(!paused);
         }
         if let Some(to) = pause_to.take().filter(|to| *to != paused) {
             paused = to;
@@ -1407,7 +1487,7 @@ fn record_loop(
                 Ok(_) => {}
             }
             match frames.recv_timeout(wait) {
-                Ok(Some((time_ns, frame))) => {
+                Ok(Some((time_ns, frame, _slot))) => {
                     if !paused && !recorder.push_hw((time_ns - origin).max(0), frame) && recorder.ended() {
                         break;
                     }
@@ -1588,5 +1668,39 @@ mod tests {
         assert!(started.elapsed() >= std::time::Duration::from_millis(200));
         assert!(!super::saving());
         let _ = writer.join();
+    }
+
+    #[test]
+    fn queued_slot_caps_backlog_and_releases_on_drop() {
+        let queued = Arc::new(AtomicUsize::new(0));
+        let first = QueuedSlot::try_acquire(&queued, 2).expect("slot 1");
+        let second = QueuedSlot::try_acquire(&queued, 2).expect("slot 2");
+        assert!(QueuedSlot::try_acquire(&queued, 2).is_none(), "full at limit");
+        drop(first);
+        let third = QueuedSlot::try_acquire(&queued, 2).expect("slot freed");
+        drop((second, third));
+        assert_eq!(queued.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn drain_controls_coalesces_target_churn_and_preserves_save_before_stop() {
+        let (tx, rx) = channel();
+        tx.send(Ctl::Screen(true)).unwrap();
+        tx.send(Ctl::Screen(false)).unwrap();
+        tx.send(Ctl::Window(vixeeny_platform::WindowId(1))).unwrap();
+        tx.send(Ctl::Window(vixeeny_platform::WindowId(2))).unwrap();
+        tx.send(Ctl::Save(false)).unwrap();
+        tx.send(Ctl::Save(true)).unwrap();
+        tx.send(Ctl::Stop).unwrap();
+        assert_eq!(
+            drain_controls(&rx),
+            DrainedCtl {
+                stop: true,
+                save: Some(true),
+                toggle_pause: false,
+                screen: Some(false),
+                window: Some(vixeeny_platform::WindowId(2)),
+            }
+        );
     }
 }
