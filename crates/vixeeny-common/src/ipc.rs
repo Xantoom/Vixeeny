@@ -74,6 +74,18 @@ impl ActionId {
         }
     }
 
+    /// The screenshots: their settings may delay them.
+    pub const fn is_capture(self) -> bool {
+        matches!(
+            self,
+            Self::CaptureRegion
+                | Self::CaptureWindow
+                | Self::CaptureFullscreen
+                | Self::CaptureAllMonitors
+                | Self::CaptureScrolling
+        )
+    }
+
     /// Actions that start on the frozen screen (a zone is picked on it).
     pub const fn freezes_screen(self) -> bool {
         matches!(self, Self::CaptureRegion | Self::CaptureScrolling)

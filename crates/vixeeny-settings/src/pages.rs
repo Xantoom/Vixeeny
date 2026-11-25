@@ -324,6 +324,19 @@ pub fn image(env: &Env, config: &Config) -> Vec<Row> {
                 |c| c.image.region.show_cursor,
                 |c, v| c.image.region.show_cursor = v,
             ),
+            choice(
+                "delay",
+                t(Key::SetCaptureDelay),
+                ["0", "3", "5", "10"]
+                    .into_iter()
+                    .map(|n| match n {
+                        "0" => opt(n, t(Key::OptNoDelay)),
+                        _ => opt(n, t(Key::OptDelaySeconds).replace("{n}", n)),
+                    })
+                    .collect(),
+                |c| c.image.region.delay_seconds.to_string(),
+                |c, v| c.image.region.delay_seconds = v.parse().unwrap_or(0),
+            ),
         ];
         // A window's picture or a scrolled page has none of them.
         if matches!(kind, ImageKind::Region | ImageKind::Fullscreen | ImageKind::AllMonitors) {

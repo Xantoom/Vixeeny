@@ -660,6 +660,8 @@ pub struct Image {
     pub format: String,
     /// The size the picture is saved at, in percent of the captured one (`100`: as captured). Part of the encoding.
     pub scale: u8,
+    /// Seconds between the shortcut and the capture (`0`: at once), to open a menu or move the pointer first.
+    pub delay_seconds: u8,
     pub show_cursor: bool,
     /// Vixeeny's notification cards, side bar and recording bar in the picture (they are left out otherwise).
     pub show_own_windows: bool,
@@ -690,6 +692,7 @@ impl Default for Image {
             template: Naming::default().template,
             format: "jpeg".into(),
             scale: 100,
+            delay_seconds: 0,
             show_cursor: false,
             show_own_windows: false,
             hdr: "tonemap_sdr".into(),

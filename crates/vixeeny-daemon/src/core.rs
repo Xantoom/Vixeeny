@@ -32,6 +32,8 @@ pub enum Event {
     /// A window (its handle) came to the foreground, or the one there went full screen or left it (the runtime looks
     /// for a game).
     Foreground(u64),
+    /// The countdown of a delayed capture ended (see [`crate::delay`]).
+    DelayEnded(u64),
 }
 
 /// Something to do.
@@ -119,7 +121,7 @@ impl Core {
                 self.reset_recording(&mut fx);
             }
             Event::AppExited { id, success } => self.on_exit(id, success, &mut fx),
-            Event::Foreground(_) => {}
+            Event::Foreground(_) | Event::DelayEnded(_) => {}
         }
         if self.update_waiting && self.recording_state() == RecState::Idle && !fx.contains(&Effect::Quit) {
             self.update_waiting = false;

@@ -8,6 +8,7 @@
 
 pub mod autostart;
 pub mod core;
+pub mod delay;
 pub mod platform;
 pub mod runtime;
 pub mod server;

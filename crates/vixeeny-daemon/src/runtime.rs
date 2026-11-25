@@ -4,13 +4,14 @@
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 
-use vixeeny_common::config::Config;
+use vixeeny_common::config::{Config, ImageKind};
 use vixeeny_common::hotkey::{self, Hotkey, ProblemKind};
 use vixeeny_common::i18n::{Key, Lang, tr};
 use vixeeny_common::ipc::{ActionId, ControlRequest, DaemonToApp, Frozen, RecState};
 
 use crate::autostart;
 use crate::core::{Core, Effect, Event, SpawnId};
+use crate::delay::Press;
 use crate::server::{AppLink, EventTx};
 use crate::supervisor::Spawner;
 
@@ -136,6 +137,8 @@ pub struct Runtime<T: Tray, S: Spawner> {
     last_game: Option<u32>,
     /// The process of that game last seen in front (the game, or another process of it).
     front: Option<u32>,
+    /// A capture waiting for the delay its settings ask.
+    delays: crate::delay::Delays,
 }
 
 impl<T: Tray, S: Spawner> Runtime<T, S> {
@@ -171,6 +174,7 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
             hooked: false,
             last_game: None,
             front: None,
+            delays: crate::delay::Delays::default(),
         }
     }
 
@@ -287,6 +291,29 @@ impl<T: Tray, S: Spawner> Runtime<T, S> {
             self.look_for_game(Some(window));
             return Flow::Continue;
         }
+        let event = match event {
+            Event::Action(action) | Event::Control(ControlRequest::Action(action)) if action.is_capture() => {
+                let seconds = self.config.image.get(ImageKind::for_action(action)).delay_seconds;
+                match self.delays.press(action, seconds) {
+                    Press::Now => event,
+                    Press::Wait(id) => {
+                        // The one timer the user asked for: it ends the countdown, nothing wakes before.
+                        let tx = self.tx.clone();
+                        std::thread::spawn(move || {
+                            std::thread::sleep(std::time::Duration::from_secs(u64::from(seconds)));
+                            tx.send(Event::DelayEnded(id));
+                        });
+                        return Flow::Continue;
+                    }
+                    Press::CalledOff => return Flow::Continue,
+                }
+            }
+            Event::DelayEnded(id) => match self.delays.ended(id) {
+                Some(action) => Event::Action(action),
+                None => return Flow::Continue,
+            },
+            other => other,
+        };
         self.freeze_or_thaw(&event);
         let mut flow = Flow::Continue;
         for effect in self.core.handle(event) {
@@ -559,6 +586,25 @@ mod tests {
         fn game(&mut self, _: Option<u64>, _: &Config) -> Option<u32> {
             self.0.lock().unwrap().then_some(7)
         }
+    }
+
+    #[test]
+    fn a_delayed_capture_starts_when_its_countdown_ends() {
+        let mut config = Config::default();
+        config.image.fullscreen.delay_seconds = 3;
+        let (mut rt, events, _, spawned) = runtime(false, config);
+        events.send(Event::Action(ActionId::CaptureFullscreen));
+        rt.pump();
+        assert!(spawned.lock().unwrap().is_empty());
+        // The countdown's end (its thread sends the same, later: by then nothing waits).
+        events.send(Event::DelayEnded(1));
+        rt.pump();
+        assert_eq!(*spawned.lock().unwrap(), vec![(1, ActionId::CaptureFullscreen)]);
+        // A capture without a delay starts at once.
+        events.send(Event::AppExited { id: 1, success: true });
+        events.send(Event::Action(ActionId::CaptureRegion));
+        rt.pump();
+        assert_eq!(spawned.lock().unwrap().last(), Some(&(2, ActionId::CaptureRegion)));
     }
 
     #[test]

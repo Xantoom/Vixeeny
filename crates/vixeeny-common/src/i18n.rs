@@ -419,6 +419,9 @@ keys! {
     SetImageScale => "Saved size", "Taille enregistrée";
     OptScaleFull => "As captured", "Telle que capturée";
     OptScalePercent => "{percent}%", "{percent} %";
+    SetCaptureDelay => "Delay before the capture", "Délai avant la capture";
+    OptNoDelay => "None", "Aucun";
+    OptDelaySeconds => "{n} s", "{n} s";
 }
 
 impl Lang {
