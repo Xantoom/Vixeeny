@@ -484,6 +484,8 @@ impl Session {
                 None
             }
             Key::Escape => Some(Command::Close),
+            // Enter takes the zone as it is: copied, as CTRL + C does. Nothing while there is none.
+            Key::Enter if !ctrl && !shift => self.selection.rect().map(|_| Command::Copy),
             Key::Char(c) if ctrl => match c.to_ascii_lowercase() {
                 'c' if shift => Some(Command::CopyText),
                 'c' => Some(Command::Copy),

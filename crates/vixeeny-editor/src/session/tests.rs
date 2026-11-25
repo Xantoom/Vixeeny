@@ -191,6 +191,15 @@ fn keyboard_commands() {
 }
 
 #[test]
+fn enter_copies_the_zone_once_there_is_one() {
+    let mut s = session();
+    let enter = KeyInput { key: Key::Enter, ctrl: false, shift: false };
+    assert_eq!(s.key(enter), None);
+    drag(&mut s, p(20.0, 20.0), p(120.0, 80.0));
+    assert_eq!(s.key(enter), Some(Command::Copy));
+}
+
+#[test]
 fn undo_redo_and_delete_from_the_keyboard() {
     let mut s = session();
     drag(&mut s, p(10.0, 10.0), p(190.0, 90.0));

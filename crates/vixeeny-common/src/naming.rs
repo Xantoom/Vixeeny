@@ -163,7 +163,8 @@ pub fn output_path(
     let has_counter = template.contains("{counter}");
     // The stems tried: a counter cut off by the length limit gives the same one again, which then takes ` (n)`.
     let mut tried = std::collections::HashSet::new();
-    for n in 1u32.. {
+    let mut last = PathBuf::new();
+    for n in 1..=MAX_TRIES {
         let stem = expand_template(template, vars, n);
         let fresh = tried.insert(stem.clone());
         let name = if (has_counter && fresh) || n == 1 { stem } else { format!("{stem} ({n})") };
@@ -171,9 +172,17 @@ pub fn output_path(
         if !exists(&path) {
             return path;
         }
+        last = path;
     }
-    unreachable!("the counter loop only ends by returning")
+    // Every name taken, or a folder that says so of every name (a network share that answers wrongly): a name of its
+    // own rather than a search without end.
+    let stem = last.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    dir.join(format!("{stem} {now:x}.{ext}"))
 }
+
+/// How many names [`output_path`] tries before it makes one up.
+const MAX_TRIES: u32 = 10_000;
 
 #[cfg(test)]
 mod tests {
@@ -312,6 +321,15 @@ mod tests {
         assert_eq!(p, Path::new("pics").join("Wuthering Waves").join("Wuthering Waves 2026-10-01 17-12-00 (2).png"));
         let flat = output_path(dir, false, "{app}_{date}_{time}", &vars(), "png", |_| false);
         assert_eq!(flat, Path::new("pics").join("Wuthering Waves_2026-10-01_17-12-00.png"));
+    }
+
+    /// A folder that says every name is taken (a share that answers wrongly) still gets a name, at once.
+    #[test]
+    fn a_folder_where_every_name_is_taken_still_gets_one() {
+        let p = output_path(Path::new("d"), false, "{app}", &vars(), "png", |_| true);
+        assert_eq!(p.parent(), Some(Path::new("d")));
+        assert_eq!(p.extension().and_then(|e| e.to_str()), Some("png"));
+        assert!(p.to_string_lossy().contains("Wuthering Waves"));
     }
 
     #[test]
