@@ -122,6 +122,7 @@ pub enum Button {
     Clear,
     Copy,
     CopyText,
+    Pin,
     Save,
     Close,
 }
@@ -137,7 +138,7 @@ const fn spec(button: Button, along: f32) -> ButtonSpec {
 }
 
 /// The bar, in its groups: the zone · the tools · style · history · outputs · close.
-pub const BUTTONS: [ButtonSpec; 16] = [
+pub const BUTTONS: [ButtonSpec; 17] = [
     spec(Button::Tool(Kit::Zone), 6.0),
     spec(Button::Live, 40.0),
     spec(Button::Tool(Kit::Pen), 87.0),
@@ -153,11 +154,12 @@ pub const BUTTONS: [ButtonSpec; 16] = [
     spec(Button::Clear, 453.0),
     spec(Button::Copy, 500.0),
     spec(Button::CopyText, 534.0),
-    spec(Button::Save, 568.0),
+    spec(Button::Pin, 568.0),
+    spec(Button::Save, 602.0),
 ];
 
 /// The close button, last.
-pub const CLOSE: ButtonSpec = spec(Button::Close, 615.0);
+pub const CLOSE: ButtonSpec = spec(Button::Close, 649.0);
 
 /// Every button, close included.
 pub fn buttons() -> impl Iterator<Item = &'static ButtonSpec> {
@@ -170,10 +172,10 @@ pub fn button(k: usize) -> &'static ButtonSpec {
 }
 
 /// The hairlines between the groups.
-pub const SEPARATORS: [f32; 5] = [78.0, 329.0, 376.0, 491.0, 606.0];
+pub const SEPARATORS: [f32; 5] = [78.0, 329.0, 376.0, 491.0, 640.0];
 
 /// Length and thickness of the bar.
-pub const BAR_W: f32 = 651.0;
+pub const BAR_W: f32 = 685.0;
 pub const BAR_H: f32 = 46.0;
 pub const BUTTON: f32 = 30.0;
 pub const BUTTON_Y: f32 = 8.0;
@@ -225,13 +227,14 @@ pub enum Tip {
     Clear,
     Copy,
     CopyText,
+    Pin,
     Save,
     Close,
     /// What comes before the other tool of a two-tool button ("Right-click: ").
     RightClick,
 }
 
-pub const TIP_COUNT: usize = 22;
+pub const TIP_COUNT: usize = 23;
 
 fn tool_tip(tool: Option<Tool>) -> Tip {
     match tool {
@@ -264,6 +267,7 @@ pub fn tip_of(k: usize, picks: &Picks, live: bool) -> (Tip, Option<Tip>) {
         Button::Clear => Tip::Clear,
         Button::Copy => Tip::Copy,
         Button::CopyText => Tip::CopyText,
+        Button::Pin => Tip::Pin,
         Button::Save => Tip::Save,
         Button::Close => Tip::Close,
     };
@@ -449,10 +453,12 @@ mod tests {
         assert_eq!(button_at(75.0, 20.0, false), None); // before the separator
         assert_eq!(button_at(345.0, 20.0, false), Some(9));
         assert_eq!(button_at(20.0, 345.0, true), Some(9));
-        assert_eq!(button_at(630.0, 20.0, false), Some(16));
+        assert_eq!(button_at(580.0, 20.0, false), Some(15));
+        assert_eq!(button_at(664.0, 20.0, false), Some(17));
         assert_eq!(button_at(10.0, 2.0, false), None);
         assert!(matches!(button(9).button, Button::Style));
-        assert!(matches!(button(16).button, Button::Close));
+        assert!(matches!(button(15).button, Button::Pin));
+        assert!(matches!(button(17).button, Button::Close));
         assert_eq!(button_xy(9, true), (BUTTON_Y, 338.0));
     }
 
@@ -488,7 +494,8 @@ mod tests {
         assert_eq!(tip_of(2, &picks, false), (Tip::Pen, None));
         assert_eq!(tip_of(1, &picks, false).0, Tip::Live);
         assert_eq!(tip_of(1, &picks, true).0, Tip::Freeze);
-        assert_eq!(tip_of(16, &picks, false).0, Tip::Close);
+        assert_eq!(tip_of(15, &picks, false).0, Tip::Pin);
+        assert_eq!(tip_of(17, &picks, false).0, Tip::Close);
         assert_eq!(Tip::RightClick as usize, TIP_COUNT - 1);
     }
 

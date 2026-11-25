@@ -135,6 +135,7 @@ pub fn toolbar(c: &Canvas<'_>, t: &Theme, u: f32, look: &BarLook) -> Result<()> 
             Button::Clear => icons::DELETE,
             Button::Copy => icons::COPY,
             Button::CopyText => icons::SCAN_TEXT,
+            Button::Pin => icons::PIN,
             Button::Save => icons::SAVE,
             Button::Close => icons::DISMISS,
         };

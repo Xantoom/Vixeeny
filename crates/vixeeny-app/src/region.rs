@@ -158,8 +158,72 @@ pub fn output_command(
                 }
             })
         }
+        Command::Pin => {
+            let img = session.export()?;
+            let zone = session.zone()?;
+            // The editor's image covers the desktop: the zone is where it shows.
+            let desktop = vixeeny_platform::virtual_bounds(snapshot.monitors.iter().map(|m| &m.rect))?;
+            let at = (desktop.x + zone.x.round() as i32, desktop.y + zone.y.round() as i32);
+            vixeeny_overlay::step_aside();
+            Some(match pin(&img, at) {
+                Ok(()) => true,
+                Err(e) => {
+                    tracing::error!("pin failed: {e:#}");
+                    tell_failure(config, &e);
+                    false
+                }
+            })
+        }
         Command::Scroll => None,
     }
+}
+
+/// Shows `img` pinned at `at` in a process of its own (`--pin`), which outlives the editor. The pixels go through its
+/// standard input: nothing is written to the disk.
+fn pin(img: &RgbaImage, at: (i32, i32)) -> anyhow::Result<()> {
+    use std::io::Write as _;
+    vixeeny_platform::allow_foreground_handoff();
+    let mut child = std::process::Command::new(std::env::current_exe()?)
+        .arg("--pin")
+        .args([at.0.to_string(), at.1.to_string(), img.width.to_string(), img.height.to_string()])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .context("cannot start the pinned picture")?;
+    let mut input = child.stdin.take().context("no pipe to the pinned picture")?;
+    input.write_all(&img.data).context("the pinned picture did not take its pixels")?;
+    Ok(())
+}
+
+/// `--pin <x> <y> <width> <height>`, the RGBA pixels on the standard input: the picture pinned over the windows until
+/// it is closed.
+pub fn run_pin(config: &Config, args: &[String]) -> anyhow::Result<()> {
+    use std::io::Read as _;
+    let number = |i: usize| -> anyhow::Result<i64> {
+        Ok(args.get(i).context("usage: --pin <x> <y> <width> <height>")?.parse()?)
+    };
+    let (x, y) = (i32::try_from(number(0)?)?, i32::try_from(number(1)?)?);
+    let (width, height) = (u32::try_from(number(2)?)?, u32::try_from(number(3)?)?);
+    let mut data = vec![0; width as usize * height as usize * 4];
+    std::io::stdin().lock().read_exact(&mut data).context("reading the pixels")?;
+    let img = RgbaImage::new(width, height, data).context("unexpected image size")?;
+    vixeeny_platform::ensure_dpi_aware();
+    let lang = crate::lang(&config.general.language);
+    let menu = vixeeny_overlay::pin::Menu {
+        copy: vixeeny_common::i18n::tr(vixeeny_common::i18n::Key::PinCopy, lang).to_owned(),
+        close: vixeeny_common::i18n::tr(vixeeny_common::i18n::Key::PinClose, lang).to_owned(),
+    };
+    // Copied as a zone capture is.
+    let settings = config.image.for_action(ActionId::CaptureRegion);
+    let bgra: Vec<u8> = img.data.as_chunks::<4>().0.iter().flat_map(|&[r, g, b, a]| [b, g, r, a]).collect();
+    let (w, h) = (img.width, img.height);
+    let copy = move || {
+        let image = Bgra::new(w, h, w as usize * 4, &bgra);
+        if let Err(e) = copy_bgra(&settings, &image, None, "Vixeeny") {
+            tracing::warn!("clipboard: {e:#}");
+        }
+    };
+    vixeeny_overlay::pin::run(&img, (x, y), &menu, crate::dark(config), copy)
+        .map_err(|e| anyhow::anyhow!("pinned picture: {e}"))
 }
 
 /// A card saying why the picture was not kept: the editor comes back without it.
@@ -724,7 +788,9 @@ fn pick(
                 return close;
             }
             match command {
-                Command::Close | Command::Copy | Command::CopyText | Command::Save | Command::SaveAs => false,
+                Command::Close | Command::Copy | Command::CopyText | Command::Pin | Command::Save | Command::SaveAs => {
+                    false
+                }
                 Command::Scroll => match session.zone() {
                     Some(zone) => {
                         scroll_slot.set(Some(zone));
@@ -893,6 +959,7 @@ pub(crate) fn toolbar_tips(lang: vixeeny_common::i18n::Lang) -> Vec<String> {
         Key::TipClear,
         Key::TipCopy,
         Key::TipCopyText,
+        Key::TipPin,
         Key::TipSave,
         Key::TipClose,
         Key::TipRightClick,

@@ -186,6 +186,7 @@ fn keyboard_commands() {
     assert_eq!(s.key(ctrl('C')), Some(Command::Copy));
     assert_eq!(s.key(ctrl('s')), Some(Command::Save));
     assert_eq!(s.key(KeyInput { key: Key::Char('s'), ctrl: true, shift: true }), Some(Command::SaveAs));
+    assert_eq!(s.key(KeyInput { key: Key::Char('p'), ctrl: true, shift: false }), Some(Command::Pin));
     assert_eq!(s.key(KeyInput { key: Key::Char('c'), ctrl: false, shift: false }), None);
 }
 

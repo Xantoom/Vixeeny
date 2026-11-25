@@ -22,7 +22,7 @@ type LayersKey = (u64, Option<AnnotationId>, Option<Annotation>);
 type Area = (u32, u32, u32, u32);
 
 /// Size of the toolbar, in image pixels (the UI lays out its content to fit).
-pub const TOOLBAR_SIZE: (f32, f32) = (651.0, 46.0);
+pub const TOOLBAR_SIZE: (f32, f32) = (685.0, 46.0);
 /// The thickness the tools start with, and the largest one, at 100 % (they grow with the interface scale).
 pub const DEFAULT_WIDTH: f32 = 4.0;
 pub const MAX_WIDTH: f32 = 40.0;
@@ -46,6 +46,8 @@ pub enum Command {
     SaveAs,
     /// Capture the zone while the user scrolls it.
     Scroll,
+    /// Show the result over the other windows until closed.
+    Pin,
     /// Close without saving.
     Close,
 }
@@ -485,6 +487,7 @@ impl Session {
             Key::Char(c) if ctrl => match c.to_ascii_lowercase() {
                 'c' if shift => Some(Command::CopyText),
                 'c' => Some(Command::Copy),
+                'p' => Some(Command::Pin),
                 's' if shift => Some(Command::SaveAs),
                 's' => Some(Command::Save),
                 'z' if shift => {

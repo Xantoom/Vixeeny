@@ -819,6 +819,8 @@ fn run() -> anyhow::Result<()> {
         Some("--cut") => return cut::run_child(config, &args[1..]),
         // A saved picture in the zone editor (see `region`).
         Some("--edit") => return region::run_edit(config, &args[1..]),
+        // A picture pinned over the windows (see `region`).
+        Some("--pin") => return region::run_pin(&config, &args[1..]),
         // The daily update check, and the installation (see `update`).
         Some("--update") => return update::run_child(&args[1..]),
         // What changed, at the first start after an update (see `whats_new`).

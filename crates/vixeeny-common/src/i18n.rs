@@ -426,6 +426,9 @@ keys! {
     ActRecordRegion => "Record a region / stop", "Enregistrer une zone / arrêter";
     ActRecordWindow => "Record a window / stop", "Enregistrer une fenêtre / arrêter";
     ToastNoLastRegion => "No region captured yet", "Aucune zone capturée pour l’instant";
+    TipPin => "Pin over the windows (CTRL + P)", "Épingler par-dessus les fenêtres (CTRL + P)";
+    PinCopy => "Copy", "Copier";
+    PinClose => "Close", "Fermer";
 }
 
 impl Lang {

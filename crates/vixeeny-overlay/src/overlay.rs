@@ -1008,6 +1008,7 @@ impl Shared {
             Button::Clear => self.session.borrow_mut().clear(),
             Button::Copy => return self.run_command(Command::Copy),
             Button::CopyText => return self.run_command(Command::CopyText),
+            Button::Pin => return self.run_command(Command::Pin),
             Button::Save => return self.run_command(Command::Save),
             Button::Close => return self.run_command(Command::Close),
         }
@@ -1298,8 +1299,8 @@ impl Shared {
     fn follow(&self, view: &View) {
         let area = if view.live && self.excluded.get() && !self.closing.get() {
             let session = self.session.borrow();
-            // Keep the monitor sessions and their last full frames during a selection gesture. Only the crop
-            // changes when it ends; closing/reopening WGC on every move adds latency and loses static frames.
+            // Keep the monitor sessions and their last full frames during a selection gesture. Only the crop changes
+            // when it ends; closing/reopening WGC on every move adds latency and loses static frames.
             if session.in_gesture() && session.live_area().is_none() {
                 return;
             }
@@ -1420,7 +1421,8 @@ impl Shared {
         if self.busy.replace(true) {
             return false;
         }
-        let exports = matches!(command, Command::Copy | Command::CopyText | Command::Save | Command::SaveAs);
+        let exports =
+            matches!(command, Command::Copy | Command::CopyText | Command::Pin | Command::Save | Command::SaveAs);
         let live = self.session.borrow().is_live();
         if exports && live && !self.thaw() {
             self.busy.set(false);
@@ -1609,8 +1611,8 @@ impl Overlay {
                 && cursor.1 < p.position.1 + p.size.1 as i32
         });
         shared.ui.borrow_mut().pointer_pane = under_cursor;
-        // The daemon already shows a dimmed freeze. Commit the same veil before exposing the editor, so the
-        // handoff never brightens the picture or waits for a second fade-in.
+        // The daemon already shows a dimmed freeze. Commit the same veil before exposing the editor, so the handoff
+        // never brightens the picture or waits for a second fade-in.
         let dim = shared.session.borrow().dim;
         // SAFETY: plain property/commit calls on the panes' composition device.
         unsafe {
