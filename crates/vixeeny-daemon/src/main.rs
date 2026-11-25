@@ -67,6 +67,12 @@ fn start_elevated(endpoint: &Endpoint) -> bool {
     if endpoint.connect().is_ok() {
         return false;
     }
+    // The start with the session follows the program, written by this process, which has the user's own rights.
+    if std::env::var_os(vixeeny_daemon::autostart::DISABLE_ENV).is_none()
+        && let Err(e) = vixeeny_platform::autostart::refresh(&exe)
+    {
+        tracing::warn!("cannot update autostart: {e}");
+    }
     match elevation::run_task() {
         Ok(()) => {
             tracing::info!("started again with the administrator's rights");

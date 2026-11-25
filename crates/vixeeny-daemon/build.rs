@@ -7,41 +7,15 @@
 /// start.
 const DELAYED: [&str; 4] = ["d3dcompiler_47.dll", "d3d12.dll", "ws2_32.dll", "version.dll"];
 
+include!("../build-common.rs");
+
 fn main() {
-    if std::env::var("CARGO_CFG_TARGET_ENV").is_ok_and(|e| e == "msvc") {
-        for dll in DELAYED {
-            println!("cargo:rustc-link-arg-bins=/DELAYLOAD:{dll}");
-        }
-        println!("cargo:rustc-link-arg-bins=delayimp.lib");
+    if is_msvc() {
+        delay_load(&DELAYED);
         link_map("Vixeeny.map");
     }
-    println!("cargo:rerun-if-changed=../../packaging/icons/vixeeny.ico");
-    println!("cargo:rerun-if-changed=../../packaging/icons/vixeeny-recording.ico");
-    let mut resource = winresource::WindowsResource::new();
-    resource
-        .set_icon_with_id("../../packaging/icons/vixeeny.ico", "1")
-        .set_icon_with_id("../../packaging/icons/vixeeny-recording.ico", "2")
-        .set("ProductName", "Vixeeny")
-        .set("FileDescription", "Vixeeny")
-        .set("OriginalFilename", "Vixeeny.exe")
-        .set("LegalCopyright", "GPL-3.0-or-later");
-    if let Err(e) = resource.compile() {
-        println!("cargo:warning=cannot embed the Windows resource: {e}");
-    }
-}
-
-/// A release build also writes the linker's map of the program beside it: the function at each address, which names the
-/// addresses of a crash note (`cargo xtask symbolize`). The program is the same with or without it.
-fn link_map(name: &str) {
-    // `<target>/release/build/<crate>/<hash>/out` (`build/<crate>-<hash>/out` before Cargo 1.100): the folder above
-    // `build`.
-    let out = std::env::var_os("OUT_DIR").map(std::path::PathBuf::from);
-    let profile = out.as_deref().and_then(|out| {
-        out.ancestors().find(|dir| dir.file_name().is_some_and(|name| name == "build")).and_then(|build| build.parent())
-    });
-    if let Some(profile) = profile
-        && profile.file_name().is_some_and(|name| name == "release")
-    {
-        println!("cargo:rustc-link-arg-bins=/MAP:{}", profile.join(name).display());
-    }
+    resource(
+        "Vixeeny.exe",
+        &[("1", "../../packaging/icons/vixeeny.ico"), ("2", "../../packaging/icons/vixeeny-recording.ico")],
+    );
 }

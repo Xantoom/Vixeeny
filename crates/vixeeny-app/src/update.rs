@@ -142,6 +142,14 @@ pub fn first_install(args: &[String]) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// `vixeeny-app --autostart-refresh`: run by the installer on every install, as the user who installs: an entry that
+/// starts Vixeeny with the session points at the program just installed (an old folder otherwise).
+pub fn refresh_autostart() -> anyhow::Result<()> {
+    let daemon = std::env::current_exe()?.with_file_name(client::DAEMON);
+    vixeeny_platform::autostart::refresh(&daemon)?;
+    Ok(())
+}
+
 /// `name=on` or `name=off` among the installer's `args`.
 fn install_choice(args: &[String], name: &str) -> Option<bool> {
     args.iter().find_map(|a| a.strip_prefix(name)?.strip_prefix('=')).map(|v| v == "on")

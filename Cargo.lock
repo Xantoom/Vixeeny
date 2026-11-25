@@ -5484,6 +5484,7 @@ dependencies = [
  "gif",
  "png",
  "rfd",
+ "roxmltree",
  "thiserror 2.0.21",
  "tracing",
  "vixeeny-audio",
@@ -5547,6 +5548,7 @@ version = "1.0.0-RC.2"
 dependencies = [
  "anyhow",
  "global-hotkey",
+ "roxmltree",
  "tracing",
  "tray-icon",
  "vixeeny-capture",

@@ -417,8 +417,8 @@ thread_local! {
 /// should only schedule its work. The window must belong to the calling thread.
 pub fn on_colour_change(id: WindowId, f: ColourChange) -> bool {
     use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
-    // Only the subclass functions of comctl32 5.8 (`GetWindowSubclass` is in version 6 only, which the program does not
-    // ask for: a program that imports it does not start).
+    // Only the subclass functions every comctl32 has: the programs' manifest asks for version 6, but a test program,
+    // without it, gets 5.8, where `GetWindowSubclass` is missing (a program that imports it does not start).
     use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
     use windows::Win32::UI::WindowsAndMessaging::{WM_DWMCOLORIZATIONCOLORCHANGED, WM_NCDESTROY, WM_SETTINGCHANGE};
     const ID: usize = 0x5649_5843; // "VIXC"

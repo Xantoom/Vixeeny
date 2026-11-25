@@ -3,8 +3,8 @@
 
 use windows::Win32::Foundation::ERROR_SUCCESS;
 use windows::Win32::System::Registry::{
-    HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, REG_DWORD, REG_SZ, RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RegGetValueW,
-    RegSetKeyValueW,
+    HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, REG_DWORD, REG_SZ, RRF_RT_REG_DWORD, RRF_RT_REG_SZ,
+    RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW,
 };
 use windows::core::HSTRING;
 
@@ -53,13 +53,24 @@ pub(crate) fn set_dword(root: HKEY, key: &str, value: &str, data: u32) -> Result
 }
 
 /// Writes a `REG_SZ` value, making its key when needed.
-fn set_string(root: HKEY, key: &str, value: &str, data: &str) -> Result<(), String> {
+pub(crate) fn set_string(root: HKEY, key: &str, value: &str, data: &str) -> Result<(), String> {
     let (key, value) = (HSTRING::from(key), HSTRING::from(value));
     let wide: Vec<u16> = data.encode_utf16().chain(std::iter::once(0)).collect();
     let bytes = u32::try_from(wide.len() * 2).map_err(|_| "the value is too long".to_owned())?;
     // SAFETY: `wide` holds `bytes` bytes, its terminating zero included.
     let status = unsafe { RegSetKeyValueW(root, &key, &value, REG_SZ.0, Some(wide.as_ptr().cast()), bytes) };
     if status == ERROR_SUCCESS { Ok(()) } else { Err(format!("cannot write {}\\{}: {status:?}", key, value)) }
+}
+
+/// Removes a value; a value already gone is not an error.
+pub(crate) fn delete_value(root: HKEY, key: &str, value: &str) -> Result<(), String> {
+    let (key_w, value_w) = (HSTRING::from(key), HSTRING::from(value));
+    // SAFETY: plain call with terminated strings.
+    let status = unsafe { RegDeleteKeyValueW(root, &key_w, &value_w) };
+    match status {
+        ERROR_SUCCESS | windows::Win32::Foundation::ERROR_FILE_NOT_FOUND => Ok(()),
+        _ => Err(format!("cannot remove {key}\\{value}: {status:?}")),
+    }
 }
 
 /// The entry of Vixeeny in Windows' installed apps, written by its installer (Inno Setup: the AppId, then `_is1`).
@@ -72,9 +83,16 @@ fn same_folder(a: &str, b: &str) -> bool {
     !a.trim().is_empty() && norm(a) == norm(b)
 }
 
-/// Puts `version` in the version field of the installed apps' entry of the install in `dir`, after an update that
-/// replaced the files without the installer. Nothing when no entry is of this folder (a portable copy). `Ok(true)` when
-/// the field changed. An entry for all users needs the administrator's rights, which an update in Program Files has.
+/// The major and minor numbers of `version` (`1.2.3-RC.1` gives 1 and 2), as the installed apps' entry keeps them.
+fn major_minor(version: &str) -> (u32, u32) {
+    let mut parts = version.split(['.', '-', '+']).map(|p| p.parse().unwrap_or(0));
+    (parts.next().unwrap_or(0), parts.next().unwrap_or(0))
+}
+
+/// Brings the installed apps' entry of the install in `dir` in line with `version`, after an update that replaced the
+/// files without the installer: the version, its numbers, and the name alone (installers before 1.0 wrote "Vixeeny
+/// version x" there). Nothing when no entry is of this folder (a portable copy). `Ok(true)` when something changed. An
+/// entry for all users needs the administrator's rights, which an update in Program Files has.
 pub fn sync_uninstall_version(dir: &std::path::Path, version: &str) -> Result<bool, String> {
     let dir = dir.to_string_lossy();
     for root in [HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER] {
@@ -84,17 +102,36 @@ pub fn sync_uninstall_version(dir: &std::path::Path, version: &str) -> Result<bo
         if !same_folder(&path, &dir) {
             continue;
         }
-        if string(root, UNINSTALL_KEY, "DisplayVersion").as_deref() == Some(version) {
-            return Ok(false);
+        let mut changed = false;
+        for (name, wanted) in [("DisplayVersion", version), ("DisplayName", "Vixeeny")] {
+            if string(root, UNINSTALL_KEY, name).as_deref() != Some(wanted) {
+                set_string(root, UNINSTALL_KEY, name, wanted)?;
+                changed = true;
+            }
         }
-        set_string(root, UNINSTALL_KEY, "DisplayVersion", version)?;
-        return Ok(true);
+        let (major, minor) = major_minor(version);
+        for (name, wanted) in
+            [("MajorVersion", major), ("VersionMajor", major), ("MinorVersion", minor), ("VersionMinor", minor)]
+        {
+            if dword(root, UNINSTALL_KEY, name) != Some(wanted) {
+                set_dword(root, UNINSTALL_KEY, name, wanted)?;
+                changed = true;
+            }
+        }
+        return Ok(changed);
     }
     Ok(false)
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_entry_keeps_the_major_and_minor_numbers() {
+        assert_eq!(super::major_minor("1.0.0-RC.3"), (1, 0));
+        assert_eq!(super::major_minor("0.31.4"), (0, 31));
+        assert_eq!(super::major_minor("garbage"), (0, 0));
+    }
+
     #[test]
     fn folders_compare_as_windows_does() {
         assert!(super::same_folder(r"C:\Program Files\Vixeeny", r"c:\program files\vixeeny\"));

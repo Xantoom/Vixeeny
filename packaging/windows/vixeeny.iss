@@ -167,6 +167,8 @@ Name: "{autoprograms}\Vixeeny"; Filename: "{app}\Vixeeny.exe"; AppUserModelID: "
 ; Written by the app as the user who installs (see [Run]), kept in line with the `autostart`
 ; setting by the daemon; removed on uninstall.
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "Vixeeny"; Flags: uninsdeletevalue
+; The `vixeeny://` links of the Windows notifications of older versions, which nothing opens any more.
+Root: HKCU; Subkey: "Software\Classes\vixeeny"; ValueType: none; Flags: deletekey uninsdeletekey
 
 [Run]
 ; For all users: the user's task that starts Vixeeny with the administrator's rights.
@@ -175,6 +177,8 @@ Filename: "{app}\vixeeny-app.exe"; Parameters: "--admin register"; Flags: runhid
 ; user who installs (in an install for all users, the administrator who gave the rights may be
 ; another account), before the first start.
 Filename: "{app}\vixeeny-app.exe"; Parameters: "--first-install {code:FirstInstallChoices}"; Flags: runhidden waituntilterminated runasoriginaluser; Check: IsFirstInstall
+; The start with Windows of the user who installs points at this folder (an update, a move).
+Filename: "{app}\vixeeny-app.exe"; Parameters: "--autostart-refresh"; Flags: runhidden waituntilterminated runasoriginaluser
 ; Windows' Snipping Tool no longer opens with the Print Screen key over Vixeeny's capture, in the
 ; user's own settings (Settings, Accessibility, Keyboard). Vixeeny also does it once at its start.
 Filename: "{app}\vixeeny-app.exe"; Parameters: "--print-screen take"; Flags: runhidden waituntilterminated runasoriginaluser
@@ -217,6 +221,8 @@ var
   // its Start menu folder.
   UserDir: String;
   UserGroup: String;
+  // The entry of an install for the user alone whose folder no longer exists.
+  StaleUserEntry: Boolean;
   // On the folder's page: the start with Windows and the updates.
   AutostartBox: TNewCheckBox;
   UpdateBox: TNewCheckBox;
@@ -256,11 +262,14 @@ var
 begin
   UserDir := '';
   UserGroup := '';
+  StaleUserEntry := False;
   if not IsAdminInstallMode then
     Exit;
   if not RegQueryStringValue(HKCU, InstallKey, 'Inno Setup: App Path', Dir) then
     Exit;
   Dir := RemoveBackslashUnlessRoot(Dir);
+  // Its folder is gone (removed by hand): only its entry in the installed apps is left, removed after the install.
+  StaleUserEntry := not FileExists(Dir + '\vixeeny-app.exe');
   // Only a Vixeeny folder, and never this install's.
   if (Dir <> '') and FileExists(Dir + '\vixeeny-app.exe') and not SameText(Dir, ExpandConstant('{app}')) then
   begin
@@ -396,8 +405,12 @@ begin
     PrevVersion := '';
   if RegQueryStringValue(HKA, InstallKey, 'UninstallString', Uninstaller) then
     PrevUninstaller := RemoveQuotes(Uninstaller);
-  if (PrevUninstaller <> '') and not FileExists(PrevUninstaller) then
+  // An entry whose uninstaller is gone (its folder removed by hand) is no install: this one takes its place.
+  if (PrevUninstaller = '') or not FileExists(PrevUninstaller) then
+  begin
+    PrevVersion := '';
     PrevUninstaller := '';
+  end;
 end;
 
 // The page that says what is installed and what this setup does with it: update an older
@@ -559,7 +572,9 @@ begin
   else if CurStep = ssPostInstall then
   begin
     if UserDir <> '' then
-      RemoveUserInstall();
+      RemoveUserInstall()
+    else if StaleUserEntry then
+      RegDeleteKeyIncludingSubkeys(HKCU, InstallKey);
     if OldFiles <> nil then
     begin
       NewFiles := LoadList(ExpandConstant('{app}'));
@@ -629,6 +644,8 @@ begin
     RemoveEmptyFolders(App);
     // The installer an update downloaded (to move Vixeeny to Program Files).
     RemoveFolder(AddBackslash(GetEnv('TEMP')) + 'Vixeeny-setup');
+    // The replay's seconds kept on the disk, when a replay did not end.
+    RemoveFolder(AddBackslash(GetEnv('TEMP')) + 'Vixeeny-replay');
     DeleteFile(AddBackslash(GetEnv('TEMP')) + 'Vixeeny-setup.turn');
     if not KeepSettings then
     begin

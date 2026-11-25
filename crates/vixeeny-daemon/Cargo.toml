@@ -35,6 +35,7 @@ windows = { workspace = true, features = [
 # The Windows resource (icon, version information) of the executable.
 [build-dependencies]
 winresource.workspace = true
+roxmltree.workspace = true
 
 [lints]
 workspace = true

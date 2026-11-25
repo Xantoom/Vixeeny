@@ -862,6 +862,7 @@ fn run() -> anyhow::Result<()> {
         }
         // The choices of the installer's page, on a first install.
         Some("--first-install") => return update::first_install(&args[1..]),
+        Some("--autostart-refresh") => return update::refresh_autostart(),
         // The installer's choice: the Print Screen key for Vixeeny rather than Windows' Snipping Tool; the uninstaller
         // gives it back.
         Some("--print-screen") if args.get(1).is_some_and(|a| a == "take") => {
