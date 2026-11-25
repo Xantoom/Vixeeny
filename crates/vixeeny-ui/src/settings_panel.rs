@@ -1282,7 +1282,8 @@ impl SettingsPanel {
     }
 
     /// Hooks the events of the window: the keys of a recorded shortcut are read from the keys themselves, the size and
-    /// the presses of the pointer followed. Needs the real (winit) backend, which keeps one hook per window.
+    /// the presses of the pointer followed, the theme kept in line (`theme::on_event`). Needs the real (winit) backend,
+    /// which keeps one hook per window.
     #[cfg(feature = "desktop")]
     pub fn capture_keys(&self) {
         use slint::winit_030::winit::event::{ElementState, WindowEvent};
@@ -1291,6 +1292,9 @@ impl SettingsPanel {
         let (weak, state) = (self.window.as_weak(), self.state.clone());
         self.window.window().on_winit_window_event(move |_, event| {
             let panel = || weak.upgrade().map(|window| SettingsPanel { window, state: state.clone() });
+            if let Some(w) = weak.upgrade() {
+                crate::theme::on_event(&w, event);
+            }
             match event {
                 // Maximized by the system too (double click, Win+Up, a drag to the top): follow it.
                 WindowEvent::Resized(_) => {

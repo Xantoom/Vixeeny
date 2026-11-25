@@ -12,8 +12,11 @@ export global Theme {
     // The icon of the program, for title bars, task bars and the like (set by the host).
     in property <image> app-icon;
     // Mica (Windows 11) is behind the window: the usual background veils it, a little see-through, and the cards veil
-    // that.
+    // that. Only while the window is in front (see `theme::on_event`): Windows may stop drawing Mica behind a window in
+    // the background (another program in front, full screen), which would show black through the veils.
     in property <bool> mica: false;
+    // Whether Windows draws Mica behind this window when it is in front (set by the host, kept for `mica`).
+    in property <bool> mica-available: false;
 
     // ---- surfaces
     out property <color> bg: (dark ? #141416 : #f6f6f7).with-alpha(mica ? 0.8 : 1);

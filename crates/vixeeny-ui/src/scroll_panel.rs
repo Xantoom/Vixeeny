@@ -74,6 +74,8 @@ impl ScrollPanel {
     pub fn new(texts: &ScrollTexts) -> Result<Self, slint::PlatformError> {
         let window = ScrollWindow::new()?;
         crate::theme::apply(&window, crate::theme::default_look());
+        #[cfg(feature = "desktop")]
+        crate::theme::watch(&window);
         window.set_status(texts.intro.as_str().into());
         window.set_finish_label(texts.finish.as_str().into());
         window.set_cancel_label(texts.cancel.as_str().into());

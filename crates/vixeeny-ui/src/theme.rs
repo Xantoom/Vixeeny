@@ -67,10 +67,89 @@ where
         when_native(window, move |handle| {
             let mica = dresser(handle, look);
             if let Some(window) = weak.upgrade() {
-                window.global::<Theme>().set_mica(mica);
+                let theme = window.global::<Theme>();
+                theme.set_mica_available(mica);
+                theme.set_mica(mica && window.window().is_visible() && is_foreground(handle));
+            }
+            if let Some(watcher) = COLOUR_WATCHER.get() {
+                let weak = weak.clone();
+                // Windows' colours changed: the look again, once the window is done with the message.
+                watcher(
+                    handle,
+                    Box::new(move || {
+                        let weak = weak.clone();
+                        slint::Timer::single_shot(std::time::Duration::ZERO, move || {
+                            if let (Some(window), Some(source)) = (weak.upgrade(), LOOK_SOURCE.get()) {
+                                apply(&window, source());
+                            }
+                        });
+                    }),
+                );
             }
         });
     }
+}
+
+/// Whether the native window `handle` is the one in front (the one the user works in).
+#[cfg(feature = "desktop")]
+fn is_foreground(handle: u64) -> bool {
+    FOREGROUND.get().is_some_and(|f| f() == handle)
+}
+
+/// The native window in front, from the host (set once at start-up).
+static FOREGROUND: std::sync::OnceLock<fn() -> u64> = std::sync::OnceLock::new();
+
+/// The look of the windows now, from the host: read again when Windows' theme or accent changes (set once at start-up).
+static LOOK_SOURCE: std::sync::OnceLock<fn() -> Look> = std::sync::OnceLock::new();
+
+pub fn set_foreground(f: fn() -> u64) {
+    let _ = FOREGROUND.set(f);
+}
+
+pub fn set_look_source(f: fn() -> Look) {
+    let _ = LOOK_SOURCE.set(f);
+}
+
+/// How the host has a native window tell when Windows' colours change (set once at start-up): every window dressed with
+/// a [`Look`] takes the look of [`set_look_source`] again then.
+static COLOUR_WATCHER: std::sync::OnceLock<ColourWatcher> = std::sync::OnceLock::new();
+
+/// Has the native window (its handle) call the function given when Windows' colours change.
+pub type ColourWatcher = fn(u64, Box<dyn Fn()>);
+
+pub fn set_colour_watcher(f: ColourWatcher) {
+    let _ = COLOUR_WATCHER.set(f);
+}
+
+/// What the theme does with an event of the window: Mica only while it is in front. Called by the window's one event
+/// hook (the backend keeps one per window: see [`watch`] for a window without one of its own).
+#[cfg(feature = "desktop")]
+pub fn on_event<C>(window: &C, event: &slint::winit_030::winit::event::WindowEvent)
+where
+    C: ComponentHandle + 'static,
+    for<'a> Theme<'a>: slint::Global<'a, C>,
+{
+    if let slint::winit_030::winit::event::WindowEvent::Focused(focused) = event {
+        let theme = window.global::<Theme>();
+        theme.set_mica(*focused && theme.get_mica_available());
+    }
+}
+
+/// Hooks [`on_event`] to a window that has no event hook of its own.
+#[cfg(feature = "desktop")]
+pub fn watch<C>(window: &C)
+where
+    C: ComponentHandle + 'static,
+    for<'a> Theme<'a>: slint::Global<'a, C>,
+{
+    use slint::winit_030::{EventResult, WinitWindowAccessor};
+    let weak = window.as_weak();
+    window.window().on_winit_window_event(move |_, event| {
+        if let Some(window) = weak.upgrade() {
+            on_event(&window, event);
+        }
+        EventResult::Propagate
+    });
 }
 
 /// What the host does to a native window once it exists (the title bar of Windows 11 follows the theme), true when it
