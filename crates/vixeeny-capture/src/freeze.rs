@@ -14,12 +14,14 @@ use std::time::Instant;
 
 use vixeeny_common::ipc::{Frozen, FrozenScreen, THAW_MESSAGE};
 use vixeeny_platform::{HdrInfo, MonitorInfo, PhysicalRect};
-use windows::Graphics::Capture::{Direct3D11CaptureFramePool, GraphicsCaptureSession};
+use windows::Graphics::Capture::{Direct3D11CaptureFrame, Direct3D11CaptureFramePool, GraphicsCaptureSession};
 use windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;
 use windows::Graphics::DirectX::DirectXPixelFormat;
-use windows::Win32::Foundation::{CloseHandle, HANDLE, HLOCAL, HWND, LPARAM, LRESULT, LUID, LocalFree, WPARAM};
+use windows::Win32::Foundation::{
+    CloseHandle, HANDLE, HLOCAL, HWND, LPARAM, LRESULT, LUID, LocalFree, S_OK, WAIT_TIMEOUT, WPARAM,
+};
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_RESOURCE_MISC_SHARED,
+    D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX,
     D3D11_RESOURCE_MISC_SHARED_NTHANDLE, D3D11_TEXTURE2D_DESC, ID3D11Device, ID3D11Device1, ID3D11DeviceContext,
     ID3D11Texture2D,
 };
@@ -31,7 +33,8 @@ use windows::Win32::Graphics::Dxgi::Common::{
 use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory1, DXGI_PRESENT, DXGI_SCALING_NONE, DXGI_SCALING_STRETCH, DXGI_SHARED_RESOURCE_READ,
     DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_EFFECT_DISCARD, DXGI_SWAP_EFFECT_FLIP_DISCARD, DXGI_USAGE_RENDER_TARGET_OUTPUT,
-    IDXGIAdapter, IDXGIDevice, IDXGIFactory2, IDXGIFactory4, IDXGIResource1, IDXGISwapChain1, IDXGISwapChain3,
+    IDXGIAdapter, IDXGIDevice, IDXGIFactory2, IDXGIFactory4, IDXGIKeyedMutex, IDXGIResource1, IDXGISwapChain1,
+    IDXGISwapChain3,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::WinRT::Direct3D11::IDirect3DDxgiInterfaceAccess;
@@ -41,7 +44,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WDA_EXCLUDEFROMCAPTURE, WM_MOUSEACTIVATE, WM_TIMER, WNDCLASSEXW, WS_EX_NOACTIVATE, WS_EX_NOREDIRECTIONBITMAP,
     WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
-use windows::core::{BOOL, Interface, w};
+use windows::core::{BOOL, HRESULT, Interface, w};
 
 use crate::wgc::{FRAME_TIMEOUT, d3d_device, frame_handler, halves_to_f32, monitor_item, os, winrt_device};
 
@@ -220,8 +223,14 @@ fn start(gpu: &Gpu, monitor: &MonitorInfo, cursor: bool) -> Result<Pending, Capt
     Ok(pending)
 }
 
-/// Waits for the first frame and copies it into the already prepared shared texture.
-fn finish(gpu: &Gpu, pending: &Pending, deadline: Instant, screen: &Screen) -> Result<(), CaptureError> {
+/// Waits for the first frame and copies it into the already prepared shared texture. Keeps the capture frame alive so
+/// WGC cannot recycle its surface before the copy is flushed.
+fn finish(
+    gpu: &Gpu,
+    pending: &Pending,
+    deadline: Instant,
+    screen: &Screen,
+) -> Result<Direct3D11CaptureFrame, CaptureError> {
     pending
         .arrived
         .recv_timeout(deadline.saturating_duration_since(Instant::now()))
@@ -231,20 +240,27 @@ fn finish(gpu: &Gpu, pending: &Pending, deadline: Instant, screen: &Screen) -> R
     let access: IDirect3DDxgiInterfaceAccess = surface.cast().map_err(os("surface access"))?;
     // SAFETY: the surface is backed by a D3D11 texture on our device.
     let source: ID3D11Texture2D = unsafe { access.GetInterface() }.map_err(os("GetInterface"))?;
-    let result = copy_frame(gpu, &source, &screen.texture);
-    let _ = frame.Close();
-    result
+    let content = frame.ContentSize().map_err(os("ContentSize"))?;
+    copy_frame(gpu, &source, (content.Width, content.Height), &screen.texture)?;
+    Ok(frame)
 }
 
 /// A display mode change must not copy a differently sized/formatted frame into a prepared texture.
-fn copy_frame(gpu: &Gpu, source: &ID3D11Texture2D, destination: &ID3D11Texture2D) -> Result<(), CaptureError> {
+fn copy_frame(
+    gpu: &Gpu,
+    source: &ID3D11Texture2D,
+    content: (i32, i32),
+    destination: &ID3D11Texture2D,
+) -> Result<(), CaptureError> {
     let (mut from, mut to) = (D3D11_TEXTURE2D_DESC::default(), D3D11_TEXTURE2D_DESC::default());
     // SAFETY: live textures and valid out-pointers.
     unsafe {
         source.GetDesc(&mut from);
         destination.GetDesc(&mut to);
     }
-    if (from.Width, from.Height, from.Format) != (to.Width, to.Height, to.Format) {
+    if (from.Width, from.Height, from.Format) != (to.Width, to.Height, to.Format)
+        || content != (to.Width as i32, to.Height as i32)
+    {
         return Err(CaptureError::Os("the display mode changed during capture".into()));
     }
     // SAFETY: same device, size and format; neither texture is mapped.
@@ -384,12 +400,17 @@ fn take(gpu: &Gpu, monitors: &[MonitorInfo], show: bool, cursor: bool) -> Result
     thaw();
     register_class()?;
     let mut screens = monitors.iter().map(|m| prepare_screen(gpu, m, monitors, show)).collect::<Result<Vec<_>, _>>()?;
+    let locks = screens.iter().map(|s| KeyedLock::acquire(&s.texture, WRITE_KEY)).collect::<Result<Vec<_>, _>>()?;
     let prepared = began.elapsed();
     let capture_started = Instant::now();
     // Every capture starts before any is waited for: they run side by side.
     let pending = monitors.iter().map(|m| start(gpu, m, cursor)).collect::<Result<Vec<_>, _>>()?;
     let deadline = Instant::now() + FRAME_TIMEOUT;
-    pending.iter().zip(&screens).try_for_each(|(p, screen)| finish(gpu, p, deadline, screen))?;
+    let frames = pending
+        .iter()
+        .zip(&screens)
+        .map(|(p, screen)| finish(gpu, p, deadline, screen))
+        .collect::<Result<Vec<_>, _>>()?;
     let captured = capture_started.elapsed();
     let present_started = Instant::now();
 
@@ -397,8 +418,10 @@ fn take(gpu: &Gpu, monitors: &[MonitorInfo], show: bool, cursor: bool) -> Result
     for (monitor, screen) in monitors.iter().zip(&mut screens) {
         shared.push(show_screen(gpu, screen, monitor)?);
     }
-    // SAFETY: plain call: the copies reach the GPU before the app reads them.
-    unsafe { gpu.context.Flush() };
+    // Releasing under `READ_KEY` flushes the copies and orders the app's device after them on the GPU.
+    for lock in locks {
+        lock.release(READ_KEY)?;
+    }
     if show {
         // SAFETY: plain call. Once the compositor has taken the presented frames, the windows appear all at once with
         // their content.
@@ -423,8 +446,10 @@ fn take(gpu: &Gpu, monitors: &[MonitorInfo], show: bool, cursor: bool) -> Result
         total = ?began.elapsed(),
         "frozen screens submitted to the compositor"
     );
-    // Closing WGC sessions can block. The frozen windows must be visible before that cleanup, rather than showing a
-    // picture that has aged while the live desktop kept moving.
+    // Closing WGC sessions can block; the frames also stay held until `ReleaseSync` has flushed our copies out of them.
+    for frame in frames {
+        let _ = frame.Close();
+    }
     drop(pending);
     Ok(Frozen { adapter: gpu.adapter, screens: shared })
 }
@@ -502,9 +527,68 @@ fn make_reader(adapter: i64) -> Result<Reader, CaptureError> {
     Ok(Reader { adapter, device, context })
 }
 
-/// How the frozen textures are created: shared through a named NT handle, which has an access control list (a legacy
-/// shared handle is a bare number any process can try).
-const SHARED_FLAGS: u32 = (D3D11_RESOURCE_MISC_SHARED.0 | D3D11_RESOURCE_MISC_SHARED_NTHANDLE.0) as u32;
+/// How the frozen textures are created: shared through a named NT handle (with an access control list; a legacy shared
+/// handle is a bare number any process can try) and a keyed mutex so the app's device waits on the GPU until the
+/// daemon's copy has finished writing every pixel.
+const SHARED_FLAGS: u32 = (D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX.0 | D3D11_RESOURCE_MISC_SHARED_NTHANDLE.0) as u32;
+
+/// Keyed-mutex key of a newly created frozen texture before the daemon has written its frame.
+const WRITE_KEY: u64 = 0;
+
+/// Keyed-mutex key once the daemon has written the frame: the app waits on it before reading.
+const READ_KEY: u64 = 1;
+
+/// Longest wait for a keyed mutex (same bound as waiting for a capture frame).
+const SYNC_TIMEOUT_MS: u32 = 2_000;
+
+/// Checks the raw `HRESULT` of `IDXGIKeyedMutex::AcquireSync`: `WAIT_TIMEOUT` and `WAIT_ABANDONED` are positive codes
+/// that `HRESULT::ok` would treat as success.
+fn check_acquire_hr(hr: HRESULT) -> Result<(), CaptureError> {
+    if hr == S_OK {
+        return Ok(());
+    }
+    if hr == HRESULT(WAIT_TIMEOUT.0 as i32) {
+        return Err(CaptureError::Timeout);
+    }
+    Err(CaptureError::Os(format!("AcquireSync: {hr}")))
+}
+
+/// Exclusive GPU-synchronised access to a shared texture's keyed mutex; releases on drop if not released explicitly.
+struct KeyedLock {
+    mutex: IDXGIKeyedMutex,
+    fallback_key: u64,
+    released: bool,
+}
+
+impl KeyedLock {
+    fn acquire(texture: &ID3D11Texture2D, key: u64) -> Result<Self, CaptureError> {
+        Self::acquire_for(texture, key, SYNC_TIMEOUT_MS)
+    }
+
+    fn acquire_for(texture: &ID3D11Texture2D, key: u64, timeout_ms: u32) -> Result<Self, CaptureError> {
+        let mutex: IDXGIKeyedMutex = texture.cast().map_err(os("IDXGIKeyedMutex"))?;
+        // SAFETY: `mutex` is a live COM interface; calling the vtable keeps `WAIT_TIMEOUT` / `WAIT_ABANDONED` distinct
+        // from `S_OK`.
+        let hr = unsafe { (Interface::vtable(&mutex).AcquireSync)(mutex.as_raw(), key, timeout_ms) };
+        check_acquire_hr(hr)?;
+        Ok(Self { mutex, fallback_key: key, released: false })
+    }
+
+    fn release(mut self, key: u64) -> Result<(), CaptureError> {
+        self.released = true;
+        // SAFETY: `mutex` was acquired above and is released once.
+        unsafe { self.mutex.ReleaseSync(key) }.map_err(os("ReleaseSync"))
+    }
+}
+
+impl Drop for KeyedLock {
+    fn drop(&mut self) {
+        if !self.released {
+            // SAFETY: `mutex` was acquired and not released yet.
+            let _ = unsafe { self.mutex.ReleaseSync(self.fallback_key) };
+        }
+    }
+}
 
 /// Only this user and the system may open a frozen screen, and not a process of a lower integrity level (a sandboxed
 /// one).
@@ -584,6 +668,7 @@ pub fn read_with(
         let mut staged = Vec::with_capacity(frozen.screens.len() * 2);
         for screen in &frozen.screens {
             let texture = open_shared(&device, screen.texture)?;
+            let lock = KeyedLock::acquire(&texture, READ_KEY)?;
             let whole = PhysicalRect::new(0, 0, screen.width, screen.height);
             let card = sdr(screen)
                 .filter(|_| screen.hdr)
@@ -596,6 +681,7 @@ pub fn read_with(
                 let rows = if screen.hdr { Rows::Halves } else { Rows::Bgra };
                 staged.push((screen, rows, stage(&device, &context, &texture)?));
             }
+            lock.release(READ_KEY)?;
         }
         for (screen, rows, staging) in staged {
             let read = |data: &[u8], stride| each(screen, rows, data, stride);
@@ -758,7 +844,8 @@ mod tests {
         assert!(!is_active());
     }
 
-    /// A texture shared by one device is read by another, as the app reads the daemon's.
+    /// A texture shared by one device is read by another once its keyed mutex is released under `READ_KEY`, and cannot
+    /// be read before then.
     #[test]
     fn shared_textures_are_read_back() {
         let _reading = READING.lock();
@@ -769,19 +856,20 @@ mod tests {
         let (w, h) = (3u32, 2u32);
         let pixels: Vec<u8> = (0..w * h * 4).map(|i| i as u8).collect();
         let bind = (D3D11_BIND_SHADER_RESOURCE.0 | D3D11_BIND_RENDER_TARGET.0) as u32;
-        let texture = vixeeny_platform::d3d::texture(
-            &gpu.device,
-            (w, h),
-            DXGI_FORMAT_B8G8R8A8_UNORM,
-            bind,
-            SHARED_FLAGS,
-            Some((&pixels, w * 4)),
-        )
-        .unwrap();
-        // SAFETY: the context of the device that made the texture.
-        unsafe { gpu.context.Flush() };
+        let texture =
+            vixeeny_platform::d3d::texture(&gpu.device, (w, h), DXGI_FORMAT_B8G8R8A8_UNORM, bind, SHARED_FLAGS, None)
+                .unwrap();
+        let lock = KeyedLock::acquire(&texture, WRITE_KEY).unwrap();
+        // SAFETY: `pixels` holds `h` rows of `w * 4` bytes; same device, mutex held.
+        unsafe { gpu.context.UpdateSubresource(&texture, 0, None, pixels.as_ptr().cast(), w * 4, 0) };
         let id = next_shared_id();
         let handle = share(&texture, id).unwrap();
+        // Before the daemon releases `READ_KEY`, the app's device cannot race and read the unwritten surface.
+        let (reader_device, _) = reader(gpu.adapter).unwrap();
+        let opened = open_shared(&reader_device, id).unwrap();
+        assert!(matches!(KeyedLock::acquire_for(&opened, READ_KEY, 0), Err(CaptureError::Timeout)));
+        drop(opened);
+        lock.release(READ_KEY).unwrap();
         let frozen = Frozen {
             adapter: gpu.adapter,
             screens: vec![FrozenScreen { x: 0, y: 0, width: w, height: h, texture: id, hdr: false, window: 0 }],
@@ -805,6 +893,15 @@ mod tests {
         let _ = unsafe { CloseHandle(handle) };
         drop(texture);
         assert!(read_with(&frozen, |_| None, false, |_, _, _, _| {}).is_err());
+    }
+
+    #[test]
+    fn acquire_sync_rejects_timeout_and_abandonment() {
+        use windows::Win32::Foundation::{E_FAIL, WAIT_ABANDONED};
+        assert!(check_acquire_hr(S_OK).is_ok());
+        assert!(matches!(check_acquire_hr(HRESULT(WAIT_TIMEOUT.0 as i32)), Err(CaptureError::Timeout)));
+        assert!(matches!(check_acquire_hr(HRESULT(WAIT_ABANDONED.0 as i32)), Err(CaptureError::Os(_))));
+        assert!(matches!(check_acquire_hr(E_FAIL), Err(CaptureError::Os(_))));
     }
 
     #[test]

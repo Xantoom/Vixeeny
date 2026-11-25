@@ -18,7 +18,7 @@ use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_BOX, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION, D3D11_TEXTURE2D_DESC,
-    ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
+    ID3D11Device, ID3D11DeviceContext, ID3D11Multithread, ID3D11Texture2D,
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::Graphics::Dxgi::{IDXGIAdapter, IDXGIDevice};
@@ -377,8 +377,13 @@ pub(crate) fn d3d_device(adapter: Option<&IDXGIAdapter>) -> Result<(ID3D11Device
     Ok(vixeeny_platform::d3d::device(adapter, D3D_DRIVER_TYPE_HARDWARE, D3D11_CREATE_DEVICE_BGRA_SUPPORT)?)
 }
 
-/// The WinRT wrapper Windows Graphics Capture wants.
+/// The WinRT wrapper Windows Graphics Capture wants. Enables Direct3D multithread protection because
+/// `Direct3D11CaptureFramePool::CreateFreeThreaded` delivers frames from a WinRT worker thread on this device.
 pub(crate) fn winrt_device(device: &ID3D11Device) -> Result<IDirect3DDevice, CaptureError> {
+    if let Ok(multithread) = device.cast::<ID3D11Multithread>() {
+        // SAFETY: plain call on a live Direct3D 11 device before WGC uses it from its worker thread.
+        let _ = unsafe { multithread.SetMultithreadProtected(true) };
+    }
     let dxgi: IDXGIDevice = device.cast().map_err(os("IDXGIDevice"))?;
     // SAFETY: `dxgi` is a live DXGI device.
     unsafe { CreateDirect3D11DeviceFromDXGIDevice(&dxgi) }
