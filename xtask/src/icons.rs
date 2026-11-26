@@ -1,16 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! `cargo xtask icons`: draws the application icon (a near-black rounded tile with a white V framed by the corners of a
-//! capture zone, after the Vixely logo) at every size and writes `packaging/icons/`: `vixeeny.ico` (the programs and
+//! `cargo xtask icons`: draws the application icon (a graphite rounded tile, lighter at the top, with a white V framed
+//! by the corners of a capture zone: the Xantoom family's V) at every size and writes `packaging/icons/`: `vixeeny.ico` (the programs and
 //! the installer), `vixeeny-recording.ico` (the tray while recording), and PNGs for the windows (64), the repository
 //! page (256) and the installer (48 to 256). The files are committed; run this again only when the drawing changes.
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use tiny_skia::{Color, FillRule, LineCap, LineJoin, Paint, PathBuilder, Pixmap, Stroke, Transform};
+use tiny_skia::{
+    Color, FillRule, GradientStop, LineCap, LineJoin, LinearGradient, Paint, PathBuilder, Pixmap, Point, SpreadMode,
+    Stroke, Transform,
+};
 
-/// The ink of the tile, the same near-black as the Vixely logo.
-const INK: (u8, u8, u8) = (0x13, 0x14, 0x16);
+/// The tile's graphite, from its top edge to its bottom edge.
+const TILE_TOP: (u8, u8, u8) = (0x43, 0x46, 0x4f);
+const TILE_BOTTOM: (u8, u8, u8) = (0x1c, 0x1d, 0x23);
 const SIZES: [u32; 7] = [16, 24, 32, 48, 64, 128, 256];
 /// The sizes also written as PNG files.
 const PNGS: [u32; 4] = [48, 64, 128, 256];
@@ -75,11 +79,25 @@ fn corners() -> Option<tiny_skia::Path> {
     p.finish()
 }
 
-/// The red dot of the "recording" tray icon, ringed with the tile's ink so it stays round on the letter.
+/// The tile's vertical graphite gradient, on the 32-unit grid (the draw transform scales it with the shapes).
+fn tile_paint() -> Result<Paint<'static>> {
+    let stop = |at: f32, (r, g, b): (u8, u8, u8)| GradientStop::new(at, Color::from_rgba8(r, g, b, 255));
+    let shader = LinearGradient::new(
+        Point::from_xy(16.0, 1.0),
+        Point::from_xy(16.0, 31.0),
+        vec![stop(0.0, TILE_TOP), stop(1.0, TILE_BOTTOM)],
+        SpreadMode::Pad,
+        Transform::identity(),
+    )
+    .context("gradient")?;
+    Ok(Paint { shader, anti_alias: true, ..Paint::default() })
+}
+
+/// The red dot of the "recording" tray icon, ringed with the tile's graphite so it stays round on the letter.
 fn recording_dot(pixmap: &mut Pixmap, size: u32) -> Result<()> {
     let scale = Transform::from_scale(size as f32 / 32.0, size as f32 / 32.0);
     let circle = |r: f32| PathBuilder::from_circle(24.5, 7.5, r).context("dot");
-    pixmap.fill_path(&circle(7.5)?, &paint(INK.0, INK.1, INK.2, 255), FillRule::Winding, scale, None);
+    pixmap.fill_path(&circle(7.5)?, &tile_paint()?, FillRule::Winding, scale, None);
     pixmap.fill_path(&circle(5.5)?, &paint(0xe5, 0x32, 0x2d, 255), FillRule::Winding, scale, None);
     Ok(())
 }
@@ -88,7 +106,7 @@ fn recording_dot(pixmap: &mut Pixmap, size: u32) -> Result<()> {
 pub fn pixmap(size: u32) -> Result<Pixmap> {
     let mut pixmap = Pixmap::new(size, size).context("pixmap")?;
     let scale = Transform::from_scale(size as f32 / 32.0, size as f32 / 32.0);
-    pixmap.fill_path(&tile().context("tile")?, &paint(INK.0, INK.1, INK.2, 255), FillRule::Winding, scale, None);
+    pixmap.fill_path(&tile().context("tile")?, &tile_paint()?, FillRule::Winding, scale, None);
     let white = paint(255, 255, 255, 255);
     if size >= DETAILED_FROM {
         let stroke = Stroke { width: 1.7, line_cap: LineCap::Round, line_join: LineJoin::Round, ..Stroke::default() };
